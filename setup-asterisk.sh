@@ -5,7 +5,9 @@
 #   - Stasis app 'talky_ai' as the dialplan target for inbound + outbound
 #   - rtp.conf restricted to 10000-20000 (matches what UFW allows)
 #
-# Idempotent: re-running it overwrites the same five config files and
+# Idempotent: re-running it overwrites the same four service config files and
+# verifies the repository-owned inbound dialplan include without replacing
+# an operator-modified live copy. It never overwrites extensions.conf.
 # regenerates the ARI password.  Backs up the current /etc/asterisk
 # to /etc/asterisk.bak.<ts> the first time it runs (and every run, so
 # you can always roll back to whatever was just there).
@@ -40,6 +42,34 @@ TRUNK_USER="${TRUNK_USER:?TRUNK_USER must be set in the environment — see docs
 TRUNK_PASS="${TRUNK_PASS:?TRUNK_PASS must be set in the environment — see docs/v2/09-known-issues.md F-17}"
 ARI_USER="talky"
 
+# Dialplan safety preflight. The working production extensions.conf contains
+# carrier-specific routing that must never be erased by this bootstrap script.
+# Asterisk must already include extensions.d/*.conf; adding that include is a
+# one-time, reviewed operator change. Once present, this script may install a
+# missing managed file, but may replace an existing file only when the repo
+# candidate is byte-for-byte identical. A diff is left as .candidate for review.
+DIALPLAN_SOURCE="/opt/talky/telephony/asterisk/conf/talky-inbound.conf"
+DIALPLAN_DIR="/etc/asterisk/extensions.d"
+DIALPLAN_LIVE="$DIALPLAN_DIR/talky-inbound.conf"
+DIALPLAN_CANDIDATE="$DIALPLAN_DIR/.talky-inbound.conf.candidate"
+
+if [ ! -f "$DIALPLAN_SOURCE" ]; then
+    echo "ERROR: managed inbound dialplan source is missing: $DIALPLAN_SOURCE" >&2
+    exit 1
+fi
+if ! grep -Eq '^[[:space:]]*#include[[:space:]]+"?extensions\.d/\*\.conf"?[[:space:]]*$' /etc/asterisk/extensions.conf; then
+    echo "ERROR: /etc/asterisk/extensions.conf does not include extensions.d/*.conf." >&2
+    echo "       Refusing to rewrite it. Add the include in a reviewed maintenance window." >&2
+    exit 1
+fi
+install -d -o asterisk -g asterisk -m 0755 "$DIALPLAN_DIR"
+install -o root -g asterisk -m 0644 "$DIALPLAN_SOURCE" "$DIALPLAN_CANDIDATE"
+if [ -e "$DIALPLAN_LIVE" ] && ! cmp -s "$DIALPLAN_CANDIDATE" "$DIALPLAN_LIVE"; then
+    echo "ERROR: managed inbound dialplan differs from the repository candidate." >&2
+    echo "       Live file was not touched; review: diff -u '$DIALPLAN_LIVE' '$DIALPLAN_CANDIDATE'" >&2
+    exit 1
+fi
+
 # 1) Make sure Asterisk is installed
 if ! command -v asterisk >/dev/null 2>&1; then
     echo "==> Asterisk not installed, installing now..."
@@ -49,7 +79,21 @@ else
     echo "==> Asterisk already installed: $(asterisk -V)"
 fi
 
-# 2) Stop Asterisk before rewriting config (it auto-starts after install)
+# 2) Stop Asterisk before rewriting config (it auto-starts after install).
+# Restart it on any later error so a failed provisioning run does not leave
+# the production PBX down.
+ASTERISK_WAS_ACTIVE=0
+if systemctl is-active --quiet asterisk; then
+    ASTERISK_WAS_ACTIVE=1
+fi
+restore_asterisk_on_error() {
+    rc=$?
+    if [ "$rc" -ne 0 ] && [ "$ASTERISK_WAS_ACTIVE" -eq 1 ]; then
+        systemctl start asterisk || true
+    fi
+    exit "$rc"
+}
+trap restore_asterisk_on_error ERR
 systemctl stop asterisk || true
 
 # 3) Generate a strong ARI password
@@ -170,36 +214,12 @@ chmod 2770 /etc/asterisk/pjsip.d
 usermod -aG asterisk admins 2>/dev/null || echo "WARN: could not add 'admins' to the 'asterisk' group — tenant trunk writes will fail with EACCES"
 echo "==> Provisioned /etc/asterisk/pjsip.d (asterisk:asterisk, 2770)"
 
-# 9) extensions.conf — dialplan
-cat > /etc/asterisk/extensions.conf <<'EXTEOF'
-[general]
-static=yes
-writeprotect=no
+# 9) Install the already-verified managed include. extensions.conf itself is
+# deliberately preserved byte-for-byte, including the working carrier map.
+install -o root -g asterisk -m 0644 "$DIALPLAN_CANDIDATE" "$DIALPLAN_LIVE"
+rm -f -- "$DIALPLAN_CANDIDATE"
 
-[globals]
-
-; Incoming calls from Blazedigitel — handed to the talky_ai Stasis app
-[from-blazedigitel]
-; Stasis argument order is a CONTRACT with asterisk_adapter._extract_inbound_meta:
-;   arg0 = direction marker ('inbound'), arg1 = the CALLED DID, arg2 = context.
-; The DID is what inbound tenant routing keys on, so ${EXTEN} (the dialled
-; number) must be in arg1 — passing ${CALLERID(num)} there resolves every call
-; to unknown_did, or routes it to whichever other tenant owns that caller's
-; number.  The caller's number is NOT passed: the adapter reads it off the
-; channel (channel.caller.number).  Asserted by
-; backend/tests/unit/test_setup_asterisk_contract.py.
-exten => _.,1,NoOp(Inbound from Blazedigitel: ${CALLERID(num)} -> ${EXTEN})
- same => n,Stasis(talky_ai,inbound,${EXTEN},${CONTEXT})
- same => n,Hangup()
-
-; Outbound calls originated by the app (via ARI) — dial via the trunk
-[from-talky]
-exten => _X.,1,NoOp(Outbound to ${EXTEN} via Blazedigitel)
- same => n,Dial(PJSIP/${EXTEN}@blazedigitel-endpoint,60,T)
- same => n,Hangup()
-EXTEOF
-
-echo "==> Wrote /etc/asterisk/{http,ari,rtp,pjsip,extensions}.conf"
+echo "==> Wrote /etc/asterisk/{http,ari,rtp,pjsip}.conf and verified managed dialplan include"
 
 # 10) Update backend .env with the new ARI password
 sed -i "s|^ASTERISK_ARI_PASSWORD=.*|ASTERISK_ARI_PASSWORD=$ARI_PW|" /opt/talky/backend/.env
@@ -207,6 +227,7 @@ echo "==> Updated /opt/talky/backend/.env with new ARI password"
 
 # 11) Restart Asterisk + talky-api so they pick up the new config
 systemctl restart asterisk
+trap - ERR
 echo "==> Asterisk restarted; sleeping 10s for registration to settle..."
 sleep 10
 systemctl restart talky-api

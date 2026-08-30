@@ -1,6 +1,11 @@
 cmake_minimum_required(VERSION 3.16)
 project(voice_gateway_cpp LANGUAGES CXX)
 
+set(VOICE_GATEWAY_BUILD_SHA "dev" CACHE STRING "Immutable source commit embedded in health responses")
+if(NOT VOICE_GATEWAY_BUILD_SHA MATCHES "^(dev|[0-9a-f]{40,64})$")
+    message(FATAL_ERROR "VOICE_GATEWAY_BUILD_SHA must be 'dev' or a 40-64 character lowercase hex commit")
+endif()
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -51,6 +56,10 @@ add_library(voice_gateway_lib
 
 target_include_directories(voice_gateway_lib PUBLIC include)
 target_link_libraries(voice_gateway_lib PUBLIC Threads::Threads)
+target_compile_definitions(
+    voice_gateway_lib
+    PUBLIC VOICE_GATEWAY_BUILD_SHA="${VOICE_GATEWAY_BUILD_SHA}"
+)
 
 target_compile_options(voice_gateway_lib PRIVATE
     -Wall

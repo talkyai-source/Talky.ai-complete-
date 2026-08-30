@@ -133,6 +133,11 @@ def test_deploy_builds_tests_and_restarts_exact_gateway_before_backend():
     ).read_text(encoding="utf-8")
 
     assert "build_voice_gateway_release.sh" in deploy
+    assert "for required_tool in bash cmake ctest c++ make" in deploy
+    candidate_build_at = deploy.index("build_voice_gateway_release.sh")
+    checkout_at = deploy.index("git checkout --detach '${DEPLOY_SHA}'")
+    assert candidate_build_at < checkout_at
+    assert "git worktree add --detach" in deploy
     assert "TALKY_DEPLOY_DRAIN_MANIFEST" in deploy
     assert "TALKY_DEPLOY_DRAIN_EVIDENCE_ID" not in deploy
     assert "TALKY_DEPLOY_DRAIN_ASSERTION" not in deploy
@@ -150,6 +155,8 @@ def test_deploy_builds_tests_and_restarts_exact_gateway_before_backend():
     )
     assert "cmake --build" in builder
     assert "ctest --test-dir" in builder
+    assert '-DVOICE_GATEWAY_BUILD_SHA="${build_sha}"' in builder
+    assert '[[ ! "${build_sha}" =~ ^[0-9a-f]{40,64}$ ]]' in builder
     assert "timeout 5s env -u INTERNAL_SERVICE_TOKEN" in builder
     assert '[[ "${missing_token_rc}" -ne 2 ]]' in builder
     assert "EnvironmentFile=/opt/talky/backend/.env" in unit
@@ -179,6 +186,15 @@ def test_deploy_builds_tests_and_restarts_exact_gateway_before_backend():
     assert 'request->path == "/health" || request->path == "/ready" || request->path == "/stats"' in gateway_http
     assert "http://127.0.0.1:18080/ready" in deploy
     assert 'p.get(\\"protocol_version\\") == 2' in deploy
+    assert 'p.get(\\"build_sha\\") == sys.argv[1]' in deploy
+    assert "VOICE_GATEWAY_BUILD_SHA" in gateway_http
+
+
+def test_trunk_status_one_shot_cannot_abort_an_otherwise_healthy_deploy():
+    deploy = (ROOT / "deploy_to_server.sh").read_text(encoding="utf-8")
+
+    assert "if ! sudo systemctl start talky-trunk-status.service; then" in deploy
+    assert "timer remains active and will retry" in deploy
 
 
 def test_drain_manifest_binds_candidate_external_state_and_is_single_use(tmp_path):

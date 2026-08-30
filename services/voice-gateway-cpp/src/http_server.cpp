@@ -34,6 +34,8 @@ namespace voice_gateway {
 
 namespace {
 
+constexpr const char* kBuildSha = VOICE_GATEWAY_BUILD_SHA;
+
 // Aggregate in-flight request-body budget (D remainder). The per-request 8 MiB
 // cap bounds ONE request, but 256 concurrent handlers x 8 MiB is ~2 GiB — a
 // coordinated flood of maximum-size bodies could OOM the process while every
@@ -507,6 +509,7 @@ std::string session_stats_json(const SessionStatsSnapshot& stats) {
 std::string process_stats_json(const ProcessStatsSnapshot& stats) {
     std::ostringstream out;
     out << "{"
+        << "\"build_sha\":\"" << escape_json(kBuildSha) << "\","
         << "\"sessions_started_total\":" << stats.sessions_started_total << ','
         << "\"sessions_stopped_total\":" << stats.sessions_stopped_total << ','
         << "\"sessions_reaped_total\":" << stats.sessions_reaped_total << ','
@@ -1745,7 +1748,8 @@ void HttpServer::handle_client(const int client_fd) {
         const bool is_healthy = healthy();
         const std::string body = std::string("{\"status\":\"") + (is_healthy ? "ok" : "degraded") +
             "\",\"io_loop_healthy\":" + (is_healthy ? "true" : "false") +
-            ",\"protocol_version\":2,\"codecs\":[\"pcmu\"],\"callback_protocol_versions\":[2]}";
+            ",\"build_sha\":\"" + escape_json(kBuildSha) +
+            "\",\"protocol_version\":2,\"codecs\":[\"pcmu\"],\"callback_protocol_versions\":[2]}";
         write_response(client_fd, is_healthy ? 200 : 503, is_healthy ? "OK" : "Service Unavailable", body);
         return;
     }
@@ -1754,7 +1758,8 @@ void HttpServer::handle_client(const int client_fd) {
         const bool is_ready = ready();
         const std::string body = std::string("{\"status\":\"") + (is_ready ? "ready" : "not_ready") +
             "\",\"ready\":" + (is_ready ? "true" : "false") +
-            ",\"protocol_version\":2,\"codecs\":[\"pcmu\"]}";
+            ",\"build_sha\":\"" + escape_json(kBuildSha) +
+            "\",\"protocol_version\":2,\"codecs\":[\"pcmu\"]}";
         write_response(client_fd, is_ready ? 200 : 503, is_ready ? "OK" : "Service Unavailable", body);
         return;
     }

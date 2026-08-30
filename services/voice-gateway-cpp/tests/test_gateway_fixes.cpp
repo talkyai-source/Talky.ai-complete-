@@ -554,10 +554,14 @@ void test_control_plane_callback_validation() {
     check(health.find("\"protocol_version\":2") != std::string::npos &&
               health.find("\"codecs\":[\"pcmu\"]") != std::string::npos,
           "vg18_health_advertises_protocol_and_codec");
+    check(health.find("\"build_sha\":\"") != std::string::npos,
+          "vg18_health_advertises_build_identity");
 
     const std::string ready =
         http_roundtrip(18099, "GET /ready HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n");
     check(ready.find("\"status\":\"ready\"") != std::string::npos, "vg18_ready_unauthenticated_ok");
+    check(ready.find("\"build_sha\":\"") != std::string::npos,
+          "vg18_ready_advertises_build_identity");
 
     server.stop();  // exercises the VG-19/VG-03 graceful drain path
     server_thread.join();

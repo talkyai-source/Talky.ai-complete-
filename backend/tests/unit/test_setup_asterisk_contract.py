@@ -29,8 +29,9 @@ from app.infrastructure.telephony.asterisk_adapter import AsteriskAdapter
 # backend/tests/unit/<this file> -> backend/tests -> backend -> repo root
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SETUP_SCRIPT = REPO_ROOT / "setup-asterisk.sh"
+DIALPLAN_SOURCE = REPO_ROOT / "telephony" / "asterisk" / "conf" / "talky-inbound.conf"
 
-INBOUND_CONTEXT = "from-blazedigitel"
+INBOUND_CONTEXT = "from-talky-inbound"
 
 # Sentinels standing in for what Asterisk expands at call time.
 DIALLED_DID = "+441184960111"
@@ -43,6 +44,7 @@ DIALPLAN_VARS = {
     "${CALLERID(num)}": CALLER_ANI,
     "${CALLERID(number)}": CALLER_ANI,
     "${CONTEXT}": INBOUND_CONTEXT,
+    "${TALKY_ROUTE_DID}": DIALLED_DID,
 }
 
 
@@ -53,6 +55,12 @@ def script_text() -> str:
         "production Asterisk; without it inbound routing is unprovisioned."
     )
     return SETUP_SCRIPT.read_text(encoding="utf-8")
+
+
+@pytest.fixture(scope="module")
+def managed_dialplan_text() -> str:
+    assert DIALPLAN_SOURCE.is_file(), "repository-owned inbound dialplan is missing"
+    return DIALPLAN_SOURCE.read_text(encoding="utf-8")
 
 
 def _heredoc_body(script: str, target_path: str) -> str:
@@ -167,9 +175,8 @@ def _stasis_start_event(args: list[str], *, with_dialplan_exten: bool) -> dict:
 
 
 @pytest.fixture(scope="module")
-def inbound_stasis_args(script_text: str) -> list[str]:
-    dialplan = _heredoc_body(script_text, "/etc/asterisk/extensions.conf")
-    return _stasis_args(_context_block(dialplan, INBOUND_CONTEXT))
+def inbound_stasis_args(managed_dialplan_text: str) -> list[str]:
+    return _stasis_args(_context_block(managed_dialplan_text, INBOUND_CONTEXT))
 
 
 # ── S0 #1: Stasis argument order ─────────────────────────────────────────────
@@ -233,14 +240,13 @@ def test_caller_number_is_not_in_the_did_position(inbound_stasis_args):
     )
 
 
-def test_no_answer_before_stasis_in_inbound_context(script_text):
+def test_no_answer_before_stasis_in_inbound_context(managed_dialplan_text):
     """Route-before-answer is a release-gate invariant.
 
     Answering before the routing decision bills the carrier leg for calls we
     then reject, and destroys the ability to return a SIP rejection code.
     """
-    dialplan = _heredoc_body(script_text, "/etc/asterisk/extensions.conf")
-    for line in _context_block(dialplan, INBOUND_CONTEXT):
+    for line in _context_block(managed_dialplan_text, INBOUND_CONTEXT):
         code = line.split(";", 1)[0]
         if "Stasis(" in code:
             break
@@ -249,6 +255,19 @@ def test_no_answer_before_stasis_in_inbound_context(script_text):
             f"{line.strip()!r}. Inbound must stay ringing until the backend "
             "admits or rejects the call."
         )
+
+
+def test_setup_never_overwrites_the_live_extensions_file(script_text):
+    assert "cat > /etc/asterisk/extensions.conf" not in script_text
+    assert "extensions.d/*.conf" in script_text
+    assert 'cmp -s "$DIALPLAN_CANDIDATE" "$DIALPLAN_LIVE"' in script_text
+    assert ".talky-inbound.conf.candidate" in script_text
+    assert "Live file was not touched" in script_text
+
+
+def test_managed_dialplan_sends_ringback_before_stasis(managed_dialplan_text):
+    block = "\n".join(_context_block(managed_dialplan_text, INBOUND_CONTEXT))
+    assert block.index("Ringing()") < block.index("Stasis(")
 
 
 # ── S0 #2: pjsip.d prerequisites the generator documents ─────────────────────

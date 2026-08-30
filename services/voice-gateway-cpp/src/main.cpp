@@ -95,6 +95,7 @@ int main(int argc, char** argv) {
     std::cout << "voice-gateway-cpp started"
               << " host=" << host
               << " port=" << port
+              << " build_sha=" << VOICE_GATEWAY_BUILD_SHA
               << " codec=pcmu"
               << " ptime_ms=20"
               << std::endl;

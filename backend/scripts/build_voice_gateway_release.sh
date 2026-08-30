@@ -14,6 +14,7 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "${script_dir}/../.." && pwd)"
 source_dir="${repo_root}/services/voice-gateway-cpp"
 build_dir="$(mktemp -d "${TMPDIR:-/tmp}/talky-voice-gateway-build.XXXXXX")"
+build_sha="${VOICE_GATEWAY_BUILD_SHA:-$(git -C "${repo_root}" rev-parse HEAD)}"
 
 cleanup() {
   rm -rf -- "${build_dir}"
@@ -22,7 +23,13 @@ trap cleanup EXIT
 
 test -f "${source_dir}/CMakeLists.txt"
 command -v timeout >/dev/null 2>&1
-cmake -S "${source_dir}" -B "${build_dir}" -DCMAKE_BUILD_TYPE=Release
+if [[ ! "${build_sha}" =~ ^[0-9a-f]{40,64}$ ]]; then
+  echo "VOICE_GATEWAY_BUILD_SHA must resolve to a full lowercase commit SHA" >&2
+  exit 2
+fi
+cmake -S "${source_dir}" -B "${build_dir}" \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DVOICE_GATEWAY_BUILD_SHA="${build_sha}"
 cmake --build "${build_dir}" --parallel
 ctest --test-dir "${build_dir}" --output-on-failure
 test -x "${build_dir}/voice_gateway"

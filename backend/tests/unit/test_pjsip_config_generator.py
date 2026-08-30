@@ -55,7 +55,7 @@ def test_render_produces_namespaced_objects():
     assert f"[trunk-{TRUNK_ID}-identify]" in conf
     # endpoint wiring
     assert "type=endpoint" in conf
-    assert f"context=from-tenant-{TENANT_ID}" in conf
+    assert "context=from-talky-inbound" in conf
     assert f"outbound_auth=trunk-{TRUNK_ID}-auth" in conf
     assert f"aors=trunk-{TRUNK_ID}-aor" in conf
     assert "transport=transport-udp" in conf
@@ -105,6 +105,17 @@ def test_render_caller_id_and_source_host_overrides():
     )
     assert "callerid=<+15551234567>" in conf
     assert "match=203.0.113.9" in conf  # identify uses the explicit source host
+
+
+def test_render_persists_explicit_carrier_account_to_did_map():
+    conf = render_trunk_conf(_input(inbound_did="+442046132301"))
+    assert "context=from-talky-inbound" in conf
+    assert "set_var=TALKY_INBOUND_DID=+442046132301" in conf
+
+
+def test_render_rejects_invalid_inbound_did_instead_of_injecting_dialplan():
+    with pytest.raises(ValueError, match="inbound_did"):
+        render_trunk_conf(_input(inbound_did="+4420\nset_var=EVIL=1"))
 
 
 def test_render_dtmf_rfc2833_maps_to_valid_pjsip_rfc4733():
@@ -202,6 +213,7 @@ def test_build_input_pulls_metadata_fields():
         "auth_username": "u",
         "metadata": {
             "caller_id": "+15550000000",
+            "inbound_did": "+15550000001",
             "register": True,
             "register_interval": 900,
             "dtmf_mode": "rfc2833",
@@ -212,6 +224,7 @@ def test_build_input_pulls_metadata_fields():
     }
     inp = build_trunk_config_input(row, decrypted_password="pw")
     assert inp.caller_id == "+15550000000"
+    assert inp.inbound_did == "+15550000001"
     assert inp.register is True
     assert inp.register_interval == 900
     assert inp.dtmf_mode == "rfc2833"

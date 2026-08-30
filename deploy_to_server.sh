@@ -99,10 +99,40 @@ ssh -t -i "$KEY" "$PROD" "
         git status --short >&2
         exit 1
     fi
+    echo '--> preflighting the complete gateway build toolchain before checkout'
+    for required_tool in bash cmake ctest c++ make curl git install mktemp rmdir timeout; do
+        if ! command -v \"\$required_tool\" >/dev/null 2>&1; then
+            echo \"!! Missing required deploy tool before checkout: \$required_tool\" >&2
+            exit 1
+        fi
+    done
+    if [ ! -x backend/venv/bin/python ]; then
+        echo '!! /opt/talky/backend/venv/bin/python is missing or not executable.' >&2
+        exit 1
+    fi
     echo '--> fetching candidate reachability proof'
     git fetch --prune origin ${BRANCH}
     git cat-file -e '${DEPLOY_SHA}^{commit}'
     git merge-base --is-ancestor '${DEPLOY_SHA}' FETCH_HEAD
+    echo '--> building, testing, and importing candidate in an isolated worktree'
+    gateway_candidate=\"\$(mktemp /tmp/talky-voice-gateway-candidate.XXXXXX)\"
+    candidate_worktree=\"\$(mktemp -d /tmp/talky-deploy-worktree.XXXXXX)\"
+    rmdir -- \"\$candidate_worktree\"
+    cleanup_candidate() {
+        if [ -n \"\$candidate_worktree\" ] && [ -e \"\$candidate_worktree\" ]; then
+            git -C /opt/talky worktree remove --force \"\$candidate_worktree\" >/dev/null 2>&1 || true
+        fi
+        if [ -n \"\$gateway_candidate\" ]; then
+            rm -f -- \"\$gateway_candidate\"
+        fi
+    }
+    trap cleanup_candidate EXIT
+    git worktree add --detach \"\$candidate_worktree\" '${DEPLOY_SHA}'
+    (cd \"\$candidate_worktree/backend\" && /opt/talky/backend/venv/bin/python -c 'import app.main') >/dev/null 2>&1
+    VOICE_GATEWAY_BUILD_SHA='${DEPLOY_SHA}' \
+        bash \"\$candidate_worktree/backend/scripts/build_voice_gateway_release.sh\" \"\$gateway_candidate\"
+    git -C /opt/talky worktree remove --force \"\$candidate_worktree\"
+    candidate_worktree=''
     echo '--> checking out frozen commit (detached)'
     git checkout --detach '${DEPLOY_SHA}'
     deployed_sha=\"\$(git rev-parse HEAD)\"
@@ -116,17 +146,7 @@ ssh -t -i "$KEY" "$PROD" "
         exit 1
     fi
     echo \"    prod now exactly at: \$deployed_sha\"
-    echo '--> import smoke test'
-    (cd backend && venv/bin/python -c 'import app.main') >/dev/null 2>&1 && echo '    import app.main OK'
-    echo '--> building and testing the exact-SHA C++ gateway candidate'
-    gateway_candidate=\"\$(mktemp /tmp/talky-voice-gateway-candidate.XXXXXX)\"
-    cleanup_gateway_candidate() {
-        if [ -n \"\${gateway_candidate:-}\" ]; then
-            rm -f -- \"\$gateway_candidate\"
-        fi
-    }
-    trap cleanup_gateway_candidate EXIT
-    bash backend/scripts/build_voice_gateway_release.sh \"\$gateway_candidate\"
+    echo '    candidate import and gateway build already proved before checkout'
     echo '--> proving the running gateway has zero active sessions'
     gateway_stats=\"\$(curl -fsS --max-time 10 http://127.0.0.1:18080/stats)\"
     active_sessions=\"\$(printf '%s' \"\$gateway_stats\" | backend/venv/bin/python -c 'import json,sys; value=json.load(sys.stdin).get(\"active_sessions\"); assert isinstance(value, int) and not isinstance(value, bool); print(value)')\"
@@ -158,8 +178,8 @@ ssh -t -i "$KEY" "$PROD" "
         exit 1
     fi
     gateway_ready=\"\$(curl -fsS --max-time 10 http://127.0.0.1:18080/ready)\"
-    printf '%s' \"\$gateway_ready\" | backend/venv/bin/python -c 'import json,sys; p=json.load(sys.stdin); assert p.get(\"ready\") is True; assert p.get(\"protocol_version\") == 2; assert \"pcmu\" in p.get(\"codecs\", [])'
-    cleanup_gateway_candidate
+    printf '%s' \"\$gateway_ready\" | backend/venv/bin/python -c 'import json,sys; p=json.load(sys.stdin); assert p.get(\"ready\") is True; assert p.get(\"protocol_version\") == 2; assert \"pcmu\" in p.get(\"codecs\", []); assert p.get(\"build_sha\") == sys.argv[1]' '${DEPLOY_SHA}'
+    cleanup_candidate
     gateway_candidate=''
     trap - EXIT
     echo '--> applying database migrations (service restart is blocked on failure)'
@@ -167,7 +187,9 @@ ssh -t -i "$KEY" "$PROD" "
     echo '--> restarting backend services after the authenticated gateway is healthy'
     sudo systemctl restart talky-api talky-dialer-worker talky-voice-worker talky-reminder-worker
     sudo systemctl restart talky-trunk-status.timer
-    sudo systemctl start talky-trunk-status.service
+    if ! sudo systemctl start talky-trunk-status.service; then
+        echo '!! talky-trunk-status one-shot failed; timer remains active and will retry.' >&2
+    fi
     sleep 6
     echo '--> service status:'
     service_failure=0
