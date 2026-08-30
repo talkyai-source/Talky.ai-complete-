@@ -580,6 +580,7 @@ export function LiveCallsPanel({ campaignId, title = "Live calls" }: LiveCallsPa
                     <table className="w-full text-sm">
                         <thead className="text-xs uppercase text-muted-foreground bg-gray-50 dark:bg-white/5">
                             <tr>
+                                <th className="px-4 py-2 text-left font-medium">Direction</th>
                                 <th className="px-4 py-2 text-left font-medium">To</th>
                                 <th className="px-4 py-2 text-left font-medium">From</th>
                                 <th className="px-4 py-2 text-left font-medium">Status</th>
@@ -599,12 +600,24 @@ export function LiveCallsPanel({ campaignId, title = "Live calls" }: LiveCallsPa
                                     : c.duration_seconds ?? null;
                                 const rv = reviews[c.id];
                                 const isOpen = !!expanded[c.id];
+                                const inbound = c.direction === "inbound";
+                                const displayTo = inbound ? c.called_did ?? c.to_number : c.to_number;
+                                const displayFrom = inbound
+                                    ? c.caller_ani ?? "Private"
+                                    : c.caller_id ?? "—";
                                 return (
                                     <Fragment key={c.id}>
                                         <tr
                                             className={`hover:bg-gray-50 dark:hover:bg-white/[0.04] ${!live ? "cursor-pointer" : ""}`}
                                             onClick={!live ? () => toggleExpand(c.id) : undefined}
                                         >
+                                            <td className="px-4 py-2">
+                                                <span className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium ${inbound
+                                                    ? "bg-violet-100 text-violet-800 dark:bg-violet-950 dark:text-violet-300"
+                                                    : "bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300"}`}>
+                                                    {inbound ? "Inbound" : "Outbound"}
+                                                </span>
+                                            </td>
                                             <td className="px-4 py-2 font-mono text-sm text-gray-900 dark:text-zinc-100">
                                                 <span className="inline-flex items-center gap-1.5">
                                                     {!live && (
@@ -612,11 +625,11 @@ export function LiveCallsPanel({ campaignId, title = "Live calls" }: LiveCallsPa
                                                             ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />
                                                             : <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />
                                                     )}
-                                                    {c.to_number}
+                                                    {displayTo}
                                                 </span>
                                             </td>
                                             <td className="px-4 py-2 font-mono text-xs text-muted-foreground">
-                                                {c.caller_id ?? "—"}
+                                                {displayFrom}
                                             </td>
                                             <td className="px-4 py-2">
                                                 <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium ${look.pillClass}`}>
@@ -630,6 +643,17 @@ export function LiveCallsPanel({ campaignId, title = "Live calls" }: LiveCallsPa
                                                         title={termination.error ?? termination.message}
                                                     >
                                                         {termination.error ?? termination.message}
+                                                    </div>
+                                                ) : null}
+                                                {inbound && (c.admission_status || c.consent_status) ? (
+                                                    <div className="mt-1 text-[11px] leading-tight text-muted-foreground">
+                                                        {c.admission_status
+                                                            ? `Admission: ${c.admission_status.replace(/_/g, " ")}`
+                                                            : null}
+                                                        {c.admission_status && c.consent_status ? " · " : null}
+                                                        {c.consent_status
+                                                            ? `Consent: ${c.consent_status.replace(/_/g, " ")}`
+                                                            : null}
                                                     </div>
                                                 ) : null}
                                             </td>
@@ -646,10 +670,10 @@ export function LiveCallsPanel({ campaignId, title = "Live calls" }: LiveCallsPa
                                                         onClick={(e) => { e.stopPropagation(); handleHangup(c.id); }}
                                                         disabled={termination.phase === "pending"}
                                                         aria-label={termination.phase === "failed"
-                                                            ? `Retry hangup for call to ${c.to_number}`
+                                                            ? `Retry hangup for call to ${displayTo}`
                                                             : termination.phase === "pending"
-                                                                ? `Ending call to ${c.to_number}`
-                                                                : `Hang up call to ${c.to_number}`}
+                                                                ? `Ending call to ${displayTo}`
+                                                                : `Hang up call to ${displayTo}`}
                                                         title={termination.phase === "failed" ? "Retry hangup" : termination.message ?? "Hang up"}
                                                         className={`inline-flex h-7 items-center justify-center gap-1 rounded-md text-red-600 transition-colors hover:bg-red-100 dark:text-red-400 dark:hover:bg-red-950/50 disabled:cursor-wait disabled:opacity-60 ${termination.phase === "failed" ? "px-2 text-xs font-medium" : "w-7"}`}
                                                     >
@@ -670,7 +694,7 @@ export function LiveCallsPanel({ campaignId, title = "Live calls" }: LiveCallsPa
                                         </tr>
                                         {!live && isOpen && (
                                             <tr className="bg-gray-50/70 dark:bg-white/[0.02]">
-                                                <td colSpan={6} className="px-4 py-3">
+                                                <td colSpan={7} className="px-4 py-3">
                                                     <CallReviewPanel
                                                         review={rv}
                                                         onLoadRecording={() => {

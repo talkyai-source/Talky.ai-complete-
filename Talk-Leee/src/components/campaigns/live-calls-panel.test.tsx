@@ -106,6 +106,27 @@ test("termination presentation remains pending until the call itself is terminal
     );
 });
 
+test("inbound live rows show direction, ANI, DID, admission, and consent", async () => {
+    api.listLiveCalls = async () => ({
+        items: [activeCall({
+            direction: "inbound",
+            caller_ani: "+15550003333",
+            called_did: "+15550004444",
+            admission_status: "allowed",
+            consent_status: "not_required",
+        })],
+        server_time: "2026-08-26T10:00:10.000Z",
+    });
+
+    renderPanel();
+
+    assert.ok(await screen.findByText("Inbound"));
+    assert.ok(screen.getByText("+15550003333"));
+    assert.ok(screen.getByText("+15550004444"));
+    assert.ok(screen.getByText(/Admission: allowed/));
+    assert.ok(screen.getByText(/Consent: not required/));
+});
+
 test("a hangup request shows Ending without optimistically ending the row or allowing a duplicate", async () => {
     const user = userEvent.setup({ document: globalThis.document });
     api.listLiveCalls = async () => ({

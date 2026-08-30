@@ -122,6 +122,81 @@ def test_private_and_invalid_ani_never_create_identity():
     assert _private_ani("+1 (555) 000-1000") == ("+15550001000", False)
 
 
+class _RejectionConn:
+    def __init__(self, routes):
+        self.routes = list(routes)
+        self.insert_args = None
+        self.cleanup_executed = False
+
+    async def fetch(self, query, *_args):
+        assert "FROM inbound_did_assignments" in query
+        return self.routes
+
+    async def fetchrow(self, query, *args):
+        assert "INSERT INTO inbound_rejections" in query
+        self.insert_args = args
+        return {"id": "dddddddd-dddd-dddd-dddd-dddddddddddd"}
+
+    async def execute(self, query, *_args):
+        assert "retention_until < NOW()" in query
+        self.cleanup_executed = True
+        return "DELETE 0"
+
+
+@pytest.mark.asyncio
+async def test_pre_row_rejection_resolves_tenant_and_retains_public_ani(monkeypatch):
+    conn = _RejectionConn(
+        [
+            {
+                "tenant_id": TENANT,
+                "campaign_id": CAMPAIGN,
+                "config_id": CONFIG,
+                "assignment_id": ASSIGNMENT,
+            }
+        ]
+    )
+    monkeypatch.setattr(admission_module, "acquire_with_tenant", lambda *_: _acquire(conn))
+
+    recorded = await InboundAdmissionService(object()).record_pre_row_rejection(
+        provider="ASTERISK",
+        provider_call_id="pbx-denied-1",
+        called_did="+1 (555) 123-4567",
+        caller_ani="+1 (555) 000-1000",
+        ingress="asterisk",
+        reason="tenant_inbound_disabled",
+    )
+
+    assert recorded is True
+    assert conn.insert_args[2:6] == (TENANT, CAMPAIGN, CONFIG, ASSIGNMENT)
+    assert conn.insert_args[6:11] == (
+        "+15551234567",
+        "+15550001000",
+        False,
+        "asterisk",
+        "tenant_inbound_disabled",
+    )
+    assert conn.cleanup_executed is True
+
+
+@pytest.mark.asyncio
+async def test_unowned_rejection_never_retains_caller_ani(monkeypatch):
+    conn = _RejectionConn([])
+    monkeypatch.setattr(admission_module, "acquire_with_tenant", lambda *_: _acquire(conn))
+
+    await InboundAdmissionService(object()).record_pre_row_rejection(
+        provider="asterisk",
+        provider_call_id="pbx-unknown-did",
+        called_did="+15559999999",
+        caller_ani="+15550001000",
+        ingress="asterisk",
+        reason="unknown_did",
+    )
+
+    assert conn.insert_args[2:6] == (None, None, None, None)
+    assert conn.insert_args[7] is None
+    assert conn.insert_args[8] is True
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("admission_request", "reason"),
@@ -769,8 +844,7 @@ async def test_after_hours_transfer_stays_closed_until_runtime_release_gate(monk
 @pytest.mark.asyncio
 async def test_after_hours_transfer_rejects_out_of_scope_staging_campaign(monkeypatch):
     closed_week = [
-        {"day": day, "enabled": False, "start": "09:00", "end": "17:00"}
-        for day in range(7)
+        {"day": day, "enabled": False, "start": "09:00", "end": "17:00"} for day in range(7)
     ]
     conn = _AllowedConn(
         route_overrides={

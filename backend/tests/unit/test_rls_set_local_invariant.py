@@ -215,6 +215,7 @@ _RLS_TABLES = (
     "connectors",
     "contact_lists",
     "conversations",
+    "inbound_rejections",
     "leads",
     "recordings_s3",
     "stream_events",
@@ -250,6 +251,7 @@ def test_rls_table_guard_matches_schema_inventory() -> None:
         f"missing={sorted(discovered - set(_RLS_TABLES))}, "
         f"stale={sorted(set(_RLS_TABLES) - discovered)}"
     )
+
 
 # A table named in a real SQL position, not in prose. `calls` is an ordinary
 # English word ("the dialer calls the guard"), so an unanchored word match

@@ -162,6 +162,12 @@ export interface LiveCallItem {
     campaign_name?: string | null;
     lead_id?: string | null;
     caller_id?: string | null;
+    direction?: "inbound" | "outbound";
+    caller_ani?: string | null;
+    called_did?: string | null;
+    admission_status?: string | null;
+    consent_status?: string | null;
+    processing_status?: string | null;
     termination_status?: CallTerminationStatus;
     termination_requested_at?: string | null;
     termination_error?: string | null;
@@ -231,6 +237,30 @@ export interface CallIssue {
     stage: string;
     attempts: number;
     updated_at?: string | null;
+}
+
+export interface RejectedInboundCallItem {
+    id: string;
+    source: "pre_row" | "call";
+    occurred_at: string;
+    status: "denied" | "after_hours";
+    reason: string;
+    provider?: string | null;
+    provider_call_id?: string | null;
+    caller_ani?: string | null;
+    called_did?: string | null;
+    campaign_id?: string | null;
+    campaign_name?: string | null;
+    inbound_config_id?: string | null;
+    assignment_id?: string | null;
+}
+
+export interface RejectedInboundCallsResponse {
+    items: RejectedInboundCallItem[];
+    page: number;
+    page_size: number;
+    total: number;
+    server_time: string;
 }
 
 export interface KnowledgeNode {
@@ -669,13 +699,18 @@ class ApiClient {
      * Designed to be polled every 1-2s by the live panel — the backend
      * intentionally keeps the shape lean so frequent polling is cheap.
      */
-    async listLiveCalls(input?: { campaignId?: string; recentWindowSeconds?: number }): Promise<{
+    async listLiveCalls(input?: {
+        campaignId?: string;
+        direction?: "inbound" | "outbound";
+        recentWindowSeconds?: number;
+    }): Promise<{
         items: LiveCallItem[];
         server_time: string;
     }> {
         const path = "/calls/live";
         const query: Record<string, string | number> = {};
         if (input?.campaignId) query.campaign_id = input.campaignId;
+        if (input?.direction) query.direction = input.direction;
         if (input?.recentWindowSeconds !== undefined) query.recent_window_seconds = input.recentWindowSeconds;
         const data = await this.client().request({
             path,
@@ -687,6 +722,25 @@ class ApiClient {
             items: LiveCallItem[];
             server_time: string;
         };
+    }
+
+    /** Durable inbound denials, including calls received after business hours. */
+    async listRejectedInboundCalls(input?: {
+        campaignId?: string;
+        page?: number;
+        pageSize?: number;
+    }): Promise<RejectedInboundCallsResponse> {
+        const query: Record<string, string | number> = {};
+        if (input?.campaignId) query.campaign_id = input.campaignId;
+        if (input?.page !== undefined) query.page = input.page;
+        if (input?.pageSize !== undefined) query.page_size = input.pageSize;
+        const data = await this.client().request({
+            path: "/calls/rejected",
+            method: "GET",
+            query,
+            timeoutMs: 8_000,
+        });
+        return data as RejectedInboundCallsResponse;
     }
 
     /** Hang up a single in-flight call from the live panel (operator action). */

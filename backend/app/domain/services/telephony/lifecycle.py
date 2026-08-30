@@ -2494,6 +2494,29 @@ async def _admit_inbound_call(
         _inbound_admissions_pending.discard(pbx_call_id)
 
 
+async def _persist_pre_row_inbound_rejection(
+    pbx_call_id: str,
+    rejection: Dict[str, Any],
+) -> None:
+    """Adapter callback: persist a non-billable inbound denial immediately."""
+
+    from app.core.container import get_container
+    from app.domain.services.telephony.inbound_admission import InboundAdmissionService
+
+    container = get_container()
+    if not getattr(container, "is_initialized", False) or container.db_pool is None:
+        raise RuntimeError("database unavailable for inbound rejection persistence")
+
+    await InboundAdmissionService(container.db_pool).record_pre_row_rejection(
+        provider=str(rejection.get("provider") or "asterisk"),
+        provider_call_id=str(rejection.get("provider_call_id") or pbx_call_id),
+        called_did=rejection.get("called_did"),
+        caller_ani=rejection.get("caller_ani"),
+        ingress=str(rejection.get("ingress") or "asterisk"),
+        reason=str(rejection.get("reason") or "admission_denied"),
+    )
+
+
 _INBOUND_ANSWER_DURABILITY_TIMEOUT_S = 5.0
 
 

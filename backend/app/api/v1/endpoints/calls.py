@@ -351,6 +351,32 @@ class LiveCallsResponse(BaseModel):
     # times even if its clock drifts
 
 
+class RejectedInboundCallItem(BaseModel):
+    """One durable pre-answer denial or after-hours rejection."""
+
+    id: str
+    source: Literal["pre_row", "call"]
+    occurred_at: str
+    status: Literal["denied", "after_hours"]
+    reason: str
+    provider: Optional[str] = None
+    provider_call_id: Optional[str] = None
+    caller_ani: Optional[str] = None
+    called_did: Optional[str] = None
+    campaign_id: Optional[str] = None
+    campaign_name: Optional[str] = None
+    inbound_config_id: Optional[str] = None
+    assignment_id: Optional[str] = None
+
+
+class RejectedInboundCallsResponse(BaseModel):
+    items: List[RejectedInboundCallItem]
+    page: int
+    page_size: int
+    total: int
+    server_time: str
+
+
 # Statuses that count as "in flight" for the live panel. Old finalised
 # rows (ended/completed/failed) only show up if they ended very recently
 # (see `recent_window_seconds` below).
@@ -747,6 +773,130 @@ async def list_live_calls(
 
     return LiveCallsResponse(
         items=items,
+        server_time=datetime.now(timezone.utc).isoformat(),
+    )
+
+
+@router.get("/rejected", response_model=RejectedInboundCallsResponse)
+async def list_rejected_inbound_calls(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=100),
+    campaign_id: Optional[UUID] = Query(None),
+    current_user: CurrentUser = Depends(get_current_user),
+    db_client: Client = Depends(get_db_client),
+):
+    """List every tenant-owned inbound rejection from both durable sources.
+
+    Early denials have no billable ``calls`` row and come from
+    ``inbound_rejections``. Capacity/minutes denials and the configured
+    after-hours hangup path do have a calls row. The explicit union prevents
+    "who called while we were closed?" from silently returning an empty list.
+    """
+
+    if not current_user.tenant_id:
+        return RejectedInboundCallsResponse(
+            items=[],
+            page=page,
+            page_size=page_size,
+            total=0,
+            server_time=datetime.now(timezone.utc).isoformat(),
+        )
+
+    tenant_id = UUID(str(current_user.tenant_id))
+    params: list[Any] = [tenant_id]
+    campaign_filter = ""
+    if campaign_id is not None:
+        params.append(campaign_id)
+        campaign_filter = f"WHERE rejected.campaign_id = ${len(params)}"
+    params.extend([page_size, (page - 1) * page_size])
+    limit_index = len(params) - 1
+    offset_index = len(params)
+
+    sql = f"""
+        WITH rejected AS (
+            SELECT r.id,
+                   'pre_row'::text AS source,
+                   r.occurred_at,
+                   'denied'::text AS status,
+                   r.reason,
+                   r.provider,
+                   r.provider_call_id,
+                   r.caller_ani,
+                   r.caller_ani_private,
+                   r.called_did,
+                   r.campaign_id,
+                   camp.name AS campaign_name,
+                   r.inbound_config_id,
+                   r.assignment_id
+            FROM inbound_rejections r
+            LEFT JOIN campaigns camp ON camp.id=r.campaign_id
+            WHERE r.tenant_id=$1
+              AND r.retention_until >= NOW()
+
+            UNION ALL
+
+            SELECT c.id,
+                   'call'::text AS source,
+                   COALESCE(c.ended_at, c.updated_at, c.created_at) AS occurred_at,
+                   CASE WHEN c.admission_reason='after_hours_closed'
+                        THEN 'after_hours' ELSE 'denied' END AS status,
+                   COALESCE(c.admission_reason, 'admission_denied') AS reason,
+                   c.provider,
+                   c.provider_call_id,
+                   c.caller_ani,
+                   c.caller_ani_private,
+                   c.called_did,
+                   c.campaign_id,
+                   camp.name AS campaign_name,
+                   NULL::uuid AS inbound_config_id,
+                   c.assignment_id
+            FROM calls c
+            LEFT JOIN campaigns camp ON camp.id=c.campaign_id
+            WHERE c.tenant_id=$1
+              AND c.direction='inbound'
+              AND (
+                    c.admission_status='denied'
+                    OR c.admission_reason='after_hours_closed'
+                  )
+        )
+        SELECT rejected.*, COUNT(*) OVER() AS total_rows
+        FROM rejected
+        {campaign_filter}
+        ORDER BY rejected.occurred_at DESC, rejected.id
+        LIMIT ${limit_index} OFFSET ${offset_index}
+    """
+
+    try:
+        async with acquire_with_tenant(db_client.pool, tenant_id) as conn:
+            rows = await conn.fetch(sql, *params)
+    except Exception as exc:
+        logger.error("list_rejected_inbound_calls failed: %s", exc)
+        raise HTTPException(status_code=500, detail="Failed to list rejected inbound calls")
+
+    items = [
+        RejectedInboundCallItem(
+            id=str(row["id"]),
+            source=row["source"],
+            occurred_at=row["occurred_at"].isoformat(),
+            status=row["status"],
+            reason=row["reason"],
+            provider=row["provider"],
+            provider_call_id=row["provider_call_id"],
+            caller_ani=(None if row["caller_ani_private"] else row["caller_ani"]),
+            called_did=row["called_did"],
+            campaign_id=str(row["campaign_id"]) if row["campaign_id"] else None,
+            campaign_name=row["campaign_name"],
+            inbound_config_id=(str(row["inbound_config_id"]) if row["inbound_config_id"] else None),
+            assignment_id=(str(row["assignment_id"]) if row["assignment_id"] else None),
+        )
+        for row in rows
+    ]
+    total = int(rows[0]["total_rows"]) if rows else 0
+    return RejectedInboundCallsResponse(
+        items=items,
+        page=page,
+        page_size=page_size,
+        total=total,
         server_time=datetime.now(timezone.utc).isoformat(),
     )
 

@@ -255,6 +255,7 @@ from app.domain.services.telephony.lifecycle import (  # noqa: E402
     _on_transfer_provider_identity_persisted,
     _on_ws_session_start,
     _admit_inbound_call,
+    _persist_pre_row_inbound_rejection,
     _persist_inbound_answered,
     _finalize_inbound_admission,
 )
@@ -415,6 +416,8 @@ async def start_telephony(
         # returns its pinned route/config snapshot.
         if hasattr(_adapter, "set_inbound_admission_callback"):
             _adapter.set_inbound_admission_callback(_admit_inbound_call)
+        if hasattr(_adapter, "set_inbound_rejection_persist_callback"):
+            _adapter.set_inbound_rejection_persist_callback(_persist_pre_row_inbound_rejection)
         if hasattr(_adapter, "set_inbound_answered_persist_callback"):
             _adapter.set_inbound_answered_persist_callback(_persist_inbound_answered)
         if hasattr(_adapter, "set_inbound_admission_finalizer"):

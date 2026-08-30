@@ -411,6 +411,8 @@ async def test_denied_inbound_hangs_up_without_answer_or_media():
         AsyncMock(return_value={"allowed": False, "reason": "unknown_did"})
     )
     adapter.set_inbound_admission_finalizer(AsyncMock())
+    persist_rejection = AsyncMock()
+    adapter.set_inbound_rejection_persist_callback(persist_rejection)
     _enable_answer_persistence(adapter)
     adapter._ari = AsyncMock(side_effect=AssertionError("ARI must not be used"))
     adapter._alloc_rtp_port = AsyncMock(side_effect=AssertionError("media must not be allocated"))
@@ -428,6 +430,12 @@ async def test_denied_inbound_hangs_up_without_answer_or_media():
         fence_root=False,
         reason_code=1,
     )
+    persist_rejection.assert_awaited_once()
+    persisted = persist_rejection.await_args.args[1]
+    assert persisted["provider_call_id"] == "inbound-1"
+    assert persisted["called_did"] == "+15557778888"
+    assert persisted["caller_ani"] == "+15553334444"
+    assert persisted["reason"] == "unknown_did"
     assert adapter.get_inbound_admission("inbound-1") is None
     assert "inbound-1" not in adapter._inbound_cleanup_pending
 

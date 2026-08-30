@@ -332,6 +332,7 @@ class AsteriskAdapter(CallControlAdapter):
         # The callback is owned by the domain lifecycle and must return an
         # allowed/admitted decision before this adapter allocates any media.
         self._on_inbound_admission: Optional[Callable] = None
+        self._on_inbound_rejection_persist: Optional[Callable] = None
         self._on_inbound_answered_persist: Optional[Callable] = None
         self._on_inbound_admission_finalize: Optional[Callable] = None
         self._inbound_admissions: Dict[str, Dict[str, Any]] = {}
@@ -365,6 +366,10 @@ class AsteriskAdapter(CallControlAdapter):
         self._inbound_admission_timeout_s = max(
             0.1,
             float(os.getenv("INBOUND_ADMISSION_TIMEOUT_S", "5.0")),
+        )
+        self._inbound_rejection_persist_timeout_s = max(
+            0.1,
+            float(os.getenv("INBOUND_REJECTION_PERSIST_TIMEOUT_S", "1.0")),
         )
 
         # Supervised transfer state.  A blind transfer is represented by a
@@ -2937,6 +2942,52 @@ class AsteriskAdapter(CallControlAdapter):
         )
         return decision
 
+    async def _persist_pre_row_inbound_rejection(
+        self,
+        channel_id: str,
+        meta: Dict[str, Any],
+        admission: Dict[str, Any],
+    ) -> bool:
+        """Durably record a denial that has no billable ``calls`` row."""
+
+        if admission.get("call_id"):
+            # The admission transaction already persisted this reason on the
+            # calls row; the operator endpoint unions that durable source.
+            return True
+        callback = self._on_inbound_rejection_persist
+        if not callable(callback):
+            logger.critical(
+                "inbound_rejection_persist_unavailable channel=%s reason=%s",
+                channel_id[:12],
+                str(admission.get("reason") or "admission_denied")[:96],
+            )
+            return False
+
+        payload = {
+            "provider": str(admission.get("provider") or "asterisk"),
+            "provider_call_id": str(admission.get("provider_call_id") or channel_id),
+            "called_did": admission.get("called_did") or meta.get("called_did"),
+            "caller_ani": admission.get("caller_ani") or meta.get("caller_number"),
+            "ingress": admission.get("ingress") or meta.get("ingress") or "asterisk",
+            "reason": str(admission.get("reason") or "admission_denied"),
+        }
+        try:
+            await asyncio.wait_for(
+                callback(channel_id, payload),
+                timeout=self._inbound_rejection_persist_timeout_s,
+            )
+            return True
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - rejection must still terminate
+            logger.critical(
+                "inbound_rejection_persist_failed channel=%s reason=%s err=%s",
+                channel_id[:12],
+                payload["reason"][:96],
+                exc,
+            )
+            return False
+
     def get_inbound_admission(self, channel_id: str) -> Optional[Dict[str, Any]]:
         decision = self._inbound_admissions.get(channel_id)
         return dict(decision) if decision is not None else None
@@ -3603,6 +3654,11 @@ class AsteriskAdapter(CallControlAdapter):
             )
             if not admission.get("allowed"):
                 reason = str(admission.get("reason") or "admission_denied")
+                await self._persist_pre_row_inbound_rejection(
+                    channel_id,
+                    meta,
+                    admission,
+                )
                 if channel_id in self._inbound_admissions:
                     self._schedule_preanswer_hangup_and_release(
                         channel_id,
@@ -4211,6 +4267,11 @@ class AsteriskAdapter(CallControlAdapter):
         ``tenant_id`` (either attributes or ``to_dict()``).
         """
         self._on_inbound_admission = callback
+
+    def set_inbound_rejection_persist_callback(self, callback: Callable) -> None:
+        """Register durable persistence for denials with no ``calls`` row."""
+
+        self._on_inbound_rejection_persist = callback
 
     def set_inbound_answered_persist_callback(self, callback: Callable) -> None:
         """Register the mandatory post-Answer durability fence.

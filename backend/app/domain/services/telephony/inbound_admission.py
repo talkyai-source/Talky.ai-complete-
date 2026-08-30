@@ -378,6 +378,118 @@ class InboundAdmissionService:
         )
         return dict(row) if row else None
 
+    async def record_pre_row_rejection(
+        self,
+        *,
+        provider: str,
+        provider_call_id: str,
+        called_did: Optional[str],
+        caller_ani: Optional[str],
+        ingress: str,
+        reason: str,
+    ) -> bool:
+        """Persist a non-billable inbound denial that has no ``calls`` row.
+
+        Tenant ownership is derived again from the DID, never trusted from the
+        PBX context. Exactly one currently-active assignment is required. For
+        unknown or ambiguous DIDs the platform keeps only the called business
+        number and reason; unowned caller ANI is deliberately discarded.
+
+        Returns ``True`` both for a new row and an idempotent replay of the
+        same provider identity. Storage failures raise so the adapter can make
+        the observability gap loud while still rejecting the PBX channel.
+        """
+
+        normalized_provider = _provider(provider)
+        normalized_call_id = _call_id(provider_call_id)
+        normalized_reason = str(reason or "").strip().lower()[:96]
+        if not normalized_provider or not normalized_call_id or not normalized_reason:
+            raise ValueError("provider, provider_call_id and reason are required")
+
+        did = normalize_did(called_did)
+        normalized_ani, ani_private = _private_ani(caller_ani)
+        normalized_ingress = str(ingress or "asterisk").strip()[:64] or "asterisk"
+
+        # A denial may precede tenant resolution by definition. Platform
+        # bypass is therefore required for the ownership lookup and for
+        # inserting the tenant_id=NULL audit row used for unknown DIDs.
+        async with acquire_with_tenant(self._pool, None) as conn:
+            routes: list[Mapping[str, Any]] = []
+            if did:
+                routes = list(
+                    await conn.fetch(
+                        """
+                        SELECT a.tenant_id, a.campaign_id, a.config_id,
+                               a.id AS assignment_id
+                        FROM inbound_did_assignments a
+                        WHERE a.canonical_did=$1
+                          AND a.status='active'
+                          AND a.valid_from <= NOW()
+                          AND (a.valid_to IS NULL OR a.valid_to > NOW())
+                        ORDER BY a.id
+                        LIMIT 2
+                        """,
+                        did,
+                    )
+                )
+
+            route = dict(routes[0]) if len(routes) == 1 else {}
+            tenant_id = str(route["tenant_id"]) if route.get("tenant_id") else None
+            # Never retain caller identity without a single tenant owner.
+            stored_ani = normalized_ani if tenant_id and not ani_private else None
+            stored_ani_private = bool(ani_private or not tenant_id)
+
+            inserted = await conn.fetchrow(
+                """
+                INSERT INTO inbound_rejections (
+                    provider, provider_call_id, tenant_id, campaign_id,
+                    inbound_config_id, assignment_id, called_did, caller_ani,
+                    caller_ani_private, ingress, reason
+                ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+                ON CONFLICT (provider, provider_call_id) DO NOTHING
+                RETURNING id
+                """,
+                normalized_provider,
+                normalized_call_id,
+                tenant_id,
+                str(route["campaign_id"]) if route.get("campaign_id") else None,
+                str(route["config_id"]) if route.get("config_id") else None,
+                str(route["assignment_id"]) if route.get("assignment_id") else None,
+                did,
+                stored_ani,
+                stored_ani_private,
+                normalized_ingress,
+                normalized_reason,
+            )
+
+            # Traffic-proportional bounded retention keeps hostile/random-DID
+            # scans from growing this pre-auth audit surface forever.
+            await conn.execute(
+                """
+                WITH expired AS (
+                    SELECT id
+                    FROM inbound_rejections
+                    WHERE retention_until < NOW()
+                    ORDER BY retention_until, id
+                    LIMIT 100
+                )
+                DELETE FROM inbound_rejections r
+                USING expired
+                WHERE r.id=expired.id
+                """
+            )
+
+        logger.info(
+            "inbound_pre_row_rejection_recorded provider=%s call=%s "
+            "tenant=%s reason=%s inserted=%s",
+            normalized_provider,
+            normalized_call_id[:12],
+            tenant_id[:8] if tenant_id else "platform",
+            normalized_reason,
+            bool(inserted),
+        )
+        return True
+
     async def admit(self, request: InboundAdmissionRequest) -> InboundAdmissionDecision:
         provider = _provider(request.provider)
         provider_call_id = _call_id(request.provider_call_id)

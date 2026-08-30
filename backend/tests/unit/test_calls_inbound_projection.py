@@ -1,6 +1,15 @@
 """Direction-aware call-history projections must preserve privacy and state."""
 
 import inspect
+from contextlib import asynccontextmanager
+from datetime import datetime, timezone
+from types import SimpleNamespace
+from uuid import UUID
+
+import pytest
+
+import app.api.v1.endpoints.calls as calls_module
+from app.api.v1.dependencies import CurrentUser
 
 from app.api.v1.endpoints.calls import (
     _display_from_number,
@@ -11,6 +20,7 @@ from app.api.v1.endpoints.calls import (
     _route_metadata,
     _transcript_state,
     get_call,
+    list_rejected_inbound_calls,
     list_calls,
 )
 
@@ -136,3 +146,76 @@ def test_call_detail_parent_billing_projection_excludes_child_leg_ledger():
 
     assert "FROM inbound_usage_transactions u" in source
     assert "u.call_leg_id IS NULL" in source
+
+
+@pytest.mark.asyncio
+async def test_rejected_inbound_feed_unions_pre_row_and_after_hours(monkeypatch):
+    tenant_id = UUID("11111111-1111-1111-1111-111111111111")
+    now = datetime.now(timezone.utc)
+    rows = [
+        {
+            "id": UUID("22222222-2222-2222-2222-222222222222"),
+            "source": "pre_row",
+            "occurred_at": now,
+            "status": "denied",
+            "reason": "unknown_did",
+            "provider": "asterisk",
+            "provider_call_id": "pbx-1",
+            "caller_ani": None,
+            "caller_ani_private": True,
+            "called_did": "+15550001111",
+            "campaign_id": None,
+            "campaign_name": None,
+            "inbound_config_id": None,
+            "assignment_id": None,
+            "total_rows": 2,
+        },
+        {
+            "id": UUID("33333333-3333-3333-3333-333333333333"),
+            "source": "call",
+            "occurred_at": now,
+            "status": "after_hours",
+            "reason": "after_hours_closed",
+            "provider": "asterisk",
+            "provider_call_id": "pbx-2",
+            "caller_ani": "+15550002222",
+            "caller_ani_private": False,
+            "called_did": "+15550001111",
+            "campaign_id": UUID("44444444-4444-4444-4444-444444444444"),
+            "campaign_name": "Reception",
+            "inbound_config_id": None,
+            "assignment_id": None,
+            "total_rows": 2,
+        },
+    ]
+
+    class Conn:
+        async def fetch(self, query, *args):
+            assert "FROM inbound_rejections" in query
+            assert "c.admission_reason='after_hours_closed'" in query
+            assert args == (tenant_id, 50, 0)
+            return rows
+
+    @asynccontextmanager
+    async def acquire(_pool, actual_tenant):
+        assert actual_tenant == tenant_id
+        yield Conn()
+
+    monkeypatch.setattr(calls_module, "acquire_with_tenant", acquire)
+    result = await list_rejected_inbound_calls(
+        page=1,
+        page_size=50,
+        campaign_id=None,
+        current_user=CurrentUser(
+            id="user-1",
+            email="user@example.com",
+            tenant_id=str(tenant_id),
+        ),
+        db_client=SimpleNamespace(pool=object()),
+    )
+
+    assert result.total == 2
+    assert [item.source for item in result.items] == ["pre_row", "call"]
+    assert result.items[0].caller_ani is None
+    assert result.items[1].status == "after_hours"
+    assert result.items[1].caller_ani == "+15550002222"

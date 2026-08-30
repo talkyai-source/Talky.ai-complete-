@@ -11,6 +11,7 @@ import { SmartCsvImport } from "@/components/campaigns/smart-csv-import";
 import { ContactLists, ActiveContactsSummary } from "@/components/campaigns/contact-lists";
 import { ScriptCard } from "@/components/campaigns/script-card";
 import { LiveCallsPanel } from "@/components/campaigns/live-calls-panel";
+import { RejectedInboundCallsPanel } from "@/components/campaigns/rejected-inbound-calls-panel";
 import { CallIssuesPanel } from "@/components/campaigns/call-issues-panel";
 import { KnowledgePanel } from "@/components/campaigns/knowledge-panel";
 import { TestAgentButton } from "@/components/campaigns/test-agent-button";
@@ -530,6 +531,14 @@ export default function CampaignDetailPage() {
                         transition={{ delay: 0.3 }}
                     >
                         <LiveCallsPanel campaignId={campaignId} />
+                    </motion.div>
+
+                    <motion.div
+                        initial={{ opacity: 0, y: 20 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: 0.325 }}
+                    >
+                        <RejectedInboundCallsPanel campaignId={campaignId} />
                     </motion.div>
 
                     {/* Call issues — why calls aren't going through (only
