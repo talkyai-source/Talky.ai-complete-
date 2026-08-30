@@ -63,6 +63,8 @@ class _Provider:
 class _Gateway:
     def __init__(self):
         self.sent = []
+        self.clips = []
+        self.hangups = []
 
     async def send_audio(self, call_id, raw):
         self.sent.append(raw)
@@ -72,6 +74,14 @@ class _Gateway:
 
     async def flush_tts_buffer(self, call_id):
         return None
+
+    async def play_pcmu_clip(self, call_id, audio, *, barge_in_event=None):
+        self.clips.append((call_id, len(audio)))
+        return {"ok": True, "interrupted": False, "bytes_sent": len(audio)}
+
+    async def hangup_call(self, call_id, reason):
+        self.hangups.append((call_id, reason))
+        return True
 
 
 class _Latency:
@@ -148,14 +158,12 @@ async def test_two_empty_streams_still_produce_speech():
     """If the retry is empty too, the turn must not end in silence. Dead air is
     the worst outcome on a phone call — the caller cannot tell it from a dropped
     line, so they hang up."""
-    provider = _Provider([[], [], [b"\x09" * 40]])
+    provider = _Provider([[], []])
     pipe, _ = await _speak(provider)
 
-    assert provider.calls == 3, "no fallback was spoken after two empty streams"
-    assert pipe.media_gateway.sent, "the caller still heard nothing"
-    assert provider.texts[2] != provider.texts[0], (
-        "the fallback re-sent the text that had already failed twice"
-    )
+    assert provider.calls == 2, "the broken provider was called a third time"
+    assert pipe.media_gateway.clips, "the provider-independent clip did not play"
+    assert pipe.media_gateway.sent == []
 
 
 @pytest.mark.asyncio
@@ -167,7 +175,31 @@ async def test_total_tts_failure_is_still_recorded_as_a_silent_turn():
     pipe, _ = await _speak(provider)
 
     assert pipe.media_gateway.sent == []
+    assert pipe.media_gateway.clips
     assert "provider_empty_stream" in pipe.silent_turns
+
+
+@pytest.mark.asyncio
+async def test_second_failed_turn_plays_terminal_clip_and_hangs_up():
+    """A caller never pays through an unlimited ladder of silent turns."""
+
+    provider = _Provider([[], [], [], []])
+    pipe = _Pipeline(provider)
+    playback = TtsPlayback(pipeline=pipe)
+    session = _session()
+
+    await playback.synthesize_and_send(
+        session, "First reply", None, track_latency=False
+    )
+    await playback.synthesize_and_send(
+        session, "Second reply", None, track_latency=False
+    )
+
+    assert len(pipe.media_gateway.clips) == 2
+    assert pipe.media_gateway.hangups == [
+        (session.call_id, "tts_provider_failure")
+    ]
+    assert session._tts_terminal_failure_hangup is True
 
 
 # ── it must not fire on healthy traffic ─────────────────────────────────────
@@ -181,6 +213,7 @@ async def test_a_working_provider_is_synthesised_exactly_once():
 
     assert provider.calls == 1
     assert len(pipe.media_gateway.sent) == 2
+    assert pipe.media_gateway.clips == []
     assert pipe.silent_turns == []
 
 
@@ -281,6 +314,7 @@ async def test_a_barge_in_before_the_first_chunk_gets_no_fallback_either():
     pipe = await _speak_interrupted([[], [], [b"\x01" * 80]], via_event=False)
 
     assert pipe.media_gateway.sent == []
+    assert pipe.media_gateway.clips == []
     assert all("say that again" not in t for t in pipe.tts_provider.texts)
 
 

@@ -62,6 +62,80 @@ class TtsPlayback:
         except Exception:  # metrics must never break playback
             pass
 
+    async def _try_emergency_voice_clip(
+        self,
+        session: CallSession,
+        websocket: Optional[WebSocket],
+        barge_in_event: Optional[asyncio.Event],
+    ) -> bool:
+        """Bypass a failed TTS provider; end the call on a second occurrence."""
+
+        play = getattr(self._p.media_gateway, "play_pcmu_clip", None)
+        if not callable(play):
+            return False
+
+        from app.domain.services.voice_pipeline.emergency_audio import (
+            VOICE_HOLD,
+            VOICE_TERMINAL,
+            play_emergency_clip,
+        )
+
+        failure_count = int(getattr(session, "_tts_failure_clip_count", 0) or 0) + 1
+        session._tts_failure_clip_count = failure_count
+        terminal = failure_count >= 2
+        clip_name = VOICE_TERMINAL if terminal else VOICE_HOLD
+        logger.critical(
+            "tts_provider_emergency_fallback call=%s occurrence=%d clip=%s terminal=%s",
+            session.call_id[:12],
+            failure_count,
+            clip_name,
+            terminal,
+        )
+        played = await play_emergency_clip(
+            self._p.media_gateway,
+            session.call_id,
+            clip_name,
+            barge_in_event=barge_in_event,
+        )
+        if websocket:
+            try:
+                await websocket.send_json(
+                    {
+                        "type": "tts_provider_failure",
+                        "occurrence": failure_count,
+                        "terminal": terminal,
+                        "fallback_played": played,
+                    }
+                )
+            except Exception:
+                pass
+
+        if terminal:
+            hangup = getattr(self._p.media_gateway, "hangup_call", None)
+            hangup_requested = False
+            if callable(hangup):
+                try:
+                    hangup_requested = bool(
+                        await hangup(session.call_id, "tts_provider_failure")
+                    )
+                except Exception as exc:
+                    logger.critical(
+                        "tts_provider_emergency_hangup_failed call=%s err=%s",
+                        session.call_id[:12],
+                        exc,
+                        exc_info=True,
+                    )
+            if not hangup_requested:
+                logger.critical(
+                    "tts_provider_emergency_hangup_unconfirmed call=%s",
+                    session.call_id[:12],
+                )
+            session._tts_terminal_failure_hangup = hangup_requested
+            # Terminal handling is complete even if the final clip or hangup
+            # failed: retrying the broken provider creates more billed silence.
+            return True
+        return played
+
     async def synthesize_and_send(
         self,
         session: CallSession,
@@ -138,11 +212,15 @@ class TtsPlayback:
             # `__anext__()` with a per-step deadline so a stuck provider socket
             # ends the turn cleanly instead of freezing the call.
             #
-            # 5s is intentionally larger than typical first-chunk latency
-            # (~250ms for Cartesia/Chirp/ElevenLabs streaming) so it never
-            # fires on healthy traffic. It only catches the rare case where
-            # the upstream WS dies without notifying the SDK.
-            _TTS_INTER_CHUNK_TIMEOUT_S = 5.0
+            # Three seconds is intentionally much larger than typical
+            # first-chunk latency (~250ms for streaming providers). Two
+            # attempts therefore preserve recovery while bounding unexplained
+            # pre-fallback silence to about six seconds.
+            # Two pre-first-audio attempts must reach the independent fallback
+            # by about six seconds. Healthy providers normally answer in well
+            # under one second; three seconds per attempt preserves a retry
+            # without leaving a caller in ten seconds of unexplained silence.
+            _TTS_INTER_CHUNK_TIMEOUT_S = 3.0
             _tts_iter = self._p.tts_provider.stream_synthesize(
                 text,
                 voice_id=session.voice_id,
@@ -377,31 +455,33 @@ class TtsPlayback:
             ):
                 # Both attempts produced no audio. The turn is otherwise about
                 # to end in total silence, which on a phone call is the worst
-                # available outcome — the caller hears nothing and cannot tell
-                # whether the line dropped. Say something short instead.
-                #
-                # Deliberately NOT the original text: it has now failed to
-                # synthesise twice, so a third attempt at the same string is
-                # the least likely thing to work. A brief line is both more
-                # likely to come back and more honest about what happened.
-                # Guarded by the same _tts_fallback_attempted flag the
-                # exception path uses, so a failing fallback cannot recurse.
-                session._tts_fallback_attempted = True
+                # available outcome. The telephony path now bypasses the failed
+                # provider entirely; non-PCMU/browser gateways retain the old
+                # recursive last resort behind a recursion guard.
                 logger.error(
-                    "tts_empty_stream_after_retry call=%s text=%r — speaking a "
-                    "short fallback so the turn is not silent",
+                    "tts_empty_stream_after_retry call=%s text=%r — using the "
+                    "provider-independent emergency voice path",
                     call_id[:12], text[:60],
                 )
-                try:
-                    await self.synthesize_and_send(
-                        session,
-                        "Sorry — could you say that again?",
-                        websocket,
-                        barge_in_event=barge_in_event,
-                        track_latency=False,
-                    )
-                except Exception:
-                    pass
+                handled = await self._try_emergency_voice_clip(
+                    session,
+                    websocket,
+                    barge_in_event,
+                )
+                if not handled:
+                    # Browser/non-telephony gateways do not carry raw PCMU.
+                    # Preserve their existing last-resort provider fallback.
+                    session._tts_fallback_attempted = True
+                    try:
+                        await self.synthesize_and_send(
+                            session,
+                            "Sorry — could you say that again?",
+                            websocket,
+                            barge_in_event=barge_in_event,
+                            track_latency=False,
+                        )
+                    except Exception:
+                        pass
 
             if provider_exhausted and not interrupted:
                 # Normal completion (not interrupted by barge-in) — flush any
@@ -429,17 +509,23 @@ class TtsPlayback:
             # _tts_fallback_attempted flag prevents infinite recursion when the
             # fallback itself fails (e.g. TTS provider is fully down).
             if not first_chunk_sent and not getattr(session, "_tts_fallback_attempted", False):
-                session._tts_fallback_attempted = True
-                try:
-                    await self.synthesize_and_send(
-                        session,
-                        "I'm sorry, I couldn't respond. Please say that again.",
-                        websocket,
-                        barge_in_event=barge_in_event,
-                        track_latency=False,
-                    )
-                except Exception:
-                    pass
+                handled = await self._try_emergency_voice_clip(
+                    session,
+                    websocket,
+                    barge_in_event,
+                )
+                if not handled:
+                    session._tts_fallback_attempted = True
+                    try:
+                        await self.synthesize_and_send(
+                            session,
+                            "I'm sorry, I couldn't respond. Please say that again.",
+                            websocket,
+                            barge_in_event=barge_in_event,
+                            track_latency=False,
+                        )
+                    except Exception:
+                        pass
         finally:
             if not interrupted and first_chunk:
                 if silent_reason is None and completed:

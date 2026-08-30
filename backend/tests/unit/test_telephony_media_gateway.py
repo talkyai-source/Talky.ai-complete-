@@ -35,6 +35,54 @@ async def test_hangup_call_returns_false_for_missing_session():
 
 
 @pytest.mark.asyncio
+async def test_preencoded_pcmu_clip_bypasses_tts_conversion_and_waits_for_drain():
+    gateway = TelephonyMediaGateway()
+    adapter = AsyncMock()
+    await gateway.on_call_started(
+        "clip-call",
+        {"adapter": adapter, "pbx_call_id": "pbx-clip-call"},
+    )
+    clip = b"\x7f" * 1600
+
+    with patch("asyncio.sleep", new=AsyncMock(return_value=None)) as sleep:
+        result = await gateway.play_pcmu_clip("clip-call", clip)
+
+    assert result == {
+        "ok": True,
+        "interrupted": False,
+        "bytes_sent": len(clip),
+    }
+    sent = [call.args[1] for call in adapter.send_tts_audio.await_args_list]
+    assert b"".join(sent) == clip
+    assert all(len(packet) % 160 == 0 for packet in sent)
+    session = gateway._sessions["clip-call"]
+    assert session.tts_recording_buffer_bytes > 0
+    assert sleep.await_count >= 1
+
+
+@pytest.mark.asyncio
+async def test_preencoded_clip_honors_barge_in_before_sending_audio():
+    gateway = TelephonyMediaGateway()
+    adapter = AsyncMock()
+    await gateway.on_call_started(
+        "clip-barge-call",
+        {"adapter": adapter, "pbx_call_id": "pbx-clip-barge-call"},
+    )
+    event = asyncio.Event()
+    event.set()
+
+    result = await gateway.play_pcmu_clip(
+        "clip-barge-call",
+        b"\x7f" * 160,
+        barge_in_event=event,
+    )
+
+    assert result["interrupted"] is True
+    assert result["bytes_sent"] == 0
+    adapter.send_tts_audio.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_recording_gate_blocks_both_sides_but_keeps_live_media_flowing():
     gateway = TelephonyMediaGateway()
     await gateway.initialize({"sample_rate": 8000, "tts_source_format": "s16le"})

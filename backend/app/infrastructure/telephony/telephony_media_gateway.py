@@ -940,6 +940,115 @@ class TelephonyMediaGateway(MediaGateway):
             )
             session._tts_pending_bytes = b""
 
+    async def play_pcmu_clip(
+        self,
+        call_id: str,
+        pcmu_audio: bytes,
+        *,
+        barge_in_event: Optional[asyncio.Event] = None,
+    ) -> Dict[str, Any]:
+        """Play a pre-encoded 8 kHz PCMU clip without touching a TTS provider.
+
+        The adapter accepts arbitrary PCMU batches, while Asterisk ultimately
+        plays 160-byte/20 ms frames. We send 100 ms batches with a 250 ms
+        look-ahead: enough to prevent network jitter gaps without dumping five
+        seconds into the C++ queue at once (which would defeat barge-in).
+        Returning waits for the expected queue drain, so a subsequent terminal
+        hangup cannot cut off the final words.
+        """
+
+        session = self._sessions.get(call_id)
+        if not session or not session.is_active:
+            return {"ok": False, "interrupted": False, "bytes_sent": 0, "reason": "no_session"}
+        if not isinstance(pcmu_audio, bytes) or not pcmu_audio or len(pcmu_audio) % 160:
+            raise ValueError("PCMU clip must contain complete 160-byte frames")
+
+        # A provider may have left a partial sample or packet behind just before
+        # it failed. Never prefix those bytes onto the known-good clip.
+        session.tts_buffer = b""
+        session._tts_pending_bytes = b""
+        try:
+            await self.clear_output_buffer(call_id)
+        except Exception as exc:
+            logger.warning(
+                "emergency_voice_clear_failed call=%s err=%s",
+                call_id[:12],
+                exc,
+            )
+
+        # The emergency message is still agent audio. Preserve it in a lawful
+        # recording exactly as the normal TTS path does, instead of leaving an
+        # unexplained silent patch in the operator's evidence.
+        if session.recording_enabled:
+            try:
+                from app.utils.audio_utils import resample_audio, ulaw_to_pcm
+
+                pcm16 = ulaw_to_pcm(pcmu_audio)
+                if self._sample_rate != self._WIRE_SAMPLE_RATE:
+                    pcm16 = resample_audio(
+                        pcm16,
+                        from_rate=self._WIRE_SAMPLE_RATE,
+                        to_rate=self._sample_rate,
+                        channels=self._channels,
+                        bit_depth=self._bit_depth,
+                        res_type="soxr_mq",
+                    )
+                loop = asyncio.get_running_loop()
+                wall_pos = int(
+                    (loop.time() - session.recording_start_time) * self._sample_rate
+                )
+                if wall_pos > session.agent_rec_cursor:
+                    session.agent_rec_cursor = wall_pos
+                session.tts_recording_buffer.append((session.agent_rec_cursor, pcm16))
+                session.tts_recording_buffer_bytes += len(pcm16)
+                session.agent_rec_cursor += len(pcm16) // 2
+            except Exception as exc:
+                logger.warning(
+                    "emergency_voice_recording_failed call=%s err=%s",
+                    call_id[:12],
+                    exc,
+                )
+
+        loop = asyncio.get_running_loop()
+        deadline = loop.time()
+        sent = 0
+        batch_bytes = 800  # five 20 ms frames / 100 ms
+        for offset in range(0, len(pcmu_audio), batch_bytes):
+            if barge_in_event is not None and barge_in_event.is_set():
+                try:
+                    await self.clear_output_buffer(call_id)
+                except Exception:
+                    pass
+                return {
+                    "ok": False,
+                    "interrupted": True,
+                    "bytes_sent": sent,
+                    "reason": "barge_in",
+                }
+
+            packet = pcmu_audio[offset : offset + batch_bytes]
+            await session.adapter.send_tts_audio(session.pbx_call_id, packet)
+            sent += len(packet)
+            session.chunks_sent += max(1, len(packet) // 160)
+            session.total_bytes_sent += len(packet)
+            deadline += len(packet) / self._WIRE_SAMPLE_RATE
+            sleep_for = deadline - loop.time() - 0.250
+            if sleep_for > 0:
+                await asyncio.sleep(sleep_for)
+
+        # Wait until the last queued byte should have reached the caller, plus
+        # one frame for scheduler jitter, before a terminal hangup may run.
+        drain_for = deadline - loop.time() + 0.020
+        if drain_for > 0:
+            await asyncio.sleep(drain_for)
+        logger.error(
+            "emergency_voice_clip_played call=%s bytes=%d duration_ms=%.0f",
+            call_id[:12],
+            sent,
+            sent / self._WIRE_SAMPLE_RATE * 1000.0,
+        )
+        return {"ok": True, "interrupted": False, "bytes_sent": sent}
+
     def set_barge_in_event(self, call_id: str, event: asyncio.Event) -> None:
         """
         Register the pipeline's barge-in event for a session.
