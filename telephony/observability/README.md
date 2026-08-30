@@ -22,6 +22,8 @@ The checked-in rules now use only metrics emitted by the backend:
 
 - backend metrics target loss and stale database-backed metric refresh;
 - fail-closed inbound routing/admission dependency failures;
+- absence of a successful inbound call for 90 minutes, refreshed by the
+  hourly carrier-hairpin synthetic timer;
 - creation of Answer-ambiguity, settlement-disabled, and reservation-overage
   billing holds;
 - detection of a stale reservation by the proof-aware recovery scan; and
@@ -35,6 +37,16 @@ metrics, application DB-pool pressure, CPU/cgroup memory saturation, or dialer
 queue depth. There are also no PostgreSQL, Redis, node, or cAdvisor exporters in
 the checked-in observability compose file. Rules for those names would be
 dead/aspirational, so they are intentionally absent.
+
+The synthetic timer is installed from `backend/systemd/` and intentionally
+requires `/etc/talky/inbound-synthetic.env`. The deployment preflight refuses
+to select a new production commit until that file contains a validated E.164
+DID and PJSIP trunk endpoint. The DID must belong to an always-open,
+agent-first synthetic campaign; otherwise a correct after-hours rejection
+would look like a media outage. The probe originates out through the carrier
+and back to that DID; success is recorded only when the returned inbound leg
+reaches confirmed first agent audio. A local dialplan-only call cannot satisfy
+this signal.
 
 Production inbound remains blocked until operations installs real exporters or
 equivalent measured collectors for every missing signal, approves numeric

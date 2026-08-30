@@ -131,6 +131,9 @@ ssh -t -i "$KEY" "$PROD" "
     (cd \"\$candidate_worktree/backend\" && /opt/talky/backend/venv/bin/python -c 'import app.main') >/dev/null 2>&1
     VOICE_GATEWAY_BUILD_SHA='${DEPLOY_SHA}' \
         bash \"\$candidate_worktree/backend/scripts/build_voice_gateway_release.sh\" \"\$gateway_candidate\"
+    echo '--> validating mandatory carrier-hairpin synthetic configuration'
+    sudo bash \"\$candidate_worktree/backend/deploy/inbound-synthetic-call.sh\" \
+        --check-config-file /etc/talky/inbound-synthetic.env
     git -C /opt/talky worktree remove --force \"\$candidate_worktree\"
     candidate_worktree=''
     echo '--> checking out frozen commit (detached)'
@@ -187,13 +190,14 @@ ssh -t -i "$KEY" "$PROD" "
     echo '--> restarting backend services after the authenticated gateway is healthy'
     sudo systemctl restart talky-api talky-dialer-worker talky-voice-worker talky-reminder-worker
     sudo systemctl restart talky-trunk-status.timer
+    sudo systemctl restart talky-inbound-synthetic.timer
     if ! sudo systemctl start talky-trunk-status.service; then
         echo '!! talky-trunk-status one-shot failed; timer remains active and will retry.' >&2
     fi
     sleep 6
     echo '--> service status:'
     service_failure=0
-    for s in talky-api talky-dialer-worker talky-voice-worker talky-reminder-worker talky-voice-gateway talky-trunk-status.timer; do
+    for s in talky-api talky-dialer-worker talky-voice-worker talky-reminder-worker talky-voice-gateway talky-trunk-status.timer talky-inbound-synthetic.timer; do
         state=\"\$(systemctl is-active \"\$s\" 2>/dev/null || true)\"
         printf '    %-26s %s\n' \"\$s\" \"\$state\"
         if [ \"\$state\" != 'active' ]; then

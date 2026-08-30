@@ -8,6 +8,7 @@ Prometheus labels.
 
 from __future__ import annotations
 
+import time
 from typing import Any, Optional
 
 from prometheus_client import REGISTRY, Counter, Gauge, Histogram
@@ -131,6 +132,16 @@ _answer_to_first_audio = _histogram(
     (),
     buckets=(0.1, 0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 5.0, 8.0, 12.0, 20.0),
 )
+_successful_calls = _counter(
+    "inbound_successful_calls_total",
+    "Inbound calls whose first agent-audio packet was accepted by the gateway.",
+    (),
+)
+_last_success_timestamp = _gauge(
+    "inbound_last_success_timestamp_seconds",
+    "Unix timestamp of the latest inbound call with confirmed first agent audio.",
+    (),
+)
 
 
 _TRANSFER_OUTCOMES = frozenset({"connected", "failed"})
@@ -213,6 +224,7 @@ def _initialize_alert_series() -> None:
     for scope in _TRANSFER_CLEANUP_SCOPES:
         for result in ("unconfirmed", "domain_finalize_failed", "error"):
             _asterisk_transfer_cleanup.labels(scope=scope, result=result).inc(0)
+    _successful_calls.inc(0)
 
 
 _initialize_alert_series()
@@ -297,3 +309,5 @@ def record_inbound_answer_to_first_audio(duration_seconds: float) -> None:
     """Observe caller dead-air latency without adding call or tenant labels."""
 
     _answer_to_first_audio.observe(max(0.0, float(duration_seconds)))
+    _successful_calls.inc()
+    _last_success_timestamp.set(time.time())

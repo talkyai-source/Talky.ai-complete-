@@ -41,7 +41,8 @@ systemctl daemon-reload
 #     before the app restarts. Migrations must never run just because the
 #     machine booted. (See the unit's own header.)
 #   * talky-cleanup.service / talky-healthwatch.service / talky-trunk-status.service
-#     — oneshots activated by their .timer, which IS enabled below.
+#     / talky-inbound-synthetic.service — oneshots activated by their .timer,
+#     which IS enabled below.
 echo "  Enabling services..."
 systemctl enable talky-api.service
 systemctl enable talky-voice-worker.service
@@ -51,6 +52,7 @@ systemctl enable talky-voice-gateway.service   # C++ media gateway; see the unit
 systemctl enable talky-cleanup.timer   # activates talky-cleanup.service nightly
 systemctl enable talky-healthwatch.timer   # activates talky-healthwatch.service every 2 min
 systemctl enable talky-trunk-status.timer  # refreshes runtime SIP evidence every 15 sec
+systemctl enable talky-inbound-synthetic.timer  # hourly carrier-hairpin proof
 systemctl enable talky.target
 
 echo ""

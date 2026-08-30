@@ -35,6 +35,18 @@ class _LabeledCounter:
         return None
 
 
+class _MetricValue:
+    def __init__(self) -> None:
+        self.increments = 0
+        self.values: list[float] = []
+
+    def inc(self) -> None:
+        self.increments += 1
+
+    def set(self, value: float) -> None:
+        self.values.append(value)
+
+
 def _alert_rules() -> dict[str, dict[str, object]]:
     document = yaml.safe_load(RULES_PATH.read_text(encoding="utf-8"))
     alerts: dict[str, dict[str, object]] = {}
@@ -64,11 +76,25 @@ def test_usage_metrics_preserve_only_real_bounded_alert_dimensions(monkeypatch) 
     ]
 
 
+def test_confirmed_first_audio_refreshes_the_inbound_success_signal(monkeypatch) -> None:
+    counter = _MetricValue()
+    gauge = _MetricValue()
+    monkeypatch.setattr(inbound_metrics, "_successful_calls", counter)
+    monkeypatch.setattr(inbound_metrics, "_last_success_timestamp", gauge)
+    monkeypatch.setattr(inbound_metrics.time, "time", lambda: 1_787_000_000.0)
+
+    inbound_metrics.record_inbound_answer_to_first_audio(0.42)
+
+    assert counter.increments == 1
+    assert gauge.values == [1_787_000_000.0]
+
+
 def test_inbound_alerts_reference_exported_application_metrics() -> None:
     alerts = _alert_rules()
     required = {
         "TalkyTelephonyMetricsRefreshStale",
         "TalkyInboundRoutingOrAdmissionDependencyFailure",
+        "TalkyInboundNoSuccessfulCall",
         "TalkyInboundBillingHoldCreated",
         "TalkyInboundStaleReservationRecoveryQueued",
         "TalkyAsteriskInboundTransferCleanupUnconfirmed",
@@ -97,6 +123,10 @@ def test_inbound_alerts_reference_exported_application_metrics() -> None:
         "usage_exceeded_reservation",
     ):
         assert result in billing_expr
+
+    no_success_expr = str(alerts["TalkyInboundNoSuccessfulCall"]["expr"])
+    assert "inbound_last_success_timestamp_seconds" in no_success_expr
+    assert "5400" in no_success_expr
 
 
 def test_missing_exporter_signals_remain_documented_release_blockers() -> None:

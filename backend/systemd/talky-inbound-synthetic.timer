@@ -1,0 +1,11 @@
+[Unit]
+Description=Run the Talky inbound carrier-hairpin synthetic hourly
+
+[Timer]
+OnBootSec=10min
+OnUnitActiveSec=60min
+RandomizedDelaySec=5min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -70,6 +70,21 @@ groups:
             admission dependencies were unavailable. Calls remain fail-closed;
             investigate the backend/database path before resuming a batch.
 
+      - alert: TalkyInboundNoSuccessfulCall
+        expr: time() - inbound_last_success_timestamp_seconds > 5400
+        for: 15m
+        labels:
+          severity: critical
+          team: telephony
+        annotations:
+          summary: "No inbound call has delivered confirmed agent audio for 90 minutes"
+          description: >-
+            The gateway has not accepted a first agent-audio packet on any
+            inbound call for 90 minutes. The hourly carrier-hairpin synthetic
+            should refresh this timestamp even during quiet customer periods.
+            Check talky-inbound-synthetic.service, carrier routing, admission,
+            media-gateway identity, and TTS delivery before trusting inbound.
+
       - alert: TalkyInboundBillingHoldCreated
         expr: >-
           sum(increase(inbound_usage_events_total{
