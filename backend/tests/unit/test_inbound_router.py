@@ -132,6 +132,24 @@ class _FakeConn:
         return _Transaction()
 
 
+class _DidMapConn(_FakeConn):
+    """Return only the binding addressed by the canonical DID query argument."""
+
+    def __init__(self, bindings_by_did):
+        super().__init__()
+        self.bindings_by_did = bindings_by_did
+
+    async def fetch(self, query, *args):
+        self.query = query
+        self.args = args
+        requested_dids = args[0]
+        return [
+            self.bindings_by_did[did]
+            for did in requested_dids
+            if did in self.bindings_by_did
+        ]
+
+
 class _Acquire:
     def __init__(self, conn):
         self.conn = conn
@@ -192,6 +210,46 @@ async def test_resolver_queries_actual_assignment_tables_and_exact_canonical_did
         ["+15551234567"],
         list(ACTIVE_INBOUND_CAMPAIGN_STATUSES),
     )
+
+
+@pytest.mark.asyncio
+async def test_two_dids_resolve_to_their_own_tenant_and_campaign_without_cross_routing():
+    tenant_b_campaign = "88888888-8888-8888-8888-888888888888"
+    tenant_b_binding = {
+        **_binding(TENANT_B),
+        "inbound_campaign_id": "99999999-9999-9999-9999-999999999999",
+        "campaign_id": tenant_b_campaign,
+        "sip_trunk_id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+        "called_did_id": "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+        "config_id": "cccccccc-cccc-cccc-cccc-cccccccccccc",
+    }
+    conn = _DidMapConn(
+        {
+            "+15551234567": _binding(TENANT_A),
+            "+442079460123": tenant_b_binding,
+        }
+    )
+    pool = _Pool(conn)
+
+    route_a = await resolve_inbound_route(
+        pool,
+        called_did="+1 (555) 123-4567",
+        context=f"from-tenant-{TENANT_A}",
+        environment="production",
+    )
+    route_b = await resolve_inbound_route(
+        pool,
+        called_did="sip:+442079460123@carrier.example",
+        context=f"from-tenant-{TENANT_B}",
+        environment="production",
+    )
+
+    assert (route_a.tenant_id, route_a.campaign_id) == (TENANT_A, CAMPAIGN)
+    assert (route_b.tenant_id, route_b.campaign_id) == (
+        TENANT_B,
+        tenant_b_campaign,
+    )
+    assert route_a.called_did_id != route_b.called_did_id
 
 
 @pytest.mark.asyncio

@@ -290,43 +290,50 @@
 
 ### Campaign Configuration
 
-- [ ] Add campaign type: `outbound` or `inbound`.
-- [ ] Add an **Inbound** section to the sidebar.
-- [ ] Allow users to create an inbound campaign.
-- [ ] Required settings:
-  - [ ] Campaign name
-  - [ ] Assigned phone number/SIP route
-  - [ ] Agent/prompt selection
-  - [ ] Voice selection
-  - [ ] Business hours and timezone
-  - [ ] After-hours behavior
-  - [ ] Greeting/opening message
-  - [ ] Human transfer destination
-  - [ ] Voicemail/fallback behavior
-  - [ ] Recording and disclosure policy
-  - [ ] Call outcome rules
-- [ ] Prevent the same inbound number from being actively assigned to conflicting campaigns.
-- [ ] Add activate, pause and archive actions.
+- [x] Add campaign type: `outbound` or `inbound`.
+- [x] Add an **Inbound** section to the sidebar.
+- [x] Allow users to create an inbound campaign.
+- [x] Required settings:
+  - [x] Campaign name
+  - [x] Assigned phone number/SIP route
+  - [x] Agent/prompt selection
+  - [x] Voice selection
+  - [x] Business hours and timezone
+  - [x] After-hours behavior
+  - [x] Greeting/opening message
+  - [x] Human transfer destination
+  - [x] Voicemail/fallback behavior
+  - [x] Recording and disclosure policy
+  - [x] Call outcome rules
+- [x] Prevent the same inbound number from being actively assigned to conflicting campaigns.
+- [x] Add activate, pause and archive actions.
 
 ### Runtime
 
-- [ ] Resolve incoming DID/SIP destination to tenant and inbound campaign.
-- [ ] Create the session with the correct tenant, campaign, prompt and voice.
-- [ ] Pass caller phone number as contact context where permitted.
-- [ ] Apply business-hours logic before starting the normal agent flow.
-- [ ] Support transfer failure and after-hours fallback.
-- [ ] Persist inbound direction, DID, caller ID, campaign ID and outcome.
-- [ ] Apply concurrency, quota and billing checks.
-- [ ] Add structured logs for routing decisions.
+- [x] Resolve incoming DID/SIP destination to tenant and inbound campaign.
+- [x] Create the session with the correct tenant, campaign, prompt and voice.
+- [x] Pass caller phone number as contact context where permitted.
+- [x] Apply business-hours logic before starting the normal agent flow.
+- [x] Support transfer failure and after-hours fallback.
+- [x] Persist inbound direction, DID, caller ID, campaign ID and outcome.
+- [x] Apply concurrency, quota and billing checks.
+- [x] Add structured logs for routing decisions.
 
 ### Acceptance Criteria
 
-- [ ] A test number routes to exactly one correct tenant/campaign.
+- [x] A test number routes to exactly one correct tenant/campaign.
 - [ ] The correct inbound agent answers with the configured greeting.
-- [ ] Calls outside business hours follow the configured fallback.
+- [x] Calls outside business hours follow the configured fallback.
 - [ ] Transfer success and failure are handled clearly.
-- [ ] Inbound minutes appear correctly in usage/billing.
-- [ ] Tenant A cannot see or route Tenant B's calls.
+- [x] Inbound minutes appear correctly in usage/billing.
+- [x] Tenant A cannot see or route Tenant B's calls.
+
+> **2026-08-31 verification note:** checked items above are backed by repository
+> migrations, tenant-scoped services/UI, and automated tests (including the
+> two-DID/two-tenant routing proof). They do not substitute for the frozen live
+> carrier canary. The two unchecked criteria deliberately require that live
+> evidence: first configured greeting audio on the production route, and an
+> approved transfer success/failure exercise with transfer gates enabled.
 
 ---
 
