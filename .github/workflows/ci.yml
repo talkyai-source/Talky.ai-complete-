@@ -170,6 +170,50 @@ jobs:
         env:
           PGPASSWORD: testpassword
 
+      - name: Preserved baseline bootstrap contract
+        # Restore the historical dump with the exact PostgreSQL client family
+        # that produced it, stamp only its proven revision, and exercise every
+        # migration through head. This is intentionally a disposable database.
+        run: |
+          PGPASSWORD=testpassword psql -h localhost -U talky -d postgres \
+            -c "CREATE DATABASE talky_preserved_baseline_test;"
+          PGPASSWORD=testpassword psql -h localhost -U talky -d postgres \
+            -c "CREATE ROLE authenticated NOLOGIN NOSUPERUSER NOBYPASSRLS;"
+          docker run --rm --network host \
+            -e PGPASSWORD=testpassword \
+            -v "$PWD:/work:ro" \
+            postgres:16.14-alpine \
+            psql -h 127.0.0.1 -U talky -d talky_preserved_baseline_test \
+              -v ON_ERROR_STOP=1 \
+              -f /work/database/schema/baseline_2026-06-02.sql
+          DATABASE_URL=postgresql://talky:testpassword@localhost:5432/talky_preserved_baseline_test \
+            alembic stamp 0008_tenant_voice_tuning
+          DATABASE_URL=postgresql://talky:testpassword@localhost:5432/talky_preserved_baseline_test \
+            alembic upgrade head
+          TEST_DATABASE_URL=postgresql://talky:testpassword@localhost:5432/talky_preserved_baseline_test \
+            pytest tests/integration/test_bootstrap_contract_repair.py -q
+          TEST_DATABASE_URL=postgresql://talky:testpassword@localhost:5432/talky_preserved_baseline_test \
+            pytest tests/integration/test_inbound_hold_resolution.py -q
+        env:
+          PGPASSWORD: testpassword
+
+      - name: Legacy false-stamp repair
+        # Reproduce the historic bad marker on the consolidated schema and
+        # prove the forward-repair migrations converge it safely to head.
+        run: |
+          PGPASSWORD=testpassword psql -h localhost -U talky -d postgres \
+            -c "CREATE DATABASE talky_false_stamp_test;"
+          PGPASSWORD=testpassword psql -h localhost -U talky -d talky_false_stamp_test \
+            -f database/complete_schema.sql -v ON_ERROR_STOP=1
+          DATABASE_URL=postgresql://talky:testpassword@localhost:5432/talky_false_stamp_test \
+            alembic stamp 0021_billing_topup
+          DATABASE_URL=postgresql://talky:testpassword@localhost:5432/talky_false_stamp_test \
+            alembic upgrade head
+          TEST_DATABASE_URL=postgresql://talky:testpassword@localhost:5432/talky_false_stamp_test \
+            pytest tests/integration/test_bootstrap_contract_repair.py -q
+        env:
+          PGPASSWORD: testpassword
+
       - name: Run tests with pytest (with coverage)
         # Coverage threshold starts intentionally LOW so it lands without
         # breaking the build. Ratchet it upward in follow-up PRs as test

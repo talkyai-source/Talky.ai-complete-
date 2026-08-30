@@ -127,3 +127,6 @@ tmp/
 output/
 outputs/
 testsprite_tests/
+
+# Local agent worktrees are machine state, never repository submodules.
+.claude/worktrees/

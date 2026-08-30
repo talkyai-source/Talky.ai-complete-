@@ -13,10 +13,12 @@ on:
     branches: [main]
     paths:
       - 'backend/**'
+      - 'services/voice-gateway-cpp/**'
       - '.github/workflows/backend-voice-tests.yml'
   pull_request:
     paths:
       - 'backend/**'
+      - 'services/voice-gateway-cpp/**'
       - '.github/workflows/backend-voice-tests.yml'
   workflow_dispatch:
 
@@ -70,7 +72,7 @@ jobs:
             tests/unit/test_barge_in_stop_metric.py \
             tests/unit/test_cartesia_bargein_context_isolation.py \
             tests/unit/test_nova_barge_in_parity.py \
-            tests/unit/test_turn_streamer_tts_overlap.py \
+            tests/unit/voice_pipeline/test_turn_streamer_tts_overlap.py \
             tests/unit/test_tts_pacing_lead.py
 
   full:
@@ -97,29 +99,3 @@ jobs:
 
       - name: Full suite
         run: python -m pytest tests/unit tests/security -q -p no:randomly -rfsE
-
-  cpp-gateway:
-    name: C++ voice gateway build
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Build
-        working-directory: services/voice-gateway-cpp
-        run: |
-          # Mirrors the production build: the host has no cmake, so the binary
-          # is produced with g++ -O2 directly. Warnings are surfaced; the
-          # production binary was last built with zero.
-          g++ --version
-          mkdir -p build
-          g++ -O2 -std=c++17 -Wall -Wextra -Iinclude \
-              src/*.cpp -o build/voice_gateway -lpthread
-          ls -la build/voice_gateway
-
-      - name: Sanity — binary starts and reports health
-        working-directory: services/voice-gateway-cpp
-        run: |
-          ./build/voice_gateway --help 2>&1 | head -5 || true
-          echo "build artifact produced"

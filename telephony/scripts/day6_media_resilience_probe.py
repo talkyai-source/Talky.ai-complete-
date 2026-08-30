@@ -8,6 +8,7 @@ transitions with deterministic fault-injection scenarios.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import socket
@@ -118,6 +119,10 @@ def start_session(
         "ptime_ms": 20,
     }
     payload.update(overrides or {})
+    payload.pop("config_digest", None)
+    payload["config_digest"] = hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
     return http_json("POST", f"{base_url}/v1/sessions/start", payload)
 
 

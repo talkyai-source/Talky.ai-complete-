@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import json
 import os
 import signal
@@ -331,6 +332,9 @@ class GatewayHttpClient:
             "ptime_ms": 20,
             "echo_enabled": bool(echo_enabled),
         }
+        payload["config_digest"] = hashlib.sha256(
+            json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
         return self._request(
             "POST", "/v1/sessions/start", payload=payload, ok=(200, 409)
         )

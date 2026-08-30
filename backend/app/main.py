@@ -824,6 +824,8 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.error(f"Error disconnecting telephony bridge: {e}")
 
+    await _tb.stop_session_management()
+
     # Phase 1 item 1 — stop the heartbeat and clear it so the successor
     # process recovers our calls immediately rather than waiting for the
     # heartbeat TTL to lapse. No-op on the in-memory backend.

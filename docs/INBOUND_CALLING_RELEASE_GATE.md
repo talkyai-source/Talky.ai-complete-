@@ -135,6 +135,8 @@ BACKEND_INTERNAL_URL=http://127.0.0.1:8000
 VOICE_GATEWAY_CALLBACK_HOST=127.0.0.1
 INTERNAL_SERVICE_TOKEN=<secret-manager reference; never inline in evidence>
 VOICE_GATEWAY_AUTH_TOKEN=<distinct secret-manager reference>
+VOICE_GATEWAY_REQUIRE_CONFIG_ACK=true
+TELEPHONY_MEDIA_WATCHDOG_INTERVAL_S=1.0
 ```
 
 Production startup rejects missing, short, or reused gateway secrets and any

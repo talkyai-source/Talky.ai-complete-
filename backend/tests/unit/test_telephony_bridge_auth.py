@@ -432,7 +432,11 @@ def test_ownership_lookup_runs_the_bypass_inside_a_transaction(monkeypatch):
 # must never be mixed by the deploy path.
 
 
-def _audio_request(*, headers: dict[str, str] | None = None) -> Request:
+def _audio_request(*, headers: dict[str, str] | None = None, body: bytes | None = None) -> Request:
+    import base64
+    if body is None:
+        valid_b64 = base64.b64encode(b"\xff" * 160).decode()
+        body = f'{{"session_id":"asterisk-abc-10000","pcmu_base64":"{valid_b64}","codec":"pcmu"}}'.encode()
     headers = headers or {}
     raw_headers = [(k.lower().encode(), v.encode()) for k, v in headers.items()]
     scope = {
@@ -448,7 +452,11 @@ def _audio_request(*, headers: dict[str, str] | None = None) -> Request:
         "client": ("203.0.113.9", 51234),
         "state": {},
     }
-    return Request(scope)
+
+    async def receive():
+        return {"type": "http.request", "body": body, "more_body": False}
+
+    return Request(scope, receive=receive)
 
 
 def _receive_gateway_audio():

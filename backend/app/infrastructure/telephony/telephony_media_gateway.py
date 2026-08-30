@@ -42,6 +42,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
 from app.domain.interfaces.media_gateway import MediaGateway
+from app.infrastructure.telephony.asterisk_adapter import TtsDeliveryError
 from app.domain.services.telephony.config import AUDIO_CALLBACK_INTERVAL_MS
 from app.utils import event_loop_lag
 
@@ -168,6 +169,9 @@ class TelephonySession:
     # invisible at DEBUG until the 300s watchdog noticed dead air.
     consecutive_audio_route_failures: int = 0
     last_audio_route_error_warn_at: float = 0.0
+    # Consecutive TTS delivery failures to the C++ media gateway.
+    consecutive_tts_failures: int = 0
+    last_tts_error_warn_at: float = 0.0
     # The in-flight forced-hangup task (audio-route force-end). Held so its
     # result is observed instead of being fire-and-forgotten, and so a
     # still-running attempt is not re-spawned on every subsequent bad packet.
@@ -841,6 +845,7 @@ class TelephonyMediaGateway(MediaGateway):
                 await session.adapter.send_tts_audio(session.pbx_call_id, packet)
                 session.chunks_sent += 1
                 session.total_bytes_sent += len(packet)
+                session.consecutive_tts_failures = 0
                 if not session.first_tts_logged:
                     session.first_tts_logged = True
                     logger.info(
@@ -848,8 +853,31 @@ class TelephonyMediaGateway(MediaGateway):
                         call_id, len(packet),
                         extra={"call_id": call_id, "t_tts_first_audio": 1},
                     )
+            except TtsDeliveryError as exc:
+                # This typed exception means the gateway did not accept the
+                # packet.  Returning normally would let the playback layer mark
+                # undelivered speech as spoken, so fail on the first proof.
+                session.consecutive_tts_failures += 1
+                now_s = loop.time()
+                if session.consecutive_tts_failures == 1 or (now_s - session.last_tts_error_warn_at) >= 1.0:
+                    session.last_tts_error_warn_at = now_s
+                    logger.warning(
+                        "[TelephonyGW] send_tts_audio failed for %s: %s (consecutive=%d)",
+                        call_id[:12],
+                        exc,
+                        session.consecutive_tts_failures,
+                    )
+                raise
             except Exception as exc:
-                logger.warning(f"[TelephonyGW] send_tts_audio failed for {call_id[:12]}: {exc}")
+                # Compatibility budget for adapters that have not adopted the
+                # typed delivery contract yet. Repeated unknown failures still
+                # fail closed instead of creating indefinite dead air.
+                session.consecutive_tts_failures += 1
+                if session.consecutive_tts_failures >= 5:
+                    raise TtsDeliveryError(
+                        f"Repeated TTS delivery failures for {call_id[:12]} "
+                        f"({session.consecutive_tts_failures} consecutive): {exc}"
+                    ) from exc
 
             session._tts_send_deadline = next_deadline
 

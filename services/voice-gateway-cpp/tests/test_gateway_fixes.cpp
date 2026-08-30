@@ -104,6 +104,113 @@ SessionConfig base_config(const std::string& id, const uint16_t listen_port, con
     return cfg;
 }
 
+void test_non_echo_receive_path_becomes_active_on_first_valid_rtp() {
+    SessionConfig cfg = base_config("active-rx", 43401, 43402);
+    cfg.echo_enabled = false;
+    RtpSession session(cfg);
+    std::string err;
+    check(session.start(err), "active_rx_start");
+
+    const int tx = make_udp_bound(43402);
+    sockaddr_in dst{};
+    dst.sin_family = AF_INET;
+    dst.sin_port = htons(43401);
+    inet_pton(AF_INET, "127.0.0.1", &dst.sin_addr);
+    send_rtp(tx, dst, 1, 0, 0x1010u, 0x11);
+    std::this_thread::sleep_for(std::chrono::milliseconds(80));
+
+    check(session.snapshot().state == "Active", "active_rx_first_packet_not_stuck_buffering");
+    session.stop("test_done");
+    close(tx);
+}
+
+void test_exact_rtp_source_rejects_rogue_first_packet() {
+    SessionConfig cfg = base_config("source-exact", 43411, 43412);
+    cfg.echo_enabled = false;
+    cfg.enforce_rtp_source = true;
+    RtpSession session(cfg);
+
+    auto recorded = std::make_shared<std::vector<int>>();
+    auto rec_mutex = std::make_shared<std::mutex>();
+    session.set_audio_callback([recorded, rec_mutex](const std::string&, const std::vector<uint8_t>& pl) {
+        if (!pl.empty()) {
+            std::lock_guard<std::mutex> lk(*rec_mutex);
+            recorded->push_back(static_cast<int>(pl[0]));
+        }
+    });
+
+    std::string err;
+    check(session.start(err), "source_exact_start");
+    const int trusted = make_udp_bound(43412);
+    const int rogue = make_udp_bound(43413);
+    sockaddr_in dst{};
+    dst.sin_family = AF_INET;
+    dst.sin_port = htons(43411);
+    inet_pton(AF_INET, "127.0.0.1", &dst.sin_addr);
+
+    send_rtp(rogue, dst, 1, 0, 0x2020u, 0xAA);   // arrives first, must not teach
+    send_rtp(trusted, dst, 2, 160, 0x2020u, 0xBB);
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+    std::vector<int> got;
+    {
+        std::lock_guard<std::mutex> lk(*rec_mutex);
+        got = *recorded;
+    }
+    check(got.size() == 1 && got[0] == 0xBB, "source_exact_rogue_first_rejected");
+    check(session.snapshot().invalid_packets >= 1, "source_exact_rejection_counted");
+    session.stop("test_done");
+    close(trusted);
+    close(rogue);
+}
+
+void test_failure_state_is_not_overwritten_by_stopped() {
+    SessionConfig cfg = base_config("failed-terminal", 43421, 43422);
+    RtpSession session(cfg);
+    std::string err;
+    check(session.start(err), "failed_terminal_start");
+    session.stop("socket_error");
+    const auto snap = session.snapshot();
+    check(snap.state == "Failed", "failed_terminal_state_preserved");
+    check(snap.stop_reason == "socket_error", "failed_terminal_reason_preserved");
+}
+
+void test_session_start_digest_is_idempotent_and_conflict_safe() {
+    voice_gateway::SessionRegistry registry;
+    SessionConfig cfg = base_config("digest-id", 43431, 43432);
+    cfg.config_digest = std::string(64, 'a');
+    std::string err;
+    check(registry.start_session(cfg, err) == voice_gateway::StartSessionResult::Started,
+          "digest_first_start");
+    check(registry.start_session(cfg, err) == voice_gateway::StartSessionResult::AlreadyExists,
+          "digest_same_config_idempotent");
+
+    SessionConfig conflict = cfg;
+    conflict.config_digest = std::string(64, 'b');
+    check(registry.start_session(conflict, err) == voice_gateway::StartSessionResult::ConfigConflict,
+          "digest_different_config_conflict");
+    bool already = false;
+    registry.stop_session(cfg.session_id, "test_done", already);
+}
+
+void test_readiness_reflects_session_admission_capacity() {
+    voice_gateway::SessionRegistry registry(1);
+    voice_gateway::HttpServer server("127.0.0.1", 18093, registry);
+    std::string err;
+    check(server.start(err), "ready_capacity_server_start");
+    check(server.ready(), "ready_capacity_initially_ready");
+
+    SessionConfig cfg = base_config("ready-cap", 43441, 43442);
+    check(registry.start_session(cfg, err) == voice_gateway::StartSessionResult::Started,
+          "ready_capacity_session_start");
+    check(!server.ready(), "ready_capacity_false_at_ceiling");
+
+    bool already = false;
+    registry.stop_session(cfg.session_id, "test_done", already);
+    check(server.ready(), "ready_capacity_recovers_after_stop");
+    server.stop();
+}
+
 // VG-25: submitting more frames than the queue capacity must return the number
 // actually retained (the tail), never the raw submitted count.
 void test_tts_overflow_accounting() {
@@ -396,14 +503,14 @@ void test_control_plane_callback_validation() {
     std::this_thread::sleep_for(std::chrono::milliseconds(80));
 
     const std::string bad_body =
-        "{\"session_id\":\"vg18-bad\",\"listen_ip\":\"127.0.0.1\",\"listen_port\":41700,"
+        "{\"session_id\":\"vg18-bad\",\"config_digest\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"listen_ip\":\"127.0.0.1\",\"listen_port\":41700,"
         "\"remote_ip\":\"127.0.0.1\",\"remote_port\":41701,\"codec\":\"pcmu\",\"ptime_ms\":20,"
         "\"audio_callback_url\":\"http://127.0.0.1:18089/api/v1/sip/telephony/audio/vg18-bad\\r\\nX-Injected: 1\"}";
     const std::string bad_resp = http_roundtrip(18099, post_request("/v1/sessions/start", bad_body));
     check(bad_resp.find("callback_url_not_allowed") != std::string::npos, "vg18_crlf_callback_rejected");
 
     const std::string off_host_body =
-        "{\"session_id\":\"vg18-off-host\",\"listen_ip\":\"127.0.0.1\",\"listen_port\":41704,"
+        "{\"session_id\":\"vg18-off-host\",\"config_digest\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"listen_ip\":\"127.0.0.1\",\"listen_port\":41704,"
         "\"remote_ip\":\"127.0.0.1\",\"remote_port\":41705,\"codec\":\"pcmu\",\"ptime_ms\":20,"
         "\"audio_callback_url\":\"http://203.0.113.9:18089/api/v1/sip/telephony/audio/vg18-off-host\"}";
     const std::string off_host_resp =
@@ -412,7 +519,7 @@ void test_control_plane_callback_validation() {
           "vg18_off_host_callback_rejected");
 
     const std::string wrong_port_body =
-        "{\"session_id\":\"vg18-wrong-port\",\"listen_ip\":\"127.0.0.1\",\"listen_port\":41706,"
+        "{\"session_id\":\"vg18-wrong-port\",\"config_digest\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"listen_ip\":\"127.0.0.1\",\"listen_port\":41706,"
         "\"remote_ip\":\"127.0.0.1\",\"remote_port\":41707,\"codec\":\"pcmu\",\"ptime_ms\":20,"
         "\"audio_callback_url\":\"http://127.0.0.1:18088/api/v1/sip/telephony/audio/vg18-wrong-port\"}";
     const std::string wrong_port_resp =
@@ -421,7 +528,7 @@ void test_control_plane_callback_validation() {
           "vg18_wrong_loopback_port_rejected");
 
     const std::string wrong_path_body =
-        "{\"session_id\":\"vg18-wrong-path\",\"listen_ip\":\"127.0.0.1\",\"listen_port\":41708,"
+        "{\"session_id\":\"vg18-wrong-path\",\"config_digest\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"listen_ip\":\"127.0.0.1\",\"listen_port\":41708,"
         "\"remote_ip\":\"127.0.0.1\",\"remote_port\":41709,\"codec\":\"pcmu\",\"ptime_ms\":20,"
         "\"audio_callback_url\":\"http://127.0.0.1:18089/audio/vg18-wrong-path\"}";
     const std::string wrong_path_resp =
@@ -430,7 +537,7 @@ void test_control_plane_callback_validation() {
           "vg18_non_audio_route_rejected");
 
     const std::string ok_body =
-        "{\"session_id\":\"vg18-ok\",\"listen_ip\":\"127.0.0.1\",\"listen_port\":41702,"
+        "{\"session_id\":\"vg18-ok\",\"config_digest\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"listen_ip\":\"127.0.0.1\",\"listen_port\":41702,"
         "\"remote_ip\":\"127.0.0.1\",\"remote_port\":41703,\"codec\":\"pcmu\",\"ptime_ms\":20,"
         "\"audio_callback_url\":\"http://127.0.0.1:18089/api/v1/sip/telephony/audio/vg18-ok\"}";
     const std::string unauthenticated_resp =
@@ -444,6 +551,13 @@ void test_control_plane_callback_validation() {
     const std::string health =
         http_roundtrip(18099, "GET /health HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n");
     check(health.find("\"status\":\"ok\"") != std::string::npos, "vg18_health_unauthenticated_ok");
+    check(health.find("\"protocol_version\":2") != std::string::npos &&
+              health.find("\"codecs\":[\"pcmu\"]") != std::string::npos,
+          "vg18_health_advertises_protocol_and_codec");
+
+    const std::string ready =
+        http_roundtrip(18099, "GET /ready HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n");
+    check(ready.find("\"status\":\"ready\"") != std::string::npos, "vg18_ready_unauthenticated_ok");
 
     server.stop();  // exercises the VG-19/VG-03 graceful drain path
     server_thread.join();
@@ -889,9 +1003,8 @@ void test_truncated_request_no_hang() {
     close(fd);
 }
 
-// Minimal HTTP sink: accepts connections, reads one full request, counts POSTs,
-// replies 200, closes. Lets the sink-finisher test observe real STT callback
-// delivery end to end.
+// Minimal keep-alive HTTP sink: counts both POSTs and accepted TCP connections,
+// so the callback tests prove multiple batches reuse one connection.
 class MiniHttpSink {
 public:
     explicit MiniHttpSink(const uint16_t port) {
@@ -918,6 +1031,7 @@ public:
         }
     }
     [[nodiscard]] int posts() const { return posts_.load(); }
+    [[nodiscard]] int connections() const { return connections_.load(); }
     // Raw bytes of the most recent POST (request line + headers + body), so a
     // test can assert on what the gateway actually put on the wire.
     [[nodiscard]] std::string last_request() const {
@@ -932,38 +1046,51 @@ private:
             if (c < 0) {
                 continue;
             }
+            connections_.fetch_add(1);
             const timeval tv{2, 0};
             setsockopt(c, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-            std::string raw;
-            char buf[4096];
-            std::size_t content_length = 0;
-            std::size_t header_end = std::string::npos;
-            for (;;) {
-                const ssize_t n = recv(c, buf, sizeof(buf), 0);
-                if (n <= 0) {
-                    break;
-                }
-                raw.append(buf, static_cast<std::size_t>(n));
-                if (header_end == std::string::npos) {
-                    header_end = raw.find("\r\n\r\n");
-                    if (header_end != std::string::npos) {
-                        const auto p = raw.find("Content-Length:");
-                        if (p != std::string::npos) {
-                            content_length = std::strtoul(raw.c_str() + p + 15, nullptr, 10);
+            while (running_.load()) {
+                std::string raw;
+                char buf[4096];
+                std::size_t content_length = 0;
+                std::size_t header_end = std::string::npos;
+                for (;;) {
+                    const ssize_t n = recv(c, buf, sizeof(buf), 0);
+                    if (n <= 0) {
+                        break;
+                    }
+                    raw.append(buf, static_cast<std::size_t>(n));
+                    if (header_end == std::string::npos) {
+                        header_end = raw.find("\r\n\r\n");
+                        if (header_end != std::string::npos) {
+                            const auto p = raw.find("Content-Length:");
+                            if (p != std::string::npos) {
+                                content_length = std::strtoul(raw.c_str() + p + 15, nullptr, 10);
+                            }
                         }
                     }
+                    if (header_end != std::string::npos &&
+                        raw.size() >= header_end + 4 + content_length) {
+                        break;
+                    }
                 }
-                if (header_end != std::string::npos && raw.size() >= header_end + 4 + content_length) {
+                if (header_end == std::string::npos) {
+                    break;
+                }
+                if (raw.rfind("POST", 0) == 0) {
+                    posts_.fetch_add(1);
+                    std::lock_guard<std::mutex> lock(mutex_);
+                    last_request_ = raw;
+                }
+                const char resp[] =
+                    "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: keep-alive\r\n\r\nok";
+                if (send(c, resp, sizeof(resp) - 1, MSG_NOSIGNAL) <= 0) {
+                    break;
+                }
+                if (raw.find("Connection: close") != std::string::npos) {
                     break;
                 }
             }
-            if (header_end != std::string::npos && raw.rfind("POST", 0) == 0) {
-                posts_.fetch_add(1);
-                std::lock_guard<std::mutex> lock(mutex_);
-                last_request_ = raw;
-            }
-            const char resp[] = "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok";
-            (void)send(c, resp, sizeof(resp) - 1, MSG_NOSIGNAL);
             close(c);
         }
     }
@@ -971,6 +1098,7 @@ private:
     int fd_{-1};
     std::atomic<bool> running_{true};
     std::atomic<int> posts_{0};
+    std::atomic<int> connections_{0};
     mutable std::mutex mutex_;   // guards last_request_
     std::string last_request_;
     std::thread worker_;
@@ -990,7 +1118,7 @@ void test_session_cap_counts_teardown_slots() {
               "cap_start_" + std::to_string(i));
     }
     SessionConfig extra = base_config("cap-extra", 43011, 43012);
-    check(registry.start_session(extra, err) == voice_gateway::StartSessionResult::InternalError,
+    check(registry.start_session(extra, err) == voice_gateway::StartSessionResult::CapacityExceeded,
           "cap_third_rejected_at_ceiling");
     check(err.find("maximum concurrent sessions") != std::string::npos, "cap_rejection_reason");
 
@@ -1114,7 +1242,7 @@ void test_sink_finish_flushes_tail() {
     std::this_thread::sleep_for(std::chrono::milliseconds(80));
 
     const std::string start_body =
-        "{\"session_id\":\"sink-e\",\"listen_ip\":\"127.0.0.1\",\"listen_port\":41710,"
+        "{\"session_id\":\"sink-e\",\"config_digest\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"listen_ip\":\"127.0.0.1\",\"listen_port\":41710,"
         "\"remote_ip\":\"127.0.0.1\",\"remote_port\":41711,\"codec\":\"pcmu\",\"ptime_ms\":20,"
         "\"audio_callback_url\":\"http://127.0.0.1:18089/api/v1/sip/telephony/audio/sink-e\","
         "\"audio_callback_batch_frames\":2}";
@@ -1139,6 +1267,9 @@ void test_sink_finish_flushes_tail() {
     (void)http_roundtrip(18092, post_request("/v1/sessions/stop", "{\"session_id\":\"sink-e\"}"));
     check(sink.posts() == 3,
           "sinkE_partial_tail_flushed_at_stop (posts=" + std::to_string(sink.posts()) + ")");
+    check(sink.connections() == 1,
+          "sinkE_callback_batches_reuse_one_tcp_connection (connections=" +
+              std::to_string(sink.connections()) + ")");
 
     close(tx);
     server.stop();
@@ -1160,7 +1291,7 @@ void test_audio_callback_sends_internal_token() {
     std::this_thread::sleep_for(std::chrono::milliseconds(80));
 
     const std::string start_body =
-        "{\"session_id\":\"tok-1\",\"listen_ip\":\"127.0.0.1\",\"listen_port\":41720,"
+        "{\"session_id\":\"tok-1\",\"config_digest\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"listen_ip\":\"127.0.0.1\",\"listen_port\":41720,"
         "\"remote_ip\":\"127.0.0.1\",\"remote_port\":41721,\"codec\":\"pcmu\",\"ptime_ms\":20,"
         "\"audio_callback_url\":\"http://127.0.0.1:18089/api/v1/sip/telephony/audio/tok-1\","
         "\"audio_callback_batch_frames\":1}";
@@ -1190,6 +1321,11 @@ void test_audio_callback_sends_internal_token() {
     check(raw.find(std::string("X-Internal-Service-Token: ") + kInternalToken + "\r\n") !=
               std::string::npos,
           "audio_callback_carries_internal_service_token");
+    check(raw.find("\"protocol_version\":2") != std::string::npos &&
+              raw.find("\"sequence\":0") != std::string::npos &&
+              raw.find("\"frame_count\":1") != std::string::npos &&
+              raw.find("\"payload_bytes\":160") != std::string::npos,
+          "audio_callback_carries_v2_sequence_and_frame_metadata");
 
     (void)http_roundtrip(18090, post_request("/v1/sessions/stop", "{\"session_id\":\"tok-1\"}"));
     close(tx);
@@ -1207,6 +1343,11 @@ int main() {
     // Configure security BEFORE the first auth/callback helper caches a token.
     set_valid_gateway_security_environment();
     test_gateway_security_configuration();
+    test_non_echo_receive_path_becomes_active_on_first_valid_rtp();
+    test_exact_rtp_source_rejects_rogue_first_packet();
+    test_failure_state_is_not_overwritten_by_stopped();
+    test_session_start_digest_is_idempotent_and_conflict_safe();
+    test_readiness_reflects_session_admission_capacity();
     test_tts_overflow_accounting();
     test_jitter_flood_no_deadlock();
     test_stt_reorder_ordering();

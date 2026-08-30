@@ -1448,7 +1448,6 @@ async def test_terminal_race_after_real_lifecycle_provisional_registration_unwin
     from app.domain.services.voice_orchestrator import VoiceOrchestrator
 
     call_id = "inbound-provisional-race"
-    gateway_session_id = "asterisk-inbound-prov-32000"
     durable_call_id = "11111111-1111-1111-1111-111111111111"
     admission = _allowed(call_id)
     admission["call_id"] = durable_call_id
@@ -1736,7 +1735,10 @@ async def test_terminal_race_after_real_lifecycle_provisional_registration_unwin
         # This is the exact provisional window: all AI resources are live and
         # registered, while the adapter has not yet accepted lifecycle ownership.
         assert state.sessions[call_id] is voice_session
-        assert state.gateway_sessions == {gateway_session_id: call_id}
+        assert len(state.gateway_sessions) == 1
+        gateway_session_id = next(iter(state.gateway_sessions))
+        assert gateway_session_id.startswith("asterisk-")
+        assert state.gateway_sessions[gateway_session_id] == call_id
         assert orchestrator._active_sessions == {voice_session.call_id: voice_session}
         assert pipeline_started.is_set()
         assert voice_session.pipeline_task is not None

@@ -490,9 +490,14 @@ SessionState RtpSession::state() const {
     return state_;
 }
 
+const std::string& RtpSession::config_digest() const noexcept {
+    return config_.config_digest;
+}
+
 SessionStatsSnapshot RtpSession::snapshot() const {
     SessionStatsSnapshot snap;
     snap.session_id = config_.session_id;
+    snap.config_digest = config_.config_digest;
 
     {
         std::lock_guard<std::mutex> lock(mutex_);
@@ -716,6 +721,9 @@ void RtpSession::receiver_loop() {
     // defensive bound, never reached by a well-formed chain.
     std::vector<std::vector<uint8_t>> probe_payloads;
     constexpr std::size_t kMaxProbePayloads = 4;
+    in_addr expected_source_address{};
+    const bool expected_source_valid =
+        ::inet_pton(AF_INET, config_.remote_ip.c_str(), &expected_source_address) == 1;
 
     const auto reorder_insert = [&](const int64_t ext_seq, const std::vector<uint8_t>& payload,
                                     const std::chrono::steady_clock::time_point now) {
@@ -800,20 +808,15 @@ void RtpSession::receiver_loop() {
             continue;
         }
 
-        // Optional RTP source pinning (VG-08), OUTSIDE the lock (state is
-        // receiver-local). Runs BEFORE classify() so an injected/foreign packet
-        // can neither pollute the sequence tracker nor refresh liveness. Pins
-        // the (IP, port) tuple ONLY: an SSRC change from the trusted tuple must
-        // reach the sequencer's restart probation instead of being dropped here
-        // (review #6 — pinning and probation were mutually exclusive before).
+        // Exact RTP source enforcement (VG-08), before sequence/liveness work.
+        // The controller obtains this tuple from Asterisk's
+        // UNICASTRTP_LOCAL_{ADDRESS,PORT}; learning from the first packet would
+        // allow one spoofed datagram to capture the session before Asterisk's
+        // real media arrives. SSRC is intentionally independent and still goes
+        // through the sequencer's legitimate-restart probation.
         if (config_.enforce_rtp_source) {
-            const uint32_t src_ip = static_cast<uint32_t>(from.sin_addr.s_addr);
-            const uint16_t src_port = ntohs(from.sin_port);
-            if (!rtp_source_locked_) {
-                rtp_source_locked_ = true;
-                locked_source_ip_ = src_ip;
-                locked_source_port_ = src_port;
-            } else if (src_ip != locked_source_ip_ || src_port != locked_source_port_) {
+            if (!expected_source_valid || from.sin_addr.s_addr != expected_source_address.s_addr ||
+                ntohs(from.sin_port) != config_.remote_port) {
                 invalid_packets_.fetch_add(1);
                 if (stt_reorder) {
                     reorder_drain(std::chrono::steady_clock::now(), false);
@@ -853,7 +856,11 @@ void RtpSession::receiver_loop() {
                 last_rtp_rx_time_ = arrival;
                 if (!first_rtp_seen_) {
                     first_rtp_seen_ = true;
-                    transition_state_locked(SessionState::Buffering);
+                    // Buffering is an echo/playout state. Production AI
+                    // sessions have echo disabled, so the first valid forward
+                    // RTP packet proves their receive path Active immediately.
+                    transition_state_locked(
+                        config_.echo_enabled ? SessionState::Buffering : SessionState::Active);
                 } else if (state_ == SessionState::Degraded) {
                     transition_state_locked(SessionState::Active);
                 }
@@ -1382,12 +1389,18 @@ void RtpSession::request_stop(const std::string& reason, const bool timeout_even
         if (failed_state) {
             ended_in_failure_.store(true);
             transition_state_locked(SessionState::Failed);
+        } else {
+            transition_state_locked(SessionState::Stopping);
         }
-        transition_state_locked(SessionState::Stopping);
         if (stop_reason_ == "running") {
             stop_reason_ = stop_reason_or_default(reason);
         }
-        transition_state_locked(SessionState::Stopped);
+        // Preserve Failed as the terminal observable state.  Previously the
+        // next two transitions immediately replaced it with Stopped, leaving
+        // only a side-channel reason to distinguish a media crash.
+        if (!failed_state) {
+            transition_state_locked(SessionState::Stopped);
+        }
     } else if (timeout_event) {
         // A losing caller still records the timeout metric to preserve the count.
         timeout_events_total_.fetch_add(1);
@@ -1510,7 +1523,7 @@ bool RtpSession::can_transition(const SessionState from, const SessionState to) 
         case SessionState::Stopping:
             return to == SessionState::Stopped;
         case SessionState::Failed:
-            return to == SessionState::Stopping || to == SessionState::Stopped;
+            return false;
         case SessionState::Stopped:
             return false;
     }

@@ -412,9 +412,15 @@ class LocalOnlyStateBackend:
         for gw in stale:
             self._tb._gateway_session_to_call_id.pop(gw, None)
             self._tb._early_audio_buffers.pop(gw, None)
+            sequence_map = getattr(self._tb, "_gateway_audio_last_sequence", None)
+            if sequence_map is not None:
+                sequence_map.pop(gw, None)
 
     def remove_gateway_session(self, gateway_session_id: str) -> None:
         self._tb._gateway_session_to_call_id.pop(gateway_session_id, None)
+        sequence_map = getattr(self._tb, "_gateway_audio_last_sequence", None)
+        if sequence_map is not None:
+            sequence_map.pop(gateway_session_id, None)
 
     def iter_gateway_session_items(self) -> list[tuple[str, str]]:
         return list(self._tb._gateway_session_to_call_id.items())

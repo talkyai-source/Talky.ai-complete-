@@ -45,9 +45,15 @@ StartSessionResult SessionRegistry::start_session(const SessionConfig& config, s
     }
 
     std::lock_guard<std::mutex> lock(mutex_);
-    if (sessions_.find(config.session_id) != sessions_.end()) {
-        error = "session already exists";
-        return StartSessionResult::AlreadyExists;
+    const auto existing = sessions_.find(config.session_id);
+    if (existing != sessions_.end()) {
+        if (!config.config_digest.empty() &&
+            existing->second->config_digest() == config.config_digest) {
+            error = "session already exists with matching config digest";
+            return StartSessionResult::AlreadyExists;
+        }
+        error = "session id already exists with a different or unverifiable config";
+        return StartSessionResult::ConfigConflict;
     }
 
     // Reject a restart while a previous session with this id is still tearing
@@ -55,7 +61,7 @@ StartSessionResult SessionRegistry::start_session(const SessionConfig& config, s
     // socket (VG-16). The caller should retry once teardown completes.
     if (stopping_.find(config.session_id) != stopping_.end()) {
         error = "session is still stopping";
-        return StartSessionResult::AlreadyExists;
+        return StartSessionResult::ConfigConflict;
     }
 
     // Resource-slot accounting (D remainder): sessions in stopping_ are out of
@@ -64,7 +70,7 @@ StartSessionResult SessionRegistry::start_session(const SessionConfig& config, s
     // could exceed the ceiling by the whole stopping set.
     if (sessions_.size() + stopping_.size() >= max_sessions_) {
         error = "maximum concurrent sessions reached";
-        return StartSessionResult::InternalError;
+        return StartSessionResult::CapacityExceeded;
     }
 
     auto session = std::make_shared<RtpSession>(config);
@@ -86,8 +92,8 @@ StartSessionResult SessionRegistry::start_session(const SessionConfig& config, s
     // not-yet-started entry: we hold mutex_ throughout.
     const auto [it, inserted] = sessions_.emplace(config.session_id, session);
     if (!inserted) {
-        error = "session already exists";
-        return StartSessionResult::AlreadyExists;
+        error = "session id insert conflict";
+        return StartSessionResult::ConfigConflict;
     }
     if (!session->start(error)) {
         sessions_.erase(it);
@@ -177,6 +183,11 @@ bool SessionRegistry::all_sessions_healthy() const {
         }
     }
     return true;
+}
+
+bool SessionRegistry::can_accept_session() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return sessions_.size() + stopping_.size() < max_sessions_;
 }
 
 ProcessStatsSnapshot SessionRegistry::snapshot() const {
@@ -334,6 +345,14 @@ bool SessionRegistry::validate_config(const SessionConfig& config, std::string& 
     if (config.session_id.size() > kMaxSessionIdLength) {
         error = "session_id exceeds maximum length";
         return false;
+    }
+
+    if (!config.config_digest.empty()) {
+        if (config.config_digest.size() != 64 ||
+            config.config_digest.find_first_not_of("0123456789abcdefABCDEF") != std::string::npos) {
+            error = "config_digest must be a 64-character hexadecimal SHA-256";
+            return false;
+        }
     }
 
     if (config.listen_ip.empty() || config.remote_ip.empty()) {

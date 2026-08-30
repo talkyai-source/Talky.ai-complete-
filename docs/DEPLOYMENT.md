@@ -244,6 +244,9 @@ active_sessions="$(printf '%s' "${gateway_stats}" | backend/venv/bin/python -c \
 test "${active_sessions}" -eq 0
 sudo systemctl restart talky-voice-gateway
 curl -fsS --max-time 10 http://127.0.0.1:18080/stats >/dev/null
+gateway_ready="$(curl -fsS --max-time 10 http://127.0.0.1:18080/ready)"
+printf '%s' "${gateway_ready}" | backend/venv/bin/python -c \
+  'import json,sys; p=json.load(sys.stdin); assert p.get("ready") is True; assert p.get("protocol_version") == 2; assert "pcmu" in p.get("codecs", [])'
 cleanup_gateway_candidate
 gateway_candidate=''
 trap - EXIT

@@ -17,7 +17,11 @@ namespace voice_gateway {
 
 enum class StartSessionResult {
     Started,
+    // Same session id and the same non-empty controller config digest.
     AlreadyExists,
+    // Same id but a different/absent digest, or the prior id is still stopping.
+    ConfigConflict,
+    CapacityExceeded,
     InvalidConfig,
     InternalError,
 };
@@ -78,6 +82,7 @@ public:
     [[nodiscard]] RtpSessionPtr get_session(const std::string& session_id) const;
     [[nodiscard]] std::vector<SessionStatsSnapshot> list_sessions() const;
     [[nodiscard]] bool all_sessions_healthy() const;
+    [[nodiscard]] bool can_accept_session() const;
     [[nodiscard]] ProcessStatsSnapshot snapshot() const;
 
     // Erase self-stopped sessions (watchdog timeout / socket_error) that the

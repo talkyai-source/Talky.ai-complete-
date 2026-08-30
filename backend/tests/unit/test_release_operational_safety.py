@@ -168,7 +168,7 @@ def test_deploy_builds_tests_and_restarts_exact_gateway_before_backend():
     post_at = gateway_http.index("bool http_post")
     sender_guard_at = gateway_http.index("if (!audio_callback_url_is_allowed(url))", post_at)
     internal_header_at = gateway_http.index('req << "X-Internal-Service-Token: "', post_at)
-    socket_at = gateway_http.index("guard.fd = socket", post_at)
+    socket_at = gateway_http.index("candidate.fd = socket", post_at)
     assert post_at < sender_guard_at < internal_header_at < socket_at
     gateway_fixes = (
         ROOT / "services" / "voice-gateway-cpp" / "tests" / "test_gateway_fixes.cpp"
@@ -176,7 +176,9 @@ def test_deploy_builds_tests_and_restarts_exact_gateway_before_backend():
     assert "origin_wrong_loopback_port_rejected" in gateway_fixes
     assert "origin_reused_secrets_rejected" in gateway_fixes
     assert "provision_voice_gateway_test_env" in gateway_gate
-    assert 'request->path == "/health" || request->path == "/stats"' in gateway_http
+    assert 'request->path == "/health" || request->path == "/ready" || request->path == "/stats"' in gateway_http
+    assert "http://127.0.0.1:18080/ready" in deploy
+    assert 'p.get(\\"protocol_version\\") == 2' in deploy
 
 
 def test_drain_manifest_binds_candidate_external_state_and_is_single_use(tmp_path):

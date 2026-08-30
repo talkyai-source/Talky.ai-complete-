@@ -87,6 +87,10 @@ from app.core.security.internal_auth import (  # noqa: E402
     resolve_call_tenant,
 )
 from app.api.v1.dependencies import CurrentUser, get_optional_user  # noqa: E402
+from app.infrastructure.metrics.gateway_metrics import (  # noqa: E402
+    record_gateway_audio_callback,
+    record_gateway_audio_missing_batches,
+)
 from app.core.security.rbac import (  # noqa: E402
     ROLE_DEFAULT_PERMISSIONS,
     Permission,
@@ -156,10 +160,25 @@ _telephony_sessions: dict[str, object] = {}  # VoiceSession objects
 
 # Watchdog task handle — started when the adapter connects, cancelled on stop.
 _watchdog_task: Optional[asyncio.Task] = None
+_media_watchdog_task: Optional[asyncio.Task] = None
 
 # Maps C++ gateway session_id → PBX call_id for the audio callback path.
 # Populated in _on_new_call when the AsteriskAdapter registers a gateway session.
 _gateway_session_to_call_id: dict[str, str] = {}
+
+# Highest protocol-v2 callback sequence accepted for each gateway session.
+# The C++ sender retries when an acknowledgement is lost, so this receiver must
+# make those at-least-once deliveries idempotent before feeding STT.
+_gateway_audio_last_sequence: dict[str, int] = {}
+
+# Mirror the C++ callback-batch ceiling and reject oversized bodies before
+# base64 decoding.  One PCMU/20ms frame is exactly 160 bytes.
+_GATEWAY_AUDIO_FRAME_BYTES = 160
+_GATEWAY_AUDIO_MAX_FRAMES_PER_CALLBACK = 100
+_GATEWAY_AUDIO_MAX_BYTES = (
+    _GATEWAY_AUDIO_FRAME_BYTES * _GATEWAY_AUDIO_MAX_FRAMES_PER_CALLBACK
+)
+_GATEWAY_AUDIO_MAX_BASE64_CHARS = ((_GATEWAY_AUDIO_MAX_BYTES + 2) // 3) * 4
 
 # Early audio buffer: audio chunks from the C++ gateway that arrive BEFORE
 # _on_new_call has registered the session mapping.  Without this, the callee's
@@ -223,6 +242,7 @@ def _alias_ringing_call_id(original_call_id: str, actual_call_id: str) -> None:
 from app.domain.services.telephony.lifecycle import (  # noqa: E402
     _get_orchestrator,
     _session_watchdog,
+    _media_session_watchdog,
     _SESSION_INACTIVITY_TIMEOUT_S,
     _on_early_ringing,
     _on_ringing,
@@ -254,12 +274,15 @@ def ensure_session_management_started() -> None:
     lifespan, not the REST endpoint) left the pod-capacity drain gate and the
     zombie-session watchdog permanently disarmed. (audit #9)
     """
-    global _watchdog_task
+    global _watchdog_task, _media_watchdog_task
     # GAP 5 — session inactivity watchdog (also does zombie reconcile,
     # ringing-warmup GC, global-concurrency lease refresh, dead-pod recovery).
     if _watchdog_task is None or _watchdog_task.done():
         _watchdog_task = asyncio.create_task(_session_watchdog())
         logger.info("telephony_watchdog: started (inactivity=%ds)", _SESSION_INACTIVITY_TIMEOUT_S)
+    if _media_watchdog_task is None or _media_watchdog_task.done():
+        _media_watchdog_task = asyncio.create_task(_media_session_watchdog())
+        logger.info("telephony_media_watchdog: started")
     # Phase 1.4 — wire pod capacity into the readiness probe so the k8s/LB
     # readiness gate can drain a saturated pod without touching internals.
     from app.core import readiness as _readiness
@@ -268,6 +291,22 @@ def ensure_session_management_started() -> None:
         active_count=lambda: get_state_backend().voice_session_count(),
         max_capacity=lambda: _MAX_TELEPHONY_SESSIONS,
     )
+
+
+async def stop_session_management() -> None:
+    """Cancel every session-management worker and release their references."""
+    global _watchdog_task, _media_watchdog_task
+    tasks = [
+        task
+        for task in (_watchdog_task, _media_watchdog_task)
+        if task is not None and not task.done()
+    ]
+    for task in tasks:
+        task.cancel()
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
+    _watchdog_task = None
+    _media_watchdog_task = None
 
 
 @router.post("/start")
@@ -282,7 +321,7 @@ async def start_telephony(
     Connect to the active B2BUA and start handling calls.
     Use adapter_type='auto' to let the system choose based on health checks.
     """
-    global _adapter, _watchdog_task
+    global _adapter
 
     from app.core.container import get_container
     from app.core.inbound_startup import (
@@ -481,13 +520,7 @@ async def stop_telephony(
 
     # Cancel the inactivity watchdog only after both PBX proof and adapter
     # cleanup have completed. A failed stop must keep normal recovery alive.
-    if _watchdog_task and not _watchdog_task.done():
-        _watchdog_task.cancel()
-        try:
-            await _watchdog_task
-        except asyncio.CancelledError:
-            pass
-        _watchdog_task = None
+    await stop_session_management()
     _adapter = None
     return JSONResponse(
         {
@@ -2126,21 +2159,133 @@ async def receive_gateway_audio(session_id: str, request: Request):
 
     try:
         request_body = await request.json()
-    except Exception:
-        return JSONResponse({"status": "ok"})
+    except Exception as exc:
+        logger.warning("gateway_audio_rejected session_id=%s reason=invalid_json exc=%s", session_id, exc)
+        raise HTTPException(status_code=400, detail="Invalid JSON payload") from exc
 
-    if not request_body:
-        return JSONResponse({"status": "ok"})
+    if not isinstance(request_body, dict) or not request_body:
+        logger.warning("gateway_audio_rejected session_id=%s reason=empty_payload", session_id)
+        raise HTTPException(status_code=400, detail="Missing or non-object JSON payload")
+
+    # Path and body identity must match.  The body id is mandatory so replay or
+    # misrouting cannot hide behind a path-only identity.
+    body_session_id = request_body.get("session_id")
+    if not isinstance(body_session_id, str) or body_session_id != session_id:
+        logger.warning(
+            "gateway_audio_rejected session_id=%s body_session_id=%s reason=session_id_mismatch",
+            session_id,
+            body_session_id,
+        )
+        raise HTTPException(status_code=400, detail="Path and body session_id mismatch")
+
+    # This route feeds the current 8 kHz PCMU pipeline.  Accepting PCM/PCM16
+    # here made the downstream decoder interpret linear samples as mu-law.
+    codec = request_body.get("codec", "pcmu")
+    if not isinstance(codec, str) or codec.lower() not in ("pcmu", "ulaw", "audio/pcmu"):
+        logger.warning("gateway_audio_rejected session_id=%s reason=unsupported_codec codec=%s", session_id, codec)
+        raise HTTPException(status_code=400, detail=f"Unsupported codec: {codec}")
+
+    protocol_version = request_body.get("protocol_version", 1)
+    if (
+        isinstance(protocol_version, bool)
+        or not isinstance(protocol_version, int)
+        or protocol_version not in (1, 2)
+    ):
+        raise HTTPException(status_code=400, detail="Unsupported callback protocol_version")
+
+    sequence = request_body.get("sequence")
+    frame_count = request_body.get("frame_count")
+    if sequence is not None and (
+        isinstance(sequence, bool) or not isinstance(sequence, int) or sequence < 0
+    ):
+        raise HTTPException(status_code=400, detail="Invalid callback sequence")
+    if protocol_version >= 2:
+        if sequence is None:
+            raise HTTPException(status_code=400, detail="Missing callback sequence")
+        if (
+            isinstance(frame_count, bool)
+            or not isinstance(frame_count, int)
+            or frame_count < 1
+            or frame_count > _GATEWAY_AUDIO_MAX_FRAMES_PER_CALLBACK
+        ):
+            raise HTTPException(status_code=400, detail="Invalid callback frame_count")
+        if request_body.get("ptime_ms") != 20:
+            raise HTTPException(status_code=400, detail="Unsupported callback ptime_ms")
 
     # C++ gateway sends pcmu_base64; fall back to audio_base64 for compatibility.
     audio_b64 = request_body.get("pcmu_base64") or request_body.get("audio_base64", "")
-    if not audio_b64:
-        return JSONResponse({"status": "ok"})
+    if not audio_b64 or not isinstance(audio_b64, str):
+        logger.warning("gateway_audio_rejected session_id=%s reason=missing_audio_base64", session_id)
+        raise HTTPException(status_code=400, detail="Missing audio payload")
+    if len(audio_b64) > _GATEWAY_AUDIO_MAX_BASE64_CHARS:
+        logger.warning(
+            "gateway_audio_rejected session_id=%s reason=audio_payload_too_large base64_chars=%d",
+            session_id,
+            len(audio_b64),
+        )
+        raise HTTPException(status_code=413, detail="Audio payload exceeds callback limit")
 
     try:
-        audio_bytes = base64.b64decode(audio_b64)
-    except Exception:
-        return JSONResponse({"status": "ok"})
+        audio_bytes = base64.b64decode(audio_b64, validate=True)
+    except Exception as exc:
+        logger.warning("gateway_audio_rejected session_id=%s reason=invalid_base64 exc=%s", session_id, exc)
+        raise HTTPException(status_code=400, detail="Invalid base64 encoding") from exc
+
+    if len(audio_bytes) == 0:
+        logger.warning("gateway_audio_rejected session_id=%s reason=empty_audio_bytes", session_id)
+        raise HTTPException(status_code=400, detail="Empty audio payload")
+
+    if len(audio_bytes) > _GATEWAY_AUDIO_MAX_BYTES:
+        raise HTTPException(status_code=413, detail="Decoded audio payload exceeds callback limit")
+
+    # PCMU 20ms frames are 160 bytes each (or a bounded multiple for batching).
+    if len(audio_bytes) % _GATEWAY_AUDIO_FRAME_BYTES != 0:
+        logger.warning(
+            "gateway_audio_rejected session_id=%s reason=invalid_frame_length bytes=%d",
+            session_id,
+            len(audio_bytes),
+        )
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Invalid audio frame length: {len(audio_bytes)} bytes "
+                f"(must be a multiple of {_GATEWAY_AUDIO_FRAME_BYTES} for 20ms PCMU)"
+            ),
+        )
+
+    decoded_frame_count = len(audio_bytes) // _GATEWAY_AUDIO_FRAME_BYTES
+    if protocol_version >= 2:
+        if frame_count != decoded_frame_count:
+            raise HTTPException(status_code=400, detail="frame_count does not match decoded audio")
+        payload_bytes = request_body.get("payload_bytes")
+        if (
+            isinstance(payload_bytes, bool)
+            or not isinstance(payload_bytes, int)
+            or payload_bytes != len(audio_bytes)
+        ):
+            raise HTTPException(status_code=400, detail="payload_bytes does not match decoded audio")
+
+        last_sequence = _gateway_audio_last_sequence.get(session_id)
+        if last_sequence is not None and sequence <= last_sequence:
+            record_gateway_audio_callback("duplicate")
+            return JSONResponse(
+                {
+                    "status": "duplicate",
+                    "sequence": sequence,
+                    "last_sequence": last_sequence,
+                    "bytes_received": 0,
+                }
+            )
+        if last_sequence is not None and sequence > last_sequence + 1:
+            missing_batches = sequence - last_sequence - 1
+            record_gateway_audio_missing_batches(missing_batches)
+            logger.warning(
+                "gateway_audio_sequence_gap session_id=%s expected=%d received=%d missing_batches=%d",
+                session_id,
+                last_sequence + 1,
+                sequence,
+                missing_batches,
+            )
 
     _sb = get_state_backend()
 
@@ -2160,11 +2305,13 @@ async def receive_gateway_audio(session_id: str, request: Request):
 
     if matched_call_id:
         await _on_audio_received(matched_call_id, audio_bytes)
+        record_gateway_audio_callback("routed")
     else:
         # Session not registered yet — buffer for later drain in _on_new_call.
         # This covers the race where the C++ gateway starts POSTing audio before
         # _on_new_call (fired as create_task) has populated the lookup tables.
         new_len = _sb.append_early_audio(session_id, audio_bytes)
+        record_gateway_audio_callback("buffered")
         if new_len == 1:
             logger.info(
                 "early_audio_buffering session_id=%s — "
@@ -2172,7 +2319,19 @@ async def receive_gateway_audio(session_id: str, request: Request):
                 session_id,
             )
 
-    return JSONResponse({"status": "ok"})
+    # Advance only after routing/buffering completes.  An exception before this
+    # point leaves the sequence retryable.
+    if protocol_version >= 2:
+        _gateway_audio_last_sequence[session_id] = sequence
+
+    return JSONResponse(
+        {
+            "status": "ok",
+            "sequence": sequence,
+            "bytes_received": len(audio_bytes),
+            "frames_received": decoded_frame_count,
+        }
+    )
 
 
 # ---------------------------------------------------------------------------

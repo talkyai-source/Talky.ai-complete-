@@ -1,0 +1,86 @@
+# C++ voice gateway — build, CTest, and the sanitizer gate.
+#
+# WHY THIS EXISTS: nothing in CI compiled the C++ media gateway. `ci.yml` has no
+# cmake/ctest job at all, and `backend-voice-tests.yml` only triggers on
+# `backend/**`, so a change under services/voice-gateway-cpp/ could reach main
+# without ever being compiled once. The gateway is also the one component that
+# cannot be built on the Windows dev host (no g++, no WSL distro), which means
+# CI is the ONLY place its correctness is ever proven.
+#
+# tests/run_gate.sh already encodes the real gate (C++20, zero warnings, all
+# three CTest suites, TSan, ASan+UBSan, and a SIGTERM shutdown smoke against a
+# live listener). This workflow runs it rather than restating the flags, so the
+# gate has exactly one definition.
+#
+# No `|| true` anywhere: a failure here must block, not decorate.
+name: voice-gateway-cpp
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'services/voice-gateway-cpp/**'
+      - 'backend/app/api/v1/endpoints/telephony_bridge.py'
+      - 'backend/app/infrastructure/telephony/asterisk_adapter.py'
+      - 'telephony/scripts/gateway_test_env.sh'
+      - '.github/workflows/voice-gateway-cpp.yml'
+  pull_request:
+    paths:
+      - 'services/voice-gateway-cpp/**'
+      - 'backend/app/api/v1/endpoints/telephony_bridge.py'
+      - 'backend/app/infrastructure/telephony/asterisk_adapter.py'
+      - 'telephony/scripts/gateway_test_env.sh'
+      - '.github/workflows/voice-gateway-cpp.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: voice-gateway-cpp-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  cmake-ctest:
+    name: CMake build + CTest (production target)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: services/voice-gateway-cpp
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain versions (recorded in the log for artifact provenance)
+        run: |
+          g++ --version
+          cmake --version
+
+      # RelWithDebInfo, not Debug: the production binary is optimised, and
+      # optimisation is exactly what surfaces the races and UB that a Debug
+      # build hides.
+      - name: Configure
+        run: cmake -S . -B build-ci -DCMAKE_BUILD_TYPE=RelWithDebInfo
+
+      - name: Build
+        run: cmake --build build-ci --parallel
+
+      - name: CTest
+        run: ctest --test-dir build-ci --output-on-failure
+
+  sanitizer-gate:
+    name: run_gate.sh (warnings + TSan + ASan/UBSan + shutdown smoke)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # setarch (util-linux) disables ASLR for TSan on newer kernels; it ships
+      # on the GitHub runner image, so this only fails loudly if that changes.
+      - name: Verify gate prerequisites
+        run: |
+          command -v setarch
+          test -r telephony/scripts/gateway_test_env.sh
+
+      - name: Run the gate
+        run: bash tests/run_gate.sh
+        working-directory: services/voice-gateway-cpp

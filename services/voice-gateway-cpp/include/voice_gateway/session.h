@@ -36,6 +36,10 @@ enum class SessionState {
 
 struct SessionConfig {
     std::string session_id;
+    // SHA-256 of the canonical start payload, supplied by the controller.
+    // Duplicate starts are idempotent only when this digest matches; reusing a
+    // session id with different RTP/callback settings is a hard conflict.
+    std::string config_digest;
     std::string listen_ip;
     uint16_t listen_port{0};
     std::string remote_ip;
@@ -103,6 +107,7 @@ struct SessionConfig {
 
 struct SessionStatsSnapshot {
     std::string session_id;
+    std::string config_digest;
     std::string state;
     std::string stop_reason;
     uint64_t packets_in{0};
@@ -167,6 +172,7 @@ public:
     [[nodiscard]] bool running() const;
     [[nodiscard]] bool healthy() const;
     [[nodiscard]] SessionState state() const;
+    [[nodiscard]] const std::string& config_digest() const noexcept;
     [[nodiscard]] SessionStatsSnapshot snapshot() const;
     // utterance_id/chunk_seq (both optional; empty/-1 = legacy behavior, VG-13):
     // when the backend stamps them, a chunk belonging to an utterance that was
@@ -375,14 +381,6 @@ private:
     bool last_played_seq_valid_{false};
     uint16_t last_played_seq_{0};
     bool has_prev_arrival_{false};
-    // RTP source pinning (only consulted when config_.enforce_rtp_source).
-    // Locked to the first packet's (source IP, source port); later mismatches
-    // are dropped as injected (VG-08). SSRC is intentionally NOT pinned here —
-    // SSRC changes from the trusted tuple go through the sequencer's restart
-    // probation instead (review #6).
-    bool rtp_source_locked_{false};
-    uint32_t locked_source_ip_{0};
-    uint16_t locked_source_port_{0};
     uint32_t prev_rtp_timestamp_{0};
     std::chrono::steady_clock::time_point prev_arrival_time_{};
     std::chrono::steady_clock::time_point last_rtcp_report_sent_at_{};

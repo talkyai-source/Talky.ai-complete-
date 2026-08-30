@@ -419,3 +419,51 @@ async def test_force_hangup_success_clears_failure_counter():
     adapter.hangup.assert_awaited_once_with("pbx-hangup-ok")
     assert session.consecutive_audio_route_failures == 0
     assert session.is_active is True
+
+
+@pytest.mark.asyncio
+async def test_send_audio_transient_tts_failure_retries_and_clears_counter_on_success():
+    gateway = TelephonyMediaGateway()
+    await gateway.initialize({"sample_rate": 8000, "tts_source_format": "s16le"})
+    adapter = AsyncMock()
+    # First send fails, second succeeds
+    adapter.send_tts_audio.side_effect = [RuntimeError("gateway blip"), None]
+
+    await gateway.on_call_started(
+        "call-tts-transient", {"adapter": adapter, "pbx_call_id": "pbx-tts-transient"},
+    )
+    session = gateway._sessions["call-tts-transient"]
+
+    with patch("asyncio.sleep", new=AsyncMock(return_value=None)):
+        # Send chunk 1 (fails once)
+        await gateway.send_audio("call-tts-transient", b"\x00\x00" * 160)
+        assert session.consecutive_tts_failures == 1
+        assert session.chunks_sent == 0
+
+        # Send chunk 2 (succeeds)
+        await gateway.send_audio("call-tts-transient", b"\x00\x00" * 160)
+        assert session.consecutive_tts_failures == 0
+        assert session.chunks_sent == 1
+
+
+@pytest.mark.asyncio
+async def test_send_audio_typed_tts_failure_propagates_immediately():
+    from app.infrastructure.telephony.asterisk_adapter import TtsDeliveryError
+
+    gateway = TelephonyMediaGateway()
+    await gateway.initialize({"sample_rate": 8000, "tts_source_format": "s16le"})
+    adapter = AsyncMock()
+    adapter.send_tts_audio.side_effect = TtsDeliveryError("gateway connection refused")
+
+    await gateway.on_call_started(
+        "call-tts-circuit-breaker", {"adapter": adapter, "pbx_call_id": "pbx-tts-cb"},
+    )
+    session = gateway._sessions["call-tts-circuit-breaker"]
+
+    with patch("asyncio.sleep", new=AsyncMock(return_value=None)):
+        with pytest.raises(TtsDeliveryError) as exc:
+            await gateway.send_audio("call-tts-circuit-breaker", b"\x00\x00" * 160)
+
+        assert "gateway connection refused" in str(exc.value)
+        assert session.consecutive_tts_failures == 1
+        assert session.chunks_sent == 0

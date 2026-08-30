@@ -8,6 +8,7 @@ sequence/timestamp behavior, and computes pacing metrics.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import socket
@@ -127,6 +128,9 @@ def main() -> int:
         "codec": "pcmu",
         "ptime_ms": 20,
     }
+    start_payload["config_digest"] = hashlib.sha256(
+        json.dumps(start_payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
 
     started = False
     start_time = time.monotonic()

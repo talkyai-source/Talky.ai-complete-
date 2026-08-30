@@ -465,6 +465,7 @@ std::string session_stats_json(const SessionStatsSnapshot& stats) {
     std::ostringstream out;
     out << "{"
         << "\"session_id\":\"" << escape_json(stats.session_id) << "\"," 
+        << "\"config_digest\":\"" << escape_json(stats.config_digest) << "\","
         << "\"state\":\"" << escape_json(stats.state) << "\"," 
         << "\"stop_reason\":\"" << escape_json(stats.stop_reason) << "\"," 
         << "\"packets_in\":" << stats.packets_in << ','
@@ -548,6 +549,7 @@ std::string sessions_list_json(const std::vector<SessionStatsSnapshot>& sessions
         const auto& s = sessions[i];
         out << "{"
             << "\"session_id\":\"" << escape_json(s.session_id) << "\","
+            << "\"config_digest\":\"" << escape_json(s.config_digest) << "\","
             << "\"state\":\"" << escape_json(s.state) << "\","
             << "\"stop_reason\":\"" << escape_json(s.stop_reason) << "\","
             << "\"tts_queue_depth_frames\":" << s.tts_queue_depth_frames
@@ -628,9 +630,9 @@ std::string base64_encode(const std::vector<uint8_t>& input) {
     return output;
 }
 
-// Owns a raw fd for the duration of a scope so an exception thrown anywhere in
-// http_post (e.g. std::bad_alloc appending to the response string) can no
-// longer leak the socket (review: sender-exception socket leak).
+// Owns a not-yet-published fd while a persistent callback connection is being
+// established. release() transfers it to the session sender only after connect
+// succeeds, so exceptions/failures during setup cannot leak the socket.
 struct FdGuard {
     int fd{-1};
     ~FdGuard() {
@@ -641,6 +643,11 @@ struct FdGuard {
     FdGuard() = default;
     FdGuard(const FdGuard&) = delete;
     FdGuard& operator=(const FdGuard&) = delete;
+    int release() noexcept {
+        const int value = fd;
+        fd = -1;
+        return value;
+    }
 };
 
 std::optional<std::string> valid_secret_environment_value(const char* name) {
@@ -794,28 +801,40 @@ const std::string& internal_service_token() {
     return token;
 }
 
-// Send a fire-and-forget HTTP POST to the given URL with a JSON body.
-// Runs synchronously; callers should dispatch to a thread if low latency is needed.
-// Returns false on any network/parse error (silently drops the callback).
-bool http_post(const std::string& url, const std::string& json_body) {
+// Send one HTTP POST over a session-owned persistent connection. The caller is
+// a single FIFO worker thread, so no socket lock or pipelining is needed.
+// Any protocol/network failure closes the connection; a bounded caller retry
+// then reconnects. This removes per-audio-batch TCP/TIME_WAIT churn without
+// allowing stale response bytes to corrupt the next acknowledgement.
+bool http_post(const std::string& url, const std::string& json_body, int& connection_fd) {
+    const auto discard_connection = [&connection_fd] {
+        if (connection_fd >= 0) {
+            ::close(connection_fd);
+            connection_fd = -1;
+        }
+    };
     // This is an independent last-mile guard, not merely an assumption that
     // /sessions/start already checked the value. Never construct a request or
     // attach INTERNAL_SERVICE_TOKEN for any destination outside the exact
     // BACKEND_INTERNAL_URL origin and caller-audio route.
     if (!audio_callback_url_is_allowed(url)) {
+        discard_connection();
         return false;
     }
     const std::string& token = internal_service_token();
     if (token.empty()) {
+        discard_connection();
         return false;
     }
 
     // Parse URL: http://host:port/path
     if (url.size() < 8) {
+        discard_connection();
         return false;
     }
     const std::size_t scheme_end = url.find("://");
     if (scheme_end == std::string::npos) {
+        discard_connection();
         return false;
     }
     const std::size_t host_start = scheme_end + 3;
@@ -833,10 +852,12 @@ bool http_post(const std::string& url, const std::string& json_body) {
         try {
             const unsigned long parsed = std::stoul(host_port.substr(colon + 1));
             if (parsed == 0 || parsed > 65535) {
+                discard_connection();
                 return false;
             }
             port = static_cast<uint16_t>(parsed);
         } catch (...) {
+            discard_connection();
             return false;
         }
     }
@@ -845,67 +866,68 @@ bool http_post(const std::string& url, const std::string& json_body) {
     addr.sin_family = AF_INET;
     addr.sin_port = htons(port);
     if (inet_pton(AF_INET, host.c_str(), &addr.sin_addr) != 1) {
+        discard_connection();
         return false;
     }
 
     // Build the request BEFORE creating the socket so its allocations cannot
     // leak an open fd; everything after socket() is covered by FdGuard.
     std::ostringstream req;
-    req << "POST " << path << " HTTP/1.0\r\n"
+    req << "POST " << path << " HTTP/1.1\r\n"
         << "Host: " << host_port << "\r\n"
         << "Content-Type: application/json\r\n";
     // The exact-origin guard above has already run, so this credential can only
     // be sent to the pinned backend listener.
     req << "X-Internal-Service-Token: " << token << "\r\n";
     req << "Content-Length: " << json_body.size() << "\r\n"
-        << "Connection: close\r\n"
+        << "Connection: keep-alive\r\n"
         << "\r\n"
         << json_body;
     const std::string wire = req.str();
 
-    // SOCK_NONBLOCK at creation: non-blocking mode is now guaranteed, not a
-    // best-effort fcntl whose failure silently reverted connect() to a blocking
-    // call with the kernel's minutes-long TCP timeout — which would defeat the
-    // deadline and stall session teardown behind it (review #10).
-    FdGuard guard;
-    guard.fd = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK, 0);
-    if (guard.fd < 0) {
-        return false;
-    }
-    const int fd = guard.fd;
-
     // ONE absolute deadline covers the whole exchange: nonblocking connect ->
-    // full request write -> status-line read. Per-operation SO_*TIMEO would let a
+    // full request write -> complete response drain. Per-operation SO_*TIMEO would let a
     // peer that trickles one byte just under each timeout keep the call alive
     // indefinitely and block session teardown (VG-10 / finding #7).
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(500);
 
-    // Nonblocking connect, bounded by the deadline.
-    if (connect(fd, reinterpret_cast<const sockaddr*>(&addr), sizeof(addr)) != 0) {
-        if (errno != EINPROGRESS) {
+    // Nonblocking connect, bounded by the deadline. Reuse the existing socket
+    // when the prior response proved it safe for another request.
+    if (connection_fd < 0) {
+        FdGuard candidate;
+        candidate.fd = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK, 0);
+        if (candidate.fd < 0) {
             return false;
         }
-        for (;;) {
-            const int wait_ms = remaining_until_ms(deadline);
-            if (wait_ms <= 0) {
+        const int candidate_fd = candidate.fd;
+        if (connect(candidate_fd, reinterpret_cast<const sockaddr*>(&addr), sizeof(addr)) != 0) {
+            if (errno != EINPROGRESS) {
                 return false;
             }
-            pollfd pfd{fd, POLLOUT, 0};
-            const int pr = poll(&pfd, 1, wait_ms);
-            if (pr < 0 && errno == EINTR) {
-                continue;
+            for (;;) {
+                const int wait_ms = remaining_until_ms(deadline);
+                if (wait_ms <= 0) {
+                    return false;
+                }
+                pollfd pfd{candidate_fd, POLLOUT, 0};
+                const int pr = poll(&pfd, 1, wait_ms);
+                if (pr < 0 && errno == EINTR) {
+                    continue;
+                }
+                if (pr <= 0) {
+                    return false;
+                }
+                break;
             }
-            if (pr <= 0) {
+            int soerr = 0;
+            socklen_t soerr_len = sizeof(soerr);
+            if (getsockopt(candidate_fd, SOL_SOCKET, SO_ERROR, &soerr, &soerr_len) != 0 || soerr != 0) {
                 return false;
             }
-            break;
         }
-        int soerr = 0;
-        socklen_t soerr_len = sizeof(soerr);
-        if (getsockopt(fd, SOL_SOCKET, SO_ERROR, &soerr, &soerr_len) != 0 || soerr != 0) {
-            return false;
-        }
+        connection_fd = candidate.release();
     }
+    const int fd = connection_fd;
 
     // Write the full request within the deadline. MSG_NOSIGNAL: a backend reset
     // must return EPIPE, not kill the gateway (VG-14).
@@ -913,6 +935,7 @@ bool http_post(const std::string& url, const std::string& json_body) {
     while (off < wire.size()) {
         const int wait_ms = remaining_until_ms(deadline);
         if (wait_ms <= 0) {
+            discard_connection();
             return false;
         }
         pollfd pfd{fd, POLLOUT, 0};
@@ -921,6 +944,7 @@ bool http_post(const std::string& url, const std::string& json_body) {
             continue;
         }
         if (pr <= 0) {
+            discard_connection();
             return false;
         }
         const ssize_t s = send(fd, wire.data() + off, wire.size() - off, MSG_NOSIGNAL);
@@ -929,19 +953,20 @@ bool http_post(const std::string& url, const std::string& json_body) {
         } else if (s < 0 && (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)) {
             continue;
         } else {
+            discard_connection();
             return false;
         }
     }
 
-    // Read up to the status line (first newline) within the deadline; do NOT
-    // wait for the body / connection close once a valid status is available.
-    // Previously the response was drained without inspection and always returned
-    // true, so a backend 500/timeout/reset looked identical to success — silent
-    // STT loss (VG-10). Non-2xx (or no parseable status) is now a failure.
+    // Read the complete response headers. Persistent reuse is safe only after
+    // the declared body has also been consumed; stopping at the status line
+    // would leave JSON bytes to be mistaken for the next response.
     std::string resp;
-    while (resp.find('\n') == std::string::npos && resp.size() < 512) {
+    std::size_t header_end = std::string::npos;
+    while (header_end == std::string::npos && resp.size() < 16 * 1024) {
         const int wait_ms = remaining_until_ms(deadline);
         if (wait_ms <= 0) {
+            discard_connection();
             return false;
         }
         pollfd pfd{fd, POLLIN, 0};
@@ -950,19 +975,27 @@ bool http_post(const std::string& url, const std::string& json_body) {
             continue;
         }
         if (pr <= 0) {
+            discard_connection();
             return false;
         }
-        char rbuf[256];
+        char rbuf[1024];
         const ssize_t r = recv(fd, rbuf, sizeof(rbuf), 0);
         if (r > 0) {
             resp.append(rbuf, static_cast<std::size_t>(r));
+            header_end = resp.find("\r\n\r\n");
         } else if (r == 0) {
-            break;  // peer closed
+            discard_connection();
+            return false;
         } else if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) {
             continue;
         } else {
+            discard_connection();
             return false;
         }
+    }
+    if (header_end == std::string::npos) {
+        discard_connection();
+        return false;
     }
 
     // Strict status parse (review #12): require a COMPLETE status line
@@ -971,24 +1004,90 @@ bool http_post(const std::string& url, const std::string& json_body) {
     // digits status (previously undefined behavior through atoi) all fail.
     const std::size_t eol = resp.find('\n');
     if (eol == std::string::npos) {
+        discard_connection();
         return false;
     }
     if (resp.compare(0, 5, "HTTP/") != 0) {
+        discard_connection();
         return false;
     }
     const std::size_t sp = resp.find(' ');
     if (sp == std::string::npos || sp + 3 >= eol) {
+        discard_connection();
         return false;
     }
     const char* digits = resp.data() + sp + 1;
     int status = 0;
     const auto [end_ptr, ec] = std::from_chars(digits, digits + 3, status);
     if (ec != std::errc() || end_ptr != digits + 3) {
+        discard_connection();
         return false;
     }
     const char after = resp[sp + 4];  // sp+4 <= eol, so in-bounds
     if (after != ' ' && after != '\r' && after != '\n') {
+        discard_connection();
         return false;  // "200junk" or a 4th digit is not a valid status field
+    }
+
+    std::optional<std::size_t> content_length;
+    bool close_after_response = false;
+    std::istringstream headers(resp.substr(eol + 1, header_end - eol - 1));
+    std::string line;
+    while (std::getline(headers, line)) {
+        if (!line.empty() && line.back() == '\r') {
+            line.pop_back();
+        }
+        const std::size_t colon = line.find(':');
+        if (colon == std::string::npos) {
+            continue;
+        }
+        const std::string name = to_lower(trim(line.substr(0, colon)));
+        const std::string value = trim(line.substr(colon + 1));
+        if (name == "content-length") {
+            std::size_t parsed_length = 0;
+            const char* begin = value.data();
+            const char* end = begin + value.size();
+            const auto [parsed_end, parsed_ec] = std::from_chars(begin, end, parsed_length);
+            if (parsed_ec != std::errc() || parsed_end != end || parsed_length > 64 * 1024 ||
+                (content_length.has_value() && content_length.value() != parsed_length)) {
+                discard_connection();
+                return false;
+            }
+            content_length = parsed_length;
+        } else if (name == "connection" && to_lower(value).find("close") != std::string::npos) {
+            close_after_response = true;
+        } else if (name == "transfer-encoding") {
+            // Chunk framing is unnecessary for the backend's bounded JSON ack.
+            // Reject it rather than risk reusing a connection at the wrong byte.
+            discard_connection();
+            return false;
+        }
+    }
+
+    if (!content_length.has_value()) {
+        // We have an unambiguous status but no reusable message boundary.
+        // Close deliberately; the successful acknowledgement still counts.
+        discard_connection();
+        return status >= 200 && status < 300;
+    }
+
+    std::size_t body_bytes = resp.size() - (header_end + 4);
+    while (body_bytes < content_length.value()) {
+        const std::size_t remaining_body = content_length.value() - body_bytes;
+        char rbuf[1024];
+        const ssize_t r = recv_within(fd, rbuf, std::min(sizeof(rbuf), remaining_body), deadline);
+        if (r <= 0) {
+            discard_connection();
+            return false;
+        }
+        body_bytes += static_cast<std::size_t>(r);
+    }
+    if (body_bytes != content_length.value()) {
+        discard_connection();
+        return false;
+    }
+    if (close_after_response) {
+        discard_connection();
     }
     return status >= 200 && status < 300;
 }
@@ -1011,6 +1110,12 @@ bool http_post(const std::string& url, const std::string& json_body) {
 // tradeoff is a gap in the audio during a stall (some frames lost) instead of
 // mounting latency; for STT this keeps transcription near-real-time.
 class AudioCallbackSender {
+    struct PendingCallback {
+        std::string body;
+        uint64_t sequence{0};
+        std::chrono::steady_clock::time_point enqueued_at;
+    };
+
 public:
     // ~5s of buffering at ~50 POST/s before shedding; ~256 * a few hundred
     // bytes of JSON is tens of KB, safely bounded per session.
@@ -1028,6 +1133,10 @@ public:
         if (worker_.joinable()) {
             worker_.join();
         }
+        if (connection_fd_ >= 0) {
+            ::close(connection_fd_);
+            connection_fd_ = -1;
+        }
     }
 
     AudioCallbackSender(const AudioCallbackSender&) = delete;
@@ -1035,16 +1144,27 @@ public:
 
     // Called from the RTP receiver thread. Non-blocking: never performs
     // network I/O and never blocks the receiver loop.
-    void enqueue(std::string body) {
+    void enqueue(std::string body, const uint64_t sequence) {
         {
             std::lock_guard<std::mutex> lock(mutex_);
             if (stop_ || finishing_) {
                 return;
             }
             while (queue_.size() >= kMaxQueue) {
+                const uint64_t dropped_sequence = queue_.front().sequence;
                 queue_.pop_front();  // drop-oldest
+                ++overflow_drops_;
+                if (overflow_drops_ == 1 || overflow_drops_ % 100 == 0) {
+                    std::cerr << "event=stt_callback_queue_overflow url=" << url_
+                              << " dropped_sequence=" << dropped_sequence
+                              << " overflow_drops=" << overflow_drops_ << "\n";
+                }
             }
-            queue_.push_back(std::move(body));
+            PendingCallback pending;
+            pending.body = std::move(body);
+            pending.sequence = sequence;
+            pending.enqueued_at = std::chrono::steady_clock::now();
+            queue_.push_back(std::move(pending));
         }
         cv_.notify_one();
     }
@@ -1068,7 +1188,7 @@ private:
     void run() {
       try {
         for (;;) {
-            std::string body;
+            PendingCallback pending;
             {
                 std::unique_lock<std::mutex> lock(mutex_);
                 cv_.wait(lock, [this] { return stop_ || finishing_ || !queue_.empty(); });
@@ -1083,7 +1203,7 @@ private:
                     drained_cv_.notify_all();
                     return;
                 }
-                body = std::move(queue_.front());
+                pending = std::move(queue_.front());
                 queue_.pop_front();
                 posting_ = true;
             }
@@ -1099,16 +1219,37 @@ private:
             // delivery while enqueue() kept filling a never-drained queue
             // (review: sender-exception permanent silence).
             try {
-                if (http_post(url_, body)) {
+                bool delivered = false;
+                int attempts = 0;
+                constexpr int kMaxAttempts = 3;
+                constexpr auto kMaxDeliveryAge = std::chrono::milliseconds(1000);
+                while (attempts < kMaxAttempts &&
+                       std::chrono::steady_clock::now() - pending.enqueued_at < kMaxDeliveryAge) {
+                    ++attempts;
+                    if (http_post(url_, pending.body, connection_fd_)) {
+                        delivered = true;
+                        break;
+                    }
+                    if (attempts < kMaxAttempts) {
+                        std::this_thread::sleep_for(std::chrono::milliseconds(10 * attempts));
+                    }
+                }
+                if (delivered) {
                     consecutive_failures_ = 0;
                 } else {
                     ++consecutive_failures_;
                     if (consecutive_failures_ == 1 || consecutive_failures_ % 100 == 0) {
                         std::cerr << "event=stt_callback_delivery_failed url=" << url_
+                                  << " sequence=" << pending.sequence
+                                  << " attempts=" << attempts
                                   << " consecutive_failures=" << consecutive_failures_ << "\n";
                     }
                 }
             } catch (...) {
+                if (connection_fd_ >= 0) {
+                    ::close(connection_fd_);
+                    connection_fd_ = -1;
+                }
                 ++consecutive_failures_;
             }
             {
@@ -1129,11 +1270,13 @@ private:
     std::mutex mutex_;
     std::condition_variable cv_;
     std::condition_variable drained_cv_;
-    std::deque<std::string> queue_;
+    std::deque<PendingCallback> queue_;
     bool stop_{false};
     bool finishing_{false};   // finish() called: drain then exit (under mutex_)
     bool posting_{false};     // a POST is in flight outside the lock (under mutex_)
+    uint64_t overflow_drops_{0};  // guarded by mutex_
     int consecutive_failures_{0};  // worker-thread-only; no lock needed
+    int connection_fd_{-1};  // worker-thread-only; closed after join
     std::thread worker_;  // declared last: constructed after the fields run() touches
 };
 
@@ -1566,6 +1709,13 @@ bool HttpServer::healthy() const {
     return healthy_.load();
 }
 
+bool HttpServer::ready() const {
+    // Readiness is an admission promise, not another spelling of liveness.
+    // A listener that is draining or has exhausted its session slots remains
+    // alive for existing calls/probes but must not receive a new call.
+    return healthy_.load() && running_.load() && registry_.can_accept_session();
+}
+
 void HttpServer::handle_client(const int client_fd) {
     bool over_budget = false;
     const auto request = read_request(client_fd, over_budget);
@@ -1585,7 +1735,7 @@ void HttpServer::handle_client(const int client_fd) {
     // deployment can prove zero active sessions without putting a secret in a
     // process argument or generated evidence file.
     const bool public_probe = request->method == "GET" &&
-                              (request->path == "/health" || request->path == "/stats");
+                              (request->path == "/health" || request->path == "/ready" || request->path == "/stats");
     if (!public_probe && !request_authorized(request.value())) {
         write_response(client_fd, 401, "Unauthorized", "{\"error\":\"unauthorized\"}");
         return;
@@ -1593,8 +1743,19 @@ void HttpServer::handle_client(const int client_fd) {
 
     if (request->method == "GET" && request->path == "/health") {
         const bool is_healthy = healthy();
-        const std::string body = std::string("{\"status\":\"") + (is_healthy ? "ok" : "degraded") + "\",\"io_loop_healthy\":" + (is_healthy ? "true" : "false") + "}";
+        const std::string body = std::string("{\"status\":\"") + (is_healthy ? "ok" : "degraded") +
+            "\",\"io_loop_healthy\":" + (is_healthy ? "true" : "false") +
+            ",\"protocol_version\":2,\"codecs\":[\"pcmu\"],\"callback_protocol_versions\":[2]}";
         write_response(client_fd, is_healthy ? 200 : 503, is_healthy ? "OK" : "Service Unavailable", body);
+        return;
+    }
+
+    if (request->method == "GET" && request->path == "/ready") {
+        const bool is_ready = ready();
+        const std::string body = std::string("{\"status\":\"") + (is_ready ? "ready" : "not_ready") +
+            "\",\"ready\":" + (is_ready ? "true" : "false") +
+            ",\"protocol_version\":2,\"codecs\":[\"pcmu\"]}";
+        write_response(client_fd, is_ready ? 200 : 503, is_ready ? "OK" : "Service Unavailable", body);
         return;
     }
 
@@ -1612,6 +1773,7 @@ void HttpServer::handle_client(const int client_fd) {
         SessionConfig config;
 
         const auto session_id = json_get_string(request->body, "session_id");
+        const auto config_digest = json_get_string(request->body, "config_digest");
         const auto listen_ip = json_get_string(request->body, "listen_ip");
         const auto listen_port = json_get_int(request->body, "listen_port");
         const auto remote_ip = json_get_string(request->body, "remote_ip");
@@ -1635,7 +1797,8 @@ void HttpServer::handle_client(const int client_fd) {
         const auto stt_reorder_window_frames = json_get_int(request->body, "stt_reorder_window_frames");
         const auto stt_reorder_hold_ms = json_get_int(request->body, "stt_reorder_hold_ms");
 
-        if (!session_id.has_value() || !listen_ip.has_value() || !listen_port.has_value() ||
+        if (!session_id.has_value() || !config_digest.has_value() ||
+            !listen_ip.has_value() || !listen_port.has_value() ||
             !remote_ip.has_value() || !remote_port.has_value() || !codec.has_value() || !ptime_ms.has_value()) {
             write_response(client_fd, 400, "Bad Request", "{\"error\":\"missing_required_start_fields\"}");
             return;
@@ -1648,6 +1811,7 @@ void HttpServer::handle_client(const int client_fd) {
         }
 
         config.session_id = session_id.value();
+        config.config_digest = config_digest.value();
         config.listen_ip = listen_ip.value();
         config.remote_ip = remote_ip.value();
         config.codec = codec.value();
@@ -1738,6 +1902,7 @@ void HttpServer::handle_client(const int client_fd) {
             struct BatchState {
                 std::vector<uint8_t> buffer;
                 int frame_count{0};
+                uint64_t next_sequence{0};
             };
             auto state = std::make_shared<BatchState>();
             // Owned solely by these closures, which live in RtpSession::
@@ -1751,16 +1916,22 @@ void HttpServer::handle_client(const int client_fd) {
                 state->buffer.insert(state->buffer.end(), pcmu.begin(), pcmu.end());
                 state->frame_count++;
                 if (state->frame_count >= batch_frames) {
+                    const uint64_t sequence = state->next_sequence++;
+                    const int frame_count = state->frame_count;
+                    const std::size_t payload_bytes = state->buffer.size();
                     const std::string b64 = base64_encode(state->buffer);
                     std::string body =
-                        "{\"session_id\":\"" + escape_json(cb_session_id) +
+                        "{\"protocol_version\":2,\"sequence\":" + std::to_string(sequence) +
+                        ",\"frame_count\":" + std::to_string(frame_count) +
+                        ",\"ptime_ms\":20,\"payload_bytes\":" + std::to_string(payload_bytes) +
+                        ",\"session_id\":\"" + escape_json(cb_session_id) +
                         "\",\"pcmu_base64\":\"" + b64 +
                         "\",\"codec\":\"pcmu\"}";
                     state->buffer.clear();
                     state->frame_count = 0;
                     // Non-blocking hand-off; never blocks the RTP receiver thread
                     // on network I/O.
-                    sender->enqueue(std::move(body));
+                    sender->enqueue(std::move(body), sequence);
                 }
             };
 
@@ -1771,14 +1942,20 @@ void HttpServer::handle_client(const int client_fd) {
             // thread as audio_cb, so BatchState needs no extra locking.
             sink_finisher = [cb_session_id, state, sender] {
                 if (!state->buffer.empty()) {
+                    const uint64_t sequence = state->next_sequence++;
+                    const int frame_count = state->frame_count;
+                    const std::size_t payload_bytes = state->buffer.size();
                     const std::string b64 = base64_encode(state->buffer);
                     std::string body =
-                        "{\"session_id\":\"" + escape_json(cb_session_id) +
+                        "{\"protocol_version\":2,\"sequence\":" + std::to_string(sequence) +
+                        ",\"frame_count\":" + std::to_string(frame_count) +
+                        ",\"ptime_ms\":20,\"payload_bytes\":" + std::to_string(payload_bytes) +
+                        ",\"session_id\":\"" + escape_json(cb_session_id) +
                         "\",\"pcmu_base64\":\"" + b64 +
                         "\",\"codec\":\"pcmu\"}";
                     state->buffer.clear();
                     state->frame_count = 0;
-                    sender->enqueue(std::move(body));
+                    sender->enqueue(std::move(body), sequence);
                 }
                 sender->finish(std::chrono::milliseconds(500));
             };
@@ -1788,12 +1965,26 @@ void HttpServer::handle_client(const int client_fd) {
         const auto result = registry_.start_session(config, error, std::move(audio_cb), std::move(sink_finisher));
 
         if (result == StartSessionResult::Started) {
-            write_response(client_fd, 200, "OK", "{\"status\":\"started\",\"session_id\":\"" + escape_json(config.session_id) + "\"}");
+            write_response(client_fd, 200, "OK", "{\"status\":\"started\",\"protocol_version\":2,\"codec\":\"" +
+                escape_json(config.codec) + "\",\"idempotent\":false,\"session_id\":\"" +
+                escape_json(config.session_id) + "\",\"config_digest\":\"" + escape_json(config.config_digest) + "\"}");
             return;
         }
 
         if (result == StartSessionResult::AlreadyExists) {
-            write_response(client_fd, 409, "Conflict", "{\"status\":\"already_exists\",\"error\":\"" + escape_json(error) + "\"}");
+            write_response(client_fd, 200, "OK", "{\"status\":\"already_exists\",\"protocol_version\":2,\"codec\":\"" +
+                escape_json(config.codec) + "\",\"idempotent\":true,\"session_id\":\"" +
+                escape_json(config.session_id) + "\",\"config_digest\":\"" + escape_json(config.config_digest) + "\"}");
+            return;
+        }
+
+        if (result == StartSessionResult::ConfigConflict) {
+            write_response(client_fd, 409, "Conflict", "{\"status\":\"config_conflict\",\"error\":\"" + escape_json(error) + "\"}");
+            return;
+        }
+
+        if (result == StartSessionResult::CapacityExceeded) {
+            write_response(client_fd, 503, "Service Unavailable", "{\"status\":\"capacity_exceeded\",\"error\":\"" + escape_json(error) + "\"}");
             return;
         }
 

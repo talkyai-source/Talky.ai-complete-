@@ -53,6 +53,7 @@ from app.services.scripts import (
 )
 from app.domain.services.call_service import CallService
 from app.domain.services.telephony.outcome_resolver import resolve_call_outcome
+from app.infrastructure.metrics.gateway_metrics import record_gateway_media_reconciliation
 
 logger = logging.getLogger(__name__)
 
@@ -232,6 +233,23 @@ def _get_orchestrator():
 _zombie_channel_ticks: dict[str, int] = {}
 _ZOMBIE_TICK_THRESHOLD = 2  # ~60s at the 30s watchdog cadence
 
+# channel_id → consecutive watchdog ticks its C++ gateway MEDIA session has
+# been absent from the gateway's own session list. The zombie sweep above
+# reconciles against Asterisk and so only catches "local session, no channel".
+# This catches the mirror failure that actually produces silent dead air: the
+# channel is up and billing, but the RTP session carrying the audio is gone
+# (gateway restart/crash, reaped session, a start that failed after answer).
+# Asterisk reports that channel as perfectly live, so no other sweep fires.
+_dead_media_ticks: dict[str, int] = {}
+_DEAD_MEDIA_TICK_THRESHOLD = 2
+try:
+    _MEDIA_WATCHDOG_INTERVAL_S = max(
+        0.5,
+        min(30.0, float(os.getenv("TELEPHONY_MEDIA_WATCHDOG_INTERVAL_S", "1.0"))),
+    )
+except (TypeError, ValueError):
+    _MEDIA_WATCHDOG_INTERVAL_S = 1.0
+
 # Reliability quick-win: `_on_audio_received` swallows all exceptions from
 # the media gateway so a single bad RTP packet can never crash the audio
 # hot path — but a *recurring* fault (e.g. STT queue wedged, resample lib
@@ -281,6 +299,114 @@ def _detect_zombie_sessions(
             if n >= threshold:
                 zombies.append(cid)
     return zombies
+
+
+def _detect_dead_media_sessions(
+    gateway_session_map: dict,
+    live_gateway_session_ids: Optional[set],
+    *,
+    threshold: int = _DEAD_MEDIA_TICK_THRESHOLD,
+) -> list:
+    """Reconcile the channels we believe have media against the gateway's own
+    session list; return the channel ids whose media session has been missing
+    for >= ``threshold`` consecutive ticks.
+
+    Mirrors ``_detect_zombie_sessions`` deliberately, including its two safety
+    properties:
+
+    * ``live_gateway_session_ids is None`` means "couldn't query the gateway
+      this tick" — a no-op returning ``[]`` that advances no counter, so an
+      unreachable gateway never mass-hangs-up live calls.
+    * The debounce absorbs the window between ``/v1/sessions/start`` returning
+      and the session appearing in the list; a real media session is present
+      every tick and can never reach the threshold.
+
+    A channel mapped to an empty session id is skipped: media was never started
+    for it, which is the ringing/warmup sweeps' business, not this one's.
+    """
+    if live_gateway_session_ids is None:
+        return []
+    # Forget counters for channels that are no longer tracked (ended normally).
+    for cid in list(_dead_media_ticks):
+        if cid not in gateway_session_map:
+            _dead_media_ticks.pop(cid, None)
+    dead: list = []
+    for cid, session_id in gateway_session_map.items():
+        if not session_id:
+            _dead_media_ticks.pop(cid, None)
+            continue
+        if session_id in live_gateway_session_ids:
+            _dead_media_ticks.pop(cid, None)  # present → reset
+        else:
+            n = _dead_media_ticks.get(cid, 0) + 1
+            _dead_media_ticks[cid] = n
+            if n >= threshold:
+                dead.append(cid)
+    return dead
+
+
+async def _reconcile_dead_media(adapter, force_end) -> list:
+    """Force-end calls whose C++ gateway media session has disappeared.
+
+    The sweep seam for ``_detect_dead_media_sessions``: queries the gateway for
+    media ground truth, debounces, and tears down what is left. Extracted from
+    the watchdog body so the WIRING is testable — a guard hooked to a signal
+    that never varies is this codebase's recurring failure mode, so the query
+    is proven to happen, not just the arithmetic.
+
+    Returns the channel ids it force-ended (for logging/tests). Every failure
+    mode is a no-op: no adapter, a non-Asterisk adapter, or a gateway that
+    cannot be queried.
+    """
+    if adapter is None or getattr(adapter, "name", None) != "asterisk":
+        return []
+    if not hasattr(adapter, "list_active_gateway_session_ids"):
+        return []
+    session_map = adapter.gateway_session_map()
+    if not session_map:
+        # Nothing believed live; still prune stale counters.
+        _detect_dead_media_sessions({}, set())
+        return []
+    live_ids = await adapter.list_active_gateway_session_ids()
+    dead = _detect_dead_media_sessions(session_map, live_ids)
+    ended: list = []
+    for cid in dead:
+        _dead_media_ticks.pop(cid, None)
+        record_gateway_media_reconciliation("detected")
+        logger.warning(
+            "telephony_watchdog: media session for %s missing from the gateway "
+            "for %d ticks — the channel is up but carries no audio, forcing end",
+            cid[:12],
+            _DEAD_MEDIA_TICK_THRESHOLD,
+            extra={"call_id": cid, "alert": "gateway_media_session_lost"},
+        )
+        try:
+            await force_end(cid)
+            ended.append(cid)
+            record_gateway_media_reconciliation("ended")
+        except Exception as exc:  # noqa: BLE001 — one bad teardown must not abort the sweep
+            record_gateway_media_reconciliation("end_failed")
+            logger.debug("dead_media_force_end_failed cid=%s err=%s", cid[:12], exc)
+    return ended
+
+
+async def _media_session_watchdog() -> None:
+    """Detect a vanished C++ media session independently of the 30s sweeps.
+
+    At the default one-second cadence and two-miss debounce, an answered call
+    with no RTP session is ended in roughly two seconds.  Keeping this check
+    separate avoids running the much heavier ARI/database lifecycle sweep once
+    per second.  An unreachable gateway is always a no-op; only an explicit,
+    successful session inventory can advance the miss counter.
+    """
+    while True:
+        try:
+            await asyncio.sleep(_MEDIA_WATCHDOG_INTERVAL_S)
+            await _reconcile_dead_media(get_adapter(), _force_end_and_hangup)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001 — watchdogs must self-heal
+            logger.warning("dead_media_reconcile_failed err=%s", exc)
 
 
 def _session_is_closing(vs) -> bool:
@@ -804,6 +930,7 @@ async def _session_watchdog() -> None:
                         # missed-event false positive where the channel is
                         # actually still live.
                         await _force_end_and_hangup(cid)
+
             except Exception as exc:
                 logger.debug("zombie_reconcile_failed err=%s", exc)
 

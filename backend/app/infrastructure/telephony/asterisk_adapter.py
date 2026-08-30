@@ -23,6 +23,8 @@ Call control path:
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import logging
 import math
 import os
@@ -828,20 +830,53 @@ class AsteriskAdapter(CallControlAdapter):
         return summary
 
     async def health_check(self) -> bool:
-        """Probe ARI /asterisk/info endpoint."""
+        """Require both PBX control and a protocol-compatible media gateway."""
         try:
             connector = aiohttp.TCPConnector()
-            async with aiohttp.ClientSession(
-                connector=connector,
-                auth=aiohttp.BasicAuth(self._ari_username, self._ari_password),
-            ) as sess:
-                async with sess.get(
-                    f"http://{self._ari_host}:{self._ari_port}/ari/asterisk/info",
-                    timeout=aiohttp.ClientTimeout(total=3),
-                ) as resp:
-                    return resp.status == 200
+            timeout = aiohttp.ClientTimeout(total=3)
+            async with aiohttp.ClientSession(connector=connector) as sess:
+                async def _ari_ok() -> bool:
+                    async with sess.get(
+                        f"http://{self._ari_host}:{self._ari_port}/ari/asterisk/info",
+                        auth=aiohttp.BasicAuth(self._ari_username, self._ari_password),
+                        timeout=timeout,
+                    ) as resp:
+                        return resp.status == 200
+
+                async def _gateway_ok() -> bool:
+                    async with sess.get(
+                        f"{self._gateway_base_url}/health",
+                        timeout=timeout,
+                    ) as resp:
+                        if resp.status != 200:
+                            return False
+                        try:
+                            payload = await resp.json(content_type=None)
+                        except Exception:
+                            return False
+                        return self._gateway_health_payload_is_compatible(payload)
+
+                ari_ok, gateway_ok = await asyncio.gather(_ari_ok(), _gateway_ok())
+                return bool(ari_ok and gateway_ok)
         except Exception:
             return False
+
+    @staticmethod
+    def _gateway_health_payload_is_compatible(payload: Any) -> bool:
+        """Fail closed when controller and gateway protocols/codecs drift."""
+        if not isinstance(payload, dict):
+            return False
+        codecs = payload.get("codecs")
+        callback_versions = payload.get("callback_protocol_versions")
+        return (
+            payload.get("status") == "ok"
+            and payload.get("io_loop_healthy") is True
+            and payload.get("protocol_version") == 2
+            and isinstance(codecs, list)
+            and "pcmu" in codecs
+            and isinstance(callback_versions, list)
+            and 2 in callback_versions
+        )
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -905,6 +940,51 @@ class AsteriskAdapter(CallControlAdapter):
             cid = ch.get("id") if isinstance(ch, dict) else None
             if cid:
                 ids.add(cid)
+        return ids
+
+    def gateway_session_map(self) -> Dict[str, str]:
+        """Snapshot of channel_id → C++ gateway session_id for live media legs.
+
+        A copy, so the watchdog reading it can never mutate the adapter's
+        routing state.
+        """
+        return dict(self._gateway_sessions)
+
+    async def list_active_gateway_session_ids(self) -> Optional[set]:
+        """Return the session IDs the C++ media gateway says it is running.
+
+        MEDIA ground truth, the mirror of ``list_active_channel_ids``'s SIP
+        ground truth. A call whose channel is up but whose gateway session is
+        gone (gateway restart/crash, a reaped session, a start that failed
+        after the channel answered) is *silent dead air*: Asterisk still
+        reports the channel live and bills it, every existing sweep votes
+        healthy, and the caller hears nothing.
+
+        Returns ``None`` (not an empty set) when the gateway can't be queried,
+        so the caller can tell "no sessions" from "couldn't check" and skip the
+        reconcile rather than tearing down every live call on a blip.
+        """
+        if not self._session:
+            return None
+        try:
+            payload = await self._gateway("GET", "/v1/sessions")
+        except Exception as exc:  # noqa: BLE001 — same contract as the ARI list
+            logger.debug("gateway_list_sessions_failed err=%s", exc)
+            return None
+        sessions = payload.get("sessions") if isinstance(payload, dict) else None
+        if not isinstance(sessions, list):
+            return None
+        ids: set = set()
+        for entry in sessions:
+            if not isinstance(entry, dict):
+                continue
+            sid = entry.get("session_id")
+            state = str(entry.get("state") or "").strip().lower()
+            # Failed/stopped sessions remain visible for evidence until the C++
+            # reaper removes them. They are not live media and must not keep an
+            # answered SIP call out of the dead-media watchdog.
+            if sid and state in {"created", "starting", "buffering", "active", "degraded"}:
+                ids.add(str(sid))
         return ids
 
     async def list_recoverable_application_channel_ids(self) -> Optional[set[str]]:
@@ -1002,6 +1082,64 @@ class AsteriskAdapter(CallControlAdapter):
                 return await resp.json(content_type=None)
             except Exception:
                 return {}
+
+    @staticmethod
+    def _seal_gateway_session_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+        """Attach the canonical SHA-256 used for idempotent session creation."""
+
+        unsigned = dict(payload)
+        unsigned.pop("config_digest", None)
+        canonical = json.dumps(
+            unsigned,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+        ).encode("utf-8")
+        sealed = dict(unsigned)
+        sealed["config_digest"] = hashlib.sha256(canonical).hexdigest()
+        return sealed
+
+    async def _start_gateway_session(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """Start once, or prove an existing session has the exact same config.
+
+        A different configuration for the same id is a 409 from protocol v2
+        and is never accepted.  Production also requires the gateway to echo
+        the id and digest; development/test retains an explicit compatibility
+        path for older fakes while a backend/gateway pair is upgraded atomically.
+        """
+
+        sealed = self._seal_gateway_session_payload(payload)
+        ack = await self._gateway(
+            "POST",
+            "/v1/sessions/start",
+            payload=sealed,
+            ok=(200,),
+        )
+        environment = os.getenv("ENVIRONMENT", "development").strip().lower()
+        require_ack = os.getenv(
+            "VOICE_GATEWAY_REQUIRE_CONFIG_ACK",
+            "true" if environment in {"production", "prod"} else "false",
+        ).strip().lower() not in {"false", "0", "no", "off"}
+        if not isinstance(ack, dict) or not ack:
+            if require_ack:
+                raise RuntimeError("Gateway start returned no verifiable acknowledgement")
+            logger.warning(
+                "gateway_start_ack_unverified session=%s environment=%s",
+                str(sealed.get("session_id") or "")[:20],
+                environment,
+            )
+            return {}
+        if ack.get("status") not in {"started", "already_exists"}:
+            raise RuntimeError(f"Gateway returned invalid start status: {ack.get('status')!r}")
+        if ack.get("protocol_version") != 2:
+            raise RuntimeError("Gateway start acknowledgement protocol_version mismatch")
+        if ack.get("codec") != sealed.get("codec"):
+            raise RuntimeError("Gateway start acknowledgement codec mismatch")
+        if ack.get("session_id") != sealed["session_id"]:
+            raise RuntimeError("Gateway start acknowledgement session_id mismatch")
+        if ack.get("config_digest") != sealed["config_digest"]:
+            raise RuntimeError("Gateway start acknowledgement config_digest mismatch")
+        return ack
 
     @staticmethod
     def _tts_queue_config() -> Dict[str, Any]:
@@ -2326,7 +2464,7 @@ class AsteriskAdapter(CallControlAdapter):
         """
         logger.info(f"AsteriskAdapter: outbound call ringing channel={channel_id[:12]}")
         listen_port = await self._alloc_rtp_port()
-        session_id = f"asterisk-{channel_id[:12]}-{listen_port}"
+        session_id = f"asterisk-{uuid.uuid4().hex}"
         bridge_id = ""
 
         try:
@@ -2456,10 +2594,8 @@ class AsteriskAdapter(CallControlAdapter):
 
             # 6. Start C++ Gateway session — call is already answered so RTP is
             #    flowing immediately; no startup-timeout risk.
-            await self._gateway(
-                "POST",
-                "/v1/sessions/start",
-                payload={
+            await self._start_gateway_session(
+                {
                     "session_id": session_id,
                     "listen_ip": self._gateway_rtp_ip,
                     "listen_port": listen_port,
@@ -2482,6 +2618,10 @@ class AsteriskAdapter(CallControlAdapter):
                     # out of step with it again (it did: this went 4 -> 2 while
                     # the detector kept assuming 80ms).
                     "audio_callback_batch_frames": AUDIO_CALLBACK_BATCH_FRAMES,
+                    # Asterisk tells us the exact source tuple through
+                    # UNICASTRTP_LOCAL_*. Never let an arbitrary first packet
+                    # teach the gateway a different source.
+                    "enforce_rtp_source": True,
                     # VG-01 sequence-ordered STT tap (see _stt_reorder_config).
                     **self._stt_reorder_config(),
                     # Optional TTS queue cap (see _tts_queue_config).
@@ -2490,8 +2630,7 @@ class AsteriskAdapter(CallControlAdapter):
                         f"{os.getenv('BACKEND_INTERNAL_URL', 'http://127.0.0.1:8000')}"
                         f"/api/v1/sip/telephony/audio/{session_id}"
                     ),
-                },
-                ok=(200, 409),
+                }
             )
 
             # Track the session
@@ -3558,7 +3697,7 @@ class AsteriskAdapter(CallControlAdapter):
                     cached_admission["_answered_at_utc"] = persisted_text
 
             listen_port = await self._alloc_rtp_port()
-            session_id = f"asterisk-{channel_id[:12]}-{listen_port}"
+            session_id = f"asterisk-{uuid.uuid4().hex}"
 
             # 1. Pre-assign a deterministic ID before the network create. If
             # Asterisk commits the bridge but the response times out, cleanup
@@ -3619,10 +3758,8 @@ class AsteriskAdapter(CallControlAdapter):
             )
 
             # 6. Start C++ Gateway session (AI mode: echo_enabled=False once TTS hooked in)
-            await self._gateway(
-                "POST",
-                "/v1/sessions/start",
-                payload={
+            await self._start_gateway_session(
+                {
                     "session_id": session_id,
                     "listen_ip": self._gateway_rtp_ip,
                     "listen_port": listen_port,
@@ -3646,6 +3783,7 @@ class AsteriskAdapter(CallControlAdapter):
                     # out of step with it again (it did: this went 4 -> 2 while
                     # the detector kept assuming 80ms).
                     "audio_callback_batch_frames": AUDIO_CALLBACK_BATCH_FRAMES,
+                    "enforce_rtp_source": True,
                     # VG-01 sequence-ordered STT tap (see _stt_reorder_config).
                     **self._stt_reorder_config(),
                     # Optional TTS queue cap (see _tts_queue_config).
@@ -3655,8 +3793,7 @@ class AsteriskAdapter(CallControlAdapter):
                         f"{os.getenv('BACKEND_INTERNAL_URL', 'http://127.0.0.1:8000')}"
                         f"/api/v1/sip/telephony/audio/{session_id}"
                     ),
-                },
-                ok=(200, 409),
+                }
             )
 
             # Track the session

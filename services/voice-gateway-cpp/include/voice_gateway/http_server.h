@@ -38,6 +38,7 @@ public:
     void stop();
 
     [[nodiscard]] bool healthy() const;
+    [[nodiscard]] bool ready() const;
 
 private:
     // One live HTTP request. The slot OWNS its joinable thread and its client

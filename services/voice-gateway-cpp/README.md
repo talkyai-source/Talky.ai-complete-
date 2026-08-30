@@ -26,6 +26,7 @@ This service is the planned RTP/media gateway layer between:
    - `GET /v1/sessions/{session_id}/stats`
 4. Operational API:
    - `GET /health`
+   - `GET /ready`
    - `GET /stats`
 5. Day 6 media resilience:
    - no-RTP watchdog timeout reasons (`start_timeout`, `no_rtp_timeout`, `no_rtp_timeout_hold`, `final_timeout`)
@@ -62,8 +63,17 @@ port exactly match `BACKEND_INTERNAL_URL`, its host also exactly matches
 `/api/v1/sip/telephony/audio/<safe-session-id>`. The sender repeats that full
 check immediately before attaching `INTERNAL_SERVICE_TOKEN`, so a different
 loopback port cannot receive the token or caller audio. `GET /health` and aggregate
-`GET /stats` remain unauthenticated read-only probes on the loopback listener;
+`GET /ready`/`GET /stats` remain unauthenticated read-only probes on the loopback listener;
 all session/control routes require the gateway bearer token.
+
+The current control/callback protocol is version 2 and advertises PCMU only.
+Session creation is idempotent only when the repeated `session_id` carries the
+same non-empty SHA-256 configuration digest; a different digest is HTTP 409.
+Caller-audio callbacks carry monotonic sequence and frame metadata, are drained
+in FIFO order by one bounded worker per session, and reuse one HTTP/1.1
+connection after consuming each complete response. Failed delivery reconnects
+with bounded retries and age; queue overflow drops the oldest audio and emits a
+sequence-visible operator event rather than growing without limit.
 
 Deploy only through `deploy_to_server.sh`: it requires a durable traffic freeze
 and zero-call evidence, builds and tests the exact SHA, publishes the gateway
