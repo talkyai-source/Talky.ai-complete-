@@ -225,6 +225,13 @@ class AsteriskAdapter(CallControlAdapter):
         self._gateway_rtp_ip = gateway_rtp_ip or os.getenv("ASTERISK_GATEWAY_RTP_IP", "127.0.0.1")
 
         self._session: Optional[aiohttp.ClientSession] = None
+        # Separate from _session on purpose. _session carries session-level
+        # BasicAuth for ARI, and aiohttp refuses to send a per-request
+        # Authorization header on a session that already has auth=
+        # ("Cannot combine AUTHORIZATION header with AUTH argument or
+        # credentials encoded in URL"). The C++ gateway authenticates with a
+        # Bearer token, so it needs a session with no default credentials.
+        self._gateway_session: Optional[aiohttp.ClientSession] = None
         self._connected_flag: bool = False
         self._ws_task: Optional[asyncio.Task] = None
         self._stop_event: asyncio.Event = asyncio.Event()
@@ -805,6 +812,9 @@ class AsteriskAdapter(CallControlAdapter):
         if self._session:
             await self._session.close()
             self._session = None
+        if self._gateway_session:
+            await self._gateway_session.close()
+            self._gateway_session = None
         summary = {
             "status": "deferred" if deferred_ids else "disconnected",
             "deferred": len(deferred_ids),
@@ -967,7 +977,18 @@ class AsteriskAdapter(CallControlAdapter):
         token = os.getenv("VOICE_GATEWAY_AUTH_TOKEN", "").strip()
         if token:
             headers = {"Authorization": f"Bearer {token}"}
-        async with self._session.request(
+        # Must NOT reuse self._session: it was built with
+        # auth=aiohttp.BasicAuth(...) for ARI, and aiohttp raises
+        # "Cannot combine AUTHORIZATION header with AUTH argument or
+        # credentials encoded in URL" as soon as a request on that session also
+        # carries an Authorization header. Before VOICE_GATEWAY_AUTH_TOKEN was
+        # set no header was attached, so this stayed latent -- and the
+        # production gate (prod_gate.py:282) now REQUIRES that token, which
+        # makes every gateway call fail and drops every admitted inbound call
+        # at session start.
+        if self._gateway_session is None or self._gateway_session.closed:
+            self._gateway_session = aiohttp.ClientSession()
+        async with self._gateway_session.request(
             method,
             f"{self._gateway_base_url}{path}",
             json=payload,
