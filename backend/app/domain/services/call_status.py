@@ -32,6 +32,8 @@ import logging
 from enum import Enum
 from typing import Any, Optional
 
+from app.core.db_utils import acquire_with_tenant
+
 logger = logging.getLogger(__name__)
 
 
@@ -237,7 +239,11 @@ async def record_call_state_by_provider_id(
     by design.
     """
     try:
-        async with db_pool.acquire() as conn:
+        # Platform bypass is correct here and only here: the provider gives us a
+        # channel/UUID and nothing else, so the owning tenant is exactly what
+        # this lookup exists to discover. Everything downstream (the UPDATE and
+        # the stream event) runs under the tenant this SELECT returns.
+        async with acquire_with_tenant(db_pool, None) as conn:
             row = await conn.fetchrow(
                 """
                 SELECT id, tenant_id, campaign_id
@@ -320,7 +326,7 @@ async def record_call_state(
 
     # 1. UPDATE the calls table.
     try:
-        async with db_pool.acquire() as conn:
+        async with acquire_with_tenant(db_pool, str(tenant_id)) as conn:
             if ts_col:
                 # COALESCE so we never clobber an earlier real timestamp
                 # if the same state event arrives twice (race-tolerant).
@@ -332,8 +338,27 @@ async def record_call_state(
                 sql = f"UPDATE calls SET status = $1, updated_at = NOW() WHERE id = $2{_guard_sql}"
             result = await conn.execute(sql, state.value, call_id)
             if result == "UPDATE 0":
-                # Duplicate, downgrade, contradictory terminal write, or a
-                # missing row. Skip the stream event too so polling and the
+                # Zero rows is ambiguous under FORCE ROW LEVEL SECURITY: either
+                # the row IS visible and the monotonic CAS guard rejected a
+                # duplicate/downgrade, or the row was never visible to this
+                # transaction at all — in which case every transition for this
+                # call is being dropped silently. Re-SELECT on the SAME
+                # connection so the probe runs inside the same transaction and
+                # therefore under the same SET LOCAL tenant context.
+                still_visible = await conn.fetchval(
+                    "SELECT 1 FROM calls WHERE id = $1", call_id
+                )
+                if still_visible is None:
+                    logger.warning(
+                        "call_status_row_invisible call=%s tenant=%s state=%s "
+                        "— the calls row is not visible in this tenant context; "
+                        "either an RLS policy denied it or the row does not "
+                        "exist. Transition dropped.",
+                        call_id, str(tenant_id), state.value,
+                    )
+                    return
+                # Duplicate, downgrade or contradictory terminal write against a
+                # row we can see. Skip the stream event too so polling and the
                 # event feed can never disagree about terminal truth.
                 logger.debug(
                     "call_status.non_monotonic_or_duplicate_skipped call=%s state=%s",

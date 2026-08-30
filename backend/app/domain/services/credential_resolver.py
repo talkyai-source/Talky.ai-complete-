@@ -27,6 +27,8 @@ import logging
 import os
 from typing import Any, Optional
 
+from app.core.db_utils import acquire_with_tenant
+
 logger = logging.getLogger(__name__)
 
 
@@ -164,7 +166,11 @@ class CredentialResolver:
             return None
 
         try:
-            async with self._db_pool.acquire() as conn:
+            # `tenant_ai_credentials` is RLS-protected and FORCEd (migration
+            # 0013). A bare acquire() carries no tenant GUC, so the policy
+            # matches zero rows and the tenant's own BYOK key silently
+            # becomes the platform key. Scope the read to this tenant.
+            async with acquire_with_tenant(self._db_pool, tenant_id) as conn:
                 row = await conn.fetchrow(
                     """
                     SELECT id, encrypted_key
@@ -188,6 +194,18 @@ class CredentialResolver:
             return None
 
         if not row:
+            # "The tenant never configured a key" and "the row exists but
+            # this connection could not read it" are the same zero rows from
+            # here, and either way the call is about to run on the PLATFORM
+            # key instead of the tenant's own. Log it so that substitution is
+            # auditable rather than silent. `resolve()` caches a sentinel per
+            # (tenant, provider), so this fires once, not per call. Names the
+            # tenant and provider only — never key material.
+            logger.warning(
+                "tenant_credential_row_not_readable tenant=%s provider=%s kind=%s "
+                "— falling back to the platform key",
+                tenant_id, provider, credential_kind,
+            )
             return None
 
         try:
@@ -202,8 +220,10 @@ class CredentialResolver:
             return None
 
         # Fire-and-forget touch of last_used_at — pooled, non-blocking.
+        # Same RLS scoping as the read above: without the tenant GUC the
+        # UPDATE matches zero rows and reports success.
         try:
-            async with self._db_pool.acquire() as conn:
+            async with acquire_with_tenant(self._db_pool, tenant_id) as conn:
                 await conn.execute(
                     "UPDATE tenant_ai_credentials SET last_used_at = NOW() WHERE id = $1",
                     row["id"],

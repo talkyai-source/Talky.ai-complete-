@@ -113,10 +113,20 @@ async def tenant_minutes_status(tenant_id: str) -> MinutesStatus:
     """
     try:
         from app.core.db import get_pool
+        from app.core.db_utils import acquire_with_tenant
         pool = get_pool()
-        async with pool.acquire() as conn:
+        # `calls`/`call_legs` are RLS-FORCEd (Alembic 0013) and the app role is
+        # no longer BYPASSRLS, so a bare pool.acquire() here summed ZERO seconds
+        # for every tenant and reported "0 used" — the gate never fired. The
+        # tenant GUC must be set for the usage read to see any rows at all.
+        async with acquire_with_tenant(pool, tenant_id) as conn:
             return await compute_minutes_status(conn, tenant_id)
     except Exception as exc:  # noqa: BLE001
+        # Still fails OPEN, deliberately unchanged here. NOTE: since the read
+        # above now returns real usage, this branch is the only remaining way
+        # for the gate to silently pass an over-quota tenant. Flipping it to
+        # fail-closed is an operational decision that must be paired with a
+        # per-tenant usage review first.
         logger.warning("minutes status lookup failed for tenant %s: %s", tenant_id, exc)
         return MinutesStatus(
             allocated=0, used_minutes=0, remaining_minutes=0,

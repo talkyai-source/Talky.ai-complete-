@@ -38,6 +38,8 @@ from collections import OrderedDict
 from dataclasses import dataclass
 from typing import Any, Optional
 
+from app.core.db_utils import acquire_with_tenant
+
 logger = logging.getLogger(__name__)
 
 
@@ -115,9 +117,14 @@ class RecordingPolicyService:
             )
             return _POLICY_LOOKUP_FAILURE_DEFAULT
         if row is None:
-            logger.info(
-                "recording_policy_absent tenant=%s — recording disabled until "
-                "an explicit policy is configured",
+            # Zero rows is ambiguous: the tenant may never have configured a
+            # policy, or a row may exist that this connection could not read.
+            # Either way recording is turned OFF (never inferred from
+            # absence), and that is a compliance decision, so it is logged at
+            # WARNING rather than left as a silent default.
+            logger.warning(
+                "recording_policy_absent tenant=%s — no readable policy row; "
+                "recording disabled until an explicit policy is configured",
                 tenant_id,
             )
             return _ABSENT_POLICY_DEFAULT
@@ -172,7 +179,11 @@ class RecordingPolicyService:
     # ──────────────────────────────────────────────────────────────────
 
     async def _load_row(self, tenant_id: str) -> Optional[dict]:
-        async with self._db_pool.acquire() as conn:
+        # `tenant_recording_policy` is RLS-protected and FORCEd (migration
+        # 0013). A bare acquire() carries no tenant GUC, so the policy row
+        # reads back as absent and a configured tenant is silently demoted
+        # to the no-policy default. Scope the read to this tenant.
+        async with acquire_with_tenant(self._db_pool, tenant_id) as conn:
             row = await conn.fetchrow(
                 "SELECT * FROM tenant_recording_policy WHERE tenant_id = $1",
                 tenant_id,

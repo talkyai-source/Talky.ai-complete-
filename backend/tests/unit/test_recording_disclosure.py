@@ -557,7 +557,7 @@ async def test_disabled_policy_turns_off_both_recording_and_announcement():
     the announcement but left should_record=True would record the callee
     silently — worse than the two-party default it replaces."""
     decision = await rps.RecordingPolicyService(_DisabledRowPool()).decide(
-        tenant_id="t-disabled"
+        tenant_id="22222222-2222-4222-8222-222222222222"
     )
 
     assert decision.should_record is False
@@ -705,6 +705,14 @@ async def test_absent_policy_keeps_recording_off():
         async def __aexit__(self, *_):
             return False
 
+        def transaction(self):
+            # acquire_with_tenant wraps the read in a transaction so its
+            # SET LOCAL tenant GUC cannot leak back to the pool.
+            return _FakeTxnCtx()
+
+        async def execute(self, *a, **k):
+            return None
+
         async def fetchrow(self, *a, **k):
             return None
 
@@ -712,7 +720,7 @@ async def test_absent_policy_keeps_recording_off():
         def acquire(self):
             return _NoRowConn()
 
-    decision = await rps.RecordingPolicyService(_NoRowPool()).decide(tenant_id="t1")
+    decision = await rps.RecordingPolicyService(_NoRowPool()).decide(tenant_id="11111111-1111-4111-8111-111111111111")
     assert decision.should_record is False
     assert decision.announcement_required is False
     assert spoken_disclosure_text(decision) is None

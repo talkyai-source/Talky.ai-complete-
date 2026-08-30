@@ -22,6 +22,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
 from app.api.v1.dependencies import CurrentUser, get_current_user, get_db_client
+from app.core.db_utils import acquire_with_tenant
 from app.core.postgres_adapter import Client
 
 logger = logging.getLogger(__name__)
@@ -138,7 +139,11 @@ async def list_stream_events(
 
     query = "\n".join(sql)
 
-    async with db_client.pool.acquire() as conn:
+    # RLS is enforced (the app role is no longer BYPASSRLS), so the connection
+    # must carry the tenant GUC or the policy on stream_events filters every row
+    # out and the activity feed silently renders empty. The tenant is the
+    # caller's own (required above), so scope to it rather than bypassing.
+    async with acquire_with_tenant(db_client.pool, current_user.tenant_id) as conn:
         rows = await conn.fetch(query, *args)
 
     has_more = len(rows) > limit

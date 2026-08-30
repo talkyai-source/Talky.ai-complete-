@@ -29,6 +29,8 @@ from typing import Any, Optional
 
 import asyncpg
 
+from app.core.db_utils import acquire_with_tenant
+
 logger = logging.getLogger(__name__)
 
 VALID_CATEGORIES = {"campaign", "system", "alert", "user_action", "milestone", "call"}
@@ -150,7 +152,10 @@ async def emit_event_via_pool(
     call — fine at low rates, throttled higher up at the worker level.
     """
     try:
-        async with pool.acquire() as conn:
+        # stream_events is tenant-scoped and under FORCE ROW LEVEL SECURITY, so
+        # a bare pool acquisition has no tenant GUC and the INSERT is rejected
+        # by the policy's WITH CHECK. The caller always knows the tenant here.
+        async with acquire_with_tenant(pool, str(tenant_id)) as conn:
             await emit_event(
                 conn,
                 tenant_id=tenant_id,
@@ -163,5 +168,11 @@ async def emit_event_via_pool(
                 actor_user_id=actor_user_id,
                 metadata=metadata,
             )
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("emit_event_via_pool.failed error=%s", exc)
+    except Exception as exc:  # noqa: BLE001 — fire-and-forget by design
+        # Log the tenant: the most likely failure now is the row being rejected
+        # (or the tenant context never being set), and that is invisible
+        # otherwise because emission is deliberately swallowed.
+        logger.warning(
+            "emit_event_via_pool.failed tenant=%s category=%s title=%r error=%s",
+            tenant_id, category, title, exc,
+        )

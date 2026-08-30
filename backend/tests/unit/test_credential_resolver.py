@@ -21,6 +21,20 @@ from app.domain.services.credential_resolver import (
 # Fakes
 # ──────────────────────────────────────────────────────────────────────────
 
+class _FakeTxn:
+    """asyncpg transaction double — see the note in test_recording_policy.py.
+
+    ``acquire_with_tenant`` wraps the connection in a transaction so its
+    ``SET LOCAL app.current_tenant_id`` cannot leak back to the pool.
+    """
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_):
+        return False
+
+
 class _FakeConn:
     def __init__(self, row: Any = None, raise_on_fetch: Optional[Exception] = None):
         self._row = row
@@ -31,6 +45,9 @@ class _FakeConn:
 
     async def __aexit__(self, *_):
         return False
+
+    def transaction(self):
+        return _FakeTxn()
 
     async def fetchrow(self, *args, **kwargs):
         if self._raise:
@@ -105,7 +122,7 @@ async def test_tenant_row_wins_over_env(monkeypatch):
     monkeypatch.setenv("GROQ_API_KEY", "env-fallback")
     pool = _FakePool({"id": "c1", "encrypted_key": "ENC:tenant-real"})
     resolver = CredentialResolver(db_pool=pool, encryption_service=_FakeEncryption("tenant-real"))
-    key = await resolver.resolve("groq", tenant_id="t1")
+    key = await resolver.resolve("groq", tenant_id="11111111-1111-4111-8111-111111111111")
     assert key == "tenant-real"
 
 
@@ -114,7 +131,7 @@ async def test_env_fallback_when_no_tenant_row(monkeypatch):
     monkeypatch.setenv("GROQ_API_KEY", "env-fallback")
     pool = _FakePool(None)  # no row
     resolver = CredentialResolver(db_pool=pool, encryption_service=_FakeEncryption())
-    key = await resolver.resolve("groq", tenant_id="t1")
+    key = await resolver.resolve("groq", tenant_id="11111111-1111-4111-8111-111111111111")
     assert key == "env-fallback"
 
 
@@ -145,7 +162,7 @@ async def test_db_failure_falls_back_to_env(monkeypatch):
     monkeypatch.setenv("GROQ_API_KEY", "env-fallback")
     pool = _FakePool(raise_on_fetch=RuntimeError("db down"))
     resolver = CredentialResolver(db_pool=pool, encryption_service=_FakeEncryption())
-    key = await resolver.resolve("groq", tenant_id="t1")
+    key = await resolver.resolve("groq", tenant_id="11111111-1111-4111-8111-111111111111")
     assert key == "env-fallback"
 
 
@@ -157,7 +174,7 @@ async def test_decrypt_failure_falls_back_to_env(monkeypatch):
     monkeypatch.setenv("GROQ_API_KEY", "env-fallback")
     pool = _FakePool({"id": "c1", "encrypted_key": "corrupted"})
     resolver = CredentialResolver(db_pool=pool, encryption_service=_FakeEncryption(plaintext=None))
-    key = await resolver.resolve("groq", tenant_id="t1")
+    key = await resolver.resolve("groq", tenant_id="11111111-1111-4111-8111-111111111111")
     assert key == "env-fallback"
 
 
@@ -179,7 +196,7 @@ async def test_resolver_lowercases_provider(monkeypatch):
             return _LoggingConn()
 
     resolver = CredentialResolver(db_pool=_LoggingPool(), encryption_service=_FakeEncryption())
-    await resolver.resolve("GROQ", tenant_id="t1")
+    await resolver.resolve("GROQ", tenant_id="11111111-1111-4111-8111-111111111111")
     assert call_log["provider"] == "groq"
 
 
@@ -192,5 +209,5 @@ async def test_resolver_trims_plaintext(monkeypatch):
         db_pool=pool,
         encryption_service=_FakeEncryption("  tenant-key  \n"),
     )
-    key = await resolver.resolve("groq", tenant_id="t1")
+    key = await resolver.resolve("groq", tenant_id="11111111-1111-4111-8111-111111111111")
     assert key == "tenant-key"

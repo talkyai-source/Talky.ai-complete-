@@ -1056,14 +1056,24 @@ class CallGuard:
         used = tenant_limits.monthly_minutes_used or 0
         try:
             from app.domain.services.minutes_quota import compute_minutes_status
+            from app.core.db_utils import acquire_with_tenant
 
-            async with self._db_pool.acquire() as conn:
+            # RLS is real now (Alembic 0013 + the app role losing BYPASSRLS):
+            # a bare pool.acquire() sees ZERO rows in `calls`/`call_legs`, so
+            # this read returned 0 used minutes for every tenant and the gate
+            # never fired. The usage read must carry the tenant GUC.
+            async with acquire_with_tenant(self._db_pool, str(tenant_id)) as conn:
                 _status = await compute_minutes_status(conn, str(tenant_id))
             if _status.used_minutes is not None:
                 used = int(_status.used_minutes)
         except Exception as exc:  # noqa: BLE001
             # Fails OPEN to the stored value, matching this method's stated
             # contract that a metering hiccup never strands legitimate calls.
+            # Unchanged on purpose — but note the live read above now returns
+            # real usage, so this fallback (to a column nothing increments) is
+            # the one remaining path that lets an over-quota tenant through.
+            # Making it fail-closed is an operator decision that must be paired
+            # with a per-tenant usage review.
             logger.warning(
                 "call_guard: live minutes lookup failed for tenant=%s (%s) — "
                 "falling back to the stored counter, which may be stale",

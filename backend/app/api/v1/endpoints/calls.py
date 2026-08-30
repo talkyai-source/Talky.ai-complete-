@@ -12,6 +12,7 @@ from typing import Any, List, Literal, Optional
 from app.core.postgres_adapter import Client
 
 from app.api.v1.dependencies import get_db_client, get_current_user, CurrentUser
+from app.core.db_utils import acquire_with_tenant
 from app.core.security.rbac import require_permission, Permission
 from app.domain.services.telephony.termination import (
     finalize_proven_inbound_termination,
@@ -679,7 +680,12 @@ async def list_live_calls(
     """
 
     try:
-        async with db_client.pool.acquire() as conn:
+        # RLS is enforced (the app role is no longer BYPASSRLS), so the
+        # connection must carry the tenant GUC or the policy filters every
+        # row out and this endpoint silently returns an empty live panel.
+        # The tenant is known here — it is the caller's own — so scope to it
+        # rather than bypassing.
+        async with acquire_with_tenant(db_client.pool, current_user.tenant_id) as conn:
             rows = await conn.fetch(sql, *args)
     except Exception as exc:
         logger.error("list_live_calls failed: %s", exc)
