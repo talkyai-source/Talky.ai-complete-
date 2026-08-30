@@ -2376,8 +2376,16 @@ async def _admit_inbound_call(
 _INBOUND_ANSWER_DURABILITY_TIMEOUT_S = 5.0
 
 
-def _normalise_answered_at(value: Any) -> str:
-    """Return a timezone-aware ISO timestamp suitable for DB and Redis."""
+def _normalise_answered_at_dt(value: Any) -> datetime:
+    """Return a timezone-aware UTC ``datetime``.
+
+    asyncpg validates a parameter's PYTHON type against the inferred column
+    type before it sends anything, so a ``timestamptz`` placeholder must be
+    given a real ``datetime``. Writing ``$4::timestamptz`` in the SQL does not
+    help: the cast is applied server-side, long after the client-side type
+    check has already rejected a ``str`` with
+    "invalid input for query argument $4 ... got 'str'".
+    """
 
     if isinstance(value, datetime):
         parsed = value
@@ -2389,7 +2397,18 @@ def _normalise_answered_at(value: Any) -> str:
             parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone(timezone.utc).isoformat()
+    return parsed.astimezone(timezone.utc)
+
+
+def _normalise_answered_at(value: Any) -> str:
+    """Return a timezone-aware ISO timestamp for Redis/JSON consumers.
+
+    Kept as the string form because the cleanup-ledger promotion and this
+    hook's return value are serialised, not bound as query parameters. Use
+    ``_normalise_answered_at_dt`` for anything handed to asyncpg.
+    """
+
+    return _normalise_answered_at_dt(value).isoformat()
 
 
 async def _find_inbound_admission_by_provider_identity(
@@ -2468,7 +2487,8 @@ async def _persist_inbound_answered(
     if not durable_call_id or not tenant_id or not provider_call_id:
         raise RuntimeError("inbound Answer lacks durable call authority")
 
-    answer_timestamp = _normalise_answered_at(answered_at)
+    # Bound as $4 against a timestamptz column, so this must be a datetime.
+    answer_timestamp = _normalise_answered_at_dt(answered_at)
     container = get_container()
     db_pool = getattr(container, "db_pool", None)
     if not getattr(container, "is_initialized", False) or db_pool is None:
