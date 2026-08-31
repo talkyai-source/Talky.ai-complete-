@@ -46,9 +46,7 @@ def _stub_termination_context(monkeypatch, module, row, *, events=None):
         return TerminationContext(
             call_id=str(call_reference),
             tenant_id=None,
-            provider_call_id=(
-                row.get("provider_call_id") or row.get("external_call_uuid")
-            ),
+            provider_call_id=(row.get("provider_call_id") or row.get("external_call_uuid")),
             previous_status=previous_status,
             provider_leg_ids=(),
         )
@@ -68,6 +66,13 @@ class _CallConn:
         self.row = row
         self.events = events if events is not None else []
         self.queries: list[str] = []
+
+    def transaction(self):
+        return _Acquire(self)
+
+    async def execute(self, _query, *_args):
+        # RLS SET LOCAL/set_config performed by acquire_with_tenant.
+        return "SELECT 1"
 
     async def fetchrow(self, query, *_args):
         self.queries.append(query)

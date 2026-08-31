@@ -5,6 +5,15 @@
 **Team:** Two developers, with agent testing and prompt tuning running in parallel
 **Release rule:** Freeze the release candidate on September 8; September 9 is validation and rollback rehearsal; September 10 is controlled release.
 
+> **Execution audit — 2026-08-31:** 213 of 532 literal checklist items are
+> evidence-backed; 319 remain open. Inbound MVP is 29/31, prompt backend is
+> 10/10, interested-lead capture is 22/24, and expanded contacts is 38/40.
+> Unchecked items must not be treated as implicit passes: they include live
+> carrier/payment/CRM tests, the 200-tenant and soak evidence, owner approvals,
+> historical team-process milestones and remaining product work. The proof,
+> premortem and exact production gates are in
+> `docs/sessions/reports/report14.md`.
+
 ## 1. Ownership
 
 ### Developer A — Backend, Voice and Integrations
@@ -270,19 +279,24 @@
 
 ### Backend/Security
 
-- [ ] Reuse existing endpoints where possible.
-- [ ] Apply tenant and role authorization to every security endpoint.
-- [ ] Never return raw API secrets after creation.
-- [ ] Audit key creation, rotation, revocation and security-setting changes.
-- [ ] Add rate limiting to sensitive actions.
-- [ ] Add tests for viewer, partner-admin, tenant-admin and master-admin roles.
+- [x] Reuse existing endpoints where possible.
+- [x] Apply tenant and role authorization to every security endpoint.
+- [x] Never return raw API secrets after creation.
+- [x] Audit key creation, rotation, revocation and security-setting changes.
+- [x] Add rate limiting to sensitive actions.
+- [x] Add tests for viewer, partner-admin, tenant-admin and master-admin roles.
 
 ### Acceptance Criteria
 
 - [x] Security is directly accessible from the left sidebar.
 - [x] Old URLs redirect correctly.
 - [x] Unauthorized controls are hidden and rejected by the backend.
-- [ ] Sensitive mutations appear in the audit log.
+- [x] Sensitive mutations appear in the audit log.
+
+> **2026-08-31 verification note:** endpoint-auth, RBAC, admin-tenant-isolation,
+> API-security/rate-limit and audit-log suites cover the checked backend items.
+> “Allowed IPs” remains the sole unsupported control and is still presented as
+> unavailable rather than as an empty or misleading security feature.
 
 ---
 
@@ -341,16 +355,22 @@
 
 ### Backend Integration
 
-- [ ] Store the master template as `generic_lead_generation` with a version.
-- [ ] Do not use `You are a helpful AI assistant` for campaign calls.
-- [ ] Load the selected campaign's prompt and configuration from the database.
-- [ ] Render campaign variables before session creation.
-- [ ] Fail validation when required variables are missing.
-- [ ] Never send unresolved `{{variable}}` placeholders to the LLM.
-- [ ] Add lead-specific context separately from stable system instructions.
-- [ ] Log `campaign_id`, `prompt_template`, `prompt_version` and `prompt_hash`.
-- [ ] Keep prompt versions immutable after use; create a new version for changes.
-- [ ] Add rollback to the previous approved prompt version.
+- [x] Store the master template as `generic_lead_generation` with a version.
+- [x] Do not use `You are a helpful AI assistant` for campaign calls.
+- [x] Load the selected campaign's prompt and configuration from the database.
+- [x] Render campaign variables before session creation.
+- [x] Fail validation when required variables are missing.
+- [x] Never send unresolved `{{variable}}` placeholders to the LLM.
+- [x] Add lead-specific context separately from stable system instructions.
+- [x] Log `campaign_id`, `prompt_template`, `prompt_version` and `prompt_hash`.
+- [x] Keep prompt versions immutable after use; create a new version for changes.
+- [x] Add rollback to the previous approved prompt version.
+
+> **2026-08-31 verification note:** the prompt registry/composer, strict slot
+> validation, durable prompt identity and archived-body rollback are covered by
+> `test_prompt_versions.py`, `test_prompt_identity_persist.py` and
+> `test_prompt_rollback.py`. The controlled-call matrix and release scorecard
+> below remain open because no immutable 30-call evidence set was supplied.
 
 ### Prompt Test Matrix
 
@@ -403,39 +423,45 @@
 
 ### Data Model
 
-- [ ] Create a structured `lead_capture` or `call_lead_details` record linked to call, campaign, contact and tenant.
-- [ ] Support campaign-defined custom fields.
-- [ ] Field types: text, number, email, phone, date/time, single select, multi-select and notes.
-- [ ] Mark fields as required, optional, agent-visible and user-visible.
-- [ ] Record the source of each value: imported contact, caller statement, agent inference or manual edit.
-- [ ] Do not treat inferred values as confirmed facts.
+- [x] Create a structured `lead_capture` or `call_lead_details` record linked to call, campaign, contact and tenant.
+- [x] Support campaign-defined custom fields.
+- [x] Field types: text, number, email, phone, date/time, single select, multi-select and notes.
+- [x] Mark fields as required, optional, agent-visible and user-visible.
+- [x] Record the source of each value: imported contact, caller statement, agent inference or manual edit.
+- [x] Do not treat inferred values as confirmed facts.
 
 ### Agent Behavior
 
-- [ ] Supply required field definitions to the agent.
-- [ ] Let the agent extract fields from natural conversation.
-- [ ] Do not force the agent to ask for information already provided.
-- [ ] Confirm important contact and appointment information.
-- [ ] Use `unknown` when information was not provided.
-- [ ] Update structured fields after each confirmed detail or at call completion.
+- [x] Supply required field definitions to the agent.
+- [x] Let the agent extract fields from natural conversation.
+- [x] Do not force the agent to ask for information already provided.
+- [x] Confirm important contact and appointment information.
+- [x] Use `unknown` when information was not provided.
+- [x] Update structured fields after each confirmed detail or at call completion.
 
 ### Frontend
 
-- [ ] Show an **Interested lead** badge when interest is detected/confirmed.
-- [ ] Open a compact lead-information panel from the call page.
-- [ ] Display captured business/customer details in a readable form.
-- [ ] Highlight missing required fields.
-- [ ] Allow authorized users to correct or complete details.
-- [ ] Show who/what supplied each value.
-- [ ] Add save, validation and conflict handling.
+- [x] Show an **Interested lead** badge when interest is detected/confirmed.
+- [x] Open a compact lead-information panel from the call page.
+- [x] Display captured business/customer details in a readable form.
+- [x] Highlight missing required fields.
+- [x] Allow authorized users to correct or complete details.
+- [x] Show who/what supplied each value.
+- [x] Add save, validation and conflict handling.
 
 ### Acceptance Criteria
 
-- [ ] Information spoken once is captured without being asked again.
-- [ ] The form is linked to the correct tenant, call and contact.
-- [ ] Missing details remain visibly missing rather than being invented.
+- [x] Information spoken once is captured without being asked again.
+- [x] The form is linked to the correct tenant, call and contact.
+- [x] Missing details remain visibly missing rather than being invented.
 - [ ] Manual corrections are audited.
 - [ ] Captured information is available to approved CRM synchronization.
+
+> **2026-08-31 verification note:** migration `0020`, the tenant-scoped capture
+> service, per-turn/teardown persistence, lead-details API and call-page panel
+> prove the checked behavior. Manual edits retain `source=manual_edit`, but no
+> separate actor/action audit event was found; CRM availability is also not an
+> approved connector synchronization proof. Those two items stay unchecked.
 
 ---
 
@@ -506,11 +532,12 @@
 - [x] Successful verified payment credits minutes once.
 - [x] Duplicate webhook does not duplicate minutes.
 - [x] Failed/cancelled payment adds no minutes.
-- [ ] Tenant billing records remain isolated. — RLS policies written and every
-      query is tenant-scoped, but this stays OPEN until #80: the production DB
-      role is a superuser with BYPASSRLS, so no policy on any table is actually
-      enforced. Ticking this would be claiming an isolation the database is not
-      currently providing.
+- [x] Tenant billing records remain isolated. — The 2026-08-31 production proof
+      confirmed the application role no longer has `BYPASSRLS` (a bare
+      connection saw zero call rows while the explicit tenant/bypass context
+      saw 1,041). Tenant-aware pooled acquisition, RLS policies and the static
+      invariant now protect billing/usage paths; live canary reconciliation is
+      still required by the global release gate.
 - [x] New balance is reflected in call quota enforcement.
 
 ---
@@ -555,58 +582,64 @@
 
 ### Canonical Contact Model
 
-- [ ] `first_name`
-- [ ] `last_name`
-- [ ] `full_name` as display/derived field where possible
-- [ ] `mobile_number`
-- [ ] `business_number`
-- [ ] `email`
-- [ ] `company_name`
-- [ ] `job_title` or role
-- [ ] `best_time_to_call`
-- [ ] `timezone`
-- [ ] `calling_notes`
-- [ ] `preferred_contact_method`, if needed
-- [ ] `do_not_call`
-- [ ] `custom_fields`
+- [x] `first_name`
+- [x] `last_name`
+- [x] `full_name` as display/derived field where possible
+- [x] `mobile_number`
+- [x] `business_number`
+- [x] `email`
+- [x] `company_name`
+- [x] `job_title` or role
+- [x] `best_time_to_call`
+- [x] `timezone`
+- [x] `calling_notes`
+- [x] `preferred_contact_method`, if needed
+- [x] `do_not_call`
+- [x] `custom_fields`
 
 ### Data Rules
 
-- [ ] Avoid storing duplicate conflicting `phone_number` and `mobile_number` values without defining a canonical calling number.
-- [ ] Add `primary_phone_type` or a clear priority rule.
-- [ ] Normalize phone numbers to E.164 while preserving display formatting if needed.
-- [ ] Validate email without rejecting legitimate formats.
-- [ ] Interpret `best_time_to_call` together with timezone.
-- [ ] Do not call when `do_not_call=true`.
-- [ ] Encrypt or protect sensitive contact data according to platform policy.
+- [x] Avoid storing duplicate conflicting `phone_number` and `mobile_number` values without defining a canonical calling number.
+- [x] Add `primary_phone_type` or a clear priority rule.
+- [x] Normalize phone numbers to E.164 while preserving display formatting if needed.
+- [x] Validate email without rejecting legitimate formats.
+- [x] Interpret `best_time_to_call` together with timezone.
+- [x] Do not call when `do_not_call=true`.
+- [x] Encrypt or protect sensitive contact data according to platform policy.
 - [ ] Audit imports, edits and deletions.
 
 ### Frontend and Import
 
-- [ ] Update add/edit contact form.
-- [ ] Update contact details view and table columns.
-- [ ] Update CSV import template.
-- [ ] Add column mapping during import.
-- [ ] Show row-level validation failures.
-- [ ] Add duplicate detection and merge/skip decision.
+- [x] Update add/edit contact form.
+- [x] Update contact details view and table columns.
+- [x] Update CSV import template.
+- [x] Add column mapping during import.
+- [x] Show row-level validation failures.
+- [x] Add duplicate detection and merge/skip decision.
 - [ ] Let campaign creation select which contact fields the agent may use.
 
 ### Agent Context
 
-- [ ] Pass only necessary fields into the call prompt/context.
-- [ ] Use the preferred calling number.
-- [ ] Respect best time to call and timezone in dialer scheduling.
-- [ ] Supply calling notes without allowing them to override system/security rules.
-- [ ] Clearly delimit imported notes as untrusted data.
-- [ ] Avoid reading internal notes aloud unless explicitly required.
+- [x] Pass only necessary fields into the call prompt/context.
+- [x] Use the preferred calling number.
+- [x] Respect best time to call and timezone in dialer scheduling.
+- [x] Supply calling notes without allowing them to override system/security rules.
+- [x] Clearly delimit imported notes as untrusted data.
+- [x] Avoid reading internal notes aloud unless explicitly required.
 
 ### Acceptance Criteria
 
-- [ ] Manual and CSV-created contacts produce the same schema.
-- [ ] Dialer chooses the correct phone number.
-- [ ] Agent receives approved name, business and call notes.
-- [ ] Best-time scheduling respects timezone.
-- [ ] Do-not-call contacts cannot be queued.
+- [x] Manual and CSV-created contacts produce the same schema.
+- [x] Dialer chooses the correct phone number.
+- [x] Agent receives approved name, business and call notes.
+- [x] Best-time scheduling respects timezone.
+- [x] Do-not-call contacts cannot be queued.
+
+> **2026-08-31 verification note:** migration `0020`, the canonical field
+> registry, CSV mapper, contact page, phone normalizer, timezone precedence,
+> prompt-safety fences and DNC guard cover the checked items. A complete
+> import/edit/delete audit trail and per-campaign field allowlist were not
+> found, so those two items remain open.
 
 ---
 

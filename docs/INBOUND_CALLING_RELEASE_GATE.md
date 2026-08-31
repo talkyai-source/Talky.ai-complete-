@@ -1,11 +1,29 @@
 # Inbound Calling Release Gate
 
-Last updated: 2026-08-29
+Last updated: 2026-08-31
 Scope: Talky.ai inbound calling, tenant dashboard, backend admission/billing, and the proposed ingress architecture
 
 ## Current verdict
 
-**The transfer-disabled local candidate has passed the repository-backed controls recorded below, with no known open critical/high code defect. That is not production achievement. Production still runs the pre-inbound commit and database schema (`0021_billing_topup`), while this inbound implementation is uncommitted locally, so production traffic is an unconditional NO-GO. There is no usable staging environment, frozen release manifest, live paging path, verified restore evidence, approved production ingress design, native C++ execution proof, or carrier-delivered call evidence. The source plan's successful-transfer scope is explicitly deferred and requires signed product/telephony acceptance; no live carrier call, deployment, production switch change, or transfer enablement was performed during this work.**
+**The transfer-disabled candidate is committed on local branch
+`codex/inbound-hardening-20260831` through implementation head `12991153`, with
+schema head `0036_inbound_rejection_log`. That is not production achievement.
+The latest production baseline supplied for this audit is application
+`69e607e9` and schema `0035`; it could not be independently reverified because
+no usable production SSH credential was available. This candidate has not been
+pushed or deployed. Production traffic is therefore an unconditional NO-GO
+until the external gates below pass. There is no supplied usable staging
+environment, frozen release manifest, real paging destination, verified restore
+evidence, second carrier-delivered tenant/DID proof, native C++ build result, or
+complete canary/soak evidence. Successful transfer remains production-disabled
+and requires signed product/telephony acceptance.**
+
+The 2026-08-31 hardening adds tenant-safe RLS acquisition and an AST invariant,
+pre-checkout deploy/toolchain guards, repo-managed dialplan comparison, gateway
+build identity, SIP denial causes, answer-to-first-audio measurement, durable
+rejection history, provider-independent PCMU emergency clips, hourly
+carrier-hairpin liveness and a two-DID/two-tenant routing proof. The full proof
+and premortem are recorded in `docs/sessions/reports/report14.md`.
 
 The tenant dashboard has been migrated locally to Next.js 16.3.3. Its production dependency audit is clean, the complete dependency graph has no high or critical finding, and the production build passes. Staging must still prove that the deployed artifact and environment match this verified build.
 
@@ -46,7 +64,7 @@ The safe default remains closed at every layer:
 
 | Area | Delivered control | Local evidence |
 |---|---|---|
-| Data | Additive migrations through `0034`, globally unique active DID, direction fields, immutable signed usage ledgers, two-person manual charge approval, audit/reassignment history, RLS/role guard, permanent settlement uniqueness, and repair of historically false-stamped bootstrap databases | Backend and real-PostgreSQL suites |
+| Data | Additive migrations through `0036`, globally unique active DID, direction fields, immutable signed usage ledgers, two-person manual charge approval, audit/reassignment/rejection history, RLS/role guard, permanent settlement uniqueness, and repair of historically false-stamped bootstrap databases | Backend and real-PostgreSQL suites |
 | Admission | Exact DID route, tenant/platform gates, verified phone and active trunk, schedule, AI, quota and concurrency before answer | Backend combined suite |
 | Billing | Full-window pre-answer reservation, signed settlement/release/reversal, explicit Answer/overage holds, evidence-backed manual resolution, stale reservation recovery | Backend, API, and real-PostgreSQL suites |
 | Runtime | Durable pre-Answer intent, pinned opening/greeting/prompt/voice/AI config, consent gate, exact quota-backed deadline, idempotent teardown | Backend combined suite |
@@ -70,7 +88,8 @@ The safe default remains closed at every layer:
 | Inbound transfer | **Deferred; production disabled by design** | Production remains closed in code. A staging-only proof path is scoped to one exact tenant/config and still requires the independent platform switch; only rejection is in production release scope until linked-leg live proof and sign-off complete. |
 | Real outbound non-regression baseline | **Not captured; original pre-change point is irrecoverable** | Require a signed deviation/waiver, compare the current candidate with the last known-good release and historical carrier CDR/PBX evidence, then complete one evidenced predeployment call plus daily and frozen-candidate outbound smoke calls. |
 
-Verification recorded through 2026-08-29:
+Historical verification recorded through 2026-08-29 (superseded where the
+2026-08-31 snapshot above differs):
 
 - final post-hardening backend unit/security regression: **7,362 passed, 7 skipped, 0 failed**; pytest reported **1,304 non-failing warnings**, principally existing deprecations plus test-double coroutine warnings that remain engineering debt
 - final focused release-control aggregate covering load/soak evidence, emitted alert contracts, operational safety, candidate/run canary scope-contract enforcement, production fail-closed gates, KMS, gateway callback authentication, concurrency races, deployment contracts, and the Day 10 harness: **197 passed, 0 failed**; the load/soak contract file independently passed **27/27** after widening only its multi-process test-harness timeout from 8 to 20 seconds

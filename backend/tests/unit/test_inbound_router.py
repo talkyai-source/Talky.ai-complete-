@@ -143,11 +143,7 @@ class _DidMapConn(_FakeConn):
         self.query = query
         self.args = args
         requested_dids = args[0]
-        return [
-            self.bindings_by_did[did]
-            for did in requested_dids
-            if did in self.bindings_by_did
-        ]
+        return [self.bindings_by_did[did] for did in requested_dids if did in self.bindings_by_did]
 
 
 class _Acquire:

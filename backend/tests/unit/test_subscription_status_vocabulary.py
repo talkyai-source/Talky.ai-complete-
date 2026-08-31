@@ -25,6 +25,7 @@ The fix is the same shape ``call_outcomes.py`` uses for the outcome
 vocabulary: ONE module spells the strings, both sides import it, and a drift
 guard fails if a second copy appears.
 """
+
 from __future__ import annotations
 
 import ast
@@ -35,7 +36,11 @@ import pytest
 from tests.unit._source_scan import BACKEND, app_sources
 
 
+TENANT_ID = "11111111-1111-1111-1111-111111111111"
+
+
 # ── fakes ───────────────────────────────────────────────────────────────────
+
 
 class _FakeRow(dict):
     """asyncpg Record-like: supports both ``row["k"]`` and ``row.get("k")``."""
@@ -50,6 +55,13 @@ class _FakeConn:
 
     async def fetchrow(self, *a, **k):
         return self._row
+
+    def transaction(self):
+        return _FakeAcquireCtx(self)
+
+    async def execute(self, *_args, **_kwargs):
+        # RLS context setup performed by acquire_with_tenant.
+        return "SELECT 1"
 
 
 class _FakeAcquireCtx:
@@ -75,7 +87,7 @@ def _guard(status: str):
     from app.domain.services.call_guard import CallGuard
 
     return CallGuard(
-        db_pool=_FakePool(_FakeConn(_FakeRow(id="t1", subscription_status=status))),
+        db_pool=_FakePool(_FakeConn(_FakeRow(id=TENANT_ID, subscription_status=status))),
         redis_client=None,
     )
 
@@ -92,38 +104,32 @@ _ALLOWED = ["active", "trialing"]
 @pytest.mark.asyncio
 @pytest.mark.parametrize("status", _BLOCKING)
 async def test_tenant_active_blocks_every_stopped_status(status):
-    result = await _guard(status)._check_tenant_active(tenant_id="t1")
+    result = await _guard(status)._check_tenant_active(tenant_id=TENANT_ID)
     assert result.passed is False, f"{status!r} tenant was allowed to dial"
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("status", _ALLOWED)
 async def test_tenant_active_allows_a_paying_tenant(status):
-    assert (await _guard(status)._check_tenant_active(tenant_id="t1")).passed is True
+    assert (await _guard(status)._check_tenant_active(tenant_id=TENANT_ID)).passed is True
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("status", _BLOCKING)
 async def test_partner_active_blocks_every_stopped_status(status):
-    result = await _guard(status)._check_partner_active(
-        tenant_id="t1", partner_id="p1"
-    )
+    result = await _guard(status)._check_partner_active(tenant_id="t1", partner_id="p1")
     assert result.passed is False, f"{status!r} partner was allowed to dial"
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("status", _ALLOWED)
 async def test_partner_active_allows_a_paying_partner(status):
-    result = await _guard(status)._check_partner_active(
-        tenant_id="t1", partner_id="p1"
-    )
+    result = await _guard(status)._check_partner_active(tenant_id="t1", partner_id="p1")
     assert result.passed is True
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "status", _BLOCKING + ["past_due", "unpaid", "incomplete_expired"]
-)
+@pytest.mark.parametrize("status", _BLOCKING + ["past_due", "unpaid", "incomplete_expired"])
 async def test_subscription_check_blocks_every_non_paying_status(status):
     result = await _guard(status)._check_subscription_uncached(tenant_id="t1")
     assert result.passed is False, f"{status!r} subscription was allowed to dial"
@@ -145,7 +151,7 @@ async def test_the_deny_reason_uses_the_canonical_spelling():
     """
     from app.domain.services.subscription_status import CANCELLED
 
-    r = await _guard("canceled")._check_tenant_active(tenant_id="t1")
+    r = await _guard("canceled")._check_tenant_active(tenant_id=TENANT_ID)
     assert r.reason == f"tenant_{CANCELLED}"
 
     r = await _guard("canceled")._check_subscription_uncached(tenant_id="t1")
@@ -160,6 +166,7 @@ async def test_status_is_matched_case_and_whitespace_insensitively():
 
 
 # ── billing writes the canonical value ──────────────────────────────────────
+
 
 class _Recorder:
     """Captures ``table(t).update(payload).eq(...).execute()`` chains."""
