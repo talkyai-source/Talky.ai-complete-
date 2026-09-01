@@ -57,31 +57,18 @@ class TranscriptHandler:
             return
 
         if transcript.metadata and transcript.metadata.get("resumed"):
-            # TurnResumed cancels SPECULATIVE work only. If a confirmed final
-            # answer is already in flight (a speculative task promoted on
-            # EndOfTurn), it must NOT be killed — doing so leaves the caller in
-            # silence. (Per Deepgram: TurnResumed targets the in-progress
-            # speculative response, not a committed turn.)
-            existing = self._p._pending_llm_tasks.get(call_id)
-            if existing is not None and getattr(existing, "_turn_type", "speculative") == "final":
-                logger.info(
-                    "TurnResumed ignored — final answer in flight for %s", call_id[:12]
-                )
-                return
-            logger.info(f"TurnResumed for call {call_id} — cancelling speculative LLM")
-            session.llm_active = False
-            if call_id in self._p._pending_llm_tasks:
-                task = self._p._pending_llm_tasks.pop(call_id)
-                # Bounded, non-blocking cancel (see _cancel_turn_task) so the
-                # consumer keeps draining events instead of freezing here.
-                await self._p._cancel_turn_task(task, call_id, "speculative_llm")
-            # Roll back any messages the speculative handle_turn_end appended
-            # before being cancelled.  Without this, orphaned user/assistant
-            # messages corrupt the conversation context for subsequent turns.
-            restore_len = getattr(session, "_speculative_history_len", None)
-            if restore_len is not None and len(session.conversation_history) > restore_len:
-                session.conversation_history = session.conversation_history[:restore_len]
-            session._speculative_history_len = None
+            # TurnResumed targets Deepgram's in-progress SPECULATIVE response.
+            # Nothing speculative runs here any more: the eager branch below
+            # stashes text only ("do NOT launch a speculative turn on eager"),
+            # and every task this handler dispatches is a confirmed FINAL turn,
+            # which a bare resume must never cancel (that is the caller-in-
+            # silence bug). The cancel-and-rollback branch that used to live
+            # here could therefore never fire — except for its stray
+            # `session.llm_active = False` when nothing was pending, which could
+            # clear the flag out from under an in-flight greeting. Removed
+            # 2026-09-02. The caller kept talking; the confirmed EndOfTurn that
+            # follows carries their full words.
+            logger.debug("TurnResumed for %s — nothing speculative to cancel", call_id[:12])
             return
 
         # ── The caller has yielded the floor. Say so NOW. ────────────────────

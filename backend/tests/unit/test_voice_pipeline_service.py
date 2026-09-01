@@ -1026,3 +1026,96 @@ async def test_failed_dnc_write_is_not_confirmed_aloud(monkeypatch):
     assert "removed" not in spoken[0].lower()
     # The flag stays set so teardown retries the purge.
     assert getattr(session, "_caller_opted_out", False) is True
+
+
+# --- the sentence cap must not cut the question off (2026-09-02) -------------
+
+@pytest.mark.asyncio
+async def test_sentence_cap_lets_the_immediately_following_question_through():
+    """Three statements then the question, cap of 3: the caller must hear the
+    question. Before this the fourth sentence was dropped and the turn dead-ended."""
+    service = _make_service_for_disposition([
+        "Got it. ", "That's the common one. ", "Most folks say the same. ",
+        "What would fix it for you?",
+    ])
+    session = _make_session()
+    session.campaign_id = "campaign-123"
+    session.agent_config.response_max_sentences = 3
+    session.current_user_input = "It's just been unreliable lately."
+    session.conversation_history.append(Message(role=MessageRole.USER, content="Hi"))
+    session.conversation_history.append(Message(role=MessageRole.ASSISTANT, content="Hi, Sarah here from Acme — got a minute?"))
+
+    await service.handle_turn_end(session, AsyncMock())
+
+    spoken = " ".join(getattr(session, "_spoken_sentences", []))
+    assert "What would fix it for you?" in spoken
+    last = session.conversation_history[-1]
+    assert last.role == MessageRole.ASSISTANT
+    assert last.content.rstrip().endswith("?")
+
+
+@pytest.mark.asyncio
+async def test_sentence_cap_still_drops_a_fourth_statement():
+    service = _make_service_for_disposition([
+        "Got it. ", "That's the common one. ", "Most folks say the same. ",
+        "We also do same-day payouts. ", "And weekend support.",
+    ])
+    session = _make_session()
+    session.campaign_id = "campaign-123"
+    session.agent_config.response_max_sentences = 3
+    session.current_user_input = "It's just been unreliable lately."
+    session.conversation_history.append(Message(role=MessageRole.USER, content="Hi"))
+    session.conversation_history.append(Message(role=MessageRole.ASSISTANT, content="Hi, Sarah here from Acme — got a minute?"))
+
+    await service.handle_turn_end(session, AsyncMock())
+
+    spoken = " ".join(getattr(session, "_spoken_sentences", []))
+    assert "same-day" not in spoken
+    assert "weekend" not in spoken
+    assert "same-day" not in session.conversation_history[-1].content
+
+
+# --- NON-NEGOTIABLES reaches the model exactly once, last (2026-09-02) -------
+
+class _CapturingLLMProvider(_StreamingLLMProvider):
+    def __init__(self, chunks):
+        super().__init__(chunks)
+        self.system_prompts: list[str] = []
+
+    async def stream_chat_with_timeout(self, *args, **kwargs):
+        sp = kwargs.get("system_prompt")
+        if sp is None and len(args) > 1:
+            sp = args[1]
+        self.system_prompts.append(sp or "")
+        async for c in super().stream_chat_with_timeout(*args, **kwargs):
+            yield c
+
+
+@pytest.mark.asyncio
+async def test_live_turn_prompt_carries_the_floor_once_and_last():
+    """The composed base ends with the full NON-NEGOTIABLES floor; per-turn
+    blocks landed after it, so a compact copy was re-appended every turn. Now
+    the base floor is relocated to the end and there is exactly one copy."""
+    from app.services.scripts.prompts.composer import compose_prompt
+
+    service = _make_service_for_disposition(["Sure — what's the best email?"])
+    llm = _CapturingLLMProvider(["Sure — what's the best email?"])
+    service.llm_provider = llm
+    session = _make_session()
+    session.campaign_id = "campaign-123"
+    session.system_prompt = compose_prompt(
+        "lead_gen", "Sarah", "Acme", {}, knowledge_driven=True,
+        additional_instructions="Call UK retailers about card terminals.",
+    )
+    session.current_user_input = "Can you send me something?"
+    session.conversation_history.append(Message(role=MessageRole.USER, content="Hi"))
+    session.conversation_history.append(Message(role=MessageRole.ASSISTANT, content="Sarah here from Acme — got a minute?"))
+
+    await service.handle_turn_end(session, AsyncMock())
+
+    assert llm.system_prompts, "the LLM was not called"
+    sp = llm.system_prompts[-1]
+    assert sp.count("## NON-NEGOTIABLES") == 1
+    assert sp.rstrip().endswith("never repeat a mis-heard version back to them.")
+    # The per-turn craft block still precedes the floor.
+    assert sp.index("## THIS TURN") < sp.index("## NON-NEGOTIABLES")

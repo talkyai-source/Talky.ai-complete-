@@ -223,3 +223,44 @@ def test_explicit_argument_beats_the_env(monkeypatch):
     monkeypatch.setenv("VOICE_PROMPT_CACHE_ORDER", "false")
     out = build_turn_prompt("BASE", live_state_block="LIVESTATE", **_CACHED)
     assert out.startswith("BASE")
+
+
+# ── the compliance floor is spoken once, last (2026-09-02) ───────────────────
+
+_FLOORED_BASE = (
+    "BASE PERSONA\n\n## NON-NEGOTIABLES (these few always hold, on every call)\n"
+    "- rule one\n- rule two\n\n\nBRAND ACCURACY — your company name is \"Acme\"."
+)
+
+
+def test_base_floor_is_relocated_to_the_very_end_after_trailing():
+    """The composer appends the floor after the tenant text; per-turn blocks
+    then used to land after it, so a compact copy was re-appended every turn
+    and the model read NON-NEGOTIABLES twice. Now the base floor itself moves
+    to the recency slot and there is exactly one copy."""
+    out = build_turn_prompt(
+        _FLOORED_BASE,
+        knowledge_block="KB",
+        live_state_block="LIVESTATE",
+        trailing_block="CRAFT",
+    )
+    assert out.count("## NON-NEGOTIABLES") == 1
+    assert out.rstrip().endswith('your company name is "Acme".')
+    assert out.index("CRAFT") < out.index("## NON-NEGOTIABLES")
+    assert out.index("KB") < out.index("## NON-NEGOTIABLES")
+    assert out.index("LIVESTATE") < out.index("## NON-NEGOTIABLES")
+    assert out.startswith("BASE PERSONA")
+
+
+def test_base_floor_relocation_holds_under_the_legacy_order():
+    out = build_turn_prompt(
+        _FLOORED_BASE, knowledge_block="KB", trailing_block="CRAFT",
+        cache_friendly_order=False,
+    )
+    assert out.count("## NON-NEGOTIABLES") == 1
+    assert out.index("CRAFT") < out.index("## NON-NEGOTIABLES")
+
+
+def test_base_without_a_floor_is_unchanged_by_relocation():
+    out = build_turn_prompt("BASE", trailing_block="FLOOR")
+    assert out == "BASE\n\nFLOOR"

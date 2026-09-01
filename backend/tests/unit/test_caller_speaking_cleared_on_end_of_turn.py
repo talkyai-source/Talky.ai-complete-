@@ -450,3 +450,45 @@ def test_the_flag_survives_a_real_pydantic_model():
 
     with pytest.raises(ValueError, match="has no field"):
         s.caller_speaking = True
+
+
+# ── TurnResumed is inert now that nothing speculative runs (2026-09-02) ──────
+
+@pytest.mark.asyncio
+async def test_turn_resumed_with_nothing_pending_does_not_touch_the_session():
+    """Speculative turns were retired (transcript_handler: "do NOT launch a
+    speculative turn on eager"), and every dispatched task is stamped final,
+    so the cancel-and-rollback branch could never fire. Its one reachable
+    effect was `session.llm_active = False` when NOTHING was pending — which
+    could clear the flag out from under an in-flight greeting. TurnResumed
+    must now leave the session exactly as it found it."""
+    p = _Pipeline()
+    s = real_session(llm_active=True)
+    s.conversation_history.append(Message(role=MessageRole.ASSISTANT, content="Hi there."))
+    s._speculative_history_len = 0
+
+    await TranscriptHandler(p).handle(s, _Chunk(text="", is_final=False, metadata={"resumed": True}))
+
+    assert s.llm_active is True
+    assert [m.content for m in s.conversation_history] == ["Hi there."]
+    assert s._speculative_history_len == 0
+
+
+@pytest.mark.asyncio
+async def test_turn_resumed_never_cancels_a_pending_task():
+    p = _Pipeline()
+    s = real_session()
+
+    async def _never():
+        await asyncio.sleep(30)
+
+    existing = asyncio.create_task(_never())
+    existing._turn_type = "final"
+    p._pending_llm_tasks[s.call_id] = existing
+    try:
+        await TranscriptHandler(p).handle(s, _Chunk(text="", is_final=False, metadata={"resumed": True}))
+        await asyncio.sleep(0)
+        assert not existing.cancelled()
+        assert p._pending_llm_tasks.get(s.call_id) is existing
+    finally:
+        existing.cancel()

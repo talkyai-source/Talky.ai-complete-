@@ -50,7 +50,10 @@ from app.services.scripts.prompts.accent_fillers import (
 from app.infrastructure.llm.groq import LLMTimeoutError
 from app.services.scripts import model_prompt_addendum
 from app.services.scripts.prompts.build import build_turn_prompt
-from app.services.scripts.prompts.guardrails import compliance_reanchor
+from app.domain.services.voice_pipeline.sentence_cap import (
+    cap_allows_another,
+    truncate_to_cap,
+)
 from app.services.scripts.prompts.live_state import build_live_state_block
 from app.domain.services.voice_pipeline.knowledge_tool import (
     knowledge_tools_for,
@@ -509,17 +512,16 @@ class TurnStreamer:
             _a = model_prompt_addendum(_mid)
             if _a and _a not in _addenda:
                 _addenda.append(_a)
-        _company = getattr(_agent_cfg, "company_name", "") or ""
-        # Craft re-anchor rides just before the compliance re-anchor: the
-        # anti-monologue rules need per-turn recency (base-prompt versions
-        # fade — audited 35-word lectures), while compliance keeps the very
-        # last slot it has always owned.
+        # Craft re-anchor is the last per-turn block: the anti-monologue rules
+        # need recency (base-prompt versions fade — audited 35-word lectures).
+        # The compliance floor no longer needs a compact second copy here:
+        # build_turn_prompt relocates the base prompt's own NON-NEGOTIABLES
+        # (and the brand line) to the very end, so it keeps the recency slot
+        # and the model reads it once per turn, not twice.
         from app.domain.services.voice_pipeline.conversation_craft import (
             craft_reanchor,
         )
-        trailing_block = "\n\n".join(
-            b for b in (_addenda + [craft_reanchor(), compliance_reanchor(_company)]) if b
-        )
+        trailing_block = "\n\n".join(b for b in (_addenda + [craft_reanchor()]) if b)
 
         # Single assembler (prompts folder) owns the block ORDER + the
         # CAPTURED-facts prepend. turn_streamer only feeds it resolved blocks.
@@ -592,6 +594,9 @@ class TurnStreamer:
         first_token = True
         first_sentence = True
         sentences_done = 0
+        # One sentence of grace past the cap, only for the turn's question —
+        # see sentence_cap.py. Consumed the first time it is used.
+        question_grace_used = False
         tts_was_interrupted = False
         suppressed_for_action = False
 
@@ -690,7 +695,11 @@ class TurnStreamer:
 
                 # Flush each complete sentence (or, for long buffers, the first
                 # clause) to TTS as tokens arrive.
-                while not (max_sentences and sentences_done >= max_sentences):
+                while cap_allows_another(
+                    sentences_done, max_sentences, buf, grace_used=question_grace_used
+                ):
+                    if max_sentences and sentences_done >= max_sentences:
+                        question_grace_used = True
                     idx = self._p._find_sentence_end(buf, allow_clause=len(buf) >= 80)
                     if idx < 0:
                         break
@@ -811,7 +820,9 @@ class TurnStreamer:
         # TTS any trailing buffer (final sentence without terminal punctuation).
         if not ask_ai_end_action and not tts_was_interrupted and buf.strip():
             if not _barged():
-                if not max_sentences or sentences_done < max_sentences:
+                if cap_allows_another(
+                    sentences_done, max_sentences, buf, grace_used=question_grace_used
+                ):
                     # Same extract-first ordering as the per-sentence loop:
                     # this trailing tail is the MOST common place the sentinel
                     # actually lands (the model's closing line ends in
@@ -883,8 +894,9 @@ class TurnStreamer:
             )
 
         if not ask_ai_end_action and max_sentences and full_text:
-            parts = re.split(r'(?<=[.!?])\s+', full_text.strip())
-            full_text = " ".join(parts[:max_sentences])
+            # Same rule as the spoken path: the cap never falls between a
+            # statement and the question that immediately follows it.
+            full_text = truncate_to_cap(full_text, max_sentences)
 
         # P3: if the caller actually BARGED IN, the history entry must be ONLY
         # what they heard (delivered sentences) + an interruption marker — never

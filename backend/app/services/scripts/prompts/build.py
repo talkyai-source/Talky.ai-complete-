@@ -139,6 +139,14 @@ def build_turn_prompt(
     if cache_friendly_order is None:
         cache_friendly_order = _cache_friendly_default()
 
+    # The compliance floor (NON-NEGOTIABLES, plus the brand line the composer
+    # appends after it) is the LAST thing the composer writes so it wins by
+    # recency over the tenant's own text. Every per-turn block below used to
+    # land after it, which is why a compact second copy was re-appended each
+    # turn — the model read NON-NEGOTIABLES twice, every turn. Split the floor
+    # off here and re-append it after everything else: one copy, still last.
+    base_prompt, floor_tail = _split_off_floor(base_prompt)
+
     if not cache_friendly_order:
         # LEGACY ORDER — kept executable, not just described, so the revert
         # switch is covered by tests rather than being a claim in a comment.
@@ -158,7 +166,7 @@ def build_turn_prompt(
             prompt = compose_system_prompt(prompt, captured_slots)
         if live_state_block:
             prompt = live_state_block + "\n\n" + prompt
-        return prompt
+        return _append_floor(prompt, floor_tail)
 
     # ── stable-for-the-call prefix: this is the part the provider caches ──
     stable = [base_prompt]
@@ -185,4 +193,27 @@ def build_turn_prompt(
         parts = parts + [tail]
     if trailing_block:
         parts = parts + [trailing_block]
-    return "\n\n".join(parts)
+    return _append_floor("\n\n".join(parts), floor_tail)
+
+
+_FLOOR_MARKER = "## NON-NEGOTIABLES"
+
+
+def _split_off_floor(base_prompt: str) -> tuple[str, str]:
+    """Return ``(base_without_floor, floor_and_everything_after_it)``.
+
+    The composer writes the floor last, followed only by the brand-accuracy
+    line, so everything from the marker on is the recency block. A base with
+    no floor (ask-AI, tests, legacy prompts) is returned unchanged with an
+    empty tail.
+    """
+    idx = (base_prompt or "").find(_FLOOR_MARKER)
+    if idx < 0:
+        return base_prompt, ""
+    return base_prompt[:idx].rstrip(), base_prompt[idx:].strip()
+
+
+def _append_floor(prompt: str, floor_tail: str) -> str:
+    if not floor_tail:
+        return prompt
+    return f"{prompt}\n\n{floor_tail}" if prompt else floor_tail
