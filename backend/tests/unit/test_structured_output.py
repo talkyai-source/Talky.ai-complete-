@@ -101,10 +101,12 @@ def test_strict_mode_active_matches_capability():
     assert strict_mode_active("llama-3.3-70b-versatile") is False
 
 
-def test_default_summariser_model_is_unchanged():
-    """Changing the model that writes customer-visible summaries is an operator
-    decision, not a side effect of adding this capability."""
-    assert summariser_model() == "llama-3.3-70b-versatile"
+def test_default_summariser_model_is_account_supported(monkeypatch):
+    """The no-env path must not select a model that this Groq account 404s."""
+    monkeypatch.delenv("CALL_SUMMARY_MODEL", raising=False)
+
+    assert summariser_model() == "openai/gpt-oss-20b"
+    assert strict_mode_active(summariser_model()) is True
 
 
 def test_summariser_model_is_overridable(monkeypatch):

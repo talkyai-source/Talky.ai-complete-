@@ -164,8 +164,11 @@ class TestSummarizeTranscript:
         assert set(result.keys()) == _SCHEMA_KEYS
         assert result["headline"] == _FULL_RESPONSE["headline"]
 
-    async def test_malformed_json_first_call_triggers_retry(self):
+    async def test_malformed_json_first_call_triggers_retry(self, monkeypatch):
         """First call returns garbage JSON → retry → still bad → fail-soft."""
+        # Exercise the non-strict override path. The production default uses
+        # constrained decoding, where malformed JSON cannot be retried.
+        monkeypatch.setenv("CALL_SUMMARY_MODEL", "qwen/qwen3.6-27b")
         mock_client = _make_async_groq(["not json at all {{{", "also bad json )))"])
 
         with patch(
@@ -178,8 +181,9 @@ class TestSummarizeTranscript:
         assert set(result.keys()) == _SCHEMA_KEYS
         assert result["headline"] == "Summary unavailable"
 
-    async def test_malformed_first_valid_second_returns_parsed(self):
+    async def test_malformed_first_valid_second_returns_parsed(self, monkeypatch):
         """First call returns bad JSON, retry returns good JSON → use it."""
+        monkeypatch.setenv("CALL_SUMMARY_MODEL", "qwen/qwen3.6-27b")
         mock_client = _make_async_groq([
             "not json {{{",
             json.dumps({"headline": "From retry", "outcome": "ok"}),

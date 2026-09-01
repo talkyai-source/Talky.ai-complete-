@@ -26,6 +26,7 @@ except ImportError:
 
 from app.domain.services.session_manager import SessionManager
 from app.domain.services.voice_pipeline_service import VoicePipelineService
+from app.domain.models.ai_config import GroqModel
 from app.infrastructure.stt.deepgram_flux import DeepgramFluxSTTProvider
 from app.infrastructure.llm.groq import GroqLLMProvider
 from app.infrastructure.tts.factory import TTSFactory
@@ -113,7 +114,7 @@ class VoicePipelineWorker:
             self._llm_provider = GroqLLMProvider()
             await self._llm_provider.initialize({
                 "api_key": os.getenv("GROQ_API_KEY"),
-                "model": "llama-3.1-8b-instant"
+                "model": GroqModel.GPT_OSS_20B.value,
             })
             # Prime httpx HTTP/2 + TLS pool at worker boot so the first voice
             # session does not pay the cold-connect tax on its first turn.

@@ -33,6 +33,7 @@ from fastapi import WebSocket
 from app.domain.models.session import CallSession, CallState
 from app.domain.models.conversation_state import ConversationState, ConversationContext
 from app.domain.models.agent_config import AgentConfig
+from app.domain.models.ai_config import GroqModel
 from app.domain.models.voice_contract import generate_talklee_call_id
 from app.domain.services.voice_pipeline_service import VoicePipelineService
 from app.domain.repositories.call_event_repository import CallEventRepository
@@ -212,7 +213,7 @@ class VoiceSessionConfig:
     turn_0_min_alpha_chars: int = 2
 
     # LLM settings
-    llm_model: str = "llama-3.3-70b-versatile"
+    llm_model: str = GroqModel.GPT_OSS_20B.value
     llm_temperature: float = 0.6
     llm_max_tokens: int = 150
     # Provider-specific knob, Gemini-only today. None = let the model decide

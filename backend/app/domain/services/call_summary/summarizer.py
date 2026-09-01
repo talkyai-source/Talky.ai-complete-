@@ -1,4 +1,4 @@
-"""AI call summarizer — Groq llama-3.3-70b-versatile → structured JSON.
+"""AI call summarizer — Groq GPT-OSS 20B → structured JSON.
 
 Every field in the schema is ALWAYS present in the returned dict. Missing
 dimensions are filled from EMPTY_SUMMARY so downstream code can read any

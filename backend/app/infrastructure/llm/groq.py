@@ -20,6 +20,7 @@ from typing import AsyncIterator, Dict, List, Optional
 import httpx
 from groq import AsyncGroq, APITimeoutError as GroqAPITimeoutError, RateLimitError as GroqRateLimitError
 from app.domain.interfaces.llm_provider import LLMProvider
+from app.domain.models.ai_config import GroqModel
 from app.domain.models.conversation import Message, MessageRole
 from app.infrastructure.providers.key_pool import KeyPool, parse_keys_csv
 from app.infrastructure.providers.provider_concurrency import get_provider_guard
@@ -304,15 +305,9 @@ class GroqLLMProvider(LLMProvider):
     """
     Groq LLM provider with ultra-fast inference
     
-    Production Models (available in AI Options):
-    - llama-3.3-70b-versatile: 280 t/s - Best quality/speed balance (default)
-    - llama-3.1-8b-instant: 560 t/s - Fastest, ideal for real-time
-
-    Preview Models (evaluation only):
-    - qwen/qwen3.6-27b: ~400 t/s - Multilingual, thinking off for voice
-
-    Not offered (still handled if passed): openai/gpt-oss-* — agentic reasoners
-    that misbehave on conversational voice. See _is_gpt_oss_model.
+    The account-supported default is ``openai/gpt-oss-20b``. Retired Llama
+    ids remain accepted when explicitly supplied for stored-config backwards
+    compatibility, but are never selected by a no-model fallback.
     
     Model selection is configured via AI Options UI (/ai-options page).
     See app/domain/models/ai_config.py for full model specifications.
@@ -412,7 +407,7 @@ class GroqLLMProvider(LLMProvider):
         self._guard = get_provider_guard("groq")
         self._http_timeout: Optional[httpx.Timeout] = None
         self._config: dict = {}
-        self._model: str = "llama-3.3-70b-versatile"  # Best balance for voice AI
+        self._model: str = GroqModel.GPT_OSS_20B.value
         self._temperature: float = 0.6  # Slightly lower for more consistent responses
         # 150 tokens ≈ 110 words — enough for 2-3 full sentences covering most voice
         # responses while still keeping the AI concise.  100 truncated complex answers
@@ -461,7 +456,7 @@ class GroqLLMProvider(LLMProvider):
         self._client = self._client_for(primary_key)
 
         # Configuration with voice-optimized defaults
-        self._model = config.get("model", "llama-3.3-70b-versatile")
+        self._model = config.get("model") or GroqModel.GPT_OSS_20B.value
         self._temperature = config.get("temperature", 0.6)
         self._max_tokens = config.get("max_tokens", 150)
 
