@@ -10,26 +10,12 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+import app.domain.services.credential_resolver as credential_resolver_module
 from app.domain.services.credential_resolver import (
     CredentialResolver,
     env_var_for_provider,
     resolve_sync_env_only,
 )
-
-
-@pytest.fixture(autouse=True)
-def _isolated_resolver_cache():
-    """CredentialResolver._CACHE is class-level and keyed on id(db_pool).
-
-    Every test here uses the same tenant UUID and a throwaway _FakePool, and
-    CPython reuses freed addresses — so under the full suite a later test can
-    hit the key a previous test's pool cached and get "tenant-real" where it
-    expected the env fallback. Seen 2026-09-02 as two order-dependent
-    failures that pass in isolation. Start and finish each test empty.
-    """
-    CredentialResolver.invalidate_cache()
-    yield
-    CredentialResolver.invalidate_cache()
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -139,6 +125,34 @@ async def test_tenant_row_wins_over_env(monkeypatch):
     resolver = CredentialResolver(db_pool=pool, encryption_service=_FakeEncryption("tenant-real"))
     key = await resolver.resolve("groq", tenant_id="11111111-1111-4111-8111-111111111111")
     assert key == "tenant-real"
+
+
+@pytest.mark.asyncio
+async def test_cache_scope_cannot_be_reused_by_a_different_pool(monkeypatch):
+    """A new pool must never inherit credentials cached by a disposed pool.
+
+    CPython may reuse a freed object's numeric ``id``.  Force that collision
+    here so the lifecycle bug is deterministic instead of allocator-dependent.
+    """
+    monkeypatch.setenv("GROQ_API_KEY", "env-fallback")
+    monkeypatch.setattr(credential_resolver_module, "id", lambda _: 17, raising=False)
+    tenant_id = "11111111-1111-4111-8111-111111111111"
+
+    old_pool = _FakePool({"id": "c1", "encrypted_key": "ENC:tenant-real"})
+    old_resolver = CredentialResolver(
+        db_pool=old_pool,
+        encryption_service=_FakeEncryption("tenant-real"),
+    )
+    assert await old_resolver.resolve("groq", tenant_id=tenant_id) == "tenant-real"
+
+    replacement_resolver = CredentialResolver(
+        db_pool=_FakePool(None),
+        encryption_service=_FakeEncryption(),
+    )
+    assert (
+        await replacement_resolver.resolve("groq", tenant_id=tenant_id)
+        == "env-fallback"
+    )
 
 
 @pytest.mark.asyncio

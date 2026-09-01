@@ -82,7 +82,7 @@ class CredentialResolver:
     # an in-memory dict hit — restoring the demo-ready latency profile
     # where keys came from os.getenv() directly.
     _SENTINEL_USE_ENV = object()
-    _CACHE: dict[tuple[int, str, str, str], Any] = {}
+    _CACHE: dict[tuple[Any, str, str, str], Any] = {}
 
     def __init__(
         self,
@@ -91,7 +91,10 @@ class CredentialResolver:
     ):
         self._db_pool = db_pool
         self._encryption = encryption_service
-        self._cache_scope = id(db_pool)
+        # Keep the pool object itself in the process-lifetime key.  A numeric
+        # id can be reused after a pool is disposed, which could otherwise
+        # hand the replacement pool a previous tenant's cached credential.
+        self._cache_scope = db_pool
 
     async def resolve(
         self,
