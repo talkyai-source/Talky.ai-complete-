@@ -1,11 +1,24 @@
 """Static guards for production migration, release, and deploy contracts."""
 
+import importlib.util
 import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+from sqlalchemy import create_engine
+
 BACKEND = Path(__file__).parents[2]
 ROOT = BACKEND.parent
+
+
+def _load_alembic_head_verifier():
+    script = BACKEND / "scripts" / "verify_alembic_current_heads.py"
+    spec = importlib.util.spec_from_file_location("verify_alembic_current_heads", script)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def test_bootstrap_docs_never_stamp_historical_snapshot_at_head():
@@ -23,9 +36,61 @@ def test_deploy_runs_migrations_before_application_restart():
 
     install_at = deploy.index("sudo bash backend/systemd/install-services.sh")
     migrate_at = deploy.index("sudo systemctl start talky-migrate.service")
+    verify_at = deploy.index("backend/scripts/verify_alembic_current_heads.py")
     restart_at = deploy.index("sudo systemctl restart talky-api talky-dialer-worker")
-    assert install_at < migrate_at < restart_at
+    assert install_at < migrate_at < verify_at < restart_at
     assert "sudo systemctl start talky-trunk-status.service" in deploy
+
+
+def test_alembic_current_heads_verifier_accepts_exact_match_and_rejects_drift():
+    verifier = _load_alembic_head_verifier()
+
+    class RepositoryScripts:
+        @staticmethod
+        def get_heads():
+            return ["0036_inbound_rejection_log"]
+
+    engine = create_engine("sqlite://")
+    try:
+        with engine.begin() as connection:
+            connection.exec_driver_sql(
+                "CREATE TABLE alembic_version (version_num VARCHAR(64) NOT NULL)"
+            )
+            connection.exec_driver_sql(
+                "INSERT INTO alembic_version (version_num) VALUES " "('0036_inbound_rejection_log')"
+            )
+
+        with engine.connect() as connection:
+            assert verifier.verify_current_heads(connection, RepositoryScripts()) == (
+                {"0036_inbound_rejection_log"},
+                {"0036_inbound_rejection_log"},
+            )
+
+        with engine.begin() as connection:
+            connection.exec_driver_sql(
+                "UPDATE alembic_version SET version_num = '0035_inbound_hardening'"
+            )
+
+        with engine.connect() as connection:
+            with pytest.raises(RuntimeError, match="database heads do not match repository heads"):
+                verifier.verify_current_heads(connection, RepositoryScripts())
+
+        class MultipleRepositoryHeads:
+            @staticmethod
+            def get_heads():
+                return ["0035_inbound_hardening", "0036_inbound_rejection_log"]
+
+        with engine.begin() as connection:
+            connection.exec_driver_sql(
+                "INSERT INTO alembic_version (version_num) VALUES "
+                "('0036_inbound_rejection_log')"
+            )
+
+        with engine.connect() as connection:
+            with pytest.raises(RuntimeError, match="exactly one Alembic head"):
+                verifier.verify_current_heads(connection, MultipleRepositoryHeads())
+    finally:
+        engine.dispose()
 
 
 def test_deploy_fails_closed_on_inactive_services_or_unhealthy_api():

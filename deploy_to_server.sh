@@ -187,6 +187,7 @@ ssh -t -i "$KEY" "$PROD" "
     trap - EXIT
     echo '--> applying database migrations (service restart is blocked on failure)'
     sudo systemctl start talky-migrate.service
+    backend/venv/bin/python backend/scripts/verify_alembic_current_heads.py
     echo '--> restarting backend services after the authenticated gateway is healthy'
     sudo systemctl restart talky-api talky-dialer-worker talky-voice-worker talky-reminder-worker
     sudo systemctl restart talky-trunk-status.timer
