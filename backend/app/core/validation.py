@@ -99,7 +99,8 @@ class ProviderValidator:
                 value = os.getenv(env_var)
                 if not value:
                     self._add_warning(provider, env_var,
-                        f"{description} not configured (optional)")
+                        f"{description} not configured (optional)",
+                        escalate_in_strict=False)
                 else:
                     self._add_success(provider, env_var, f"{description} configured")
         
@@ -127,12 +128,19 @@ class ProviderValidator:
             message=message
         ))
     
-    def _add_warning(self, provider: str, setting: str, message: str):
+    def _add_warning(
+        self,
+        provider: str,
+        setting: str,
+        message: str,
+        *,
+        escalate_in_strict: bool = True,
+    ):
         """Add warning validation result."""
         self.results.append(ValidationResult(
             provider=provider,
             setting=setting,
-            is_valid=not self.strict,  # Warnings become errors in strict mode
+            is_valid=not (self.strict and escalate_in_strict),
             message=f"WARNING: {message}"
         ))
     
