@@ -8,7 +8,9 @@ on:
 
 env:
   PYTHON_VERSION: "3.10"
-  NODE_VERSION: "20"
+  # 22.18+ runs TypeScript type stripping unflagged, which the Admin test
+  # suite relies on (its .mjs tests import .ts sources directly).
+  NODE_VERSION: "22"
 
 jobs:
   # ──────────────────────────────────────────────────────────────────
@@ -129,7 +131,7 @@ jobs:
         # The repository still has substantial legacy style/import debt. Keep
         # the gate blocking for syntax errors, undefined names, and other
         # runtime-invalid constructs; broaden it only as that debt is retired.
-        run: ruff check app/ --select E9,F63,F7,F82
+        run: ruff check app/ --select F --extend-ignore F401,F841
 
       - name: Dependency vulnerability audit (pip-audit)
         # Fails the build on any unaccepted CVE in production deps.
@@ -147,25 +149,16 @@ jobs:
         # that backlog is fixed instead of making every CI run unconditionally red.
         run: bandit -r app/ -lll -x app/tests
 
-      - name: Init test database
-        run: |
-          PGPASSWORD=testpassword psql -h localhost -U talky -d talky_test \
-            -f database/complete_schema.sql -v ON_ERROR_STOP=1
-        env:
-          PGPASSWORD: testpassword
-
-      - name: Alembic round-trip (upgrade → downgrade → upgrade)
-        # Catches migrations that have no working downgrade path. A failed
-        # downgrade in production = unrecoverable rollback, so we test it here.
-        # Uses a separate DB so the test fixtures aren't disturbed.
+      - name: Bootstrap and migrate primary test database
         run: |
           PGPASSWORD=testpassword psql -h localhost -U talky -d postgres \
-            -c "CREATE DATABASE talky_alembic_test;"
-          DATABASE_URL=postgresql://talky:testpassword@localhost:5432/talky_alembic_test \
-            alembic upgrade head
-          DATABASE_URL=postgresql://talky:testpassword@localhost:5432/talky_alembic_test \
-            alembic downgrade base
-          DATABASE_URL=postgresql://talky:testpassword@localhost:5432/talky_alembic_test \
+            -v ON_ERROR_STOP=1 -c \
+            "CREATE ROLE authenticated NOLOGIN NOSUPERUSER NOBYPASSRLS;"
+          PGPASSWORD=testpassword psql -h localhost -U talky -d talky_test \
+            -f database/complete_schema.sql -v ON_ERROR_STOP=1
+          DATABASE_URL=postgresql://talky:testpassword@localhost:5432/talky_test \
+            alembic stamp 0008_tenant_voice_tuning
+          DATABASE_URL=postgresql://talky:testpassword@localhost:5432/talky_test \
             alembic upgrade head
         env:
           PGPASSWORD: testpassword
@@ -177,8 +170,6 @@ jobs:
         run: |
           PGPASSWORD=testpassword psql -h localhost -U talky -d postgres \
             -c "CREATE DATABASE talky_preserved_baseline_test;"
-          PGPASSWORD=testpassword psql -h localhost -U talky -d postgres \
-            -c "CREATE ROLE authenticated NOLOGIN NOSUPERUSER NOBYPASSRLS;"
           docker run --rm --network host \
             -e PGPASSWORD=testpassword \
             -v "$PWD:/work:ro" \
@@ -197,35 +188,86 @@ jobs:
         env:
           PGPASSWORD: testpassword
 
-      - name: Legacy false-stamp repair
-        # Reproduce the historic bad marker on the consolidated schema and
-        # prove the forward-repair migrations converge it safely to head.
+      - name: Legacy false-stamp repair and inbound migration round-trip
+        # Reproduce the historic false 0021 marker, exercise the 0022 rollback
+        # guard only within its supported boundary, then converge to head.
+        # Migration 0033 is forward-only, so CI must never downgrade from head.
         run: |
           PGPASSWORD=testpassword psql -h localhost -U talky -d postgres \
-            -c "CREATE DATABASE talky_false_stamp_test;"
-          PGPASSWORD=testpassword psql -h localhost -U talky -d talky_false_stamp_test \
+            -c "CREATE DATABASE talky_alembic_test;"
+          PGPASSWORD=testpassword psql -h localhost -U talky -d talky_alembic_test \
             -f database/complete_schema.sql -v ON_ERROR_STOP=1
-          DATABASE_URL=postgresql://talky:testpassword@localhost:5432/talky_false_stamp_test \
+          DATABASE_URL=postgresql://talky:testpassword@localhost:5432/talky_alembic_test \
             alembic stamp 0021_billing_topup
-          DATABASE_URL=postgresql://talky:testpassword@localhost:5432/talky_false_stamp_test \
+          DATABASE_URL=postgresql://talky:testpassword@localhost:5432/talky_alembic_test \
+            alembic upgrade 0022_inbound_calling_foundation
+          PGPASSWORD=testpassword psql -h localhost -U talky -d talky_alembic_test \
+            -v ON_ERROR_STOP=1 -c \
+            "UPDATE platform_runtime_controls SET inbound_controls_reason='downgrade guard proof' WHERE id=1;"
+          if DATABASE_URL=postgresql://talky:testpassword@localhost:5432/talky_alembic_test \
+              alembic downgrade 0021_billing_topup; then
+            echo "0022 downgrade unexpectedly accepted retained inbound control state" >&2
+            exit 1
+          fi
+          PGPASSWORD=testpassword psql -h localhost -U talky -d talky_alembic_test \
+            -v ON_ERROR_STOP=1 -c \
+            "UPDATE platform_runtime_controls SET inbound_controls_reason=NULL WHERE id=1;"
+          DATABASE_URL=postgresql://talky:testpassword@localhost:5432/talky_alembic_test \
+            alembic downgrade 0021_billing_topup
+          PGPASSWORD=testpassword psql -h localhost -U talky -d talky_alembic_test \
+            -v ON_ERROR_STOP=1 <<'SQL'
+          DO $$
+          BEGIN
+            IF to_regprocedure('prevent_call_event_mutation()') IS NULL
+               OR NOT EXISTS (
+                    SELECT 1 FROM pg_trigger
+                    WHERE tgname = 'call_events_immutable' AND NOT tgisinternal
+               )
+               OR EXISTS (
+                    SELECT 1 FROM pg_class
+                    WHERE oid IN ('call_events'::regclass, 'call_legs'::regclass)
+                      AND (NOT relrowsecurity OR NOT relforcerowsecurity)
+               )
+               OR to_regclass('public.inbound_campaign_configs') IS NOT NULL THEN
+              RAISE EXCEPTION '0022 downgrade did not restore the safe baseline';
+            END IF;
+          END
+          $$;
+          SQL
+          DATABASE_URL=postgresql://talky:testpassword@localhost:5432/talky_alembic_test \
+            alembic upgrade 0022_inbound_calling_foundation
+          DATABASE_URL=postgresql://talky:testpassword@localhost:5432/talky_alembic_test \
             alembic upgrade head
-          TEST_DATABASE_URL=postgresql://talky:testpassword@localhost:5432/talky_false_stamp_test \
-            pytest tests/integration/test_bootstrap_contract_repair.py -q
         env:
           PGPASSWORD: testpassword
 
+      - name: Migrated inbound database integration
+        run: |
+          pytest \
+            tests/integration/test_inbound_reassignment_history.py \
+            tests/integration/test_inbound_hold_resolution.py \
+            tests/integration/test_bootstrap_contract_repair.py \
+            -q
+        env:
+          TEST_DATABASE_URL: postgresql://talky:testpassword@localhost:5432/talky_alembic_test
+          JWT_SECRET: ci-test-secret-key-not-for-production-32chars
+          ENVIRONMENT: test
+
       - name: Run tests with pytest (with coverage)
+        # Integration tests own the migrated database above. This is the full
+        # canonical unit/security release suite, with no per-feature selection.
         # Coverage threshold starts intentionally LOW so it lands without
         # breaking the build. Ratchet it upward in follow-up PRs as test
         # coverage grows. Never lower it.
         run: |
-          pytest tests/ -v --tb=short -q \
+          pytest tests/unit tests/security -v --tb=short -q \
             --cov=app \
             --cov-report=term-missing \
             --cov-report=xml:coverage.xml \
             --cov-fail-under=20
         env:
           DATABASE_URL: postgresql://talky:testpassword@localhost:5432/talky_test
+          TEST_DATABASE_URL: postgresql://talky:testpassword@localhost:5432/talky_alembic_test
           REDIS_HOST: localhost
           REDIS_PORT: 6379
           JWT_SECRET: ci-test-secret-key-not-for-production-32chars
@@ -305,21 +347,69 @@ jobs:
         run: npm ci
 
       - name: Dependency vulnerability audit
-        # FIX: added — npm audit blocks on high/critical severity
+        # Audit the complete dependency graph. High and critical findings block
+        # the release; moderate findings stay visible for follow-up.
         run: npm audit --audit-level=high
-        continue-on-error: false
 
       - name: Lint
-        # FIX: removed || true — lint failures now block merges
         run: npm run lint
 
       - name: Type check
-        run: npx tsc --noEmit
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
 
       - name: Build
         run: npm run build
         env:
           NEXT_PUBLIC_API_BASE_URL: http://localhost:8000/api/v1
+
+  # Admin control plane: lint + dependency audit + test + production build.
+  admin-frontend:
+    name: Admin Frontend
+    runs-on: ubuntu-latest
+    needs: [secret-scan, secret-guard]
+    defaults:
+      run:
+        working-directory: Admin/frontend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: Admin/frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Dependency vulnerability audit
+        run: npm audit --audit-level=high
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+  # Telephony ingress: fail-closed routing and rollback assertions.
+  telephony-static:
+    name: Telephony Ingress Safety
+    runs-on: ubuntu-latest
+    needs: [secret-scan, secret-guard]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate telephony routing, admission, and rollback contracts
+        run: python telephony/tests/test_telephony_stack.py
 
   # ──────────────────────────────────────────────────────────────────
   # Docker: build + image vulnerability scan (Trivy)
@@ -327,7 +417,7 @@ jobs:
   docker-build:
     name: Docker Build & Scan
     runs-on: ubuntu-latest
-    needs: [backend, frontend]
+    needs: [backend, frontend, admin-frontend, telephony-static]
 
     steps:
       - uses: actions/checkout@v4
