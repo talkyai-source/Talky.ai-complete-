@@ -6,8 +6,9 @@
 #   - rtp.conf restricted to 10000-20000 (matches what UFW allows)
 #
 # Idempotent: re-running it overwrites the same four service config files and
-# verifies the repository-owned inbound dialplan include without replacing
-# an operator-modified live copy. It never overwrites extensions.conf.
+# reconciles the repository-owned inbound dialplan through the same
+# candidate/digest/runtime-proof path used by deploy. It never overwrites
+# extensions.conf.
 # regenerates the ARI password.  Backs up the current /etc/asterisk
 # to /etc/asterisk.bak.<ts> the first time it runs (and every run, so
 # you can always roll back to whatever was just there).
@@ -43,32 +44,21 @@ TRUNK_PASS="${TRUNK_PASS:?TRUNK_PASS must be set in the environment — see docs
 ARI_USER="talky"
 
 # Dialplan safety preflight. The working production extensions.conf contains
-# carrier-specific routing that must never be erased by this bootstrap script.
-# Asterisk must already include extensions.d/*.conf; adding that include is a
-# one-time, reviewed operator change. Once present, this script may install a
-# missing managed file, but may replace an existing file only when the repo
-# candidate is byte-for-byte identical. A diff is left as .candidate for review.
-DIALPLAN_SOURCE="/opt/talky/telephony/asterisk/conf/talky-inbound.conf"
-DIALPLAN_DIR="/etc/asterisk/extensions.d"
-DIALPLAN_LIVE="$DIALPLAN_DIR/talky-inbound.conf"
-DIALPLAN_CANDIDATE="$DIALPLAN_DIR/.talky-inbound.conf.candidate"
-
-if [ ! -f "$DIALPLAN_SOURCE" ]; then
-    echo "ERROR: managed inbound dialplan source is missing: $DIALPLAN_SOURCE" >&2
-    exit 1
-fi
+# operator-owned configuration and must never be erased by this bootstrap
+# script. Asterisk must already include extensions.d/*.conf; adding that include
+# is a one-time reviewed operator change. The managed include itself is rendered
+# later from the database into a secured candidate and installed atomically.
 if ! grep -Eq '^[[:space:]]*#include[[:space:]]+"?extensions\.d/\*\.conf"?[[:space:]]*$' /etc/asterisk/extensions.conf; then
     echo "ERROR: /etc/asterisk/extensions.conf does not include extensions.d/*.conf." >&2
     echo "       Refusing to rewrite it. Add the include in a reviewed maintenance window." >&2
     exit 1
 fi
-install -d -o asterisk -g asterisk -m 0755 "$DIALPLAN_DIR"
-install -o root -g asterisk -m 0644 "$DIALPLAN_SOURCE" "$DIALPLAN_CANDIDATE"
-if [ -e "$DIALPLAN_LIVE" ] && ! cmp -s "$DIALPLAN_CANDIDATE" "$DIALPLAN_LIVE"; then
-    echo "ERROR: managed inbound dialplan differs from the repository candidate." >&2
-    echo "       Live file was not touched; review: diff -u '$DIALPLAN_LIVE' '$DIALPLAN_CANDIDATE'" >&2
-    exit 1
-fi
+
+# Prove the database-derived account routes agree with the reviewed carrier
+# inventory before installing packages, stopping Asterisk, writing any config,
+# or rotating ARI credentials. A conflict must leave the operator's working
+# live context completely untouched.
+bash /opt/talky/backend/scripts/reconcile_asterisk_release.sh --check-only
 
 # 1) Make sure Asterisk is installed
 if ! command -v asterisk >/dev/null 2>&1; then
@@ -171,7 +161,7 @@ expiration=600
 [blazedigitel-endpoint]
 type=endpoint
 transport=transport-udp
-context=from-blazedigitel
+context=from-talky-inbound
 disallow=all
 allow=ulaw
 allow=alaw
@@ -214,22 +204,25 @@ chmod 2770 /etc/asterisk/pjsip.d
 usermod -aG asterisk admins 2>/dev/null || echo "WARN: could not add 'admins' to the 'asterisk' group — tenant trunk writes will fail with EACCES"
 echo "==> Provisioned /etc/asterisk/pjsip.d (asterisk:asterisk, 2770)"
 
-# 9) Install the already-verified managed include. extensions.conf itself is
-# deliberately preserved byte-for-byte, including the working carrier map.
-install -o root -g asterisk -m 0644 "$DIALPLAN_CANDIDATE" "$DIALPLAN_LIVE"
-rm -f -- "$DIALPLAN_CANDIDATE"
+# 9) Provision only the managed include directory. The reconciler owns the
+# talky-inbound.conf file; extensions.conf remains byte-for-byte untouched.
+install -d -o root -g asterisk -m 0755 /etc/asterisk/extensions.d
 
-echo "==> Wrote /etc/asterisk/{http,ari,rtp,pjsip}.conf and verified managed dialplan include"
+echo "==> Wrote /etc/asterisk/{http,ari,rtp,pjsip}.conf and preserved extensions.conf"
 
 # 10) Update backend .env with the new ARI password
 sed -i "s|^ASTERISK_ARI_PASSWORD=.*|ASTERISK_ARI_PASSWORD=$ARI_PW|" /opt/talky/backend/.env
 echo "==> Updated /opt/talky/backend/.env with new ARI password"
 
-# 11) Restart Asterisk + talky-api so they pick up the new config
+# 11) Start Asterisk, then install the database-derived candidate only after
+# the reconciler proves zero channels. This owns pjsip.d + talky-inbound.conf,
+# checks the approved digest again, reloads, verifies runtime objects, and rolls
+# the complete managed set back on any failure.
 systemctl restart asterisk
-trap - ERR
 echo "==> Asterisk restarted; sleeping 10s for registration to settle..."
 sleep 10
+bash /opt/talky/backend/scripts/reconcile_asterisk_release.sh
+trap - ERR
 systemctl restart talky-api
 sleep 4
 

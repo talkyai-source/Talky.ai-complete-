@@ -29,6 +29,8 @@ from app.infrastructure.telephony.asterisk_adapter import AsteriskAdapter
 # backend/tests/unit/<this file> -> backend/tests -> backend -> repo root
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SETUP_SCRIPT = REPO_ROOT / "setup-asterisk.sh"
+DEPLOY_SCRIPT = REPO_ROOT / "deploy_to_server.sh"
+RECONCILE_RELEASE = REPO_ROOT / "backend" / "scripts" / "reconcile_asterisk_release.sh"
 DIALPLAN_SOURCE = REPO_ROOT / "telephony" / "asterisk" / "conf" / "talky-inbound.conf"
 
 INBOUND_CONTEXT = "from-talky-inbound"
@@ -260,9 +262,61 @@ def test_no_answer_before_stasis_in_inbound_context(managed_dialplan_text):
 def test_setup_never_overwrites_the_live_extensions_file(script_text):
     assert "cat > /etc/asterisk/extensions.conf" not in script_text
     assert "extensions.d/*.conf" in script_text
-    assert 'cmp -s "$DIALPLAN_CANDIDATE" "$DIALPLAN_LIVE"' in script_text
-    assert ".talky-inbound.conf.candidate" in script_text
-    assert "Live file was not touched" in script_text
+    assert "backend/scripts/reconcile_asterisk_release.sh" in script_text
+    assert "DIALPLAN_CANDIDATE" not in script_text
+
+
+def test_setup_and_deploy_share_candidate_digest_reconciler(script_text):
+    deploy = DEPLOY_SCRIPT.read_text(encoding="utf-8")
+    release = RECONCILE_RELEASE.read_text(encoding="utf-8")
+
+    invocation = "bash backend/scripts/reconcile_asterisk_release.sh"
+    assert invocation in deploy
+    assert "bash /opt/talky/backend/scripts/reconcile_asterisk_release.sh" in script_text
+    assert "CHECK_OUTPUT" in release
+    assert "--expected-digest" in release
+    assert release.index("CHECK_OUTPUT") < release.index("--expected-digest")
+    assert 'if [ "${CHECK_STATUS}" -gt 1 ]' in release
+    assert 'if [ "${CHECK_ONLY}" -eq 1 ]' in release
+    assert release.index('if [ "${CHECK_ONLY}" -eq 1 ]') < release.index(
+        "CANDIDATE_DIGEST"
+    )
+    assert "for required_tool in asterisk " in deploy
+    assert deploy.index("for required_tool in asterisk ") < deploy.index(
+        "git checkout --detach"
+    )
+
+
+def test_setup_blocks_on_mapping_conflicts_before_any_asterisk_mutation(script_text):
+    check_only = (
+        "bash /opt/talky/backend/scripts/reconcile_asterisk_release.sh --check-only"
+    )
+    assert check_only in script_text
+    assert script_text.index(check_only) < script_text.index(
+        "if ! command -v asterisk"
+    )
+    assert script_text.index(check_only) < script_text.index(
+        "systemctl stop asterisk"
+    )
+
+
+def test_deploy_blocks_on_candidate_mapping_conflicts_before_checkout():
+    deploy = DEPLOY_SCRIPT.read_text(encoding="utf-8")
+    candidate_check = (
+        'bash \\"\\$candidate_worktree/backend/scripts/'
+        'reconcile_asterisk_release.sh\\" --check-only'
+    )
+    assert candidate_check in deploy
+    assert deploy.index(candidate_check) < deploy.index("git checkout --detach")
+
+
+def test_managed_dialplan_preserves_catch_all_and_has_no_endpoint_variable(
+    managed_dialplan_text,
+):
+    assert managed_dialplan_text.count("; TALKY_GENERATED_ACCOUNT_ROUTES") == 1
+    assert "exten => _.,1," in managed_dialplan_text
+    assert "_X." not in managed_dialplan_text
+    assert "TALKY_INBOUND_DID" not in managed_dialplan_text
 
 
 def test_managed_dialplan_sends_ringback_before_stasis(managed_dialplan_text):
@@ -301,6 +355,32 @@ def test_pjsip_conf_includes_the_generated_trunk_directory(script_text):
         "pjsip_config_generator into /etc/asterisk/pjsip.d/trunk-<id>.conf is "
         "therefore never loaded by Asterisk — a 'pjsip reload' still reports "
         "success, so the trunk silently does not exist."
+    )
+
+
+def test_shared_endpoint_uses_the_repository_owned_inbound_context(script_text):
+    """The carrier endpoint and generated tenant endpoints enter one dialplan.
+
+    ``from-blazedigitel`` existed only in the hand-edited production file.  A
+    fresh run of this repository script therefore pointed inbound INVITEs at a
+    context the repository did not own, making the generated account-to-DID
+    mapping impossible to reproduce or review.
+    """
+    body = _heredoc_body(script_text, "/etc/asterisk/pjsip.conf")
+    match = re.search(
+        r"^\[blazedigitel-endpoint\]\s*$\n(.*?)(?=^\[[^\]]+\]\s*$|\Z)",
+        body,
+        re.DOTALL | re.MULTILINE,
+    )
+    assert match, "the setup-generated shared carrier endpoint is missing"
+    endpoint = match.group(1)
+    assert re.search(r"^context=from-talky-inbound\s*$", endpoint, re.MULTILINE), (
+        "the setup-generated carrier endpoint does not enter the repository-owned "
+        "[from-talky-inbound] dialplan"
+    )
+    assert "context=from-blazedigitel" not in body, (
+        "from-blazedigitel is a hand-edit-only context; setup must not recreate "
+        "an unreproducible inbound dependency"
     )
 
 

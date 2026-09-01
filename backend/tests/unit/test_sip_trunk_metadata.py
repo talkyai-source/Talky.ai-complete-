@@ -60,14 +60,12 @@ def test_unknown_keys_are_preserved():
     assert out["some_other_feature"] == {"x": 1}
 
 
-def test_inbound_did_is_validated_as_explicit_carrier_mapping():
-    out = normalize_trunk_metadata({"inbound_did": " +442046132301 "})
-    assert out["inbound_did"] == "+442046132301"
-
-
-@pytest.mark.parametrize("value", ["150001 -> +4420", "+12", "0001234567", 150001])
-def test_invalid_inbound_did_is_rejected(value):
-    with pytest.raises(ValueError, match="inbound_did"):
+@pytest.mark.parametrize(
+    "value",
+    ["+442046132300", "150001 -> +4420", "+12", "0001234567", 150001, None],
+)
+def test_trunk_metadata_cannot_claim_an_inbound_did_mapping(value):
+    with pytest.raises(ValueError, match="assignment-owned"):
         normalize_trunk_metadata({"inbound_did": value})
 
 

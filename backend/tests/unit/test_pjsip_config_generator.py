@@ -107,15 +107,10 @@ def test_render_caller_id_and_source_host_overrides():
     assert "match=203.0.113.9" in conf  # identify uses the explicit source host
 
 
-def test_render_persists_explicit_carrier_account_to_did_map():
-    conf = render_trunk_conf(_input(inbound_did="+442046132301"))
+def test_render_never_puts_account_to_did_mapping_on_an_endpoint():
+    conf = render_trunk_conf(_input())
     assert "context=from-talky-inbound" in conf
-    assert "set_var=TALKY_INBOUND_DID=+442046132301" in conf
-
-
-def test_render_rejects_invalid_inbound_did_instead_of_injecting_dialplan():
-    with pytest.raises(ValueError, match="inbound_did"):
-        render_trunk_conf(_input(inbound_did="+4420\nset_var=EVIL=1"))
+    assert "set_var=TALKY_INBOUND_DID" not in conf
 
 
 def test_render_dtmf_rfc2833_maps_to_valid_pjsip_rfc4733():
@@ -213,6 +208,8 @@ def test_build_input_pulls_metadata_fields():
         "auth_username": "u",
         "metadata": {
             "caller_id": "+15550000000",
+            # Legacy workaround metadata is deliberately ignored. The
+            # account route is generated only from inbound_did_assignments.
             "inbound_did": "+15550000001",
             "register": True,
             "register_interval": 900,
@@ -224,7 +221,7 @@ def test_build_input_pulls_metadata_fields():
     }
     inp = build_trunk_config_input(row, decrypted_password="pw")
     assert inp.caller_id == "+15550000000"
-    assert inp.inbound_did == "+15550000001"
+    assert not hasattr(inp, "inbound_did")
     assert inp.register is True
     assert inp.register_interval == 900
     assert inp.dtmf_mode == "rfc2833"

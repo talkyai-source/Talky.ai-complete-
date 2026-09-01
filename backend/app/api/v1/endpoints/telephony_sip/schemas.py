@@ -119,7 +119,7 @@ def normalize_trunk_metadata(meta: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     """Validate + canonicalise the advanced SIP-trunk options carried in the
     trunk's free-form ``metadata`` JSON.
 
-    These options (caller_id, inbound_did, outbound_proxy, auth_realm, register,
+    These options (caller_id, outbound_proxy, auth_realm, register,
     register_interval, dtmf_mode, srtp) live in the existing JSONB ``metadata``
     column — no migration — but we still validate them here so a bad value is
     a 422 at write time instead of a surprise when the runtime policy is
@@ -168,20 +168,16 @@ def normalize_trunk_metadata(meta: Optional[Dict[str, Any]]) -> Dict[str, Any]:
                 raise ValueError("caller_id must be a phone number (digits, optional leading +)")
             out["caller_id"] = cid
 
-    # inbound_did — carrier account/login -> public DID mapping. Some carriers
-    # put the registration username in the Request-URI; the generated endpoint
-    # exposes this validated value to the dialplan as TALKY_INBOUND_DID.
+    # ``inbound_did`` in trunk metadata was a 2026-08-30 endpoint-set_var
+    # workaround. It cannot identify one endpoint when multiple registrations
+    # share a carrier source host, and it is not proof that the tenant owns an
+    # active DID. The Asterisk reconciler now requires the reviewed carrier
+    # inventory to agree with the same-tenant inbound_did_assignments +
+    # verified phone-number join.
     if "inbound_did" in out:
-        did = out["inbound_did"]
-        if did is None or (isinstance(did, str) and not did.strip()):
-            out.pop("inbound_did", None)
-        else:
-            if not isinstance(did, str):
-                raise ValueError("inbound_did must be a string")
-            did = did.strip()
-            if not re.fullmatch(r"\+?[1-9][0-9]{6,14}", did):
-                raise ValueError("inbound_did must be a 7-15 digit E.164 number")
-            out["inbound_did"] = did
+        raise ValueError(
+            "inbound_did is assignment-owned; configure an inbound DID assignment"
+        )
 
     _opt_str("auth_realm", 255)
     _opt_bool("register")

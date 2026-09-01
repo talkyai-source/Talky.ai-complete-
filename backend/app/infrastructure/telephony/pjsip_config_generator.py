@@ -51,7 +51,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-import re
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -96,7 +95,6 @@ class TrunkConfigInput:
     auth_username: Optional[str]
     auth_password: Optional[str]          # DECRYPTED, in-memory only
     caller_id: Optional[str] = None
-    inbound_did: Optional[str] = None     # explicit carrier account -> public DID map
     register: bool = False
     register_interval: int = _DEFAULT_REGISTER_INTERVAL
     dtmf_mode: Optional[str] = None
@@ -165,12 +163,11 @@ def render_trunk_conf(inp: TrunkConfigInput) -> str:
     lines.append(f"[{ep}]")
     lines.append("type=endpoint")
     lines.append(f"transport={transport_obj}")
+    # Every inbound endpoint enters the same context deliberately. Multiple
+    # registrations can share one carrier source host, so identify matching
+    # cannot prove which endpoint received an INVITE. The reconciler renders
+    # exact Request-URI account routes from active same-tenant DID assignments.
     lines.append("context=from-talky-inbound")
-    if inp.inbound_did:
-        inbound_did = _reject_newlines("inbound_did", inp.inbound_did.strip())
-        if not re.fullmatch(r"\+?[1-9][0-9]{6,14}", inbound_did):
-            raise ValueError("inbound_did must be a 7-15 digit E.164 number")
-        lines.append(f"set_var=TALKY_INBOUND_DID={inbound_did}")
     lines.append("disallow=all")
     lines.append("allow=ulaw,alaw")
     if has_auth:
@@ -306,7 +303,6 @@ def build_trunk_config_input(row: Any, *, decrypted_password: Optional[str]) -> 
         auth_username=row["auth_username"],
         auth_password=decrypted_password,
         caller_id=(md.get("caller_id") or None),
-        inbound_did=(md.get("inbound_did") or None),
         register=bool(md.get("register", False)),
         register_interval=int(md.get("register_interval", _DEFAULT_REGISTER_INTERVAL) or _DEFAULT_REGISTER_INTERVAL),
         dtmf_mode=(md.get("dtmf_mode") or None),

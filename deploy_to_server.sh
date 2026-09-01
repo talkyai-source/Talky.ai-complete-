@@ -100,7 +100,7 @@ ssh -t -i "$KEY" "$PROD" "
         exit 1
     fi
     echo '--> preflighting the complete gateway build toolchain before checkout'
-    for required_tool in bash cmake ctest c++ make curl git install mktemp rmdir timeout; do
+    for required_tool in asterisk bash cmake ctest c++ make curl git install mktemp rmdir timeout; do
         if ! command -v \"\$required_tool\" >/dev/null 2>&1; then
             echo \"!! Missing required deploy tool before checkout: \$required_tool\" >&2
             exit 1
@@ -135,6 +135,11 @@ ssh -t -i "$KEY" "$PROD" "
     (cd \"\$candidate_worktree/backend\" && /opt/talky/backend/venv/bin/python -c 'import app.main') >/dev/null 2>&1
     VOICE_GATEWAY_BUILD_SHA='${DEPLOY_SHA}' \
         bash \"\$candidate_worktree/backend/scripts/build_voice_gateway_release.sh\" \"\$gateway_candidate\"
+    echo '--> validating candidate Asterisk account-to-DID inventory'
+    sudo env \
+        TALKY_BACKEND_ENV_FILE=/opt/talky/backend/.env \
+        TALKY_BACKEND_PYTHON=/opt/talky/backend/venv/bin/python \
+        bash \"\$candidate_worktree/backend/scripts/reconcile_asterisk_release.sh\" --check-only
     echo '--> validating mandatory carrier-hairpin synthetic configuration'
     sudo bash \"\$candidate_worktree/backend/deploy/inbound-synthetic-call.sh\" \
         --check-config-file /etc/talky/inbound-synthetic.env
@@ -206,6 +211,8 @@ ssh -t -i "$KEY" "$PROD" "
     echo '--> applying database migrations (service restart is blocked on failure)'
     sudo systemctl start talky-migrate.service
     backend/venv/bin/python backend/scripts/verify_alembic_current_heads.py
+    echo '--> reconciling repository-owned Asterisk configuration'
+    sudo bash backend/scripts/reconcile_asterisk_release.sh
     echo '--> restarting backend services after the authenticated gateway is healthy'
     sudo systemctl restart talky-api talky-dialer-worker talky-voice-worker talky-reminder-worker
     sudo systemctl restart talky-trunk-status.timer
