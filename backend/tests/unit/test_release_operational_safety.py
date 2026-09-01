@@ -133,7 +133,10 @@ def test_deploy_builds_tests_and_restarts_exact_gateway_before_backend():
     ).read_text(encoding="utf-8")
 
     assert "build_voice_gateway_release.sh" in deploy
-    assert "for required_tool in bash cmake ctest c++ make" in deploy
+    assert (
+        "for required_tool in asterisk bash cmake ctest c++ make curl git "
+        "install mktemp rmdir timeout"
+    ) in deploy
     candidate_build_at = deploy.index("build_voice_gateway_release.sh")
     checkout_at = deploy.index("git checkout --detach '${DEPLOY_SHA}'")
     assert candidate_build_at < checkout_at
@@ -150,9 +153,12 @@ def test_deploy_builds_tests_and_restarts_exact_gateway_before_backend():
     assert deploy.count('get(\\"active_sessions\\")') >= 3
     assert "Gateway still owns" in deploy
     assert "sudo systemctl restart talky-voice-gateway" in deploy
-    assert deploy.index("sudo systemctl restart talky-voice-gateway") < deploy.index(
-        "sudo systemctl restart talky-api"
+    gateway_restart_at = deploy.index("sudo systemctl restart talky-voice-gateway")
+    asterisk_reconcile_at = deploy.index(
+        "sudo bash backend/scripts/reconcile_asterisk_release.sh"
     )
+    backend_restart_at = deploy.index("sudo systemctl restart talky-api")
+    assert gateway_restart_at < asterisk_reconcile_at < backend_restart_at
     assert "cmake --build" in builder
     assert "ctest --test-dir" in builder
     assert '-DVOICE_GATEWAY_BUILD_SHA="${build_sha}"' in builder
