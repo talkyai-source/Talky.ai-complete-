@@ -242,6 +242,7 @@ def _compose_knowledge_driven_body(
     agent_name: str,
     company_name: str,
     body_override: str | None = None,
+    opening_key: str = "outbound",
 ) -> str:
     """Persona body for knowledge-driven (slot-free) campaigns.
 
@@ -271,9 +272,13 @@ def _compose_knowledge_driven_body(
                 exc,
             )
     if persona_type == "lead_gen":
-        from app.services.scripts.prompts.personas.lead_gen import LEAD_GEN_KD_BODY
-        return LEAD_GEN_KD_BODY.format(
-            agent_name=agent_name, company_name=company_name
+        from app.services.scripts.prompts.personas.lead_gen import lead_gen_kd_body
+        # The shared STAGE 1 carries a {call_reason} slot that only slot-based
+        # campaigns fill; here the shape line points at the campaign guidance.
+        return lead_gen_kd_body(opening_key).format(
+            agent_name=agent_name,
+            company_name=company_name,
+            call_reason="[the reason in your campaign guidance]",
         )
     base = _KNOWLEDGE_DRIVEN_BODIES.get(
         persona_type, _KNOWLEDGE_DRIVEN_BODIES["customer_support"]
@@ -356,7 +361,8 @@ def compose_prompt(
         # a lean identity + tone body. The substance is injected from the
         # campaign's knowledge base at call time (knowledge/session_inject).
         persona_block = _compose_knowledge_driven_body(
-            persona_type, agent_name, company_name, body_override=body_override
+            persona_type, agent_name, company_name,
+            body_override=body_override, opening_key=opening_key,
         )
     else:
         persona_openings = PERSONA_OPENINGS[persona_type]

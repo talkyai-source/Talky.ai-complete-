@@ -57,7 +57,7 @@ export function CampaignBasicsEditor({
 
     const agentNames = useMemo(() => parseAgentNames(agentNamesRaw), [agentNamesRaw]);
     const guidance = guidanceBudgetStatus(goal);
-    const valid = name.trim() && companyName.trim() && agentNames.length >= 1 && voiceId && !guidance.overBudget;
+    const valid = name.trim() && companyName.trim() && agentNames.length >= 1 && voiceId && guidance.valid;
 
     const onSave = async () => {
         setSaving(true);
@@ -137,14 +137,15 @@ export function CampaignBasicsEditor({
 
                 <div>
                     <div className="flex items-baseline justify-between gap-3">
-                        <Label htmlFor="ce-goal">Campaign guidance <span className="text-muted-foreground font-normal">(optional)</span></Label>
+                        <Label htmlFor="ce-goal">Campaign guidance <span className="text-destructive">*</span></Label>
                         <span className={`text-xs tabular-nums ${guidance.overBudget ? "font-semibold text-destructive" : "text-muted-foreground"}`}>
                             {guidance.chars.toLocaleString()} / {guidance.budget.toLocaleString()}
                         </span>
                     </div>
                     <textarea
                         id="ce-goal" value={goal} onChange={(e) => setGoal(e.target.value)} rows={2}
-                        aria-invalid={guidance.overBudget || undefined}
+                        required
+                        aria-invalid={!guidance.valid || undefined}
                         className={`mt-1 w-full rounded-md border bg-white dark:bg-zinc-900 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 ${guidance.overBudget ? "border-destructive" : "border-gray-300 dark:border-white/15"}`}
                     />
                     <p className={`mt-1 text-xs ${guidance.overBudget ? "text-destructive" : "text-muted-foreground"}`}>

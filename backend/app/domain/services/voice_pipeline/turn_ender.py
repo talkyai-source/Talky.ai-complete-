@@ -244,9 +244,7 @@ class TurnEnder:
         # mode the first user utterance is their reply to the greeting
         # ("yeah", "sure", "uh-huh") and must reach the LLM as a real
         # affirmative, not be filtered out as noise.
-        _has_prior_user_turn = any(
-            m.role == MessageRole.USER for m in session.conversation_history
-        )
+        _has_prior_user_turn = _has_prior_user_turn_for_floor
 
         # Interruption lifecycle (gap #2). If the caller cut off ACTIVE agent
         # speech (flagged by tts_playback when it silenced the agent), classify
@@ -458,13 +456,9 @@ class TurnEnder:
         )
         mark_caller_stopped(session)
 
-        # Clear barge-in event now that EndOfTurn has fired (user stopped speaking).
-        # Stale barge-in signals from the user's own speech turn are now irrelevant.
-        # Any NEW barge-in signal that fires AFTER this point means the user started
-        # speaking again WHILE the AI is processing/responding — and must NOT be wiped.
-        barge_in_event = self._p._barge_in_events.get(call_id)
-        if barge_in_event:
-            barge_in_event.clear()
+        # (The stale barge-in event from the caller's own StartOfTurn was
+        # cleared above; nothing between there and here awaits, so a second
+        # clear could only ever wipe a NEW barge-in, which must survive.)
 
         # Deterministic identity disposition (Case 1 fix): remove the LLM's
         # coin-flip for the unambiguous cases. A wrong DESTINATION (wrong

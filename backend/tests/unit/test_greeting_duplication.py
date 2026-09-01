@@ -237,8 +237,11 @@ def test_stage_one_still_covers_reason_first_and_the_easy_out():
     assert "FIRST breath" in outbound
     assert "Lead with your name, then the permission ask, then the reason" in outbound
     assert "easy way to say no" in outbound
+    # The knowledge-driven body now IS the shared opening + playbook (its
+    # private agent-first copy was removed 2026-09-02), so it carries the same
+    # two ideas in the same words.
     assert "first breath" in LEAD_GEN_KD_BODY
-    assert "easy way to decline" in LEAD_GEN_KD_BODY
+    assert "easy way to say no" in LEAD_GEN_KD_BODY
 
 
 # ── #3: the few-shot must not key on a bare "Hello?" ───────────────────────

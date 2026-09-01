@@ -92,9 +92,17 @@ _TEMPLATES: Final[Mapping[str, str]] = {
 
 #: Current version per persona. Bump on any change to the composed text.
 _VERSIONS: Final[Mapping[str, str]] = {
-    "lead_gen": "lead_gen@3",
-    "customer_support": "customer_support@2",
-    "receptionist": "receptionist@2",
+    # @4 / @3 (2026-09-02): the prompt stopped arguing with itself. Voicemail
+    # has one instruction (end the call), wrong PERSON is a pivot everywhere
+    # and only wrong NUMBER/BUSINESS ends, silence belongs to the silence
+    # monitor alone (the "Take your time / Still there?" prose is gone), the
+    # dated engineering changelog inside STAGE 1 is gone, and the
+    # knowledge-driven lead_gen body reuses the shared opening for its
+    # opening mode instead of a private agent-first copy. customer_support
+    # and receptionist move only because the shared guardrails text changed.
+    "lead_gen": "lead_gen@4",
+    "customer_support": "customer_support@3",
+    "receptionist": "receptionist@3",
 }
 
 #: Fallback for a persona that is not in the registry yet. Deliberately visible

@@ -82,6 +82,14 @@ _EXPECTED_HASHES: dict[str, str] = {
     # timezone rule. lead_gen only — the other two personas are untouched, and
     # their hashes above are unchanged, which is the mechanism behaving.
     "lead_gen@3": "6a98b67eaa7a65e8",
+    # 2026-09-02 — the prompt stopped arguing with itself (see versions.py):
+    # one voicemail rule, wrong-person = pivot everywhere, silence owned by the
+    # silence monitor, no dated changelog in STAGE 1, and the knowledge-driven
+    # lead_gen body composes from the shared opening for its opening mode.
+    # All three move because the shared STAYING ON TRACK guardrail changed.
+    "lead_gen@4": "6bb07b97b15b3e5a",
+    "customer_support@3": "27f1f0b1ac192f25",
+    "receptionist@3": "f89d421c87a29242",
 }
 
 

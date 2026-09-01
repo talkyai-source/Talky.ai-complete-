@@ -353,13 +353,22 @@ class GroqLLMProvider(LLMProvider):
         system_prompt: Optional[str],
         messages: List[dict],
     ) -> List[dict]:
-        """
-        Groq recommends avoiding system prompts for GPT-OSS models and placing
-        instructions in a user message instead.
+        """Place the instructions on the CURRENT user message for GPT-OSS.
 
-        If the message list is empty or starts with an assistant message (e.g. the
-        Ask AI greeting), the instructions are prepended as a standalone user
-        message so that GPT-OSS always receives a user message first.
+        Groq's reasoning guidance for the GPT-OSS family is "avoid system
+        prompts — include all instructions in the user message". Until
+        2026-09-02 this stitched the block onto the FIRST user message, i.e.
+        the oldest turn of the call: the per-turn parts of the prompt (LIVE
+        STATE, CAPTURED, "ACTION THIS TURN: read the email back") sat next to
+        "hello" while the caller's current words were at the far end, and
+        because that first message changed every turn no prefix could ever be
+        cached. The instructions now ride on the LATEST user message; every
+        earlier message is passed through byte-for-byte, so the history is a
+        stable, cacheable prefix.
+
+        GPT-OSS still wants a user message first. When the history opens with
+        the agent's greeting, a short neutral user lead-in is prepended — it
+        carries no instructions, so it never changes between turns.
         """
         if not system_prompt:
             return messages
@@ -370,36 +379,29 @@ class GroqLLMProvider(LLMProvider):
             "Apply these instructions to every reply in this conversation."
         )
 
-        # GPT-OSS requires the first message to be user role.
-        # If history starts with an assistant message (e.g. greeting), prepend a
-        # standalone user instruction message rather than trying to inject into a
-        # later user message — that would leave the assistant message at index 0.
-        if not messages or messages[0].get("role") != "user":
-            return [{"role": "user", "content": instruction_block}, *messages]
+        if not messages:
+            return [{"role": "user", "content": instruction_block}]
 
-        # Normal path: inject instructions into the first user message.
-        merged_messages: List[dict] = []
-        injected = False
-        for message in messages:
-            if not injected and message.get("role") == "user":
-                merged_messages.append({
-                    **message,
-                    "content": (
-                        f"{instruction_block}\n\n"
-                        f"Current user message:\n{message.get('content', '')}"
-                    ),
-                })
-                injected = True
-                continue
-            merged_messages.append(message)
+        last_user_idx = next(
+            (i for i in range(len(messages) - 1, -1, -1) if messages[i].get("role") == "user"),
+            None,
+        )
+        if last_user_idx is None:
+            # Only assistant turns so far (e.g. a greeting with no reply yet):
+            # the instructions become the current user message.
+            return [*messages, {"role": "user", "content": instruction_block}]
 
-        if not injected:
-            merged_messages.insert(0, {
-                "role": "user",
-                "content": instruction_block,
-            })
-
-        return merged_messages
+        merged: List[dict] = list(messages)
+        merged[last_user_idx] = {
+            **messages[last_user_idx],
+            "content": (
+                f"{instruction_block}\n\n"
+                f"Current user message:\n{messages[last_user_idx].get('content', '')}"
+            ),
+        }
+        if merged[0].get("role") != "user":
+            merged.insert(0, {"role": "user", "content": "(The call has connected.)"})
+        return merged
     
     def __init__(self):
         self._client: Optional[AsyncGroq] = None

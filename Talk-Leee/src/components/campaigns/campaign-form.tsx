@@ -386,10 +386,11 @@ export function CampaignForm({ mode, campaignId, initialData }: Props) {
             setError("Add the company or business name your agent represents.");
             return;
         }
-        if (guidance.overBudget) {
-            // The backend refuses this too; say it here so nothing is ever
-            // saved and then silently shortened on the call.
-            setError(guidance.message ?? "Campaign guidance is over the character limit.");
+        if (!guidance.valid) {
+            // Over budget: the backend refuses this too; say it here so nothing
+            // is ever saved and then silently shortened on the call. Too short /
+            // empty: a frontend-only rule — a campaign needs a goal.
+            setError(guidance.message ?? "Campaign guidance is required.");
             return;
         }
         const missing = missingRequiredSlots();
@@ -1090,7 +1091,7 @@ export function CampaignForm({ mode, campaignId, initialData }: Props) {
                     {/* Campaign guidance (sent as system_prompt / additional_instructions) */}
                     <div className="space-y-2">
                         <div className="flex items-baseline justify-between gap-3">
-                            <Label htmlFor="system_prompt">Campaign guidance</Label>
+                            <Label htmlFor="system_prompt">Campaign guidance <span className="text-destructive">*</span></Label>
                             <span
                                 className={`text-xs tabular-nums ${guidance.overBudget ? "font-semibold text-destructive" : "text-muted-foreground"}`}
                                 data-testid="guidance-counter"
@@ -1107,11 +1108,12 @@ export function CampaignForm({ mode, campaignId, initialData }: Props) {
                             onChange={handleChange}
                             disabled={submitting}
                             rows={4}
-                            aria-invalid={guidance.overBudget || undefined}
+                            required
+                            aria-invalid={!guidance.valid || undefined}
                             className={`flex w-full rounded-lg border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50 ${guidance.overBudget ? "border-destructive" : "border-input"}`}
                         />
-                        {guidance.overBudget ? (
-                            <p className="text-xs text-destructive">{guidance.message}</p>
+                        {guidance.message ? (
+                            <p className={`text-xs ${guidance.overBudget ? "text-destructive" : "text-muted-foreground"}`}>{guidance.message}</p>
                         ) : (
                             <p className="text-xs text-muted-foreground">
                                 Layered on top of the core persona and guardrails; it is not the whole prompt. Keep behaviour here and
@@ -1139,7 +1141,7 @@ export function CampaignForm({ mode, campaignId, initialData }: Props) {
                     )}
 
                     <div className="flex gap-4">
-                        <Button type="submit" disabled={submitting || leadFields.isLoading || leadFields.isError || !formData.voice_id || guidance.overBudget}>
+                        <Button type="submit" disabled={submitting || leadFields.isLoading || leadFields.isError || !formData.voice_id || !guidance.valid}>
                             {submitting ? (
                                 <>
                                     <Loader2 className="w-4 h-4 animate-spin" />
