@@ -42,6 +42,41 @@ def test_deploy_runs_migrations_before_application_restart():
     assert "sudo systemctl start talky-trunk-status.service" in deploy
 
 
+def test_deploy_preflights_migration_runner_before_checkout():
+    deploy = (ROOT / "deploy_to_server.sh").read_text(encoding="utf-8")
+
+    python_at = deploy.index("if [ ! -x backend/venv/bin/python ]")
+    alembic_at = deploy.index("if [ ! -x backend/venv/bin/alembic ]")
+    checkout_at = deploy.index("git checkout --detach '${DEPLOY_SHA}'")
+
+    assert python_at < alembic_at < checkout_at
+
+
+def test_deploy_proves_required_units_loaded_and_persistent_units_enabled():
+    deploy = (ROOT / "deploy_to_server.sh").read_text(encoding="utf-8")
+
+    install_at = deploy.index("sudo bash backend/systemd/install-services.sh")
+    loaded_at = deploy.index(
+        "for required_unit in talky-migrate.service talky-inbound-synthetic.service"
+    )
+    enabled_at = deploy.index(
+        "for enabled_unit in talky-api.service talky-dialer-worker.service"
+    )
+    gateway_restart_at = deploy.index("sudo systemctl restart talky-voice-gateway")
+
+    assert install_at < loaded_at < enabled_at < gateway_restart_at
+    assert 'systemctl show \\"\\$required_unit\\" --property=LoadState --value' in deploy
+    assert 'systemctl is-enabled --quiet \\"\\$enabled_unit\\"' in deploy
+    for required in (
+        "talky-voice-worker.service",
+        "talky-reminder-worker.service",
+        "talky-voice-gateway.service",
+        "talky-trunk-status.timer",
+        "talky-inbound-synthetic.timer",
+    ):
+        assert required in deploy[enabled_at:gateway_restart_at]
+
+
 def test_alembic_current_heads_verifier_accepts_exact_match_and_rejects_drift():
     verifier = _load_alembic_head_verifier()
 

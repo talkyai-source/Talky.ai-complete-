@@ -110,6 +110,10 @@ ssh -t -i "$KEY" "$PROD" "
         echo '!! /opt/talky/backend/venv/bin/python is missing or not executable.' >&2
         exit 1
     fi
+    if [ ! -x backend/venv/bin/alembic ]; then
+        echo '!! /opt/talky/backend/venv/bin/alembic is missing or not executable.' >&2
+        exit 1
+    fi
     echo '--> fetching candidate reachability proof'
     git fetch --prune origin ${BRANCH}
     git cat-file -e '${DEPLOY_SHA}^{commit}'
@@ -165,6 +169,20 @@ ssh -t -i "$KEY" "$PROD" "
         /opt/talky/runtime/bin/voice_gateway
     echo '--> reconciling systemd units'
     sudo bash backend/systemd/install-services.sh
+    echo '--> proving required systemd units are installed and enabled'
+    for required_unit in talky-migrate.service talky-inbound-synthetic.service; do
+        unit_load_state=\"\$(systemctl show \"\$required_unit\" --property=LoadState --value 2>/dev/null || true)\"
+        if [ \"\$unit_load_state\" != 'loaded' ]; then
+            echo \"!! Required systemd unit \$required_unit is not loaded (state=\$unit_load_state).\" >&2
+            exit 1
+        fi
+    done
+    for enabled_unit in talky-api.service talky-dialer-worker.service talky-voice-worker.service talky-reminder-worker.service talky-voice-gateway.service talky-trunk-status.timer talky-inbound-synthetic.timer; do
+        if ! systemctl is-enabled --quiet \"\$enabled_unit\"; then
+            echo \"!! Required systemd unit \$enabled_unit is not enabled.\" >&2
+            exit 1
+        fi
+    done
     echo '--> rechecking zero gateway sessions immediately before restart'
     gateway_stats=\"\$(curl -fsS --max-time 10 http://127.0.0.1:18080/stats)\"
     active_sessions=\"\$(printf '%s' \"\$gateway_stats\" | backend/venv/bin/python -c 'import json,sys; value=json.load(sys.stdin).get(\"active_sessions\"); assert isinstance(value, int) and not isinstance(value, bool); print(value)')\"
