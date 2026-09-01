@@ -20,6 +20,9 @@ Admin/frontend/.env
 *.crt
 *.p12
 *.pfx
+/secrets/
+# Atomically installed production binaries are runtime state, not source.
+/runtime/
 
 # ── Python ───────────────────────────────────────────────────
 __pycache__/
@@ -130,3 +133,4 @@ testsprite_tests/
 
 # Local agent worktrees are machine state, never repository submodules.
 .claude/worktrees/
+.codex-worktrees/

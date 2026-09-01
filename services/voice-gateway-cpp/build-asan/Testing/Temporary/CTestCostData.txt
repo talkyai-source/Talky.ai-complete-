@@ -1,3 +1,0 @@
-voice_gateway_tests 1 0
----
-voice_gateway_tests
