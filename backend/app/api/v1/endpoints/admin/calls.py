@@ -837,16 +837,6 @@ async def terminate_call(
                     redis_client = getattr(get_container(), "redis", None)
                 except Exception:
                     redis_client = None
-                answered_at = call["answered_at"]
-                if answered_at:
-                    now = (
-                        datetime.now(timezone.utc)
-                        if getattr(answered_at, "tzinfo", None)
-                        else datetime.now()
-                    )
-                    duration = max(0, int((now - answered_at).total_seconds()))
-                else:
-                    duration = 0
                 await finalize_proven_inbound_termination(
                     db_client.pool,
                     provider_call_id=termination_context.provider_call_id,
@@ -854,13 +844,7 @@ async def terminate_call(
                     tenant_id=str(call["tenant_id"]),
                     provider=str(call["provider"] or "asterisk"),
                     terminal_status="ended",
-                    duration_seconds=duration,
-                    reason=(
-                        "admin_operator_hangup"
-                        if answered_at
-                        else "admin_operator_hangup_before_answer"
-                    ),
-                    release_only=not bool(answered_at),
+                    reason="admin_operator_hangup",
                     redis_client=redis_client,
                     campaign_id=(str(call["campaign_id"]) if call.get("campaign_id") else None),
                 )

@@ -126,7 +126,7 @@ async def get_dashboard_summary(
             FAILED_OUTCOMES as _FAILED_OUTCOMES,
         )
         month_q = db_client.table("calls").select(
-            "id,outcome,duration_seconds,is_test"
+            "id,outcome,duration_seconds,is_test,direction,billing_status"
         )
         month_q = apply_tenant_filter(month_q, current_user.tenant_id)
         month_q = month_q.gte("created_at", month_start_iso)
@@ -138,14 +138,24 @@ async def get_dashboard_summary(
         failed_calls = sum(
             1 for r in month_rows if (r.get("outcome") or "") in _FAILED_OUTCOMES
         )
-        billable_month_rows = [
+        customer_month_rows = [
             row for row in month_rows if not bool(row.get("is_test"))
         ]
+        billable_parent_rows = [
+            row
+            for row in customer_month_rows
+            if (
+                row.get("direction") != "inbound"
+                or row.get("billing_status") == "finalized"
+            )
+        ]
         parent_duration_seconds = sum(
-            int(r.get("duration_seconds") or 0) for r in billable_month_rows
+            int(r.get("duration_seconds") or 0) for r in billable_parent_rows
         )
+        # Child transfer usage settles independently of its parent. Keep every
+        # non-test parent ID here, then retain the finalized-only child filter.
         month_call_ids = [
-            r.get("id") for r in billable_month_rows if r.get("id")
+            r.get("id") for r in customer_month_rows if r.get("id")
         ]
         transfer_duration_seconds = 0
         if month_call_ids:
@@ -256,4 +266,3 @@ async def get_dashboard_summary(
             status_code=500,
             detail="Failed to fetch dashboard summary"
         )
-

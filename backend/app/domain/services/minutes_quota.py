@@ -84,6 +84,14 @@ async def compute_minutes_status(conn: Any, tenant_id: str) -> MinutesStatus:
                   -- Campaign test sessions are real rows so they can be
                   -- reviewed, but are never customer traffic (Alembic 0017).
                   AND NOT c.is_test
+                  -- Outbound rows predate inbound billing_status and retain
+                  -- their legacy ``none`` value. Inbound reservations/holds
+                  -- are not usage: charge the parent only after its immutable
+                  -- finalize transaction commits authoritative seconds.
+                  AND (
+                    c.direction IS DISTINCT FROM 'inbound'
+                    OR c.billing_status='finalized'
+                  )
             ),0)
             + COALESCE((
                 SELECT SUM(COALESCE(leg.duration_seconds,0))

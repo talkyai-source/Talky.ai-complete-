@@ -257,3 +257,63 @@ async def test_summary_adds_only_finalized_transfer_leg_actual_seconds():
     assert ("in_", ("call_id", ["11111111-1111-1111-1111-111111111111"]), {}) in leg_builder.calls
     assert ("eq", ("leg_type", "transfer"), {}) in leg_builder.calls
     assert ("eq", ("billing_status", "finalized"), {}) in leg_builder.calls
+
+
+@pytest.mark.asyncio
+async def test_summary_minutes_exclude_unsettled_inbound_but_keep_outbound():
+    """The dashboard's minutes KPI must equal the quota/billing definition."""
+    month_builder = _FakeBuilder(
+        data=[
+            {
+                "id": "11111111-1111-1111-1111-111111111111",
+                "outcome": "answered",
+                "duration_seconds": 60,
+                "is_test": False,
+                "direction": "outbound",
+                "billing_status": "none",
+            },
+            {
+                "id": "22222222-2222-2222-2222-222222222222",
+                "outcome": "answered",
+                "duration_seconds": 60,
+                "is_test": False,
+                "direction": "inbound",
+                "billing_status": "finalized",
+            },
+            {
+                "id": "33333333-3333-3333-3333-333333333333",
+                "outcome": "answered",
+                "duration_seconds": 3600,
+                "is_test": False,
+                "direction": "inbound",
+                "billing_status": "held",
+            },
+            {
+                "id": "44444444-4444-4444-4444-444444444444",
+                "outcome": None,
+                "duration_seconds": 3600,
+                "is_test": False,
+                "direction": "inbound",
+                "billing_status": "reserved",
+            },
+        ]
+    )
+    builders = {
+        "calls": [
+            _FakeBuilder(count=4, data=[]),
+            month_builder,
+            _FakeBuilder(count=0, data=[]),
+        ],
+        "campaigns": [_FakeBuilder(count=0, data=[])],
+        "tenants": [_FakeBuilder(data=[{"minutes_allocated": 10}])],
+        "dialer_jobs": [_FakeBuilder(count=0, data=[])],
+    }
+
+    result = await get_dashboard_summary(
+        current_user=_user(),
+        db_client=_FakeClient(builders),
+    )
+
+    # Legacy outbound 60s + settled inbound 60s. Held/reserved inbound is 0.
+    assert result.minutes_used == 2
+    assert result.minutes_remaining == 8

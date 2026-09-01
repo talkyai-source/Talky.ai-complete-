@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import json
 from datetime import datetime, timezone
 from types import SimpleNamespace
@@ -10,10 +11,23 @@ from fastapi import HTTPException
 
 from app.api.v1.dependencies import CurrentUser
 from app.api.v1.endpoints import calls, telephony_bridge
+from app.api.v1.endpoints.admin import calls as admin_calls
 from app.core import container as container_module
 from app.domain.services.telephony import inbound_admission
 from app.domain.services.telephony.termination import TerminationContext
 from app.domain.services.call_status import TERMINAL_CALL_STATUSES
+
+
+def test_operator_endpoints_never_calculate_inbound_duration_from_wall_clock():
+    sources = (
+        inspect.getsource(calls.hangup_live_call),
+        inspect.getsource(admin_calls.terminate_call),
+        inspect.getsource(telephony_bridge.hangup_call),
+        inspect.getsource(telephony_bridge._apply_inbound_transfer_failure_action),
+    )
+    for source in sources:
+        assert "duration_seconds=duration" not in source
+        assert "now - answered_at" not in source
 
 
 class _Acquire:

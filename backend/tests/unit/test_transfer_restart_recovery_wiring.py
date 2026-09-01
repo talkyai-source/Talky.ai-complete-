@@ -26,12 +26,14 @@ def test_normal_lifespan_wires_answer_fence_before_connect_and_readiness():
 
     source = inspect.getsource(main.lifespan)
     answer_wiring = source.index("set_inbound_answered_persist_callback")
+    terminal_wiring = source.index("set_inbound_terminal_proof_persist_callback")
     connect = source.index("await _tb._adapter.connect()")
     live_validation = source.index("validate_live_production_inbound_adapter(", connect)
     readiness = source.index("_tb.ensure_session_management_started()", connect)
 
-    assert answer_wiring < connect < live_validation < readiness
+    assert answer_wiring < terminal_wiring < connect < live_validation < readiness
     assert "_tb._persist_inbound_answered" in source
+    assert "_tb._persist_inbound_terminal_proof" in source
 
 
 class _OwnerState:

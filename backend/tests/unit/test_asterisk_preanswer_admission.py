@@ -18,6 +18,7 @@ def _enable_answer_persistence(
 ):
     hook = callback or AsyncMock(return_value=None)
     adapter.set_inbound_answered_persist_callback(hook)
+    adapter.set_inbound_terminal_proof_persist_callback(AsyncMock(return_value=None))
     return hook
 
 
@@ -212,7 +213,7 @@ async def test_ambiguous_answer_request_failure_finalizes_never_releases():
     finalizer.assert_awaited_once()
     assert finalizer.await_args.kwargs == {
         "terminal_status": "failed",
-        "duration_seconds": 1,
+        "duration_seconds": 0,
         "reason": "process_restart_answer_ambiguous",
         "release_only": False,
     }
@@ -253,7 +254,55 @@ async def test_answer_http_response_only_releases_when_noncommit_is_proven(
     finalizer.assert_awaited_once()
     assert finalizer.await_args.kwargs["reason"] == expected_reason
     assert finalizer.await_args.kwargs["release_only"] is expected_release_only
-    assert finalizer.await_args.kwargs["duration_seconds"] == (0 if expected_release_only else 1)
+    assert finalizer.await_args.kwargs["duration_seconds"] == 0
+
+
+def test_answered_duration_uses_terminal_proof_and_is_capped_to_reservation():
+    adapter = AsteriskAdapter()
+    decision = _allowed()
+    decision["config_snapshot"]["route"] = {
+        "max_call_duration_seconds": 60,
+        "reservation_seconds": 60,
+    }
+    decision["_answered_at_monotonic"] = 100.0
+
+    with pytest.raises(RuntimeError, match="terminal proof"):
+        adapter._answered_elapsed_seconds(decision)
+
+    assert (
+        adapter._answered_elapsed_seconds(
+            decision,
+            terminal_at_monotonic=104.01,
+        )
+        == 5
+    )
+    assert (
+        adapter._answered_elapsed_seconds(
+            decision,
+            terminal_at_monotonic=10_000.0,
+        )
+        == 60
+    )
+
+    decision.pop("_answered_at_monotonic")
+    decision["_answer_intent_at_monotonic"] = 100.0
+    assert (
+        adapter._answered_elapsed_seconds(
+            decision,
+            terminal_at_monotonic=104.01,
+        )
+        == 0
+    )
+
+    decision.pop("_answer_intent_at_monotonic")
+    decision["_answered_at_utc"] = "2026-09-02T00:00:00+00:00"
+    assert (
+        adapter._answered_elapsed_seconds(
+            decision,
+            terminal_at_monotonic=104.01,
+        )
+        == 0
+    )
 
 
 @pytest.mark.asyncio
@@ -305,7 +354,84 @@ async def test_crash_after_answer_2xx_leaves_durable_ambiguous_intent(
     assert cached["_answer_intent_at_utc"]
     assert cached["_answered_at_monotonic"] > 0
     assert cached["_answered_at_utc"]
-    assert adapter._answered_elapsed_seconds(cached) >= 1
+    with pytest.raises(RuntimeError, match="terminal proof"):
+        adapter._answered_elapsed_seconds(cached)
+
+
+@pytest.mark.asyncio
+async def test_terminal_proof_is_durable_before_media_and_lifecycle_cleanup():
+    adapter = AsteriskAdapter()
+    admission = _allowed()
+    admission["_answered_at_monotonic"] = 100.0
+    admission["_answered_at_utc"] = "2026-09-02T00:00:00+00:00"
+    adapter._inbound_admissions["inbound-1"] = admission
+    adapter._active_sessions["inbound-1"] = {
+        "session_id": "gateway-1",
+        "listen_port": 32000,
+        "bridge_id": "bridge-1",
+        "direction": "inbound",
+    }
+    adapter._gateway_sessions["inbound-1"] = "gateway-1"
+    adapter._ext_channels["inbound-1"] = "external-1"
+    adapter._bridges["inbound-1"] = "bridge-1"
+    adapter._record_terminal_at_monotonic(
+        "inbound-1",
+        105.0,
+        timestamp_utc="2026-09-02T00:00:05+00:00",
+    )
+    actions: list[str] = []
+
+    async def persist_terminal(channel_id, payload, *, terminated_at, duration_seconds):
+        actions.append("persist_terminal")
+        assert channel_id == "inbound-1"
+        assert payload["call_id"] == admission["call_id"]
+        assert terminated_at == "2026-09-02T00:00:05+00:00"
+        assert duration_seconds == 5
+
+    async def gateway(method, path, **_kwargs):
+        if method == "POST" and path == "/v1/sessions/stop":
+            actions.append("gateway_stop")
+        return {}
+
+    async def ari(method, path, **_kwargs):
+        if method == "DELETE":
+            actions.append(f"delete:{path}")
+        return {}
+
+    async def ended(channel_id):
+        actions.append("lifecycle_end")
+        assert channel_id == "inbound-1"
+
+    adapter.set_inbound_terminal_proof_persist_callback(persist_terminal)
+    adapter.set_call_end_callback(ended)
+    adapter._gateway = gateway
+    adapter._ari = ari
+    adapter._release_rtp_port = AsyncMock()
+
+    await adapter._on_stasis_end(
+        "inbound-1",
+        "ChannelDestroyed",
+        absence_proven=True,
+    )
+
+    assert actions[0] == "persist_terminal"
+    assert actions.index("persist_terminal") < actions.index("gateway_stop")
+    assert actions.index("persist_terminal") < actions.index("delete:/channels/external-1")
+    assert actions.index("persist_terminal") < actions.index("lifecycle_end")
+
+
+@pytest.mark.asyncio
+async def test_destroyed_non_parent_channel_does_not_consume_terminal_proof_capacity():
+    adapter = AsteriskAdapter()
+    adapter._active_sessions["outbound-1"] = {"direction": "outbound"}
+    adapter._schedule_terminal_cleanup = lambda *_args, **_kwargs: None
+
+    await adapter._handle_ari_event(
+        {"type": "ChannelDestroyed", "channel": {"id": "outbound-1"}}
+    )
+
+    assert "outbound-1" not in adapter._terminal_at_monotonic
+    assert "outbound-1" not in adapter._terminal_at_utc
 
 
 @pytest.mark.asyncio
@@ -1389,6 +1515,7 @@ async def test_terminal_after_lifecycle_acceptance_uses_lifecycle_once():
     accepted = asyncio.Event()
     finish_initialization = asyncio.Event()
     ended_calls: list[str] = []
+    terminal_times: list[float] = []
 
     async def accepted_handoff(channel_id, _admission):
         # Production accepts only after every cancellable initialization await.
@@ -1398,6 +1525,9 @@ async def test_terminal_after_lifecycle_acceptance_uses_lifecycle_once():
 
     async def lifecycle_end(channel_id):
         ended_calls.append(channel_id)
+        terminal_time = adapter.pop_terminal_at_monotonic(channel_id)
+        assert terminal_time is not None
+        terminal_times.append(terminal_time)
         adapter.pop_inbound_admission(channel_id)
 
     async def ari(method, path, **kwargs):
@@ -1435,6 +1565,7 @@ async def test_terminal_after_lifecycle_acceptance_uses_lifecycle_once():
         await asyncio.sleep(0)
 
     assert ended_calls == ["inbound-1"]
+    assert len(terminal_times) == 1
     assert "inbound-1" not in adapter._inbound_handoff_tasks
     assert "inbound-1" not in adapter._inbound_handoff_accepted
     assert "inbound-1" not in adapter._active_sessions

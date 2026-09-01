@@ -257,6 +257,7 @@ from app.domain.services.telephony.lifecycle import (  # noqa: E402
     _admit_inbound_call,
     _persist_pre_row_inbound_rejection,
     _persist_inbound_answered,
+    _persist_inbound_terminal_proof,
     _finalize_inbound_admission,
 )
 
@@ -420,6 +421,10 @@ async def start_telephony(
             _adapter.set_inbound_rejection_persist_callback(_persist_pre_row_inbound_rejection)
         if hasattr(_adapter, "set_inbound_answered_persist_callback"):
             _adapter.set_inbound_answered_persist_callback(_persist_inbound_answered)
+        if hasattr(_adapter, "set_inbound_terminal_proof_persist_callback"):
+            _adapter.set_inbound_terminal_proof_persist_callback(
+                _persist_inbound_terminal_proof
+            )
         if hasattr(_adapter, "set_inbound_admission_finalizer"):
             _adapter.set_inbound_admission_finalizer(_finalize_inbound_admission)
         if hasattr(_adapter, "set_transfer_connected_callback"):
@@ -1461,16 +1466,6 @@ async def hangup_call(call_id: str, request: Request):
     settlement_deferred = termination_context.direction != "inbound"
     if termination_context.direction == "inbound":
         try:
-            answered_at = termination_context.answered_at
-            if answered_at:
-                now = (
-                    datetime.now(timezone.utc)
-                    if getattr(answered_at, "tzinfo", None)
-                    else datetime.now()
-                )
-                duration = max(0, int((now - answered_at).total_seconds()))
-            else:
-                duration = 0
             await finalize_proven_inbound_termination(
                 pool,
                 provider_call_id=str(termination_context.provider_call_id or call_id),
@@ -1478,11 +1473,7 @@ async def hangup_call(call_id: str, request: Request):
                 tenant_id=termination_context.tenant_id,
                 provider=termination_context.provider or "asterisk",
                 terminal_status="ended",
-                duration_seconds=duration,
-                reason=(
-                    "raw_operator_hangup" if answered_at else "raw_operator_hangup_before_answer"
-                ),
-                release_only=not bool(answered_at),
+                reason="raw_operator_hangup",
                 redis_client=getattr(container, "redis", None),
                 campaign_id=termination_context.campaign_id,
             )
@@ -1884,16 +1875,6 @@ async def _apply_inbound_transfer_failure_action(attempt, result: dict) -> dict:
             else proof.error or proof.code
         )
         if proof.confirmed:
-            answered_at = termination_context.answered_at
-            if answered_at:
-                now = (
-                    datetime.now(timezone.utc)
-                    if getattr(answered_at, "tzinfo", None)
-                    else datetime.now()
-                )
-                duration = max(0, int((now - answered_at).total_seconds()))
-            else:
-                duration = 0
             await finalize_proven_inbound_termination(
                 container.db_pool,
                 provider_call_id=str(
@@ -1903,9 +1884,7 @@ async def _apply_inbound_transfer_failure_action(attempt, result: dict) -> dict:
                 tenant_id=termination_context.tenant_id,
                 provider=termination_context.provider or "asterisk",
                 terminal_status="ended",
-                duration_seconds=duration,
                 reason=f"transfer_failure_action_{requested_action}",
-                release_only=not bool(answered_at),
                 redis_client=getattr(container, "redis", None),
                 campaign_id=termination_context.campaign_id,
             )

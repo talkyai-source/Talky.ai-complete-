@@ -143,6 +143,7 @@ def validate_production_inbound_adapter(
     required_callbacks = (
         "set_inbound_admission_callback",
         "set_inbound_answered_persist_callback",
+        "set_inbound_terminal_proof_persist_callback",
         "set_inbound_admission_finalizer",
         "list_recoverable_application_channel_ids",
         "recovery_excluded_channel_ids",
@@ -178,6 +179,7 @@ def validate_live_production_inbound_adapter(
         required_wiring = (
             "_on_inbound_admission",
             "_on_inbound_answered_persist",
+            "_on_inbound_terminal_proof_persist",
             "_on_inbound_admission_finalize",
         )
         unwired = [name for name in required_wiring if not callable(getattr(adapter, name, None))]

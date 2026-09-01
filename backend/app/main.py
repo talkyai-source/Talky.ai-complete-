@@ -633,6 +633,13 @@ async def lifespan(app: FastAPI):
                 )
             if hasattr(_tb._adapter, "set_inbound_answered_persist_callback"):
                 _tb._adapter.set_inbound_answered_persist_callback(_tb._persist_inbound_answered)
+            if hasattr(
+                _tb._adapter,
+                "set_inbound_terminal_proof_persist_callback",
+            ):
+                _tb._adapter.set_inbound_terminal_proof_persist_callback(
+                    _tb._persist_inbound_terminal_proof
+                )
             if hasattr(_tb._adapter, "set_inbound_admission_finalizer"):
                 _tb._adapter.set_inbound_admission_finalizer(_tb._finalize_inbound_admission)
             if hasattr(_tb._adapter, "set_transfer_connected_callback"):

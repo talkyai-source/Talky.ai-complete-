@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -61,6 +64,8 @@ async def test_reasoned_preanswer_hangup_retries_bare_in_same_iteration(monkeypa
     assert await adapter.hangup_confirmed("denied-1", reason_code=42) is True
     assert requests[0]["params"] == {"reason_code": "42"}
     assert "params" not in requests[1]
+    assert adapter._terminal_at_monotonic == {}
+    assert adapter._terminal_at_utc == {}
 
 
 @pytest.mark.asyncio
@@ -413,6 +418,11 @@ async def test_proven_inbound_finalizer_commits_children_parent_global_then_ack(
         finalize_parent,
     )
     monkeypatch.setattr(concurrency, "release_lease_strict", release_global)
+    monkeypatch.setattr(
+        termination,
+        "_load_persisted_inbound_terminal_duration",
+        AsyncMock(return_value=17),
+    )
 
     await finalize_proven_inbound_termination(
         object(),
@@ -420,12 +430,211 @@ async def test_proven_inbound_finalizer_commits_children_parent_global_then_ack(
         durable_call_id="durable-parent",
         tenant_id="tenant-1",
         terminal_status="ended",
-        duration_seconds=17,
         reason="operator_hangup",
         redis_client=object(),
     )
 
     assert order == ["ledger", "children", "parent", "global", "ack"]
+
+
+def test_proven_finalizer_has_no_caller_supplied_settlement_escape_hatch():
+    parameters = inspect.signature(finalize_proven_inbound_termination).parameters
+    assert "duration_seconds" not in parameters
+    assert "release_only" not in parameters
+
+
+@pytest.mark.asyncio
+async def test_stale_preanswer_snapshot_is_held_instead_of_released(monkeypatch):
+    """A caller snapshot cannot release a call while ARI Answer is persisting.
+
+    The durable read happens after PBX absence proof.  If it still cannot prove
+    answer-to-hangup duration, settlement must enter the carrier/CDR hold path;
+    a zero-second release would permanently underbill an answered call when the
+    Answer write commits immediately afterwards.
+    """
+
+    import app.domain.services.global_concurrency as concurrency
+    import app.domain.services.telephony.inbound_admission as admission
+    import app.domain.services.telephony.inbound_transfer as transfers
+    import app.domain.services.telephony.state_backend as state_backend
+
+    finalized = AsyncMock()
+    released = AsyncMock()
+
+    class State:
+        async def register_cleanup_obligation(self, *_args, **_kwargs):
+            return None
+
+        async def acknowledge_orphan_recovery(self, *_args, **_kwargs):
+            return None
+
+    monkeypatch.setattr(state_backend, "get_state_backend", lambda: State())
+    monkeypatch.setattr(
+        termination,
+        "_load_persisted_inbound_terminal_duration",
+        AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
+        transfers,
+        "finalize_connected_inbound_transfers",
+        AsyncMock(return_value=0),
+    )
+    monkeypatch.setattr(admission.InboundAdmissionService, "finalize", finalized)
+    monkeypatch.setattr(admission.InboundAdmissionService, "release", released)
+    monkeypatch.setattr(concurrency, "release_lease_strict", AsyncMock())
+
+    await finalize_proven_inbound_termination(
+        object(),
+        provider_call_id="provider-parent",
+        durable_call_id="durable-parent",
+        tenant_id="tenant-1",
+        terminal_status="ended",
+        reason="tenant_operator_hangup_before_answer",
+        redis_client=object(),
+    )
+
+    released.assert_not_awaited()
+    finalized.assert_awaited_once()
+    request = finalized.await_args.args[-1]
+    assert request.duration_seconds == 0
+    assert request.reason == "process_restart_answer_ambiguous"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("persisted_duration", "expected_duration"),
+    [(5, 5), (0, None)],
+)
+async def test_persisted_terminal_duration_requires_new_provider_proof(
+    monkeypatch,
+    persisted_duration,
+    expected_duration,
+):
+    terminated_at = datetime(2026, 9, 2, 12, 0, 5, tzinfo=timezone.utc)
+
+    class Conn:
+        async def fetchrow(self, query, *args):
+            normalized = " ".join(query.split())
+            assert "answered_at IS NOT NULL" not in normalized
+            assert "provider_terminated_at IS NOT NULL" not in normalized
+            assert "NOW()" not in normalized
+            assert args == ("durable-parent", "provider-parent")
+            return {
+                "answered_at": datetime(2026, 9, 2, 12, 0, tzinfo=timezone.utc),
+                "provider_terminated_at": terminated_at,
+                "duration_seconds": persisted_duration,
+                "reserved_seconds": 60,
+            }
+
+    @asynccontextmanager
+    async def acquire(pool, tenant_id, **_kwargs):
+        assert pool is sentinel_pool
+        assert tenant_id == "tenant-1"
+        yield Conn()
+
+    sentinel_pool = object()
+    monkeypatch.setattr(termination, "acquire_with_tenant", acquire)
+
+    if expected_duration is None:
+        with pytest.raises(RuntimeError, match="duration is invalid"):
+            await termination._load_persisted_inbound_terminal_duration(
+                sentinel_pool,
+                durable_call_id="durable-parent",
+                provider_call_id="provider-parent",
+                tenant_id="tenant-1",
+            )
+    else:
+        duration = await termination._load_persisted_inbound_terminal_duration(
+            sentinel_pool,
+            durable_call_id="durable-parent",
+            provider_call_id="provider-parent",
+            tenant_id="tenant-1",
+        )
+        assert duration == expected_duration
+
+
+@pytest.mark.asyncio
+async def test_persisted_terminal_duration_marks_inflight_answer_as_ambiguous(
+    monkeypatch,
+):
+    class Conn:
+        async def fetchrow(self, query, *args):
+            normalized = " ".join(query.split())
+            assert "answered_at IS NOT NULL" not in normalized
+            assert "provider_terminated_at IS NOT NULL" not in normalized
+            assert "NOW()" not in normalized
+            assert args == ("durable-parent", "provider-parent")
+            return {
+                "answered_at": None,
+                "provider_terminated_at": datetime(
+                    2026, 9, 2, 12, 0, 5, tzinfo=timezone.utc
+                ),
+                "duration_seconds": 0,
+                "reserved_seconds": 60,
+            }
+
+    @asynccontextmanager
+    async def acquire(pool, tenant_id, **_kwargs):
+        assert pool is sentinel_pool
+        assert tenant_id == "tenant-1"
+        yield Conn()
+
+    sentinel_pool = object()
+    monkeypatch.setattr(termination, "acquire_with_tenant", acquire)
+
+    duration = await termination._load_persisted_inbound_terminal_duration(
+        sentinel_pool,
+        durable_call_id="durable-parent",
+        provider_call_id="provider-parent",
+        tenant_id="tenant-1",
+    )
+
+    assert duration is None
+
+
+@pytest.mark.asyncio
+async def test_missing_terminal_proof_retains_cleanup_ledger_before_settlement(
+    monkeypatch,
+):
+    import app.domain.services.global_concurrency as concurrency
+    import app.domain.services.telephony.inbound_admission as admission
+    import app.domain.services.telephony.inbound_transfer as transfers
+    import app.domain.services.telephony.state_backend as state_backend
+
+    order: list[str] = []
+
+    class State:
+        async def register_cleanup_obligation(self, _call_id, **_kwargs):
+            order.append("ledger")
+
+        async def acknowledge_orphan_recovery(self, _call_id):
+            order.append("ack")
+
+    async def unexpected(*_args, **_kwargs):
+        order.append("unexpected")
+
+    monkeypatch.setattr(state_backend, "get_state_backend", lambda: State())
+    monkeypatch.setattr(
+        termination,
+        "_load_persisted_inbound_terminal_duration",
+        AsyncMock(side_effect=RuntimeError("missing provider terminal proof")),
+    )
+    monkeypatch.setattr(transfers, "finalize_connected_inbound_transfers", unexpected)
+    monkeypatch.setattr(admission.InboundAdmissionService, "finalize", unexpected)
+    monkeypatch.setattr(concurrency, "release_lease_strict", unexpected)
+
+    with pytest.raises(RuntimeError, match="missing provider terminal proof"):
+        await finalize_proven_inbound_termination(
+            object(),
+            provider_call_id="provider-parent",
+            durable_call_id="durable-parent",
+            tenant_id="tenant-1",
+            terminal_status="ended",
+            reason="operator_hangup",
+            redis_client=object(),
+        )
+
+    assert order == ["ledger"]
 
 
 @pytest.mark.asyncio
@@ -461,6 +670,11 @@ async def test_proven_inbound_finalizer_retains_ledger_when_child_commit_fails(
     )
     monkeypatch.setattr(admission.InboundAdmissionService, "finalize", unexpected)
     monkeypatch.setattr(concurrency, "release_lease_strict", unexpected)
+    monkeypatch.setattr(
+        termination,
+        "_load_persisted_inbound_terminal_duration",
+        AsyncMock(return_value=17),
+    )
 
     with pytest.raises(RuntimeError, match="transfer lease database unavailable"):
         await finalize_proven_inbound_termination(
@@ -469,7 +683,6 @@ async def test_proven_inbound_finalizer_retains_ledger_when_child_commit_fails(
             durable_call_id="durable-parent",
             tenant_id="tenant-1",
             terminal_status="ended",
-            duration_seconds=17,
             reason="operator_hangup",
             redis_client=object(),
         )

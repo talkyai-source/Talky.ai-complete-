@@ -302,6 +302,16 @@ class AsteriskAdapter(CallControlAdapter):
         # the later proof instead of polling or timing out after already
         # claiming the terminal-event burst.
         self._destroyed_channel_ids: set[str] = set()
+        # First authoritative parent-leg absence time. ChannelDestroyed records
+        # it at event receipt; confirmation polling records it when inventory
+        # first proves absence. Lifecycle consumes this frozen monotonic clock
+        # before any gateway/bridge/provider cleanup can inflate billable time.
+        self._terminal_at_monotonic: Dict[str, float] = {}
+        # Wall-clock companion to the monotonic measurement. PostgreSQL needs
+        # an absolute terminal timestamp that survives a worker crash; keeping
+        # it beside the frozen duration boundary prevents recovery from ever
+        # substituting its later restart time for the real PBX absence time.
+        self._terminal_at_utc: Dict[str, str] = {}
 
         # Global event callbacks
         self._call_arrived_callbacks: Dict[str, Callable] = {}
@@ -334,6 +344,7 @@ class AsteriskAdapter(CallControlAdapter):
         self._on_inbound_admission: Optional[Callable] = None
         self._on_inbound_rejection_persist: Optional[Callable] = None
         self._on_inbound_answered_persist: Optional[Callable] = None
+        self._on_inbound_terminal_proof_persist: Optional[Callable] = None
         self._on_inbound_admission_finalize: Optional[Callable] = None
         self._inbound_admissions: Dict[str, Dict[str, Any]] = {}
         self._inbound_setup_inflight: set[str] = set()
@@ -2353,6 +2364,12 @@ class AsteriskAdapter(CallControlAdapter):
                 if len(self._destroyed_channel_ids) >= 4000:
                     self._destroyed_channel_ids.clear()
                 self._destroyed_channel_ids.add(channel_id)
+                # Asterisk also emits ChannelDestroyed for ExternalMedia,
+                # outbound and transfer-target legs. Only the admitted inbound
+                # parent is a billing boundary; recording every child leaked
+                # clocks and could evict the live parent's proof.
+                if self._is_inbound_parent_channel(channel_id):
+                    self._record_terminal_at_monotonic(channel_id)
             # Capture the hangup cause (Q.850) BEFORE we tear anything down so
             # the outcome resolver can classify no-answer / busy / rejected
             # instead of defaulting to an agent-side hangup. ChannelDestroyed
@@ -2992,6 +3009,41 @@ class AsteriskAdapter(CallControlAdapter):
         decision = self._inbound_admissions.get(channel_id)
         return dict(decision) if decision is not None else None
 
+    def _is_inbound_parent_channel(self, channel_id: str) -> bool:
+        """Return whether ``channel_id`` owns inbound billing state."""
+
+        if channel_id in self._inbound_admissions:
+            return True
+        session = self._active_sessions.get(channel_id)
+        return isinstance(session, dict) and session.get("direction") == "inbound"
+
+    def _record_terminal_at_monotonic(
+        self,
+        channel_id: str,
+        timestamp: Optional[float] = None,
+        *,
+        timestamp_utc: Optional[str] = None,
+    ) -> float:
+        """Freeze the first authoritative parent-leg absence time."""
+
+        if len(self._terminal_at_monotonic) >= 4000:
+            for stale_id in list(self._terminal_at_monotonic)[:2000]:
+                self._terminal_at_monotonic.pop(stale_id, None)
+                self._terminal_at_utc.pop(stale_id, None)
+        value = float(time.monotonic() if timestamp is None else timestamp)
+        frozen = self._terminal_at_monotonic.setdefault(channel_id, value)
+        self._terminal_at_utc.setdefault(
+            channel_id,
+            str(timestamp_utc or datetime.now(timezone.utc).isoformat()),
+        )
+        return frozen
+
+    def pop_terminal_at_monotonic(self, channel_id: str) -> Optional[float]:
+        """Return and retire the frozen absence clock for lifecycle billing."""
+
+        self._terminal_at_utc.pop(channel_id, None)
+        return self._terminal_at_monotonic.pop(channel_id, None)
+
     def pop_inbound_admission(self, channel_id: str) -> Optional[Dict[str, Any]]:
         handoff_task = self._inbound_handoff_tasks.get(channel_id)
         if handoff_task is None or handoff_task.done():
@@ -3016,38 +3068,111 @@ class AsteriskAdapter(CallControlAdapter):
         return str(action)
 
     @staticmethod
-    def _answered_elapsed_seconds(decision: Dict[str, Any]) -> int:
-        """Conservatively measure billable time after provider Answer.
+    def _answered_elapsed_seconds(
+        decision: Dict[str, Any],
+        *,
+        terminal_at_monotonic: Optional[float] = None,
+    ) -> int:
+        """Measure confirmed Answer to frozen PBX absence.
 
-        Monotonic time is authoritative in-process. The wall-clock timestamp
-        is retained as a restart/debug fallback and ensures an answered call
-        is never mistaken for a zero-second pre-answer release.
+        Answer intent is not billable evidence. Ambiguous Answer requests are
+        finalized into the existing carrier-CDR hold with zero measured
+        seconds rather than growing while cleanup retries. The result can never
+        exceed the admission's pinned reservation.
         """
 
         marker = decision.get("_answered_at_monotonic")
-        if not isinstance(marker, (int, float)):
-            marker = decision.get("_answer_intent_at_monotonic")
-        if isinstance(marker, (int, float)):
-            return max(1, math.ceil(max(0.0, time.monotonic() - float(marker))))
+        marker_is_valid = isinstance(marker, (int, float)) and not isinstance(marker, bool)
+        terminal_is_valid = isinstance(terminal_at_monotonic, (int, float)) and not isinstance(
+            terminal_at_monotonic,
+            bool,
+        )
+        if marker_is_valid and not terminal_is_valid:
+            raise RuntimeError("confirmed inbound Answer lacks terminal proof")
+        if not marker_is_valid:
+            return 0
+        elapsed = max(
+            1,
+            math.ceil(max(0.0, float(terminal_at_monotonic) - float(marker))),
+        )
+        snapshot = decision.get("config_snapshot")
+        route = snapshot.get("route") if isinstance(snapshot, dict) else None
+        reservation = route.get("reservation_seconds") if isinstance(route, dict) else None
+        if isinstance(reservation, int) and not isinstance(reservation, bool):
+            return min(elapsed, max(0, reservation))
+        return elapsed
 
-        raw_timestamp = decision.get("_answered_at_utc") or decision.get("_answer_intent_at_utc")
-        if raw_timestamp:
-            try:
-                answered_at = datetime.fromisoformat(str(raw_timestamp).replace("Z", "+00:00"))
-                if answered_at.tzinfo is None:
-                    answered_at = answered_at.replace(tzinfo=timezone.utc)
-                return max(
-                    1,
-                    math.ceil(
-                        max(
-                            0.0,
-                            (datetime.now(timezone.utc) - answered_at).total_seconds(),
-                        )
-                    ),
-                )
-            except (TypeError, ValueError, OverflowError):
-                pass
-        return 0
+    async def _persist_inbound_terminal_proof_for_channel(self, channel_id: str) -> bool:
+        """Durably fence an answered inbound terminal boundary.
+
+        A positive return means either this channel has no billable inbound
+        Answer, or PostgreSQL now contains the exact PBX terminal timestamp and
+        capped duration. Callers must retain cleanup ownership and retry while
+        this returns false.
+        """
+
+        decision = self._inbound_admissions.get(channel_id)
+        if decision is None:
+            return True
+        answered_marker = decision.get("_answered_at_monotonic")
+        answered_confirmed = bool(
+            (
+                isinstance(answered_marker, (int, float))
+                and not isinstance(answered_marker, bool)
+            )
+            or decision.get("_answered_at_utc")
+        )
+        if not answered_confirmed:
+            return True
+        if decision.get("_terminal_proof_persisted") is True:
+            return True
+        callback = self._on_inbound_terminal_proof_persist
+        if not callable(callback):
+            logger.critical(
+                "inbound_terminal_proof_persist_unavailable channel=%s",
+                channel_id[:12],
+            )
+            return False
+        terminal_at_monotonic = self._terminal_at_monotonic.get(channel_id)
+        terminal_at_utc = self._terminal_at_utc.get(channel_id)
+        if terminal_at_monotonic is None or not terminal_at_utc:
+            logger.critical(
+                "inbound_terminal_proof_missing channel=%s",
+                channel_id[:12],
+            )
+            return False
+        try:
+            duration_seconds = self._answered_elapsed_seconds(
+                decision,
+                terminal_at_monotonic=terminal_at_monotonic,
+            )
+            if not (
+                isinstance(answered_marker, (int, float))
+                and not isinstance(answered_marker, bool)
+            ):
+                # A wall-clock-only Answer can prove billing occurred, but it
+                # cannot safely produce elapsed seconds across clock changes.
+                duration_seconds = 0
+                decision["_terminal_duration_ambiguous"] = True
+            await callback(
+                channel_id,
+                dict(decision),
+                terminated_at=terminal_at_utc,
+                duration_seconds=duration_seconds,
+            )
+            decision["_terminal_proof_persisted"] = True
+            decision["_terminal_duration_seconds"] = duration_seconds
+            decision["_terminal_at_utc"] = terminal_at_utc
+            return True
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - proof ownership must retry
+            logger.critical(
+                "inbound_terminal_proof_persist_failed channel=%s err=%s",
+                channel_id[:12],
+                exc,
+            )
+            return False
 
     async def _release_cached_inbound_admission(
         self,
@@ -3062,18 +3187,53 @@ class AsteriskAdapter(CallControlAdapter):
         if callback is None:
             return False
         try:
-            answered_duration = self._answered_elapsed_seconds(decision)
+            terminal_at = self._terminal_at_monotonic.get(channel_id)
+            answered_duration = self._answered_elapsed_seconds(
+                decision,
+                terminal_at_monotonic=terminal_at,
+            )
+            answered_marker = decision.get("_answered_at_monotonic")
+            monotonic_answer_confirmed = bool(
+                isinstance(answered_marker, (int, float))
+                and not isinstance(answered_marker, bool)
+            )
+            answer_confirmed = bool(
+                monotonic_answer_confirmed or decision.get("_answered_at_utc")
+            )
+            answer_ambiguous = bool(
+                not answer_confirmed
+                and (
+                    decision.get("_answer_intent_at_monotonic") is not None
+                    or decision.get("_answer_intent_at_utc")
+                )
+            )
+            duration_ambiguous = bool(
+                answer_confirmed
+                and (
+                    not monotonic_answer_confirmed
+                    or decision.get("_terminal_duration_ambiguous")
+                )
+            )
+            terminal_reason = (
+                "process_restart_answer_ambiguous"
+                if answer_ambiguous or duration_ambiguous
+                else reason
+            )
             await callback(
                 channel_id,
                 decision,
                 terminal_status="failed",
                 duration_seconds=answered_duration,
-                reason=reason,
-                release_only=(answered_duration == 0),
+                reason=terminal_reason,
+                release_only=(not answer_confirmed and not answer_ambiguous),
             )
             if self._inbound_admissions.get(channel_id) is decision:
                 self._inbound_admissions.pop(channel_id, None)
-            return self._inbound_admissions.get(channel_id) is not decision
+            released = self._inbound_admissions.get(channel_id) is not decision
+            if released:
+                self._terminal_at_monotonic.pop(channel_id, None)
+                self._terminal_at_utc.pop(channel_id, None)
+            return released
         except Exception as exc:  # noqa: BLE001 — cleanup remains best effort
             logger.error(
                 "inbound_admission_release_failed channel=%s reason=%s err=%s",
@@ -4128,6 +4288,16 @@ class AsteriskAdapter(CallControlAdapter):
             )
             await asyncio.sleep(max(0.05, self._inbound_cleanup_retry_s))
 
+        self._record_terminal_at_monotonic(channel_id)
+        while not await self._persist_inbound_terminal_proof_for_channel(channel_id):
+            logger.critical(
+                "AsteriskAdapter: terminal proof is not durable; cleanup deferred "
+                "channel=%s reason=%s",
+                channel_id[:12],
+                reason,
+            )
+            await asyncio.sleep(max(0.05, self._inbound_cleanup_retry_s))
+
         session_info = self._active_sessions.pop(channel_id, None)
         if (
             session_info is None
@@ -4282,6 +4452,16 @@ class AsteriskAdapter(CallControlAdapter):
         media fail-closed.
         """
         self._on_inbound_answered_persist = callback
+
+    def set_inbound_terminal_proof_persist_callback(self, callback: Callable) -> None:
+        """Register the mandatory pre-cleanup terminal durability fence.
+
+        Signature: ``async callback(pbx_call_id, admission,
+        terminated_at=..., duration_seconds=...)``. Gateway, bridge and
+        lifecycle cleanup remain deferred until it succeeds.
+        """
+
+        self._on_inbound_terminal_proof_persist = callback
 
     def set_inbound_admission_finalizer(self, callback: Callable) -> None:
         """Register cleanup/finalization for an already-admitted call."""
@@ -4736,10 +4916,16 @@ class AsteriskAdapter(CallControlAdapter):
         if fence_root:
             self._termination_fenced_call_ids.add(owned_channel_ids[0])
         async with self._transfer_setup_lock:
-            return await self._hangup_many_confirmed_locked(
+            confirmed = await self._hangup_many_confirmed_locked(
                 owned_channel_ids,
                 reason_code=reason_code,
             )
+        if confirmed and self._is_inbound_parent_channel(owned_channel_ids[0]):
+            self._record_terminal_at_monotonic(owned_channel_ids[0])
+            confirmed = await self._persist_inbound_terminal_proof_for_channel(
+                owned_channel_ids[0]
+            )
+        return confirmed
 
     async def _delete_channel_with_reason_fallback(
         self,

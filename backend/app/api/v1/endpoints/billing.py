@@ -424,14 +424,16 @@ async def get_daily_usage(
     """
     Daily minutes-used breakdown for the last `days` days (default 30).
 
-    Aggregates `duration_seconds` from the `calls` table grouped by day.
+    Aggregates settled `duration_seconds` from the `calls` table grouped by day.
     Days with no calls return 0 so the response is a continuous time series
     ready for a sparkline.
 
     Minutes are summed with NO disposition filter, matching the dashboard and
     `minutes_quota.compute_minutes_status` (the gate that actually blocks
-    calls). Connected/failed counts key on `outcome`, never `status` — see
-    `call_outcomes`. The previous version filtered
+    calls). Legacy outbound rows remain usage; inbound parent time becomes
+    usage only after its immutable finalize transaction commits. Connected
+    and failed counts key on `outcome`, never `status` — see `call_outcomes`.
+    The previous version filtered
     `status IN ('answered','completed','in_progress')`, which dropped every
     `ended` call, and then derived `failed` from `status NOT IN (...)` — a
     count the outer WHERE made structurally impossible to be anything but 0.
@@ -453,7 +455,13 @@ async def get_daily_usage(
                 rows = await conn.fetch(
                     """
                     SELECT date_trunc('day', created_at)::date AS day,
-                           COALESCE(SUM(duration_seconds), 0) AS total_seconds,
+                           COALESCE(
+                               SUM(duration_seconds) FILTER (
+                                   WHERE direction IS DISTINCT FROM 'inbound'
+                                      OR billing_status='finalized'
+                               ),
+                               0
+                           ) AS total_seconds,
                            COUNT(*) AS total_calls,
                            COUNT(*) FILTER (WHERE outcome = ANY($2::text[])) AS successful,
                            COUNT(*) FILTER (WHERE outcome = ANY($3::text[])) AS failed

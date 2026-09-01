@@ -526,9 +526,6 @@ async def hangup_live_call(
                     redis_client = getattr(get_container(), "redis", None)
                 except Exception:  # local tests/minimal deployments
                     redis_client = None
-                duration = (
-                    _duration_between(row["answered_at"], None) or 0 if row["answered_at"] else 0
-                )
                 await finalize_proven_inbound_termination(
                     db_client.pool,
                     provider_call_id=termination_context.provider_call_id,
@@ -536,13 +533,7 @@ async def hangup_live_call(
                     tenant_id=str(current_user.tenant_id),
                     provider=str(row["provider"] or "asterisk"),
                     terminal_status="ended",
-                    duration_seconds=duration,
-                    reason=(
-                        "tenant_operator_hangup"
-                        if row["answered_at"]
-                        else "tenant_operator_hangup_before_answer"
-                    ),
-                    release_only=not bool(row["answered_at"]),
+                    reason="tenant_operator_hangup",
                     redis_client=redis_client,
                     campaign_id=(str(row["campaign_id"]) if row.get("campaign_id") else None),
                 )

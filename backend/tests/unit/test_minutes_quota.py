@@ -91,3 +91,5 @@ async def test_used_total_includes_only_finalized_transfer_actual_seconds():
     assert "leg.billing_status='finalized'" in usage_sql
     assert "leg.billing_status='reserved'" not in usage_sql
     assert "leg.billing_status='held'" not in usage_sql
+    assert "c.direction is distinct from 'inbound'" in usage_sql
+    assert "c.billing_status='finalized'" in usage_sql

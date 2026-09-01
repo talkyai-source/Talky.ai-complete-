@@ -331,6 +331,58 @@ async def mark_termination_pending_and_load_context(
     )
 
 
+async def _load_persisted_inbound_terminal_duration(
+    pool: Any,
+    *,
+    durable_call_id: str,
+    provider_call_id: str,
+    tenant_id: str | None,
+) -> int | None:
+    """Return only a duration fenced by durable answer and terminal proof.
+
+    ``ended_at`` predates the proof contract and may be a delayed projection,
+    so it is deliberately not accepted. Operator/admin paths call this after
+    the adapter confirms absence; a missing marker leaves the durable cleanup
+    obligation in an explicit carrier/CDR hold instead of guessing from
+    wall-clock time.  ``None`` means that the locked-after-proof snapshot is
+    still ambiguous; it never means a proven zero-second release.
+    """
+
+    normalized_call_id = str(durable_call_id or "").strip()
+    normalized_provider_id = str(provider_call_id or "").strip()
+    if not normalized_call_id or not normalized_provider_id:
+        raise ValueError("durable and provider call identities are required")
+    async with acquire_with_tenant(
+        pool,
+        str(tenant_id) if tenant_id is not None else None,
+        timeout=5.0,
+    ) as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT answered_at, provider_terminated_at,
+                   duration_seconds, reserved_seconds
+            FROM calls
+            WHERE id=$1::uuid
+              AND direction='inbound'
+              AND (provider_call_id=$2 OR external_call_uuid=$2)
+            """,
+            normalized_call_id,
+            normalized_provider_id,
+        )
+    if row is None:
+        raise RuntimeError("durable inbound call identity was not found")
+    if row.get("answered_at") is None or row.get("provider_terminated_at") is None:
+        return None
+    duration = row.get("duration_seconds")
+    if isinstance(duration, bool) or not isinstance(duration, int) or duration <= 0:
+        raise RuntimeError("durable provider terminal duration is invalid")
+    reserved = row.get("reserved_seconds")
+    if isinstance(reserved, int) and not isinstance(reserved, bool):
+        if reserved < 0 or duration > reserved:
+            raise RuntimeError("durable provider terminal duration exceeds reservation")
+    return duration
+
+
 async def finalize_proven_inbound_termination(
     pool: Any,
     *,
@@ -338,11 +390,9 @@ async def finalize_proven_inbound_termination(
     durable_call_id: str | None,
     tenant_id: str | None,
     terminal_status: str,
-    duration_seconds: int,
     provider: str = "asterisk",
     outcome: str | None = None,
     reason: str | None = None,
-    release_only: bool = False,
     redis_client: Any = None,
     campaign_id: str | None = None,
     acknowledge_ledger: bool = True,
@@ -353,7 +403,8 @@ async def finalize_proven_inbound_termination(
 
     1. persist a same-owner retry ledger before any settlement mutation;
     2. close active transfer legs and release their transfer leases;
-    3. settle/release the parent admission, billing, and tenant call lease;
+    3. settle the parent from a fresh durable fact read, holding any ambiguous
+       answer race for carrier/CDR reconciliation;
     4. strictly release the cluster-wide call slot; and
     5. acknowledge the retry ledger last.
 
@@ -388,34 +439,35 @@ async def finalize_proven_inbound_termination(
 
     normalized_durable_id = str(durable_call_id or "").strip()
     if normalized_durable_id:
+        authoritative_duration = await _load_persisted_inbound_terminal_duration(
+            pool,
+            durable_call_id=normalized_durable_id,
+            provider_call_id=normalized_provider_id,
+            tenant_id=tenant_id,
+        )
+        effective_reason = reason
+        if authoritative_duration is None:
+            authoritative_duration = 0
+            effective_reason = "process_restart_answer_ambiguous"
         await finalize_connected_inbound_transfers(
             pool,
             call_id=normalized_durable_id,
-            terminal_reason=reason,
+            terminal_reason=effective_reason,
             redis_client=redis_client,
         )
         service = InboundAdmissionService(pool)
-        if release_only:
-            await service.release(
+        await service.finalize(
+            InboundFinalizationRequest(
                 call_id=normalized_durable_id,
                 provider=normalized_provider,
                 provider_call_id=normalized_provider_id,
-                reason=reason or "proven_preanswer_termination",
+                terminal_status=terminal_status,
+                duration_seconds=authoritative_duration,
+                outcome=outcome,
+                reason=effective_reason,
                 request_id=f"proven-termination:{normalized_provider_id}",
             )
-        else:
-            await service.finalize(
-                InboundFinalizationRequest(
-                    call_id=normalized_durable_id,
-                    provider=normalized_provider,
-                    provider_call_id=normalized_provider_id,
-                    terminal_status=terminal_status,
-                    duration_seconds=max(0, int(duration_seconds or 0)),
-                    outcome=outcome,
-                    reason=reason,
-                    request_id=f"proven-termination:{normalized_provider_id}",
-                )
-            )
+        )
 
     await release_lease_strict(redis_client, call_id=normalized_provider_id)
     if acknowledge_ledger:

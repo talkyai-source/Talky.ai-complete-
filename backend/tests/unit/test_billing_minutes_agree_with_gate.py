@@ -162,10 +162,23 @@ def test_daily_failed_count_is_not_structurally_zero():
 
 
 def test_daily_minutes_have_no_disposition_filter():
-    """Billable time is every second recorded, matching the gate."""
+    """Call outcome/status never decides whether measured time is usage."""
     q = _daily_query()
     assert "status = ANY" not in q
     assert "SUM(duration_seconds)" in q
+
+
+def test_daily_minutes_exclude_unsettled_inbound_usage_but_keep_outbound():
+    """Daily billing must use the gate's settlement rule for parent time.
+
+    Legacy outbound rows do not participate in inbound settlement and must
+    remain visible.  Inbound reservations and reconciliation holds are not
+    customer usage until their immutable finalize transaction commits.
+    """
+    q = _daily_query()
+    assert "SUM(duration_seconds) FILTER" in q
+    assert "direction IS DISTINCT FROM 'inbound'" in q
+    assert "OR billing_status='finalized'" in q
 
 
 # --------------------------------------------------------------------------

@@ -58,6 +58,10 @@ from app.infrastructure.metrics.gateway_metrics import record_gateway_media_reco
 logger = logging.getLogger(__name__)
 
 
+class InboundTerminalProofMissing(RuntimeError):
+    """A confirmed Answer has no authoritative PBX-absence timestamp."""
+
+
 def _state():
     """The telephony state backend (Phase 1, item 1 of the architecture
     roadmap). All per-call state reads/writes go through this so the
@@ -1149,10 +1153,11 @@ def _ledger_answer_elapsed_seconds(
     ledger_entry: Mapping[str, Any],
     *,
     ended_at: Any = None,
+    max_seconds: Any = None,
 ) -> int:
-    """Conservative elapsed time from confirmed or ambiguous Answer evidence."""
+    """Elapsed time from confirmed Answer evidence, bounded by reservation."""
 
-    raw_timestamp = ledger_entry.get("answered_at") or ledger_entry.get("answer_requested_at")
+    raw_timestamp = ledger_entry.get("answered_at")
     if not raw_timestamp:
         return 0
     try:
@@ -1164,10 +1169,13 @@ def _ledger_answer_elapsed_seconds(
             ended = datetime.fromisoformat(ended.replace("Z", "+00:00"))
         if ended.tzinfo is None:
             ended = ended.replace(tzinfo=timezone.utc)
-        return max(
+        elapsed = max(
             1,
             math.ceil(max(0.0, (ended - started).total_seconds())),
         )
+        if isinstance(max_seconds, int) and not isinstance(max_seconds, bool):
+            return min(elapsed, max(0, max_seconds))
+        return elapsed
     except (AttributeError, TypeError, ValueError, OverflowError):
         return 0
 
@@ -1216,31 +1224,23 @@ async def _hydrate_orphan_recovery_context(
                    c.admission_reason, c.processing_status,
                    c.billing_status, c.reserved_seconds,
                    c.concurrency_lease_id, c.route_snapshot,
+                   c.provider_terminated_at,
                    c.terminal_settled_at, c.terminal_retry_payload,
                    c.terminal_retry_enqueued_at,
-                   COUNT(*) OVER() AS recovery_match_count,
-                   CASE
-                     WHEN c.answered_at IS NOT NULL
-                       THEN GREATEST(
-                         0,
-                         COALESCE(c.duration_seconds,0),
-                         CEIL(EXTRACT(EPOCH FROM (
-                           COALESCE(c.ended_at,NOW()) - c.answered_at
-                         )))::int
-                       )
-                     WHEN c.status IN ('answered','in_call')
-                       AND c.started_at IS NOT NULL
-                       THEN GREATEST(
-                         0,
-                         COALESCE(c.duration_seconds,0),
-                         CEIL(EXTRACT(EPOCH FROM (
-                           COALESCE(c.ended_at,NOW()) - c.started_at
-                         )))::int
-                       )
-                     WHEN c.duration_seconds IS NOT NULL
-                       THEN GREATEST(0,c.duration_seconds)
-                     ELSE 0
-                   END AS recovery_duration_seconds
+                    COUNT(*) OVER() AS recovery_match_count,
+                    CASE
+                      WHEN c.answered_at IS NOT NULL
+                        AND c.provider_terminated_at IS NOT NULL
+                        AND COALESCE(c.reserved_seconds,0) > 0
+                        THEN LEAST(
+                          c.reserved_seconds,
+                          GREATEST(
+                            0,
+                            COALESCE(c.duration_seconds,0)
+                          )
+                        )
+                      ELSE 0
+                    END AS recovery_duration_seconds
             FROM calls c
             WHERE (c.provider_call_id=$1 OR c.external_call_uuid=$1)
               AND ($2::uuid IS NULL OR c.id=$2::uuid)
@@ -1282,21 +1282,6 @@ async def _hydrate_orphan_recovery_context(
                 "orphan recovery identity is ambiguous for provider session "
                 f"{provider_session_id}"
             )
-        # The strict Answer hook writes PostgreSQL before Redis, so the normal
-        # path already has ``c.answered_at``. Keep the ledger timestamp as a
-        # second conservative clock for rolling upgrades and a crash between
-        # the two durable writes: recovery must never turn an answered call
-        # into a zero-second release merely because an older row projection
-        # missed the timestamp.
-        ledger_elapsed = _ledger_answer_elapsed_seconds(
-            ledger_entry,
-            ended_at=row.get("ended_at"),
-        )
-        if ledger_elapsed:
-            row["recovery_duration_seconds"] = max(
-                int(row.get("recovery_duration_seconds") or 0),
-                ledger_elapsed,
-            )
         # Use the same durable all-leg query as tenant/admin termination.
         # Adapter transfer maps are process-local and empty after a restart.
         provider_leg_ids = list(
@@ -1308,12 +1293,26 @@ async def _hydrate_orphan_recovery_context(
 
     status = str(row.get("status") or "").strip().lower()
     ledger_state = str(ledger_entry.get("state") or "").strip().lower()
-    answer_ambiguous = ledger_state == "answer_pending"
     was_answered = bool(
         row.get("answered_at") is not None
         or status in {"answered", "in_call"}
         or ledger_state in {"active", "answer_pending"}
     )
+    terminal_proof_missing = bool(
+        was_answered and row.get("provider_terminated_at") is None
+    )
+    terminal_duration_ambiguous = bool(
+        was_answered
+        and row.get("provider_terminated_at") is not None
+        and max(0, int(row.get("recovery_duration_seconds") or 0)) == 0
+    )
+    answer_ambiguous = bool(
+        ledger_state == "answer_pending"
+        or terminal_proof_missing
+        or terminal_duration_ambiguous
+    )
+    if terminal_proof_missing or terminal_duration_ambiguous:
+        row["recovery_duration_seconds"] = 0
     provider_call_id = str(
         row.get("provider_call_id") or row.get("external_call_uuid") or provider_session_id
     )
@@ -1347,6 +1346,8 @@ async def _hydrate_orphan_recovery_context(
         "duration_seconds": max(0, int(row.get("recovery_duration_seconds") or 0)),
         "was_answered": was_answered,
         "answer_ambiguous": answer_ambiguous,
+        "terminal_proof_missing": terminal_proof_missing,
+        "terminal_duration_ambiguous": terminal_duration_ambiguous,
         "logical_settled": _is_recovery_row_logically_settled(row),
         "admission": admission,
         "ledger_entry": dict(ledger_entry),
@@ -2696,7 +2697,98 @@ async def _persist_inbound_answered(
         ),
         timeout=_INBOUND_ANSWER_DURABILITY_TIMEOUT_S,
     )
+    answered_at_monotonic = payload.get("_answered_at_monotonic")
+    if isinstance(answered_at_monotonic, bool) or not isinstance(
+        answered_at_monotonic,
+        (int, float),
+    ):
+        raise RuntimeError("durable inbound Answer lacks a monotonic timestamp")
+    _start_inbound_runtime_guards(
+        pbx_call_id,
+        payload,
+        answered_at_monotonic=float(answered_at_monotonic),
+        max_duration_seconds=_pinned_inbound_max_duration(payload),
+    )
     return persisted_timestamp
+
+
+async def _persist_inbound_terminal_proof(
+    pbx_call_id: str,
+    admission: Mapping[str, Any],
+    *,
+    terminated_at: Any,
+    duration_seconds: int,
+) -> Dict[str, Any]:
+    """Persist PBX absence before gateway/media cleanup may delay teardown.
+
+    This is deliberately a projection-only write: billing settlement and
+    lease release remain owned by ``_finalize_inbound_admission``.  Recovery
+    may trust ``ended_at`` only because the adapter awaits this write at the
+    first authoritative parent-leg absence boundary.
+    """
+
+    from app.core.container import get_container
+    from app.core.db_utils import acquire_with_tenant
+
+    payload = dict(admission or {})
+    durable_call_id = str(payload.get("call_id") or "").strip()
+    tenant_id = str(payload.get("tenant_id") or "").strip()
+    provider_call_id = str(payload.get("provider_call_id") or pbx_call_id).strip()
+    if not durable_call_id or not tenant_id or not provider_call_id:
+        raise RuntimeError("inbound terminal proof lacks durable call authority")
+    if isinstance(duration_seconds, bool) or not isinstance(duration_seconds, int):
+        raise RuntimeError("inbound terminal proof duration must be an integer")
+    duration = max(0, duration_seconds)
+    max_duration = _pinned_inbound_max_duration(payload)
+    if duration > max_duration:
+        raise RuntimeError("inbound terminal proof exceeds the pinned reservation")
+    terminal_timestamp = _normalise_answered_at_dt(terminated_at)
+
+    container = get_container()
+    db_pool = getattr(container, "db_pool", None)
+    if not getattr(container, "is_initialized", False) or db_pool is None:
+        raise RuntimeError("database unavailable for durable inbound terminal proof")
+    async with acquire_with_tenant(
+        db_pool,
+        tenant_id,
+        timeout=_INBOUND_ANSWER_DURABILITY_TIMEOUT_S,
+    ) as conn:
+        row = await conn.fetchrow(
+            """
+            UPDATE calls
+               SET provider_terminated_at=LEAST(
+                       COALESCE(provider_terminated_at,$4::timestamptz),
+                       $4::timestamptz
+                   ),
+                   ended_at=LEAST(COALESCE(ended_at,$4::timestamptz),$4::timestamptz),
+                   duration_seconds=CASE
+                     WHEN answered_at IS NULL THEN 0
+                     WHEN provider_terminated_at IS NULL
+                       OR $4::timestamptz < provider_terminated_at THEN $5
+                     ELSE duration_seconds
+                   END,
+                   updated_at=NOW()
+             WHERE id=$1::uuid
+               AND tenant_id=$2::uuid
+               AND direction='inbound'
+               AND (provider_call_id=$3 OR external_call_uuid=$3)
+            RETURNING ended_at, duration_seconds
+            """,
+            durable_call_id,
+            tenant_id,
+            provider_call_id,
+            terminal_timestamp,
+            duration,
+        )
+    if row is None:
+        raise RuntimeError("durable inbound call row was not found for terminal proof")
+    persisted_ended_at = row.get("ended_at")
+    if persisted_ended_at is None:
+        raise RuntimeError("inbound terminal proof timestamp was not persisted")
+    return {
+        "ended_at": _normalise_answered_at(persisted_ended_at),
+        "duration_seconds": max(0, int(row.get("duration_seconds") or 0)),
+    }
 
 
 async def _finalize_inbound_admission(
@@ -2746,9 +2838,6 @@ async def _finalize_inbound_admission(
     if durable_call_id:
         service = InboundAdmissionService(container.db_pool)
         if release_only:
-            # Adapter-owned pre-lifecycle cleanup can cancel `_on_new_call`
-            # after its guards were armed but before VoiceSession ownership.
-            await _cancel_inbound_runtime_guards(pbx_call_id)
             await service.release(
                 call_id=str(durable_call_id),
                 provider=provider,
@@ -2769,6 +2858,13 @@ async def _finalize_inbound_admission(
                     request_id=pbx_call_id,
                 )
             )
+        # Answer persistence arms the hard deadline before media setup.  A
+        # confirmed post-Answer setup failure can therefore settle without
+        # ever reaching `_on_new_call`. Keep both guards through a failed
+        # durable write, but retire them immediately after release/finalize
+        # commits so the heartbeat cannot misread the now-settled lease as a
+        # live authority loss.
+        await _cancel_inbound_runtime_guards(pbx_call_id)
 
     # The database settlement/release above is the durable authority.  Only
     # after it succeeds may this call stop counting against the cluster-wide
@@ -2792,6 +2888,7 @@ async def _finalize_inbound_admission(
         # provider dedupe: a late/ambiguous admission commit must remain
         # discoverable by a later recovery pass.
         _inbound_admissions_in_flight.pop(pbx_call_id, None)
+        await _cancel_inbound_runtime_guards(pbx_call_id)
         adapter = get_adapter()
         pop_cached = getattr(adapter, "pop_inbound_admission", None)
         if callable(pop_cached):
@@ -3057,6 +3154,34 @@ def _pinned_inbound_max_duration(admission: Mapping[str, Any]) -> int:
     ):
         raise RuntimeError("admitted inbound call has an invalid quota-backed duration")
     return duration
+
+
+def _confirmed_inbound_duration_seconds(
+    admission: Mapping[str, Any],
+    terminal_at_monotonic: Any,
+) -> int:
+    """Measure confirmed Answer to frozen PBX absence, capped to reservation.
+
+    Answer intent is deliberately not billable evidence.  A timeout across the
+    ARI Answer boundary is held for carrier adjudication elsewhere and stays at
+    zero seconds here instead of growing until restart/cleanup eventually runs.
+    """
+
+    answered_at = admission.get("_answered_at_monotonic")
+    if isinstance(answered_at, bool) or not isinstance(answered_at, (int, float)):
+        return 0
+    if isinstance(terminal_at_monotonic, bool) or not isinstance(
+        terminal_at_monotonic,
+        (int, float),
+    ):
+        raise InboundTerminalProofMissing(
+            "confirmed inbound Answer lacks authoritative terminal proof"
+        )
+    elapsed = max(
+        1,
+        math.ceil(max(0.0, float(terminal_at_monotonic) - float(answered_at))),
+    )
+    return min(elapsed, _pinned_inbound_max_duration(admission))
 
 
 async def _enforce_inbound_deadline(
@@ -3353,9 +3478,10 @@ def _build_pinned_inbound_config(
 
 async def _on_new_call(call_id: str, inbound_admission: Any = None) -> None:
     """Initialize AI pipeline when a new SIP call arrives."""
-    # This callback is dispatched immediately after Asterisk answers. Anchor
-    # the hard deadline before any status/database/provider await below.
-    _new_call_t0 = asyncio.get_running_loop().time()
+    # The adapter captured provider Answer before any bridge/media await.  This
+    # callback may arrive much later, so it must preserve that clock rather than
+    # silently starting a new billing/deadline clock here.
+    setup_reference_monotonic = asyncio.get_running_loop().time()
     state_backend = _state()
     if (
         getattr(state_backend, "strict_ownership_active", False)
@@ -3397,10 +3523,17 @@ async def _on_new_call(call_id: str, inbound_admission: Any = None) -> None:
                 inbound_transfer_failure_action,
             ) = _pinned_inbound_action(admission_payload)
             effective_max_duration = _pinned_inbound_max_duration(admission_payload)
+            answered_at_monotonic = admission_payload.get("_answered_at_monotonic")
+            if isinstance(answered_at_monotonic, bool) or not isinstance(
+                answered_at_monotonic,
+                (int, float),
+            ):
+                raise RuntimeError("admitted inbound call lacks confirmed Answer time")
+            setup_reference_monotonic = float(answered_at_monotonic)
             _start_inbound_runtime_guards(
                 call_id,
                 admission_payload,
-                answered_at_monotonic=_new_call_t0,
+                answered_at_monotonic=float(answered_at_monotonic),
                 max_duration_seconds=effective_max_duration,
             )
         except Exception as exc:
@@ -3788,7 +3921,9 @@ async def _on_new_call(call_id: str, inbound_admission: Any = None) -> None:
                     )
                 pre = _pop_ringing_warmup(call_id)
                 if pre is not None:
-                    _wait_ms = (asyncio.get_event_loop().time() - _new_call_t0) * 1000.0
+                    _wait_ms = (
+                        asyncio.get_running_loop().time() - setup_reference_monotonic
+                    ) * 1000.0
                     logger.info(
                         "BRIDGE ringing_warmup_consumed call_id=%s wait_ms=%.0f",
                         call_id[:12],
@@ -3987,7 +4122,7 @@ async def _on_new_call(call_id: str, inbound_admission: Any = None) -> None:
             # audio pump needs — pipeline_task / connect_task / etc. can
             # start in parallel.
             #
-            # Anchoring the sleep on `_new_call_t0` AND spawning the task
+            # Anchoring setup telemetry on the confirmed Answer clock and spawning the task
             # here (instead of after pipeline_task creation) ensures the
             # greeting fires at exactly t=2.0s from answer, regardless of
             # any variance in downstream setup. The previous late-spawn
@@ -4058,7 +4193,9 @@ async def _on_new_call(call_id: str, inbound_admission: Any = None) -> None:
                                 i,
                                 r,
                             )
-                _warmup_ms = (asyncio.get_event_loop().time() - _new_call_t0) * 1000.0
+                _warmup_ms = (
+                    asyncio.get_running_loop().time() - setup_reference_monotonic
+                ) * 1000.0
                 logger.info(
                     "BRIDGE telephony_warmup_done call_id=%s source=ringing await_ms=%.0f",
                     call_id[:12],
@@ -4094,7 +4231,9 @@ async def _on_new_call(call_id: str, inbound_admission: Any = None) -> None:
                 for i, r in enumerate(results):
                     if isinstance(r, Exception):
                         logger.warning("telephony_warmup[%d] failed (non-fatal): %s", i, r)
-                _warmup_ms = (asyncio.get_event_loop().time() - _new_call_t0) * 1000.0
+                _warmup_ms = (
+                    asyncio.get_running_loop().time() - setup_reference_monotonic
+                ) * 1000.0
                 logger.info(
                     "BRIDGE telephony_warmup_done call_id=%s source=answer "
                     "warmups=%d warmup_ms=%.0f",
@@ -4152,7 +4291,9 @@ async def _on_new_call(call_id: str, inbound_admission: Any = None) -> None:
             # FIX 3 — attach done-callback so a crash inside start_pipeline triggers
             # _on_call_ended rather than leaving a silent dead session.
             voice_session.pipeline_task.add_done_callback(lambda t: _pipeline_done_cb(t, call_id))
-            _pipeline_start_ms = (asyncio.get_event_loop().time() - _new_call_t0) * 1000.0
+            _pipeline_start_ms = (
+                asyncio.get_running_loop().time() - setup_reference_monotonic
+            ) * 1000.0
             logger.info(
                 "BRIDGE pipeline_started call_id=%s total_setup_ms=%.0f source=%s",
                 call_id[:12],
@@ -4203,7 +4344,9 @@ async def _on_new_call(call_id: str, inbound_admission: Any = None) -> None:
         if get_adapter():
             await get_adapter().start_audio_stream(call_id)
 
-        _total_init_ms = (asyncio.get_event_loop().time() - _new_call_t0) * 1000.0
+        _total_init_ms = (
+            asyncio.get_running_loop().time() - setup_reference_monotonic
+        ) * 1000.0
         logger.info(
             "BRIDGE ai_pipeline_initialized call_id=%s total_init_ms=%.0f",
             call_id[:12],
@@ -4600,6 +4743,7 @@ def _resolve_inbound_terminal_outcome(
 async def _on_call_ended(
     call_id: str,
     *,
+    terminal_at_monotonic: Any = None,
     recovery_context: Optional[Dict[str, Any]] = None,
     acknowledge_ledger: bool = True,
 ) -> bool:
@@ -4663,6 +4807,15 @@ async def _on_call_ended(
         get_admission = getattr(adapter, "get_inbound_admission", None)
         if callable(get_admission):
             inbound_admission = dict(get_admission(call_id) or {})
+    if recovery_context is None and terminal_at_monotonic is None:
+        adapter = get_adapter()
+        pop_terminal_time = getattr(
+            adapter,
+            "pop_terminal_at_monotonic",
+            None,
+        )
+        if callable(pop_terminal_time):
+            terminal_at_monotonic = pop_terminal_time(call_id)
     is_true_inbound = bool(
         (recovery_context or {}).get("direction") == "inbound" or inbound_admission.get("allowed")
     )
@@ -4679,19 +4832,25 @@ async def _on_call_ended(
         if inbound_admission.get("_terminal_reason")
         else None
     )
-    answered_at_monotonic = inbound_admission.get("_answered_at_monotonic")
-    if isinstance(answered_at_monotonic, (int, float)):
-        inbound_duration_s = max(
-            1,
-            math.ceil(
-                max(
-                    0.0,
-                    asyncio.get_running_loop().time() - float(answered_at_monotonic),
-                )
-            ),
-        )
+    if is_true_inbound and recovery_context is None:
+        try:
+            inbound_duration_s = _confirmed_inbound_duration_seconds(
+                inbound_admission,
+                terminal_at_monotonic,
+            )
+        except InboundTerminalProofMissing:
+            inbound_duration_s = 0
+            inbound_terminal_reason = "process_restart_answer_ambiguous"
+            logger.critical(
+                "inbound_terminal_duration_held_missing_proof call=%s",
+                call_id[:12],
+            )
     if recovery_context is not None:
-        inbound_duration_s = max(0, int(recovery_context.get("duration_seconds") or 0))
+        recovery_duration = max(0, int(recovery_context.get("duration_seconds") or 0))
+        reserved_seconds = recovery_context.get("reserved_seconds")
+        if isinstance(reserved_seconds, int) and not isinstance(reserved_seconds, bool):
+            recovery_duration = min(recovery_duration, max(0, reserved_seconds))
+        inbound_duration_s = recovery_duration
     if is_true_inbound:
         await _cancel_inbound_runtime_guards(call_id)
 
@@ -4771,17 +4930,29 @@ async def _on_call_ended(
         if not inbound_admission:
             inbound_admission = dict(getattr(voice_session, "_inbound_admission", None) or {})
             is_true_inbound = bool(inbound_admission.get("allowed"))
-        try:
-            inbound_duration_s = int(
-                getattr(
-                    getattr(voice_session, "call_session", None),
-                    "get_duration_seconds",
-                    lambda: 0,
-                )()
-            )
-        except Exception:
-            inbound_duration_s = 0
-        inbound_terminal_reason = getattr(voice_session, "_hangup_reason", None)
+        if is_true_inbound and recovery_context is None:
+            try:
+                inbound_duration_s = _confirmed_inbound_duration_seconds(
+                    inbound_admission,
+                    terminal_at_monotonic,
+                )
+            except InboundTerminalProofMissing:
+                inbound_duration_s = 0
+                inbound_terminal_reason = "process_restart_answer_ambiguous"
+        elif not is_true_inbound:
+            try:
+                inbound_duration_s = int(
+                    getattr(
+                        getattr(voice_session, "call_session", None),
+                        "get_duration_seconds",
+                        lambda: 0,
+                    )()
+                )
+            except Exception:
+                inbound_duration_s = 0
+        session_terminal_reason = getattr(voice_session, "_hangup_reason", None)
+        if inbound_terminal_reason != "process_restart_answer_ambiguous":
+            inbound_terminal_reason = session_terminal_reason
         # Cancel any per-call task that's still running. Without this,
         # tasks spawned during the call (silence handler, greeting,
         # presynth warm-ups) keep firing into a torn-down gateway and

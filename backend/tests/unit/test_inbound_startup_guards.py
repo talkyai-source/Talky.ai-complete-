@@ -170,6 +170,23 @@ def test_production_adapter_requires_answer_persistence_capability():
         )
 
 
+def test_production_adapter_requires_terminal_proof_persistence_capability():
+    from app.infrastructure.telephony.asterisk_adapter import AsteriskAdapter
+
+    adapter = AsteriskAdapter()
+    adapter.set_inbound_terminal_proof_persist_callback = None
+    with pytest.raises(
+        RuntimeError,
+        match="set_inbound_terminal_proof_persist_callback",
+    ):
+        validate_production_inbound_adapter(
+            environment="production",
+            inbound_enabled=True,
+            configured_adapter="asterisk",
+            adapter=adapter,
+        )
+
+
 def test_live_production_adapter_requires_all_answer_callbacks_wired():
     from app.infrastructure.telephony.asterisk_adapter import AsteriskAdapter
 
@@ -188,6 +205,7 @@ def test_live_production_adapter_requires_all_answer_callbacks_wired():
 
     adapter.set_inbound_admission_callback(callback)
     adapter.set_inbound_answered_persist_callback(callback)
+    adapter.set_inbound_terminal_proof_persist_callback(callback)
     adapter.set_inbound_admission_finalizer(callback)
     validate_live_production_inbound_adapter(
         environment="production",

@@ -49,6 +49,7 @@ async def test_durable_answer_commits_call_before_promoting_cleanup_ledger(
     import app.core.db_utils as db_utils
 
     payload = _admission_payload("pbx-answer-durable")
+    payload["_answered_at_monotonic"] = 321.5
     answer_time = datetime(2026, 8, 28, 12, 0, 0, tzinfo=timezone.utc)
     order: list[str] = []
 
@@ -79,6 +80,15 @@ async def test_durable_answer_commits_call_before_promoting_cleanup_ledger(
             "campaign_id": payload["campaign_id"],
         }
 
+    def start_guards(call_id, admission, **kwargs):
+        order.append("runtime_guards")
+        assert call_id == "pbx-answer-durable"
+        assert admission["_answered_at_monotonic"] == 321.5
+        assert kwargs == {
+            "answered_at_monotonic": 321.5,
+            "max_duration_seconds": 60,
+        }
+
     monkeypatch.setattr(
         container_module,
         "get_container",
@@ -90,6 +100,7 @@ async def test_durable_answer_commits_call_before_promoting_cleanup_ledger(
         "_state",
         lambda: SimpleNamespace(promote_answered_cleanup_obligation=promote),
     )
+    monkeypatch.setattr(lifecycle, "_start_inbound_runtime_guards", start_guards)
 
     persisted = await lifecycle._persist_inbound_answered(
         "pbx-answer-durable",
@@ -98,7 +109,171 @@ async def test_durable_answer_commits_call_before_promoting_cleanup_ledger(
     )
 
     assert persisted == answer_time.isoformat()
-    assert order == ["postgres_answer", "redis_answer"]
+    assert order == ["postgres_answer", "redis_answer", "runtime_guards"]
+
+
+def test_inbound_duration_uses_frozen_terminal_time_and_never_exceeds_reservation():
+    payload = _admission_payload("duration-proof")
+    payload["_answered_at_monotonic"] = 100.0
+
+    assert lifecycle._confirmed_inbound_duration_seconds(payload, 104.01) == 5
+    assert lifecycle._confirmed_inbound_duration_seconds(payload, 10_000.0) == 60
+
+    with pytest.raises(lifecycle.InboundTerminalProofMissing):
+        lifecycle._confirmed_inbound_duration_seconds(payload, None)
+
+    payload.pop("_answered_at_monotonic")
+    payload["_answer_intent_at_monotonic"] = 100.0
+    assert lifecycle._confirmed_inbound_duration_seconds(payload, 104.01) == 0
+
+
+@pytest.mark.asyncio
+async def test_terminal_proof_persists_exact_duration_before_terminal_projection(
+    monkeypatch,
+):
+    import app.core.container as container_module
+    import app.core.db_utils as db_utils
+
+    call_id = "pbx-terminal-proof"
+    payload = _admission_payload(call_id)
+    terminal_at = datetime(2026, 9, 2, 12, 0, 5, tzinfo=timezone.utc)
+    captured: dict[str, object] = {}
+
+    class Conn:
+        async def fetchrow(self, query, *args):
+            captured["query"] = " ".join(query.split())
+            captured["args"] = args
+            return {"ended_at": terminal_at, "duration_seconds": 5}
+
+    @asynccontextmanager
+    async def acquire(_pool, tenant_id, **_kwargs):
+        assert tenant_id == payload["tenant_id"]
+        yield Conn()
+
+    monkeypatch.setattr(
+        container_module,
+        "get_container",
+        lambda: SimpleNamespace(is_initialized=True, db_pool=object()),
+    )
+    monkeypatch.setattr(db_utils, "acquire_with_tenant", acquire)
+
+    result = await lifecycle._persist_inbound_terminal_proof(
+        call_id,
+        payload,
+        terminated_at=terminal_at,
+        duration_seconds=5,
+    )
+
+    assert result == {"ended_at": terminal_at.isoformat(), "duration_seconds": 5}
+    assert "provider_terminated_at=LEAST(" in captured["query"]
+    assert (
+        "WHEN provider_terminated_at IS NULL OR $4::timestamptz < "
+        "provider_terminated_at THEN $5"
+    ) in captured["query"]
+    assert "ended_at=LEAST(COALESCE(ended_at,$4::timestamptz)" in captured["query"]
+    assert captured["args"] == (
+        payload["call_id"],
+        payload["tenant_id"],
+        call_id,
+        terminal_at,
+        5,
+    )
+
+
+@pytest.mark.asyncio
+async def test_post_answer_media_failure_retires_real_guards_after_durable_finalize(
+    monkeypatch,
+):
+    import app.core.container as container_module
+    import app.core.db_utils as db_utils
+    import app.domain.services.global_concurrency as global_concurrency
+    import app.domain.services.telephony.inbound_admission as admission_module
+
+    call_id = "pbx-post-answer-media-failure"
+    payload = _admission_payload(call_id)
+    payload["_answered_at_monotonic"] = asyncio.get_running_loop().time()
+    answer_time = datetime(2026, 9, 2, 12, 0, 0, tzinfo=timezone.utc)
+    guards_started = {"heartbeat": asyncio.Event(), "deadline": asyncio.Event()}
+    guards_cancelled: list[str] = []
+    never = asyncio.Event()
+
+    class Conn:
+        async def fetchrow(self, _query, *_args):
+            return {"status": "answered", "answered_at": answer_time}
+
+    @asynccontextmanager
+    async def acquire(_pool, tenant_id, **_kwargs):
+        assert tenant_id == payload["tenant_id"]
+        yield Conn()
+
+    async def guard(label: str):
+        guards_started[label].set()
+        try:
+            await never.wait()
+        except asyncio.CancelledError:
+            guards_cancelled.append(label)
+            raise
+
+    async def heartbeat(_call_id, _admission):
+        await guard("heartbeat")
+
+    async def deadline(_call_id, _max_seconds, _answered_at):
+        await guard("deadline")
+
+    finalize = AsyncMock()
+    release_global = AsyncMock()
+    monkeypatch.setattr(
+        container_module,
+        "get_container",
+        lambda: SimpleNamespace(is_initialized=True, db_pool=object(), redis=object()),
+    )
+    monkeypatch.setattr(db_utils, "acquire_with_tenant", acquire)
+    monkeypatch.setattr(
+        lifecycle,
+        "_state",
+        lambda: SimpleNamespace(promote_answered_cleanup_obligation=AsyncMock()),
+    )
+    monkeypatch.setattr(lifecycle, "_heartbeat_active_inbound_admission", heartbeat)
+    monkeypatch.setattr(lifecycle, "_enforce_inbound_deadline", deadline)
+    monkeypatch.setattr(admission_module.InboundAdmissionService, "finalize", finalize)
+    monkeypatch.setattr(global_concurrency, "release_lease_strict", release_global)
+    monkeypatch.setattr(
+        lifecycle,
+        "get_adapter",
+        lambda: SimpleNamespace(pop_inbound_admission=Mock()),
+    )
+
+    lifecycle._inbound_admissions_in_flight.pop(call_id, None)
+    lifecycle._inbound_heartbeat_tasks.pop(call_id, None)
+    lifecycle._inbound_deadline_tasks.pop(call_id, None)
+    try:
+        await lifecycle._persist_inbound_answered(
+            call_id,
+            payload,
+            answered_at=answer_time,
+        )
+        await asyncio.gather(*(event.wait() for event in guards_started.values()))
+        assert call_id in lifecycle._inbound_heartbeat_tasks
+        assert call_id in lifecycle._inbound_deadline_tasks
+
+        await lifecycle._finalize_inbound_admission(
+            call_id,
+            payload,
+            terminal_status="failed",
+            duration_seconds=1,
+            reason="media_setup_failed",
+            release_only=False,
+        )
+
+        finalize.assert_awaited_once()
+        release_global.assert_awaited_once()
+        assert sorted(guards_cancelled) == ["deadline", "heartbeat"]
+        assert call_id not in lifecycle._inbound_heartbeat_tasks
+        assert call_id not in lifecycle._inbound_deadline_tasks
+    finally:
+        await lifecycle._cancel_inbound_runtime_guards(call_id)
+        lifecycle._inbound_admissions_in_flight.pop(call_id, None)
+        lifecycle._inbound_admissions_finalized.discard(("asterisk", call_id))
 
 
 @pytest.mark.asyncio
@@ -295,6 +470,7 @@ async def test_after_hours_transfer_uses_persisted_leg_and_accepts_durable_hando
             "selected_destination": "+15559876543",
         }
     )
+    payload["_answered_at_monotonic"] = asyncio.get_running_loop().time()
     order: list[str] = []
     transfer_kwargs: dict = {}
 
@@ -406,7 +582,9 @@ async def test_post_answer_inbound_capacity_rejection_delegates_before_release(
         lambda: SimpleNamespace(db_pool=object()),
     )
 
-    await lifecycle._on_new_call(call_id, _admission_payload(call_id))
+    payload = _admission_payload(call_id)
+    payload["_answered_at_monotonic"] = asyncio.get_running_loop().time()
+    await lifecycle._on_new_call(call_id, payload)
 
     cancel_guards.assert_awaited_once_with(call_id)
     rejected.assert_called_once_with(call_id, reason="pod_capacity")
@@ -587,7 +765,9 @@ async def test_inbound_guards_start_before_optional_answered_status_io(monkeypat
         lambda: SimpleNamespace(db_pool=object()),
     )
 
-    task = asyncio.create_task(lifecycle._on_new_call("pbx-inbound-1", _admission_payload()))
+    payload = _admission_payload()
+    payload["_answered_at_monotonic"] = asyncio.get_running_loop().time()
+    task = asyncio.create_task(lifecycle._on_new_call("pbx-inbound-1", payload))
     await status_entered.wait()
     assert order[:3] == ["guards", "ledger:active", "status"]
     task.cancel()
@@ -668,8 +848,13 @@ async def test_canonical_inbound_finalizer_releases_global_slot_after_durable_su
     async def release_global(actual_redis, *, call_id):
         assert actual_redis is redis
         assert call_id == pbx_call_id
-        assert order == [durable_label]
+        assert order == [durable_label, "guards_cancelled"]
         order.append("global_release")
+
+    async def cancel_guards(call_id):
+        assert call_id == pbx_call_id
+        assert order == [durable_label]
+        order.append("guards_cancelled")
 
     def pop_cached(call_id):
         popped.append(call_id)
@@ -691,6 +876,7 @@ async def test_canonical_inbound_finalizer_releases_global_slot_after_durable_su
         durable_finalize,
     )
     monkeypatch.setattr(global_concurrency, "release_lease_strict", release_global)
+    monkeypatch.setattr(lifecycle, "_cancel_inbound_runtime_guards", cancel_guards)
     monkeypatch.setattr(
         lifecycle,
         "get_adapter",
@@ -721,7 +907,12 @@ async def test_canonical_inbound_finalizer_releases_global_slot_after_durable_su
             release_only=release_only,
         )
 
-        assert order == [durable_label, "global_release", "cache_pop"]
+        assert order == [
+            durable_label,
+            "guards_cancelled",
+            "global_release",
+            "cache_pop",
+        ]
         assert popped == [pbx_call_id]
         assert dedupe_key in lifecycle._inbound_admissions_finalized
         assert pbx_call_id not in lifecycle._inbound_admissions_in_flight
@@ -778,6 +969,8 @@ async def test_canonical_inbound_finalizer_keeps_global_slot_until_durable_retry
     )
     monkeypatch.setattr(global_concurrency, "release_lease_strict", release_global)
     monkeypatch.setattr(lifecycle, "get_adapter", lambda: None)
+    cancel_guards = AsyncMock()
+    monkeypatch.setattr(lifecycle, "_cancel_inbound_runtime_guards", cancel_guards)
 
     lifecycle._inbound_admissions_finalized.discard(dedupe_key)
     lifecycle._inbound_admissions_in_flight[pbx_call_id] = dict(payload)
@@ -792,6 +985,7 @@ async def test_canonical_inbound_finalizer_keeps_global_slot_until_durable_retry
             )
 
         assert order == ["durable:1"]
+        cancel_guards.assert_not_awaited()
         assert dedupe_key not in lifecycle._inbound_admissions_finalized
         assert pbx_call_id in lifecycle._inbound_admissions_in_flight
 
@@ -804,6 +998,7 @@ async def test_canonical_inbound_finalizer_keeps_global_slot_until_durable_retry
         )
 
         assert order == ["durable:1", "durable:2", "global_release"]
+        cancel_guards.assert_awaited_once_with(pbx_call_id)
         assert dedupe_key in lifecycle._inbound_admissions_finalized
     finally:
         lifecycle._inbound_admissions_finalized.discard(dedupe_key)
@@ -947,6 +1142,7 @@ async def test_normal_inbound_terminal_path_has_no_early_global_release(monkeypa
 
     pbx_call_id = "terminal-inbound-canonical"
     payload = _admission_payload(pbx_call_id)
+    payload["_answered_at_monotonic"] = 100.0
     dedupe_key = ("asterisk", pbx_call_id)
     redis = object()
     order: list[str] = []
@@ -957,6 +1153,7 @@ async def test_normal_inbound_terminal_path_has_no_early_global_release(monkeypa
     async def durable_finalize(_self, _request):
         assert "global_release" not in order
         assert "transfers_finalized" in order
+        assert _request.duration_seconds == 5
         order.append("durable_finalize")
 
     async def release_global(actual_redis, *, call_id):
@@ -984,9 +1181,11 @@ async def test_normal_inbound_terminal_path_has_no_early_global_release(monkeypa
         def remove_gateway_sessions_for_call(_call_id):
             return None
 
+    pop_terminal_time = Mock(return_value=104.01)
     adapter = SimpleNamespace(
         get_inbound_admission=lambda _call_id: dict(payload),
         pop_inbound_admission=lambda _call_id: None,
+        pop_terminal_at_monotonic=pop_terminal_time,
     )
     container = SimpleNamespace(
         is_initialized=True,
@@ -1027,6 +1226,7 @@ async def test_normal_inbound_terminal_path_has_no_early_global_release(monkeypa
         await lifecycle._on_call_ended(pbx_call_id)
 
         assert order.count("global_release") == 1
+        pop_terminal_time.assert_called_once_with(pbx_call_id)
         assert order.index("transfers_finalized") < order.index("durable_finalize")
         assert order.index("durable_finalize") < order.index("global_release")
     finally:
@@ -1373,13 +1573,16 @@ async def test_release_only_finalizer_cancels_preaccept_runtime_guards(monkeypat
             raise
 
     async def durable_release(_self, **_kwargs):
-        assert pbx_call_id not in lifecycle._inbound_heartbeat_tasks
-        assert pbx_call_id not in lifecycle._inbound_deadline_tasks
-        assert sorted(cancelled) == ["deadline", "heartbeat"]
+        assert pbx_call_id in lifecycle._inbound_heartbeat_tasks
+        assert pbx_call_id in lifecycle._inbound_deadline_tasks
+        assert cancelled == []
         order.append("durable_release")
 
     async def release_global(_redis, *, call_id):
         assert call_id == pbx_call_id
+        assert pbx_call_id not in lifecycle._inbound_heartbeat_tasks
+        assert pbx_call_id not in lifecycle._inbound_deadline_tasks
+        assert sorted(cancelled) == ["deadline", "heartbeat"]
         order.append("global_release")
 
     lifecycle._inbound_heartbeat_tasks[pbx_call_id] = asyncio.create_task(

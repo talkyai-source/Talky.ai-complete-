@@ -416,6 +416,9 @@ async def test_hydration_uses_durable_inbound_truth_and_all_active_transfer_ids(
             assert provider == "asterisk"
             assert tenant_id_filter is None
             assert "recovery_duration_seconds" in query
+            assert "LEAST" in query
+            assert "reserved_seconds" in query
+            assert "provider_terminated_at - c.answered_at" not in query
             assert "COUNT(*) OVER() AS recovery_match_count" in query
             return {
                 "id": durable_id,
@@ -429,8 +432,9 @@ async def test_hydration_uses_durable_inbound_truth_and_all_active_transfer_ids(
                 "outcome": None,
                 "started_at": datetime.now(timezone.utc),
                 "answered_at": datetime.now(timezone.utc),
-                "ended_at": None,
-                "duration_seconds": None,
+                "ended_at": datetime.now(timezone.utc),
+                "provider_terminated_at": datetime.now(timezone.utc),
+                "duration_seconds": 42,
                 "admission_status": "admitted",
                 "admission_reason": "accepted",
                 "processing_status": "active",
@@ -487,7 +491,92 @@ async def test_hydration_uses_durable_inbound_truth_and_all_active_transfer_ids(
 
 
 @pytest.mark.asyncio
-async def test_unresolved_answer_intent_recovers_as_answered_with_nonzero_duration(
+@pytest.mark.parametrize(
+    ("provider_terminal", "proof_missing", "duration_ambiguous"),
+    [
+        (None, True, False),
+        (datetime(2026, 9, 2, 12, 0, 30, tzinfo=timezone.utc), False, True),
+    ],
+)
+async def test_answered_orphan_without_monotonic_duration_is_held_at_zero(
+    monkeypatch,
+    provider_terminal,
+    proof_missing,
+    duration_ambiguous,
+):
+    import app.core.container as container_module
+    import app.core.db_utils as db_utils
+
+    durable_id = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+    tenant_id = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+    captured_query = ""
+
+    class Conn:
+        async def fetchrow(self, query, *_identity):
+            nonlocal captured_query
+            captured_query = " ".join(query.split())
+            return {
+                "id": durable_id,
+                "tenant_id": tenant_id,
+                "campaign_id": None,
+                "direction": "inbound",
+                "provider": "asterisk",
+                "provider_call_id": "answered-without-terminal-proof",
+                "external_call_uuid": None,
+                "status": "answered",
+                "outcome": None,
+                "started_at": datetime(2026, 9, 2, 12, 0, tzinfo=timezone.utc),
+                "answered_at": datetime(2026, 9, 2, 12, 0, 1, tzinfo=timezone.utc),
+                # Legacy projections wrote ended_at without PBX absence
+                # provenance. Recovery must not mistake that for the new
+                # provider terminal proof.
+                "ended_at": datetime(2026, 9, 2, 12, 0, 30, tzinfo=timezone.utc),
+                "provider_terminated_at": provider_terminal,
+                "duration_seconds": 9999,
+                "admission_status": "allowed",
+                "admission_reason": "accepted",
+                "processing_status": "active",
+                "billing_status": "reserved",
+                "reserved_seconds": 60,
+                "concurrency_lease_id": None,
+                "route_snapshot": {},
+                "terminal_settled_at": None,
+                "terminal_retry_payload": None,
+                "terminal_retry_enqueued_at": None,
+                "recovery_duration_seconds": 0,
+                "recovery_match_count": 1,
+            }
+
+        async def fetch(self, *_args):
+            return []
+
+    monkeypatch.setattr(
+        container_module,
+        "get_container",
+        lambda: SimpleNamespace(is_initialized=True, db_pool=object()),
+    )
+    monkeypatch.setattr(
+        db_utils,
+        "acquire_with_tenant",
+        lambda *_args, **_kwargs: _AsyncContext(Conn()),
+    )
+
+    context = await lifecycle._hydrate_orphan_recovery_context(
+        "answered-without-terminal-proof",
+        {"state": "active", "provider": "asterisk"},
+    )
+
+    assert "COALESCE(c.ended_at,NOW())" not in captured_query
+    assert "provider_terminated_at" in captured_query
+    assert context["duration_seconds"] == 0
+    assert context["answer_ambiguous"] is True
+    assert context["terminal_proof_missing"] is proof_missing
+    assert context["terminal_duration_ambiguous"] is duration_ambiguous
+    assert context["admission"]["_terminal_reason"] == "process_restart_answer_ambiguous"
+
+
+@pytest.mark.asyncio
+async def test_unresolved_answer_intent_is_held_without_inventing_billable_duration(
     monkeypatch,
 ):
     import app.core.container as container_module
@@ -557,7 +646,7 @@ async def test_unresolved_answer_intent_recovers_as_answered_with_nonzero_durati
 
     assert context["was_answered"] is True
     assert context["answer_ambiguous"] is True
-    assert context["duration_seconds"] >= 1
+    assert context["duration_seconds"] == 0
     assert context["admission"]["_recovery_was_answered"] is True
     assert context["admission"]["_terminal_reason"] == "process_restart_answer_ambiguous"
 
