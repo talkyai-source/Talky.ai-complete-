@@ -37,6 +37,8 @@ Output shape (one string, labeled blocks):
                           facts, and cover the lookup pause with a natural verbal
                           hold (the anti-dead-air preamble) so the caller never
                           hears dead silence.
+  6. CONNECTED ACTIONS  — completion may be stated only after the matching
+                          action tool explicitly permits confirmation.
 """
 from __future__ import annotations
 
@@ -118,6 +120,20 @@ def _knowledge_note() -> str:
     )
 
 
+def _actions_note() -> str:
+    return (
+        "CONNECTED ACTIONS\n"
+        "Callback scheduling, email delivery, form submission, call transfer, "
+        "and ending the call each have a function tool. Calling a tool is the "
+        "only way to perform that action. Wait for its result before describing "
+        "what happened. If success is false or confirmation_allowed is false, "
+        "never say the action was completed; state the limitation honestly and "
+        "offer only the next step in the result. For end_call, say one short "
+        "goodbye first, then call the tool only after the caller clearly ended "
+        "the conversation."
+    )
+
+
 def _opening_note(persona: "RealtimePersona") -> str:
     direction = str(persona.call_direction or "outbound").strip().lower()
     greeting = (
@@ -183,6 +199,7 @@ def build_realtime_instructions(persona: RealtimePersona) -> str:
         _EXPRESSIVE_DELIVERY,
         _COMPLIANCE_ESSENTIALS,
         _knowledge_note(),
+        _actions_note(),
     ]
     if persona.extra_notes and persona.extra_notes.strip():
         blocks.append("ALSO\n" + persona.extra_notes.strip())

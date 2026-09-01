@@ -8,13 +8,130 @@ human-like conversation flow (no hints that it's an AI).
 import re
 import asyncio
 import logging
-from typing import Tuple, Optional, List, Union
+from collections.abc import Mapping
+from typing import Any, Tuple, Optional, List, Union
 from pydantic import BaseModel, Field
 
 from app.domain.models.conversation_state import ConversationState, CallOutcomeType
 from app.domain.models.agent_config import ConversationRule
 
 logger = logging.getLogger(__name__)
+
+
+# HARD RULE 10's executable half.  Prompt text is advisory; these patterns are
+# the output gate that stops an unsupported action-completion claim before TTS.
+# They intentionally match completion language, not a request or an honest
+# limitation ("I can't send that").
+_ACTION_COMPLETION_PATTERNS = {
+    "schedule_callback": re.compile(
+        r"(?:\b(?:scheduled|booked|arranged|confirmed|set up)\b.{0,35}"
+        r"\b(?:callback|call\s*back|follow[- ]?up call)\b|"
+        r"\b(?:callback|call\s*back|follow[- ]?up call)\b.{0,35}"
+        r"\b(?:scheduled|booked|arranged|confirmed|set up)\b|"
+        r"\b(?:i|we)(?:'ve| have)\s+(?:(?:just|now)\s+)?"
+        r"(?:scheduled|booked|arranged|set up)\s+(?:it|that)\b)",
+        re.IGNORECASE,
+    ),
+    "send_email": re.compile(
+        r"(?:\b(?:sent|emailed|delivered)\b.{0,35}"
+        r"\b(?:e-?mail|information|details|quote|estimate)\b|"
+        r"\b(?:e-?mail|information|details|quote|estimate)\b.{0,35}"
+        r"\b(?:sent|emailed|delivered|on (?:its|the) way)\b|"
+        r"\b(?:check|in) your inbox\b|"
+        r"\b(?:i|we)(?:'ve| have)\s+(?:(?:just|now)\s+)?"
+        r"(?:sent|emailed|delivered)\s+(?:it|that|this)\b)",
+        re.IGNORECASE,
+    ),
+    "submit_form": re.compile(
+        r"(?:\b(?:submitted|filed|completed)\b.{0,35}"
+        r"\b(?:form|application|request)\b|"
+        r"\b(?:form|application|request)\b.{0,35}"
+        r"\b(?:submitted|filed|completed)\b|"
+        r"\b(?:i|we)(?:'ve| have)\s+(?:(?:just|now)\s+)?"
+        r"(?:submitted|filed|completed)\s+(?:it|that|this)\b)",
+        re.IGNORECASE,
+    ),
+    "transfer_call": re.compile(
+        r"\b(?:transferring you now|connecting you now|putting you through|"
+        r"transfer (?:has )?(?:started|completed)|transfer is complete|"
+        r"(?:i|we)(?:'ve| have)\s+(?:(?:just|now)\s+)?"
+        r"(?:transferred|connected)\s+(?:you|the call))\b",
+        re.IGNORECASE,
+    ),
+    "end_call": re.compile(
+        r"\b(?:i(?:'ve| have) ended the call|the call (?:has )?ended|"
+        r"hangup (?:has )?(?:started|completed)|hangup is complete|"
+        r"i(?:'m| am)\s+(?:ending the call|hanging up))\b",
+        re.IGNORECASE,
+    ),
+}
+
+_ACTION_NEGATED_COMPLETION_PATTERNS = {
+    "schedule_callback": re.compile(
+        r"(?:\b(?:callback|call\s*back|follow[- ]?up call)\b.{0,24}"
+        r"\b(?:wasn't|isn't|hasn't been|was not|is not|has not been)\s+"
+        r"(?:scheduled|booked|arranged|confirmed|set up)\b|"
+        r"\b(?:i|we)\s+(?:haven't|have not|didn't|did not)\s+"
+        r"(?:schedule|scheduled|book|booked|arrange|arranged|set up)\b"
+        r".{0,24}\b(?:callback|call\s*back|follow[- ]?up call|it|that)\b)",
+        re.IGNORECASE,
+    ),
+    "send_email": re.compile(
+        r"(?:\b(?:e-?mail|information|details|quote|estimate)\b.{0,24}"
+        r"\b(?:wasn't|isn't|hasn't been|was not|is not|has not been)\s+"
+        r"(?:sent|emailed|delivered)\b|"
+        r"\b(?:i|we)\s+(?:haven't|have not|didn't|did not)\s+"
+        r"(?:send|sent|e-?mail|emailed|deliver|delivered)\b.{0,24}"
+        r"\b(?:e-?mail|information|details|quote|estimate|it|that|this)\b)",
+        re.IGNORECASE,
+    ),
+    "submit_form": re.compile(
+        r"(?:\b(?:form|application|request)\b.{0,24}"
+        r"\b(?:wasn't|isn't|hasn't been|was not|is not|has not been)\s+"
+        r"(?:submitted|filed|completed)\b|"
+        r"\b(?:i|we)\s+(?:haven't|have not|didn't|did not)\s+"
+        r"(?:submit|submitted|file|filed|complete|completed)\b.{0,24}"
+        r"\b(?:form|application|request|it|that|this)\b)",
+        re.IGNORECASE,
+    ),
+    "transfer_call": re.compile(
+        r"(?:\btransfer\b.{0,24}\b(?:wasn't|isn't|hasn't been|was not|is not|"
+        r"has not been)\s+(?:started|completed)\b|"
+        r"\b(?:i|we)\s+(?:haven't|have not|didn't|did not)\s+"
+        r"(?:transfer|transferred|connect|connected)\s+(?:you|the call)\b)",
+        re.IGNORECASE,
+    ),
+    "end_call": re.compile(
+        r"(?:\b(?:call|hangup)\b.{0,24}\b(?:wasn't|isn't|hasn't been|was not|"
+        r"is not|has not been)\s+(?:ended|started|completed)\b|"
+        r"\b(?:i|we)\s+(?:haven't|have not|didn't|did not)\s+"
+        r"(?:end|ended)\s+(?:this |the )?call\b)",
+        re.IGNORECASE,
+    ),
+}
+
+
+def _completed_action_claims(response: str) -> list[str]:
+    """Return action names claimed as completed, excluding explicit failures."""
+    claims: list[str] = []
+    for action, pattern in _ACTION_COMPLETION_PATTERNS.items():
+        negated_spans = [
+            negated.span()
+            for negated in _ACTION_NEGATED_COMPLETION_PATTERNS[action].finditer(response)
+        ]
+        for match in pattern.finditer(response):
+            # Exempt only an explicit negation whose span overlaps THIS exact
+            # completion predicate. An unrelated "didn't" (or an earlier
+            # failed attempt followed by a later success claim) is not a
+            # blanket bypass for the action.
+            if any(
+                match.start() < negated_end and negated_start < match.end()
+                for negated_start, negated_end in negated_spans
+            ):
+                continue
+            claims.append(action)
+            break
+    return claims
 
 
 class LLMTimeoutError(Exception):
@@ -199,7 +316,9 @@ class LLMGuardrails:
     def validate_response(
         self,
         response: str,
-        rules: ConversationRule = None
+        rules: ConversationRule = None,
+        *,
+        action_results: Optional[Mapping[str, Mapping[str, Any]]] = None,
     ) -> Tuple[bool, Optional[str]]:
         """
         Validate response doesn't contain forbidden phrases.
@@ -207,12 +326,36 @@ class LLMGuardrails:
         Args:
             response: LLM response to validate
             rules: Conversation rules with forbidden_phrases
+            action_results: Latest deterministic result for each connected
+                voice action.  A completion claim is valid only when the
+                matching result explicitly permits confirmation.
             
         Returns:
             Tuple of (is_valid, reason_if_invalid)
         """
         if not response:
             return False, "empty_response"
+
+        # Enforce HARD RULE 10 even when a campaign has no custom ConversationRule.
+        # This runs before the historical ``if not rules`` fast-path because an
+        # absent tenant rule must never mean "imaginary side effects are allowed".
+        results = action_results or {}
+        for action in _completed_action_claims(response):
+            result = results.get(action)
+            if not isinstance(result, Mapping):
+                logger.warning("Blocked unconfirmed voice action claim: %s", action)
+                return False, f"unconfirmed_action:{action}"
+            if not (
+                result.get("success") is True
+                and result.get("confirmation_allowed") is True
+            ):
+                status = str(result.get("status") or "unconfirmed")
+                logger.warning(
+                    "Blocked failed/unconfirmed voice action claim: %s status=%s",
+                    action,
+                    status,
+                )
+                return False, f"action_failed:{action}:{status}"
         
         if not rules:
             return True, None

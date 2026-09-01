@@ -6,9 +6,10 @@ running for another minute until the silence timer fired. The agent had no
 real way to end a call, so wrong numbers, "not interested", and detected
 voicemails all dragged on, burning minutes and sounding unprofessional.
 
-Mechanism: a text sentinel, not tool-calling. The prompt (see
-:func:`call_control_rules`) tells the model to end its FINAL sentence with
-the exact token ``[[END_CALL]]`` when the conversation is over.
+Mechanism: supported provider/action turns use the deterministic ``end_call``
+function tool. The text sentinel remains the compatibility fallback for a
+provider or turn where tools are unavailable. The prompt (see
+:func:`call_control_rules`) tells the model which control is present.
 
 2026-07-13 root-cause fix: the sentinel used to be read in
 ``synthesize_and_send_audio`` — AFTER ``turn_streamer`` had already run every
@@ -117,16 +118,16 @@ def strip_and_flag(session, text: str) -> str:
 # STATE. The lesson generalises: any sentence in this file that describes a
 # SPECIFIC TURN must name which turn, or recency makes it describe every turn.
 CALL_CONTROL_RULES = f"""\
-## ENDING THE CALL (your one real control)
+## ENDING THE CALL
 - Call genuinely over — a clear goodbye, a WRONG BUSINESS (they've never heard
   of the company, it's a private residence, or plainly not a business line), or
-  a voicemail/answering machine — say at most ONE short warm closing line, then
-  end that reply with the exact token {END_CALL_TOKEN} . The system hangs up.
+  a voicemail/answering machine — say at most ONE short warm closing line. If an
+  `end_call` tool is offered this turn, call it; otherwise end that reply with
+  the exact token {END_CALL_TOKEN} . The system hangs up.
 - WRONG PERSON is NOT this: if the business is right but your contact isn't
   here / isn't available / "no one by that name", do NOT end — that's a pivot,
   see WRONG PERSON / GATEKEEPER below. Only a wrong DESTINATION ends the call.
-- The token is invisible to the caller; rely on it alone — words like
-  "hangs up" do nothing.
+- A tool result or the token is required; words like "hangs up" do nothing.
 - Voicemail/answering machine: reply with {END_CALL_TOKEN} alone — we call
   back another time instead of leaving a recording.
 

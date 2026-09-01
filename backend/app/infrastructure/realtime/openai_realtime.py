@@ -837,8 +837,8 @@ class OpenAIRealtimeSession:
 
 # ── Tool schema helper ──────────────────────────────────────────────────────
 def knowledge_lookup_tool() -> Dict[str, Any]:
-    """The single Phase-1 tool: a company-facts knowledge lookup, in the
-    Realtime API's function-tool shape. The gateway fulfils it by calling
+    """Company-facts knowledge lookup in the Realtime API function-tool shape.
+    The gateway fulfils it by calling
     `retrieve_knowledge(...)` and returning the text via send_function_result.
     """
     return {

@@ -1663,6 +1663,9 @@ class VoiceOrchestrator:
             from app.domain.services.voice_pipeline.realtime_bridge import (
                 RealtimeBridge,
             )
+            from app.domain.services.voice_pipeline.action_tools import (
+                realtime_voice_action_tools,
+            )
             from app.services.scripts.realtime_instructions import (
                 RealtimePersona,
                 build_realtime_instructions,
@@ -1731,7 +1734,7 @@ class VoiceOrchestrator:
                     model=xai_model,
                     agent_id=rt_settings.get("agent_id"),
                     instructions=instructions,
-                    tools=[knowledge_lookup_tool()],
+                    tools=[knowledge_lookup_tool(), *realtime_voice_action_tools()],
                     settings=config.realtime_settings,
                     call_id=call_id,
                 )
@@ -1741,7 +1744,7 @@ class VoiceOrchestrator:
                     model=config.realtime_model or "gpt-realtime-2",
                     voice=config.realtime_voice or "marin",
                     instructions=instructions,
-                    tools=[knowledge_lookup_tool()],
+                    tools=[knowledge_lookup_tool(), *realtime_voice_action_tools()],
                     settings=config.realtime_settings,
                     call_id=call_id,
                 )
@@ -1835,6 +1838,7 @@ class VoiceOrchestrator:
                 transcript_service=realtime_transcript_service,
                 talklee_call_id=talklee_call_id,
                 call_direction=config.direction.value,
+                action_session=call_session,
             )
 
             voice_session = VoiceSession(

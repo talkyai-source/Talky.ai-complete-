@@ -90,6 +90,12 @@ _EXPECTED_HASHES: dict[str, str] = {
     "lead_gen@4": "6bb07b97b15b3e5a",
     "customer_support@3": "27f1f0b1ac192f25",
     "receptionist@3": "f89d421c87a29242",
+    # Connected actions make END_CALL a deterministic tool when available and
+    # retain the sentinel only as a compatibility fallback. The shared
+    # call-control block therefore moves all three immutable prompt versions.
+    "lead_gen@5": "4fb88dc0b97580cc",
+    "customer_support@4": "98f3b72dbefed9f4",
+    "receptionist@4": "cdef4b6192408322",
 }
 
 

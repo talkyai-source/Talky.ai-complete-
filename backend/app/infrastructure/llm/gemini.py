@@ -453,6 +453,7 @@ class GeminiLLMProvider(LLMProvider):
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
         timeout_seconds: float = DEFAULT_LLM_TIMEOUT,
+        require_tool_result_before_content: bool = False,
         **kwargs,
     ) -> AsyncIterator[str]:
         """Stream a turn that MAY call a function tool, using Gemini function
@@ -568,12 +569,19 @@ class GeminiLLMProvider(LLMProvider):
         round0_cfg = genai_types.GenerateContentConfig(tools=gemini_tools, **base_cfg)
         fcalls: list = []
         produced = False
+        round_zero_tokens: list[str] = []
         async for tok in _stream(round0_cfg, fcalls):
             produced = True
-            yield tok
+            if require_tool_result_before_content:
+                round_zero_tokens.append(tok)
+            else:
+                yield tok
 
-        # Answered directly, or nothing to look up → done.
-        if produced or not fcalls:
+        if not fcalls:
+            if require_tool_result_before_content and produced:
+                yield "".join(round_zero_tokens)
+            return
+        if produced and not require_tool_result_before_content:
             return
 
         # Round 1 — execute the tool(s), feed responses back (role="user", as the
@@ -599,8 +607,15 @@ class GeminiLLMProvider(LLMProvider):
         contents.append(genai_types.Content(role="user", parts=resp_parts))
 
         round1_cfg = genai_types.GenerateContentConfig(**base_cfg)  # no tools
-        async for tok in _stream(round1_cfg, []):
-            yield tok
+        if require_tool_result_before_content:
+            grounded_tokens: list[str] = []
+            async for tok in _stream(round1_cfg, []):
+                grounded_tokens.append(tok)
+            if grounded_tokens:
+                yield "".join(grounded_tokens)
+        else:
+            async for tok in _stream(round1_cfg, []):
+                yield tok
 
     async def stream_chat_with_timeout(
         self,

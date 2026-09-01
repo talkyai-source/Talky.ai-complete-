@@ -657,6 +657,7 @@ class GroqLLMProvider(LLMProvider):
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
         timeout_seconds: float = DEFAULT_LLM_TIMEOUT,
+        require_tool_result_before_content: bool = False,
         **kwargs,
     ) -> AsyncIterator[str]:
         """Stream a turn that MAY call a function tool, yielding only spoken
@@ -682,6 +683,7 @@ class GroqLLMProvider(LLMProvider):
 
         sink: List[dict] = []
         produced_content = False
+        round_zero_tokens: List[str] = []
         # Round 0 — let the model decide. A clean tool-only response ends via
         # StopAsyncIteration (no content), so the TTFT guard does NOT misfire.
         async for tok in self.stream_chat_with_timeout(
@@ -690,10 +692,19 @@ class GroqLLMProvider(LLMProvider):
             tools=tools, tool_choice="auto", tool_calls_sink=sink, **kwargs,
         ):
             produced_content = True
-            yield tok
+            if require_tool_result_before_content:
+                round_zero_tokens.append(tok)
+            else:
+                yield tok
 
-        # Answered directly, or nothing to look up → done.
-        if produced_content or not sink:
+        # Normal KB mode preserves its historical streaming semantics. Strict
+        # action mode withholds any round-0 prose when a tool call exists, so a
+        # model cannot say "done" and only then discover the action failed.
+        if not sink:
+            if require_tool_result_before_content and produced_content:
+                yield "".join(round_zero_tokens)
+            return
+        if produced_content and not require_tool_result_before_content:
             return
 
         # Round 1 — execute the tool(s) and stream the grounded answer.
@@ -710,11 +721,21 @@ class GroqLLMProvider(LLMProvider):
                 "content": result or "No specific information found.",
             })
 
-        async for tok in self.stream_chat_with_timeout(
-            messages, timeout_seconds=timeout_seconds, system_prompt=system_prompt,
-            temperature=temperature, max_tokens=max_tokens, extra_messages=extra, **kwargs,
-        ):
-            yield tok
+        if require_tool_result_before_content:
+            grounded_tokens: List[str] = []
+            async for tok in self.stream_chat_with_timeout(
+                messages, timeout_seconds=timeout_seconds, system_prompt=system_prompt,
+                temperature=temperature, max_tokens=max_tokens, extra_messages=extra, **kwargs,
+            ):
+                grounded_tokens.append(tok)
+            if grounded_tokens:
+                yield "".join(grounded_tokens)
+        else:
+            async for tok in self.stream_chat_with_timeout(
+                messages, timeout_seconds=timeout_seconds, system_prompt=system_prompt,
+                temperature=temperature, max_tokens=max_tokens, extra_messages=extra, **kwargs,
+            ):
+                yield tok
 
     async def stream_chat(
         self,

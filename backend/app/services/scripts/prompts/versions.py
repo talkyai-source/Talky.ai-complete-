@@ -92,6 +92,9 @@ _TEMPLATES: Final[Mapping[str, str]] = {
 
 #: Current version per persona. Bump on any change to the composed text.
 _VERSIONS: Final[Mapping[str, str]] = {
+    # @5 / @4 (2026-09-02): connected voice actions replaced END_CALL's
+    # sentinel-only wording with the deterministic tool-result contract. The
+    # shared call-control block changes every composed persona.
     # @4 / @3 (2026-09-02): the prompt stopped arguing with itself. Voicemail
     # has one instruction (end the call), wrong PERSON is a pivot everywhere
     # and only wrong NUMBER/BUSINESS ends, silence belongs to the silence
@@ -100,9 +103,9 @@ _VERSIONS: Final[Mapping[str, str]] = {
     # knowledge-driven lead_gen body reuses the shared opening for its
     # opening mode instead of a private agent-first copy. customer_support
     # and receptionist move only because the shared guardrails text changed.
-    "lead_gen": "lead_gen@4",
-    "customer_support": "customer_support@3",
-    "receptionist": "receptionist@3",
+    "lead_gen": "lead_gen@5",
+    "customer_support": "customer_support@4",
+    "receptionist": "receptionist@4",
 }
 
 #: Fallback for a persona that is not in the registry yet. Deliberately visible

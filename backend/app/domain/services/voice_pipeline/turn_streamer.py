@@ -56,9 +56,20 @@ from app.domain.services.voice_pipeline.sentence_cap import (
 )
 from app.services.scripts.prompts.live_state import build_live_state_block
 from app.domain.services.voice_pipeline.knowledge_tool import (
+    KB_TOOL_NAME,
     knowledge_tools_for,
     run_knowledge_lookup,
     tool_system_addendum,
+)
+from app.domain.services.voice_pipeline.action_tools import (
+    action_from_validation_reason,
+    action_results_for_session,
+    action_tool_system_addendum,
+    action_tools_for_turn,
+    execution_failure_result,
+    result_json,
+    run_voice_action,
+    safe_failure_speech,
 )
 
 logger = logging.getLogger(__name__)
@@ -359,6 +370,17 @@ class TurnStreamer:
         guardrails = get_guardrails()
 
         messages = _truncate_history(session.conversation_history)
+        last_user_text_for_limit = next(
+            (m.content for m in reversed(messages) if m.role == MessageRole.USER),
+            "",
+        )
+        # Action tools are offered only on a turn whose caller/preceding-agent
+        # text makes an action relevant. Their strict provider path buffers the
+        # first pass, ensuring no pre-tool promise can reach TTS.
+        action_tools = action_tools_for_turn(messages, self._p.llm_provider)
+        legacy_end_action = bool(
+            self._p._supports_llm_end_session_action(session) and not action_tools
+        )
         # Resolve the per-turn blocks (runtime work: keyword gate, KB fetch,
         # voice-capability + accent resolution). The ORDER they stack in lives
         # in prompts.build.build_turn_prompt — this section only RESOLVES them,
@@ -386,7 +408,7 @@ class TurnStreamer:
         kb_tools = None
         knowledge_block = None
         if session.knowledge_mode in ("retrieve", "map_retrieve") and messages:
-            if not self._p._supports_llm_end_session_action(session):
+            if not legacy_end_action:
                 kb_tools = knowledge_tools_for(session, self._p.llm_provider)
             if kb_tools:
                 knowledge_block = tool_system_addendum()
@@ -428,8 +450,10 @@ class TurnStreamer:
                 knowledge_block = await _knowledge_block_for_turn(session, messages) or None
 
         end_session_block = (
-            _END_SESSION_TOOL_INSTRUCTIONS
-            if self._p._supports_llm_end_session_action(session)
+            action_tool_system_addendum()
+            if action_tools
+            else _END_SESSION_TOOL_INSTRUCTIONS
+            if legacy_end_action
             else None
         )
 
@@ -541,10 +565,6 @@ class TurnStreamer:
             captured_slots=session.captured_slots,
         )
 
-        last_user_text_for_limit = next(
-            (m.content for m in reversed(messages) if m.role == MessageRole.USER),
-            "",
-        )
         max_sentences = self._p._response_max_sentences_for_turn(
             session,
             last_user_text_for_limit,
@@ -599,6 +619,8 @@ class TurnStreamer:
         question_grace_used = False
         tts_was_interrupted = False
         suppressed_for_action = False
+        guardrail_block_reason: Optional[str] = None
+        guardrail_blocked_response: Optional[str] = None
 
         # P3: track sentences ACTUALLY delivered to TTS, so on a barge-in we
         # commit to history only what the caller really heard — not the full
@@ -621,24 +643,69 @@ class TurnStreamer:
                 return False
             return True
 
+        def _validate_for_tts(text: str) -> tuple[str, Optional[str]]:
+            """Validate cleaned model text before any byte reaches TTS."""
+            results = action_results_for_session(session)
+            valid, reason = guardrails.validate_response(
+                text,
+                # C1 activates the deterministic action-evidence gate here.
+                # Do not also activate the historical fuzzy do_not_say matcher:
+                # it was never on this live path and treats policy prose as a
+                # bag of keywords (for example, an instruction to "close
+                # politely" falsely blocks those exact allowed words).
+                None,
+                action_results=results,
+            )
+            if valid:
+                return text, None
+            action = action_from_validation_reason(reason)
+            replacement = (
+                safe_failure_speech(action, results.get(action))
+                if action
+                else "Let me put that another way."
+            )
+            logger.warning(
+                "llm_response_blocked_before_tts call=%s reason=%s",
+                call_id[:12],
+                reason,
+            )
+            return replacement, reason
+
         t_llm_start = time.monotonic()
         t_tts_first: Optional[float] = None
         t_tts_end: Optional[float] = None
 
-        # On-demand KB: the model may fetch facts via a tool mid-turn. The
-        # method yields the same str token stream, so the loop below is
-        # unchanged — only the iterator differs. Falls back to the normal
-        # timeout-guarded stream when tools aren't active.
-        if kb_tools:
-            async def _kb_runner(_name: str, _args: dict) -> str:
-                q = (_args or {}).get("query") or last_user_text_for_limit
-                return await run_knowledge_lookup(session, q)
+        # Connected tool turn. Action results and KB facts share one provider
+        # round-trip, but actions use strict buffering so round-0 prose can
+        # never promise success before the tool result exists.
+        offered_tools = [*(kb_tools or []), *action_tools]
+        if offered_tools:
+            async def _voice_tool_runner(_name: str, _args: dict) -> str:
+                if _name == KB_TOOL_NAME:
+                    q = (_args or {}).get("query") or last_user_text_for_limit
+                    return await run_knowledge_lookup(session, q)
+                try:
+                    result = await run_voice_action(
+                        session,
+                        _name,
+                        _args,
+                        user_text=last_user_text_for_limit,
+                    )
+                except Exception:
+                    logger.exception(
+                        "voice_action_executor_failed call=%s action=%s",
+                        call_id[:12],
+                        _name,
+                    )
+                    result = execution_failure_result(session, _name)
+                return result_json(result)
 
             _token_iter = self._p.llm_provider.stream_chat_with_tools(
                 messages,
                 system_prompt=system_prompt,
-                tools=kb_tools,
-                tool_runner=_kb_runner,
+                tools=offered_tools,
+                tool_runner=_voice_tool_runner,
+                require_tool_result_before_content=bool(action_tools),
                 temperature=getattr(session, "llm_temperature", None),
                 max_tokens=getattr(session, "llm_max_tokens", None),
             )
@@ -671,6 +738,22 @@ class TurnStreamer:
 
                 all_tokens.append(token)
                 buf += token
+
+                # Strict action turns arrive as one buffered provider chunk.
+                # Validate the whole post-tool reply before sentence pacing so
+                # a two-sentence completion claim cannot leak its first half.
+                if action_tools and guardrail_block_reason is None:
+                    _candidate = guardrails.clean_response(
+                        buf,
+                        tts_model_id=_tts_model_id,
+                        protected_values=_protected_readback,
+                    )
+                    if _candidate:
+                        _candidate, _candidate_reason = _validate_for_tts(_candidate)
+                        if _candidate_reason:
+                            guardrail_block_reason = _candidate_reason
+                            all_tokens[:] = [_candidate]
+                            buf = _candidate
 
                 # If the model is emitting the structured end-session action
                 # (pure JSON — by contract "no spoken text outside JSON"), do NOT
@@ -719,6 +802,11 @@ class TurnStreamer:
                         raw_sentence, tts_model_id=_tts_model_id,
                         protected_values=_protected_readback,
                     )
+                    _sentence_reason: Optional[str] = None
+                    if sentence and guardrail_block_reason is None:
+                        sentence, _sentence_reason = _validate_for_tts(sentence)
+                        if _sentence_reason:
+                            guardrail_block_reason = _sentence_reason
 
                     # Drop only what cannot be SPOKEN — punctuation or
                     # whitespace left over from cleaning. The test used to be
@@ -766,7 +854,14 @@ class TurnStreamer:
                     if tts_was_interrupted:
                         break
 
-                if tts_was_interrupted:
+                    if guardrail_block_reason:
+                        guardrail_blocked_response = " ".join(
+                            session._spoken_sentences
+                        ).strip()
+                        buf = ""
+                        break
+
+                if tts_was_interrupted or guardrail_block_reason:
                     break
 
         except LLMTimeoutError:
@@ -795,7 +890,7 @@ class TurnStreamer:
         t_llm_done = time.monotonic()
         self._p.latency_tracker.mark_llm_end(call_id)
 
-        raw_response_text = "".join(all_tokens)
+        raw_response_text = guardrail_blocked_response or "".join(all_tokens)
         # Extract-first on the full aggregate too: all_tokens (unlike buf) was
         # never touched by the per-sentence extraction above, so without this
         # the sentinel would still be sitting in raw_response_text and
@@ -833,6 +928,11 @@ class TurnStreamer:
                         raw_tail, tts_model_id=_tts_model_id,
                         protected_values=_protected_readback,
                     )
+                    _tail_reason: Optional[str] = None
+                    if sentence:
+                        sentence, _tail_reason = _validate_for_tts(sentence)
+                        if _tail_reason:
+                            guardrail_block_reason = _tail_reason
                     if sentence:
                         await _settle_filler()
                         if t_tts_first is None:
@@ -846,6 +946,11 @@ class TurnStreamer:
                         t_tts_end = time.monotonic()
                         if not tts_was_interrupted:
                             session._spoken_sentences.append(sentence)
+                            if _tail_reason:
+                                guardrail_blocked_response = " ".join(
+                                    session._spoken_sentences
+                                ).strip()
+                                raw_response_text = guardrail_blocked_response
 
         # Cleanup: ensure the thinking-filler task is never left dangling (e.g.
         # an early barge-in or an action turn produced no real audio).

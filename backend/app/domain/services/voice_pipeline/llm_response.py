@@ -15,6 +15,11 @@ import re
 from typing import Optional
 
 from app.domain.services.llm_guardrails import get_guardrails
+from app.domain.services.voice_pipeline.action_tools import (
+    action_from_validation_reason,
+    action_results_for_session,
+    safe_failure_speech,
+)
 from app.infrastructure.llm.groq import LLMTimeoutError
 from app.services.scripts import compose_system_prompt, model_prompt_addendum
 
@@ -114,6 +119,27 @@ async def generate_llm_response(llm_provider, latency_tracker, session, user_inp
         if max_sentences and sanitized:
             parts = re.split(r'(?<=[.!?])\s+', sanitized.strip())
             sanitized = " ".join(parts[:max_sentences])
+        results = action_results_for_session(session)
+        valid, reason = guardrails.validate_response(
+            sanitized,
+            # Keep this newly-live check scoped to the deterministic action
+            # contract. The legacy fuzzy do_not_say matcher is not safe to
+            # promote into a runtime output gate as a side effect of C1.
+            None,
+            action_results=results,
+        )
+        if not valid and sanitized:
+            action = action_from_validation_reason(reason)
+            logger.warning(
+                "llm_response_blocked call=%s reason=%s",
+                call_id[:12],
+                reason,
+            )
+            return (
+                safe_failure_speech(action, results.get(action))
+                if action
+                else "Let me put that another way."
+            )
         return sanitized
 
     except LLMTimeoutError:

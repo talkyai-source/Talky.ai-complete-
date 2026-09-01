@@ -81,7 +81,8 @@ class RealtimeBridge:
 
     Construct with the already-connected session, the media gateway, the
     call_id, the gateway's internal PCM sample rate, and (optionally) a
-    knowledge context so the model's knowledge_lookup tool can be fulfilled.
+    knowledge context plus the shared CallSession so knowledge and action tools
+    can be fulfilled through the same deterministic contracts.
     """
 
     def __init__(
@@ -102,6 +103,7 @@ class RealtimeBridge:
         talklee_call_id: Optional[str] = None,
         on_connection_lost: Optional[Callable[[], Awaitable[None]]] = None,
         call_direction: str = "outbound",
+        action_session: Optional[Any] = None,
     ) -> None:
         self._call_id = call_id
         self._rt = realtime_session
@@ -122,6 +124,11 @@ class RealtimeBridge:
         self._talklee_call_id = talklee_call_id
         self._turn_index = 0
         self._call_direction = str(call_direction or "outbound").strip().lower()
+        # Shared CallSession for deterministic voice-action results. Optional so
+        # older construction sites/tests remain compatible; the bridge itself
+        # is a safe in-memory fallback for fail-closed unavailable results.
+        self._action_session = action_session or self
+        self._latest_caller_text = ""
         if transcript_service is not None and talklee_call_id:
             try:
                 transcript_service.bind_call_identity(call_id, talklee_call_id)
@@ -422,6 +429,7 @@ class RealtimeBridge:
                 elif kind == "caller_transcript" and ev.text:
                     logger.debug("realtime caller: %s", ev.text)
                     if getattr(ev, "is_final", False):
+                        self._latest_caller_text = ev.text
                         _tidx = self._turn_index
                         self._record_turn("user", ev.text)
                         # Real-time voicemail detection on the opening turn(s):
@@ -468,24 +476,55 @@ class RealtimeBridge:
                          self._call_id, exc)
 
     async def _handle_function_call(self, fc: Any) -> None:
-        """Fulfil the model's knowledge_lookup tool using the SAME retrieval
-        the cascaded path uses. Any other tool name gets a benign stub so the
-        model can continue. Never raises."""
+        """Fulfil knowledge and deterministic action tools. Never raises."""
         try:
             if fc.name == "knowledge_lookup":
                 query = fc.parsed_arguments().get("query", "")
                 text = await self._lookup_knowledge(query)
                 await self._rt.send_function_result(fc.call_id, text)
             else:
-                await self._rt.send_function_result(
-                    fc.call_id, {"error": f"unknown tool {fc.name}"}
+                from app.domain.services.voice_pipeline.action_tools import (
+                    ACTION_END_CALL,
+                    VOICE_ACTION_NAMES,
+                    run_voice_action,
                 )
+
+                if fc.name not in VOICE_ACTION_NAMES:
+                    await self._rt.send_function_result(
+                        fc.call_id, {"error": f"unknown tool {fc.name}"}
+                    )
+                    return
+
+                result = await run_voice_action(
+                    self._action_session,
+                    fc.name,
+                    fc.parsed_arguments(),
+                    user_text=self._latest_caller_text,
+                )
+                # Close the tool round-trip before any completion claim or
+                # end-call side effect. send_function_result is awaited, so the
+                # result is on the provider wire before execution continues.
+                await self._rt.send_function_result(fc.call_id, result)
+                if fc.name == ACTION_END_CALL and result["success"]:
+                    hangup = getattr(self._gw, "hangup_call", None)
+                    if callable(hangup):
+                        await hangup(self._call_id, "agent_end_call")
         except Exception as exc:  # noqa: BLE001
             logger.debug("realtime_bridge function-call err call=%s: %s",
                          self._call_id, exc)
             try:
+                from app.domain.services.voice_pipeline.action_tools import (
+                    VOICE_ACTION_NAMES,
+                    execution_failure_result,
+                )
+
+                fallback = (
+                    execution_failure_result(self._action_session, fc.name)
+                    if getattr(fc, "name", None) in VOICE_ACTION_NAMES
+                    else {"error": "lookup failed"}
+                )
                 await self._rt.send_function_result(
-                    fc.call_id, {"error": "lookup failed"}
+                    fc.call_id, fallback
                 )
             except Exception:  # noqa: BLE001
                 pass

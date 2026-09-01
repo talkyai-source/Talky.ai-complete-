@@ -16,6 +16,7 @@ import pytest
 from app.domain.models.conversation import Message, MessageRole
 from app.infrastructure.llm.gemini import GeminiLLMProvider
 from app.domain.services.voice_pipeline.knowledge_tool import KNOWLEDGE_TOOL_SPEC
+from app.domain.services.voice_pipeline.action_tools import ACTION_SEND_EMAIL
 
 
 # ── fake streaming transport ────────────────────────────────────────────────
@@ -139,3 +140,41 @@ def test_tool_call_then_grounded_answer(rich_genai):
     assert "".join(out) == "It's forty nine a month."
     assert seen["name"] == "lookup_company_knowledge"
     assert seen["query"] == "price"
+
+
+def test_strict_action_turn_discards_premature_round_zero_claim(rich_genai):
+    fc = rich_genai.FunctionCall(name=ACTION_SEND_EMAIL, args={})
+    p = _provider_with_streams([
+        _FakeStream([
+            _FakeChunk(
+                text="I've sent that already.",
+                function_calls=[fc],
+            )
+        ]),
+        _FakeStream([
+            _FakeChunk(text="I can't send an email from this call.")
+        ]),
+    ])
+    action_spec = {
+        "type": "function",
+        "function": {
+            "name": ACTION_SEND_EMAIL,
+            "description": "Send an email.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    }
+
+    async def runner(name, args):
+        assert name == ACTION_SEND_EMAIL
+        return '{"success":false,"status":"unavailable"}'
+
+    out = _run(p.stream_chat_with_tools(
+        [Message(role=MessageRole.USER, content="email it")],
+        system_prompt="sys",
+        tools=[action_spec],
+        tool_runner=runner,
+        require_tool_result_before_content=True,
+    ))
+
+    assert out == ["I can't send an email from this call."]
+    assert "sent that already" not in "".join(out).lower()
