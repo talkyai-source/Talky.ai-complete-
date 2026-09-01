@@ -42,10 +42,23 @@ def test_opt_out_flag_string_spellings(val, expected):
 
 
 # ── purge orchestration ───────────────────────────────────────────
+_TENANT_ID = "00000000-0000-0000-0000-000000000001"
+
+
 class _FakeDNCConn:
+    def __init__(self):
+        self.executed = []
+
+    def transaction(self):
+        return self
+
+    async def execute(self, sql, *args):
+        self.executed.append((sql, args))
+        return "SET"
+
     async def fetchrow(self, *a, **k):
         return {
-            "id": "1", "tenant_id": "t", "normalized_number": "+15551234567",
+            "id": "1", "tenant_id": _TENANT_ID, "normalized_number": "+15551234567",
             "source": "caller_opt_out", "reason": "x",
             "expires_at": None, "created_at": None,
         }
@@ -58,9 +71,10 @@ class _FakeDNCConn:
 class _FakeDNCPool:
     def __init__(self):
         self.acquired = 0
+        self.conn = _FakeDNCConn()
     def acquire(self):
         self.acquired += 1
-        return _FakeDNCConn()
+        return self.conn
 
 
 class _FakeResult:
@@ -100,7 +114,7 @@ async def test_purge_runs_all_three_steps():
     client = _FakeClient(rows=[{"id": "j1"}, {"id": "j2"}])
     res = await purge_lead_on_opt_out(
         db_pool=pool, db_client=client,
-        tenant_id="t", lead_id="lead-1", phone_number="+1 (555) 123-4567",
+        tenant_id=_TENANT_ID, lead_id="lead-1", phone_number="+1 (555) 123-4567",
         call_id="call-9",
     )
     assert res["dnc_added"] is True
@@ -112,6 +126,9 @@ async def test_purge_runs_all_three_steps():
     # the cancel used the opt-out reason.
     assert any(u.get("failure_reason") == OPT_OUT_REASON for u in client.cap["updates"])
     assert any(u.get("status") == "dnc" for u in client.cap["updates"])
+    assert pool.conn.executed == [
+        (f"SET LOCAL app.current_tenant_id = '{_TENANT_ID}'", ()),
+    ]
 
 
 @pytest.mark.asyncio
