@@ -39,6 +39,16 @@ class _PermissionConnection:
         # and an empty grant set stays a denial rather than an unseeded
         # fallback to role defaults.
         self.seeded = True
+        self.context_statements = []
+
+    def transaction(self):
+        return _AcquirePermissionConnection(self)
+
+    async def execute(self, query, *args):
+        # get_effective_permissions now enters the same transaction-scoped RLS
+        # context as production before reading role/direct grants.
+        self.context_statements.append((query, args))
+        return "SET"
 
     async def fetch(self, query, *_args):
         if "FROM tenant_users" in query:

@@ -100,6 +100,9 @@ class SecretsConn:
         self.row = row
         self.executed = []
 
+    def transaction(self):
+        return _AcquireCtx(self)
+
     def _visible(self, secret_id, tenant):
         r = self.row
         if r is None or str(r["secret_id"]) != str(secret_id):
@@ -266,6 +269,9 @@ def _event_row(event_id, tenant_id):
 class EventsConn:
     def __init__(self, row):
         self.row = row
+
+    def transaction(self):
+        return _AcquireCtx(self)
 
     async def fetchrow(self, query, *args):
         if "security_events" not in query:
