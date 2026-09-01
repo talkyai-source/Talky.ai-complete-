@@ -153,6 +153,154 @@ BEGIN
     END IF;
 END $$;
 
+-- 1.3.1 REFRESH TOKENS
+-- Authoritative contracts: Alembic 0002 plus the current nine-value CHECK in
+-- database/migrations/20260729_widen_refresh_tokens_revoked_reason.sql.
+CREATE TABLE IF NOT EXISTS refresh_tokens (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    family_id UUID NOT NULL,
+    user_id UUID NOT NULL REFERENCES user_profiles(id) ON DELETE CASCADE,
+    tenant_id UUID,
+    token_hash TEXT NOT NULL UNIQUE,
+    parent_id UUID REFERENCES refresh_tokens(id) ON DELETE SET NULL,
+    issued_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    expires_at TIMESTAMPTZ NOT NULL,
+    used_at TIMESTAMPTZ,
+    revoked_at TIMESTAMPTZ,
+    revoked_reason TEXT,
+    ip INET,
+    user_agent TEXT,
+    CONSTRAINT chk_rt_expires_after_issued CHECK (expires_at > issued_at)
+);
+
+ALTER TABLE refresh_tokens
+    DROP CONSTRAINT IF EXISTS refresh_tokens_revoked_reason_check;
+ALTER TABLE refresh_tokens
+    ADD CONSTRAINT refresh_tokens_revoked_reason_check
+    CHECK (
+        revoked_reason IS NULL OR revoked_reason = ANY (ARRAY[
+            'rotated'::text,
+            'reuse_detected'::text,
+            'logout'::text,
+            'admin'::text,
+            'expired'::text,
+            'password_change'::text,
+            'password_reset'::text,
+            'mfa_disabled'::text,
+            'expired_with_subsequent_use'::text
+        ])
+    ) NOT VALID;
+ALTER TABLE refresh_tokens
+    VALIDATE CONSTRAINT refresh_tokens_revoked_reason_check;
+
+CREATE INDEX IF NOT EXISTS idx_rt_family ON refresh_tokens(family_id);
+CREATE INDEX IF NOT EXISTS idx_rt_user_active
+    ON refresh_tokens(user_id, expires_at) WHERE revoked_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_rt_token_lookup
+    ON refresh_tokens(token_hash) WHERE revoked_at IS NULL;
+
+-- 1.3.2 TENANT SECRETS AND ACCESS AUDIT
+-- Authoritative contract: database/schema/baseline_2026-06-02.sql.
+CREATE TABLE IF NOT EXISTS tenant_secrets (
+    secret_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    tenant_id UUID REFERENCES tenants(id),
+    created_by UUID REFERENCES user_profiles(id),
+    secret_type VARCHAR(30) NOT NULL,
+    secret_name VARCHAR(100) NOT NULL,
+    description TEXT,
+    encrypted_value BYTEA NOT NULL,
+    encrypted_dek BYTEA NOT NULL,
+    iv BYTEA NOT NULL,
+    algorithm VARCHAR(20) NOT NULL DEFAULT 'AES-256-GCM',
+    permissions JSONB DEFAULT '{}'::jsonb,
+    version INTEGER NOT NULL DEFAULT 1,
+    rotated_from UUID REFERENCES tenant_secrets(secret_id),
+    rotated_to UUID REFERENCES tenant_secrets(secret_id),
+    rotated_at TIMESTAMPTZ,
+    expires_at TIMESTAMPTZ,
+    last_accessed_at TIMESTAMPTZ,
+    last_accessed_by UUID,
+    access_count INTEGER NOT NULL DEFAULT 0,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    is_compromised BOOLEAN NOT NULL DEFAULT FALSE,
+    revoked_at TIMESTAMPTZ,
+    revoked_reason TEXT,
+    CONSTRAINT tenant_secrets_tenant_id_secret_name_is_active_key
+        UNIQUE (tenant_id, secret_name, is_active)
+);
+
+CREATE INDEX IF NOT EXISTS idx_tenant_secrets_active
+    ON tenant_secrets(tenant_id, is_active) WHERE is_active = TRUE;
+CREATE INDEX IF NOT EXISTS idx_tenant_secrets_expires
+    ON tenant_secrets(expires_at)
+    WHERE expires_at IS NOT NULL AND is_active = TRUE;
+CREATE INDEX IF NOT EXISTS idx_tenant_secrets_rotated_from
+    ON tenant_secrets(rotated_from);
+CREATE INDEX IF NOT EXISTS idx_tenant_secrets_tenant ON tenant_secrets(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_tenant_secrets_type ON tenant_secrets(secret_type);
+
+CREATE TABLE IF NOT EXISTS secret_access_log (
+    access_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    accessed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    secret_id UUID NOT NULL REFERENCES tenant_secrets(secret_id),
+    tenant_id UUID REFERENCES tenants(id),
+    accessed_by UUID REFERENCES user_profiles(id),
+    access_type VARCHAR(30) NOT NULL,
+    access_reason TEXT,
+    ip_address INET,
+    user_agent TEXT,
+    success BOOLEAN NOT NULL,
+    failure_reason TEXT,
+    api_key_prefix VARCHAR(16),
+    presented_permission VARCHAR(50)
+);
+
+CREATE INDEX IF NOT EXISTS idx_secret_access_secret ON secret_access_log(secret_id);
+CREATE INDEX IF NOT EXISTS idx_secret_access_success ON secret_access_log(success);
+CREATE INDEX IF NOT EXISTS idx_secret_access_tenant ON secret_access_log(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_secret_access_time
+    ON secret_access_log(accessed_at DESC);
+CREATE INDEX IF NOT EXISTS idx_secret_access_user ON secret_access_log(accessed_by);
+
+-- 1.3.3 WEBHOOK CONFIGS
+-- Authoritative contract: database/schema/baseline_2026-06-02.sql.
+CREATE TABLE IF NOT EXISTS webhook_configs (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE,
+    webhook_name TEXT NOT NULL,
+    secret_key TEXT NOT NULL,
+    signature_algorithm TEXT DEFAULT 'hmac-sha256',
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    CONSTRAINT webhook_configs_tenant_id_webhook_name_key
+        UNIQUE (tenant_id, webhook_name)
+);
+
+CREATE INDEX IF NOT EXISTS idx_webhook_configs_tenant
+    ON webhook_configs(tenant_id, webhook_name) WHERE is_active = TRUE;
+
+-- 1.3.4 CLONED VOICES
+-- Authoritative contract: database/migrations/20260615_cloned_voices.sql.
+CREATE TABLE IF NOT EXISTS cloned_voices (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL,
+    voice_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    provider TEXT NOT NULL DEFAULT 'elevenlabs',
+    created_by TEXT,
+    consent_at TIMESTAMPTZ NOT NULL,
+    status TEXT NOT NULL DEFAULT 'ready',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_cloned_voices_voice_id UNIQUE (voice_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_cloned_voices_tenant
+    ON cloned_voices(tenant_id);
+
 -- 1.4 SECURITY_SESSIONS
 -- Stores server-side session records for instant revocation.
 CREATE TABLE IF NOT EXISTS security_sessions (
@@ -2717,6 +2865,51 @@ INSERT INTO abuse_detection_rules (
  1, 2, 'block', 60, 5)
 ON CONFLICT DO NOTHING;
 
+-- The historical 20260507 RLS repair was applied separately in production,
+-- but this consolidated bootstrap is the supported Alembic 0008 floor.  Seed
+-- these five legacy policies here so migration 0013 can discover, canonicalize
+-- and FORCE them on a fresh bootstrap exactly as it does on production.
+ALTER TABLE campaigns ENABLE ROW LEVEL SECURITY;
+ALTER TABLE leads ENABLE ROW LEVEL SECURITY;
+ALTER TABLE calls ENABLE ROW LEVEL SECURITY;
+ALTER TABLE conversations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE connectors ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS campaigns_tenant_isolation ON campaigns;
+CREATE POLICY campaigns_tenant_isolation ON campaigns
+    USING (
+        COALESCE(NULLIF(current_setting('app.bypass_rls', TRUE), ''), 'false')::BOOLEAN = TRUE
+        OR tenant_id::text = NULLIF(current_setting('app.current_tenant_id', TRUE), '')
+    );
+
+DROP POLICY IF EXISTS leads_tenant_isolation ON leads;
+CREATE POLICY leads_tenant_isolation ON leads
+    USING (
+        COALESCE(NULLIF(current_setting('app.bypass_rls', TRUE), ''), 'false')::BOOLEAN = TRUE
+        OR tenant_id::text = NULLIF(current_setting('app.current_tenant_id', TRUE), '')
+    );
+
+DROP POLICY IF EXISTS calls_tenant_isolation ON calls;
+CREATE POLICY calls_tenant_isolation ON calls
+    USING (
+        COALESCE(NULLIF(current_setting('app.bypass_rls', TRUE), ''), 'false')::BOOLEAN = TRUE
+        OR tenant_id::text = NULLIF(current_setting('app.current_tenant_id', TRUE), '')
+    );
+
+DROP POLICY IF EXISTS conversations_tenant_isolation ON conversations;
+CREATE POLICY conversations_tenant_isolation ON conversations
+    USING (
+        COALESCE(NULLIF(current_setting('app.bypass_rls', TRUE), ''), 'false')::BOOLEAN = TRUE
+        OR tenant_id::text = NULLIF(current_setting('app.current_tenant_id', TRUE), '')
+    );
+
+DROP POLICY IF EXISTS connectors_tenant_isolation ON connectors;
+CREATE POLICY connectors_tenant_isolation ON connectors
+    USING (
+        COALESCE(NULLIF(current_setting('app.bypass_rls', TRUE), ''), 'false')::BOOLEAN = TRUE
+        OR tenant_id::text = NULLIF(current_setting('app.current_tenant_id', TRUE), '')
+    );
+
 -- =============================================================================
 -- SECTION 7: FUNCTIONS & PROCEDURES
 -- =============================================================================
@@ -2832,7 +3025,13 @@ BEGIN
         WHERE t.table_schema = 'public'
           AND t.table_type = 'BASE TABLE'
           AND c.column_name = 'updated_at'
-          AND t.table_name NOT IN ('call_events', 'recordings', 'invoices', 'usage_records')
+          AND t.table_name NOT IN (
+              'call_events',
+              'cloned_voices',
+              'recordings',
+              'invoices',
+              'usage_records'
+          )
     LOOP
         EXECUTE format('DROP TRIGGER IF EXISTS update_%I_updated_at ON %I', t, t);
         EXECUTE format(

@@ -6465,6 +6465,28 @@ CREATE POLICY ttc_tenant_isolation ON public.tenant_telephony_credentials USING 
 -- remains implicitly searched before public for built-in functions.
 SELECT pg_catalog.set_config('search_path', 'public', false);
 
+-- =============================================================================
+-- Appended 2026-06-15: cloned_voices was applied after this preserved dump by
+-- database/migrations/20260615_cloned_voices.sql.  Keep that exact ownership
+-- contract in the supported stamp-0008 restore path as well.
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS cloned_voices (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL,
+    voice_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    provider TEXT NOT NULL DEFAULT 'elevenlabs',
+    created_by TEXT,
+    consent_at TIMESTAMPTZ NOT NULL,
+    status TEXT NOT NULL DEFAULT 'ready',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_cloned_voices_voice_id UNIQUE (voice_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_cloned_voices_tenant
+    ON cloned_voices(tenant_id);
+
 
 -- =============================================================================
 -- Appended 2026-06-03: tenant_ai_credentials was applied on prod but missing

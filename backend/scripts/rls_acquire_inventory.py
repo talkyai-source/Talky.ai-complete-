@@ -163,8 +163,28 @@ _CREATE_POLICY_RE = re.compile(
 # `create_table("x", ..., sa.Column("tenant_id", ...))` and CREATE TABLE ... tenant_id
 _CREATE_TABLE_SQL_RE = re.compile(
     r"create\s+table\s+(?:if\s+not\s+exists\s+)?(?:public\.)?\"?"
-    r"([a-z_][a-z0-9_]*)\"?\s*\((.*?)\n\s*\);",
+    r"([a-z_][a-z0-9_]*)\"?\s*\((.*?)\n\s*\)\s*;?",
     re.IGNORECASE | re.DOTALL,
+)
+
+# Only executable/runtime schema sources are evidence.  Test fixtures, docs,
+# generated reports and archived SQL often contain example ``ALTER TABLE`` or
+# ``CREATE POLICY`` statements; counting those would make a prose claim satisfy
+# the production RLS gate.
+_NON_RUNTIME_SCHEMA_PARTS = frozenset(
+    {
+        "__pycache__",
+        "_archive",
+        "docs",
+        "evidence",
+        "fixtures",
+        "generated",
+        "reports",
+        "sessions",
+        "temp",
+        "tests",
+        "tmp",
+    }
 )
 
 
@@ -173,6 +193,128 @@ def _read(path: Path) -> str:
         return path.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return ""
+
+
+def _literal_string_set(
+    node: ast.AST,
+    constants: dict[str, set[str]],
+) -> set[str]:
+    """Resolve a literal table-name collection without importing a migration."""
+
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return {node.value}
+    if isinstance(node, (ast.Tuple, ast.List, ast.Set)):
+        values: set[str] = set()
+        for item in node.elts:
+            values.update(_literal_string_set(item, constants))
+        return values
+    if isinstance(node, ast.Call):
+        name = node.func.id if isinstance(node.func, ast.Name) else None
+        if name in {"frozenset", "list", "set", "tuple"} and node.args:
+            return _literal_string_set(node.args[0], constants)
+    if isinstance(node, ast.Name):
+        return set(constants.get(node.id, set()))
+    return set()
+
+
+def _python_schema_evidence(source: str) -> tuple[set[str], set[str]]:
+    """Find executable dynamic RLS/table declarations in an Alembic module.
+
+    Regexes intentionally handle literal SQL.  Current migrations also install
+    policies through helpers such as ``for table in _RLS_TABLES:
+    _canonical_rls(table)`` and create tables through ``op.create_table``.
+    Parse those two bounded forms so a Python loop cannot disappear from the
+    tenant-boundary inventory.  No migration is imported or executed.
+    """
+
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return set(), set()
+
+    constants: dict[str, set[str]] = {}
+    for node in tree.body:
+        name: Optional[str] = None
+        value: Optional[ast.AST] = None
+        if isinstance(node, ast.Assign) and len(node.targets) == 1:
+            target = node.targets[0]
+            if isinstance(target, ast.Name):
+                name = target.id
+                value = node.value
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            name = node.target.id
+            value = node.value
+        if name is not None and value is not None:
+            resolved = _literal_string_set(value, constants)
+            if resolved:
+                constants[name] = resolved
+
+    def strings_in(node: ast.AST) -> str:
+        return "\n".join(
+            sub.value
+            for sub in ast.walk(node)
+            if isinstance(sub, ast.Constant) and isinstance(sub.value, str)
+        )
+
+    policy_installers = {
+        node.name
+        for node in tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and "create policy" in strings_in(node).lower()
+    }
+
+    rls_tables: set[str] = set()
+    tenant_scoped: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            call_name = (
+                node.func.attr
+                if isinstance(node.func, ast.Attribute)
+                else node.func.id
+                if isinstance(node.func, ast.Name)
+                else None
+            )
+            if call_name == "create_table" and node.args:
+                table_names = _literal_string_set(node.args[0], constants)
+                has_tenant_column = any(
+                    isinstance(child, ast.Call)
+                    and (
+                        child.func.attr
+                        if isinstance(child.func, ast.Attribute)
+                        else child.func.id
+                        if isinstance(child.func, ast.Name)
+                        else None
+                    )
+                    == "Column"
+                    and child.args
+                    and _literal_string_set(child.args[0], constants) == {"tenant_id"}
+                    for child in ast.walk(node)
+                )
+                if has_tenant_column:
+                    tenant_scoped.update(table_names)
+
+            if call_name in policy_installers and node.args:
+                rls_tables.update(_literal_string_set(node.args[0], constants))
+
+        if isinstance(node, (ast.For, ast.AsyncFor)):
+            body = ast.Module(body=node.body, type_ignores=[])
+            body_calls_installer = any(
+                isinstance(child, ast.Call)
+                and (
+                    child.func.id
+                    if isinstance(child.func, ast.Name)
+                    else child.func.attr
+                    if isinstance(child.func, ast.Attribute)
+                    else None
+                )
+                in policy_installers
+                for child in ast.walk(body)
+            )
+            body_has_policy_ddl = "create policy" in strings_in(body).lower()
+            if body_calls_installer or body_has_policy_ddl:
+                rls_tables.update(_literal_string_set(node.iter, constants))
+
+    return rls_tables, tenant_scoped
 
 
 def discover_rls_tables(backend_root: Path) -> tuple[set[str], set[str]]:
@@ -196,16 +338,19 @@ def discover_rls_tables(backend_root: Path) -> tuple[set[str], set[str]]:
             sources.extend(p for p in d.rglob("*.py"))
 
     for path in sources:
-        # `_archive/` holds superseded schemas whose policies were dropped long
-        # ago (0013 replaces every policy it finds). Reading them would invent
-        # protection that does not exist - e.g. `tenants`, which has no
-        # tenant_id column and so is never a 0013 target, carried three
-        # policies in database/_archive/schema.sql.
-        if "_archive" in path.parts:
+        # Superseded schemas, fixtures and human/generated evidence are not
+        # executable production sources. Reading them would invent protection
+        # that does not exist (and could let a test assertion prove itself).
+        relative_parts = {part.lower() for part in path.relative_to(backend_root).parts}
+        if relative_parts & _NON_RUNTIME_SCHEMA_PARTS:
             continue
         text = _read(path)
         if not text:
             continue
+        if path.suffix.lower() == ".py":
+            python_rls, python_tenant_scoped = _python_schema_evidence(text)
+            rls.update(name.lower() for name in python_rls)
+            tenant_scoped.update(name.lower() for name in python_tenant_scoped)
         for m in _ENABLE_RLS_RE.finditer(text):
             rls.add(m.group(1).lower())
         for m in _CREATE_POLICY_RE.finditer(text):
