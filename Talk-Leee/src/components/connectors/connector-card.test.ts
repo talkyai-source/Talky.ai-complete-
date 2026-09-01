@@ -60,6 +60,25 @@ test("ConnectorCard shows Expired status and allows reconnect", () => {
     assert.equal(screen.queryByRole("button", { name: "Connect" }), null);
 });
 
+test("ConnectorCard exposes an unavailable server capability without a dead OAuth button", () => {
+    renderWithQueryClient(
+        createElement(ConnectorCard, {
+            type: "salesforce",
+            name: "Salesforce",
+            description: "Sync qualified leads",
+            icon: Mail,
+            status: "disconnected",
+            available: false,
+            unavailableReason: "Salesforce is not enabled by this server yet.",
+        })
+    );
+
+    assert.ok(screen.getByLabelText("Status: Unavailable"));
+    assert.ok(screen.getByText("Salesforce is not enabled by this server yet."));
+    assert.ok(screen.getByText("Server capability required"));
+    assert.equal(screen.queryByRole("button", { name: "Connect" }), null);
+});
+
 test("ConnectorCard calls authorize and shows loading state", async () => {
     const userEvent = (await import("@testing-library/user-event")).default;
     const user = userEvent.setup({ document: globalThis.document });

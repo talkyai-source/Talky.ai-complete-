@@ -30,6 +30,14 @@ export interface ReviewOptions {
     bare_rating_earns_reward: boolean;
 }
 
+export interface ReviewRewardBalance {
+    total_points: number;
+    entries: number;
+    awarded_today: number;
+    daily_cap: number;
+    rewards_enabled: boolean;
+}
+
 /** One reviewer voice note about how the agent handled a call. */
 export interface CallFeedback {
     id: string;
@@ -422,6 +430,11 @@ class ExtendedApi {
     /** Tag vocabulary and reward rules. Fetch once, render the form from it. */
     async getReviewOptions(): Promise<ReviewOptions> {
         return this.client.request({ path: "/calls/reviews/options", method: "GET" });
+    }
+
+    /** A factual ledger balance. The UI never treats configuration alone as proof of an award. */
+    async getReviewRewardBalance(): Promise<ReviewRewardBalance> {
+        return this.client.request({ path: "/calls/reviews/rewards/balance", method: "GET" });
     }
 
     /**

@@ -10,16 +10,17 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { useConnectorStatuses, queryKeys } from "@/lib/api-hooks";
 import { isApiClientError } from "@/lib/http-client";
 import type { ConnectorProviderStatus } from "@/lib/models";
+import type { ConnectorProviderType } from "@/lib/connectors-utils";
 import { notificationsStore } from "@/lib/notifications";
 import { cn } from "@/lib/utils";
-import { CalendarDays, Mail, UsersRound, HardDrive } from "lucide-react";
+import { CalendarDays, Cloud, Mail, UsersRound, HardDrive } from "lucide-react";
 
 function formatError(err: unknown) {
     if (isApiClientError(err)) return err.message;
     return err instanceof Error ? err.message : "Request failed";
 }
 
-type ProviderType = "calendar" | "email" | "crm" | "drive";
+type ProviderType = ConnectorProviderType;
 
 type ProviderCard = {
     type: ProviderType;
@@ -57,6 +58,13 @@ const PROVIDERS: ProviderCard[] = [
         description: "Connect file storage for documents and recordings.",
         accent: "border-amber-500/20 bg-gradient-to-br from-amber-500/10 to-orange-500/5",
         icon: HardDrive,
+    },
+    {
+        type: "salesforce",
+        name: "Salesforce",
+        description: "Send approved qualified and interested leads to Salesforce with tenant-scoped OAuth.",
+        accent: "border-blue-500/20 bg-gradient-to-br from-blue-500/10 to-cyan-500/5",
+        icon: Cloud,
     },
 ];
 
@@ -144,7 +152,7 @@ export default function ConnectorsPage() {
     const byType = useMemo(() => {
         const map = new Map<ProviderType, ConnectorProviderStatus>();
         for (const item of q.data?.items ?? []) {
-            if (item.type === "calendar" || item.type === "email" || item.type === "crm" || item.type === "drive") {
+            if (item.type === "calendar" || item.type === "email" || item.type === "crm" || item.type === "drive" || item.type === "salesforce") {
                 map.set(item.type, item);
             }
         }
@@ -157,7 +165,7 @@ export default function ConnectorsPage() {
             .split(",")
             .map((x) => x.trim())
             .filter(Boolean);
-        const allowed: ProviderType[] = ["calendar", "email", "crm", "drive"];
+        const allowed: ProviderType[] = ["calendar", "email", "crm", "drive", "salesforce"];
         return list.filter((x): x is ProviderType => (allowed as string[]).includes(x));
     }, [searchParams]);
 
@@ -222,6 +230,10 @@ export default function ConnectorsPage() {
                                         provider={data?.provider}
                                         errorMessage={data?.error_message}
                                         oauthCallbackPath={`/connectors/${p.type}/callback`}
+                                        available={p.type !== "salesforce" || Boolean(data)}
+                                        unavailableReason={p.type === "salesforce" && !data
+                                            ? "Salesforce is not enabled by this server yet. No OAuth request will be started until the backend advertises the capability."
+                                            : undefined}
                                     />
                                 );
                             })}

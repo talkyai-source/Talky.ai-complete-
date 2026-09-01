@@ -26,6 +26,11 @@ import { AgentNameGender, pruneGenders } from "@/components/campaigns/agent-name
 import { PERSONAS, parseAgentNames } from "@/lib/campaign-personas";
 import { VoiceProviderPicker } from "@/components/campaigns/voice-provider-picker";
 import { CallingScheduleEditor } from "@/components/campaigns/calling-schedule-editor";
+import {
+    CampaignLeadFieldsPicker,
+    useCampaignLeadFieldDraft,
+} from "@/components/campaigns/campaign-lead-fields";
+import { leadDetailsApi } from "@/lib/lead-details-api";
 
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
 const STEPS = ["Basics", "Knowledge", "Review"] as const;
@@ -63,6 +68,8 @@ export function CampaignWizard() {
     const [preview, setPreview] = useState<{ system_prompt: string; greeting: string } | null>(null);
     const [previewLoading, setPreviewLoading] = useState(false);
     const [submitting, setSubmitting] = useState(false);
+    const [createdCampaignId, setCreatedCampaignId] = useState<string | null>(null);
+    const leadFields = useCampaignLeadFieldDraft();
 
     const agentNames = useMemo(() => parseAgentNames(agentNamesRaw), [agentNamesRaw]);
     const basicsValid = name.trim() && companyName.trim() && agentNames.length >= 1 && voiceId;
@@ -105,35 +112,50 @@ export function CampaignWizard() {
     };
 
     const onCreate = async () => {
+        if (leadFields.isLoading || leadFields.isError) {
+            setError("Contact-field settings must load successfully before this campaign can be created.");
+            return;
+        }
         setSubmitting(true);
         setError(null);
+        let campaignId = createdCampaignId;
         try {
-            const { campaign } = await dashboardApi.createCampaign({
-                name: name.trim(),
-                description: undefined,
-                system_prompt: goal.trim(),      // additional instructions
-                voice_id: voiceId,
-                tts_provider: provider || undefined,   // per-campaign engine
-                goal: goal.trim() || undefined,
-                persona_type: personaType,
-                company_name: companyName.trim(),
-                agent_names: agentNames,
-                agent_name_genders: pruneGenders(agentGenders, agentNames),
-                campaign_slots: {},
-                knowledge_driven: true,
-                calling_schedule: schedule,
-            });
+            if (!campaignId) {
+                const { campaign } = await dashboardApi.createCampaign({
+                    name: name.trim(),
+                    description: undefined,
+                    system_prompt: goal.trim(),      // additional instructions
+                    voice_id: voiceId,
+                    tts_provider: provider || undefined,   // per-campaign engine
+                    goal: goal.trim() || undefined,
+                    persona_type: personaType,
+                    company_name: companyName.trim(),
+                    agent_names: agentNames,
+                    agent_name_genders: pruneGenders(agentGenders, agentNames),
+                    campaign_slots: {},
+                    knowledge_driven: true,
+                    calling_schedule: schedule,
+                });
+                campaignId = campaign.id;
+                setCreatedCampaignId(campaign.id);
+            }
+            await leadDetailsApi.setCampaignFields(campaignId, leadFields.fields);
             if (file) {
                 try {
-                    await api.uploadCampaignKnowledge(campaign.id, file);
+                    await api.uploadCampaignKnowledge(campaignId, file);
                 } catch {
-                    router.push(`/campaigns/${campaign.id}?knowledge_error=1`);
+                    router.push(`/campaigns/${campaignId}?knowledge_error=1`);
                     return;
                 }
             }
-            router.push(`/campaigns/${campaign.id}`);
+            router.push(`/campaigns/${campaignId}`);
         } catch (err) {
-            setError(err instanceof Error ? err.message : "Failed to create campaign");
+            const detail = err instanceof Error ? err.message : "Failed to create campaign";
+            setError(
+                campaignId
+                    ? `Campaign details were created, but its contact-field policy was not saved. Retry to finish without creating a duplicate. ${detail}`
+                    : detail,
+            );
             setSubmitting(false);
         }
     };
@@ -283,6 +305,18 @@ export function CampaignWizard() {
                             will only have its persona to work from until you do.
                         </p>
 
+                        <div className="border-t border-gray-200 pt-5 dark:border-white/10">
+                            <CampaignLeadFieldsPicker
+                                specs={leadFields.specs}
+                                value={leadFields.fields}
+                                onChange={leadFields.setFields}
+                                isLoading={leadFields.isLoading}
+                                error={leadFields.isError ? leadFields.error : undefined}
+                                onRetry={leadFields.retry}
+                                disabled={submitting}
+                            />
+                        </div>
+
                         <div className="flex justify-between pt-1">
                             <Button variant="ghost" onClick={() => setStep(0)}><ArrowLeft className="h-4 w-4" /> Back</Button>
                             <Button onClick={goToReview}>Next: Review <ArrowRight className="h-4 w-4" /></Button>
@@ -299,6 +333,7 @@ export function CampaignWizard() {
                             <SummaryRow label="Agents" value={agentNames.join(", ")} />
                             <SummaryRow label="Voice" value={voiceName ? `${voiceName}${provider ? ` (${provider})` : ""}` : voiceId} />
                             <SummaryRow label="Knowledge" value={file ? file.name : "— none —"} />
+                            <SummaryRow label="Lead fields" value={leadFields.fields.length ? `${leadFields.fields.length} selected` : "— none —"} />
                         </div>
 
                         <div>
@@ -322,7 +357,7 @@ export function CampaignWizard() {
 
                         <div className="flex justify-between pt-1">
                             <Button variant="ghost" onClick={() => setStep(1)} disabled={submitting}><ArrowLeft className="h-4 w-4" /> Back</Button>
-                            <Button onClick={onCreate} disabled={submitting}>
+                            <Button onClick={onCreate} disabled={submitting || leadFields.isLoading || leadFields.isError}>
                                 {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
                                 {submitting ? "Creating…" : "Create campaign"}
                             </Button>

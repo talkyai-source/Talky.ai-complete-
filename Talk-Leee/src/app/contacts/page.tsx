@@ -6,10 +6,11 @@ import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { dashboardApi, Campaign, Contact, ContactMutation } from "@/lib/dashboard-api";
+import { dashboardApi, Campaign, Contact } from "@/lib/dashboard-api";
 import { extendedApi, BulkImportResponse } from "@/lib/extended-api";
 import { sharedHttpClient } from "@/lib/api";
 import { parseContactsCsv } from "@/lib/contact-csv";
+import { contactPayload, EMPTY_CONTACT_FORM, type ContactFormState } from "@/lib/contact-form";
 import { ContactLists } from "@/components/campaigns/contact-lists";
 import { CsvImportMapper } from "@/components/contacts/csv-import-mapper";
 import { Upload, FileText, CheckCircle, AlertCircle, Loader2, Download, X, Search, Plus, Pencil, Trash2, ChevronDown } from "lucide-react";
@@ -118,51 +119,6 @@ type ImportFieldError = {
     value?: string | null;
     error: string;
 };
-
-type ContactFormState = {
-    phone_number: string;
-    first_name: string;
-    last_name: string;
-    mobile_number: string;
-    business_number: string;
-    email: string;
-    company_name: string;
-    best_time_to_call: string;
-    timezone: string;
-    calling_notes: string;
-};
-
-const EMPTY_CONTACT_FORM: ContactFormState = {
-    phone_number: "",
-    first_name: "",
-    last_name: "",
-    mobile_number: "",
-    business_number: "",
-    email: "",
-    company_name: "",
-    best_time_to_call: "",
-    timezone: "",
-    calling_notes: "",
-};
-
-function contactPayload(form: ContactFormState): ContactMutation {
-    const firstName = form.first_name.trim();
-    const lastName = form.last_name.trim();
-    const fullName = [firstName, lastName].filter(Boolean).join(" ");
-    return {
-        phone_number: form.phone_number.trim(),
-        mobile_number: form.mobile_number.trim(),
-        full_name: fullName,
-        first_name: firstName || undefined,
-        last_name: lastName || undefined,
-        email: form.email.trim(),
-        company_name: form.company_name.trim(),
-        business_number: form.business_number.trim(),
-        best_time_to_call: form.best_time_to_call.trim(),
-        timezone: form.timezone.trim(),
-        calling_notes: form.calling_notes.trim(),
-    };
-}
 
 export default function ContactsPage() {
     const [campaigns, setCampaigns] = useState<Campaign[]>([]);
@@ -324,17 +280,23 @@ export default function ContactsPage() {
             business_number: contact.business_number || "",
             email: contact.email || "",
             company_name: contact.company_name || "",
+            job_title: contact.job_title || "",
             best_time_to_call: contact.best_time_to_call || "",
             timezone: contact.timezone || "",
             calling_notes: contact.calling_notes || "",
+            preferred_contact_method: contact.preferred_contact_method || "",
+            do_not_call: Boolean(contact.do_not_call),
         });
         setShowContactDetails(Boolean(
             mobileNumber
             || contact.business_number
             || contact.company_name
+            || contact.job_title
             || contact.best_time_to_call
             || contact.timezone
             || contact.calling_notes
+            || contact.preferred_contact_method
+            || contact.do_not_call
         ));
         setShowAddContact(true);
     }
@@ -899,6 +861,16 @@ export default function ContactsPage() {
                             />
                         </div>
                         <div>
+                            <Label htmlFor="contact-job-title">Job Title or Role</Label>
+                            <Input
+                                id="contact-job-title"
+                                autoComplete="organization-title"
+                                value={contactForm.job_title}
+                                onChange={(event) => setContactForm((previous) => ({ ...previous, job_title: event.target.value }))}
+                                placeholder="Operations Manager"
+                            />
+                        </div>
+                        <div>
                             <Label htmlFor="contact-best-time">Best Time to Call</Label>
                             <Input
                                 id="contact-best-time"
@@ -916,6 +888,21 @@ export default function ContactsPage() {
                                 placeholder="America/New_York"
                             />
                         </div>
+                        <div>
+                            <Label htmlFor="contact-preferred-method">Preferred Contact Method</Label>
+                            <select
+                                id="contact-preferred-method"
+                                value={contactForm.preferred_contact_method}
+                                onChange={(event) => setContactForm((previous) => ({ ...previous, preferred_contact_method: event.target.value }))}
+                                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                            >
+                                <option value="">No preference</option>
+                                <option value="phone">Phone</option>
+                                <option value="email">Email</option>
+                                <option value="sms">SMS</option>
+                                <option value="whatsapp">WhatsApp</option>
+                            </select>
+                        </div>
                         <div className="sm:col-span-2 lg:col-span-3">
                             <Label htmlFor="contact-calling-notes">Calling Notes</Label>
                             <textarea
@@ -926,6 +913,18 @@ export default function ContactsPage() {
                                 className="flex min-h-20 w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground ring-offset-background transition-[background-color,border-color,box-shadow] placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                             />
                         </div>
+                        <label className="flex items-start gap-3 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 sm:col-span-2 lg:col-span-3">
+                            <input
+                                type="checkbox"
+                                checked={contactForm.do_not_call}
+                                onChange={(event) => setContactForm((previous) => ({ ...previous, do_not_call: event.target.checked }))}
+                                className="mt-0.5 h-4 w-4 rounded border-input accent-amber-600"
+                            />
+                            <span>
+                                <span className="block text-sm font-medium text-foreground">Do not call this contact</span>
+                                <span className="block text-xs text-muted-foreground">This is an operational suppression flag. The dialer will exclude the contact; the agent will never be asked to discuss it.</span>
+                            </span>
+                        </label>
                     </div>
                 )}
             </div>
@@ -1096,10 +1095,21 @@ export default function ContactsPage() {
                                             <div className="flex items-start justify-between gap-3">
                                                 <div className="min-w-0">
                                                     <p className="break-words text-sm font-semibold tabular-nums text-foreground">{contact.phone_number}</p>
-                                                    <p className="mt-1 truncate text-sm text-muted-foreground">{displayName}</p>
-                                                    <p className="truncate text-xs text-muted-foreground">{contact.email || "No email"}</p>
-                                                </div>
-                                                {contact.is_lead ? (
+                                                     <p className="mt-1 truncate text-sm text-muted-foreground">{displayName}</p>
+                                                     <p className="truncate text-xs text-muted-foreground">
+                                                         {[contact.job_title, contact.company_name].filter(Boolean).join(" · ") || contact.email || "No company or email"}
+                                                     </p>
+                                                     {(contact.best_time_to_call || contact.timezone || contact.preferred_contact_method) && (
+                                                         <p className="mt-1 text-xs text-muted-foreground">
+                                                             {[contact.best_time_to_call, contact.timezone, contact.preferred_contact_method].filter(Boolean).join(" · ")}
+                                                         </p>
+                                                     )}
+                                                 </div>
+                                                 {contact.do_not_call ? (
+                                                     <span className="shrink-0 rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-xs font-medium text-amber-700 dark:text-amber-300">
+                                                         Do not call
+                                                     </span>
+                                                 ) : contact.is_lead ? (
                                                     <span className="shrink-0 rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2 py-0.5 text-xs font-medium text-emerald-700 dark:text-emerald-400">
                                                         Lead — follow up
                                                     </span>
@@ -1136,9 +1146,9 @@ export default function ContactsPage() {
                                 <table className="w-full">
                                     <thead className="border-b border-border">
                                         <tr>
-                                            <th className="whitespace-nowrap px-4 py-2 text-left text-xs font-medium uppercase text-muted-foreground">Phone</th>
-                                            <th className="whitespace-nowrap px-4 py-2 text-left text-xs font-medium uppercase text-muted-foreground">Name</th>
-                                            <th className="whitespace-nowrap px-4 py-2 text-left text-xs font-medium uppercase text-muted-foreground">Email</th>
+                                             <th className="whitespace-nowrap px-4 py-2 text-left text-xs font-medium uppercase text-muted-foreground">Contact</th>
+                                             <th className="whitespace-nowrap px-4 py-2 text-left text-xs font-medium uppercase text-muted-foreground">Company / role</th>
+                                             <th className="whitespace-nowrap px-4 py-2 text-left text-xs font-medium uppercase text-muted-foreground">Call window</th>
                                             <th className="whitespace-nowrap px-4 py-2 text-left text-xs font-medium uppercase text-muted-foreground">Status</th>
                                             <th className="whitespace-nowrap px-4 py-2 text-right text-xs font-medium uppercase text-muted-foreground">Actions</th>
                                         </tr>
@@ -1146,15 +1156,27 @@ export default function ContactsPage() {
                                     <tbody className="divide-y divide-border/60">
                                         {contacts.map((contact) => (
                                             <tr key={contact.id} className={`transition-colors hover:bg-muted/30 ${contact.is_lead ? "bg-green-500/5" : ""}`}>
-                                                <td className="whitespace-nowrap px-4 py-3 text-sm tabular-nums text-foreground">{contact.phone_number}</td>
-                                                <td className="whitespace-nowrap px-4 py-3 text-sm text-muted-foreground">
-                                                    {contact.first_name || contact.last_name
-                                                        ? `${contact.first_name || ""} ${contact.last_name || ""}`.trim()
-                                                        : contact.full_name?.trim() || "--"}
-                                                </td>
-                                                <td className="whitespace-nowrap px-4 py-3 text-sm text-muted-foreground">{contact.email || "--"}</td>
-                                                <td className="whitespace-nowrap px-4 py-3 text-sm">
-                                                    {contact.is_lead ? (
+                                                 <td className="px-4 py-3 text-sm">
+                                                     <p className="font-medium text-foreground">{contact.first_name || contact.last_name
+                                                         ? `${contact.first_name || ""} ${contact.last_name || ""}`.trim()
+                                                         : contact.full_name?.trim() || "Name unavailable"}</p>
+                                                     <p className="whitespace-nowrap text-xs tabular-nums text-muted-foreground">{contact.phone_number}</p>
+                                                     {contact.email ? <p className="max-w-56 truncate text-xs text-muted-foreground">{contact.email}</p> : null}
+                                                 </td>
+                                                 <td className="px-4 py-3 text-sm text-muted-foreground">
+                                                     <p>{contact.company_name || "--"}</p>
+                                                     {contact.job_title ? <p className="text-xs">{contact.job_title}</p> : null}
+                                                 </td>
+                                                 <td className="px-4 py-3 text-sm text-muted-foreground">
+                                                     <p>{contact.best_time_to_call || "Any time"}</p>
+                                                     <p className="text-xs">{[contact.timezone, contact.preferred_contact_method].filter(Boolean).join(" · ") || "No preference"}</p>
+                                                 </td>
+                                                 <td className="whitespace-nowrap px-4 py-3 text-sm">
+                                                     {contact.do_not_call ? (
+                                                         <span className="w-fit rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-xs font-medium text-amber-700 dark:text-amber-300">
+                                                             Do not call
+                                                         </span>
+                                                     ) : contact.is_lead ? (
                                                         <span className="w-fit rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2 py-0.5 text-xs font-medium text-emerald-700 dark:text-emerald-400">
                                                             Lead — follow up
                                                         </span>

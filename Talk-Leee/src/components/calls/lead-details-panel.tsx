@@ -43,6 +43,7 @@ import {
     leadDetailsApi,
     type CapturedDetail,
 } from "@/lib/lead-details-api";
+import { leadInterestState } from "@/lib/lead-outcome";
 
 export function leadDetailsQueryKey(callId: string) {
     return ["leadDetails", callId] as const;
@@ -160,9 +161,11 @@ function DetailRow({
 export function LeadDetailsPanel({
     callId,
     campaignId,
+    leadOutcome,
 }: {
     callId: string;
     campaignId?: string;
+    leadOutcome?: string | null;
 }) {
     const query = useQuery({
         queryKey: leadDetailsQueryKey(callId),
@@ -173,10 +176,9 @@ export function LeadDetailsPanel({
     const details = query.data?.details ?? [];
     const missing = query.data?.missing_required ?? [];
 
-    // The badge §7 asks for. "Interested" is not a separate flag — it is what
-    // having captured anything MEANS: the agent only gets structured detail out
-    // of someone who engaged.
-    const interested = details.length > 0;
+    // The badge comes from the post-call verdict, never from "some fields were
+    // captured". A caller can give their name and still explicitly decline.
+    const interested = leadInterestState(leadOutcome) === "interested";
 
     const retry = useCallback(() => void query.refetch(), [query]);
 

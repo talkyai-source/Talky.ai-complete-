@@ -1,6 +1,6 @@
 "use client";
 
-import { Loader2, AlertCircle, TrendingUp, TrendingDown, Minus, Sparkles } from "lucide-react";
+import { Loader2, AlertCircle, TrendingUp, TrendingDown, Minus, Sparkles, ShieldAlert } from "lucide-react";
 import type { CallSummaryObj, CallSummaryEnvelope } from "@/lib/dashboard-api";
 import { InfoTip } from "@/components/ui/info-tip";
 
@@ -58,6 +58,33 @@ function knownSummaryValue(value?: string): value is string {
     return Boolean(normalized && normalized !== "unknown" && normalized !== "none");
 }
 
+/**
+ * Show a review signal when the model has produced a classification that could
+ * cause a human or CRM workflow to act. The API does not return calibrated
+ * confidence, so the UI must not invent a percentage.
+ */
+export function summaryNeedsReview(summary: CallSummaryObj): boolean {
+    const verdicts = [summary.outcome, summary.qualification_status]
+        .filter((value): value is string => Boolean(value?.trim()))
+        .map((value) => value.trim().toLowerCase().replace(/[\s-]+/g, "_"));
+    const actionable = verdicts.some((value) => (
+        value.includes("qualified")
+        || value.includes("interested")
+        || value.includes("callback")
+        || value.includes("nurture")
+        || value.includes("achieved")
+        || value.includes("positive")
+        || value.includes("success")
+    ));
+    const hasQualificationEvidence = [
+        summary.identified_need,
+        summary.decision_maker_status,
+        summary.timeline,
+        summary.budget_information,
+    ].some(knownSummaryValue);
+    return actionable || hasQualificationEvidence;
+}
+
 // ---------------------------------------------------------------------------
 // Main card
 // ---------------------------------------------------------------------------
@@ -82,6 +109,7 @@ function SummaryBody({ summary }: { summary: CallSummaryObj }) {
         (item): item is { label: string; value: string } => knownSummaryValue(item.value),
     );
     const hasQualification = Boolean(qualificationStatus || qualificationDetails.length > 0);
+    const needsReview = summaryNeedsReview(summary);
 
     return (
         <div className="space-y-4">
@@ -103,6 +131,21 @@ function SummaryBody({ summary }: { summary: CallSummaryObj }) {
 
             {/* Header row: outcome chip + sentiment */}
             <div className="flex flex-wrap items-center gap-2">
+                {needsReview && (
+                    <span className="inline-flex items-center gap-1">
+                        <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/40 bg-amber-500/10 px-2.5 py-0.5 text-xs font-semibold text-amber-700 dark:text-amber-300">
+                            <ShieldAlert className="h-3.5 w-3.5" aria-hidden />
+                            Needs review
+                        </span>
+                        <InfoTip label="Why this summary needs review">
+                            This summary contains an actionable AI classification or qualification
+                            detail. The API does not provide calibrated confidence, so Talk-Lee
+                            shows an honest review warning instead of inventing a percentage.
+                            Confirm it against the transcript or recording before follow-up or CRM
+                            synchronization.
+                        </InfoTip>
+                    </span>
+                )}
                 {summary.outcome && (
                     <span className="inline-flex items-center gap-1">
                         <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold ${outcomeColor(summary.outcome)}`}>

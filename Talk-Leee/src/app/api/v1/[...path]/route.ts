@@ -1935,6 +1935,7 @@ async function handleInner(request: Request, segments: string[], state: { cached
                 { type: "email", status: "disconnected", last_sync: null, error_message: null, provider: null },
                 { type: "crm", status: "disconnected", last_sync: null, error_message: null, provider: null },
                 { type: "drive", status: "disconnected", last_sync: null, error_message: null, provider: null },
+                { type: "salesforce", status: "disconnected", last_sync: null, error_message: null, provider: null },
             ],
         });
     }

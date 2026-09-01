@@ -77,7 +77,7 @@
 - [ ] Review reward points/credits
 - [ ] Salesforce OAuth connection
 - [ ] One-way Talk-lee-to-Salesforce lead/contact synchronization
-- [ ] Review analytics dashboard
+- [x] Review analytics dashboard
 
 ### P2 — Do not block September 10
 
@@ -140,10 +140,11 @@
 >   handling, reward eligibility. **None of the three things this line names is
 >   tested.** True API-level tests are also blocked by the httpx/starlette
 >   TestClient mismatch (#79).
-> - **"Display confidence or 'needs review'"** (§8) — reversed. There is no
->   `confidence` field anywhere in the summary payload. A provenance banner was
->   added, which is a different thing; inventing a confidence number from
->   nothing would be worse than showing none.
+> - **"Display confidence or 'needs review'"** (§8) — completed 2026-09-01.
+>   Actionable AI classifications now show an explicit **Needs review** signal.
+>   The UI deliberately does not invent a numerical confidence value because
+>   the summary contract does not provide one. Component tests cover both the
+>   actionable and ordinary-summary states.
 > - **"Popovers do not cover save buttons or critical fields"** (§8) — reversed.
 >   Radix collision handling makes this *likely*, but it was never checked on a
 >   real narrow screen, and "likely" is not "done".
@@ -491,7 +492,7 @@
 - [x] Add hover/focus information for every main metric or conclusion.
 - [x] Explain how the summary was generated.
 - [x] Distinguish transcript facts from AI-inferred conclusions.
-- [ ] Display confidence or "needs review" where appropriate.
+- [x] Display confidence or "needs review" where appropriate.
 - [x] Explain key terms such as qualified, interested, callback and unsuccessful.
 
 ### Acceptance Criteria
@@ -543,6 +544,14 @@
 ---
 
 ## 10. Salesforce MVP
+
+> **Frontend safety status — 2026-09-01:** Salesforce is now visible in the
+> connector interface, but it fails closed when the server does not advertise
+> Salesforce support: the card says **Unavailable**, explains the missing
+> server capability and exposes no Connect/Reconnect OAuth action. This is not
+> a completed Salesforce connector. The checklist below stays open until
+> tenant-scoped OAuth, encrypted token storage, refresh, sync, retry,
+> reconciliation and isolation are implemented and proven end to end.
 
 ### September 10 Scope
 
@@ -616,7 +625,14 @@
 - [x] Add column mapping during import.
 - [x] Show row-level validation failures.
 - [x] Add duplicate detection and merge/skip decision.
-- [ ] Let campaign creation select which contact fields the agent may use.
+- [x] Let campaign creation select which contact fields the agent may use.
+
+> **Verified 2026-09-01:** both guided and detailed campaign creation use the
+> server-owned contact-field registry, expose explicit per-field access and
+> requiredness, and block saving if the policy cannot be loaded. Creation retry
+> reuses the already-created campaign ID so a failed policy save cannot create a
+> duplicate campaign. The same policy editor is available on knowledge-driven
+> campaign edit pages.
 
 ### Agent Context
 

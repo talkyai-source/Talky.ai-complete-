@@ -380,6 +380,7 @@ export default function CallDetailPage() {
                             <LeadDetailsPanel
                                 callId={callId}
                                 campaignId={call?.campaign_id ?? undefined}
+                                leadOutcome={call?.lead_outcome}
                             />
                         </motion.div>
                     </div>

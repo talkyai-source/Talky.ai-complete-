@@ -50,6 +50,8 @@ export function ConnectorCard({
     authorizeConnector,
     disconnectConnector,
     statusPillTheme,
+    available = true,
+    unavailableReason,
     className,
 }: {
     type: ConnectorProviderType;
@@ -65,6 +67,8 @@ export function ConnectorCard({
     authorizeConnector?: (input: { type: string; redirect_uri: string }) => Promise<{ authorization_url: string }>;
     disconnectConnector?: (input: { type: string }) => Promise<void>;
     statusPillTheme?: StatusPillTheme;
+    available?: boolean;
+    unavailableReason?: string;
     className?: string;
 }) {
     const qc = useQueryClient();
@@ -84,20 +88,21 @@ export function ConnectorCard({
     }, [status]);
 
     const detailsText = useMemo(() => {
+        if (!available) return unavailableReason?.trim() || "This connector is not enabled by the server.";
         if (inlineError) return inlineError;
         if (status === "error" || status === "expired") return errorMessage?.trim() || "Connection needs attention.";
         if (status === "connected") return "Syncing enabled.";
         return "Not connected.";
-    }, [errorMessage, inlineError, status]);
+    }, [available, errorMessage, inlineError, status, unavailableReason]);
 
     const authorizeFn = authorizeConnector ?? authorize.mutateAsync;
     const disconnectFn = disconnectConnector ?? disconnect.mutateAsync;
 
     const isBusy = pendingAction !== null;
 
-    const canConnect = status === "disconnected";
-    const canReconnect = status === "expired" || status === "error";
-    const canDisconnect = status === "connected" || status === "expired" || status === "error";
+    const canConnect = available && status === "disconnected";
+    const canReconnect = available && (status === "expired" || status === "error");
+    const canDisconnect = available && (status === "connected" || status === "expired" || status === "error");
 
     const connectOrReconnect = useCallback(async () => {
         setInlineError(undefined);
@@ -160,7 +165,12 @@ export function ConnectorCard({
                 </div>
 
                 <div className="flex items-center gap-2">
-                    <StatusPill state={statusPillState} theme={statusPillTheme} />
+                    <StatusPill
+                        state={statusPillState}
+                        theme={statusPillTheme}
+                        label={available ? undefined : "Unavailable"}
+                        tooltip={available ? undefined : unavailableReason || "This connector is not enabled by the server."}
+                    />
                 </div>
             </div>
 
@@ -179,6 +189,9 @@ export function ConnectorCard({
                 <div className="text-xs text-muted-foreground">{provider ? `Provider: ${provider}` : null}</div>
 
                 <div className="flex flex-wrap items-center gap-2">
+                    {!available ? (
+                        <span className="text-xs font-medium text-muted-foreground">Server capability required</span>
+                    ) : null}
                     {canConnect ? (
                         <Button
                             type="button"

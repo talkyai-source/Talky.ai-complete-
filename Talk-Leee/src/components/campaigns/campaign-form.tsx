@@ -32,7 +32,12 @@ import {
     parseList,
 } from "@/lib/campaign-personas";
 import { conflictingNames, pruneGenders } from "@/components/campaigns/agent-name-gender";
+import {
+    CampaignLeadFieldsPicker,
+    useCampaignLeadFieldDraft,
+} from "@/components/campaigns/campaign-lead-fields";
 import { aiOptionsApi, AIProviderConfig, VoiceInfo } from "@/lib/ai-options-api";
+import { leadDetailsApi } from "@/lib/lead-details-api";
 import { captureException } from "@/lib/monitoring";
 import { ChevronDown, Loader2, Play, RefreshCw, Square, Volume2, Check } from "lucide-react";
 import { motion } from "framer-motion";
@@ -81,6 +86,10 @@ export function CampaignForm({ mode, campaignId, initialData }: Props) {
 
     const [submitting, setSubmitting] = useState(false);
     const [error, setError] = useState("");
+    // If campaign creation succeeds but saving lead-field policy fails, retry
+    // against the created id instead of creating a duplicate campaign.
+    const [createdCampaignId, setCreatedCampaignId] = useState<string | null>(null);
+    const leadFields = useCampaignLeadFieldDraft(isEdit ? campaignId : undefined);
     const [voices, setVoices] = useState<VoiceInfo[]>([]);
     const [loadingVoices, setLoadingVoices] = useState(true);
     const [previewingVoiceId, setPreviewingVoiceId] = useState<string | null>(null);
@@ -345,6 +354,10 @@ export function CampaignForm({ mode, campaignId, initialData }: Props) {
 
     async function handleSubmit(e: React.FormEvent) {
         e.preventDefault();
+        if (leadFields.isLoading || leadFields.isError) {
+            setError("Contact-field settings must load successfully before this campaign can be saved.");
+            return;
+        }
         if (!formData.voice_id) {
             setError("Select a voice from the active global TTS provider before saving the campaign.");
             return;
@@ -385,19 +398,29 @@ export function CampaignForm({ mode, campaignId, initialData }: Props) {
             campaign_slots: buildCampaignSlots(),
         };
 
+        let targetCampaignId = isEdit ? campaignId : createdCampaignId ?? undefined;
         try {
             if (isEdit) {
                 if (!campaignId) {
                     throw new Error("Internal error: edit mode without a campaignId.");
                 }
                 const result = await dashboardApi.updateCampaign(campaignId, payload);
-                router.push(`/campaigns/${result.campaign.id}`);
-            } else {
+                targetCampaignId = result.campaign.id;
+            } else if (!targetCampaignId) {
                 const result = await dashboardApi.createCampaign(payload);
-                router.push(`/campaigns/${result.campaign.id}`);
+                targetCampaignId = result.campaign.id;
+                setCreatedCampaignId(targetCampaignId);
             }
+
+            await leadDetailsApi.setCampaignFields(targetCampaignId!, leadFields.fields);
+            router.push(`/campaigns/${targetCampaignId}`);
         } catch (err) {
-            setError(err instanceof Error ? err.message : "Failed to save campaign");
+            const detail = err instanceof Error ? err.message : "Failed to save campaign";
+            setError(
+                targetCampaignId
+                    ? `Campaign details were saved, but its contact-field policy was not. Retry to finish without creating a duplicate. ${detail}`
+                    : detail,
+            );
         } finally {
             setSubmitting(false);
         }
@@ -1042,6 +1065,18 @@ export function CampaignForm({ mode, campaignId, initialData }: Props) {
                         </p>
                     </div>
 
+                    <div className="border-t border-border pt-6">
+                        <CampaignLeadFieldsPicker
+                            specs={leadFields.specs}
+                            value={leadFields.fields}
+                            onChange={leadFields.setFields}
+                            isLoading={leadFields.isLoading}
+                            error={leadFields.isError ? leadFields.error : undefined}
+                            onRetry={leadFields.retry}
+                            disabled={submitting}
+                        />
+                    </div>
+
                     {error && (
                         <div className="text-sm text-red-400 bg-red-500/10 border border-red-500/30 rounded-lg p-3">
                             {error}
@@ -1049,7 +1084,7 @@ export function CampaignForm({ mode, campaignId, initialData }: Props) {
                     )}
 
                     <div className="flex gap-4">
-                        <Button type="submit" disabled={submitting || !formData.voice_id}>
+                        <Button type="submit" disabled={submitting || leadFields.isLoading || leadFields.isError || !formData.voice_id}>
                             {submitting ? (
                                 <>
                                     <Loader2 className="w-4 h-4 animate-spin" />

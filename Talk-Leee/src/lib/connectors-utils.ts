@@ -1,4 +1,4 @@
-export type ConnectorProviderType = "calendar" | "email" | "crm" | "drive";
+export type ConnectorProviderType = "calendar" | "email" | "crm" | "drive" | "salesforce";
 
 export type ConnectorCardAction = "connect" | "reconnect" | "disconnect";
 

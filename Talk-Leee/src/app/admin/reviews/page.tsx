@@ -76,6 +76,10 @@ export default function ReviewsPage() {
         queryFn: () => extendedApi.getReviewOptions(),
         staleTime: 5 * 60_000,
     });
+    const rewardBalance = useQuery({
+        queryKey: ["reviewRewardBalance"],
+        queryFn: () => extendedApi.getReviewRewardBalance(),
+    });
 
     // 403 here means the account can see calls but not the tenant-wide view.
     const forbidden = (list.error as { status?: number })?.status === 403;
@@ -98,7 +102,7 @@ export default function ReviewsPage() {
             ) : (
                 <div className="space-y-6">
                     {/* headline numbers */}
-                    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
                         <Stat label="Reviews" value={t?.reviews ?? 0} loading={summary.isLoading} />
                         <Stat
                             label="Average rating"
@@ -113,6 +117,22 @@ export default function ReviewsPage() {
                             emphasise={(t?.low_rated ?? 0) > 0}
                         />
                         <Stat label="Calls reviewed" value={t?.calls_reviewed ?? 0} loading={summary.isLoading} />
+                        <Stat
+                            label="Your review points"
+                            value={rewardBalance.data?.entries
+                                ? rewardBalance.data.total_points
+                                : rewardBalance.data?.rewards_enabled
+                                    ? 0
+                                    : "Off"}
+                            hint={rewardBalance.isError
+                                ? "Ledger unavailable"
+                                : rewardBalance.data?.entries
+                                    ? `${rewardBalance.data.entries} verified ledger ${rewardBalance.data.entries === 1 ? "entry" : "entries"}`
+                                    : rewardBalance.data?.rewards_enabled
+                                        ? "No verified awards yet"
+                                        : "Reward awards are not enabled"}
+                            loading={rewardBalance.isLoading}
+                        />
                     </div>
 
                     {/* the Safe Improvement Loop's two questions */}

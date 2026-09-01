@@ -56,6 +56,17 @@ export interface CapturedDetail {
     updated_at: string;
 }
 
+export interface CampaignLeadField {
+    field_key: string;
+    label: string;
+    field_type: string;
+    is_required: boolean;
+    agent_visible: boolean;
+    user_visible: boolean;
+    options?: string[] | null;
+    sort_order: number;
+}
+
 export interface ImportIssue {
     row: number;
     field: string;
@@ -101,6 +112,24 @@ export const leadDetailsApi = {
             path: `/calls/${callId}/lead-details`,
             method: "GET",
             query: campaignId ? { campaign_id: campaignId } : undefined,
+        });
+    },
+
+    async campaignFields(campaignId: string): Promise<{ fields: CampaignLeadField[] }> {
+        return sharedHttpClient().request({
+            path: `/campaigns/${encodeURIComponent(campaignId)}/lead-fields`,
+            method: "GET",
+        });
+    },
+
+    async setCampaignFields(
+        campaignId: string,
+        fields: CampaignLeadField[],
+    ): Promise<{ fields: CampaignLeadField[] }> {
+        return sharedHttpClient().request({
+            path: `/campaigns/${encodeURIComponent(campaignId)}/lead-fields`,
+            method: "PUT",
+            body: fields,
         });
     },
 

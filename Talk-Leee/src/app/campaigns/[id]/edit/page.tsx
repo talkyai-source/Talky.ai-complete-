@@ -18,6 +18,7 @@ import {
     type CampaignFormInitial,
 } from "@/components/campaigns/campaign-form";
 import { CampaignBasicsEditor } from "@/components/campaigns/campaign-basics-editor";
+import { CampaignLeadFieldsManager } from "@/components/campaigns/campaign-lead-fields";
 import { dashboardApi, type PersonaType, type CampaignCallingSchedule } from "@/lib/dashboard-api";
 import { ArrowLeft, RefreshCw } from "lucide-react";
 import { motion } from "framer-motion";
@@ -151,21 +152,24 @@ export default function EditCampaignPage() {
                 </div>
             ) : initial ? (
                 knowledgeDriven ? (
-                    <CampaignBasicsEditor
-                        campaignId={campaignId}
-                        initial={{
-                            name: initial.name,
-                            description: initial.description,
-                            companyName: initial.company_name,
-                            personaType: initial.persona_type,
-                            agentNames: initial.agent_names,
-                            agentNameGenders: initial.agent_name_genders,
-                            voiceId: initial.voice_id,
-                            ttsProvider,
-                            goal: initial.goal,
-                            callingSchedule,
-                        }}
-                    />
+                    <div className="space-y-6">
+                        <CampaignBasicsEditor
+                            campaignId={campaignId}
+                            initial={{
+                                name: initial.name,
+                                description: initial.description,
+                                companyName: initial.company_name,
+                                personaType: initial.persona_type,
+                                agentNames: initial.agent_names,
+                                agentNameGenders: initial.agent_name_genders,
+                                voiceId: initial.voice_id,
+                                ttsProvider,
+                                goal: initial.goal,
+                                callingSchedule,
+                            }}
+                        />
+                        <CampaignLeadFieldsManager campaignId={campaignId} />
+                    </div>
                 ) : (
                     <CampaignForm mode="edit" campaignId={campaignId} initialData={initial} />
                 )
