@@ -326,6 +326,22 @@ class VoicePipelineService:
         session.tts_active = False
         session.state = CallState.ENDING
 
+        # Do the thing before saying it was done. An opt-out is the one end
+        # action with a hard compliance consequence, and until 2026-09-02 the
+        # farewell "I'll take you off the list" played to completion while the
+        # DNC write waited for teardown (best-effort). Write first; if the write
+        # does not land, say something that is true instead.
+        if getattr(session, "_caller_opted_out", False):
+            from app.domain.services.dialer import opt_out as _opt_out
+
+            if not await _opt_out.purge_opt_out_before_farewell(session):
+                logger.warning(
+                    "opt_out_unconfirmed_farewell call_id=%s — DNC write did not land "
+                    "before the farewell; speaking a non-committal close",
+                    call_id[:12],
+                )
+                farewell = _opt_out.OPT_OUT_UNCONFIRMED_FAREWELL
+
         if farewell:
             try:
                 if hasattr(self.media_gateway, "start_playback_tracking"):

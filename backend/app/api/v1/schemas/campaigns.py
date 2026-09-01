@@ -222,6 +222,14 @@ class CampaignPromptPreviewRequest(BaseModel):
     campaign_slots: dict = Field(default_factory=dict)
     additional_instructions: Optional[str] = None
     direction: Literal["outbound", "inbound"] = "outbound"
+    opening_mode: Optional[Literal["agent_first", "callee_first"]] = Field(
+        None,
+        description=(
+            "Who talks first. Independent of direction: an outbound campaign "
+            "can let the callee say hello first. None keeps the legacy "
+            "direction-derived opening."
+        ),
+    )
     knowledge_driven: bool = Field(
         default=False,
         description="Preview the lean knowledge-first prompt (skips content slots).",
@@ -253,6 +261,20 @@ class CampaignPromptPreviewResponse(BaseModel):
     )
     prompt_chars: int = Field(
         ..., description="Length of the assembled system_prompt in characters.",
+    )
+    opening_mode: Literal["agent_first", "callee_first"]
+    campaign_guidance_chars: int = Field(
+        ..., description="Characters of operator guidance (additional_instructions).",
+    )
+    campaign_guidance_budget_chars: int = Field(
+        ..., description="The budget the save/start paths enforce for that guidance.",
+    )
+    over_budget: bool = Field(
+        ...,
+        description=(
+            "True when the guidance exceeds the budget. Saving will be refused; "
+            "the preview shows what a live call would run, middle elided."
+        ),
     )
 
 

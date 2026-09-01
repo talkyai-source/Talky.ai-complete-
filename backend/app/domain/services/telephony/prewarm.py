@@ -329,14 +329,20 @@ async def prepare_prewarmed_session(
     warmup_failure_reason: Optional[str] = None
     try:
         orchestrator = _get_orchestrator()
-        # Derive the call direction from per-call first_speaker so the
-        # session config picks the correct base prompt up front. With
-        # this in place, the runtime select_inbound_base_prompt() call
-        # below becomes idempotent (the inbound sentinel is already in
-        # the prompt for INBOUND calls); we keep that runtime call as
-        # defense-in-depth for persona-composed prompts.
-        from app.domain.services.voice_orchestrator import Direction
-        call_direction = Direction.from_first_speaker(effective_first_speaker)
+        # This is the dialer: the platform originated the call, so it is
+        # OUTBOUND regardless of who speaks first. first_speaker becomes the
+        # opening mode, which selects the callee-first prompt block at compose
+        # time (the runtime select_inbound_base_prompt() below is then an
+        # idempotent no-op kept as defence in depth). Until 2026-09-02 this
+        # derived Direction.INBOUND from first_speaker="user", which switched
+        # off AMD/voicemail detection and, after 2026-08-30, discarded the
+        # recording of every callee-first outbound call.
+        from app.domain.services.voice_orchestrator import (
+            Direction,
+            opening_mode_from_first_speaker,
+        )
+        call_direction = Direction.OUTBOUND
+        opening_mode = opening_mode_from_first_speaker(effective_first_speaker)
 
         # Resolve per-tenant voice tuning asynchronously (T4-C3): the
         # production path consults the DB-backed override on
@@ -373,6 +379,7 @@ async def prepare_prewarmed_session(
             campaign=campaign_row,
             agent_name=agent_name,
             direction=call_direction,
+            opening_mode=opening_mode,
             voice_tuning_override=voice_tuning,
             ai_config_override=ai_config,
             lead_first_name=lead_first_name,

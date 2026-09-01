@@ -132,12 +132,21 @@ def test_a_stated_email_is_an_established_fact():
     assert snap["email"]["field_type"] == "email"
 
 
-def test_an_unconfirmed_value_is_captured_but_not_marked_confirmed():
-    """§7: 'Do not treat inferred values as confirmed facts.' An email the
-    caller said but has not yet agreed on read-back is still worth capturing —
-    it just must not claim to be settled."""
+def test_an_unconfirmed_email_is_not_persisted_at_all():
+    """Changed 2026-09-02. The previous contract wrote the heard value with
+    confirmed=FALSE ("still worth capturing"). Two problems surfaced in the
+    capture audit: the row existed before the prospect agreed anything, and a
+    later mis-heard address could replace a confirmed one while the sticky
+    ``confirmed OR`` kept the flag TRUE. Contact fields are now persisted
+    ONLY after explicit confirmation; the live CallState still holds the
+    pending value for the read-back loop."""
     snap = snapshot_slots(CallState(email="dana@acme.co", email_confirmed=False))
-    assert snap["email"]["confirmed"] is False
+    assert "email" not in snap
+
+
+def test_an_unconfirmed_phone_is_not_persisted_at_all():
+    snap = snapshot_slots(CallState(phone="+447700900123", phone_confirmed=False))
+    assert "phone" not in snap
 
 
 def test_a_yes_no_slot_is_stored_as_words_not_a_python_bool():
@@ -262,14 +271,14 @@ async def test_the_same_fact_is_not_rewritten_every_turn():
 
 
 @pytest.mark.asyncio
-async def test_a_later_confirmation_is_written_even_though_the_value_is_unchanged():
+async def test_a_value_reaches_the_database_only_once_confirmed():
     """The read-back loop confirms an email several turns after it was heard.
-    Same string, different fact — it must reach the database."""
+    Nothing is written while it is pending; the confirmation is what writes."""
     conn = _FakeConn()
     session = _session(email="dana@acme.co", email_confirmed=False)
 
-    assert await _flush(session, conn) == 1
-    assert conn.inserts[0][1][A_CONFIRMED] is False
+    assert await _flush(session, conn) == 0
+    assert conn.inserts == []
 
     session.captured_slots = CallState(email="dana@acme.co", email_confirmed=True)
     assert await _flush(session, conn) == 1
@@ -277,12 +286,12 @@ async def test_a_later_confirmation_is_written_even_though_the_value_is_unchange
 
 
 @pytest.mark.asyncio
-async def test_a_corrected_value_is_written():
+async def test_a_corrected_and_reconfirmed_value_is_written():
     conn = _FakeConn()
-    session = _session(email="wrong@acme.co")
+    session = _session(email="wrong@acme.co", email_confirmed=True)
     await _flush(session, conn)
 
-    session.captured_slots = CallState(email="right@acme.co")
+    session.captured_slots = CallState(email="right@acme.co", email_confirmed=True)
     assert await _flush(session, conn) == 1
     assert conn.inserts[-1][1][A_VALUE] == "right@acme.co"
 
@@ -325,7 +334,7 @@ async def test_a_broken_pool_does_not_propagate_into_the_call():
 async def test_one_bad_field_does_not_lose_the_others():
     """An overlong note must not cost the call its email."""
     conn = _FakeConn()
-    session = _session(email="dana@acme.co", follow_up="x" * 5000)
+    session = _session(email="dana@acme.co", email_confirmed=True, follow_up="x" * 5000)
 
     assert await _flush(session, conn) == 1
     assert conn.inserts[0][1][A_KEY] == "email"
@@ -338,7 +347,7 @@ async def test_the_is_test_lookup_names_the_tenant_explicitly():
     """RLS is inert in production, so every statement carries its own
     tenant predicate."""
     conn = _FakeConn()
-    await _flush(_session(email="a@b.co"), conn)
+    await _flush(_session(email="a@b.co", email_confirmed=True), conn)
 
     sql, args = conn.is_test_lookups[0]
     assert "tenant_id = $2::uuid" in sql

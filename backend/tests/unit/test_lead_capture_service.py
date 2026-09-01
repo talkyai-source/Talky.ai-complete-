@@ -74,6 +74,15 @@ def test_confirmed_is_sticky():
     assert "call_lead_details.confirmed OR EXCLUDED.confirmed" in src
 
 
+def test_an_unconfirmed_write_cannot_replace_a_confirmed_value():
+    """Sticky ``confirmed`` alone was a trap: a same-source unconfirmed retry
+    still passed the trust WHERE, overwrote ``value``, and inherited
+    confirmed=TRUE — a confirmed-looking row holding a value nobody agreed.
+    The statement must refuse that write."""
+    src = inspect.getsource(LeadCaptureService.capture)
+    assert "NOT (call_lead_details.confirmed AND NOT EXCLUDED.confirmed)" in src
+
+
 # ── value normalisation ─────────────────────────────────────────────────────
 
 def test_multi_select_becomes_a_json_array():

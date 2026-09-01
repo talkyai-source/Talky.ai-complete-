@@ -22,6 +22,10 @@ import { apiBaseUrl } from "@/lib/env";
 import { useAuth } from "@/lib/auth-context";
 import { useAccessToken } from "@/lib/auth-hooks";
 import { sharedHttpClient } from "@/lib/api";
+import {
+    buildCampaignTestWsUrl,
+    describeTestSession,
+} from "@/components/campaigns/test-agent-session";
 
 function resolveBackendWsBaseUrl(): string {
     try {
@@ -46,9 +50,12 @@ type Phase = "idle" | "connecting" | "listening" | "processing" | "speaking";
 export function TestAgentButton({
     campaignId,
     disabled,
+    agentName,
 }: {
     campaignId: string;
     disabled?: boolean;
+    /** First configured agent name, for the "who opens" description. */
+    agentName?: string;
 }) {
     const { status: authStatus } = useAuth();
     const accessToken = useAccessToken();
@@ -56,6 +63,9 @@ export function TestAgentButton({
 
     const [modalOpen, setModalOpen] = useState(false);
     const [firstSpeaker, setFirstSpeaker] = useState<"agent" | "user">("agent");
+    // OFF by default: without a carrier's echo cancellation the laptop mic hears
+    // the agent and cuts it off every turn. Headphones make barge-in testable.
+    const [allowBargeIn, setAllowBargeIn] = useState(false);
     const [phase, setPhase] = useState<Phase>("idle");
     const [error, setError] = useState<string | null>(null);
     const inCall = phase !== "idle";
@@ -356,7 +366,10 @@ export function TestAgentButton({
         }
 
         const openSocket = (attempt: number) => {
-            const wsUrl = `${resolveBackendWsBaseUrl()}/ws/campaign-test/${campaignId}?first_speaker=${fs}`;
+            const wsUrl = buildCampaignTestWsUrl(resolveBackendWsBaseUrl(), campaignId, {
+                firstSpeaker: fs,
+                allowBargeIn,
+            });
             const ws = new WebSocket(wsUrl);
             ws.binaryType = "arraybuffer";
             wsRef.current = ws;
@@ -438,7 +451,7 @@ export function TestAgentButton({
         };
 
         openSocket(0);
-    }, [accessToken, campaignId, handleMessage, endSession, stopMicrophone, cleanupPlayback]);
+    }, [accessToken, allowBargeIn, campaignId, handleMessage, endSession, stopMicrophone, cleanupPlayback]);
 
     const handleStart = useCallback(() => {
         setModalOpen(false);
@@ -484,7 +497,7 @@ export function TestAgentButton({
                 open={modalOpen}
                 onOpenChange={setModalOpen}
                 title="Test this campaign's agent"
-                description="Talk to the exact agent a real call runs — same AI Options (pipeline, LLM, STT, TTS, persona). Pick who opens the conversation."
+                description="Talk to the exact agent a real outbound call runs — same AI Options (pipeline, LLM, STT, TTS, persona, Company knowledge). Pick who opens the conversation."
                 size="sm"
                 footer={
                     <div className="flex justify-end gap-2">
@@ -501,6 +514,22 @@ export function TestAgentButton({
                 }
             >
                 <div className="space-y-2">
+                    {(() => {
+                        const d = describeTestSession({ firstSpeaker, agentName: agentName ?? "" });
+                        return (
+                            <div
+                                className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-muted/30 px-3 py-2 text-xs"
+                                data-testid="test-session-summary"
+                            >
+                                <span className="rounded bg-primary/15 px-2 py-0.5 font-semibold tracking-wide text-primary">
+                                    {d.badge}
+                                </span>
+                                <span className="text-muted-foreground">
+                                    Opening: <span className="text-foreground">{d.opening}</span>
+                                </span>
+                            </div>
+                        );
+                    })()}
                     <label
                         className={`flex cursor-pointer items-start gap-3 rounded-lg border p-3 transition-colors ${
                             firstSpeaker === "agent" ? "border-primary bg-primary/5" : "border-border hover:bg-muted/40"
@@ -536,9 +565,30 @@ export function TestAgentButton({
                             className="mt-1"
                         />
                         <div>
-                            <div className="text-sm font-medium text-foreground">You speak first</div>
+                            <div className="text-sm font-medium text-foreground">You say hello first</div>
                             <div className="text-xs text-muted-foreground">
-                                The agent waits for you to say &ldquo;hello&rdquo; before responding. Same as caller-first.
+                                The agent waits for your &ldquo;hello&rdquo;, then introduces itself and why it is calling.
+                                Still an outbound call &mdash; it will not answer like a receptionist.
+                            </div>
+                        </div>
+                    </label>
+
+                    <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-border p-3 hover:bg-muted/40">
+                        <input
+                            type="checkbox"
+                            checked={allowBargeIn}
+                            onChange={(e) => setAllowBargeIn(e.target.checked)}
+                            className="mt-1"
+                            data-testid="allow-barge-in"
+                        />
+                        <div>
+                            <div className="text-sm font-medium text-foreground">
+                                I&rsquo;m wearing headphones &mdash; allow interruption
+                            </div>
+                            <div className="text-xs text-muted-foreground">
+                                Lets you talk over the agent, like on a real phone line. On speakers the microphone
+                                hears the agent&rsquo;s own voice and it will interrupt itself &mdash; leave this off, and
+                                don&rsquo;t judge interruption quality from a speaker test.
                             </div>
                         </div>
                     </label>

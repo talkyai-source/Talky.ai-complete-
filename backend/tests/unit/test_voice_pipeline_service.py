@@ -960,3 +960,69 @@ async def test_normal_nonbackchannel_endofturn_still_barges_in_during_tts():
     task = service._pending_llm_tasks[session.call_id]
     service.handle_turn_end.assert_called_once()
     task.cancel()
+
+
+# --- DNC must be WRITTEN before it is SPOKEN (2026-09-02) --------------------
+# Until now the farewell "I'll take you off the list" was synthesised, played to
+# completion and the hangup requested; purge_lead_on_opt_out ran later, at
+# teardown, best-effort. A spoken promise stood in for the backend action.
+
+@pytest.mark.asyncio
+async def test_dnc_record_is_written_before_the_farewell_is_spoken(monkeypatch):
+    from app.domain.services.dialer import opt_out as opt_out_mod
+
+    order: list[str] = []
+
+    async def fake_purge(session, **_kw):
+        order.append("purge")
+        return True
+
+    monkeypatch.setattr(opt_out_mod, "purge_opt_out_before_farewell", fake_purge)
+
+    service = _make_service_for_disposition([])
+    original_tts = service.synthesize_and_send_audio
+
+    async def spy_tts(session, text, websocket, **kw):
+        order.append(f"speak:{text[:20]}")
+        return await original_tts(session, text, websocket, **kw)
+
+    service.synthesize_and_send_audio = spy_tts
+    session = _make_session()
+    session.campaign_id = "campaign-123"
+    session.current_user_input = "Please stop calling me."
+
+    await service.handle_turn_end(session, AsyncMock())
+
+    assert order[0] == "purge", order
+    assert order[1].startswith("speak:"), order
+    assert "off the list" in order[1] or "Understood" in order[1]
+
+
+@pytest.mark.asyncio
+async def test_failed_dnc_write_is_not_confirmed_aloud(monkeypatch):
+    from app.domain.services.dialer import opt_out as opt_out_mod
+
+    async def failing_purge(session, **_kw):
+        return False
+
+    monkeypatch.setattr(opt_out_mod, "purge_opt_out_before_farewell", failing_purge)
+
+    service = _make_service_for_disposition([])
+    spoken: list[str] = []
+
+    async def spy_tts(session, text, websocket, **kw):
+        spoken.append(text)
+        return False
+
+    service.synthesize_and_send_audio = spy_tts
+    session = _make_session()
+    session.campaign_id = "campaign-123"
+    session.current_user_input = "Please stop calling me."
+
+    await service.handle_turn_end(session, AsyncMock())
+
+    assert spoken, "a farewell is still spoken"
+    assert "off the list" not in spoken[0].lower()
+    assert "removed" not in spoken[0].lower()
+    # The flag stays set so teardown retries the purge.
+    assert getattr(session, "_caller_opted_out", False) is True

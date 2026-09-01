@@ -182,6 +182,11 @@ class LeadCaptureService:
                  -- exists to win.
                  WHERE array_position($11::text[], EXCLUDED.source)
                     >= array_position($11::text[], call_lead_details.source)
+                   -- A confirmed value is never replaced by an unconfirmed one,
+                   -- whatever the source rank. Without this a same-source retry
+                   -- passed the rank test, overwrote value, and the sticky OR
+                   -- above kept confirmed=TRUE on a value nobody agreed.
+                   AND NOT (call_lead_details.confirmed AND NOT EXCLUDED.confirmed)
                    -- Prod's app role is superuser + BYPASSRLS, so the table's
                    -- policy is inert and an ON CONFLICT that matched a row
                    -- would happily update it across tenants. Name the tenant.

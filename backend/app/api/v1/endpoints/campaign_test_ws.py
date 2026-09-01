@@ -428,9 +428,14 @@ async def campaign_test_websocket(
         await websocket.close(code=1008, reason="Campaign not found")
         return
 
-    # ── First-speaker → Direction (chosen BEFORE create_voice_session so the
-    #    realtime bridge is built with the correct greet_on_start) ─────────
-    from app.domain.services.voice_orchestrator import Direction
+    # ── Direction and opening mode are two facts. This tests an OUTBOUND
+    #    campaign, full stop; first_speaker only decides who opens. Chosen
+    #    BEFORE create_voice_session so the realtime bridge is built with the
+    #    correct greet_on_start. ────────────────────────────────────────────
+    from app.domain.services.voice_orchestrator import (
+        Direction,
+        opening_mode_from_first_speaker,
+    )
     from app.domain.services.telephony_session_config import (
         build_telephony_session_config,
     )
@@ -440,11 +445,14 @@ async def campaign_test_websocket(
     from app.domain.services.voice_tuning import get_voice_tuning_resolver
 
     fs = "user" if (first_speaker or "").strip().lower() == "user" else "agent"
-    direction = Direction.from_first_speaker(fs)
+    direction = Direction.OUTBOUND
+    opening_mode = opening_mode_from_first_speaker(fs)
 
     logger.info(
-        "campaign_test_ws start campaign=%s tenant=%s first_speaker=%s",
-        str(campaign_id)[:8], str(tenant_id)[:8], fs,
+        "campaign_test_ws start campaign=%s tenant=%s direction=%s opening_mode=%s "
+        "first_speaker=%s allow_barge_in=%s",
+        str(campaign_id)[:8], str(tenant_id)[:8], direction.value, opening_mode,
+        fs, allow_barge_in,
     )
 
     voice_session = None
@@ -465,6 +473,7 @@ async def campaign_test_websocket(
                 gateway_type="browser",
                 campaign=campaign_row,
                 direction=direction,
+                opening_mode=opening_mode,
                 ai_config_override=ai_cfg,
                 voice_tuning_override=vt,
                 allow_browser_barge_in=allow_barge_in,
@@ -507,9 +516,11 @@ async def campaign_test_websocket(
             gateway = voice_session.media_gateway
             is_realtime = getattr(voice_session, "realtime_bridge", None) is not None
 
-            # Caller-first cascaded: re-frame the prompt as an inbound receiver.
-            # (direction=INBOUND already composes inbound, so this is an
-            # idempotent no-op belt-and-braces — matches the phone path.)
+            # Callee-first cascaded: make sure the callee-speaks-first directive
+            # leads the prompt. opening_mode="callee_first" already composed it,
+            # so this is an idempotent no-op belt-and-braces — matches the
+            # phone path. It is NOT inbound framing: the directive itself says
+            # "OUTBOUND CALL — CALLEE SPEAKS FIRST".
             if not is_realtime and fs == "user":
                 try:
                     from app.domain.services.telephony.modes.caller_first import (
@@ -519,6 +530,33 @@ async def campaign_test_websocket(
                     select_inbound_base_prompt(voice_session)
                 except Exception as exc:  # noqa: BLE001
                     logger.debug("campaign_test_ws inbound prompt swap failed: %s", exc)
+
+            # ── Campaign knowledge — the same call prewarm makes for a phone
+            #    call (prewarm.py, "Campaign knowledge" block). This endpoint
+            #    skips prewarm, and until 2026-09-02 nothing else injected the
+            #    knowledge base, so the test agent knew nothing about the
+            #    company while the docstring above promised parity. Fail-soft,
+            #    same as prewarm: a knowledge failure must never stop a test.
+            try:
+                from app.services.scripts.knowledge.session_inject import (
+                    apply_campaign_knowledge,
+                )
+
+                await apply_campaign_knowledge(
+                    getattr(voice_session, "call_session", None),
+                    campaign_row,
+                    pool=container.db_pool,
+                )
+                logger.info(
+                    "campaign_test_knowledge_applied campaign=%s mode=%s",
+                    str(campaign_id)[:8],
+                    getattr(getattr(voice_session, "call_session", None), "knowledge_mode", None),
+                )
+            except Exception as _kb_exc:  # noqa: BLE001
+                logger.warning(
+                    "campaign_test_knowledge_inject_failed campaign=%s err=%s",
+                    str(campaign_id)[:8], _kb_exc,
+                )
 
             # Rates come off the gateway AFTER create — realtime forces 8 kHz.
             out_rate = getattr(gateway, "_sample_rate", config.gateway_sample_rate)

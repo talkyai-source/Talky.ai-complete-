@@ -17,6 +17,21 @@ from app.domain.services.credential_resolver import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _isolated_resolver_cache():
+    """CredentialResolver._CACHE is class-level and keyed on id(db_pool).
+
+    Every test here uses the same tenant UUID and a throwaway _FakePool, and
+    CPython reuses freed addresses — so under the full suite a later test can
+    hit the key a previous test's pool cached and get "tenant-real" where it
+    expected the env fallback. Seen 2026-09-02 as two order-dependent
+    failures that pass in isolation. Start and finish each test empty.
+    """
+    CredentialResolver.invalidate_cache()
+    yield
+    CredentialResolver.invalidate_cache()
+
+
 # ──────────────────────────────────────────────────────────────────────────
 # Fakes
 # ──────────────────────────────────────────────────────────────────────────

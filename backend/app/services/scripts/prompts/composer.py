@@ -289,6 +289,7 @@ def compose_prompt(
     additional_instructions: Optional[str] = None,
     *,
     direction: str = "outbound",
+    opening_mode: str | None = None,
     knowledge_driven: bool = False,
     body_override: str | None = None,
 ) -> str:
@@ -312,11 +313,14 @@ def compose_prompt(
         creator hot-patch behaviour without a code deploy.
     direction:
         ``"outbound"`` (default) when the platform initiated the call,
-        or ``"inbound"`` when the caller is reaching out / first-speaker
-        is ``"user"``. Selects the persona's OPENING block and prepends
-        the canonical inbound directive when applicable. The default
-        preserves pre-T4 behaviour for callers that pass only positional
-        arguments.
+        or ``"inbound"`` when the carrier rang us. Never derived from
+        first_speaker.
+    opening_mode:
+        ``"agent_first"`` / ``"callee_first"`` — who talks first. Callee-first
+        selects the persona's callee-speaks-first OPENING block and prepends
+        the canonical directive at position 0. ``None`` (legacy callers)
+        falls back to the direction-derived choice, so a bare
+        ``direction="inbound"`` still gets the block it always did.
 
     Raises
     ------
@@ -331,6 +335,21 @@ def compose_prompt(
         )
 
     direction_key = (direction or "outbound").strip().lower()
+    if direction_key not in ("outbound", "inbound"):
+        raise PromptCompositionError(
+            f"Unknown direction {direction_key!r}. Known directions: "
+            "['inbound', 'outbound']"
+        )
+    # The persona OPENING blocks are keyed "outbound" (agent opens) and
+    # "inbound" (the other party speaks first, agent then leads). The second
+    # key predates the realisation that "callee speaks first" is a turn-taking
+    # choice, not a direction; the text under it is outbound-framed. Select it
+    # from opening_mode when given, otherwise from direction as before.
+    if opening_mode:
+        callee_first = opening_mode.strip().lower() == "callee_first"
+    else:
+        callee_first = direction_key == "inbound"
+    opening_key = "inbound" if callee_first else "outbound"
 
     if knowledge_driven:
         # Knowledge-first campaign: skip the per-persona content slots and use
@@ -341,10 +360,10 @@ def compose_prompt(
         )
     else:
         persona_openings = PERSONA_OPENINGS[persona_type]
-        if direction_key not in persona_openings:
+        if opening_key not in persona_openings:
             raise PromptCompositionError(
-                f"Persona {persona_type!r} has no opening for direction "
-                f"{direction_key!r}. Known directions: {sorted(persona_openings)}"
+                f"Persona {persona_type!r} has no opening {opening_key!r}. "
+                f"Known openings: {sorted(persona_openings)}"
             )
 
         slots = _prepare_slots(persona_type, campaign_slots)
@@ -375,7 +394,7 @@ def compose_prompt(
         # persona body.
         persona_body = body_override or PERSONA_BODIES[persona_type]
         persona_template = (
-            persona_openings[direction_key] + "\n" + persona_body
+            persona_openings[opening_key] + "\n" + persona_body
         )
         # The {direction_opening} marker on the body is a no-op placeholder
         # for the legacy / backward-compat alias path that pre-merged the
@@ -411,7 +430,7 @@ def compose_prompt(
     # that might still be in the persona body. This block also carries
     # the INBOUND_DIRECTIVE_SENTINEL, which the runtime
     # select_inbound_base_prompt() reads as an idempotency signal.
-    if direction_key == "inbound":
+    if callee_first:
         parts.append(
             inbound_directive_block(
                 agent_name=agent_name,

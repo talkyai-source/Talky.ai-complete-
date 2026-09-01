@@ -362,6 +362,17 @@ def _tenant_prompt_char_budget() -> int:
     return budget if budget > 0 else _DEFAULT_TENANT_PROMPT_MAX_CHARS
 
 
+def campaign_guidance_char_budget() -> int:
+    """The ONE character budget for operator-written campaign guidance.
+
+    Public so the save/start validators and the preview endpoint enforce the
+    same number the live-call builder caps at. Until 2026-09-02 only the live
+    builder knew it, so a script could be saved and previewed in full and then
+    have its middle removed on every real call.
+    """
+    return _tenant_prompt_char_budget()
+
+
 def _cap_tenant_additional_instructions(text, *, campaign_id=None):
     """Cap the tenant-authored ``additional_instructions`` (campaign Goal /
     operator ROLE text) to an approximate token budget before it enters
@@ -1190,6 +1201,7 @@ def build_telephony_session_config(
     lead_company: Optional[str] = None,
     lead_context: Optional[dict] = None,
     allow_browser_barge_in: bool = False,
+    opening_mode: Optional[str] = None,
 ) -> VoiceSessionConfig:
     """
     Build a VoiceSessionConfig for a telephony call.
@@ -1210,13 +1222,15 @@ def build_telephony_session_config(
         campaign_service._create_job_for_lead). Stays stable for the
         whole call.
     direction:
-        Whether the call originated from the platform (``OUTBOUND``,
-        default) or is being treated as a receiver-style call
-        (``INBOUND``). For INBOUND the composer prepends the canonical
-        inbound directive at compose time; the bridge also applies it at
-        runtime via :func:`select_inbound_base_prompt` for caller-first
-        outbound calls — so the LLM is correctly framed without each
-        persona template needing two variants.
+        Who originated the call: ``OUTBOUND`` (the platform dialed, default)
+        or ``INBOUND`` (the carrier rang us). Never derive this from
+        first_speaker — a callee-first dialer call is still OUTBOUND.
+    opening_mode:
+        Who talks first: ``"agent_first"`` or ``"callee_first"``. For
+        callee-first the composer prepends the canonical callee-speaks-first
+        directive at compose time (the bridge also applies it at runtime via
+        :func:`select_inbound_base_prompt`, idempotently). None keeps the
+        historical direction-derived behaviour for callers that set neither.
     """
     # Source of provider SELECTION (model/provider/temp/tokens/STT engine/
     # pipeline mode/realtime). Prefer the tenant's persisted config threaded in
@@ -1420,6 +1434,7 @@ def build_telephony_session_config(
             campaign_slots=script_config.get("campaign_slots") or {},
             additional_instructions=_tenant_additional_instructions,
             direction=direction.value,
+            opening_mode=opening_mode,
             knowledge_driven=kd,
             body_override=_body_override,
         )
@@ -1438,10 +1453,20 @@ def build_telephony_session_config(
             # a call id through a public builder for the sake of a log line
             # would be the tail wagging the dog — the per-call view comes from
             # llm_usage, which does carry one.
+            # Layer sizes (2026-09-02): the guidance layer is the one operators
+            # write and the one the cap acts on, so it is reported separately
+            # from the persona/guardrail base. Knowledge is injected later by
+            # session_inject (its own log line) and is not part of this number.
+            # direction and opening_mode are logged because the two were one
+            # field until today and the framing bugs were invisible in logs.
             "telephony_prompt_composed persona=%s agent=%s company=%s campaign=%s "
-            "kd=%s prompt_chars=%d",
+            "kd=%s direction=%s opening_mode=%s guidance_chars=%d base_chars=%d "
+            "prompt_chars=%d",
             persona_type, agent_name, company_name, _campaign_id(campaign),
-            knowledge_driven, len(system_prompt or ""),
+            knowledge_driven, direction.value, opening_mode or "-",
+            len(_tenant_additional_instructions or ""),
+            len(system_prompt or "") - len(_tenant_additional_instructions or ""),
+            len(system_prompt or ""),
         )
     except PromptCompositionError as exc:
         # A slot-based persona with incomplete campaign_slots. Strict mode (the
@@ -1705,6 +1730,7 @@ def build_telephony_session_config(
         prompt_version=prompt_identity.version,
         prompt_hash=prompt_identity.hash,
         direction=direction,
+        opening_mode=opening_mode,
         persona_type=persona_type,
         # Realtime pipeline mode (default "cascaded" = unchanged behaviour).
         pipeline_mode=_pipeline_mode,

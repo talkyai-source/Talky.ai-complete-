@@ -383,7 +383,11 @@ export default function CampaignDetailPage() {
                                     {minutes.remaining_minutes} min left
                                 </span>
                             )}
-                            <TestAgentButton campaignId={campaignId} disabled={actionLoading} />
+                            <TestAgentButton
+                                campaignId={campaignId}
+                                disabled={actionLoading}
+                                agentName={campaign.script_config?.agent_names?.[0]}
+                            />
                             <Button variant="outline" onClick={() => router.push(`/campaigns/${campaignId}/edit`)} disabled={actionLoading}>
                                 <Pencil className="w-4 h-4" />
                                 Edit

@@ -394,13 +394,20 @@ class DashboardApi {
         campaign_slots: Record<string, unknown>;
         additional_instructions?: string;
         direction?: "outbound" | "inbound";
+        /** Who talks first. Independent of direction. */
+        opening_mode?: "agent_first" | "callee_first";
         knowledge_driven?: boolean;
     }): Promise<{
         system_prompt: string;
         greeting: string;
         direction: "outbound" | "inbound";
+        opening_mode: "agent_first" | "callee_first";
         has_inbound_directive: boolean;
         prompt_chars: number;
+        campaign_guidance_chars: number;
+        campaign_guidance_budget_chars: number;
+        /** Saving will be refused; the preview shows what a live call would run. */
+        over_budget: boolean;
     }> {
         return this.client.request({
             path: "/campaigns/preview-prompt",
@@ -412,6 +419,7 @@ class DashboardApi {
                 campaign_slots: input.campaign_slots,
                 additional_instructions: input.additional_instructions,
                 direction: input.direction ?? "outbound",
+                opening_mode: input.opening_mode,
                 knowledge_driven: input.knowledge_driven ?? false,
             },
         });

@@ -92,6 +92,7 @@ def _build_telephony_session_config(
     lead_last_name: Optional[str] = None,
     lead_company: Optional[str] = None,
     lead_context: Optional[dict] = None,
+    opening_mode: Optional[str] = None,
 ):
     """
     Thin shim kept for call-site compatibility.
@@ -118,6 +119,7 @@ def _build_telephony_session_config(
         lead_last_name=lead_last_name,
         lead_company=lead_company,
         lead_context=lead_context,
+        opening_mode=opening_mode,
     )
 
 

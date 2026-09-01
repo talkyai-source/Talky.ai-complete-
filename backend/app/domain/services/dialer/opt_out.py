@@ -98,3 +98,82 @@ async def purge_lead_on_opt_out(
         result["jobs_cancelled"], result["lead_marked"],
     )
     return result
+
+
+# Spoken when the caller asked to be removed but the DNC write did not
+# succeed in time. It commits to nothing the system has not done; the
+# teardown retries the purge, and the transcript shows what was actually said.
+OPT_OUT_UNCONFIRMED_FAREWELL = (
+    "Understood — I've noted that and won't keep you. Goodbye."
+)
+
+
+async def purge_opt_out_before_farewell(session, *, timeout_s: float = 2.5) -> bool:
+    """Write the opt-out BEFORE the agent says it has.
+
+    Called from the end-action shutdown path with the live ``CallSession``.
+    Resolves the owning voice session (which carries the dialer's tenant /
+    lead / phone), runs :func:`purge_lead_on_opt_out` under a short timeout
+    so the caller is not left in silence, and marks the voice session
+    ``_opt_out_purged`` so the teardown's own purge becomes a no-op.
+
+    Returns True only when the DNC row was actually written (or already
+    had been). False means the spoken farewell must not claim removal.
+    Never raises.
+    """
+    call_id = str(getattr(session, "call_id", "") or "")
+    try:
+        from app.domain.services.telephony.lifecycle import _state
+
+        voice_session = _state().get_voice_session(call_id) if call_id else None
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("opt_out_pre_farewell: no voice session call=%s err=%s", call_id[:12], exc)
+        voice_session = None
+    if voice_session is None:
+        return False
+    if getattr(voice_session, "_opt_out_purged", False):
+        return True
+
+    tenant_id = getattr(voice_session, "_dialer_tenant_id", None)
+    phone = getattr(voice_session, "_dialer_phone", None)
+    if not (tenant_id and phone):
+        logger.warning(
+            "opt_out_pre_farewell: missing tenant/phone call=%s tenant=%s phone=%s",
+            call_id[:12], bool(tenant_id), bool(phone),
+        )
+        return False
+
+    try:
+        from app.core.container import get_container
+
+        container = get_container()
+        if not container.is_initialized:
+            return False
+        import asyncio
+
+        result = await asyncio.wait_for(
+            purge_lead_on_opt_out(
+                db_pool=container.db_pool,
+                db_client=container.db_client,
+                tenant_id=str(tenant_id),
+                lead_id=getattr(voice_session, "_dialer_lead_id", None),
+                phone_number=str(phone),
+                call_id=getattr(voice_session, "_dialer_call_id", None),
+            ),
+            timeout=timeout_s,
+        )
+    except Exception as exc:  # noqa: BLE001 — includes TimeoutError
+        logger.error(
+            "opt_out_pre_farewell_failed call=%s err=%r — farewell will not claim removal; "
+            "teardown retries",
+            call_id[:12], exc,
+        )
+        return False
+
+    if result.get("dnc_added"):
+        try:
+            voice_session._opt_out_purged = True
+        except Exception:  # noqa: BLE001
+            pass
+        return True
+    return False

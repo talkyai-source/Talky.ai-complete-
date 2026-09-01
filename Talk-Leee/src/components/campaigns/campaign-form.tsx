@@ -22,6 +22,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { dashboardApi, PersonaType } from "@/lib/dashboard-api";
+import { guidanceBudgetStatus } from "@/lib/campaign-guidance";
 import {
     PERSONAS,
     PersonaSpec,
@@ -139,16 +140,29 @@ export function CampaignForm({ mode, campaignId, initialData }: Props) {
     // prompt + spoken greeting from the current draft. Open the panel
     // to see exactly what the AI will be told before starting a call.
     const [previewOpen, setPreviewOpen] = useState(false);
-    const [previewDirection, setPreviewDirection] = useState<"outbound" | "inbound">("outbound");
+    // Campaigns created here are outbound. The preview used to offer a
+    // "direction" select that really chose who speaks first; the two are
+    // separate facts and only the opening is the operator's choice.
+    const [previewOpening, setPreviewOpening] = useState<"agent_first" | "callee_first">("agent_first");
     const [previewLoading, setPreviewLoading] = useState(false);
     const [previewError, setPreviewError] = useState<string | null>(null);
     const [previewData, setPreviewData] = useState<{
         system_prompt: string;
         greeting: string;
         direction: "outbound" | "inbound";
+        opening_mode: "agent_first" | "callee_first";
         has_inbound_directive: boolean;
         prompt_chars: number;
+        campaign_guidance_chars: number;
+        campaign_guidance_budget_chars: number;
+        over_budget: boolean;
     } | null>(null);
+    // Live counter for the guidance field. The server's budget wins once a
+    // preview has reported it; the local default matches the backend default.
+    const guidance = guidanceBudgetStatus(
+        formData.system_prompt,
+        previewData?.campaign_guidance_budget_chars,
+    );
 
     const persona: PersonaSpec = PERSONAS.find((p) => p.value === personaType) ?? PERSONAS[0];
 
@@ -206,7 +220,8 @@ export function CampaignForm({ mode, campaignId, initialData }: Props) {
                 agent_name: firstAgent,
                 campaign_slots: buildCampaignSlots(),
                 additional_instructions: formData.system_prompt || undefined,
-                direction: previewDirection,
+                direction: "outbound",
+                opening_mode: previewOpening,
             });
             setPreviewData(result);
         } catch (err) {
@@ -369,6 +384,12 @@ export function CampaignForm({ mode, campaignId, initialData }: Props) {
         }
         if (!companyName.trim()) {
             setError("Add the company or business name your agent represents.");
+            return;
+        }
+        if (guidance.overBudget) {
+            // The backend refuses this too; say it here so nothing is ever
+            // saved and then silently shortened on the call.
+            setError(guidance.message ?? "Campaign guidance is over the character limit.");
             return;
         }
         const missing = missingRequiredSlots();
@@ -885,17 +906,20 @@ export function CampaignForm({ mode, campaignId, initialData }: Props) {
                         {previewOpen && (
                             <div className="space-y-3 pt-1">
                                 <div className="flex flex-wrap items-center gap-3">
-                                    <Label className="text-xs">Direction:</Label>
+                                    <span className="rounded bg-primary/15 px-2 py-0.5 text-xs font-semibold tracking-wide text-primary">
+                                        Campaign type: Outbound
+                                    </span>
+                                    <Label className="text-xs">Opening:</Label>
                                     <select
-                                        value={previewDirection}
+                                        value={previewOpening}
                                         onChange={(e) =>
-                                            setPreviewDirection(e.target.value as "outbound" | "inbound")
+                                            setPreviewOpening(e.target.value as "agent_first" | "callee_first")
                                         }
                                         className="rounded border border-border bg-background px-2 py-1 text-xs"
                                         disabled={previewLoading}
                                     >
-                                        <option value="outbound">Outbound (we call them)</option>
-                                        <option value="inbound">Inbound (they call us)</option>
+                                        <option value="agent_first">Agent opens</option>
+                                        <option value="callee_first">Callee says hello first</option>
                                     </select>
                                     <Button
                                         type="button"
@@ -920,6 +944,22 @@ export function CampaignForm({ mode, campaignId, initialData }: Props) {
                                 )}
                                 {previewData && (
                                     <div className="space-y-3">
+                                        <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                                            <span>Direction: <span className="text-foreground">{previewData.direction}</span></span>
+                                            <span>Opening: <span className="text-foreground">{previewData.opening_mode === "callee_first" ? "callee says hello first" : "agent opens"}</span></span>
+                                            <span>
+                                                Campaign guidance:{" "}
+                                                <span className={previewData.over_budget ? "text-destructive" : "text-foreground"}>
+                                                    {previewData.campaign_guidance_chars.toLocaleString()} / {previewData.campaign_guidance_budget_chars.toLocaleString()} chars
+                                                </span>
+                                            </span>
+                                        </div>
+                                        {previewData.over_budget && (
+                                            <div className="rounded border border-destructive/40 bg-destructive/5 p-2 text-xs text-destructive">
+                                                Over budget: this preview shows what a live call would run with the middle of your
+                                                guidance omitted. Saving is refused until it fits.
+                                            </div>
+                                        )}
                                         <div className="space-y-1">
                                             <Label className="text-xs">
                                                 First spoken line ({previewData.direction})
@@ -931,7 +971,7 @@ export function CampaignForm({ mode, campaignId, initialData }: Props) {
                                         <div className="space-y-1">
                                             <Label className="text-xs">
                                                 System prompt ({previewData.prompt_chars.toLocaleString()} chars
-                                                {previewData.has_inbound_directive ? ", inbound directive applied" : ""})
+                                                {previewData.has_inbound_directive ? ", callee-first directive applied" : ""})
                                             </Label>
                                             <pre className="max-h-96 overflow-auto whitespace-pre-wrap rounded border border-border bg-background p-2 text-[11px] leading-snug">
                                                 {previewData.system_prompt}
@@ -1047,22 +1087,37 @@ export function CampaignForm({ mode, campaignId, initialData }: Props) {
                         ))}
                     </div>
 
-                    {/* Additional instructions */}
+                    {/* Campaign guidance (sent as system_prompt / additional_instructions) */}
                     <div className="space-y-2">
-                        <Label htmlFor="system_prompt">Additional instructions</Label>
+                        <div className="flex items-baseline justify-between gap-3">
+                            <Label htmlFor="system_prompt">Campaign guidance</Label>
+                            <span
+                                className={`text-xs tabular-nums ${guidance.overBudget ? "font-semibold text-destructive" : "text-muted-foreground"}`}
+                                data-testid="guidance-counter"
+                                aria-live="polite"
+                            >
+                                {guidance.chars.toLocaleString()} / {guidance.budget.toLocaleString()} characters
+                            </span>
+                        </div>
                         <textarea
                             id="system_prompt"
                             name="system_prompt"
-                            placeholder="Anything specific to this campaign that the generic rules and persona don't cover."
+                            placeholder="Behaviour specific to this campaign that the persona doesn't cover. Put facts (prices, hours, products) in Company knowledge instead."
                             value={formData.system_prompt}
                             onChange={handleChange}
                             disabled={submitting}
                             rows={4}
-                            className="flex w-full rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50"
+                            aria-invalid={guidance.overBudget || undefined}
+                            className={`flex w-full rounded-lg border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50 ${guidance.overBudget ? "border-destructive" : "border-input"}`}
                         />
-                        <p className="text-xs text-muted-foreground">
-                            Layered on top of the generic guardrails and the persona you picked. Optional but recommended for campaign-specific callouts.
-                        </p>
+                        {guidance.overBudget ? (
+                            <p className="text-xs text-destructive">{guidance.message}</p>
+                        ) : (
+                            <p className="text-xs text-muted-foreground">
+                                Layered on top of the core persona and guardrails; it is not the whole prompt. Keep behaviour here and
+                                facts in Company knowledge. Nothing over the limit is trimmed — the save is refused instead.
+                            </p>
+                        )}
                     </div>
 
                     <div className="border-t border-border pt-6">
@@ -1084,7 +1139,7 @@ export function CampaignForm({ mode, campaignId, initialData }: Props) {
                     )}
 
                     <div className="flex gap-4">
-                        <Button type="submit" disabled={submitting || leadFields.isLoading || leadFields.isError || !formData.voice_id}>
+                        <Button type="submit" disabled={submitting || leadFields.isLoading || leadFields.isError || !formData.voice_id || guidance.overBudget}>
                             {submitting ? (
                                 <>
                                     <Loader2 className="w-4 h-4 animate-spin" />

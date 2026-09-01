@@ -233,8 +233,13 @@ async def preview_prompt(
     inputs (unknown persona, missing slot, etc.) — same error class
     the create / update flows surface.
     """
+    from app.domain.services.campaign_prompt_service import (
+        guidance_budget_violation,
+    )
     from app.domain.services.telephony_session_config import (
+        _cap_tenant_additional_instructions,
         build_persona_greeting,
+        campaign_guidance_char_budget,
     )
     from app.services.scripts.prompts.composer import (
         PromptCompositionError,
@@ -244,14 +249,27 @@ async def preview_prompt(
         INBOUND_DIRECTIVE_SENTINEL,
     )
 
+    # Preview = what the call runs. The live builder caps over-budget guidance
+    # (middle elided); previewing the uncapped text is how a 31k-char script
+    # looked fine to its author while every call ran 38% of it. The save and
+    # start paths refuse over-budget guidance outright; the flag below lets the
+    # UI say so before the operator hits Save.
+    guidance = body.additional_instructions or ""
+    violation = guidance_budget_violation(guidance)
+    opening_mode = body.opening_mode or (
+        "callee_first" if body.direction == "inbound" else "agent_first"
+    )
     try:
         system_prompt = compose_prompt(
             persona_type=body.persona_type,
             agent_name=body.agent_name,
             company_name=body.company_name,
             campaign_slots=body.campaign_slots,
-            additional_instructions=body.additional_instructions,
+            additional_instructions=_cap_tenant_additional_instructions(
+                guidance, campaign_id="preview"
+            ),
             direction=body.direction,
+            opening_mode=opening_mode,
             knowledge_driven=body.knowledge_driven,
         )
     except PromptCompositionError as exc:
@@ -270,6 +288,10 @@ async def preview_prompt(
         direction=body.direction,
         has_inbound_directive=INBOUND_DIRECTIVE_SENTINEL in system_prompt,
         prompt_chars=len(system_prompt),
+        opening_mode=opening_mode,
+        campaign_guidance_chars=len(guidance),
+        campaign_guidance_budget_chars=campaign_guidance_char_budget(),
+        over_budget=violation is not None,
     )
 
 
@@ -622,6 +644,31 @@ async def start_campaign(
         )
         priority_override = (start_request.priority_override if start_request else None)
         first_speaker = (start_request.first_speaker if start_request else "agent")
+
+        # Activation gate: guidance saved before the budget was enforced at
+        # save time (or with a larger env budget) must not go live with its
+        # middle silently removed on every call. Same rule, same message as
+        # save; the operator fixes the script once instead of discovering it
+        # in a transcript.
+        try:
+            _existing_for_gate = await service.get_campaign(campaign_id)
+        except Exception:  # noqa: BLE001 — the service's own start raises a clean 404 below
+            _existing_for_gate = None
+        if _existing_for_gate:
+            from app.domain.services.campaign_prompt_service import (
+                guidance_budget_error_message,
+                guidance_budget_violation,
+            )
+            _sc = _existing_for_gate.get("script_config") or {}
+            _violation = guidance_budget_violation(
+                (_sc.get("additional_instructions") if isinstance(_sc, dict) else None)
+                or _existing_for_gate.get("system_prompt")
+            )
+            if _violation is not None:
+                raise HTTPException(
+                    status_code=400,
+                    detail=guidance_budget_error_message(*_violation),
+                )
 
         # Persist the client's pacing choices (batch size + inter-call gap) onto
         # the campaign's calling_config so the dialer's gates read them. None →

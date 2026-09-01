@@ -4985,7 +4985,12 @@ async def _on_call_ended(
                 getattr(voice_session, "_caller_opted_out", False)
                 or getattr(_cs, "_caller_opted_out", False)
             )
-            if opted_out:
+            # The end-action path now writes the DNC row BEFORE speaking the
+            # farewell and marks the session; this teardown purge is the retry
+            # for the case where that write did not land.
+            if opted_out and getattr(voice_session, "_opt_out_purged", False):
+                logger.info("opt_out_purge_already_done call_id=%s", call_id[:12])
+            elif opted_out:
                 from app.core.container import get_container as _gc3
 
                 _c3 = _gc3()

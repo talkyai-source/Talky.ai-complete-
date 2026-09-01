@@ -11,8 +11,8 @@ Covered:
      streamed, ready frame reflects it.
   2. realtime tenant + caller-first → the resolved pipeline_mode drives the
      realtime branch (bridge.run scheduled, no cascaded start_pipeline),
-     direction=INBOUND (this is what sets greet_on_start=False on a real
-     bridge), no greeting.
+     direction stays OUTBOUND with opening_mode=callee_first (this is what
+     sets greet_on_start=False on a real bridge), no greeting.
   3. missing auth → 1008 close, no session created.
   4. campaign not owned by the tenant (fetch miss) → 1008 close (IDOR guard).
 
@@ -257,8 +257,12 @@ async def test_realtime_caller_first_takes_realtime_branch():
 
     cfg = h.captured["config"]
     assert cfg.pipeline_mode == "realtime"
-    # caller-first → INBOUND, which is what makes a real bridge greet_on_start=False.
-    assert cfg.direction == Direction.INBOUND
+    # A campaign test is OUTBOUND whoever opens; callee-first is an opening
+    # mode, which is what makes a real bridge greet_on_start=False. Deriving
+    # INBOUND from first_speaker here used to tell the realtime model "the
+    # caller contacted the company".
+    assert cfg.direction == Direction.OUTBOUND
+    assert h.captured["build_kwargs"]["opening_mode"] == "callee_first"
 
     ready = _ready(ws)
     assert ready["pipeline_mode"] == "realtime"
@@ -449,3 +453,30 @@ async def test_campaign_not_found_closes_1008():
 
     assert ws.closed_code == 1008
     h.orchestrator.create_voice_session.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# 5. campaign knowledge reaches the browser test
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_browser_test_applies_campaign_knowledge_like_prewarm():
+    """The endpoint's docstring promised knowledge parity with a real call, but
+    apply_campaign_knowledge was only ever called from prewarm, which the
+    browser path skips. A tester therefore saw an agent that knew nothing
+    about the company and pasted the facts into the prompt instead."""
+    tenant_cfg = AIProviderConfig(pipeline_mode="cascaded")
+    row = {**_CAMPAIGN, "knowledge_mode": "retrieve"}
+    with _Harness(tenant_cfg=tenant_cfg, campaign_row=row) as h, patch(
+        "app.services.scripts.knowledge.session_inject.apply_campaign_knowledge",
+        new=AsyncMock(),
+    ) as apply_kb:
+        ws = FakeWebSocket(cookies={"talky_at": "tok"}, recv_frames=[_end_call_frame()])
+        await campaign_test_ws.campaign_test_websocket(ws, "camp-1", first_speaker="user")
+
+    apply_kb.assert_awaited_once()
+    args, kwargs = apply_kb.await_args
+    ended = h.orchestrator.end_session.await_args.args[0]
+    assert args[0] is ended.call_session
+    assert args[1] is row
+    assert kwargs["pool"] is h.container.db_pool

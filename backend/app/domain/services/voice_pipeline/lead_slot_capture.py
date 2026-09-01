@@ -192,6 +192,13 @@ def snapshot_slots(captured_slots: Any) -> dict[str, dict]:
             if confirmed_attr
             else False
         )
+        if confirmed_attr and not confirmed:
+            # Contact fields (email, phone) persist ONLY after the prospect has
+            # confirmed the read-back. The pending value lives in CallState for
+            # the confirm loop; writing it early put a row in the CRM before
+            # anyone agreed it, and a later mis-hearing could replace a
+            # confirmed value while inheriting its confirmed flag (2026-09-02).
+            continue
         out[field_key] = {
             "value": value,
             "field_type": field_type,

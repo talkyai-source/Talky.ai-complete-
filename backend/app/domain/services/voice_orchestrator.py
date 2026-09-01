@@ -98,17 +98,35 @@ class Direction(str, enum.Enum):
 
     @classmethod
     def from_first_speaker(cls, first_speaker: Optional[str]) -> "Direction":
-        """Map the legacy per-call ``first_speaker`` flag onto a Direction.
+        """DEPRECATED — do not call from campaign, dialer or browser-test paths.
 
         Pre-T3.10 the codebase carried ``first_speaker = "user"`` to mean
-        "treat this as inbound framing". The two concepts are actually
-        orthogonal (who speaks first vs. who initiated the call), but
-        until per-campaign direction lands in the UI, deriving direction
-        from first_speaker preserves the existing intent without needing
-        a schema change.
+        "treat this as inbound framing", and this mapping was a bridge "until
+        per-campaign direction lands in the UI". It never did, and every
+        later consumer of ``direction`` read INBOUND as *carrier inbound*:
+        realtime instructions told the agent the caller had rung in, AMD and
+        voicemail detection switched off, and the 2026-08-30 recording gate
+        discarded the recording. Who speaks first is
+        :func:`opening_mode_from_first_speaker`; who originated the call is a
+        fact the caller already knows and must pass explicitly.
         """
         value = (first_speaker or "").strip().lower()
         return cls.INBOUND if value == "user" else cls.OUTBOUND
+
+
+OPENING_MODE_AGENT_FIRST = "agent_first"
+OPENING_MODE_CALLEE_FIRST = "callee_first"
+
+
+def opening_mode_from_first_speaker(first_speaker: Optional[str]) -> str:
+    """Map the per-call ``first_speaker`` knob onto an opening mode.
+
+    ``"user"`` → the agent waits for the other party to speak (callee-first).
+    Anything else, including None, → the agent opens. This is a turn-taking
+    choice and says nothing about who originated the call.
+    """
+    value = (first_speaker or "").strip().lower()
+    return OPENING_MODE_CALLEE_FIRST if value == "user" else OPENING_MODE_AGENT_FIRST
 
 
 # ---------------------------------------------------------------------------
@@ -251,6 +269,12 @@ class VoiceSessionConfig:
     # base prompt (inbound vs outbound) up front. Defaults to OUTBOUND so
     # every legacy call path keeps its current behaviour.
     direction: Direction = Direction.OUTBOUND
+    # Who talks first — "agent_first" or "callee_first" — independent of
+    # direction: an outbound dialer call can be callee-first (a courtesy pause
+    # for "hello?") and a true inbound call can be agent-first. Drives the
+    # callee-first prompt directive and realtime greet_on_start. None means the
+    # caller did not say, and the direction-derived legacy default applies.
+    opening_mode: Optional[str] = None
     # Persona key — "lead_gen" / "customer_support" / "receptionist", or
     # None for legacy/non-telephony sessions. Set by
     # build_telephony_session_config when the campaign has a
@@ -1792,14 +1816,7 @@ class VoiceOrchestrator:
             if set_barge_in:
                 set_barge_in(call_id, call_session.barge_in_event)
 
-            pinned_realtime_greeting = getattr(
-                config, "realtime_greet_on_start", None
-            )
-            greet_on_start = (
-                bool(pinned_realtime_greeting)
-                if pinned_realtime_greeting is not None
-                else config.direction == Direction.OUTBOUND
-            )
+            greet_on_start = self._resolve_realtime_greet_on_start(config)
             bridge = RealtimeBridge(
                 call_id=call_id,
                 realtime_session=rt,
@@ -1838,6 +1855,22 @@ class VoiceOrchestrator:
                 call_id[:8], exc,
             )
             return None
+
+    @staticmethod
+    def _resolve_realtime_greet_on_start(config: VoiceSessionConfig) -> bool:
+        """Who opens a realtime call.
+
+        Precedence: the immutable admission pin (true inbound decides this
+        before the socket exists) → the explicit ``opening_mode`` → the
+        direction-derived legacy default for callers that set neither.
+        """
+        pinned = getattr(config, "realtime_greet_on_start", None)
+        if pinned is not None:
+            return bool(pinned)
+        opening_mode = getattr(config, "opening_mode", None)
+        if opening_mode:
+            return opening_mode == OPENING_MODE_AGENT_FIRST
+        return config.direction == Direction.OUTBOUND
 
     @staticmethod
     def _build_realtime_persona(config: VoiceSessionConfig):
