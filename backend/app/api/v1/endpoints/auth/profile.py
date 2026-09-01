@@ -6,6 +6,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.api.v1.dependencies import CurrentUser, get_current_user, get_db_client
+from app.core.db_utils import acquire_with_tenant
 from app.core.postgres_adapter import Client
 
 from ._shared import normalize_optional_text
@@ -39,7 +40,7 @@ async def get_me(
     AuthContext.user without firing a parallel /auth/me query. The fields
     are nullable for users without a tenant or without a partner link.
     """
-    async with db_client.pool.acquire() as conn:
+    async with acquire_with_tenant(db_client.pool, current_user.tenant_id) as conn:
         row = await conn.fetchrow(
             """
             SELECT t.id                       AS tenant_id,
@@ -123,7 +124,7 @@ async def update_me(
             minutes_remaining=current_user.minutes_remaining,
         )
 
-    async with db_client.pool.acquire() as conn:
+    async with acquire_with_tenant(db_client.pool, current_user.tenant_id) as conn:
         async with conn.transaction():
             if body.name is not None:
                 await conn.execute(

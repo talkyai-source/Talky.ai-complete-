@@ -18,6 +18,8 @@ from typing import Optional, Tuple
 
 from fastapi import HTTPException, Request, status
 
+from app.core.db_utils import acquire_with_tenant
+
 logger = logging.getLogger(__name__)
 
 # Constants
@@ -271,7 +273,7 @@ class WebhookSecretManager:
             return None
 
         try:
-            async with db_pool.acquire() as conn:
+            async with acquire_with_tenant(db_pool, str(tenant_id)) as conn:
                 row = await conn.fetchrow(
                     """
                     SELECT secret_key FROM webhook_configs

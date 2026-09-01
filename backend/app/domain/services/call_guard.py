@@ -867,7 +867,9 @@ class CallGuard:
         re-reading the lead.
         """
         try:
-            async with acquire_with_tenant(self._db_pool, str(tenant_id)) as conn:
+            # This query intentionally includes platform-global DNC rows
+            # (tenant_id IS NULL), so use bypass with explicit tenant predicates.
+            async with acquire_with_tenant(self._db_pool, None) as conn:
                 # Per-lead suppression flag. Only queried on the dialer path,
                 # which is the only caller that knows a lead_id.
                 #
@@ -1189,7 +1191,7 @@ class CallGuard:
     async def _check_velocity(self, tenant_id: str, **kwargs) -> CheckResult:
         """Check for recent abuse events indicating velocity anomalies."""
         try:
-            async with self._db_pool.acquire() as conn:
+            async with acquire_with_tenant(self._db_pool, str(tenant_id)) as conn:
                 recent_events = await conn.fetchval(
                     """
                     SELECT COUNT(*)
@@ -1311,7 +1313,7 @@ class CallGuard:
 
         # Fetch from database
         try:
-            async with self._db_pool.acquire() as conn:
+            async with acquire_with_tenant(self._db_pool, str(tenant_id)) as conn:
                 row = await conn.fetchrow(
                     """
                     SELECT *
@@ -1543,7 +1545,9 @@ class CallGuard:
     ) -> None:
         """Log guard decision to database."""
         try:
-            async with self._db_pool.acquire() as conn:
+            async with acquire_with_tenant(
+                self._db_pool, str(result.tenant_id)
+            ) as conn:
                 await conn.execute(
                     """
                     INSERT INTO call_guard_decisions (

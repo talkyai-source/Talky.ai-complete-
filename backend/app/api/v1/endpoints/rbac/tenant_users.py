@@ -24,6 +24,7 @@ from app.api.v1.dependencies import (
     require_role,
     require_tenant_member,
 )
+from app.core.db_utils import acquire_with_tenant
 from app.core.postgres_adapter import Client
 from app.core.security.rbac import normalize_role
 from app.domain.services.audit_logger import AuditEvent, AuditLogger
@@ -64,7 +65,7 @@ async def list_tenant_members(
     # Regular users can only see active members
     effective_status = ["active"] if not is_admin else [status]
 
-    async with db_client.pool.acquire() as conn:
+    async with acquire_with_tenant(db_client.pool, str(query_tenant_id)) as conn:
         rows = await conn.fetch(
             """
             SELECT
@@ -133,7 +134,7 @@ async def add_user_to_tenant(
             detail="Cannot grant a role above your own tier",
         )
 
-    async with db_client.pool.acquire() as conn:
+    async with acquire_with_tenant(db_client.pool, str(request.tenant_id)) as conn:
         # Verify user exists
         user_row = await conn.fetchrow(
             "SELECT id FROM user_profiles WHERE id = $1",
@@ -231,7 +232,15 @@ async def update_tenant_user(
 
     **Requires tenant_admin role.**
     """
-    async with db_client.pool.acquire() as conn:
+    user_role = normalize_role(current_user.role)
+    # Platform admins may target any membership; all other callers are pinned
+    # to the tenant carried by their authenticated identity.
+    rls_tenant_id = (
+        None
+        if user_role == UserRole.PLATFORM_ADMIN
+        else str(current_user.tenant_id)
+    )
+    async with acquire_with_tenant(db_client.pool, rls_tenant_id) as conn:
         # Get current record
         current = await conn.fetchrow(
             """
@@ -250,7 +259,6 @@ async def update_tenant_user(
             )
 
         # Check permissions
-        user_role = normalize_role(current_user.role)
         if user_role != UserRole.PLATFORM_ADMIN:
             if str(current["tenant_id"]) != str(current_user.tenant_id):
                 raise HTTPException(
@@ -365,7 +373,15 @@ async def remove_user_from_tenant(
 
     **Requires tenant_admin role.**
     """
-    async with db_client.pool.acquire() as conn:
+    user_role = normalize_role(current_user.role)
+    # Platform admins may target any membership; all other callers are pinned
+    # to the tenant carried by their authenticated identity.
+    rls_tenant_id = (
+        None
+        if user_role == UserRole.PLATFORM_ADMIN
+        else str(current_user.tenant_id)
+    )
+    async with acquire_with_tenant(db_client.pool, rls_tenant_id) as conn:
         # Get current record
         current = await conn.fetchrow(
             """
@@ -384,7 +400,6 @@ async def remove_user_from_tenant(
             )
 
         # Check permissions
-        user_role = normalize_role(current_user.role)
         if user_role != UserRole.PLATFORM_ADMIN:
             if str(current["tenant_id"]) != str(current_user.tenant_id):
                 raise HTTPException(

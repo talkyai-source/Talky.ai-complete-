@@ -176,6 +176,7 @@ class EmailService:
                     if account.get("refresh_token_encrypted"):
                         try:
                             access_token = await self._refresh_token(
+                                tenant_id=tenant_id,
                                 connector_id=connector_id,
                                 provider=provider,
                                 refresh_token_encrypted=account["refresh_token_encrypted"],
@@ -201,7 +202,11 @@ class EmailService:
             return connector, connector_id, provider
 
     async def _refresh_token(
-        self, connector_id: str, provider: str, refresh_token_encrypted: str
+        self,
+        tenant_id: str,
+        connector_id: str,
+        provider: str,
+        refresh_token_encrypted: str,
     ) -> str:
         """Refresh OAuth token and update database."""
         refresh_token = self.encryption.decrypt(refresh_token_encrypted)
@@ -217,7 +222,7 @@ class EmailService:
         new_access_encrypted = self.encryption.encrypt(new_tokens.access_token)
         new_refresh_encrypted = self.encryption.encrypt(new_tokens.refresh_token or refresh_token)
 
-        async with self.db_pool.acquire() as conn:
+        async with acquire_with_tenant(self.db_pool, str(tenant_id)) as conn:
             await conn.execute(
                 """
                 UPDATE connector_accounts SET
@@ -225,12 +230,13 @@ class EmailService:
                     refresh_token_encrypted = $2,
                     token_expires_at = $3,
                     last_refreshed_at = NOW()
-                WHERE connector_id = $4
+                WHERE connector_id = $4 AND tenant_id = $5
                 """,
                 new_access_encrypted,
                 new_refresh_encrypted,
                 new_tokens.expires_at,
                 connector_id,
+                tenant_id,
             )
 
         return new_tokens.access_token
@@ -299,6 +305,7 @@ class EmailService:
 
             # Update action as completed
             await self._update_action_status(
+                tenant_id=tenant_id,
                 action_id=action_id,
                 status="completed",
                 output_data={
@@ -323,7 +330,10 @@ class EmailService:
         except EmailNotConnectedError:
             # Update action as failed
             await self._update_action_status(
-                action_id=action_id, status="failed", error="No email provider connected"
+                tenant_id=tenant_id,
+                action_id=action_id,
+                status="failed",
+                error="No email provider connected",
             )
             raise
 
@@ -331,7 +341,12 @@ class EmailService:
             logger.error(f"Failed to send email: {e}")
 
             # Update action as failed
-            await self._update_action_status(action_id=action_id, status="failed", error=str(e))
+            await self._update_action_status(
+                tenant_id=tenant_id,
+                action_id=action_id,
+                status="failed",
+                error=str(e),
+            )
 
             return {"success": False, "error": str(e), "action_id": action_id}
 
@@ -395,7 +410,7 @@ class EmailService:
                     return str(response.data[0].get("id", action_id))
                 return action_id
 
-            async with self.db_pool.acquire() as conn:
+            async with acquire_with_tenant(self.db_pool, str(tenant_id)) as conn:
                 await conn.execute(
                     """
                     INSERT INTO assistant_actions (
@@ -422,6 +437,7 @@ class EmailService:
 
     async def _update_action_status(
         self,
+        tenant_id: str,
         action_id: str,
         status: str,
         output_data: Optional[Dict[str, Any]] = None,
@@ -440,10 +456,10 @@ class EmailService:
                     payload["error"] = error
                 self.supabase.table("assistant_actions").update(payload).eq(
                     "id", action_id
-                ).execute()
+                ).eq("tenant_id", tenant_id).execute()
                 return
 
-            async with self.db_pool.acquire() as conn:
+            async with acquire_with_tenant(self.db_pool, str(tenant_id)) as conn:
                 query = "UPDATE assistant_actions SET status = $1, completed_at = NOW()"
                 params = [status]
                 param_idx = 2
@@ -458,8 +474,9 @@ class EmailService:
                     params.append(error)
                     param_idx += 1
 
-                query += f" WHERE id = ${param_idx}"
+                query += f" WHERE id = ${param_idx} AND tenant_id = ${param_idx + 1}"
                 params.append(action_id)
+                params.append(tenant_id)
 
                 await conn.execute(query, *params)
 

@@ -26,6 +26,7 @@ from app.api.v1.dependencies import (
     CurrentUser,
     get_audit_logger,
 )
+from app.core.db_utils import acquire_with_tenant
 from app.domain.services.audit_logger import AuditEvent, AuditLogger
 from app.core.postgres_adapter import Client
 
@@ -131,7 +132,7 @@ async def get_tenant_call_limits(
     db_client: Client = Depends(get_db_client),
 ):
     """Get call limits for a tenant. Requires admin privileges."""
-    async with db_client.pool.acquire() as conn:
+    async with acquire_with_tenant(db_client.pool, str(tenant_id)) as conn:
         row = await conn.fetchrow(
             """
             SELECT *
@@ -185,7 +186,7 @@ async def update_tenant_call_limits(
         hour, minute = map(int, limits.business_hours_end.split(":"))
         business_end = time(hour, minute)
 
-    async with db_client.pool.acquire() as conn:
+    async with acquire_with_tenant(db_client.pool, str(tenant_id)) as conn:
         # Deactivate existing limits
         await conn.execute(
             """
@@ -286,7 +287,8 @@ async def get_partner_limits(
     db_client: Client = Depends(get_db_client),
 ):
     """Get aggregate limits for a partner. Requires admin privileges."""
-    async with db_client.pool.acquire() as conn:
+    # Partner administration is intentionally platform-wide.
+    async with acquire_with_tenant(db_client.pool, None) as conn:
         row = await conn.fetchrow(
             """
             SELECT pl.*, t.name as partner_name
@@ -299,7 +301,7 @@ async def get_partner_limits(
 
     if not row:
         # Get partner name and return defaults
-        async with db_client.pool.acquire() as conn:
+        async with acquire_with_tenant(db_client.pool, None) as conn:
             tenant = await conn.fetchrow(
                 "SELECT name FROM tenants WHERE id = $1",
                 partner_id,
@@ -335,7 +337,8 @@ async def update_partner_limits(
     """Update aggregate limits for a partner. Requires admin privileges."""
     import json
 
-    async with db_client.pool.acquire() as conn:
+    # Partner administration is intentionally platform-wide.
+    async with acquire_with_tenant(db_client.pool, None) as conn:
         # Upsert partner limits
         row = await conn.fetchrow(
             """
@@ -427,7 +430,10 @@ async def add_dnc_entry(
     if entry.expires_at:
         expires = datetime.fromisoformat(entry.expires_at.replace("Z", "+00:00"))
 
-    async with db_client.pool.acquire() as conn:
+    # A NULL tenant_id represents the platform-wide DNC list.
+    async with acquire_with_tenant(
+        db_client.pool, str(tenant_id) if tenant_id is not None else None
+    ) as conn:
         row = await conn.fetchrow(
             """
             INSERT INTO dnc_entries (
@@ -497,7 +503,10 @@ async def list_dnc_entries(
     query += f" LIMIT ${len(params) + 1}"
     params.append(limit)
 
-    async with db_client.pool.acquire() as conn:
+    # The explicit predicate deliberately combines a tenant's rows with the
+    # platform-wide tenant_id=NULL list, so this platform-admin query must see
+    # both scopes even when tenant_id is supplied.
+    async with acquire_with_tenant(db_client.pool, None) as conn:
         rows = await conn.fetch(query, *params)
 
     return [
@@ -527,7 +536,8 @@ async def remove_dnc_entry(
     audit_logger: AuditLogger = Depends(get_audit_logger),
 ):
     """Remove a DNC entry. Requires admin privileges."""
-    async with db_client.pool.acquire() as conn:
+    # The platform-admin route resolves an ID before its tenant is known.
+    async with acquire_with_tenant(db_client.pool, None) as conn:
         result = await conn.execute(
             "DELETE FROM dnc_entries WHERE id = $1",
             entry_id,
@@ -553,7 +563,8 @@ async def get_call_limits_status(
 ):
     """Get call limits system status. Requires admin privileges."""
     """Get system-wide call limits status."""
-    async with db_client.pool.acquire() as conn:
+    # This dashboard intentionally aggregates all tenants.
+    async with acquire_with_tenant(db_client.pool, None) as conn:
         # Count tenants with custom limits
         custom_limits_count = await conn.fetchval(
             "SELECT COUNT(DISTINCT tenant_id) FROM tenant_call_limits WHERE is_active = TRUE"

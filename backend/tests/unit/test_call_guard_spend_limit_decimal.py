@@ -125,6 +125,12 @@ class _FakeConn:
     async def fetchrow(self, *a, **k):
         return self._row
 
+    def transaction(self):
+        return _FakeAcquireCtx(self)
+
+    async def execute(self, *_args, **_kwargs):
+        return "SET"
+
 
 class _FakeAcquireCtx:
     def __init__(self, conn):
@@ -201,7 +207,7 @@ async def test_get_tenant_limits_coerces_decimal_to_float():
     redis = _FakeRedis()
     guard = CallGuard(db_pool=_FakePool(conn), redis_client=redis)
 
-    limits = await guard._get_tenant_limits("t1")
+    limits = await guard._get_tenant_limits("00000000-0000-0000-0000-000000000001")
 
     assert isinstance(limits.monthly_spend_cap, float)
     assert isinstance(limits.monthly_spend_used, float)
@@ -219,7 +225,7 @@ async def test_get_tenant_limits_cache_write_succeeds_with_nonzero_decimal_spend
     redis = _FakeRedis()
     guard = CallGuard(db_pool=_FakePool(conn), redis_client=redis)
 
-    await guard._get_tenant_limits("t1")
+    await guard._get_tenant_limits("00000000-0000-0000-0000-000000000001")
 
     assert redis.setex_succeeded is True, (
         "the tenant-limits cache write must succeed even when the DB row "
@@ -236,7 +242,7 @@ async def test_get_tenant_limits_handles_null_spend_cap():
     redis = _FakeRedis()
     guard = CallGuard(db_pool=_FakePool(conn), redis_client=redis)
 
-    limits = await guard._get_tenant_limits("t1")
+    limits = await guard._get_tenant_limits("00000000-0000-0000-0000-000000000001")
 
     assert limits.monthly_spend_cap is None
     assert limits.monthly_spend_used == 0.0

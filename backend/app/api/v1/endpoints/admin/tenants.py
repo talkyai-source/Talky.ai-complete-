@@ -41,6 +41,7 @@ from app.api.v1.dependencies import (
     get_db_client,
     require_platform_admin,
 )
+from app.core.db_utils import acquire_with_tenant
 from app.core.postgres_adapter import Client
 from app.domain.services.audit_logger import AuditEvent, AuditLogger
 
@@ -257,7 +258,9 @@ async def create_tenant(
     name = body.business_name.strip()
 
     try:
-        async with db_client.pool.acquire() as conn:
+        # The tenant UUID does not exist until this transaction inserts it;
+        # this platform-admin provisioning transaction is intentionally global.
+        async with acquire_with_tenant(db_client.pool, None) as conn:
             async with conn.transaction():
                 plan = await conn.fetchrow(
                     "SELECT id, name, minutes, concurrent_calls "

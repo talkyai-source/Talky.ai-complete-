@@ -4,6 +4,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.api.v1.dependencies import get_audit_logger, get_db_client
+from app.core.db_utils import acquire_with_tenant
 from app.core.postgres_adapter import Client
 from app.core.security.verification_tokens import (
     hash_verification_token,
@@ -43,7 +44,8 @@ async def verify_email(
     # Hash the token for database lookup
     token_hash = hash_verification_token(token)
 
-    async with db_client.pool.acquire() as conn:
+    # The opaque verification token must be resolved before its tenant is known.
+    async with acquire_with_tenant(db_client.pool, None) as conn:
         # --- lookup user by token ----------------------------------------------
         row = await conn.fetchrow(
             """

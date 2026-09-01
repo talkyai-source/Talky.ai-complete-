@@ -22,6 +22,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
 from app.api.v1.dependencies import require_platform_admin
+from app.core.db_utils import acquire_with_tenant
 
 # PLATFORM-WIDE router — platform_admin only. This completes the follow-up the
 # previous fix flagged: router-level auth closed the fully-unauthenticated hole,
@@ -183,7 +184,10 @@ async def list_abuse_events(
     params.append(limit)
     query += f" LIMIT ${len(params)}"
 
-    async with db_pool.acquire() as conn:
+    # A missing filter is an intentional platform-admin cross-tenant scan.
+    async with acquire_with_tenant(
+        db_pool, str(tenant_id) if tenant_id is not None else None
+    ) as conn:
         rows = await conn.fetch(query, *params)
 
     return [
@@ -222,7 +226,8 @@ async def get_abuse_event(
     db_pool=Depends(get_db_pool),
 ):
     """Get details of a specific abuse event."""
-    async with db_pool.acquire() as conn:
+    # The platform-admin route resolves an ID before its tenant is known.
+    async with acquire_with_tenant(db_pool, None) as conn:
         row = await conn.fetchrow(
             """
             SELECT
@@ -273,7 +278,8 @@ async def resolve_abuse_event(
     db_pool=Depends(get_db_pool),
 ):
     """Resolve an abuse event."""
-    async with db_pool.acquire() as conn:
+    # The platform-admin route resolves an ID before its tenant is known.
+    async with acquire_with_tenant(db_pool, None) as conn:
         # Update the event
         result = await conn.execute(
             """
@@ -347,7 +353,10 @@ async def get_abuse_statistics(
     db_pool=Depends(get_db_pool),
 ):
     """Get abuse detection statistics."""
-    async with db_pool.acquire() as conn:
+    # A missing filter is an intentional platform-admin cross-tenant aggregate.
+    async with acquire_with_tenant(
+        db_pool, str(tenant_id) if tenant_id is not None else None
+    ) as conn:
         # Base query conditions
         tenant_filter = "AND tenant_id = $1" if tenant_id else ""
         params = [tenant_id] if tenant_id else []
@@ -461,7 +470,10 @@ async def list_abuse_rules(
 
     query += " ORDER BY priority ASC, created_at DESC"
 
-    async with db_pool.acquire() as conn:
+    # Global rules have tenant_id=NULL and therefore need the platform scope.
+    async with acquire_with_tenant(
+        db_pool, str(tenant_id) if tenant_id is not None else None
+    ) as conn:
         rows = await conn.fetch(query, *params)
 
     return [
@@ -519,7 +531,10 @@ async def create_abuse_rule(
             detail=f"Invalid action_on_trigger. Must be one of: {valid_actions}"
         )
 
-    async with db_pool.acquire() as conn:
+    # Creating a global rule (tenant_id=NULL) is a platform-internal write.
+    async with acquire_with_tenant(
+        db_pool, str(tenant_id) if tenant_id is not None else None
+    ) as conn:
         row = await conn.fetchrow(
             """
             INSERT INTO abuse_detection_rules (
@@ -582,7 +597,8 @@ async def update_abuse_rule(
 ):
     """Update an abuse detection rule."""
 
-    async with db_pool.acquire() as conn:
+    # The platform-admin route resolves an ID before its tenant is known.
+    async with acquire_with_tenant(db_pool, None) as conn:
         row = await conn.fetchrow(
             """
             UPDATE abuse_detection_rules
@@ -643,7 +659,8 @@ async def delete_abuse_rule(
     db_pool=Depends(get_db_pool),
 ):
     """Delete an abuse detection rule."""
-    async with db_pool.acquire() as conn:
+    # The platform-admin route resolves an ID before its tenant is known.
+    async with acquire_with_tenant(db_pool, None) as conn:
         result = await conn.execute(
             "DELETE FROM abuse_detection_rules WHERE id = $1",
             rule_id,
@@ -696,7 +713,10 @@ async def get_abuse_alerts(
     params.append(limit)
     query += f" LIMIT ${len(params)}"
 
-    async with db_pool.acquire() as conn:
+    # A missing filter is an intentional platform-admin cross-tenant scan.
+    async with acquire_with_tenant(
+        db_pool, str(tenant_id) if tenant_id is not None else None
+    ) as conn:
         rows = await conn.fetch(query, *params)
 
     return [

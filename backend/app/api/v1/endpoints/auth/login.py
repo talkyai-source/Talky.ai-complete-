@@ -7,6 +7,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 
 from app.api.v1.dependencies import get_audit_logger, get_db_client
+from app.core.db_utils import acquire_with_tenant
 from app.core.postgres_adapter import Client
 from app.core.security.lockout import (
     check_account_locked,
@@ -59,7 +60,8 @@ async def login(
     ua = get_user_agent(request)
     normalised_email = body.email.lower()
 
-    async with db_client.pool.acquire() as conn:
+    # Authentication starts with an email, before a tenant identity is known.
+    async with acquire_with_tenant(db_client.pool, None) as conn:
         # --- per-account lockout check -----------------------------------------
         locked_until = await check_account_locked(conn, normalised_email)
         if locked_until is not None:
@@ -303,7 +305,7 @@ async def login(
     from ._shared import set_session_cookie as _set_session_cookie
     _set_session_cookie(resp, raw_session_token)
 
-    async with db_client.pool.acquire() as conn:
+    async with acquire_with_tenant(db_client.pool, tenant_id) as conn:
         await issue_cookie_auth(
             resp,
             conn,

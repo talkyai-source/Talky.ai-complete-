@@ -26,6 +26,7 @@ from fastapi import Cookie, Depends, HTTPException, Header, status, Request
 import asyncpg
 
 from app.core.container import get_db_pool_from_container
+from app.core.db_utils import acquire_with_tenant
 from app.core.jwt_security import JWTValidationError, decode_and_validate_token
 from app.core.security.device_fingerprint import generate_device_fingerprint
 from app.core.security.sessions import (
@@ -170,7 +171,9 @@ async def _resolve_cookie_session(
         }
 
     fingerprint = generate_device_fingerprint(request)
-    async with db_client.pool.acquire() as conn:
+    # Session validation runs before a tenant can be trusted; token/fingerprint
+    # predicates provide the lookup boundary until the profile supplies tenant_id.
+    async with acquire_with_tenant(db_client.pool, None) as conn:
         return await validate_session(
             conn,
             raw_session_token,
@@ -267,7 +270,10 @@ async def get_current_user(
                         detail="Session mismatch",
                     )
             else:
-                async with resolve_db_client().pool.acquire() as conn:
+                # JWT/session binding is pre-tenant and restricted by both IDs.
+                async with acquire_with_tenant(
+                    resolve_db_client().pool, None
+                ) as conn:
                     session = await get_session_by_id(conn, token_session_id, user_id=user_id)
                 if not session:
                     raise HTTPException(
@@ -308,7 +314,8 @@ async def get_current_user(
     # compute_tenant_minutes_used(), matching the dashboard endpoint.
     try:
         client = resolve_db_client()
-        async with client.pool.acquire() as conn:
+        # The profile is what discovers the tenant for this authenticated user.
+        async with acquire_with_tenant(client.pool, None) as conn:
             row = await conn.fetchrow(
                 """
                 SELECT up.id, up.email, up.name, up.role, up.tenant_id,
@@ -550,7 +557,7 @@ async def require_tenant_member(
     # outside), so the name must be resolved explicitly.
     from app.core.security.tenant_isolation import validate_tenant_access
 
-    async with get_db_client().pool.acquire() as conn:
+    async with acquire_with_tenant(get_db_client().pool, str(tenant_id)) as conn:
         has_access = await validate_tenant_access(conn, current_user.id, tenant_id)
 
     if not has_access:
@@ -589,7 +596,9 @@ async def load_user_permissions(
 
     # Load permissions from database
     if tenant_id:
-        async with get_db_client().pool.acquire() as conn:
+        async with acquire_with_tenant(
+            get_db_client().pool, str(tenant_id)
+        ) as conn:
             perms = await get_user_permissions(conn, current_user.id, tenant_id)
             current_user.set_permissions({p.value for p in perms})
 
@@ -634,7 +643,9 @@ def require_permissions(required_perms: list[str]):
 
         # Load permissions if not cached
         if not user_perms and current_user.tenant_id:
-            async with get_db_client().pool.acquire() as conn:
+            async with acquire_with_tenant(
+                get_db_client().pool, str(current_user.tenant_id)
+            ) as conn:
                 perms = await get_user_permissions(conn, current_user.id, current_user.tenant_id)
                 user_perms = {p.value for p in perms}
                 current_user.set_permissions(user_perms)

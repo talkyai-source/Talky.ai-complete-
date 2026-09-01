@@ -13,6 +13,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 
 from app.api.v1.dependencies import get_db_client
+from app.core.db_utils import acquire_with_tenant
 from app.core.jwt_security import encode_access_token as _encode_access_token
 from app.core.postgres_adapter import Client
 from app.core.security.lockout import check_account_locked, record_login_attempt
@@ -74,7 +75,8 @@ async def verify_mfa_challenge(
             detail="Provide either 'code' (TOTP) or 'recovery_code'.",
         )
 
-    async with db_client.pool.acquire() as conn:
+    # The signed challenge must be resolved before its tenant is known.
+    async with acquire_with_tenant(db_client.pool, None) as conn:
         # --- Resolve and validate the challenge token -------------------------
         challenge = await resolve_mfa_challenge(conn, body.challenge_token)
 
@@ -285,7 +287,7 @@ async def verify_mfa_challenge(
     #
     # A fresh connection is acquired because the one used above is scoped to
     # the transaction block that created the session and is already released.
-    async with db_client.pool.acquire() as cookie_conn:
+    async with acquire_with_tenant(db_client.pool, tenant_id) as cookie_conn:
         await issue_cookie_auth(
             response,
             cookie_conn,

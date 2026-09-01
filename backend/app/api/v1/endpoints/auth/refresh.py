@@ -7,6 +7,7 @@ from typing import Optional
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response, status
 
 from app.api.v1.dependencies import get_db_client
+from app.core.db_utils import acquire_with_tenant
 from app.core.jwt_security import ACCESS_TOKEN_TTL_MINUTES, encode_access_token
 from app.core.postgres_adapter import Client
 from app.core.security.cookies import (
@@ -48,7 +49,8 @@ async def refresh(
     ip = get_client_ip(request)
     ua = get_user_agent(request)
 
-    async with db_client.pool.acquire() as conn:
+    # The opaque refresh cookie must be resolved before its tenant is known.
+    async with acquire_with_tenant(db_client.pool, None) as conn:
         result = await rotate_refresh_token(
             conn,
             presented_token=talky_rt,

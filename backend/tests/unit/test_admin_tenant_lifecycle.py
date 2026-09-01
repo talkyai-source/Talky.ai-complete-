@@ -71,6 +71,11 @@ class FakeConn:
 
     def _record(self, method: str, sql: str, args: tuple):
         self.queries.append((method, " ".join(sql.split()), args))
+        # ``acquire_with_tenant`` establishes transaction-local RLS context
+        # before the endpoint statement. Model PostgreSQL's SET command tag
+        # instead of teaching each endpoint responder about connection setup.
+        if method == "execute" and sql.lstrip().upper().startswith("SET LOCAL "):
+            return "SET"
         return self._responder(method, sql, args)
 
     async def fetch(self, sql, *args):

@@ -14,6 +14,8 @@ from uuid import UUID, uuid4
 import asyncpg
 from pydantic import BaseModel, field_validator
 
+from app.core.db_utils import acquire_with_tenant
+
 logger = logging.getLogger(__name__)
 
 
@@ -303,7 +305,8 @@ class AuditLogger:
 
     async def _get_previous_hash(self) -> str:
         """Get hash of most recent audit log entry"""
-        async with self.db_pool.acquire() as conn:
+        # The tamper-evident chain is platform-wide, not per tenant.
+        async with acquire_with_tenant(self.db_pool, None) as conn:
             row = await conn.fetchrow(
                 "SELECT entry_hash FROM audit_logs ORDER BY event_time DESC LIMIT 1"
             )
@@ -548,7 +551,9 @@ class AuditLogger:
         # operational alerts (Network / API / Campaign / System); leave
         # NULL for security-only events that should stay in the admin
         # security panel.
-        async with self.db_pool.acquire() as conn:
+        async with acquire_with_tenant(
+            self.db_pool, str(tenant_uuid) if tenant_uuid is not None else None
+        ) as conn:
             await conn.execute(
                 """
                 INSERT INTO security_events (
@@ -625,7 +630,8 @@ class AuditLogger:
             )
         """
 
-        async with self.db_pool.acquire() as conn:
+        # One batch can contain several tenants and platform (NULL-tenant) rows.
+        async with acquire_with_tenant(self.db_pool, None) as conn:
             try:
                 await conn.executemany(sql, rows)
                 return
@@ -727,7 +733,10 @@ class AuditLogger:
         """
         params.extend([limit, offset])
 
-        async with self.db_pool.acquire() as conn:
+        # A missing tenant is an explicit platform-audit query across tenants.
+        async with acquire_with_tenant(
+            self.db_pool, str(tenant_id) if tenant_id is not None else None
+        ) as conn:
             rows = await conn.fetch(query, *params)
 
         return [AuditLogEntry(**dict(row)) for row in rows]
@@ -739,7 +748,8 @@ class AuditLogger:
         Returns:
             dict with verification results
         """
-        async with self.db_pool.acquire() as conn:
+        # The tamper-evident chain is verified across the entire platform.
+        async with acquire_with_tenant(self.db_pool, None) as conn:
             rows = await conn.fetch(
                 "SELECT event_id, event_time, event_type, actor_id, action, previous_hash, entry_hash FROM audit_logs ORDER BY event_time"
             )

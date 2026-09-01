@@ -41,6 +41,7 @@ from functools import wraps
 from fastapi import Depends, HTTPException, status, Request
 
 from app.api.v1.dependencies import CurrentUser, get_current_user
+from app.core.db_utils import acquire_with_tenant
 from app.core.postgres_adapter import Client
 
 logger = logging.getLogger(__name__)
@@ -612,7 +613,9 @@ async def get_effective_permissions(
     the caller, which must fail closed rather than substitute Python defaults.
     """
 
-    async with pool.acquire() as conn:
+    async with acquire_with_tenant(
+        pool, str(tenant_id) if tenant_id is not None else None
+    ) as conn:
         return await get_user_permissions(conn, user_id, tenant_id)
 
 
@@ -669,7 +672,8 @@ async def rbac_data_is_seeded(pool) -> bool:
     if cached is not None and (now - cached[0]) < _SEEDING_PROBE_TTL_SECONDS:
         return cached[1]
 
-    async with pool.acquire() as conn:
+    # Seeding is a deployment-wide property and intentionally spans tenants.
+    async with acquire_with_tenant(pool, None) as conn:
         row = await conn.fetchrow(
             """
             SELECT

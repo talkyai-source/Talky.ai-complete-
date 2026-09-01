@@ -20,6 +20,8 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.keywrap import aes_key_unwrap, aes_key_wrap
 from pydantic import BaseModel
 
+from app.core.db_utils import acquire_with_tenant
+
 logger = logging.getLogger(__name__)
 
 
@@ -245,7 +247,9 @@ class SecretsManager:
         # Determine tenant_id from owner
         tenant_id = owner_uuid if owner_type == "tenant" else None
 
-        async with self.db_pool.acquire() as conn:
+        async with acquire_with_tenant(
+            self.db_pool, str(tenant_id) if tenant_id is not None else None
+        ) as conn:
             await conn.execute(
                 """
                 INSERT INTO tenant_secrets (
@@ -309,7 +313,9 @@ class SecretsManager:
         secret_uuid = UUID(secret_id) if isinstance(secret_id, str) else secret_id
         accessor_uuid = UUID(accessed_by) if isinstance(accessed_by, str) else accessed_by
 
-        async with self.db_pool.acquire() as conn:
+        # Secret IDs are opaque platform identifiers; this legacy method has no
+        # tenant input, so its platform caller must cross the strict RLS boundary.
+        async with acquire_with_tenant(self.db_pool, None) as conn:
             row = await conn.fetchrow(
                 "SELECT * FROM tenant_secrets WHERE secret_id = $1",
                 secret_uuid
@@ -394,7 +400,9 @@ class SecretsManager:
         secret_uuid = UUID(secret_id) if isinstance(secret_id, str) else secret_id
         tenant_uuid = _coerce_tenant_uuid(tenant_id)
 
-        async with self.db_pool.acquire() as conn:
+        async with acquire_with_tenant(
+            self.db_pool, str(tenant_id) if tenant_id is not None else None
+        ) as conn:
             row = await conn.fetchrow(
                 """
                 SELECT secret_id, tenant_id, secret_type, secret_name, description,
@@ -472,7 +480,9 @@ class SecretsManager:
         admin_uuid = UUID(rotated_by) if isinstance(rotated_by, str) else rotated_by
         tenant_uuid = _coerce_tenant_uuid(tenant_id)
 
-        async with self.db_pool.acquire() as conn:
+        async with acquire_with_tenant(
+            self.db_pool, str(tenant_uuid) if tenant_uuid is not None else None
+        ) as conn:
             # Get current secret — scoped to the caller's tenant when supplied
             # so a cross-tenant secret is indistinguishable from a missing one.
             row = await conn.fetchrow(
@@ -572,7 +582,9 @@ class SecretsManager:
         admin_uuid = UUID(revoked_by) if isinstance(revoked_by, str) else revoked_by
         tenant_uuid = _coerce_tenant_uuid(tenant_id)
 
-        async with self.db_pool.acquire() as conn:
+        async with acquire_with_tenant(
+            self.db_pool, str(tenant_uuid) if tenant_uuid is not None else None
+        ) as conn:
             row = await conn.fetchrow(
                 "SELECT tenant_id FROM tenant_secrets "
                 "WHERE secret_id = $1 AND ($2::uuid IS NULL OR tenant_id = $2)",
@@ -634,7 +646,9 @@ class SecretsManager:
         reporter_uuid = UUID(reported_by) if isinstance(reported_by, str) else reported_by
         tenant_uuid = _coerce_tenant_uuid(tenant_id)
 
-        async with self.db_pool.acquire() as conn:
+        async with acquire_with_tenant(
+            self.db_pool, str(tenant_uuid) if tenant_uuid is not None else None
+        ) as conn:
             row = await conn.fetchrow(
                 "SELECT tenant_id FROM tenant_secrets "
                 "WHERE secret_id = $1 AND ($2::uuid IS NULL OR tenant_id = $2)",
@@ -699,7 +713,9 @@ class SecretsManager:
         api_key_hash = self._hash_api_key(api_key)
         prefix = api_key[:16]
 
-        async with self.db_pool.acquire() as conn:
+        # Public API-key validation must search the platform key set before it
+        # can know which tenant owns the presented key.
+        async with acquire_with_tenant(self.db_pool, None) as conn:
             # Find matching secrets by prefix
             rows = await conn.fetch(
                 """
@@ -811,7 +827,10 @@ class SecretsManager:
             ORDER BY created_at DESC
         """
 
-        async with self.db_pool.acquire() as conn:
+        # A missing tenant is reserved for an explicit platform-admin listing.
+        async with acquire_with_tenant(
+            self.db_pool, str(tenant_id) if tenant_id is not None else None
+        ) as conn:
             rows = await conn.fetch(query, *params)
 
         return [self._row_to_metadata(row) for row in rows]
@@ -865,7 +884,9 @@ class SecretsManager:
         cutoff = datetime.utcnow() + timedelta(days=days)
         tenant_uuid = _coerce_tenant_uuid(tenant_id)
 
-        async with self.db_pool.acquire() as conn:
+        async with acquire_with_tenant(
+            self.db_pool, str(tenant_uuid) if tenant_uuid is not None else None
+        ) as conn:
             rows = await conn.fetch(
                 """
                 SELECT secret_id, tenant_id, secret_type, secret_name, description,

@@ -11,6 +11,8 @@ import redis.asyncio as aioredis
 import asyncpg
 from pydantic import BaseModel
 
+from app.core.db_utils import acquire_with_tenant
+
 
 class SuspensionType(str, Enum):
     """Types of suspension"""
@@ -163,7 +165,8 @@ class SuspensionService:
         if duration_hours and suspension_type in self.AUTO_RESTORE_TYPES:
             suspended_until = datetime.utcnow() + timedelta(hours=duration_hours)
 
-        async with self.db_pool.acquire() as conn:
+        # Platform suspension starts from a user id before tenant discovery.
+        async with acquire_with_tenant(self.db_pool, None) as conn:
             async with conn.transaction():
                 # Create suspension event
                 suspension_id = uuid4()
@@ -252,7 +255,7 @@ class SuspensionService:
         if duration_hours and suspension_type in self.AUTO_RESTORE_TYPES:
             suspended_until = datetime.utcnow() + timedelta(hours=duration_hours)
 
-        async with self.db_pool.acquire() as conn:
+        async with acquire_with_tenant(self.db_pool, str(tenant_uuid)) as conn:
             async with conn.transaction():
                 # Create suspension event
                 suspension_id = uuid4()
@@ -363,7 +366,8 @@ class SuspensionService:
         if duration_hours and suspension_type in self.AUTO_RESTORE_TYPES:
             suspended_until = datetime.utcnow() + timedelta(hours=duration_hours)
 
-        async with self.db_pool.acquire() as conn:
+        # A partner suspension deliberately spans every tenant it owns.
+        async with acquire_with_tenant(self.db_pool, None) as conn:
             async with conn.transaction():
                 # Create suspension event
                 suspension_id = uuid4()
@@ -471,7 +475,8 @@ class SuspensionService:
         user_uuid = UUID(user_id) if isinstance(user_id, str) else user_id
         admin_uuid = UUID(restored_by) if isinstance(restored_by, str) else restored_by
 
-        async with self.db_pool.acquire() as conn:
+        # Platform restoration is keyed by user id before tenant discovery.
+        async with acquire_with_tenant(self.db_pool, None) as conn:
             async with conn.transaction():
                 # Get active suspension
                 suspension = await conn.fetchrow(
@@ -542,7 +547,7 @@ class SuspensionService:
         tenant_uuid = UUID(tenant_id) if isinstance(tenant_id, str) else tenant_id
         admin_uuid = UUID(restored_by) if isinstance(restored_by, str) else restored_by
 
-        async with self.db_pool.acquire() as conn:
+        async with acquire_with_tenant(self.db_pool, str(tenant_uuid)) as conn:
             async with conn.transaction():
                 # Get active suspension
                 suspension = await conn.fetchrow(
@@ -696,7 +701,8 @@ class SuspensionService:
         partner_uuid = UUID(partner_id) if isinstance(partner_id, str) else partner_id
         admin_uuid = UUID(restored_by) if isinstance(restored_by, str) else restored_by
 
-        async with self.db_pool.acquire() as conn:
+        # A partner restoration deliberately spans every tenant it owns.
+        async with acquire_with_tenant(self.db_pool, None) as conn:
             async with conn.transaction():
                 # Get active suspension
                 suspension = await conn.fetchrow(

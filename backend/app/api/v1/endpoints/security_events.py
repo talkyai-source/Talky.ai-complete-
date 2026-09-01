@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app.api.v1.dependencies import get_audit_logger, get_db_pool, require_permissions
+from app.core.db_utils import acquire_with_tenant
 from app.domain.services.audit_logger import AuditEvent, AuditLogger
 
 router = APIRouter(prefix="/admin/security-events", tags=["Security Events"])
@@ -153,7 +154,8 @@ async def list_security_events(
     """
     params.extend([limit, offset])
 
-    async with db_pool.acquire() as conn:
+    # A tenant-less platform operator is the only legitimate cross-tenant case.
+    async with acquire_with_tenant(db_pool, scoped_tenant_id) as conn:
         rows = await conn.fetch(query, *params)
     return [_row_to_response(row) for row in rows]
 
@@ -165,7 +167,9 @@ async def get_security_event(
     db_pool=Depends(get_db_pool),
 ):
     """Get a specific security event"""
-    async with db_pool.acquire() as conn:
+    user_tenant_id = current_user.get("tenant_id")
+    # A tenant-less platform operator may resolve an event before its tenant is known.
+    async with acquire_with_tenant(db_pool, user_tenant_id) as conn:
         row = await conn.fetchrow(
             "SELECT * FROM security_events WHERE event_id = $1",
             event_id,
@@ -175,7 +179,6 @@ async def get_security_event(
     # Compare as strings — asyncpg returns uuid columns as `uuid.UUID` while
     # current_user.tenant_id is a string from the JWT, so a direct `!=` would
     # always trip and 403 the legitimate owner.
-    user_tenant_id = current_user.get("tenant_id")
     if user_tenant_id and str(row["tenant_id"]) != str(user_tenant_id):
         raise HTTPException(status_code=403, detail="Cannot access other tenant events")
     return _row_to_response(row)
@@ -204,7 +207,8 @@ async def create_security_event(
             status_code=403, detail="Cannot access other tenant events"
         )
     scoped_tenant_id = _user_tenant_id or data.tenant_id
-    async with db_pool.acquire() as conn:
+    # A tenant-less platform operator may create a platform-level event.
+    async with acquire_with_tenant(db_pool, scoped_tenant_id) as conn:
         row = await conn.fetchrow(
             """
             INSERT INTO security_events (
@@ -271,18 +275,16 @@ async def update_security_event(
     if not assignments:
         raise HTTPException(status_code=400, detail="No updates provided")
 
-    # Object-level authz: security_events has no RLS, so scope the mutation to
-    # the caller's tenant. A cross-tenant event_id then updates zero rows and
-    # returns not-found — indistinguishable from a nonexistent event. A caller
-    # with no tenant in their token (platform admin) stays unscoped, matching
-    # the read endpoints above.
+    # Keep the explicit tenant predicate as defence in depth alongside RLS. A
+    # cross-tenant event_id updates zero rows; a tenant-less platform admin is
+    # intentionally unscoped.
     params.append(event_id)
     tenant_clause = f"WHERE event_id = ${idx}"
     scoped_tenant_id = current_user.get("tenant_id")
     if scoped_tenant_id:
         params.append(scoped_tenant_id)
         tenant_clause += f" AND tenant_id = ${idx + 1}"
-    async with db_pool.acquire() as conn:
+    async with acquire_with_tenant(db_pool, scoped_tenant_id) as conn:
         row = await conn.fetchrow(
             f"""
             UPDATE security_events
@@ -320,15 +322,14 @@ async def resolve_security_event(
     db_pool=Depends(get_db_pool),
 ):
     """Mark a security event as resolved"""
-    # Scope to the caller's tenant so another tenant's event resolves as
-    # not-found rather than being mutated (security_events has no RLS).
+    # Keep the explicit tenant predicate as defence in depth alongside RLS.
     params = [datetime.utcnow(), current_user["id"], resolution_notes, event_id]
     tenant_clause = "WHERE event_id = $4"
     scoped_tenant_id = current_user.get("tenant_id")
     if scoped_tenant_id:
         params.append(scoped_tenant_id)
         tenant_clause += " AND tenant_id = $5"
-    async with db_pool.acquire() as conn:
+    async with acquire_with_tenant(db_pool, scoped_tenant_id) as conn:
         row = await conn.fetchrow(
             f"""
             UPDATE security_events
@@ -368,7 +369,7 @@ async def get_open_alerts(
     if scoped_tenant_id:
         tenant_clause = "AND tenant_id = $1"
         params.append(scoped_tenant_id)
-    async with db_pool.acquire() as conn:
+    async with acquire_with_tenant(db_pool, scoped_tenant_id) as conn:
         rows = await conn.fetch(
             f"""
             SELECT *
@@ -401,7 +402,7 @@ async def get_overdue_alerts(
     if scoped_tenant_id:
         tenant_clause = "AND tenant_id = $2"
         params.append(scoped_tenant_id)
-    async with db_pool.acquire() as conn:
+    async with acquire_with_tenant(db_pool, scoped_tenant_id) as conn:
         rows = await conn.fetch(
             f"""
             SELECT *
@@ -429,15 +430,14 @@ async def escalate_event(
     db_pool=Depends(get_db_pool),
 ):
     """Escalate a security event to senior team"""
-    # Scope to the caller's tenant so a cross-tenant event_id escalates zero
-    # rows and returns not-found (security_events has no RLS).
+    # Keep the explicit tenant predicate as defence in depth alongside RLS.
     params = [reason, event_id]
     tenant_clause = "WHERE event_id = $2"
     scoped_tenant_id = current_user.get("tenant_id")
     if scoped_tenant_id:
         params.append(scoped_tenant_id)
         tenant_clause += " AND tenant_id = $3"
-    async with db_pool.acquire() as conn:
+    async with acquire_with_tenant(db_pool, scoped_tenant_id) as conn:
         row = await conn.fetchrow(
             f"""
             UPDATE security_events

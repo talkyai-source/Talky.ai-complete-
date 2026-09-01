@@ -20,6 +20,7 @@ from app.api.v1.dependencies import (
     load_user_permissions,
     require_role,
 )
+from app.core.db_utils import acquire_with_tenant
 from app.core.postgres_adapter import Client
 from app.core.security.rbac import get_user_role_in_tenant, normalize_role
 from app.core.security.tenant_isolation import validate_tenant_access
@@ -49,7 +50,9 @@ async def get_my_tenants(
     db_client: Client = Depends(get_db_client),
 ) -> List[Dict[str, Any]]:
     """Get all tenants the current user belongs to."""
-    async with db_client.pool.acquire() as conn:
+    # This self-only query intentionally spans every tenant membership owned
+    # by the authenticated user; the explicit user_id predicate is mandatory.
+    async with acquire_with_tenant(db_client.pool, None) as conn:
         tenants = await get_user_tenants(conn, current_user.id, include_pending=True)
 
     return tenants
@@ -83,7 +86,7 @@ async def get_user_permissions_endpoint(
             )
 
         # Verify target user is in the tenant
-        async with db_client.pool.acquire() as conn:
+        async with acquire_with_tenant(db_client.pool, str(query_tenant_id)) as conn:
             target_in_tenant = await validate_tenant_access(conn, user_id, query_tenant_id)
 
         if not target_in_tenant:
@@ -93,7 +96,10 @@ async def get_user_permissions_endpoint(
             )
 
     # Get user's role and permissions
-    async with db_client.pool.acquire() as conn:
+    async with acquire_with_tenant(
+        db_client.pool,
+        str(query_tenant_id) if query_tenant_id is not None else None,
+    ) as conn:
         user_role = await get_user_role_in_tenant(conn, user_id, query_tenant_id)
         perms = await get_user_permissions(conn, user_id, query_tenant_id)
 

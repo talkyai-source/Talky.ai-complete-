@@ -11,6 +11,33 @@ from cryptography.fernet import Fernet
 # Generate a valid Fernet key for testing
 TEST_FERNET_KEY = Fernet.generate_key().decode()
 os.environ["CONNECTOR_ENCRYPTION_KEY"] = TEST_FERNET_KEY
+TENANT_ID = "00000000-0000-0000-0000-000000000001"
+
+
+class _FakeDbConnection:
+    def __init__(self):
+        self.queries = []
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_args):
+        return False
+
+    def transaction(self):
+        return self
+
+    async def execute(self, query, *args):
+        self.queries.append((query, args))
+        return "UPDATE 1"
+
+
+class _FakeDbPool:
+    def __init__(self):
+        self.connection = _FakeDbConnection()
+
+    def acquire(self):
+        return self.connection
 
 
 class TestEmailServiceImports:
@@ -231,3 +258,24 @@ class TestSingletonHelper:
         service = get_email_service(mock_supabase)
         
         assert isinstance(service, EmailService)
+
+
+@pytest.mark.asyncio
+async def test_action_status_update_is_tenant_scoped():
+    from app.services.email_service import EmailService
+
+    pool = _FakeDbPool()
+    service = EmailService(pool)
+    await service._update_action_status(
+        tenant_id=TENANT_ID,
+        action_id="action-1",
+        status="completed",
+    )
+
+    query, args = next(
+        (query, args)
+        for query, args in pool.connection.queries
+        if "UPDATE assistant_actions" in query
+    )
+    assert "AND tenant_id = $3" in query
+    assert args == ("completed", "action-1", TENANT_ID)

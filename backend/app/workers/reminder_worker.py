@@ -251,7 +251,7 @@ class ReminderWorker:
 
         logger.info(f"Processing reminder {reminder_id}: {reminder_type} for {meeting_title}")
 
-        async with self._db_pool.acquire() as conn:
+        async with acquire_with_tenant(self._db_pool, tenant_id) as conn:
             # Mark as processing
             await conn.execute(
                 "UPDATE reminders SET status = 'processing', idempotency_key = $1 WHERE id = $2",

@@ -32,6 +32,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, EmailStr, Field
 
 from app.api.v1.dependencies import get_audit_logger, get_db_client
+from app.core.db_utils import acquire_with_tenant
 from app.core.postgres_adapter import Client
 from app.core.security.password import (
     PasswordValidationError,
@@ -243,7 +244,8 @@ async def forgot_password(
         # additional emails arriving; that's the intended behaviour.
         return generic_ok
 
-    async with db_client.pool.acquire() as conn:
+    # Password recovery starts with an email, before a tenant is known.
+    async with acquire_with_tenant(db_client.pool, None) as conn:
         user_row = await conn.fetchrow(
             "SELECT id FROM user_profiles WHERE LOWER(email) = $1",
             email,
@@ -379,7 +381,9 @@ async def reset_password(
 
     new_hash = hash_password(new_password)
 
-    async with db_client.pool.acquire() as conn:
+    # The signed Redis recovery record identifies a user, but carries no
+    # tenant claim; resolve and mutate it under the narrow pre-auth scope.
+    async with acquire_with_tenant(db_client.pool, None) as conn:
         # Re-confirm the user still exists and the email hasn't changed.
         row = await conn.fetchrow(
             "SELECT id FROM user_profiles WHERE id = $1 AND LOWER(email) = $2",

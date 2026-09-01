@@ -17,7 +17,10 @@ from app.api.v1.endpoints.rbac.schemas import AddTenantUserRequest, UpdateTenant
 from app.api.v1.endpoints.rbac.tenant_users import add_user_to_tenant, update_tenant_user
 
 
-def _tenant_admin_user(tenant_id: str = "tenant-1", user_id: str = "caller-1") -> CurrentUser:
+def _tenant_admin_user(
+    tenant_id: str = "00000000-0000-0000-0000-000000000001",
+    user_id: str = "caller-1",
+) -> CurrentUser:
     return CurrentUser(id=user_id, email="admin@example.com", tenant_id=tenant_id, role="tenant_admin")
 
 
@@ -34,7 +37,16 @@ class _FakeConnCtx:
         return False
 
 
+class _FakeTransaction:
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+
 def _fake_db_client(conn) -> MagicMock:
+    conn.transaction = MagicMock(return_value=_FakeTransaction())
     db_client = MagicMock()
     db_client.pool.acquire = MagicMock(return_value=_FakeConnCtx(conn))
     return db_client

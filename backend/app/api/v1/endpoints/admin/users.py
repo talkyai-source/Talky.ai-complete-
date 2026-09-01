@@ -23,6 +23,7 @@ from app.api.v1.dependencies import (
     get_db_client,
     require_platform_admin,
 )
+from app.core.db_utils import acquire_with_tenant
 from app.core.postgres_adapter import Client
 from app.core.security.password import hash_password
 from app.domain.services.audit_logger import AuditEvent, AuditLogger
@@ -146,7 +147,8 @@ async def list_users(
         + f"LIMIT ${limit_idx} OFFSET ${offset_idx}"
     )
 
-    async with db_client.pool.acquire() as conn:
+    # This platform-admin directory intentionally spans every tenant.
+    async with acquire_with_tenant(db_client.pool, None) as conn:
         rows = await conn.fetch(query, *params)
 
     return [AdminUserItem(**dict(r)) for r in rows]
@@ -159,7 +161,8 @@ async def get_user(
     db_client: Client = Depends(get_db_client),
 ):
     """Get a single user by id (admin only)."""
-    async with db_client.pool.acquire() as conn:
+    # The platform-admin route resolves an ID before its tenant is known.
+    async with acquire_with_tenant(db_client.pool, None) as conn:
         user = await _fetch_user(conn, user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
@@ -183,7 +186,11 @@ async def create_user(
     name = body.name.strip()
     pw_hash = hash_password(body.password)
 
-    async with db_client.pool.acquire() as conn:
+    # Platform admins may create a tenant-less platform user; otherwise scope
+    # every tenant-owned read/write to the explicitly requested tenant.
+    async with acquire_with_tenant(
+        db_client.pool, str(body.tenant_id) if body.tenant_id else None
+    ) as conn:
         if body.tenant_id:
             tenant = await conn.fetchrow("SELECT id FROM tenants WHERE id = $1", body.tenant_id)
             if not tenant:
@@ -239,7 +246,8 @@ async def update_user(
     if body.name is None and body.role is None and body.is_active is None:
         raise HTTPException(status_code=400, detail="No fields to update")
 
-    async with db_client.pool.acquire() as conn:
+    # The platform-admin route resolves an ID before its tenant is known.
+    async with acquire_with_tenant(db_client.pool, None) as conn:
         current = await conn.fetchrow(
             "SELECT id, role, is_active FROM user_profiles WHERE id = $1", user_id
         )
@@ -327,7 +335,8 @@ async def delete_user(
     (calls, audit logs, …) the FK constraint makes a hard delete unsafe, so we
     fall back to deactivating the account and report that in the response.
     """
-    async with db_client.pool.acquire() as conn:
+    # The platform-admin route resolves an ID before its tenant is known.
+    async with acquire_with_tenant(db_client.pool, None) as conn:
         current = await conn.fetchrow(
             "SELECT id, email, role FROM user_profiles WHERE id = $1", user_id
         )

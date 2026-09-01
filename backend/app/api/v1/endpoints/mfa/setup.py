@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.api.v1.dependencies import CurrentUser, get_current_user, get_db_client
+from app.core.db_utils import acquire_with_tenant
 from app.core.postgres_adapter import Client
 from app.core.security.recovery import (
     format_recovery_code,
@@ -53,7 +54,7 @@ async def setup_mfa(
 
     OWASP: A new setup overwrites any existing pending (unconfirmed) secret.
     """
-    async with db_client.pool.acquire() as conn:
+    async with acquire_with_tenant(db_client.pool, current_user.tenant_id) as conn:
         # P3.3 — refuse to silently downgrade an account that already has
         # confirmed MFA. The previous UPSERT would reset enabled=TRUE rows
         # back to FALSE, leaving the account briefly without 2FA AND
@@ -136,7 +137,7 @@ async def confirm_mfa(
 
     OWASP: Recovery codes must be provided at setup time.
     """
-    async with db_client.pool.acquire() as conn:
+    async with acquire_with_tenant(db_client.pool, current_user.tenant_id) as conn:
         # Load the pending MFA record
         row = await conn.fetchrow(
             """

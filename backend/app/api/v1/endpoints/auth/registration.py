@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 
 from app.api.v1.dependencies import get_audit_logger, get_db_client
 from app.core.config import get_settings
+from app.core.db_utils import acquire_with_tenant
 from app.core.postgres_adapter import Client
 from app.core.security.password import (
     PasswordValidationError,
@@ -72,7 +73,8 @@ async def register(
     # Plan upgrades are made later via the dashboard.
     forced_plan_id = "free"
 
-    async with db_client.pool.acquire() as conn:
+    # The tenant is created in this transaction, so no tenant UUID exists yet.
+    async with acquire_with_tenant(db_client.pool, None) as conn:
         plan = await conn.fetchrow(
             "SELECT id, minutes FROM plans WHERE id = $1", forced_plan_id
         )

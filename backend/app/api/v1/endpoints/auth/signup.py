@@ -21,6 +21,7 @@ import uuid
 from fastapi import APIRouter, Body, Depends, HTTPException, Request, Response, status
 
 from app.api.v1.dependencies import get_audit_logger, get_db_client
+from app.core.db_utils import acquire_with_tenant
 from app.core.postgres_adapter import Client
 from app.core.security.password import (
     PasswordValidationError,
@@ -94,7 +95,8 @@ async def signup_start(
     email = body.email.strip().lower()
 
     # Reject if a real account with this email already exists.
-    async with db_client.pool.acquire() as conn:
+    # Signup starts with an email, before a tenant identity exists.
+    async with acquire_with_tenant(db_client.pool, None) as conn:
         existing = await conn.fetchrow(
             "SELECT id FROM user_profiles WHERE email = $1", email
         )
@@ -263,7 +265,8 @@ async def signup_complete(
     # All checks passed — create the account. plan_id is hardcoded.
     forced_plan_id = "free"
 
-    async with db_client.pool.acquire() as conn:
+    # The tenant is created in this transaction, so no tenant UUID exists yet.
+    async with acquire_with_tenant(db_client.pool, None) as conn:
         plan = await conn.fetchrow(
             "SELECT id, minutes FROM plans WHERE id = $1", forced_plan_id
         )
@@ -351,7 +354,7 @@ async def signup_complete(
     token = create_jwt(user_id, email, "tenant_admin", str(tenant["id"]), session_id)
     set_session_cookie(response, raw_session_token)
 
-    async with db_client.pool.acquire() as conn:
+    async with acquire_with_tenant(db_client.pool, str(tenant["id"])) as conn:
         await issue_cookie_auth(
             response,
             conn,

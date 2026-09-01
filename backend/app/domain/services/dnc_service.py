@@ -35,6 +35,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Optional
 
+from app.core.db_utils import acquire_with_tenant
 from app.domain.services.phone_number_normalizer import (
     is_strict_e164,
     normalize_e164_digits,
@@ -134,7 +135,9 @@ class DNCService:
         if source not in KNOWN_SOURCES:
             logger.info("dnc_unknown_source source=%s — accepted but not taxonomised", source)
 
-        async with self._db.acquire() as conn:
+        async with acquire_with_tenant(
+            self._db, str(tenant_id) if tenant_id is not None else None
+        ) as conn:
             row = await conn.fetchrow(
                 """
                 INSERT INTO dnc_entries
@@ -210,7 +213,9 @@ class DNCService:
         skipped: list[str] = []
         invalid: list[str] = []
 
-        async with self._db.acquire() as conn:
+        async with acquire_with_tenant(
+            self._db, str(tenant_id) if tenant_id is not None else None
+        ) as conn:
             for raw in numbers:
                 try:
                     normalized = normalize_e164_for_storage(raw)
@@ -248,7 +253,7 @@ class DNCService:
     async def remove(self, *, tenant_id: str, entry_id: str) -> bool:
         """Delete an entry owned by this tenant. Returns True if a row
         was actually deleted (absent rows return False — idempotent)."""
-        async with self._db.acquire() as conn:
+        async with acquire_with_tenant(self._db, str(tenant_id)) as conn:
             result = await conn.execute(
                 "DELETE FROM dnc_entries WHERE tenant_id = $1 AND id = $2",
                 tenant_id,
@@ -278,7 +283,11 @@ class DNCService:
         """.format(
             global_clause="OR tenant_id IS NULL" if include_global else "",
         )
-        async with self._db.acquire() as conn:
+        # Global DNC rows require platform visibility; the SQL remains explicitly
+        # restricted to this tenant plus tenant_id IS NULL.
+        async with acquire_with_tenant(
+            self._db, None if include_global else str(tenant_id)
+        ) as conn:
             rows = await conn.fetch(sql, tenant_id, limit)
         return [_row_to_entry(r) for r in rows]
 
@@ -294,7 +303,8 @@ class DNCService:
         normalized = normalize_e164(e164)
         if not normalized:
             return False
-        async with self._db.acquire() as conn:
+        # Global suppressions must be visible alongside this tenant's rows.
+        async with acquire_with_tenant(self._db, None) as conn:
             row = await conn.fetchrow(
                 """
                 SELECT 1 FROM dnc_entries

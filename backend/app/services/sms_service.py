@@ -10,6 +10,7 @@ from datetime import datetime
 import asyncpg
 import json
 
+from app.core.db_utils import acquire_with_tenant
 from app.infrastructure.connectors.sms import get_vonage_sms_provider, SMSResult
 from app.domain.services.sms_template_manager import (
     get_sms_template_manager,
@@ -77,7 +78,7 @@ class SMSService:
         """
         # Check idempotency
         if idempotency_key:
-            existing = await self._check_idempotency(idempotency_key)
+            existing = await self._check_idempotency(tenant_id, idempotency_key)
             if existing:
                 logger.info(f"SMS already sent with idempotency_key: {idempotency_key}")
                 return {
@@ -122,6 +123,7 @@ class SMSService:
             if result.success:
                 # Update action as completed
                 await self._update_action_status(
+                    tenant_id=tenant_id,
                     action_id=action_id,
                     status="completed",
                     output_data={
@@ -144,6 +146,7 @@ class SMSService:
             else:
                 # Update action as failed
                 await self._update_action_status(
+                    tenant_id=tenant_id,
                     action_id=action_id,
                     status="failed",
                     error=result.error
@@ -161,6 +164,7 @@ class SMSService:
             logger.error(f"Exception sending SMS: {e}", exc_info=True)
             
             await self._update_action_status(
+                tenant_id=tenant_id,
                 action_id=action_id,
                 status="failed",
                 error=str(e)
@@ -209,18 +213,22 @@ class SMSService:
             triggered_by="reminder"
         )
     
-    async def _check_idempotency(self, idempotency_key: str) -> Optional[Dict[str, Any]]:
+    async def _check_idempotency(
+        self, tenant_id: str, idempotency_key: str
+    ) -> Optional[Dict[str, Any]]:
         """Check if an action with this idempotency key already exists."""
         try:
-            async with self.db_pool.acquire() as conn:
+            async with acquire_with_tenant(self.db_pool, str(tenant_id)) as conn:
                 row = await conn.fetchrow(
                     """
                     SELECT id, external_message_id, status 
                     FROM assistant_actions 
                     WHERE type = 'send_sms' 
-                    AND output_data->>'idempotency_key' = $1
+                    AND tenant_id = $1
+                    AND input_data->>'idempotency_key' = $2
                     AND status = 'completed'
                     """,
+                    tenant_id,
                     idempotency_key
                 )
                 return dict(row) if row else None
@@ -247,7 +255,7 @@ class SMSService:
         }
         
         try:
-            async with self.db_pool.acquire() as conn:
+            async with acquire_with_tenant(self.db_pool, str(tenant_id)) as conn:
                 # We need to construct the JSON properly
                 # Inserting directly into table
                 # Note: meeting_id and reminder_id might not have direct columns in assistant_actions
@@ -285,6 +293,7 @@ class SMSService:
     
     async def _update_action_status(
         self,
+        tenant_id: str,
         action_id: str,
         status: str,
         output_data: Optional[Dict[str, Any]] = None,
@@ -295,7 +304,7 @@ class SMSService:
             return
         
         try:
-            async with self.db_pool.acquire() as conn:
+            async with acquire_with_tenant(self.db_pool, str(tenant_id)) as conn:
                 query = "UPDATE assistant_actions SET status = $1, completed_at = NOW()"
                 params = [status]
                 param_idx = 2
@@ -310,8 +319,9 @@ class SMSService:
                     params.append(error)
                     param_idx += 1
                 
-                query += f" WHERE id = ${param_idx}"
+                query += f" WHERE id = ${param_idx} AND tenant_id = ${param_idx + 1}"
                 params.append(action_id)
+                params.append(tenant_id)
                 
                 await conn.execute(query, *params)
                 

@@ -57,6 +57,7 @@ from slowapi import Limiter
 from slowapi.util import get_remote_address
 
 from app.api.v1.dependencies import CurrentUser, get_current_user, get_db_client
+from app.core.db_utils import acquire_with_tenant
 from app.core.jwt_security import encode_access_token
 from app.core.postgres_adapter import Client
 from app.core.security.lockout import check_account_locked, record_login_attempt
@@ -266,7 +267,7 @@ async def register_begin(
     ip = _get_client_ip(request)
     ua = _get_user_agent(request)
 
-    async with db_client.pool.acquire() as conn:
+    async with acquire_with_tenant(db_client.pool, current_user.tenant_id) as conn:
         options = await generate_registration_options(
             conn=conn,
             user_id=current_user.id,
@@ -309,7 +310,7 @@ async def register_complete(
     ip = _get_client_ip(request)
     expected_origin = _validate_passkey_origin(request)
 
-    async with db_client.pool.acquire() as conn:
+    async with acquire_with_tenant(db_client.pool, current_user.tenant_id) as conn:
         # Verify the registration response
         try:
             verified = await verify_registration(
@@ -404,7 +405,8 @@ async def login_begin(
     credential_ids: Optional[list[str]] = None
     user_id: Optional[str] = None
 
-    async with db_client.pool.acquire() as conn:
+    # Both email and discoverable login begin before a tenant is known.
+    async with acquire_with_tenant(db_client.pool, None) as conn:
         if body.email:
             # Look up user by email
             user_row = await conn.fetchrow(
@@ -488,7 +490,8 @@ async def login_complete(
             detail="Missing credential ID in response.",
         )
 
-    async with db_client.pool.acquire() as conn:
+    # The credential must be resolved before its owning tenant is known.
+    async with acquire_with_tenant(db_client.pool, None) as conn:
         # Look up the credential
         credential = await get_credential_by_id(conn, raw_credential_id)
 
@@ -644,7 +647,7 @@ async def login_complete(
     #
     # A fresh connection is acquired because the one above is scoped to the
     # transaction that created the session and is already released.
-    async with db_client.pool.acquire() as cookie_conn:
+    async with acquire_with_tenant(db_client.pool, tenant_id) as cookie_conn:
         await issue_cookie_auth(
             response,
             cookie_conn,
@@ -704,7 +707,7 @@ async def list_passkeys(
       - Backup status (backed_up indicates synced passkey)
       - Last used timestamp
     """
-    async with db_client.pool.acquire() as conn:
+    async with acquire_with_tenant(db_client.pool, current_user.tenant_id) as conn:
         credentials = await get_user_credentials(conn, current_user.id)
 
     passkeys = [
@@ -740,7 +743,7 @@ async def update_passkey(
     Users can rename their passkeys to easily identify them
     (e.g., "Work MacBook", "iPhone 15", "YubiKey Nano").
     """
-    async with db_client.pool.acquire() as conn:
+    async with acquire_with_tenant(db_client.pool, current_user.tenant_id) as conn:
         success = await update_credential_display_name(
             conn, passkey_id, current_user.id, body.display_name
         )
@@ -776,7 +779,7 @@ async def delete_passkey(
     passkey_count. This does NOT revoke the credential from the authenticator
     itself (that's not possible via WebAuthn).
     """
-    async with db_client.pool.acquire() as conn:
+    async with acquire_with_tenant(db_client.pool, current_user.tenant_id) as conn:
         # Check if this is their last passkey
         count_result = await conn.fetchrow(
             "SELECT COUNT(*) as cnt FROM user_passkeys WHERE user_id = $1",

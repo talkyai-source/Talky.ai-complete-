@@ -12,6 +12,14 @@ from app.api.v1.dependencies import get_audit_logger, get_db_client
 from app.api.v1.endpoints.auth.login import router
 
 
+class _FakeTransaction:
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+
 def _find_api_route(app: FastAPI, path: str) -> APIRoute:
     """Locate an APIRoute by full path on any FastAPI/starlette version —
     modern starlette wraps included routers in app.routes instead of
@@ -48,6 +56,7 @@ async def test_login_request_validation_uses_resolved_login_model():
         fetchval=AsyncMock(return_value=0),
         fetchrow=AsyncMock(return_value=None),
         execute=AsyncMock(),
+        transaction=MagicMock(return_value=_FakeTransaction()),
     )
     acquire_context = AsyncMock()
     acquire_context.__aenter__.return_value = conn
@@ -71,3 +80,12 @@ async def test_login_request_validation_uses_resolved_login_model():
 
     assert response.status_code == 401
     assert response.json()["detail"] == "Invalid email or password."
+    rls_statements = [
+        call.args[0]
+        for call in conn.execute.await_args_list
+        if call.args and call.args[0].startswith("SET LOCAL app.")
+    ]
+    assert rls_statements == [
+        "SET LOCAL app.bypass_rls = 'on'",
+        "SET LOCAL app.current_tenant_id = '00000000-0000-0000-0000-000000000000'",
+    ]

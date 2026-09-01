@@ -16,6 +16,38 @@ from app.domain.services.sms_template_manager import (
 )
 from app.infrastructure.connectors.sms import SMSResult
 
+TENANT_ID = "00000000-0000-0000-0000-000000000001"
+
+
+class _FakeDbConnection:
+    def __init__(self):
+        self.queries = []
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_args):
+        return False
+
+    def transaction(self):
+        return self
+
+    async def execute(self, query, *args):
+        self.queries.append((query, args))
+        return "INSERT 0 1"
+
+    async def fetchrow(self, query, *args):
+        self.queries.append((query, args))
+        return None
+
+
+class _FakeDbPool:
+    def __init__(self):
+        self.connection = _FakeDbConnection()
+
+    def acquire(self):
+        return self.connection
+
 
 class TestSMSTemplateManager:
     """Tests for SMSTemplateManager."""
@@ -126,12 +158,8 @@ class TestSMSService:
     
     @pytest.fixture
     def mock_supabase(self):
-        """Create mock Supabase client."""
-        mock = MagicMock()
-        mock.table.return_value.insert.return_value.execute.return_value.data = [{"id": "action-123"}]
-        mock.table.return_value.update.return_value.eq.return_value.execute.return_value = MagicMock()
-        mock.table.return_value.select.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value.data = None
-        return mock
+        """Create an RLS-aware asyncpg-style pool."""
+        return _FakeDbPool()
     
     @pytest.fixture
     def mock_provider(self):
@@ -150,13 +178,30 @@ class TestSMSService:
             yield provider
     
     @pytest.mark.asyncio
+    async def test_idempotency_lookup_is_tenant_scoped(self, mock_provider):
+        pool = _FakeDbPool()
+        service = SMSService(pool)
+        service._provider = mock_provider
+
+        assert await service._check_idempotency(TENANT_ID, "same-key") is None
+
+        query, args = next(
+            (query, args)
+            for query, args in pool.connection.queries
+            if "FROM assistant_actions" in query
+        )
+        assert "tenant_id = $1" in query
+        assert "input_data->>'idempotency_key' = $2" in query
+        assert args == (TENANT_ID, "same-key")
+
+    @pytest.mark.asyncio
     async def test_send_sms_success(self, mock_supabase, mock_provider):
         """Test successful SMS send."""
         service = SMSService(mock_supabase)
         service._provider = mock_provider
         
         result = await service.send_sms(
-            tenant_id="tenant-123",
+            tenant_id=TENANT_ID,
             to_number="+1234567890",
             message="Test message"
         )
@@ -172,7 +217,7 @@ class TestSMSService:
         service._provider = mock_provider
         
         result = await service.send_sms(
-            tenant_id="tenant-123",
+            tenant_id=TENANT_ID,
             to_number="+1234567890",
             message="",
             template_name=SMSTemplateType.MEETING_REMINDER_1H.value,
@@ -200,7 +245,7 @@ class TestSMSService:
             
             with pytest.raises(SMSNotConfiguredError):
                 await service.send_sms(
-                    tenant_id="tenant-123",
+                    tenant_id=TENANT_ID,
                     to_number="+1234567890",
                     message="Test"
                 )
@@ -212,7 +257,7 @@ class TestSMSService:
         service._provider = mock_provider
         
         result = await service.send_meeting_reminder(
-            tenant_id="tenant-123",
+            tenant_id=TENANT_ID,
             to_number="+1234567890",
             reminder_type="1h",
             name="Jane",

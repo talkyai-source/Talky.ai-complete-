@@ -784,7 +784,7 @@ class AbuseDetectionService:
         """Store call metrics for aggregate analysis."""
         country_code = self._extract_country_code(phone_number)
 
-        async with self._db_pool.acquire() as conn:
+        async with acquire_with_tenant(self._db_pool, str(tenant_id)) as conn:
             # Upsert velocity snapshot
             await conn.execute(
                 """
@@ -830,7 +830,9 @@ class AbuseDetectionService:
     ) -> Optional[UUID]:
         """Record abuse event to database."""
         try:
-            async with self._db_pool.acquire() as conn:
+            async with acquire_with_tenant(
+                self._db_pool, str(event.tenant_id)
+            ) as conn:
                 row = await conn.fetchrow(
                     """
                     INSERT INTO abuse_events (
@@ -903,7 +905,10 @@ class AbuseDetectionService:
         query += f" LIMIT ${len(params) + 1}"
         params.append(limit)
 
-        async with self._db_pool.acquire() as conn:
+        # A missing tenant is an explicit platform-operator query across tenants.
+        async with acquire_with_tenant(
+            self._db_pool, str(tenant_id) if tenant_id is not None else None
+        ) as conn:
             rows = await conn.fetch(query, *params)
             return [dict(row) for row in rows]
 
@@ -915,7 +920,8 @@ class AbuseDetectionService:
         false_positive: Optional[bool] = None,
     ) -> bool:
         """Resolve an abuse event."""
-        async with self._db_pool.acquire() as conn:
+        # Event resolution is a platform-operator action keyed by the event UUID.
+        async with acquire_with_tenant(self._db_pool, None) as conn:
             result = await conn.execute(
                 """
                 UPDATE abuse_events
@@ -938,7 +944,10 @@ class AbuseDetectionService:
         hours: int = 24,
     ) -> Dict[str, Any]:
         """Get abuse detection statistics."""
-        async with self._db_pool.acquire() as conn:
+        # A missing tenant is an explicit platform-operator aggregate.
+        async with acquire_with_tenant(
+            self._db_pool, str(tenant_id) if tenant_id is not None else None
+        ) as conn:
             # Count by severity
             severity_counts = await conn.fetch(
                 f"""

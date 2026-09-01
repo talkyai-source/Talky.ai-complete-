@@ -22,6 +22,7 @@ from typing import Optional
 from fastapi import APIRouter, Cookie, Depends, Request, Response
 
 from app.api.v1.dependencies import CurrentUser, get_current_user, get_db_client
+from app.core.db_utils import acquire_with_tenant
 from app.core.postgres_adapter import Client
 from app.core.security.cookies import REFRESH_COOKIE_NAME, clear_auth_cookies
 from app.core.security.refresh_tokens import revoke_family_by_token
@@ -52,7 +53,7 @@ async def logout(
     2. Revoke the refresh token family so the cookie-auth chain stops.
     3. Clear all auth cookies (legacy talky_sid + new talky_at/talky_rt).
     """
-    async with db_client.pool.acquire() as conn:
+    async with acquire_with_tenant(db_client.pool, current_user.tenant_id) as conn:
         if talky_sid:
             await revoke_session_by_token(conn, talky_sid, reason="logout")
         if talky_rt:
@@ -86,7 +87,7 @@ async def logout_all(
     any plausible legitimate use (a user clicking the button twice a
     minute by accident) and well below the abuse threshold.
     """
-    async with db_client.pool.acquire() as conn:
+    async with acquire_with_tenant(db_client.pool, current_user.tenant_id) as conn:
         count = await revoke_all_user_sessions(
             conn,
             current_user.id,

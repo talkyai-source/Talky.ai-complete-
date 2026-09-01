@@ -11,6 +11,7 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.api.v1.dependencies import CurrentUser, get_current_user, get_db_client
+from app.core.db_utils import acquire_with_tenant
 from app.core.postgres_adapter import Client
 from app.core.security.password import verify_password
 from app.core.security.recovery import count_remaining_codes, invalidate_all_codes
@@ -30,7 +31,7 @@ async def get_mfa_status(
     db_client: Client = Depends(get_db_client),
 ) -> MFAStatusResponse:
     """Return the MFA status for the current authenticated user."""
-    async with db_client.pool.acquire() as conn:
+    async with acquire_with_tenant(db_client.pool, current_user.tenant_id) as conn:
         row = await conn.fetchrow(
             "SELECT enabled, verified_at FROM user_mfa WHERE user_id = $1",
             current_user.id,
@@ -68,7 +69,7 @@ async def disable_mfa(
       - Deletes all recovery codes
       - Updates user_profiles.mfa_enabled = FALSE
     """
-    async with db_client.pool.acquire() as conn:
+    async with acquire_with_tenant(db_client.pool, current_user.tenant_id) as conn:
         # Load current password hash for reauthentication check
         pw_row = await conn.fetchrow(
             "SELECT password_hash FROM user_profiles WHERE id = $1",

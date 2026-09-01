@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel
 
 from app.api.v1.dependencies import get_audit_logger, get_db_pool, require_permissions
+from app.core.db_utils import acquire_with_tenant
 from app.domain.services.audit_logger import (
     AuditEvent,
     AuditLogger,
@@ -296,7 +297,8 @@ async def get_event_stats(
         )
     scoped_tenant_id = user_tenant_id or tenant_id
     since = datetime.utcnow() - timedelta(days=days)
-    async with db_pool.acquire() as conn:
+    # A tenant-less platform operator is the only legitimate cross-tenant case.
+    async with acquire_with_tenant(db_pool, scoped_tenant_id) as conn:
         rows = await conn.fetch(
             """
             SELECT event_type, COUNT(*) AS total
@@ -349,7 +351,8 @@ async def get_failed_login_stats(
     """
     since = datetime.utcnow() - timedelta(days=days)
     user_tenant_id = current_user.get("tenant_id")
-    async with db_pool.acquire() as conn:
+    # A tenant-less platform operator is the only legitimate cross-tenant case.
+    async with acquire_with_tenant(db_pool, user_tenant_id) as conn:
         summary = await conn.fetchrow(
             """
             SELECT COUNT(*) FILTER (WHERE la.success = FALSE) AS total_failed,

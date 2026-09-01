@@ -302,6 +302,9 @@ class TestRBACContext:
 # ========================================================================
 
 
+TENANT_ID = "00000000-0000-0000-0000-000000000001"
+
+
 class _RevokedConn:
     """A connection whose role_permissions / user_permissions rows are the
     authoritative answer — here, with calls:delete revoked."""
@@ -311,6 +314,12 @@ class _RevokedConn:
 
     async def fetch(self, _query, *_args):
         return [{"name": name} for name in self.granted_names]
+
+    async def execute(self, *_args):
+        return "SET"
+
+    def transaction(self):
+        return _Acquire(self)
 
 
 class _Acquire:
@@ -333,13 +342,13 @@ class _Pool:
 
 
 class _User:
-    def __init__(self, role, tenant_id="tenant-A", user_id="user-1"):
+    def __init__(self, role, tenant_id=TENANT_ID, user_id="user-1"):
         self.id = user_id
         self.role = role
         self.tenant_id = tenant_id
 
 
-def _request(tenant_id="tenant-A"):
+def _request(tenant_id=TENANT_ID):
     from starlette.requests import Request
 
     scope = {
@@ -463,6 +472,12 @@ class _ProbeConn:
             "has_role_grants": self.role_grants,
             "has_memberships": self.memberships,
         }
+
+    async def execute(self, *_args):
+        return "SET"
+
+    def transaction(self):
+        return _Acquire(self)
 
 
 class _ProbeErrorConn(_ProbeConn):

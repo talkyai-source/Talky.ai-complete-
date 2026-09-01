@@ -8,6 +8,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Request
 
 from app.api.v1.dependencies import get_db_client
+from app.core.db_utils import acquire_with_tenant
 from app.core.postgres_adapter import Client
 
 from ._shared import limiter
@@ -34,7 +35,8 @@ async def passkey_check(
     Note: We deliberately don't reveal if the email exists at all —
     a non-existent email simply returns has_passkeys=false.
     """
-    async with db_client.pool.acquire() as conn:
+    # This pre-authentication email lookup runs before a tenant is known.
+    async with acquire_with_tenant(db_client.pool, None) as conn:
         row = await conn.fetchrow(
             "SELECT passkey_count FROM user_profiles WHERE email = $1 AND is_active = TRUE",
             body.email.lower(),

@@ -224,6 +224,12 @@ class _EffectivePermissionConn:
             return [{"name": name} for name in self.direct_permissions]
         raise AssertionError(query)
 
+    async def execute(self, *_args):
+        return "SET"
+
+    def transaction(self):
+        return _EffectivePermissionAcquire(self)
+
 
 class _EffectivePermissionAcquire:
     def __init__(self, conn):
