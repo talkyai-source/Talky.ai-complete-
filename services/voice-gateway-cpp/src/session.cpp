@@ -405,9 +405,6 @@ bool RtpSession::start(std::string& error) {
         last_received_seq_valid_ = false;
         last_played_seq_valid_ = false;
         has_prev_arrival_ = false;
-        rtp_source_locked_ = false;
-        locked_source_ip_ = 0;
-        locked_source_port_ = 0;
         prev_rtp_timestamp_ = 0;
         interarrival_jitter_ts_units_ = 0.0;
         last_rtcp_report_sent_at_ = started_at_;
