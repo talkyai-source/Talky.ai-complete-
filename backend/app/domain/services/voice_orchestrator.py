@@ -290,6 +290,10 @@ class VoiceSessionConfig:
     # in `tenant_ai_credentials` first, falling back to env vars when no
     # row exists. None = legacy behaviour (env vars only).
     tenant_id: Optional[str] = None
+    # Explicit region used only to interpret a caller-stated national phone
+    # number. None is fail-closed: the agent asks for a country code rather than
+    # silently assuming US.
+    contact_phone_region: Optional[str] = None
     # Only enable this when the session is backed by a real row in `calls`.
     # Browser demos generate ephemeral call_ids that do not satisfy the FK.
     event_logging_enabled: bool = False
@@ -609,6 +613,7 @@ class VoiceOrchestrator:
             llm_temperature=config.llm_temperature,
             llm_max_tokens=config.llm_max_tokens,
             voice_id=config.voice_id,
+            contact_phone_region=config.contact_phone_region,
             started_at=datetime.utcnow(),
             last_activity_at=datetime.utcnow(),
         )
@@ -1794,6 +1799,7 @@ class VoiceOrchestrator:
                 # voice_id carries the realtime voice for telemetry/consistency.
                 system_prompt=config.system_prompt,
                 voice_id=(getattr(config, "realtime_voice", None) or config.voice_id),
+                contact_phone_region=config.contact_phone_region,
                 started_at=datetime.utcnow(),
                 last_activity_at=datetime.utcnow(),
             )
@@ -1829,6 +1835,9 @@ class VoiceOrchestrator:
                 knowledge_pool=knowledge_pool,
                 tenant_id=config.tenant_id,
                 campaign_id=config.campaign_id,
+                lead_id=config.lead_id,
+                contact_phone_region=config.contact_phone_region,
+                contact_session=call_session,
                 session_active=lambda: self._active_sessions.get(call_id) is not None,
                 barge_in_event=call_session.barge_in_event,
                 # True inbound can be caller-first OR agent-first. Admission

@@ -142,13 +142,12 @@ def test_domain_plus_local_signal_is_a_readback():
     assert _agent_read_back_email(h, "john7890@gmail.com") is True
 
 
-def test_domain_only_with_confirm_question_counts():
-    # domain named AND an explicit confirm question -> a read-back (the caller is
-    # being asked to confirm), even if the local didn't literal-match.
+def test_domain_only_with_confirm_question_still_does_not_count():
+    # A confirm question cannot make an unheard local part safe to persist.
     from app.domain.services.voice_pipeline.turn_runner import _agent_read_back_email
     from app.domain.models.conversation import MessageRole as R
     h = [_msg(R.ASSISTANT, "Sending to your acme dot com — did I get that right?")]
-    assert _agent_read_back_email(h, "bob@acme.com") is True
+    assert _agent_read_back_email(h, "bob@acme.com") is False
 
 
 # ── issue #2: an assembled multi-word email enters the gate via the agent read-back

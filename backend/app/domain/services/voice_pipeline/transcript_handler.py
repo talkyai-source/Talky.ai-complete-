@@ -265,6 +265,12 @@ class TranscriptHandler:
                     "text": session.current_user_input,
                     "seq": _current_seq,
                     "queued_monotonic": time.monotonic(),
+                    "confidence": getattr(
+                        session, "_last_transcript_confidence", None
+                    ),
+                    "alternatives": tuple(
+                        getattr(session, "_last_transcript_alternatives", ()) or ()
+                    ),
                 }
                 logger.info(
                     "turn_queued_behind_pending call=%s seq=%d",
@@ -283,10 +289,14 @@ class TranscriptHandler:
             # the detached task body (turn_ender.handle) reads it, feeding the
             # turn-0 rejection floor a stale value.
             _confidence = getattr(session, "_last_transcript_confidence", None)
+            _alternatives = tuple(
+                getattr(session, "_last_transcript_alternatives", ()) or ()
+            )
             task = asyncio.create_task(
                 self._p.handle_turn_end(
                     session, websocket, source="final", user_text=_user_text,
                     confidence=_confidence,
+                    transcript_alternatives=_alternatives,
                 )
             )
             # Tag: a FINAL task answers a confirmed, completed utterance. It is
@@ -328,6 +338,9 @@ class TranscriptHandler:
                 # unconditionally so the eager-only turn keeps the caller's words.
                 if getattr(transcript, "is_final", True):
                     session._last_transcript_confidence = transcript.confidence
+                    session._last_transcript_alternatives = tuple(
+                        (metadata or {}).get("alternatives") or ()
+                    )
             return
 
         # Real-time machine detection on EVERY transcript, interims included.
@@ -387,5 +400,7 @@ class TranscriptHandler:
             # assumption. (On Flux confidence is always None regardless.)
             if getattr(transcript, "is_final", True):
                 session._last_transcript_confidence = transcript.confidence
+                session._last_transcript_alternatives = tuple(
+                    (metadata or {}).get("alternatives") or ()
+                )
             session.update_activity()
-

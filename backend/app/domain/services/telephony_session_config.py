@@ -1675,6 +1675,23 @@ def build_telephony_session_config(
         script_config.get("realtime_settings")
         or getattr(source_config, "realtime_settings", None)
     )
+    # National-format callback numbers are meaningful only with an explicit
+    # country context. Reuse the campaign's already-supported import setting,
+    # but do NOT apply the contacts endpoint's historical US default here.
+    _contact_phone_region = (
+        script_config.get("contact_phone_region")
+        or script_config.get("default_country_code")
+        or (script_config.get("campaign_slots") or {}).get("default_country_code")
+    )
+    if _contact_phone_region:
+        _contact_phone_region = str(_contact_phone_region).strip().upper()
+        if not re.fullmatch(r"[A-Z]{2}", _contact_phone_region):
+            logger.warning(
+                "contact_phone_region_invalid campaign=%s — national-format "
+                "callback numbers will require a country code",
+                str(_campaign_id(campaign)) if campaign else "telephony",
+            )
+            _contact_phone_region = None
     if _pipeline_mode == "realtime":
         logger.info(
             "telephony_pipeline_mode=realtime campaign=%s voice=%s model=%s",
@@ -1736,6 +1753,7 @@ def build_telephony_session_config(
         # row is present; None for legacy / dev paths. Reused from the
         # T3.9 lookup above to keep the call sites consistent.
         tenant_id=_tenant_id,
+        contact_phone_region=_contact_phone_region,
         agent_config=agent_config,
         system_prompt=system_prompt,
         # Carried so the per-call log and the calls row can name the exact

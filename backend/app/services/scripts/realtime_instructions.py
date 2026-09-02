@@ -11,9 +11,10 @@ the text to a TTS engine that is nudged with bracketed audio tags
   * A realtime model produces the audio itself, so bracket audio-tags
     ("[laughs]", "<break>") would be spoken literally or ignored — expression
     is steered with plain natural-language direction instead.
-  * The cascaded prompt is tuned around STT quirks, read-back gates, and its
-    own captured-slot rendering. Realtime shares only the small, pure,
-    provider-neutral structured-state contract; it does not reuse that prompt.
+  * The cascaded prompt is tuned around STT quirks and text-only presentation.
+    The duplex path shares the backend contact-capture machine and the small,
+    provider-neutral structured-state contract, while this composer states the
+    audible rules in voice-first language instead of importing cascaded layers.
 
 So this composer deliberately imports NOTHING from
 `app.services.scripts.prompts.*` (composer / guardrails / prompt_builder /
@@ -33,13 +34,14 @@ Output shape (one string, labeled blocks):
   4. GROUND RULES       — plain-language must-nots (be honest you're an AI and
                           name it when asked, never read back card/SSN/OTP, stop
                           when asked, only state given/looked-up facts).
-  5. KNOWLEDGE          — a knowledge_lookup function exists; use it for company
+  5. CONTACT DETAILS    — explicit capture, correction, and confirmation rules.
+  6. KNOWLEDGE          — a knowledge_lookup function exists; use it for company
                           facts, and cover the lookup pause with a natural verbal
                           hold (the anti-dead-air preamble) so the caller never
                           hears dead silence.
-  6. CONNECTED ACTIONS  — completion may be stated only after the matching
+  7. CONNECTED ACTIONS  — completion may be stated only after the matching
                           action tool explicitly permits confirmation.
-  7. LIVE STRUCTURED STATE — bounded evidence replaced in-place each turn.
+  8. LIVE STRUCTURED STATE — bounded evidence replaced in-place each turn.
 """
 from __future__ import annotations
 
@@ -109,6 +111,22 @@ GROUND RULES (always)
 - Only state facts you were given or that you looked up with your knowledge
   tool. If you don't know something, say so plainly — never invent prices,
   policies, names, or details."""
+
+_CONTACT_CAPTURE = """\
+CONTACT DETAILS
+- When a caller gives an email address or phone number, read the complete value
+  back and ask them to confirm it. Do not say you saved, sent, submitted, or will
+  use it until they give a clear yes.
+- If an email is unclear, ask for the uncertain letters one at a time ("b as in
+  Bravo" is fine). If they correct a letter, username, or domain, change only
+  that segment and preserve the unaffected part, then read the complete address
+  back again.
+- For a phone number without configured country context, ask the caller to
+  repeat the complete number beginning with its plus-prefixed country code.
+  Never assume it is a US number. Read every digit back. If they correct a digit
+  group, change only that segment and confirm the complete number again.
+- After three unclear confirmation replies, stop repeating the same read-back;
+  ask for the uncertain segment once more in a different way or offer to move on."""
 
 
 def _knowledge_note() -> str:
@@ -204,6 +222,7 @@ def build_realtime_instructions(persona: RealtimePersona) -> str:
         _opening_note(persona),
         _EXPRESSIVE_DELIVERY,
         _COMPLIANCE_ESSENTIALS,
+        _CONTACT_CAPTURE,
         _knowledge_note(),
         _actions_note(),
     ]

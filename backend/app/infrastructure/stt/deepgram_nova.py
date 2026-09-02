@@ -140,9 +140,19 @@ class DeepgramNovaSTTProvider(STTProvider):
                                     return
                                 text = (getattr(alts[0], "transcript", "") or "").strip()
                                 conf = getattr(alts[0], "confidence", None)
+                                alternatives = tuple(
+                                    (getattr(item, "transcript", "") or "").strip()
+                                    for item in alts[1:]
+                                    if (getattr(item, "transcript", "") or "").strip()
+                                )
                                 is_final = bool(getattr(m, "is_final", False))
                                 speech_final = bool(getattr(m, "speech_final", False))
-                                queue.put_nowait(("results", (text, is_final, speech_final, conf)))
+                                queue.put_nowait(
+                                    (
+                                        "results",
+                                        (text, is_final, speech_final, conf, alternatives),
+                                    )
+                                )
                         except asyncio.QueueFull:
                             pass  # drop on backpressure rather than block the socket
                         except Exception as exc:  # noqa: BLE001
@@ -254,7 +264,7 @@ class DeepgramNovaSTTProvider(STTProvider):
                                 continue
 
                             # kind == "results"
-                            text, is_final, speech_final, conf = payload
+                            text, is_final, speech_final, conf, alternatives = payload
                             if is_final:
                                 if text:
                                     finals.append(text)
@@ -263,7 +273,12 @@ class DeepgramNovaSTTProvider(STTProvider):
                                     # End of turn: full transcript, then the empty marker.
                                     ft = turn_text()
                                     if ft:
-                                        yield TranscriptChunk(text=ft, is_final=True, confidence=conf)
+                                        yield TranscriptChunk(
+                                            text=ft,
+                                            is_final=True,
+                                            confidence=conf,
+                                            metadata={"alternatives": alternatives},
+                                        )
                                     yield TranscriptChunk(text="", is_final=True, confidence=1.0)
                                     finals.clear()
                                 else:

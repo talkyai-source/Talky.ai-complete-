@@ -42,11 +42,9 @@ from app.domain.services.voice_pipeline.turn_helpers import (
 
 logger = logging.getLogger(__name__)
 
-# This module logs the caller's utterance on almost every branch (turn-0
-# rejection, backchannel, self-echo, turn_end, slow-turn WARNING — the last of
-# which Sentry turns into a breadcrumb that leaves the box). Install the
-# process-wide log redactor at import: idempotent, never raises, and it covers
-# future log statements added here without anyone having to remember.
+# Defense in depth for exception/provider messages outside our control. Caller
+# and agent transcript logs below are shape-only (character counts), so spoken
+# addresses never depend on a regex redactor understanding their format.
 install_pii_log_redaction()
 
 # Sentinel distinguishing "not yet resolved" from a resolved-but-None cache
@@ -60,6 +58,7 @@ _UNRESOLVED = object()
 # detached-task-runs) live session read, while still falling back to the
 # live read for callers that don't pass one at all.
 _CONFIDENCE_UNSET = object()
+_CONTACT_EVIDENCE_UNSET = object()
 
 
 def _resolve_transcript_target_call_id(session) -> Optional[str]:
@@ -117,6 +116,7 @@ class TurnEnder:
         source: str = "final",
         user_text: Optional[str] = None,
         confidence: Any = _CONFIDENCE_UNSET,
+        transcript_alternatives: Any = _CONTACT_EVIDENCE_UNSET,
     ) -> None:
         call_id = session.call_id
         # Prefer the transcript captured at SCHEDULE time. A barge-in can reset
@@ -128,6 +128,16 @@ class TurnEnder:
         full_transcript = (
             user_text if user_text is not None else session.current_user_input
         ).strip()
+        resolved_contact_confidence = (
+            confidence
+            if confidence is not _CONFIDENCE_UNSET
+            else getattr(session, "_last_transcript_confidence", None)
+        )
+        resolved_contact_alternatives = (
+            tuple(transcript_alternatives or ())
+            if transcript_alternatives is not _CONTACT_EVIDENCE_UNSET
+            else tuple(getattr(session, "_last_transcript_alternatives", ()) or ())
+        )
         tenant_id = getattr(session, "tenant_id", None)
 
         if not full_transcript:
@@ -165,9 +175,9 @@ class TurnEnder:
             if reject_reason is not None:
                 logger.info(
                     "turn_0_transcript_rejected reason=%s call=%s "
-                    "transcript=%r confidence=%s min_conf=%s min_chars=%d "
+                    "transcript_chars=%d confidence=%s min_conf=%s min_chars=%d "
                     "— letting Flux re-emit",
-                    reject_reason, call_id[:12], full_transcript[:40],
+                    reject_reason, call_id[:12], len(full_transcript),
                     resolved_confidence, min_conf, min_chars,
                 )
                 try:
@@ -225,7 +235,7 @@ class TurnEnder:
         if self._p._is_repetitive_transcript(full_transcript) and not contains_dnc(full_transcript):
             logger.warning(
                 "Repetitive STT transcript likely hallucination, skipping turn",
-                extra={"call_id": call_id, "transcript": full_transcript[:80]},
+                extra={"call_id": call_id, "transcript_chars": len(full_transcript)},
             )
             return
 
@@ -272,8 +282,8 @@ class TurnEnder:
                     # Surface so the top-interrupted-calls review (Hamming) and
                     # any future human-handoff can find these fast.
                     logger.info(
-                        "interruption_escalation transcript=%r call=%s",
-                        full_transcript[:80], call_id[:12],
+                        "interruption_escalation transcript_chars=%d call=%s",
+                        len(full_transcript), call_id[:12],
                     )
             except Exception as exc:  # metrics must never break a turn
                 logger.debug("interruption_classify_failed err=%s", exc)
@@ -297,8 +307,8 @@ class TurnEnder:
             and not _agent_asked_question
         ):
             logger.info(
-                "backchannel_suppressed transcript=%r call=%s",
-                full_transcript, call_id[:12],
+                "backchannel_suppressed transcript_chars=%d call=%s",
+                len(full_transcript), call_id[:12],
             )
             # A backchannel IS caller presence. It never enters history, so
             # the silence monitor's turn-count check can't see it — stamp it
@@ -327,9 +337,9 @@ class TurnEnder:
                 else "answers_agent_question"
             )
             logger.info(
-                "backchannel_allowed reason=%s transcript=%r call=%s "
+                "backchannel_allowed reason=%s transcript_chars=%d call=%s "
                 "agent_last_was_question=%s",
-                _reason, full_transcript, call_id[:12], _agent_asked_question,
+                _reason, len(full_transcript), call_id[:12], _agent_asked_question,
             )
 
         # Clear any barge-in event that was set by the user's own StartOfTurn that
@@ -361,7 +371,7 @@ class TurnEnder:
                     "call_id": call_id,
                     "turn_id": session.turn_id,
                     "source": source,
-                    "transcript": full_transcript[:80],
+                    "transcript_chars": len(full_transcript),
                 },
             )
             return
@@ -380,7 +390,7 @@ class TurnEnder:
                     "call_id": call_id,
                     "turn_id": session.turn_id,
                     "source": source,
-                    "transcript": full_transcript[:80],
+                    "transcript_chars": len(full_transcript),
                 },
             )
             return
@@ -422,7 +432,7 @@ class TurnEnder:
                     extra={
                         "call_id": call_id,
                         "turn_id": session.turn_id,
-                        "transcript": full_transcript[:120],
+                        "transcript_chars": len(full_transcript),
                     },
                 )
                 return
@@ -430,8 +440,8 @@ class TurnEnder:
                 "self_echo_stripped",
                 extra={
                     "call_id": call_id,
-                    "before": full_transcript[:120],
-                    "after": _deechoed[:120],
+                    "before_chars": len(full_transcript),
+                    "after_chars": len(_deechoed),
                 },
             )
             full_transcript = _deechoed
@@ -442,7 +452,7 @@ class TurnEnder:
                 "call_id": call_id,
                 "turn_id": session.turn_id,
                 "source": source,
-                "transcript": full_transcript,
+                "transcript_chars": len(full_transcript),
                 "timestamp": datetime.utcnow().isoformat(),
             },
         )
@@ -513,8 +523,8 @@ class TurnEnder:
         if disposition in (IdentityDisposition.WRONG_BUSINESS, IdentityDisposition.DNC):
             end_line = disposition_end_line(disposition) or ""
             logger.info(
-                "identity_disposition_end call=%s disposition=%s transcript=%r",
-                call_id[:12], disposition.value, full_transcript[:80],
+                "identity_disposition_end call=%s disposition=%s transcript_chars=%d",
+                call_id[:12], disposition.value, len(full_transcript),
             )
             if disposition == IdentityDisposition.DNC:
                 # Persist the opt-out (F-13 fix 2026-07-20 + user directive
@@ -579,8 +589,8 @@ class TurnEnder:
             # is, deterministically (no LLM), then let the caller's answer route
             # to WRONG_BUSINESS (end) or WRONG_PERSON (pivot) on the next turn.
             logger.info(
-                "identity_disposition_clarify call=%s transcript=%r",
-                call_id[:12], full_transcript[:80],
+                "identity_disposition_clarify call=%s transcript_chars=%d",
+                call_id[:12], len(full_transcript),
             )
             try:
                 session._identity_clarify_asked = True
@@ -620,7 +630,10 @@ class TurnEnder:
             "turn",
             call_id=call_id,
             tenant_id=tenant_id,
-            **{"voice.turn.id": session.turn_id, "voice.turn.transcript": full_transcript[:200]},
+            **{
+                "voice.turn.id": session.turn_id,
+                "voice.turn.transcript_chars": len(full_transcript),
+            },
         ) as turn_span:
             session.state = CallState.PROCESSING
             session.llm_active = True
@@ -642,6 +655,16 @@ class TurnEnder:
                 with pipeline_span("llm_tts", call_id=call_id, provider="groq",
                                    tenant_id=tenant_id) as llm_tts_span:
                     t0 = time.monotonic()
+                    # Evidence is snapshotted with this exact transcript by
+                    # TranscriptHandler. TurnRunner must not read the live STT
+                    # attributes, which a later turn can overwrite while this
+                    # detached task waits.
+                    session._active_turn_transcript_confidence = (
+                        resolved_contact_confidence
+                    )
+                    session._active_turn_transcript_alternatives = (
+                        resolved_contact_alternatives
+                    )
                     response_text, llm_latency, tts_latency = await self._p._run_turn(
                         session, full_transcript, websocket, session.turn_id
                     )
@@ -678,7 +701,7 @@ class TurnEnder:
                     extra={
                         "call_id": call_id,
                         "turn_id": session.turn_id,
-                        "response": response_text,
+                        "response_chars": len(response_text or ""),
                         "llm_latency_ms": round(llm_latency, 1),
                         "tts_latency_ms": round(tts_latency, 1),
                     },
@@ -772,7 +795,7 @@ class TurnEnder:
                         "voice_slow_turn call_id=%s turn_id=%d "
                         "response_start_ms=%.1f stt_first_ms=%s "
                         "llm_first_token_ms=%s tts_first_chunk_ms=%s "
-                        "llm_total_ms=%.1f tts_total_ms=%.1f transcript=%r",
+                        "llm_total_ms=%.1f tts_total_ms=%.1f transcript_chars=%d",
                         call_id[:12],
                         session.turn_id,
                         _response_start,
@@ -781,7 +804,7 @@ class TurnEnder:
                         round(tracked.tts_first_chunk_ms, 1) if tracked.tts_first_chunk_ms else "n/a",
                         round(llm_latency, 1),
                         round(tts_latency, 1),
-                        full_transcript[:80],
+                        len(full_transcript),
                     )
 
                 if websocket:
@@ -943,10 +966,15 @@ class TurnEnder:
                             self._p.handle_turn_end(
                                 session, websocket, source="queued",
                                 user_text=_queued.get("text"),
+                                confidence=_queued.get(
+                                    "confidence", _CONFIDENCE_UNSET
+                                ),
+                                transcript_alternatives=_queued.get(
+                                    "alternatives", _CONTACT_EVIDENCE_UNSET
+                                ),
                             )
                         )
                         _next_task._turn_type = "final"
                         _next_task._utterance_seq = _queued.get("seq")
                         _next_task._source_text = _queued.get("text")
                         self._p._pending_llm_tasks[call_id] = _next_task
-

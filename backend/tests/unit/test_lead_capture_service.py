@@ -144,6 +144,72 @@ async def test_an_empty_field_key_is_refused():
         )
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "source",
+    ("caller_stated", "agent_inferred", "imported", "manual_edit"),
+)
+async def test_contact_is_refused_until_machine_confirmation(source):
+    svc = LeadCaptureService(pool=object())
+    with pytest.raises(InvalidCaptureError, match="confirmed"):
+        await svc.capture(
+            tenant_id="t",
+            call_id="c",
+            field_key="email",
+            value="bob@acme.com",
+            source=source,
+            field_type="email",
+            confirmed=False,
+            validation_status="awaiting_confirmation",
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("field_type", "value", "message"),
+    (
+        ("phone", "4155552671", "E.164"),
+        ("email", "bob..smith@example.com", "valid"),
+    ),
+)
+async def test_public_capture_refuses_invalid_confirmed_contact_values(
+    field_type,
+    value,
+    message,
+):
+    svc = LeadCaptureService(pool=object())
+    with pytest.raises(InvalidCaptureError, match=message):
+        await svc.capture(
+            tenant_id="t",
+            call_id="c",
+            field_key=field_type,
+            value=value,
+            source="manual_edit",
+            field_type=field_type,
+            confirmed=True,
+            validation_status="confirmed",
+        )
+
+
+def test_contact_audit_columns_are_written_and_returned():
+    src = inspect.getsource(LeadCaptureService.capture)
+    for column in (
+        "raw_value",
+        "normalized_value",
+        "validation_status",
+        "confirmed_at",
+    ):
+        assert column in src
+    read_src = inspect.getsource(LeadCaptureService.details_for_call)
+    for column in (
+        "raw_value",
+        "normalized_value",
+        "validation_status",
+        "confirmed_at",
+    ):
+        assert column in read_src
+
+
 # ── bulk ────────────────────────────────────────────────────────────────────
 
 def test_bulk_capture_does_not_lose_good_fields_to_one_bad_one():

@@ -16,6 +16,10 @@ Function                     Contract
                              (``default_country``), passes 4-5 digit SIP
                              extensions through, rejects junk with
                              ``ValueError``.  Use this for anything new.
+``normalize_phone_for_``     VOICE CAPTURE. Strict libphonenumber validity;
+``capture``                  accepts ``+`` E.164 input without a region, but a
+                             national-format number requires explicit region
+                             context and is never guessed as US.
 ``normalize_phone_number_``  Same, but never rejects on length/format --
 ``lenient``                  digits passthrough fallback.  Only for accounts
                              with relaxed phone validation.
@@ -114,6 +118,42 @@ def normalize_phone_number(phone: str, default_country: str = "US") -> str:
         return f"+{cleaned}"
 
     return f"+{cleaned}"
+
+
+def normalize_phone_for_capture(phone: str, region: str | None = None) -> str:
+    """Validate a caller-stated number and return strict E.164.
+
+    Voice capture is not allowed to guess a country.  An input already carrying
+    ``+<country code>`` is self-describing; every other input requires an
+    explicit ISO-3166 region supplied by the call context.  Unlike the legacy
+    contact importer helper above, this path has no digits-only fallback: a
+    number that libphonenumber cannot prove valid remains unconfirmed.
+    """
+    raw = str(phone or "").strip()
+    if not raw:
+        raise ValueError("Phone number is empty")
+    has_country_code = raw.startswith("+")
+    explicit_region = str(region or "").strip().upper() or None
+    if not has_country_code and explicit_region is None:
+        raise ValueError(
+            "Country or region is required for a phone number without a '+' country code"
+        )
+
+    import phonenumbers
+
+    try:
+        parsed = phonenumbers.parse(raw, None if has_country_code else explicit_region)
+    except phonenumbers.NumberParseException as exc:
+        raise ValueError("Invalid phone number") from exc
+    if not phonenumbers.is_possible_number(parsed) or not phonenumbers.is_valid_number(parsed):
+        raise ValueError("Invalid phone number")
+    normalized = phonenumbers.format_number(
+        parsed,
+        phonenumbers.PhoneNumberFormat.E164,
+    )
+    if not is_strict_e164(normalized):
+        raise ValueError("Invalid E.164 phone number")
+    return normalized
 
 
 def normalize_phone_number_lenient(phone: str) -> str:

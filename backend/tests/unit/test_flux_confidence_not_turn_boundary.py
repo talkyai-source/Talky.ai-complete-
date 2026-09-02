@@ -16,6 +16,7 @@ stay protected.
 LOCAL ONLY — not committed.
 """
 import asyncio
+import logging
 
 import pytest
 
@@ -59,12 +60,14 @@ class _FakeFluxWS:
         return None
 
 
-async def _drive_flux(frames):
+async def _drive_flux(frames, *, min_interrupt_words=None):
     """Run stream_transcribe against a pre-connected fake WS and collect chunks."""
     import json
 
     provider = DeepgramFluxSTTProvider()
     provider._api_key = "test-key"  # skip the initialize() guard
+    if min_interrupt_words is not None:
+        provider._min_interrupt_words = min_interrupt_words
     call_id = "call-conf-test"
 
     all_sent = asyncio.Event()
@@ -88,6 +91,26 @@ async def _drive_flux(frames):
 
     await asyncio.wait_for(_consume(), timeout=5.0)
     return collected
+
+
+@pytest.mark.asyncio
+async def test_flux_start_of_turn_logs_shape_not_sensitive_partial(caplog):
+    caplog.set_level(
+        logging.INFO,
+        logger="app.infrastructure.stt.deepgram_flux",
+    )
+    # Spoken contact forms are not reliably recognised by generic PII regexes;
+    # the provider itself must never pass transcript content to logging.
+    secret = "private-person-at-example-dot-com"
+
+    await _drive_flux(
+        [{"type": "TurnInfo", "event": "StartOfTurn", "transcript": secret}],
+        min_interrupt_words=2,
+    )
+
+    assert secret not in caplog.text
+    assert "private-person" not in caplog.text
+    assert "short words=1 threshold=2" in caplog.text
 
 
 @pytest.mark.asyncio

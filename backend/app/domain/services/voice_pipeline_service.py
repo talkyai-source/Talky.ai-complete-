@@ -48,7 +48,11 @@ from app.domain.services.voice_pipeline.turn_runner import TurnRunner
 from app.domain.services.voice_pipeline.turn_streamer import TurnStreamer
 from app.domain.services.voice_pipeline.audio_ingest import AudioIngest, TerminalSTTError
 from app.domain.services.voice_pipeline.transcript_handler import TranscriptHandler
-from app.domain.services.voice_pipeline.turn_ender import TurnEnder, _CONFIDENCE_UNSET
+from app.domain.services.voice_pipeline.turn_ender import (
+    TurnEnder,
+    _CONFIDENCE_UNSET,
+    _CONTACT_EVIDENCE_UNSET,
+)
 from app.core.container import get_container
 from app.core.postgres_adapter import Client as PostgresAdapterClient
 from app.core.telemetry import get_tracer, pipeline_span, record_latency, voice_span
@@ -543,6 +547,7 @@ class VoicePipelineService:
         source: str = "final",
         user_text: Optional[str] = None,
         confidence: Any = _CONFIDENCE_UNSET,
+        transcript_alternatives: Any = _CONTACT_EVIDENCE_UNSET,
     ) -> None:
         """Run the end-of-turn LLM+TTS cycle.
 
@@ -563,7 +568,12 @@ class VoicePipelineService:
         session read, unchanged.
         """
         return await self._turn_ender.handle(
-            session, websocket, source, user_text=user_text, confidence=confidence
+            session,
+            websocket,
+            source,
+            user_text=user_text,
+            confidence=confidence,
+            transcript_alternatives=transcript_alternatives,
         )
 
     # ── Barge-in ──────────────────────────────────────────────────

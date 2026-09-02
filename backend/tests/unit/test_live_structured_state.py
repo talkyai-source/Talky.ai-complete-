@@ -398,6 +398,98 @@ async def test_realtime_bridge_reduces_final_user_turn_and_publishes_before_next
 
 
 @pytest.mark.asyncio
+async def test_realtime_contact_confirmation_updates_and_correction_clears_live_state():
+    blocks = []
+
+    class _RT:
+        async def update_live_state(self, block):
+            blocks.append(block)
+
+        async def interrupt_with_text(self, _directive):
+            return None
+
+    class _Gateway:
+        async def clear_output_buffer(self, _call_id):
+            return None
+
+    bridge = RealtimeBridge(
+        call_id="call-contact-state",
+        realtime_session=_RT(),
+        media_gateway=_Gateway(),
+    )
+
+    await bridge._observe_contact_turn("My email is bob@example.com")
+    bridge._remember_contact_turn(
+        "assistant",
+        "So that's bob at example dot com, did I get that right?",
+    )
+    await bridge._observe_contact_turn("yes")
+
+    assert "confirmed_contacts=email:bob@example.com" in blocks[-1]
+
+    await bridge._observe_contact_turn(
+        "Actually, my corrected email is alice@example.com"
+    )
+
+    assert "confirmed_contacts=none" in blocks[-1]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("interrupted", "expects_identity"),
+    [(False, True), (True, False)],
+)
+async def test_realtime_identity_requires_uninterrupted_opening_delivery(
+    interrupted, expects_identity
+):
+    blocks = []
+
+    async def _events():
+        yield RealtimeEvent(
+            kind="agent_transcript",
+            text="Hello, I'm Sarah from Acme.",
+            is_final=True,
+        )
+        if interrupted:
+            yield RealtimeEvent(kind="interrupted", raw={"during_response": True})
+        yield RealtimeEvent(
+            kind="response_done",
+            raw={
+                "response": {
+                    "status": "cancelled" if interrupted else "completed"
+                }
+            },
+        )
+
+    class _RT:
+        def events(self):
+            return _events()
+
+        async def update_live_state(self, block):
+            blocks.append(block)
+
+    class _Gateway:
+        async def clear_output_buffer(self, _call_id):
+            return None
+
+    bridge = RealtimeBridge(
+        call_id="call-opening-proof",
+        realtime_session=_RT(),
+        media_gateway=_Gateway(),
+        greet_on_start=True,
+    )
+
+    await bridge._pump_model_events()
+
+    if expects_identity:
+        assert blocks
+        assert "identity_introduced=yes" in blocks[-1]
+    else:
+        assert not blocks
+        assert bridge._live_state.identity_introduced is None
+
+
+@pytest.mark.asyncio
 async def test_realtime_tool_result_is_published_before_model_continuation():
     order = []
 

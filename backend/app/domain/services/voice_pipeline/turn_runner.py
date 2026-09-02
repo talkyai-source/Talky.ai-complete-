@@ -103,16 +103,6 @@ _CONFIRM_QUESTION_RE = re.compile(
 )
 
 
-def _email_local_signal(email: str) -> str:
-    """The first alphabetic run (>=2 chars) of the local part — a distinctive
-    signal that the agent actually SPOKE the local part, not just the domain."""
-    local = email.split("@", 1)[0].lower()
-    for run in re.findall(r"[a-z]+", local):
-        if len(run) >= 2:
-            return run
-    return ""
-
-
 def _is_phone_correction(utterance, current_phone) -> bool:
     """True if the caller restated a DIFFERENT phone number — a correction handled
     by the capture path, so we skip the confirmation classification for it."""
@@ -140,6 +130,28 @@ def _email_from_recent_agent_readback(history):
     return None
 
 
+_READBACK_DIGIT_WORDS = {
+    "zero": "0",
+    "one": "1",
+    "two": "2",
+    "three": "3",
+    "four": "4",
+    "five": "5",
+    "six": "6",
+    "seven": "7",
+    "eight": "8",
+    "nine": "9",
+}
+
+
+def _normalize_readback_words(text: str) -> str:
+    normalized = str(text or "").lower()
+    for word, digit in _READBACK_DIGIT_WORDS.items():
+        normalized = re.sub(rf"\b{word}\b", digit, normalized)
+    normalized = re.sub(r"[-‐‑‒–—]", " ", normalized)
+    return " ".join(normalized.split())
+
+
 def _agent_read_back_email(history, email) -> bool:
     """True if the agent's most recent REAL turn read the pending email back — so
     the caller's current turn can safely be interpreted as a confirmation reply.
@@ -157,19 +169,20 @@ def _agent_read_back_email(history, email) -> bool:
     if not email or "@" not in email:
         return False
     spoken = natural_email_readback(email).lower()
-    domain_spoken = email.rsplit("@", 1)[-1].lower().replace(".", " dot ")  # "gmail dot com"
-    local_sig = _email_local_signal(email)
+    normalized_spoken = _normalize_readback_words(spoken)
     for m in reversed(history or []):
         if getattr(m, "role", None) != MessageRole.ASSISTANT:
             continue
         c = (m.content or "").lower()
         if _SILENCE_CHECK_RE.search(c):
             continue  # a silence-check is not a read-back — keep scanning back
-        if (bool(spoken) and spoken in c) or (email.lower() in c):
-            return True  # full spoken read-back or the literal address
-        # Domain-only: require the local part be signalled too, OR a confirm question.
-        if bool(domain_spoken) and domain_spoken in c:
-            return (bool(local_sig) and local_sig in c) or bool(_CONFIRM_QUESTION_RE.search(c))
+        confirm_question = bool(_CONFIRM_QUESTION_RE.search(c))
+        normalized_content = _normalize_readback_words(c)
+        full_value = (
+            bool(normalized_spoken) and normalized_spoken in normalized_content
+        ) or (email.lower() in c)
+        if full_value:
+            return confirm_question
         return False
     return False
 
@@ -192,7 +205,8 @@ def _agent_read_back_phone(history, phone) -> bool:
         if _SILENCE_CHECK_RE.search(c):
             continue
         c_digits = re.sub(r"\D", "", c)
-        return (digits in c_digits) or (bool(spoken) and spoken in c)
+        full_value = (digits in c_digits) or (bool(spoken) and spoken in c)
+        return full_value and bool(_CONFIRM_QUESTION_RE.search(c))
     return False
 
 
@@ -354,6 +368,19 @@ class TurnRunner:
             confirmation_verdict=_confirm_verdict,
             phone_readback_issued=_phone_readback_issued,
             phone_confirmation_verdict=_phone_verdict,
+            phone_region=getattr(session, "contact_phone_region", None),
+            # Flux deliberately supplies None. The state machine treats None as
+            # "signal unavailable", never as low recognition confidence.
+            transcript_confidence=getattr(
+                session,
+                "_active_turn_transcript_confidence",
+                getattr(session, "_last_transcript_confidence", None),
+            ),
+            transcript_alternatives=getattr(
+                session,
+                "_active_turn_transcript_alternatives",
+                getattr(session, "_last_transcript_alternatives", ()),
+            ),
         )
 
         response_text = ""
@@ -402,9 +429,9 @@ class TurnRunner:
                 ):
                     logger.info(
                         "phantom_goodbye_suppressed call_id=%s reason=%s user_turns=%d "
-                        "wrong_person_block=%s transcript=%r — keeping call alive",
+                        "wrong_person_block=%s transcript_chars=%d — keeping call alive",
                         call_id, ask_ai_end_action.get("reason"), user_turns,
-                        _wrong_person_block, (full_transcript or "")[:60],
+                        _wrong_person_block, len(full_transcript or ""),
                     )
                     session.tts_active = True
                     await self._p.synthesize_and_send_audio(
@@ -453,6 +480,14 @@ class TurnRunner:
             if response_text and response_text.strip():
                 session.conversation_history.append(
                     Message(role=MessageRole.ASSISTANT, content=response_text)
+                )
+                from app.services.scripts.call_state_tracker import (
+                    update_state_from_agent_turn,
+                )
+
+                session.captured_slots = update_state_from_agent_turn(
+                    session.captured_slots,
+                    response_text,
                 )
                 # The agent has now delivered a real reply — since 2026-08-11
                 # that is the turn AFTER the bare pickup greeting, not turn 1

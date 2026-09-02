@@ -145,7 +145,7 @@ def test_an_unconfirmed_email_is_not_persisted_at_all():
 
 
 def test_an_unconfirmed_phone_is_not_persisted_at_all():
-    snap = snapshot_slots(CallState(phone="+447700900123", phone_confirmed=False))
+    snap = snapshot_slots(CallState(phone="+442079460958", phone_confirmed=False))
     assert "phone" not in snap
 
 
@@ -188,7 +188,7 @@ async def test_a_call_with_stated_facts_writes_them_with_caller_provenance():
 @pytest.mark.asyncio
 async def test_a_phone_number_is_captured_too():
     conn = _FakeConn()
-    session = _session(phone="+447700900123", phone_confirmed=True)
+    session = _session(phone="+442079460958", phone_confirmed=True)
 
     assert await _flush(session, conn) == 1
     args = conn.inserts[0][1]

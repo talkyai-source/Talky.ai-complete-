@@ -745,7 +745,11 @@ class DeepgramFluxSTTProvider(STTProvider):
                         transcript_text = data.get("transcript", "")
                         
                         if turn_info_count <= 10:
-                            logger.debug(f"TurnInfo: event={event}, transcript={transcript_text[:30]!r}")
+                            logger.debug(
+                                "TurnInfo: event=%s transcript_chars=%d",
+                                event,
+                                len(transcript_text or ""),
+                            )
                         
                         if stop_event.is_set():
                             break
@@ -777,8 +781,7 @@ class DeepgramFluxSTTProvider(STTProvider):
                                 # (a) short acknowledgement ("yeah", "ok", "mhm")
                                 if is_backchannel(transcript_text):
                                     logger.info(
-                                        "Flux StartOfTurn backchannel %r — barge-in suppressed",
-                                        (transcript_text or "")[:24],
+                                        "Flux StartOfTurn backchannel — barge-in suppressed"
                                     )
                                     continue
                                 # (b) hesitation noise ("uh", "um", "erm"). This
@@ -788,8 +791,7 @@ class DeepgramFluxSTTProvider(STTProvider):
                                 # sentence. See backchannel._DISFLUENCIES.
                                 if is_disfluency(transcript_text):
                                     logger.info(
-                                        "Flux StartOfTurn disfluency %r — barge-in suppressed",
-                                        (transcript_text or "")[:24],
+                                        "Flux StartOfTurn disfluency — barge-in suppressed"
                                     )
                                     continue
                                 # (c) min-words guard, now DISABLED by default
@@ -800,8 +802,9 @@ class DeepgramFluxSTTProvider(STTProvider):
                                 word_count = len((transcript_text or "").split())
                                 if word_count < self._min_interrupt_words:
                                     logger.info(
-                                        "Flux StartOfTurn short %r (<%d words) — barge-in deferred",
-                                        (transcript_text or "")[:24],
+                                        "Flux StartOfTurn short words=%d threshold=%d — "
+                                        "barge-in deferred",
+                                        word_count,
                                         self._min_interrupt_words,
                                     )
                                     continue
@@ -847,7 +850,10 @@ class DeepgramFluxSTTProvider(STTProvider):
                         
                         # Handle EagerEndOfTurn - start LLM early (speculative)
                         elif event == "EagerEndOfTurn":
-                            logger.debug(f"Flux EagerEndOfTurn: '{transcript_text}'")
+                            logger.debug(
+                                "Flux EagerEndOfTurn transcript_chars=%d",
+                                len(transcript_text or ""),
+                            )
                             if transcript_text and transcript_text.strip():
                                 # Track speculative state
                                 if eager_state:
@@ -889,7 +895,10 @@ class DeepgramFluxSTTProvider(STTProvider):
                         
                         # Handle EndOfTurn - finalize turn
                         elif event == "EndOfTurn":
-                            logger.info(f"Flux EndOfTurn: '{transcript_text}'")
+                            logger.info(
+                                "Flux EndOfTurn transcript_chars=%d",
+                                len(transcript_text or ""),
+                            )
 
                             if transcript_text and transcript_text.strip():
                                 if not first_final_logged[0]:
@@ -945,7 +954,14 @@ class DeepgramFluxSTTProvider(STTProvider):
                                 chunk = TranscriptChunk(
                                     text=transcript,
                                     is_final=False,
-                                    confidence=alternatives[0].get("confidence")
+                                    confidence=alternatives[0].get("confidence"),
+                                    metadata={
+                                        "alternatives": tuple(
+                                            str(item.get("transcript") or "")
+                                            for item in alternatives[1:]
+                                            if item.get("transcript")
+                                        )
+                                    },
                                 )
                                 await transcript_queue.put(chunk)
                     

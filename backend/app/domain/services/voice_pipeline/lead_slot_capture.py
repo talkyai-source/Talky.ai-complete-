@@ -18,10 +18,10 @@ provenance for everything written here is ``caller_stated``, never
 ``agent_inferred``; writing a guess under a caller's name is precisely what §7
 forbids.
 
-``email`` and ``phone`` additionally carry the read-back confirmation flag from
-the confirm-before-commit gate. An unconfirmed value is still captured (it is
-real information) but is stored ``confirmed = FALSE`` so the panel can show it
-as not yet settled.
+``email`` and ``phone`` additionally carry the read-back confirmation state and
+audit values from the confirm-before-commit machine.  A pending value stays in
+memory and produces no row at all; only the caller-approved canonical value can
+leave the live pipeline.
 
 WHAT MUST NOT HAPPEN
 --------------------
@@ -36,9 +36,9 @@ WHAT MUST NOT HAPPEN
    round trips on the latency-critical path. The last written
    ``(value, confirmed)`` per field is memoised on the session; only a change
    is written.
-4. **It must name the tenant in SQL.** Prod's app role is superuser +
-   BYPASSRLS, so an RLS policy is decorative — the ``is_test`` lookup carries
-   its own ``tenant_id`` predicate.
+4. **It must name the tenant in SQL.** RLS context and an explicit ownership
+   predicate are complementary controls — the ``is_test`` lookup carries its
+   own ``tenant_id`` predicate.
 
 WHERE IT IS CALLED FROM
 -----------------------
@@ -177,6 +177,33 @@ def snapshot_slots(captured_slots: Any) -> dict[str, dict]:
     if captured_slots is None:
         return out
     for attr, field_key, field_type, confirmed_attr in SLOT_FIELDS:
+        capture = (
+            getattr(captured_slots, f"{field_key}_capture", None)
+            if field_key in {"email", "phone"}
+            else None
+        )
+        if capture is not None:
+            from app.domain.services.voice_pipeline.contact_capture import (
+                CaptureStatus,
+            )
+
+            # S7: contact fields do not leave the in-memory confirmation loop
+            # until the caller has approved the canonical value.
+            if (
+                capture.status is not CaptureStatus.CONFIRMED
+                or not capture.normalized_value
+            ):
+                continue
+            out[field_key] = {
+                "value": capture.normalized_value,
+                "field_type": field_type,
+                "confirmed": True,
+                "raw_value": capture.raw_value,
+                "normalized_value": capture.normalized_value,
+                "validation_status": capture.validation_status,
+                "confirmed_at": capture.confirmed_at,
+            }
+            continue
         raw = getattr(captured_slots, attr, None)
         if raw is None:
             continue
@@ -203,8 +230,35 @@ def snapshot_slots(captured_slots: Any) -> dict[str, dict]:
             "value": value,
             "field_type": field_type,
             "confirmed": confirmed,
+            "raw_value": value if field_key in {"email", "phone"} else None,
+            "normalized_value": value if field_key in {"email", "phone"} else None,
+            "validation_status": (
+                "confirmed" if field_key in {"email", "phone"} and confirmed else None
+            ),
+            "confirmed_at": None,
         }
     return out
+
+
+def pending_contact_revocations(session: Any) -> dict[str, str]:
+    """Caller-stated contacts written by this session that lost confirmation."""
+    written = getattr(session, _WRITTEN_ATTR, None)
+    captured_slots = getattr(session, "captured_slots", None)
+    if not isinstance(written, dict) or captured_slots is None:
+        return {}
+
+    from app.domain.services.voice_pipeline.contact_capture import CaptureStatus
+
+    revocations: dict[str, str] = {}
+    for field_key in ("email", "phone"):
+        capture = getattr(captured_slots, f"{field_key}_capture", None)
+        if (
+            field_key in written
+            and capture is not None
+            and capture.status is not CaptureStatus.CONFIRMED
+        ):
+            revocations[field_key] = capture.validation_status
+    return revocations
 
 
 def _stash(session: Any, name: str, value: Any) -> None:
@@ -219,8 +273,8 @@ def _stash(session: Any, name: str, value: Any) -> None:
 async def _call_is_test(pool: Any, tenant_id: str, call_id: str) -> Optional[bool]:
     """``calls.is_test`` for this call, or None when no such row exists.
 
-    EXPLICIT TENANT PREDICATE: prod's app role is superuser + BYPASSRLS, so the
-    table's policy is inert and the statement must scope itself.
+    EXPLICIT TENANT PREDICATE: RLS context is deliberately not the only
+    isolation boundary here.
     """
     from app.core.db_utils import acquire_with_tenant
 
@@ -292,7 +346,8 @@ async def _capture(
         return 0
 
     pending = snapshot_slots(getattr(session, "captured_slots", None))
-    if not pending:
+    revocations = pending_contact_revocations(session)
+    if not pending and not revocations:
         # The common case. Checked BEFORE any database work so a call that
         # establishes nothing never touches the pool at all.
         return 0
@@ -300,12 +355,23 @@ async def _capture(
     written = getattr(session, _WRITTEN_ATTR, None)
     if not isinstance(written, dict):
         written = {}
+
+    def fingerprint(item: dict) -> tuple:
+        return (
+            item["value"],
+            item["confirmed"],
+            item.get("raw_value"),
+            item.get("normalized_value"),
+            item.get("validation_status"),
+            item.get("confirmed_at"),
+        )
+
     changed = {
         key: item
         for key, item in pending.items()
-        if written.get(key) != (item["value"], item["confirmed"])
+        if written.get(key) != fingerprint(item)
     }
-    if not changed:
+    if not changed and not revocations:
         return 0
 
     is_test = getattr(session, _IS_TEST_ATTR, None)
@@ -326,7 +392,7 @@ async def _capture(
         logger.debug(
             "lead_slot_capture_skipped_test_call call=%s fields=%s",
             target_call_id[:8],
-            sorted(changed),
+            sorted(set(changed) | set(revocations)),
         )
         _stash(session, _WRITTEN_ATTR, written)
         return 0
@@ -340,6 +406,26 @@ async def _capture(
     campaign = _as_uuid(campaign_id)
     lead = _as_uuid(lead_id)
     count = 0
+    for field_key, validation_status in revocations.items():
+        try:
+            revoked = await service.revoke_caller_contact(
+                tenant_id=tenant,
+                call_id=target_call_id,
+                field_key=field_key,
+                validation_status=validation_status,
+            )
+        except Exception as exc:  # noqa: BLE001 - transient; retry next turn
+            logger.warning(
+                "lead_slot_capture_revoke_failed call=%s field=%s err=%s",
+                target_call_id[:8],
+                field_key,
+                exc,
+            )
+            continue
+        written.pop(field_key, None)
+        if revoked:
+            count += 1
+
     for field_key, item in changed.items():
         try:
             stored = await service.capture(
@@ -350,6 +436,10 @@ async def _capture(
                 source=CAPTURE_SOURCE,
                 field_type=item["field_type"],
                 confirmed=item["confirmed"],
+                raw_value=item.get("raw_value"),
+                normalized_value=item.get("normalized_value"),
+                validation_status=item.get("validation_status"),
+                confirmed_at=item.get("confirmed_at"),
                 campaign_id=campaign,
                 lead_id=lead,
             )
@@ -362,7 +452,7 @@ async def _capture(
                 field_key,
                 exc,
             )
-            written[field_key] = (item["value"], item["confirmed"])
+            written[field_key] = fingerprint(item)
             continue
         except Exception as exc:  # noqa: BLE001 - transient; retry next turn
             logger.warning(
@@ -372,7 +462,7 @@ async def _capture(
                 exc,
             )
             continue
-        written[field_key] = (item["value"], item["confirmed"])
+        written[field_key] = fingerprint(item)
         if stored:
             count += 1
 
@@ -382,7 +472,7 @@ async def _capture(
             "lead_slot_capture call=%s reason=%s fields=%s written=%d",
             target_call_id[:8],
             reason,
-            sorted(changed),
+            sorted(set(changed) | set(revocations)),
             count,
         )
     return count

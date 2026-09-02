@@ -8,6 +8,7 @@ its own system message.
 """
 from __future__ import annotations
 
+from app.domain.services.voice_pipeline.contact_capture import CaptureStatus
 from app.services.scripts.call_state_tracker import CallState
 from app.services.scripts.spoken_email_normalizer import (
     natural_email_readback,
@@ -27,7 +28,36 @@ def compose_system_prompt(base_prompt: str, state: CallState) -> str:
     # action-this-turn: read it back, confirm, and do NOT save it until the
     # caller says yes. This stops a first-utterance mishear being locked as truth.
     pending: list[str] = []
-    if state.email and not state.email_confirmed:
+    for capture in (state.email_capture, state.phone_capture):
+        if capture is None or capture.status not in {
+            CaptureStatus.NEEDS_CLARIFICATION,
+            CaptureStatus.INVALID,
+        }:
+            continue
+        if (
+            state.active_contact_kind is not None
+            and capture.kind != state.active_contact_kind
+        ):
+            continue
+        instruction = capture.clarification_prompt or (
+            "Please ask the caller to repeat that contact detail clearly."
+        )
+        candidate = (
+            f" Current candidate (not confirmed): {capture.normalized_value}."
+            if capture.normalized_value
+            else ""
+        )
+        pending.append(f"- {instruction}{candidate} Do not save or rely on it yet.")
+
+    if (
+        state.email
+        and not state.email_confirmed
+        and (
+            state.email_capture is None
+            or state.email_capture.status is CaptureStatus.AWAITING_CONFIRMATION
+        )
+        and state.active_contact_kind in {None, "email"}
+    ):
         readback = natural_email_readback(state.email)
         if state.email_readback_attempts >= 3:
             # Bounded fallback: don't keep re-reading the same value forever.
@@ -58,7 +88,15 @@ def compose_system_prompt(base_prompt: str, state: CallState) -> str:
                 )
 
     # Phone / callback number — SAME confirm-before-commit surfacing as email.
-    if state.phone and not state.phone_confirmed:
+    if (
+        state.phone
+        and not state.phone_confirmed
+        and (
+            state.phone_capture is None
+            or state.phone_capture.status is CaptureStatus.AWAITING_CONFIRMATION
+        )
+        and state.active_contact_kind in {None, "phone"}
+    ):
         readback = natural_phone_readback(state.phone)
         if state.phone_readback_attempts >= 3:
             pending.append(

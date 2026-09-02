@@ -94,6 +94,46 @@ _DEFAULT_TURN_DETECTION = {"type": "semantic_vad", "eagerness": "medium"}
 _DEFAULT_NOISE_REDUCTION = {"type": "far_field"}
 _DEFAULT_TRANSCRIPTION_MODEL = "gpt-realtime-whisper"
 
+_CONTACT_DIRECTIVE_BLOCK_START = (
+    "CONTACT CAPTURE STATE v1 — latest backend directive only:"
+)
+_CONTACT_DIRECTIVE_BLOCK_END = "END CONTACT CAPTURE STATE"
+_MAX_CONTACT_DIRECTIVE_CHARS = 4096
+
+
+def _replace_contact_directive_block(instructions: str, directive: str) -> str:
+    """Replace one bounded backend-owned contact instruction block."""
+    base = str(instructions or "")
+    value = str(directive or "").strip()
+    if not value or len(value) > _MAX_CONTACT_DIRECTIVE_CHARS:
+        raise ValueError("invalid contact directive length")
+    if (
+        _CONTACT_DIRECTIVE_BLOCK_START in value
+        or _CONTACT_DIRECTIVE_BLOCK_END in value
+    ):
+        raise ValueError("contact directive contains a reserved marker")
+
+    starts = base.count(_CONTACT_DIRECTIVE_BLOCK_START)
+    ends = base.count(_CONTACT_DIRECTIVE_BLOCK_END)
+    if starts != ends or starts > 1:
+        raise ValueError("malformed contact directive block")
+    if starts:
+        start = base.find(_CONTACT_DIRECTIVE_BLOCK_START)
+        end = base.find(_CONTACT_DIRECTIVE_BLOCK_END, start)
+        if end < start:
+            raise ValueError("malformed contact directive block")
+        end += len(_CONTACT_DIRECTIVE_BLOCK_END)
+        base = (base[:start] + base[end:]).strip()
+
+    block = "\n".join(
+        (
+            _CONTACT_DIRECTIVE_BLOCK_START,
+            value,
+            _CONTACT_DIRECTIVE_BLOCK_END,
+        )
+    )
+    return f"{base}\n\n{block}".strip() if base else block
+
 # Default reasoning effort for the voice path. OpenAI's realtime prompting guide
 # recommends "low" as the production voice default — a big latency win — raising
 # it only for harder tasks. Shape on the wire is session.reasoning = {"effort": …}
@@ -587,6 +627,59 @@ class OpenAIRealtimeSession:
             logger.warning("realtime send_text failed call=%s err=%s",
                            self._call_id, exc)
 
+    async def interrupt_with_text(self, text: str) -> None:
+        """Replace an auto-generated turn with a backend-owned instruction.
+
+        Realtime server VAD may have started a response before the completed
+        caller transcript reaches the contact state machine. Replace the one
+        bounded session-level contact block first, then cancel that speculative
+        response; response.done consumes ``_pending_response_create`` and starts
+        a fresh response that can see only the latest directive. No raw
+        directive text is logged or appended to conversation history.
+        """
+        if not text or self._ws is None or self._closed.is_set():
+            return
+        try:
+            updated = _replace_contact_directive_block(self._instructions, text)
+        except ValueError as exc:
+            logger.warning(
+                "realtime contact directive rejected call=%s err=%s",
+                self._call_id,
+                exc,
+            )
+            return
+        was_active = self._response_active
+        if was_active:
+            # Invalidate and drain the speculative response synchronously.
+            # Waiting for the server's later response.done would let audio
+            # already queued behind the caller transcript leak after the
+            # gateway buffer was cleared.
+            self._on_interruption("contact_directive")
+        try:
+            self._instructions = updated
+            await self._ws.send(
+                json.dumps(
+                    {
+                        "type": "session.update",
+                        "session": {"instructions": updated},
+                    }
+                )
+            )
+            self._last_published_instructions = updated
+            if was_active:
+                self._pending_response_create = True
+                await self._ws.send(json.dumps({"type": "response.cancel"}))
+            else:
+                await self._create_response()
+        except websockets.exceptions.ConnectionClosed:
+            self._closed.set()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "realtime contact directive failed call=%s err=%s",
+                self._call_id,
+                exc,
+            )
+
     # ── Model → caller (normalised event stream) ─────────────────────────
     async def events(self):
         """Async iterator over normalised RealtimeEvents until the session
@@ -687,7 +780,7 @@ class OpenAIRealtimeSession:
             text = data.get("transcript")
             if text:
                 self._offer_event(RealtimeEvent(
-                    kind="caller_transcript", text=text, is_final=True))
+                    kind="caller_transcript", text=text, is_final=True, raw=data))
             return
 
         # ---- Barge-in: caller started talking ------------------------------
@@ -768,13 +861,17 @@ class OpenAIRealtimeSession:
         """Caller took the floor: invalidate the in-flight response and FLUSH
         any model audio still queued, so the agent stops mid-sentence instead
         of talking over the caller."""
+        during_response = self._response_active
         self._response_epoch += 1
         dropped = self._flush_audio_events()
         logger.debug(
             "realtime barge-in call=%s reason=%s flushed=%d epoch=%d",
             self._call_id, reason, dropped, self._response_epoch,
         )
-        self._offer_event(RealtimeEvent(kind="interrupted", raw={"reason": reason}))
+        self._offer_event(RealtimeEvent(
+            kind="interrupted",
+            raw={"reason": reason, "during_response": during_response},
+        ))
 
     def _flush_audio_events(self) -> int:
         """Drain queued 'audio' events (stale, superseded by barge-in).
