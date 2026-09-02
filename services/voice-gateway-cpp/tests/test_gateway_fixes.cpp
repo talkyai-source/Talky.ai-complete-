@@ -178,7 +178,8 @@ void test_failure_state_is_not_overwritten_by_stopped() {
     check(session.start(err), "failed_terminal_start");
     session.stop("socket_error");
     const auto snap = session.snapshot();
-    check(snap.state == "Failed", "failed_terminal_state_preserved");
+    check(session.state() == voice_gateway::SessionState::Failed,
+          "failed_terminal_state_preserved");
     check(snap.stop_reason == "socket_error", "failed_terminal_reason_preserved");
 }
 

@@ -53,3 +53,13 @@ def test_non_echo_receive_can_transition_directly_from_starting_to_active():
     assert "to == SessionState::Active" in starting_case
     assert "active_deadline" in runtime_tests
     assert "session.snapshot().packets_in == 1" in runtime_tests
+
+
+def test_terminal_failure_regression_uses_the_typed_state_contract():
+    """C++ state tests must not invent display-string capitalization."""
+
+    runtime_tests = (GATEWAY / "tests" / "test_gateway_fixes.cpp").read_text(
+        encoding="utf-8"
+    )
+
+    assert "session.state() == voice_gateway::SessionState::Failed" in runtime_tests
