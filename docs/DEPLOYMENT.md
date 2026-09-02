@@ -59,26 +59,48 @@ export TALKY_DEPLOY_DRAIN_MANIFEST_SHA256='<64-lowercase-hex-sha256-of-exact-fil
 2. verifies and atomically consumes the candidate-bound production drain
    manifest before opening SSH; any digest, candidate, environment, freshness,
    freeze, zero-count, evidence, approver, or replay mismatch fails closed
-3. refuses source-tree drift on the server, fetches the branch for object
-   reachability, then `git checkout --detach <full-sha>` and verifies `HEAD`
-   equals the frozen SHA; it never deploys a moving branch tip
-4. runs the Python import smoke test, then builds and executes the complete C++
-   gateway CTest suite from that exact SHA in a temporary directory
-5. proves the existing gateway has zero sessions, atomically publishes the
-   tested binary outside the git checkout, reconciles systemd units, rechecks
-   zero sessions immediately before restart, restarts the gateway, and proves
-   its health; the gateway loads the distinct `INTERNAL_SERVICE_TOKEN` and
+3. refuses source-tree drift on the server, preflights Asterisk, the complete
+   gateway toolchain, Python, and Alembic, then fetches the branch and proves
+   the frozen object is reachable without changing the live checkout
+4. creates an isolated detached worktree before mutating the live `/opt/talky`
+   checkout; from the frozen SHA it runs the Python import smoke test, builds
+   and executes the complete C++ gateway CTest suite, runs
+   `reconcile_asterisk_release.sh --check-only` to reject ambiguous
+   account-to-DID inventory, and validates the mandatory carrier-hairpin
+   synthetic configuration
+5. only after those candidate proofs, checks out the frozen SHA with
+   `git checkout --detach <full-sha>` and verifies `HEAD` and the clean tree; it
+   never deploys a moving branch tip
+6. proves the existing gateway has zero sessions, atomically publishes the
+   tested binary outside the git checkout, then reconciles systemd; the
+   installer installs `talky-migrate.service`, `talky-inbound-synthetic.service`
+   and the other repository units, enables `talky-inbound-synthetic.timer` and
+   every persistent service/timer; the deploy then verifies the required units
+   are loaded and the release-critical services and timers are enabled
+7. rechecks zero gateway sessions immediately before restart, restarts the
+   gateway, and proves its authenticated readiness and build SHA; the gateway
+   loads the distinct `INTERNAL_SERVICE_TOKEN` and
    `VOICE_GATEWAY_AUTH_TOKEN` secrets plus exact `VOICE_GATEWAY_CALLBACK_HOST`
    and `BACKEND_INTERNAL_URL` origin from `backend/.env`; it refuses startup if
    secrets are absent, short, or reused, and refuses any callback whose scheme,
    host, port, or caller-audio path falls outside that pinned origin
-6. `sudo systemctl start talky-migrate.service` — **migrations; a failure here
-   blocks the restart below**
-7. restarts the API/workers only after the authenticated matching gateway is
-   healthy, then refreshes trunk-status services
-8. requires every listed unit to be active, then requires liveness, capacity
-   readiness, and dependency-aware deep readiness to return successful HTTP
-   responses; any failure keeps the deploy command non-zero
+8. starts `talky-migrate.service` and verifies `alembic current == heads`;
+   migration errors fail closed. It then applies the repository-owned Asterisk
+   configuration through `reconcile_asterisk_release.sh`, which requires zero
+   active Asterisk channels and atomically applies, reloads, verifies, or rolls
+   back the managed configuration
+9. restarts the API and three Python workers only after the matching gateway,
+   schema, and Asterisk configuration are proven; it then restarts the
+   trunk-status timer and restarts `talky-inbound-synthetic.timer`, while the
+   trunk-status one-shot remains non-fatal because its timer retries
+10. requires every listed unit to be active, then requires liveness, capacity
+    readiness, and dependency-aware deep readiness to return successful HTTP
+    responses; any failure keeps the deploy command non-zero
+
+Asterisk configuration is generated and reconciled from the repository:
+`setup-asterisk.sh` provisions the managed includes, and deploys use
+`backend/scripts/reconcile_asterisk_release.sh`. Do not hand-edit the managed
+files in `/etc/asterisk`; the next verified reconciliation will replace drift.
 
 Overridable via environment:
 

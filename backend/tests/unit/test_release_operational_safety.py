@@ -103,6 +103,38 @@ def test_deploy_uses_documented_openssh_key_by_default_and_keeps_override():
     assert "talky_admin" not in deployment_doc
 
 
+def test_deployment_docs_match_candidate_first_reconciliation_sequence():
+    deployment_doc = (ROOT / "docs" / "DEPLOYMENT.md").read_text(encoding="utf-8")
+    normalized = " ".join(deployment_doc.split())
+
+    candidate_at = normalized.index(
+        "creates an isolated detached worktree before mutating the live "
+        "`/opt/talky` checkout"
+    )
+    checkout_at = normalized.index(
+        "only after those candidate proofs, checks out the frozen SHA"
+    )
+    unit_at = normalized.index(
+        "installs `talky-migrate.service`, `talky-inbound-synthetic.service`"
+    )
+    migrate_at = normalized.index("verifies `alembic current == heads`")
+    asterisk_at = normalized.index(
+        "applies the repository-owned Asterisk configuration"
+    )
+    restart_at = normalized.index("restarts the API and three Python workers")
+
+    assert candidate_at < checkout_at < unit_at < migrate_at < asterisk_at < restart_at
+    for contract in (
+        "Python import smoke test",
+        "complete C++ gateway CTest suite",
+        "`reconcile_asterisk_release.sh --check-only`",
+        "carrier-hairpin synthetic configuration",
+        "enables `talky-inbound-synthetic.timer`",
+        "restarts `talky-inbound-synthetic.timer`",
+    ):
+        assert contract in normalized
+
+
 def test_deploy_and_rollback_require_fail_closed_health_probes():
     deploy = (ROOT / "deploy_to_server.sh").read_text(encoding="utf-8")
     deployment_doc = (ROOT / "docs" / "DEPLOYMENT.md").read_text(encoding="utf-8")
