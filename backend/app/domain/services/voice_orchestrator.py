@@ -118,6 +118,13 @@ class Direction(str, enum.Enum):
 OPENING_MODE_AGENT_FIRST = "agent_first"
 OPENING_MODE_CALLEE_FIRST = "callee_first"
 
+# Realtime response audio is delivered before its terminal transcript.  Until
+# the bridge quarantines every response and validates that transcript before
+# playout, the action-result contract cannot be enforced on this path.  This is
+# deliberately not an environment flag: an operator typo must not re-enable an
+# unsafe speech path.
+_REALTIME_PREPLAY_GUARD_AVAILABLE = False
+
 
 def opening_mode_from_first_speaker(first_speaker: Optional[str]) -> str:
     """Map the per-call ``first_speaker`` knob onto an opening mode.
@@ -534,6 +541,20 @@ class VoiceOrchestrator:
         )
 
         # ── PIPELINE-MODE BRANCH POINT (Realtime add-on) ────────────────────
+        if (
+            getattr(config, "pipeline_mode", "cascaded") == "realtime"
+            and not _REALTIME_PREPLAY_GUARD_AVAILABLE
+        ):
+            logger.warning(
+                "realtime_blocked reason=c1_preplay_guard_unavailable "
+                "call_id=%s fallback=cascaded",
+                call_id[:8],
+            )
+            # VoiceSessionConfig is mutable by contract. If that ever changes,
+            # assignment must fail the call here rather than fall through to an
+            # unguarded Realtime socket.
+            config.pipeline_mode = "cascaded"
+
         # A single OpenAI gpt-realtime-2 speech-to-speech session replaces the
         # cascaded STT→LLM→TTS middle. Default "cascaded" means every existing
         # tenant skips this entirely and the code below is byte-for-byte

@@ -12,6 +12,7 @@ Tests cover:
 """
 import asyncio
 import json
+import logging
 import pytest
 from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch, PropertyMock
@@ -172,6 +173,50 @@ class TestCreateVoiceSession:
             assert vs.media_gateway is mock_gw
             assert vs.pipeline is not None
             assert vs.call_session is not None
+
+    @pytest.mark.asyncio
+    async def test_realtime_request_fails_closed_to_guarded_cascaded_pipeline(
+        self, caplog
+    ):
+        """Realtime audio cannot play before its action claims are validated.
+
+        Until a pre-playout validator exists, selection must happen before any
+        Realtime socket/gateway is created and retain the cascaded sample rates.
+        """
+        orch = VoiceOrchestrator(db_client=None)
+        config = VoiceSessionConfig(
+            session_type="freeswitch",
+            pipeline_mode="realtime",
+            stt_sample_rate=16000,
+            tts_sample_rate=24000,
+        )
+        realtime_builder = AsyncMock(return_value=_make_voice_session(config=config))
+        mock_stt = _make_mock_provider()
+        mock_llm = _make_mock_provider()
+        mock_tts = _make_mock_provider()
+        mock_gateway = _make_mock_gateway()
+
+        with (
+            patch.object(
+                orch,
+                "_create_realtime_voice_session",
+                new=realtime_builder,
+            ),
+            patch.object(orch, "_create_stt_provider", return_value=mock_stt),
+            patch.object(orch, "_create_llm_provider", return_value=mock_llm),
+            patch.object(orch, "_create_tts_provider", return_value=mock_tts),
+            patch.object(orch, "_create_media_gateway", return_value=mock_gateway),
+            caplog.at_level(logging.WARNING),
+        ):
+            session = await orch.create_voice_session(config)
+
+        realtime_builder.assert_not_awaited()
+        assert config.pipeline_mode == "cascaded"
+        assert session.realtime_session is None
+        assert session.realtime_bridge is None
+        assert session.pipeline.stt_sample_rate == 16000
+        assert session.pipeline.tts_sample_rate == 24000
+        assert "realtime_blocked reason=c1_preplay_guard_unavailable" in caplog.text
 
     @pytest.mark.asyncio
     async def test_media_gateway_uses_stt_rate_for_browser_input(self):
