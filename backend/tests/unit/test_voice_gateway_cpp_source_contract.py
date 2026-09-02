@@ -36,3 +36,20 @@ def test_direct_gate_defines_and_exercises_build_identity():
     assert 'BUILD_IDENTITY="-DVOICE_GATEWAY_BUILD_SHA=\\\"${BUILD_SHA}\\\""' in gate
     assert '"$BUILD_IDENTITY"' in gate
     assert "std::string(VOICE_GATEWAY_BUILD_SHA)" in runtime_tests
+
+
+def test_non_echo_receive_can_transition_directly_from_starting_to_active():
+    """The state guard must admit the transition requested by the RTP loop."""
+
+    source = (GATEWAY / "src" / "session.cpp").read_text(encoding="utf-8")
+    runtime_tests = (GATEWAY / "tests" / "test_gateway_fixes.cpp").read_text(
+        encoding="utf-8"
+    )
+    transitions = source.split("bool RtpSession::can_transition", 1)[1]
+    starting_case = transitions.split("case SessionState::Starting:", 1)[1].split(
+        "case SessionState::Buffering:", 1
+    )[0]
+
+    assert "to == SessionState::Active" in starting_case
+    assert "active_deadline" in runtime_tests
+    assert "session.snapshot().packets_in == 1" in runtime_tests

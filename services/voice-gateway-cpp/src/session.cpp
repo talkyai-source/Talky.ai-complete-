@@ -1510,7 +1510,7 @@ bool RtpSession::can_transition(const SessionState from, const SessionState to) 
         case SessionState::Created:
             return to == SessionState::Starting || to == SessionState::Stopping || to == SessionState::Stopped || to == SessionState::Failed;
         case SessionState::Starting:
-            return to == SessionState::Buffering || to == SessionState::Degraded || to == SessionState::Stopping || to == SessionState::Stopped || to == SessionState::Failed;
+            return to == SessionState::Buffering || to == SessionState::Active || to == SessionState::Degraded || to == SessionState::Stopping || to == SessionState::Stopped || to == SessionState::Failed;
         case SessionState::Buffering:
             return to == SessionState::Active || to == SessionState::Degraded || to == SessionState::Stopping || to == SessionState::Stopped || to == SessionState::Failed;
         case SessionState::Active:

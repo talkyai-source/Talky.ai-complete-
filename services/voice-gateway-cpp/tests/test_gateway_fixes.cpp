@@ -117,9 +117,16 @@ void test_non_echo_receive_path_becomes_active_on_first_valid_rtp() {
     dst.sin_port = htons(43401);
     inet_pton(AF_INET, "127.0.0.1", &dst.sin_addr);
     send_rtp(tx, dst, 1, 0, 0x1010u, 0x11);
-    std::this_thread::sleep_for(std::chrono::milliseconds(80));
 
-    check(session.snapshot().state == "Active", "active_rx_first_packet_not_stuck_buffering");
+    const auto active_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+    while (session.state() != voice_gateway::SessionState::Active &&
+           std::chrono::steady_clock::now() < active_deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+
+    check(session.state() == voice_gateway::SessionState::Active,
+          "active_rx_first_packet_not_stuck_buffering");
+    check(session.snapshot().packets_in == 1, "active_rx_first_packet_counted");
     session.stop("test_done");
     close(tx);
 }
