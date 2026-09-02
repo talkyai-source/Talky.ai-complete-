@@ -2,7 +2,14 @@ cmake_minimum_required(VERSION 3.16)
 project(voice_gateway_cpp LANGUAGES CXX)
 
 set(VOICE_GATEWAY_BUILD_SHA "dev" CACHE STRING "Immutable source commit embedded in health responses")
-if(NOT VOICE_GATEWAY_BUILD_SHA MATCHES "^(dev|[0-9a-f]{40,64})$")
+# CMake's regex engine has no bounded repetition ({40,64}), so the previous
+# single-pattern check rejected EVERY real commit SHA and the release build
+# script (which passes a full SHA) could never configure. Match the alphabet
+# with the regex and enforce the length separately.
+string(LENGTH "${VOICE_GATEWAY_BUILD_SHA}" _voice_gateway_build_sha_len)
+if(NOT VOICE_GATEWAY_BUILD_SHA MATCHES "^(dev|[0-9a-f]+)$"
+   OR (NOT VOICE_GATEWAY_BUILD_SHA STREQUAL "dev"
+       AND (_voice_gateway_build_sha_len LESS 40 OR _voice_gateway_build_sha_len GREATER 64)))
     message(FATAL_ERROR "VOICE_GATEWAY_BUILD_SHA must be 'dev' or a 40-64 character lowercase hex commit")
 endif()
 
