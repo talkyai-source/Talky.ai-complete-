@@ -7,7 +7,9 @@ on:
     branches: [main]
 
 env:
-  PYTHON_VERSION: "3.10"
+  # Match production and backend-voice-tests. The package itself requires
+  # Python >=3.11, so 3.10 cannot be a meaningful compatibility gate.
+  PYTHON_VERSION: "3.12"
   # 22.18+ runs TypeScript type stripping unflagged, which the Admin test
   # suite relies on (its .mjs tests import .ts sources directly).
   NODE_VERSION: "22"

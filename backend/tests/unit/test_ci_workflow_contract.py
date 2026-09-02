@@ -2,7 +2,6 @@
 
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[3]
 WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
 
@@ -14,6 +13,10 @@ def _workflow() -> str:
 def test_ci_runs_every_canonical_repository_suite() -> None:
     workflow = _workflow()
 
+    # Production and the dedicated voice workflow run Python 3.12, while the
+    # package contract requires >=3.11. Pinning this gate to 3.10 turns valid
+    # stdlib usage (for example datetime.UTC) into collection-time failures.
+    assert 'PYTHON_VERSION: "3.12"' in workflow
     assert 'NODE_VERSION: "22"' in workflow
     assert "ruff check app/ --select F --extend-ignore F401,F841" in workflow
     assert "pytest tests/unit tests/security" in workflow
