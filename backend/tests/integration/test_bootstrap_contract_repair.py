@@ -17,10 +17,13 @@ from sqlalchemy.exc import DBAPIError, SQLAlchemyError
 
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
+from alembic.script import ScriptDirectory
 
 MIGRATION = importlib.import_module("Alembic.versions.0033_bootstrap_contract_repair")
-CURRENT_HEAD = "0035_user_profiles_role_widen"
+ROLE_MIGRATION = importlib.import_module("Alembic.versions.0035_user_profiles_role_widen")
 BACKEND = Path(__file__).resolve().parents[2]
+CURRENT_HEAD = ScriptDirectory(str(BACKEND / "Alembic")).get_current_head()
+assert CURRENT_HEAD is not None
 _LOCAL_DATABASE_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 _TEST_DATABASE_NAME = re.compile(r"(?:^|[_-])(?:test|ci|tmp|ephemeral)(?:[_-]|$)")
 _NEW_USER_ROLES = ("campaign_manager", "agent", "billing_user")
@@ -97,6 +100,22 @@ def _run_upgrade(connection) -> None:
         MIGRATION.upgrade()
     finally:
         MIGRATION.op = original_op
+
+
+def _run_downgrade(connection, migration) -> None:
+    """Invoke one revision's downgrade against the caller-owned transaction.
+
+    Later forward-only revisions intentionally prevent Alembic from walking
+    backward from today's head. A guard test for an older revision therefore
+    calls that revision directly; this still exercises its real DDL/catalog
+    logic while keeping the current head marker and newer schema untouched.
+    """
+    original_op = migration.op
+    try:
+        migration.op = Operations(MigrationContext.configure(connection))
+        migration.downgrade()
+    finally:
+        migration.op = original_op
 
 
 @pytest.mark.integration
@@ -827,8 +846,31 @@ def test_0035_role_check_accepts_exact_new_roles_and_rejects_unknown() -> None:
 
 
 @pytest.mark.integration
-def test_0035_downgrade_refuses_atomically_while_new_role_is_retained() -> None:
+def test_current_head_cli_downgrade_refuses_without_moving_marker() -> None:
     dsn = _dsn_or_skip()
+    engine = _engine_or_fail()
+    try:
+        with engine.connect() as connection:
+            before = connection.execute(
+                text("SELECT version_num FROM alembic_version")
+            ).scalar_one()
+        assert before == CURRENT_HEAD
+
+        result = _run_alembic(dsn, "downgrade", "-1")
+        assert result.returncode != 0
+        assert "Refusing to downgrade" in result.stderr
+
+        with engine.connect() as connection:
+            assert (
+                connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
+                == before
+            )
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.integration
+def test_0035_revision_guard_refuses_while_new_role_is_retained() -> None:
     engine = _engine_or_fail()
     email = f"role-downgrade-guard-{uuid.uuid4()}@example.test"
     try:
@@ -841,15 +883,15 @@ def test_0035_downgrade_refuses_atomically_while_new_role_is_retained() -> None:
                 {"email": email},
             )
 
-        result = _run_alembic(dsn, "downgrade", "0034_inbound_billing_four_eye")
-        assert result.returncode != 0
-        assert "Refusing to downgrade 0035" in result.stderr
+        with engine.connect() as connection:
+            transaction = connection.begin()
+            try:
+                with pytest.raises(RuntimeError, match="Refusing to downgrade 0035"):
+                    _run_downgrade(connection, ROLE_MIGRATION)
+            finally:
+                transaction.rollback()
 
         with engine.connect() as connection:
-            assert (
-                connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
-                == CURRENT_HEAD
-            )
             assert connection.execute(
                 text("SELECT count(*) FROM user_profiles WHERE email=:email"),
                 {"email": email},
@@ -867,28 +909,25 @@ def test_0035_downgrade_refuses_atomically_while_new_role_is_retained() -> None:
                 text("DELETE FROM user_profiles WHERE email=:email"),
                 {"email": email},
             )
-        repair = _run_alembic(dsn, "upgrade", "head")
         engine.dispose()
-        assert repair.returncode == 0, repair.stdout + repair.stderr
 
 
 @pytest.mark.integration
-def test_0033_downgrade_refusal_keeps_marker_and_schema_intact() -> None:
-    dsn = _dsn_or_skip()
+def test_0033_revision_guard_keeps_schema_intact() -> None:
     engine = _engine_or_fail()
     try:
         with engine.connect() as connection:
             before = connection.execute(text("SELECT count(*) FROM topup_packages")).scalar_one()
 
-        result = _run_alembic(dsn, "downgrade", "0032_inbound_billing_hold")
-        assert result.returncode != 0
-        assert "Refusing to downgrade 0033" in result.stderr
+        with engine.connect() as connection:
+            transaction = connection.begin()
+            try:
+                with pytest.raises(RuntimeError, match="Refusing to downgrade 0033"):
+                    _run_downgrade(connection, MIGRATION)
+            finally:
+                transaction.rollback()
 
         with engine.connect() as connection:
-            assert (
-                connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
-                == CURRENT_HEAD
-            )
             assert (
                 connection.execute(text("SELECT count(*) FROM topup_packages")).scalar_one()
                 == before
