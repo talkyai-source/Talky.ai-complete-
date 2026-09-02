@@ -85,7 +85,7 @@ Overridable via environment:
 | Variable | Default |
 |---|---|
 | `TALKY_PROD_HOST` | `admins@144.76.17.150` |
-| `TALKY_PROD_KEY` | `$HOME/.ssh/talky_admin` |
+| `TALKY_PROD_KEY` | `$HOME/.ssh/id_rsa_openssh` |
 | `TALKY_DEPLOY_BRANCH` | `main` |
 | `TALKY_DEPLOY_SHA` | local `HEAD` (resolved once to a full SHA) |
 | `TALKY_DEPLOY_DRAIN_MANIFEST` | **required path; no default** |
@@ -208,7 +208,7 @@ test "${active_calls_proof}" = 'ACTIVE_CALLS_ZERO'
 # 3. Only after steps 1-2, select the previously proven application SHA.
 rollback_sha='<full-known-good-sha>'
 [[ "${rollback_sha}" =~ ^[0-9a-f]{40,64}$ ]]
-ssh -t -i ~/.ssh/talky_admin admins@144.76.17.150 \
+ssh -t -i ~/.ssh/id_rsa_openssh admins@144.76.17.150 \
   bash -s -- "${rollback_sha}" <<'REMOTE'
 set -Eeuo pipefail
 rollback_sha="$1"

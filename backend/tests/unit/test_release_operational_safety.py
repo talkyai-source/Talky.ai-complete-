@@ -92,6 +92,17 @@ def test_deploy_uses_one_frozen_sha_and_never_pulls_a_moving_tip():
     assert "git status --porcelain" in source
 
 
+def test_deploy_uses_documented_openssh_key_by_default_and_keeps_override():
+    deploy = (ROOT / "deploy_to_server.sh").read_text(encoding="utf-8")
+    deployment_doc = (ROOT / "docs" / "DEPLOYMENT.md").read_text(encoding="utf-8")
+
+    expected = 'KEY="${TALKY_PROD_KEY:-$HOME/.ssh/id_rsa_openssh}"'
+    assert expected in deploy
+    assert "`TALKY_PROD_KEY` | `$HOME/.ssh/id_rsa_openssh`" in deployment_doc
+    assert "ssh -t -i ~/.ssh/id_rsa_openssh" in deployment_doc
+    assert "talky_admin" not in deployment_doc
+
+
 def test_deploy_and_rollback_require_fail_closed_health_probes():
     deploy = (ROOT / "deploy_to_server.sh").read_text(encoding="utf-8")
     deployment_doc = (ROOT / "docs" / "DEPLOYMENT.md").read_text(encoding="utf-8")

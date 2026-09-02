@@ -21,7 +21,7 @@
 set -euo pipefail
 
 PROD="${TALKY_PROD_HOST:-admins@144.76.17.150}"
-KEY="${TALKY_PROD_KEY:-$HOME/.ssh/talky_admin}"
+KEY="${TALKY_PROD_KEY:-$HOME/.ssh/id_rsa_openssh}"
 BRANCH="${TALKY_DEPLOY_BRANCH:-main}"
 DEPLOY_REF="${TALKY_DEPLOY_SHA:-HEAD}"
 DRAIN_MANIFEST="${TALKY_DEPLOY_DRAIN_MANIFEST:-}"
