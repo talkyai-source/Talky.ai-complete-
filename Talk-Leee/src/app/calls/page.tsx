@@ -1,19 +1,34 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
-import { Phone, PhoneOff, PhoneIncoming, PhoneOutgoing, Clock, ChevronRight, ChevronDown, FileText, Megaphone, Loader2, Sparkles, Play, Pause, Search, Mic } from "lucide-react";
+import { Phone, PhoneOff, PhoneIncoming, PhoneOutgoing, Clock, ChevronRight, ChevronDown, FileText, Megaphone, Loader2, Sparkles, Play, Pause, Search, Mic, ThumbsUp } from "lucide-react";
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
 import { useCalls, useCallTranscript, useCallSummary } from "@/lib/api-hooks";
-import type { Call } from "@/lib/dashboard-api";
+import type { Call, CallSummaryEnvelope } from "@/lib/dashboard-api";
 import { CallSummaryCard } from "@/components/calls/CallSummaryCard";
 import { statusPillClass } from "@/lib/status-colors";
 import { extendedApi } from "@/lib/extended-api";
 import { CallIssuesBanner } from "@/components/calls/call-issues-banner";
-import { QuickReviewButtons } from "@/components/calls/quick-review-buttons";
+import {
+    CallHistoryFormButton,
+    CallHistoryNotesField,
+    CallReviewModal,
+    LeadTypeSelect,
+} from "@/components/calls/call-history-workflow-controls";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { getRecordingCapabilities } from "@/lib/media-permissions";
 import { useEffectivePermissions } from "@/lib/queries/inbound-queries";
+import { useAuth } from "@/lib/auth-context";
+import {
+    defaultCallHistoryWorkflow,
+    isActiveCallStatus,
+    readCallHistoryWorkflow,
+    writeCallHistoryWorkflow,
+    type CallHistoryWorkflowEntry,
+    type CallHistoryWorkflowMap,
+} from "@/lib/call-history-workflow";
 
 function getStatusIcon(status: string) {
     switch (status) {
@@ -31,12 +46,8 @@ function getStatusIcon(status: string) {
     }
 }
 
-// Delegates to the shared util so call history, detail, and contacts all agree
-// on what green/red mean.
-const getStatusStyle = statusPillClass;
-
 const DESKTOP_CALL_GRID =
-    "grid-cols-[minmax(0,1.4fr)_minmax(0,0.8fr)_minmax(0,1fr)_minmax(0,0.7fr)_minmax(0,1.1fr)_auto_auto_auto_auto_auto_auto]";
+    "grid-cols-[minmax(9rem,1.15fr)_minmax(7.5rem,0.75fr)_minmax(6rem,0.7fr)_minmax(7.5rem,0.8fr)_minmax(9rem,1fr)_4.75rem_5.5rem_auto]";
 
 const FAILED_CALL_OUTCOMES = new Set([
     "busy",
@@ -110,11 +121,79 @@ function CallParties({ call }: { call: Call }) {
     return <span className="truncate text-sm font-semibold text-foreground">{call.phone_number}</span>;
 }
 
-function CallRow({ call, canPlayMedia }: { call: Call; canPlayMedia: boolean }) {
+function SummaryPreview({
+    fallback,
+    isLoading,
+    isError,
+    data,
+}: {
+    fallback?: string;
+    isLoading: boolean;
+    isError: boolean;
+    data?: CallSummaryEnvelope;
+}) {
+    if (isLoading) {
+        return (
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+                Loading key points…
+            </div>
+        );
+    }
+
+    if (isError) return <p className="text-xs text-destructive">Could not load the AI summary.</p>;
+
+    const summary = data?.summary;
+    const keyPoints = summary?.key_points?.filter(Boolean).slice(0, 4) ?? [];
+    return (
+        <div className="space-y-2.5">
+            <div>
+                <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-muted-foreground">AI Summary</p>
+                <p className="mt-1 text-sm font-semibold leading-snug text-foreground">
+                    {summary?.headline || fallback || "No summary is available for this call."}
+                </p>
+            </div>
+            {keyPoints.length > 0 ? (
+                <ul className="space-y-1.5">
+                    {keyPoints.map((point, index) => (
+                        <li key={`${point}-${index}`} className="flex gap-2 text-xs leading-relaxed text-popover-foreground">
+                            <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-primary/60" aria-hidden />
+                            <span>{point}</span>
+                        </li>
+                    ))}
+                </ul>
+            ) : null}
+            {summary?.next_step?.trim() ? (
+                <div className="rounded-lg bg-muted/70 px-2.5 py-2 text-xs leading-relaxed">
+                    <span className="font-semibold text-foreground">Next:</span>{" "}
+                    <span className="text-muted-foreground">{summary.next_step}</span>
+                </div>
+            ) : null}
+        </div>
+    );
+}
+
+type CallWorkflowPatch = Partial<Omit<CallHistoryWorkflowEntry, "updatedAt">>;
+
+function CallRow({
+    call,
+    canPlayMedia,
+    workflow,
+    onWorkflowChange,
+    onReview,
+}: {
+    call: Call;
+    canPlayMedia: boolean;
+    workflow: CallHistoryWorkflowEntry;
+    onWorkflowChange: (call: Call, patch: CallWorkflowPatch) => void;
+    onReview: (call: Call) => void;
+}) {
     const [expanded, setExpanded] = useState(false);
+    const [summaryPreviewOpen, setSummaryPreviewOpen] = useState(false);
     const [showTranscript, setShowTranscript] = useState(false);
-    const summaryQuery = useCallSummary(expanded ? call.id : undefined);
+    const summaryQuery = useCallSummary(expanded || summaryPreviewOpen ? call.id : undefined);
     const transcriptQuery = useCallTranscript(showTranscript ? call.id : undefined, "json");
+    const callLabel = call.phone_number || call.from_number || "call";
 
     // Inline recording playback (same auth/refresh path as the detail page).
     const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -176,134 +255,206 @@ function CallRow({ call, canPlayMedia }: { call: Call; canPlayMedia: boolean }) 
         <div className="rounded-xl border border-border bg-background">
             <div className="space-y-3 p-4 xl:hidden">
                 <div className="flex items-start justify-between gap-3">
-                    <div className="flex min-w-0 items-start gap-2">{getStatusIcon(call.status)}<div className="flex min-w-0 flex-col"><CallParties call={call} /></div></div>
-                    <DirectionBadge direction={call.direction} />
+                    <div className="flex min-w-0 items-start gap-2">
+                        {getStatusIcon(call.status)}
+                        <div className="flex min-w-0 flex-col gap-1.5">
+                            <CallParties call={call} />
+                            <div className="flex flex-wrap items-center gap-2">
+                                <DirectionBadge direction={call.direction} />
+                                <span className="inline-flex items-center gap-1 text-xs text-muted-foreground tabular-nums">
+                                    <Clock className="h-3.5 w-3.5" aria-hidden />
+                                    {formatDuration(call.duration_seconds)}
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                    <LeadTypeSelect
+                        value={workflow.leadType}
+                        onChange={(leadType) => onWorkflowChange(call, { leadType })}
+                        callLabel={callLabel}
+                    />
                 </div>
-                <div className="flex flex-wrap items-center gap-2"><span className={`inline-flex items-center rounded-full px-2 py-1 text-xs font-semibold ${getStatusStyle(call.status)}`}>{humanizeOutcome(call.status)}</span>{call.outcome ? <span className={`inline-flex items-center rounded-full px-2 py-1 text-xs font-semibold ${statusPillClass(call.outcome)}`}>{humanizeOutcome(call.outcome)}</span> : null}<span className="inline-flex items-center gap-1 text-xs text-muted-foreground"><Clock className="h-3.5 w-3.5" aria-hidden />{formatDuration(call.duration_seconds)}</span><time dateTime={call.created_at} className="text-xs text-muted-foreground">{new Date(call.created_at).toLocaleString()}</time></div>
-                {call.summary ? <p className="line-clamp-2 text-xs text-muted-foreground">{call.summary}</p> : null}
+                <div className="flex flex-wrap items-center gap-2">
+                    {call.outcome ? (
+                        <span className={`inline-flex items-center rounded-full px-2 py-1 text-xs font-semibold ${statusPillClass(call.outcome)}`}>
+                            {humanizeOutcome(call.outcome)}
+                        </span>
+                    ) : null}
+                    <time dateTime={call.created_at} className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+                        <Clock className="h-3.5 w-3.5" aria-hidden />
+                        {new Date(call.created_at).toLocaleString()}
+                    </time>
+                </div>
+                <CallHistoryNotesField
+                    value={workflow.notes}
+                    onChange={(notes) => onWorkflowChange(call, { notes })}
+                    callLabel={callLabel}
+                />
                 <div className="flex flex-wrap items-center gap-2 border-t border-border pt-3">
-                    <button type="button" onClick={() => setExpanded((value) => !value)} aria-expanded={expanded} className="inline-flex h-11 items-center gap-1.5 rounded-lg border border-border px-3 text-xs font-medium text-muted-foreground hover:bg-accent hover:text-foreground"><Sparkles className="h-4 w-4" aria-hidden />AI summary</button>
-                    <button type="button" onClick={() => setShowTranscript((value) => !value)} aria-expanded={showTranscript} className="inline-flex h-11 items-center gap-1.5 rounded-lg border border-border px-3 text-xs font-medium text-muted-foreground hover:bg-accent hover:text-foreground"><FileText className="h-4 w-4" aria-hidden />Transcript</button>
-                    {call.recording_id && canPlayMedia ? <button type="button" onClick={togglePlay} aria-label={playing ? "Pause recording" : "Play recording"} className="inline-flex h-11 items-center gap-1.5 rounded-lg border border-border px-3 text-xs font-medium text-muted-foreground hover:bg-accent hover:text-foreground">{audioLoading ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : playing ? <Pause className="h-4 w-4" aria-hidden /> : <Play className="h-4 w-4" aria-hidden />}Recording</button> : null}
-                    <QuickReviewButtons callId={call.id} touchFriendly />
+                    <TooltipProvider delayDuration={250}>
+                        <Tooltip onOpenChange={setSummaryPreviewOpen}>
+                            <TooltipTrigger asChild>
+                                <button
+                                    type="button"
+                                    onClick={() => setExpanded((value) => !value)}
+                                    aria-expanded={expanded}
+                                    className={`inline-flex h-11 items-center gap-1.5 rounded-lg border px-3 text-xs font-medium transition-colors ${expanded ? "border-ring/60 bg-accent text-foreground" : "border-border text-muted-foreground hover:bg-accent hover:text-foreground"}`}
+                                >
+                                    <Sparkles className="h-4 w-4" aria-hidden />
+                                    AI summary
+                                </button>
+                            </TooltipTrigger>
+                            <TooltipContent side="top" align="start" sideOffset={8} className="w-80 max-w-[calc(100vw-2rem)] p-4 shadow-xl">
+                                <SummaryPreview fallback={call.summary} isLoading={summaryQuery.isLoading} isError={summaryQuery.isError} data={summaryQuery.data} />
+                            </TooltipContent>
+                        </Tooltip>
+                    </TooltipProvider>
+                    <button
+                        type="button"
+                        onClick={() => setShowTranscript((value) => !value)}
+                        aria-expanded={showTranscript}
+                        className={`inline-flex h-11 items-center gap-1.5 rounded-lg border px-3 text-xs font-medium transition-colors ${showTranscript ? "border-ring/60 bg-accent text-foreground" : "border-border text-muted-foreground hover:bg-accent hover:text-foreground"}`}
+                    >
+                        <FileText className="h-4 w-4" aria-hidden />
+                        AI script
+                    </button>
+                    <CallHistoryFormButton
+                        value={workflow.form}
+                        onChange={(form) => onWorkflowChange(call, { form })}
+                        callLabel={callLabel}
+                        showLabel
+                    />
+                    {call.recording_id && canPlayMedia ? (
+                        <button type="button" onClick={togglePlay} aria-label={playing ? "Pause recording" : "Play recording"} className="inline-flex h-11 items-center gap-1.5 rounded-lg border border-border px-3 text-xs font-medium text-muted-foreground hover:bg-accent hover:text-foreground">
+                            {audioLoading ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : playing ? <Pause className="h-4 w-4" aria-hidden /> : <Play className="h-4 w-4" aria-hidden />}
+                            Recording
+                        </button>
+                    ) : null}
+                    <button type="button" onClick={() => onReview(call)} className="inline-flex h-11 items-center gap-1.5 rounded-lg border border-border px-3 text-xs font-medium text-muted-foreground hover:bg-accent hover:text-foreground">
+                        <ThumbsUp className="h-4 w-4" aria-hidden />
+                        Review
+                    </button>
                     <Link href={`/calls/${call.id}`} aria-label={call.has_feedback ? "Agent feedback left — open call" : "Leave agent feedback"} className={`inline-flex h-11 w-11 items-center justify-center rounded-lg border ${call.has_feedback ? "border-primary/50 bg-primary/10 text-primary" : "border-border text-muted-foreground hover:bg-accent hover:text-foreground"}`}><Mic className="h-4 w-4" aria-hidden /></Link>
-                    <span className="flex-1" /><Link href={`/calls/${call.id}`} className="inline-flex h-11 items-center gap-1.5 rounded-lg border border-border px-3 text-xs font-semibold text-foreground hover:bg-accent">Details<ChevronRight className="h-4 w-4" aria-hidden /></Link>
+                    <span className="flex-1" />
+                    <Link href={`/calls/${call.id}`} className="inline-flex h-11 items-center gap-1.5 rounded-lg border border-border px-3 text-xs font-semibold text-foreground hover:bg-accent">
+                        Details
+                        <ChevronRight className="h-4 w-4" aria-hidden />
+                    </Link>
                 </div>
             </div>
-            {/* Six `auto` columns for six action cells: summary, transcript,
-                play, rate, voice-note, open. The rate cell holds two buttons
-                but is ONE cell, so the row does not grow a column per icon. */}
+
             <div className={`hidden min-w-0 ${DESKTOP_CALL_GRID} items-center gap-3 px-4 py-3 xl:grid`}>
-                <div className="flex min-w-0 flex-col gap-0.5">
-                    <div className="flex min-w-0 items-center gap-3">
+                <div className="flex min-w-0 flex-col gap-1.5">
+                    <div className="flex min-w-0 items-center gap-2">
                         {getStatusIcon(call.status)}
                         <div className="flex min-w-0 flex-col"><CallParties call={call} /></div>
                     </div>
-                    <DirectionBadge direction={call.direction} />
-                    {call.summary && (
-                        <p className="truncate pl-7 text-xs text-muted-foreground" title={call.summary}>
-                            {call.summary}
-                        </p>
-                    )}
-                    {call.lead_outcome && (() => {
-                        const verdict = call.lead_outcome.split("|")[0].trim().toLowerCase();
-                        const isLead = verdict.startsWith("qualified") || verdict.startsWith("callback");
-                        return (
-                            <span
-                                className={`ml-7 w-fit rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${statusPillClass(verdict)}`}
-                                title={call.lead_outcome}
-                            >
-                                {isLead ? "Lead — follow up" : verdict}
-                            </span>
-                        );
-                    })()}
+                    <div className="flex min-w-0 flex-wrap items-center gap-2 pl-6">
+                        <DirectionBadge direction={call.direction} />
+                        <span className="inline-flex items-center gap-1 text-xs text-muted-foreground tabular-nums" title="Call duration">
+                            <Clock className="h-3.5 w-3.5" aria-hidden />
+                            {formatDuration(call.duration_seconds)}
+                        </span>
+                    </div>
                 </div>
-                <div className="min-w-0">
-                    <span className={`inline-flex items-center rounded-full px-2 py-1 text-xs font-semibold ${getStatusStyle(call.status)}`}>
-                        {humanizeOutcome(call.status)}
-                    </span>
-                </div>
+                <LeadTypeSelect
+                    value={workflow.leadType}
+                    onChange={(leadType) => onWorkflowChange(call, { leadType })}
+                    callLabel={callLabel}
+                />
                 <div className="min-w-0">
                     {call.outcome ? (
-                        <span className={`inline-flex items-center rounded-full px-2 py-1 text-xs font-semibold ${statusPillClass(call.outcome)}`}>
+                        <span className={`inline-flex max-w-full items-center truncate rounded-full px-2 py-1 text-xs font-semibold ${statusPillClass(call.outcome)}`} title={humanizeOutcome(call.outcome)}>
                             {humanizeOutcome(call.outcome)}
                         </span>
                     ) : (
                         <span className="text-sm text-muted-foreground">--</span>
                     )}
                 </div>
-                <div className="flex items-center gap-1 text-sm text-muted-foreground tabular-nums">
-                    <Clock className="h-4 w-4" />
-                    {formatDuration(call.duration_seconds)}
+                <time dateTime={call.created_at} title={new Date(call.created_at).toLocaleString()} className="min-w-0 text-xs leading-relaxed text-muted-foreground">
+                    {new Date(call.created_at).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}
+                    <span className="block tabular-nums">{new Date(call.created_at).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}</span>
+                </time>
+                <CallHistoryNotesField
+                    value={workflow.notes}
+                    onChange={(notes) => onWorkflowChange(call, { notes })}
+                    callLabel={callLabel}
+                />
+                <div className="flex justify-center">
+                    <TooltipProvider delayDuration={250}>
+                        <Tooltip onOpenChange={setSummaryPreviewOpen}>
+                            <TooltipTrigger asChild>
+                                <button
+                                    type="button"
+                                    onClick={() => setExpanded((value) => !value)}
+                                    aria-expanded={expanded}
+                                    aria-label={expanded ? "Hide AI summary" : "Show AI summary"}
+                                    className={`inline-flex h-8 w-8 items-center justify-center rounded-lg border transition-colors ${expanded ? "border-ring/60 bg-accent text-accent-foreground" : "border-border bg-background text-muted-foreground hover:bg-accent hover:text-foreground"}`}
+                                >
+                                    <Sparkles className="h-4 w-4" aria-hidden />
+                                </button>
+                            </TooltipTrigger>
+                            <TooltipContent side="top" align="end" sideOffset={8} className="w-80 max-w-[calc(100vw-2rem)] p-4 shadow-xl">
+                                <SummaryPreview fallback={call.summary} isLoading={summaryQuery.isLoading} isError={summaryQuery.isError} data={summaryQuery.data} />
+                            </TooltipContent>
+                        </Tooltip>
+                    </TooltipProvider>
                 </div>
-                <div className="min-w-0 truncate text-sm text-muted-foreground">{new Date(call.created_at).toLocaleString()}</div>
-                <button
-                    type="button"
-                    onClick={() => setExpanded((v) => !v)}
-                    aria-expanded={expanded}
-                    aria-label={expanded ? "Hide AI summary" : "Show AI summary"}
-                    title={expanded ? "Hide AI summary" : "Show AI summary"}
-                    className={`inline-flex h-8 w-8 items-center justify-center rounded-lg border transition-colors ${expanded
-                        ? "border-ring/60 bg-accent text-accent-foreground"
-                        : "border-border bg-background text-muted-foreground hover:text-foreground hover:bg-accent"
-                        }`}
-                >
-                    <Sparkles className="h-4 w-4" />
-                </button>
-                <button
-                    type="button"
-                    onClick={() => setShowTranscript((v) => !v)}
-                    aria-expanded={showTranscript}
-                    aria-label={showTranscript ? "Hide transcript" : "Show transcript"}
-                    title={showTranscript ? "Hide transcript" : "Show transcript"}
-                    className={`inline-flex h-8 w-8 items-center justify-center rounded-lg border transition-colors ${showTranscript
-                        ? "border-ring/60 bg-accent text-accent-foreground"
-                        : "border-border bg-background text-muted-foreground hover:text-foreground hover:bg-accent"
-                        }`}
-                >
-                    <FileText className="h-4 w-4" />
-                </button>
-                {call.recording_id && canPlayMedia ? (
+                <div className="flex items-center justify-center gap-1">
                     <button
                         type="button"
-                        onClick={togglePlay}
-                        aria-label={playing ? "Pause recording" : "Play recording"}
-                        title={playing ? "Pause recording" : "Play recording"}
+                        onClick={() => setShowTranscript((value) => !value)}
+                        aria-expanded={showTranscript}
+                        aria-label={showTranscript ? "Hide AI script" : "Show AI script"}
+                        title={showTranscript ? "Hide AI script" : "Show AI script"}
+                        className={`inline-flex h-8 w-8 items-center justify-center rounded-lg border transition-colors ${showTranscript ? "border-ring/60 bg-accent text-accent-foreground" : "border-border bg-background text-muted-foreground hover:bg-accent hover:text-foreground"}`}
+                    >
+                        <FileText className="h-4 w-4" aria-hidden />
+                    </button>
+                    <CallHistoryFormButton
+                        value={workflow.form}
+                        onChange={(form) => onWorkflowChange(call, { form })}
+                        callLabel={callLabel}
+                    />
+                </div>
+                <div className="flex items-center justify-end gap-1">
+                    {call.recording_id && canPlayMedia ? (
+                        <button
+                            type="button"
+                            onClick={togglePlay}
+                            aria-label={playing ? "Pause recording" : "Play recording"}
+                            title={playing ? "Pause recording" : "Play recording"}
+                            className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-background text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                        >
+                            {audioLoading ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : playing ? <Pause className="h-4 w-4" aria-hidden /> : <Play className="h-4 w-4" aria-hidden />}
+                        </button>
+                    ) : null}
+                    <button
+                        type="button"
+                        onClick={() => onReview(call)}
+                        aria-label={`Review call with ${callLabel}`}
+                        title="Review call"
                         className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-background text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
                     >
-                        {audioLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : playing ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+                        <ThumbsUp className="h-4 w-4" aria-hidden />
                     </button>
-                ) : (
-                    <span aria-hidden className="inline-block h-8 w-8" />
-                )}
-                {/* Rate it right here, next to the audio you just heard
-                    (goals.md §3). Navigating to the detail page to leave a
-                    rating meant, in practice, that nobody rated anything while
-                    working down a list. The full panel on the call page is
-                    still where tags and a comment go. */}
-                <QuickReviewButtons callId={call.id} />
-                {/* Agent-feedback voice note. Filled when this call already has
-                    one. `has_feedback` is computed per row by an EXISTS in the
-                    calls list query, so it reflects reality rather than being a
-                    flag that is always false. */}
-                <Link
-                    href={`/calls/${call.id}`}
-                    aria-label={call.has_feedback ? "Agent feedback left — open call" : "Leave agent feedback"}
-                    title={call.has_feedback ? "Agent feedback left" : "Leave agent feedback"}
-                    className={`inline-flex h-8 w-8 items-center justify-center rounded-lg border transition-colors ${call.has_feedback
-                        ? "border-primary/50 bg-primary/10 text-primary"
-                        : "border-border bg-background text-muted-foreground hover:bg-accent hover:text-foreground"
-                        }`}
-                >
-                    <Mic className="h-4 w-4" />
-                </Link>
-                <Link
-                    href={`/calls/${call.id}`}
-                    aria-label="Open call details"
-                    className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-background text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                >
-                    <ChevronRight className="h-4 w-4" />
-                </Link>
+                    <Link
+                        href={`/calls/${call.id}`}
+                        aria-label={call.has_feedback ? "Agent feedback left — open call" : "Leave agent feedback"}
+                        title={call.has_feedback ? "Agent feedback left" : "Leave agent feedback"}
+                        className={`inline-flex h-8 w-8 items-center justify-center rounded-lg border transition-colors ${call.has_feedback ? "border-primary/50 bg-primary/10 text-primary" : "border-border bg-background text-muted-foreground hover:bg-accent hover:text-foreground"}`}
+                    >
+                        <Mic className="h-4 w-4" aria-hidden />
+                    </Link>
+                    <Link
+                        href={`/calls/${call.id}`}
+                        aria-label="Open call details"
+                        title="Open call details"
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-background text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                    >
+                        <ChevronRight className="h-4 w-4" aria-hidden />
+                    </Link>
+                </div>
             </div>
             <audio
                 ref={audioRef}
@@ -352,7 +503,7 @@ function CallRow({ call, canPlayMedia }: { call: Call; canPlayMedia: boolean }) 
                         <div className="px-4 py-3">
                             <div className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                                 <FileText className="h-3.5 w-3.5" />
-                                Transcript
+                                AI Script
                             </div>
                             {transcriptQuery.isLoading ? (
                                 <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -427,7 +578,21 @@ function groupByCampaign(calls: Call[]): CampaignGroup[] {
     return Array.from(map.values()).sort((a, b) => b.latest - a.latest);
 }
 
-function CampaignSection({ group, defaultOpen, canPlayMedia }: { group: CampaignGroup; defaultOpen: boolean; canPlayMedia: boolean }) {
+function CampaignSection({
+    group,
+    defaultOpen,
+    canPlayMedia,
+    workflow,
+    onWorkflowChange,
+    onReview,
+}: {
+    group: CampaignGroup;
+    defaultOpen: boolean;
+    canPlayMedia: boolean;
+    workflow: CallHistoryWorkflowMap;
+    onWorkflowChange: (call: Call, patch: CallWorkflowPatch) => void;
+    onReview: (call: Call) => void;
+}) {
     const [open, setOpen] = useState(defaultOpen);
 
     return (
@@ -475,21 +640,27 @@ function CampaignSection({ group, defaultOpen, canPlayMedia }: { group: Campaign
                         className="overflow-hidden"
                     >
                         <div className={`mt-4 hidden ${DESKTOP_CALL_GRID} gap-3 px-4 pb-2 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground xl:grid`}>
-                            <div>Phone</div>
-                            <div>Status</div>
+                            <div>Phone <span className="text-[10px] font-medium normal-case tracking-normal">/ Duration</span></div>
+                            <div>Lead type</div>
                             <div>Outcome</div>
-                            <div>Duration</div>
-                            <div>Date</div>
-                            <div className="text-center">AI</div>
-                            <div className="text-center">Script</div>
-                            <div aria-hidden />
-                            <div aria-hidden />
-                            <div aria-hidden />
-                            <div aria-hidden />
+                            <div className="flex justify-center" title="Date and time">
+                                <Clock className="h-4 w-4" role="img" aria-label="Date and time" />
+                            </div>
+                            <div>Notes</div>
+                            <div className="text-center">AI Summary</div>
+                            <div className="text-center">AI Script <span className="text-[10px] font-medium normal-case tracking-normal">/ Form</span></div>
+                            <div className="text-right">Actions</div>
                         </div>
                         <div className="space-y-2">
                             {group.calls.map((call) => (
-                                <CallRow key={call.id} call={call} canPlayMedia={canPlayMedia} />
+                                <CallRow
+                                    key={call.id}
+                                    call={call}
+                                    canPlayMedia={canPlayMedia}
+                                    workflow={workflow[call.id] ?? defaultCallHistoryWorkflow(call)}
+                                    onWorkflowChange={onWorkflowChange}
+                                    onReview={onReview}
+                                />
                             ))}
                         </div>
                     </motion.div>
@@ -500,6 +671,7 @@ function CampaignSection({ group, defaultOpen, canPlayMedia }: { group: Campaign
 }
 
 export default function CallsPage() {
+    const { user } = useAuth();
     const permissions = useEffectivePermissions();
     const recordingCapabilities = getRecordingCapabilities(
         permissions.isSuccess ? permissions.data.permissions : undefined,
@@ -511,6 +683,41 @@ export default function CallsPage() {
     const [filter, setFilter] = useState<"all" | "leads" | "issues">("all");
     const [direction, setDirection] = useState<"all" | "inbound" | "outbound">("all");
     const [inboundCampaignId, setInboundCampaignId] = useState<string | undefined>();
+    const [workflow, setWorkflow] = useState<CallHistoryWorkflowMap>({});
+    const [loadedWorkflowScope, setLoadedWorkflowScope] = useState("");
+    const [reviewCall, setReviewCall] = useState<Call | null>(null);
+    const previousStatusesRef = useRef<Map<string, string> | null>(null);
+    const workflowScope = user?.tenant_id || user?.id || "";
+
+    useEffect(() => {
+        if (!workflowScope) return;
+        // Browser-only, identity-scoped workflow metadata cannot be part of the
+        // server render. Hydrate it once auth has resolved.
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- localStorage hydration after the client/auth boundary
+        setWorkflow(readCallHistoryWorkflow(workflowScope));
+        setLoadedWorkflowScope(workflowScope);
+    }, [workflowScope]);
+
+    useEffect(() => {
+        if (!workflowScope || loadedWorkflowScope !== workflowScope) return;
+        writeCallHistoryWorkflow(workflowScope, workflow);
+    }, [loadedWorkflowScope, workflow, workflowScope]);
+
+    const updateWorkflow = useCallback((call: Call, patch: CallWorkflowPatch) => {
+        const updatedAt = new Date().toISOString();
+        setWorkflow((current) => {
+            const existing = current[call.id] ?? defaultCallHistoryWorkflow(call);
+            return {
+                ...current,
+                [call.id]: {
+                    ...existing,
+                    ...patch,
+                    form: patch.form ?? existing.form,
+                    updatedAt,
+                },
+            };
+        });
+    }, []);
 
     useEffect(() => {
         const timer = window.setTimeout(() => {
@@ -524,6 +731,22 @@ export default function CallsPage() {
 
     const q = useCalls(page, pageSize, { direction: direction === "all" ? undefined : direction, inboundCampaignId });
     const allCalls = useMemo(() => q.data?.calls ?? [], [q.data]);
+
+    useEffect(() => {
+        const current = new Map(allCalls.map((call) => [call.id, call.status]));
+        const previous = previousStatusesRef.current;
+        previousStatusesRef.current = current;
+        if (!previous) return;
+
+        const justEnded = allCalls.find((call) => {
+            const oldStatus = previous.get(call.id);
+            return oldStatus && isActiveCallStatus(oldStatus) && !isActiveCallStatus(call.status);
+        });
+        if (justEnded) {
+            setReviewCall((currentReview) => currentReview ?? justEnded);
+        }
+    }, [allCalls]);
+
     const calls = useMemo(() => {
         const term = search.trim().toLowerCase();
         return allCalls.filter((c) => {
@@ -545,7 +768,7 @@ export default function CallsPage() {
     const hasActiveFilters = Boolean(search.trim()) || filter !== "all" || direction !== "all" || Boolean(inboundCampaignId);
 
     return (
-        <DashboardLayout title="Call History" description="Inbound and outbound calls with direction-aware parties, transcripts, and media">
+        <DashboardLayout title="Call History" description="Review calls, classify leads, capture notes, and complete follow-up forms">
             <CallIssuesBanner />
             {q.isLoading ? (
                 <div role="status" aria-label="Loading call history" className="flex h-64 items-center justify-center">
@@ -628,7 +851,15 @@ export default function CallsPage() {
                         </div>
                     ) : (
                         groups.map((g, idx) => (
-                            <CampaignSection key={g.id} group={g} defaultOpen={idx === 0} canPlayMedia={canPlayMedia} />
+                            <CampaignSection
+                                key={g.id}
+                                group={g}
+                                defaultOpen={idx === 0}
+                                canPlayMedia={canPlayMedia}
+                                workflow={workflow}
+                                onWorkflowChange={updateWorkflow}
+                                onReview={setReviewCall}
+                            />
                         ))
                     )}
 
@@ -662,6 +893,11 @@ export default function CallsPage() {
                     )}
                 </div>
             )}
+            <CallReviewModal
+                key={reviewCall?.id ?? "closed-review"}
+                call={reviewCall}
+                onClose={() => setReviewCall(null)}
+            />
         </DashboardLayout>
     );
 }

@@ -3,6 +3,7 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { backendApi, type AdminResourceListInput, type AuditLogsListInput, type SecurityEventsListInput } from "@/lib/backend-api";
 import { dashboardApi, type Call, type CallListFilters } from "@/lib/dashboard-api";
+import { isActiveCallStatus } from "@/lib/call-history-workflow";
 import { outboundCampaignsOnly } from "@/lib/campaign-direction";
 import { extendedApi } from "@/lib/extended-api";
 import type { AssistantRun, CalendarEvent, Connector, PartnerSummary, Reminder, TenantSummary } from "@/lib/models";
@@ -658,6 +659,14 @@ export function useCalls(page: number, pageSize: number, filters: CallListFilter
         queryKey: queryKeys.calls(page, pageSize, filters),
         queryFn: () => dashboardApi.listCalls(page, pageSize, filters),
         placeholderData: keepPreviousData,
+        // Keep the history live only while a call is actually changing state.
+        // This lets the page raise its one-time review prompt immediately after
+        // an active call ends without polling settled history forever.
+        refetchInterval: (query) => {
+            const data = query.state.data as { calls: Call[]; total: number } | undefined;
+            const hasActiveCall = data?.calls.some((call) => isActiveCallStatus(call.status));
+            return hasActiveCall ? 3_000 : false;
+        },
     });
 }
 

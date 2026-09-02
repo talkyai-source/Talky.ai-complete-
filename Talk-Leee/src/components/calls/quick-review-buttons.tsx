@@ -51,10 +51,12 @@ export function QuickReviewButtons({
     callId,
     className = "",
     touchFriendly = false,
+    onSaved,
 }: {
     callId: string;
     className?: string;
     touchFriendly?: boolean;
+    onSaved?: (review: ConversationReview) => void;
 }) {
     const queryClient = useQueryClient();
     const [error, setError] = useState<string | null>(null);
@@ -85,6 +87,7 @@ export function QuickReviewButtons({
             void queryClient.invalidateQueries({ queryKey: ["reviewList"] });
             void queryClient.invalidateQueries({ queryKey: ["reviewSummary"] });
             setError(null);
+            onSaved?.(saved);
         },
         onError: (err: unknown) =>
             setError(err instanceof Error ? err.message : "Couldn't save your rating"),
