@@ -7,8 +7,8 @@ telephony_session_config for latency. The only call site of that cap is the
 live-call builder, so a 31,464-char script saved fine, previewed in full, and
 had 62% of itself replaced with "[... middle omitted ...]" on every real call
 (prod journal, campaign 09b7ee9c, 2026-08). These tests make the save/start
-paths refuse over-budget guidance and make the preview compose exactly what
-the live call composes.
+paths refuse over-budget guidance, count the structured brief in that same
+budget, and make preview reject rather than display an elided prompt.
 """
 from __future__ import annotations
 
@@ -16,11 +16,16 @@ import logging
 from types import SimpleNamespace
 
 import pytest
+from fastapi import HTTPException
 
 from app.domain.services.campaign_prompt_service import (
     CampaignPromptValidationError,
     build_validated_script_config,
     guidance_budget_violation,
+)
+from app.domain.services.campaign_brief import (
+    campaign_guidance_text,
+    normalize_campaign_brief,
 )
 from app.domain.services.telephony_session_config import (
     campaign_guidance_char_budget,
@@ -40,8 +45,14 @@ def _kw(guidance: str) -> dict:
 
 def test_guidance_at_budget_is_accepted():
     budget = campaign_guidance_char_budget()
-    out = build_validated_script_config(**_kw("x " * (budget // 2)))
-    assert len(out["additional_instructions"]) <= budget
+    brief = normalize_campaign_brief(None, company_name="Acme", agent_names=["Alex"])
+    brief_chars = len(campaign_guidance_text("", brief))
+    # campaign_guidance_text joins the brief and non-empty freeform layer with
+    # two newlines. Fill the exact remaining capacity, not the old freeform-only
+    # capacity.
+    guidance = "x" * (budget - brief_chars - 2)
+    out = build_validated_script_config(**_kw(guidance))
+    assert len(campaign_guidance_text(out["additional_instructions"], out["campaign_brief"])) == budget
 
 
 def test_guidance_over_budget_is_rejected_with_the_numbers():
@@ -72,9 +83,8 @@ def test_budget_is_env_overridable(monkeypatch):
 # ── preview composes the live prompt ────────────────────────────────────────
 
 @pytest.mark.asyncio
-async def test_preview_reports_budget_and_composes_like_a_live_call(monkeypatch):
-    """Preview must never show more prompt than the call will run. It reports
-    the guidance size against the budget so the UI can block the save."""
+async def test_preview_refuses_over_budget_instead_of_eliding(monkeypatch):
+    """Preview/save/start share one gate; no path returns shortened content."""
     from app.api.v1.endpoints import campaigns as ep
     from app.api.v1.schemas.campaigns import CampaignPromptPreviewRequest
 
@@ -89,16 +99,11 @@ async def test_preview_reports_budget_and_composes_like_a_live_call(monkeypatch)
         direction="outbound",
         opening_mode="callee_first",
     )
-    resp = await ep.preview_prompt(body, current_user=SimpleNamespace(tenant_id="t"))
-    assert resp.campaign_guidance_chars == len(guidance)
-    assert resp.campaign_guidance_budget_chars == 600
-    assert resp.over_budget is True
-    # The live builder elides the middle of over-budget guidance; the preview
-    # shows the same thing rather than the full text.
-    assert "omitted for length" in resp.system_prompt
-    assert resp.direction == "outbound"
-    assert resp.opening_mode == "callee_first"
-    assert resp.has_inbound_directive is True
+    with pytest.raises(HTTPException) as exc:
+        await ep.preview_prompt(body, current_user=SimpleNamespace(tenant_id="t"))
+    assert getattr(exc.value, "status_code", None) == 400
+    assert "Nothing is trimmed automatically" in str(getattr(exc.value, "detail", ""))
+    assert "omitted for length" not in str(getattr(exc.value, "detail", ""))
 
 
 # ── the composition log names every layer ───────────────────────────────────

@@ -20,6 +20,7 @@ from app.domain.models.agent_config import AgentConfig, AgentGoal, ConversationF
 from app.domain.models.ai_config import AIProviderConfig
 from app.domain.services.voice_orchestrator import Direction, VoiceSessionConfig
 from app.domain.services.global_ai_config import get_global_config
+from app.domain.services.campaign_brief import campaign_guidance_text
 from app.domain.services.voice_tuning import (
     VoiceTuning,
     get_voice_tuning_resolver,
@@ -1425,6 +1426,9 @@ def build_telephony_session_config(
     except Exception:  # noqa: BLE001 — a pin lookup must never break a call
         _pin = None
     _body_override, _pinned_version = resolve_pinned_body(persona_type, _pin)
+    _campaign_brief = script_config.get("campaign_brief")
+    if not isinstance(_campaign_brief, dict):
+        _campaign_brief = None
 
     def _compose(kd: bool) -> str:
         return compose_prompt(
@@ -1437,6 +1441,7 @@ def build_telephony_session_config(
             opening_mode=opening_mode,
             knowledge_driven=kd,
             body_override=_body_override,
+            campaign_brief=_campaign_brief,
         )
 
     try:
@@ -1464,8 +1469,9 @@ def build_telephony_session_config(
             "prompt_chars=%d",
             persona_type, agent_name, company_name, _campaign_id(campaign),
             knowledge_driven, direction.value, opening_mode or "-",
-            len(_tenant_additional_instructions or ""),
-            len(system_prompt or "") - len(_tenant_additional_instructions or ""),
+            len(campaign_guidance_text(_tenant_additional_instructions, _campaign_brief)),
+            len(system_prompt or "")
+            - len(campaign_guidance_text(_tenant_additional_instructions, _campaign_brief)),
             len(system_prompt or ""),
         )
     except PromptCompositionError as exc:
@@ -1566,7 +1572,15 @@ def build_telephony_session_config(
                 "Never push too hard — if rejected twice, close politely",
             ]
         ),
-        flow=ConversationFlow(max_objection_attempts=2),
+        flow=ConversationFlow(
+            max_objection_attempts=(
+                int(_campaign_brief.get("max_objection_attempts", 2))
+                if _campaign_brief
+                and str(_campaign_brief.get("max_objection_attempts", 2)).isdigit()
+                and 1 <= int(_campaign_brief.get("max_objection_attempts", 2)) <= 5
+                else 2
+            )
+        ),
         # Per-turn ceiling (not a target). 2 forced every reply terse — no room
         # for consultative discovery, mood-matching, or natural expressiveness.
         # 5 was set as "headroom, not a mandate to monologue" and trusted the

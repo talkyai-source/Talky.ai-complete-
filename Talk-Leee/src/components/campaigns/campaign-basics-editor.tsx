@@ -22,6 +22,20 @@ import { VoiceProviderPicker } from "@/components/campaigns/voice-provider-picke
 import { AgentNameGender, pruneGenders } from "@/components/campaigns/agent-name-gender";
 import { CallingScheduleEditor } from "@/components/campaigns/calling-schedule-editor";
 import { guidanceBudgetStatus } from "@/lib/campaign-guidance";
+import { CampaignBriefFields } from "@/components/campaigns/campaign-brief-fields";
+import {
+    buildCampaignBrief,
+    campaignBriefDraft,
+    campaignBriefGuidanceText,
+    campaignBriefValidation,
+    type CampaignBrief,
+    type CampaignBriefDraft,
+} from "@/lib/campaign-brief";
+import {
+    CampaignLeadFieldsPicker,
+    useCampaignLeadFieldDraft,
+} from "@/components/campaigns/campaign-lead-fields";
+import { leadDetailsApi } from "@/lib/lead-details-api";
 
 export type CampaignBasicsEditorInitial = {
     name: string;
@@ -34,6 +48,7 @@ export type CampaignBasicsEditorInitial = {
     ttsProvider?: string | null;
     goal: string;
     callingSchedule?: CampaignCallingSchedule | null;
+    campaignBrief?: CampaignBrief;
 };
 
 export function CampaignBasicsEditor({
@@ -51,13 +66,36 @@ export function CampaignBasicsEditor({
     const [provider, setProvider] = useState(initial.ttsProvider ?? "");
     const [goal, setGoal] = useState(initial.goal);
     const [schedule, setSchedule] = useState<CampaignCallingSchedule>(initial.callingSchedule ?? {});
+    const [briefDraft, setBriefDraft] = useState<CampaignBriefDraft>(
+        campaignBriefDraft(initial.campaignBrief),
+    );
+    const leadFields = useCampaignLeadFieldDraft(campaignId);
 
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
     const agentNames = useMemo(() => parseAgentNames(agentNamesRaw), [agentNamesRaw]);
-    const guidance = guidanceBudgetStatus(goal);
-    const valid = name.trim() && companyName.trim() && agentNames.length >= 1 && voiceId && guidance.valid;
+    const requiredLeadFields = leadFields.fields
+        .filter((field) => field.is_required && field.agent_visible)
+        .map((field) => ({ field_key: field.field_key, label: field.label }));
+    const campaignBrief = buildCampaignBrief({
+        draft: briefDraft,
+        brand: companyName,
+        representativeNames: agentNames,
+        requiredLeadFields,
+    });
+    const briefError = campaignBriefValidation(briefDraft);
+    const guidance = guidanceBudgetStatus(campaignBriefGuidanceText(goal, campaignBrief));
+    const valid = Boolean(
+        name.trim()
+        && companyName.trim()
+        && agentNames.length >= 1
+        && voiceId
+        && guidance.valid
+        && !briefError
+        && !leadFields.isLoading
+        && !leadFields.isError,
+    );
 
     const onSave = async () => {
         setSaving(true);
@@ -75,9 +113,11 @@ export function CampaignBasicsEditor({
                 agent_names: agentNames,
                 agent_name_genders: pruneGenders(agentGenders, agentNames),
                 campaign_slots: {},
+                campaign_brief: campaignBrief,
                 knowledge_driven: true,
                 calling_schedule: schedule,
             });
+            await leadDetailsApi.setCampaignFields(campaignId, leadFields.fields);
             router.push(`/campaigns/${campaignId}`);
         } catch (err) {
             setError(err instanceof Error ? err.message : "Failed to save campaign");
@@ -100,7 +140,7 @@ export function CampaignBasicsEditor({
                         <Input id="ce-name" value={name} onChange={(e) => setName(e.target.value)} className="mt-1" />
                     </div>
                     <div>
-                        <Label htmlFor="ce-company">Company name</Label>
+                        <Label htmlFor="ce-company">Brand / company name</Label>
                         <Input id="ce-company" value={companyName} onChange={(e) => setCompanyName(e.target.value)} className="mt-1" />
                     </div>
                 </div>
@@ -126,7 +166,7 @@ export function CampaignBasicsEditor({
                 </div>
 
                 <div>
-                    <Label htmlFor="ce-agents">Agent names</Label>
+                    <Label htmlFor="ce-agents">Representative names</Label>
                     <Input id="ce-agents" value={agentNamesRaw} onChange={(e) => setAgentNamesRaw(e.target.value)} placeholder="Alex, Jordan, Sam" className="mt-1" />
                     <p className="mt-1 text-xs text-muted-foreground">
                         1–3 names, comma-separated.
@@ -135,21 +175,30 @@ export function CampaignBasicsEditor({
                     <AgentNameGender names={agentNames} value={agentGenders} onChange={setAgentGenders} voiceGender={voiceGender} />
                 </div>
 
+                <CampaignBriefFields
+                    idPrefix="editor-campaign-brief"
+                    value={briefDraft}
+                    onChange={setBriefDraft}
+                    requiredLeadFields={requiredLeadFields}
+                    disabled={saving}
+                />
+
                 <div>
                     <div className="flex items-baseline justify-between gap-3">
-                        <Label htmlFor="ce-goal">Campaign guidance <span className="text-destructive">*</span></Label>
+                        <Label htmlFor="ce-goal">Additional campaign guidance</Label>
                         <span className={`text-xs tabular-nums ${guidance.overBudget ? "font-semibold text-destructive" : "text-muted-foreground"}`}>
                             {guidance.chars.toLocaleString()} / {guidance.budget.toLocaleString()}
                         </span>
                     </div>
                     <textarea
                         id="ce-goal" value={goal} onChange={(e) => setGoal(e.target.value)} rows={2}
-                        required
-                        aria-invalid={!guidance.valid || undefined}
+                        aria-invalid={guidance.overBudget || undefined}
                         className={`mt-1 w-full rounded-md border bg-white dark:bg-zinc-900 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 ${guidance.overBudget ? "border-destructive" : "border-gray-300 dark:border-white/15"}`}
                     />
                     <p className={`mt-1 text-xs ${guidance.overBudget ? "text-destructive" : "text-muted-foreground"}`}>
-                        {guidance.message ?? "Layered on the core persona. Behaviour here; facts in Company knowledge. Over the limit the save is refused, never trimmed."}
+                        {guidance.overBudget
+                            ? guidance.message
+                            : "The counter includes the structured brief and this freeform layer. Nothing is trimmed automatically."}
                     </p>
                 </div>
 
@@ -164,6 +213,18 @@ export function CampaignBasicsEditor({
 
                 <div className="rounded-lg border border-border bg-background/50 p-4">
                     <CallingScheduleEditor value={schedule} onChange={setSchedule} />
+                </div>
+
+                <div className="border-t border-border pt-5">
+                    <CampaignLeadFieldsPicker
+                        specs={leadFields.specs}
+                        value={leadFields.fields}
+                        onChange={leadFields.setFields}
+                        isLoading={leadFields.isLoading}
+                        error={leadFields.isError ? leadFields.error : undefined}
+                        onRetry={leadFields.retry}
+                        disabled={saving}
+                    />
                 </div>
 
                 <div className="flex items-start gap-2 rounded-lg border border-gray-200 dark:border-white/10 bg-gray-50 dark:bg-white/5 px-3 py-2.5 text-xs text-muted-foreground">

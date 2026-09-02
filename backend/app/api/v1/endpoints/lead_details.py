@@ -220,7 +220,50 @@ async def set_lead_fields(
 
     from app.core.db_utils import acquire_with_tenant
 
+    required_refs = [
+        {"field_key": f.field_key.strip(), "label": f.label.strip()}
+        for f in fields
+        if f.is_required and f.agent_visible
+    ]
     async with acquire_with_tenant(container.db_pool, tenant_id) as conn:
+        campaign = await conn.fetchrow(
+            """
+            SELECT system_prompt, script_config
+              FROM campaigns
+             WHERE id = $1::uuid
+               AND tenant_id = $2::uuid
+            """,
+            campaign_id,
+            tenant_id,
+        )
+        if not campaign:
+            raise HTTPException(status_code=404, detail="Campaign not found")
+
+        from app.domain.services.campaign_prompt_service import (
+            guidance_budget_error_message,
+            guidance_budget_violation,
+        )
+
+        script_config = campaign["script_config"] or {}
+        if isinstance(script_config, str):
+            try:
+                script_config = __import__("json").loads(script_config)
+            except ValueError:
+                script_config = {}
+        brief = dict(script_config.get("campaign_brief") or {})
+        brief["required_lead_fields"] = required_refs
+        violation = guidance_budget_violation(
+            script_config.get("additional_instructions")
+            or campaign["system_prompt"]
+            or "",
+            brief,
+        )
+        if violation is not None:
+            raise HTTPException(
+                status_code=400,
+                detail=guidance_budget_error_message(*violation),
+            )
+
         await conn.execute(
             "DELETE FROM campaign_lead_fields WHERE campaign_id = $1::uuid",
             campaign_id,
@@ -238,6 +281,26 @@ async def set_lead_fields(
                 __import__("json").dumps(f.options) if f.options else None,
                 f.sort_order,
             )
+        # Keep the prompt-facing campaign brief in the same transaction as the
+        # authoritative field policy.  The frontend must not maintain a second
+        # list that can drift after somebody edits the contact-field panel.
+        await conn.execute(
+            """
+            UPDATE campaigns
+               SET script_config = jsonb_set(
+                    COALESCE(script_config, '{}'::jsonb),
+                    '{campaign_brief}',
+                    COALESCE(script_config->'campaign_brief', '{}'::jsonb)
+                    || jsonb_build_object('required_lead_fields', $3::jsonb),
+                    true
+               )
+             WHERE id = $1::uuid
+               AND tenant_id = $2::uuid
+            """,
+            campaign_id,
+            tenant_id,
+            __import__("json").dumps(required_refs),
+        )
     logger.info(
         "campaign_lead_fields_updated campaign=%s count=%d required=%d",
         str(campaign_id)[:8], len(fields), sum(1 for f in fields if f.is_required),

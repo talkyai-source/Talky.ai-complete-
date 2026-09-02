@@ -4,7 +4,81 @@ from __future__ import annotations
 import re
 from typing import Dict, List, Literal, Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+
+CampaignNextAction = Literal[
+    "schedule_callback",
+    "send_email",
+    "submit_form",
+    "transfer",
+    "end_call",
+]
+
+
+class CampaignBriefLeadField(BaseModel):
+    """One campaign field the operator marked as required."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    field_key: str = Field(..., min_length=1, max_length=64, pattern=r"^[A-Za-z][A-Za-z0-9_]*$")
+    label: str = Field(..., min_length=1, max_length=255)
+
+
+class CampaignBriefInput(BaseModel):
+    """Typed strategy persisted inside ``campaigns.script_config`` JSONB."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    representative_name: str = Field(..., min_length=1, max_length=120)
+    brand: str = Field(..., min_length=1, max_length=120)
+    decision_maker_role: Optional[str] = Field(default=None, max_length=160)
+    approved_next_actions: List[CampaignNextAction] = Field(default_factory=list, max_length=5)
+    transfer_destination: Optional[str] = Field(default=None, max_length=255)
+    required_lead_fields: List[CampaignBriefLeadField] = Field(default_factory=list, max_length=20)
+    opening_objective: Optional[str] = Field(default=None, max_length=500)
+    max_objection_attempts: int = Field(default=2, ge=1, le=5)
+
+    @field_validator("approved_next_actions")
+    @classmethod
+    def _unique_actions(cls, value: List[CampaignNextAction]) -> List[CampaignNextAction]:
+        return list(dict.fromkeys(value))
+
+    @field_validator("required_lead_fields")
+    @classmethod
+    def _unique_required_fields(
+        cls, value: List[CampaignBriefLeadField]
+    ) -> List[CampaignBriefLeadField]:
+        seen: set[str] = set()
+        result: List[CampaignBriefLeadField] = []
+        for item in value:
+            key = item.field_key.casefold()
+            if key not in seen:
+                seen.add(key)
+                result.append(item)
+        return result
+
+    @model_validator(mode="after")
+    def _transfer_is_complete(self) -> "CampaignBriefInput":
+        transfer_approved = "transfer" in self.approved_next_actions
+        has_destination = bool((self.transfer_destination or "").strip())
+        if transfer_approved and not has_destination:
+            raise ValueError(
+                "transfer_destination is required when transfer is approved"
+            )
+        if has_destination and not transfer_approved:
+            raise ValueError(
+                "transfer_destination requires transfer in approved_next_actions"
+            )
+        return self
+
+
+class CampaignPromptLayerResponse(BaseModel):
+    """A real prompt-composer boundary rendered as one collapsible UI layer."""
+
+    key: str
+    label: str
+    content: str
 
 
 class CampaignStartRequest(BaseModel):
@@ -92,6 +166,10 @@ class CampaignCreateRequest(BaseModel):
     )
     company_name: str = Field(..., min_length=1)
     campaign_slots: dict = Field(default_factory=dict)
+    campaign_brief: Optional[CampaignBriefInput] = Field(
+        default=None,
+        description="Structured campaign strategy persisted in script_config JSONB.",
+    )
     knowledge_driven: bool = Field(
         default=False,
         description=(
@@ -158,6 +236,10 @@ class CampaignUpdateRequest(BaseModel):
     )
     company_name: str = Field(..., min_length=1)
     campaign_slots: dict = Field(default_factory=dict)
+    campaign_brief: Optional[CampaignBriefInput] = Field(
+        default=None,
+        description="Structured campaign strategy persisted in script_config JSONB.",
+    )
     knowledge_driven: bool = Field(
         default=False,
         description=(
@@ -220,6 +302,7 @@ class CampaignPromptPreviewRequest(BaseModel):
         ),
     )
     campaign_slots: dict = Field(default_factory=dict)
+    campaign_brief: Optional[CampaignBriefInput] = None
     additional_instructions: Optional[str] = None
     direction: Literal["outbound", "inbound"] = "outbound"
     opening_mode: Optional[Literal["agent_first", "callee_first"]] = Field(
@@ -269,11 +352,15 @@ class CampaignPromptPreviewResponse(BaseModel):
     campaign_guidance_budget_chars: int = Field(
         ..., description="The budget the save/start paths enforce for that guidance.",
     )
+    layers: List[CampaignPromptLayerResponse] = Field(
+        ...,
+        description="Ordered prompt-composer boundaries; joining their content reproduces system_prompt exactly.",
+    )
     over_budget: bool = Field(
         ...,
         description=(
-            "True when the guidance exceeds the budget. Saving will be refused; "
-            "the preview shows what a live call would run, middle elided."
+            "Always false for a successful preview. Over-budget drafts are rejected "
+            "with the same error as save/start; content is never elided."
         ),
     )
 

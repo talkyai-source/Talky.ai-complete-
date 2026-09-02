@@ -7,8 +7,13 @@ that it can render through the production persona prompt composer.
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from typing import Any, List
 
+from app.domain.services.campaign_brief import (
+    campaign_guidance_text,
+    normalize_campaign_brief,
+)
 from app.domain.services.telephony_session_config import (
     campaign_guidance_char_budget,
 )
@@ -29,7 +34,10 @@ class CampaignPromptValidationError(ValueError):
     """Raised when campaign prompt configuration cannot safely compose."""
 
 
-def guidance_budget_violation(text: str | None) -> tuple[int, int] | None:
+def guidance_budget_violation(
+    text: str | None,
+    campaign_brief: Mapping[str, Any] | None = None,
+) -> tuple[int, int] | None:
     """Return ``(chars, budget)`` when campaign guidance exceeds the budget.
 
     Same number the live-call builder caps at
@@ -37,7 +45,7 @@ def guidance_budget_violation(text: str | None) -> tuple[int, int] | None:
     save, start and preview paths so an operator learns about the limit at
     the keyboard, not from a server log after the call.
     """
-    chars = len(text or "")
+    chars = len(campaign_guidance_text(text, campaign_brief))
     budget = campaign_guidance_char_budget()
     if chars > budget:
         return chars, budget
@@ -61,6 +69,7 @@ def build_validated_script_config(
     campaign_slots: dict,
     additional_instructions: str,
     knowledge_driven: bool = False,
+    campaign_brief: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build script_config only after validating the production prompt path.
 
@@ -96,6 +105,15 @@ def build_validated_script_config(
     if not cleaned_agents:
         raise CampaignPromptValidationError("At least one agent name is required")
 
+    try:
+        cleaned_brief = normalize_campaign_brief(
+            campaign_brief,
+            company_name=cleaned_company,
+            agent_names=cleaned_agents,
+        )
+    except ValueError as exc:
+        raise CampaignPromptValidationError(str(exc)) from exc
+
     # Shallow-sanitise string slot values (operator-supplied) the same way.
     # List/dict slots are formatted later by the composer's _prepare_slots.
     raw_slots = campaign_slots or {}
@@ -108,7 +126,7 @@ def build_validated_script_config(
     # silently at call time; the operator's preview showed the full text and
     # the call ran a version with the middle removed.
     cleaned_instructions = sanitize_tenant_text(additional_instructions)
-    violation = guidance_budget_violation(cleaned_instructions)
+    violation = guidance_budget_violation(cleaned_instructions, cleaned_brief)
     if violation is not None:
         raise CampaignPromptValidationError(guidance_budget_error_message(*violation))
 
@@ -126,6 +144,7 @@ def build_validated_script_config(
             campaign_slots=slots,
             additional_instructions=cleaned_instructions,
             knowledge_driven=knowledge_driven,
+            campaign_brief=cleaned_brief,
         )
     except PromptCompositionError as exc:
         raise CampaignPromptValidationError(
@@ -139,4 +158,5 @@ def build_validated_script_config(
         "campaign_slots": slots,
         "additional_instructions": cleaned_instructions,
         "knowledge_driven": knowledge_driven,
+        "campaign_brief": cleaned_brief,
     }

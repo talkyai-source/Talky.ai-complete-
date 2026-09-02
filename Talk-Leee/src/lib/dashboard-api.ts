@@ -1,4 +1,5 @@
 import { sharedHttpClient } from "@/lib/api";
+import type { CampaignBrief } from "@/lib/campaign-brief";
 
 // Dashboard Types
 export interface DashboardSummary {
@@ -57,6 +58,7 @@ export interface Campaign {
         agent_name_genders?: Record<string, string>;
         campaign_slots?: Record<string, unknown>;
         additional_instructions?: string;
+        campaign_brief?: CampaignBrief;
     };
     // Per-campaign calling hours + timezone (Phase 3c-v2). Null/absent = tenant default.
     calling_config?: CampaignCallingSchedule | null;
@@ -93,6 +95,7 @@ export interface CampaignCreate {
     // matching the selected voice's gender.
     agent_name_genders?: Record<string, string>;
     campaign_slots: Record<string, unknown>;
+    campaign_brief?: CampaignBrief;
     // Knowledge-first campaign (vectorless-RAG wizard): content comes from the
     // uploaded knowledge base, so per-persona content slots are not required and
     // the persona prompt is a lean identity+tone shell. Default false.
@@ -393,6 +396,7 @@ class DashboardApi {
         agent_name: string;
         campaign_slots: Record<string, unknown>;
         additional_instructions?: string;
+        campaign_brief?: CampaignBrief;
         direction?: "outbound" | "inbound";
         /** Who talks first. Independent of direction. */
         opening_mode?: "agent_first" | "callee_first";
@@ -408,6 +412,7 @@ class DashboardApi {
         campaign_guidance_budget_chars: number;
         /** Saving will be refused; the preview shows what a live call would run. */
         over_budget: boolean;
+        layers: Array<{ key: string; label: string; content: string }>;
     }> {
         return this.client.request({
             path: "/campaigns/preview-prompt",
@@ -418,6 +423,7 @@ class DashboardApi {
                 agent_name: input.agent_name,
                 campaign_slots: input.campaign_slots,
                 additional_instructions: input.additional_instructions,
+                campaign_brief: input.campaign_brief,
                 direction: input.direction ?? "outbound",
                 opening_mode: input.opening_mode,
                 knowledge_driven: input.knowledge_driven ?? false,

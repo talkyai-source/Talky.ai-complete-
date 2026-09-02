@@ -24,6 +24,14 @@ import { Label } from "@/components/ui/label";
 import { dashboardApi, PersonaType } from "@/lib/dashboard-api";
 import { guidanceBudgetStatus } from "@/lib/campaign-guidance";
 import {
+    buildCampaignBrief,
+    campaignBriefDraft,
+    campaignBriefGuidanceText,
+    campaignBriefValidation,
+    type CampaignBrief,
+    type CampaignBriefDraft,
+} from "@/lib/campaign-brief";
+import {
     PERSONAS,
     PersonaSpec,
     SlotDef,
@@ -33,6 +41,8 @@ import {
     parseList,
 } from "@/lib/campaign-personas";
 import { conflictingNames, pruneGenders } from "@/components/campaigns/agent-name-gender";
+import { CampaignBriefFields } from "@/components/campaigns/campaign-brief-fields";
+import { PromptLayerPreview } from "@/components/campaigns/prompt-layer-preview";
 import {
     CampaignLeadFieldsPicker,
     useCampaignLeadFieldDraft,
@@ -58,6 +68,7 @@ export interface CampaignFormInitial {
     agent_name_genders?: Record<string, string>;
     /** Persona-specific slot values — keyed by slot.key. */
     slots: Record<string, string>;
+    campaign_brief?: CampaignBrief;
 }
 
 interface Props {
@@ -135,6 +146,9 @@ export function CampaignForm({ mode, campaignId, initialData }: Props) {
     // WIPED its agent_name_genders and calls fell back to gender inference.
     const [agentGenders] = useState<Record<string, string>>(seed.agent_name_genders ?? {});
     const [slotValues, setSlotValues] = useState<Record<string, string>>({ ...seed.slots });
+    const [briefDraft, setBriefDraft] = useState<CampaignBriefDraft>(
+        campaignBriefDraft(seed.campaign_brief),
+    );
 
     // Prompt preview (T4-B4) — backend renders the assembled system
     // prompt + spoken greeting from the current draft. Open the panel
@@ -156,11 +170,23 @@ export function CampaignForm({ mode, campaignId, initialData }: Props) {
         campaign_guidance_chars: number;
         campaign_guidance_budget_chars: number;
         over_budget: boolean;
+        layers: Array<{ key: string; label: string; content: string }>;
     } | null>(null);
     // Live counter for the guidance field. The server's budget wins once a
     // preview has reported it; the local default matches the backend default.
+    const parsedAgentNames = parseAgentNames(agentNamesRaw);
+    const requiredLeadFields = leadFields.fields
+        .filter((field) => field.is_required && field.agent_visible)
+        .map((field) => ({ field_key: field.field_key, label: field.label }));
+    const campaignBrief = buildCampaignBrief({
+        draft: briefDraft,
+        brand: companyName,
+        representativeNames: parsedAgentNames,
+        requiredLeadFields,
+    });
+    const briefError = campaignBriefValidation(briefDraft);
     const guidance = guidanceBudgetStatus(
-        formData.system_prompt,
+        campaignBriefGuidanceText(formData.system_prompt, campaignBrief),
         previewData?.campaign_guidance_budget_chars,
     );
 
@@ -211,6 +237,14 @@ export function CampaignForm({ mode, campaignId, initialData }: Props) {
             setPreviewError("Add a company name before previewing.");
             return;
         }
+        if (briefError) {
+            setPreviewError(briefError);
+            return;
+        }
+        if (guidance.overBudget) {
+            setPreviewError(guidance.message ?? "Campaign guidance is over budget.");
+            return;
+        }
         setPreviewLoading(true);
         setPreviewError(null);
         try {
@@ -220,6 +254,7 @@ export function CampaignForm({ mode, campaignId, initialData }: Props) {
                 agent_name: firstAgent,
                 campaign_slots: buildCampaignSlots(),
                 additional_instructions: formData.system_prompt || undefined,
+                campaign_brief: campaignBrief,
                 direction: "outbound",
                 opening_mode: previewOpening,
             });
@@ -393,6 +428,10 @@ export function CampaignForm({ mode, campaignId, initialData }: Props) {
             setError(guidance.message ?? "Campaign guidance is required.");
             return;
         }
+        if (briefError) {
+            setError(briefError);
+            return;
+        }
         const missing = missingRequiredSlots();
         if (missing.length > 0) {
             setError(`Missing required fields: ${missing.map((s) => s.label).join(", ")}`);
@@ -418,6 +457,7 @@ export function CampaignForm({ mode, campaignId, initialData }: Props) {
                 return Object.keys(kept).length > 0 ? kept : undefined;
             })(),
             campaign_slots: buildCampaignSlots(),
+            campaign_brief: campaignBrief,
         };
 
         let targetCampaignId = isEdit ? campaignId : createdCampaignId ?? undefined;
@@ -949,18 +989,12 @@ export function CampaignForm({ mode, campaignId, initialData }: Props) {
                                             <span>Direction: <span className="text-foreground">{previewData.direction}</span></span>
                                             <span>Opening: <span className="text-foreground">{previewData.opening_mode === "callee_first" ? "callee says hello first" : "agent opens"}</span></span>
                                             <span>
-                                                Campaign guidance:{" "}
+                                                Campaign guidance total:{" "}
                                                 <span className={previewData.over_budget ? "text-destructive" : "text-foreground"}>
                                                     {previewData.campaign_guidance_chars.toLocaleString()} / {previewData.campaign_guidance_budget_chars.toLocaleString()} chars
                                                 </span>
                                             </span>
                                         </div>
-                                        {previewData.over_budget && (
-                                            <div className="rounded border border-destructive/40 bg-destructive/5 p-2 text-xs text-destructive">
-                                                Over budget: this preview shows what a live call would run with the middle of your
-                                                guidance omitted. Saving is refused until it fits.
-                                            </div>
-                                        )}
                                         <div className="space-y-1">
                                             <Label className="text-xs">
                                                 First spoken line ({previewData.direction})
@@ -969,15 +1003,12 @@ export function CampaignForm({ mode, campaignId, initialData }: Props) {
                                                 {previewData.greeting}
                                             </pre>
                                         </div>
-                                        <div className="space-y-1">
-                                            <Label className="text-xs">
-                                                System prompt ({previewData.prompt_chars.toLocaleString()} chars
-                                                {previewData.has_inbound_directive ? ", callee-first directive applied" : ""})
-                                            </Label>
-                                            <pre className="max-h-96 overflow-auto whitespace-pre-wrap rounded border border-border bg-background p-2 text-[11px] leading-snug">
-                                                {previewData.system_prompt}
-                                            </pre>
-                                        </div>
+                                        <PromptLayerPreview
+                                            layers={previewData.layers}
+                                            promptChars={previewData.prompt_chars}
+                                            hasInboundDirective={previewData.has_inbound_directive}
+                                            headingId="campaign-form-prompt-layers"
+                                        />
                                     </div>
                                 )}
                             </div>
@@ -987,7 +1018,7 @@ export function CampaignForm({ mode, campaignId, initialData }: Props) {
                     {/* Company name + agent-name pool */}
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div className="space-y-2">
-                            <Label htmlFor="company_name">Company / business name</Label>
+                            <Label htmlFor="company_name">Brand / company name</Label>
                             <Input
                                 id="company_name"
                                 name="company_name"
@@ -999,7 +1030,7 @@ export function CampaignForm({ mode, campaignId, initialData }: Props) {
                             />
                         </div>
                         <div className="space-y-2">
-                            <Label htmlFor="agent_names">Agent names (up to 3)</Label>
+                            <Label htmlFor="agent_names">Representative names (up to 3)</Label>
                             <Input
                                 id="agent_names"
                                 name="agent_names"
@@ -1052,6 +1083,14 @@ export function CampaignForm({ mode, campaignId, initialData }: Props) {
                             })()}
                         </div>
                     </div>
+
+                    <CampaignBriefFields
+                        idPrefix="campaign-brief"
+                        value={briefDraft}
+                        onChange={setBriefDraft}
+                        requiredLeadFields={requiredLeadFields}
+                        disabled={submitting}
+                    />
 
                     {/* Persona-specific slot fields */}
                     <div className="space-y-4">
@@ -1141,7 +1180,7 @@ export function CampaignForm({ mode, campaignId, initialData }: Props) {
                     )}
 
                     <div className="flex gap-4">
-                        <Button type="submit" disabled={submitting || leadFields.isLoading || leadFields.isError || !formData.voice_id || !guidance.valid}>
+                        <Button type="submit" disabled={submitting || leadFields.isLoading || leadFields.isError || !formData.voice_id || !guidance.valid || Boolean(briefError)}>
                             {submitting ? (
                                 <>
                                     <Loader2 className="w-4 h-4 animate-spin" />

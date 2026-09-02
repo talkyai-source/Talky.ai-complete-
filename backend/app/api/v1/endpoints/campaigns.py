@@ -126,6 +126,7 @@ def _build_validated_script_config(
     campaign_slots: dict,
     additional_instructions: str,
     knowledge_driven: bool = False,
+    campaign_brief: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
     """HTTP wrapper around the domain prompt validation service."""
     from app.domain.services.campaign_prompt_service import (
@@ -141,6 +142,7 @@ def _build_validated_script_config(
             campaign_slots=campaign_slots,
             additional_instructions=additional_instructions,
             knowledge_driven=knowledge_driven,
+            campaign_brief=campaign_brief,
         )
     except CampaignPromptValidationError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -234,43 +236,58 @@ async def preview_prompt(
     the create / update flows surface.
     """
     from app.domain.services.campaign_prompt_service import (
+        guidance_budget_error_message,
         guidance_budget_violation,
     )
+    from app.domain.services.campaign_brief import (
+        campaign_guidance_text,
+        normalize_campaign_brief,
+    )
     from app.domain.services.telephony_session_config import (
-        _cap_tenant_additional_instructions,
         build_persona_greeting,
         campaign_guidance_char_budget,
     )
+    from app.services.scripts.prompts.prompt_safety import sanitize_tenant_text
     from app.services.scripts.prompts.composer import (
         PromptCompositionError,
-        compose_prompt,
+        compose_prompt_document,
     )
     from app.services.scripts.prompts.direction import (
         INBOUND_DIRECTIVE_SENTINEL,
     )
 
-    # Preview = what the call runs. The live builder caps over-budget guidance
-    # (middle elided); previewing the uncapped text is how a 31k-char script
-    # looked fine to its author while every call ran 38% of it. The save and
-    # start paths refuse over-budget guidance outright; the flag below lets the
-    # UI say so before the operator hits Save.
-    guidance = body.additional_instructions or ""
-    violation = guidance_budget_violation(guidance)
+    # Preview uses the exact same normalized campaign brief and the exact same
+    # budget as save/start. It refuses an over-budget draft rather than showing
+    # an elided prompt that could never be saved.
+    guidance = sanitize_tenant_text(body.additional_instructions or "")
+    try:
+        brief = normalize_campaign_brief(
+            body.campaign_brief.model_dump() if body.campaign_brief else None,
+            company_name=body.company_name,
+            agent_names=[body.agent_name],
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    violation = guidance_budget_violation(guidance, brief)
+    if violation is not None:
+        raise HTTPException(
+            status_code=400,
+            detail=guidance_budget_error_message(*violation),
+        )
     opening_mode = body.opening_mode or (
         "callee_first" if body.direction == "inbound" else "agent_first"
     )
     try:
-        system_prompt = compose_prompt(
+        document = compose_prompt_document(
             persona_type=body.persona_type,
             agent_name=body.agent_name,
             company_name=body.company_name,
             campaign_slots=body.campaign_slots,
-            additional_instructions=_cap_tenant_additional_instructions(
-                guidance, campaign_id="preview"
-            ),
+            additional_instructions=guidance,
             direction=body.direction,
             opening_mode=opening_mode,
             knowledge_driven=body.knowledge_driven,
+            campaign_brief=brief,
         )
     except PromptCompositionError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -283,15 +300,19 @@ async def preview_prompt(
     )
 
     return CampaignPromptPreviewResponse(
-        system_prompt=system_prompt,
+        system_prompt=document.system_prompt,
         greeting=greeting,
         direction=body.direction,
-        has_inbound_directive=INBOUND_DIRECTIVE_SENTINEL in system_prompt,
-        prompt_chars=len(system_prompt),
+        has_inbound_directive=INBOUND_DIRECTIVE_SENTINEL in document.system_prompt,
+        prompt_chars=len(document.system_prompt),
         opening_mode=opening_mode,
-        campaign_guidance_chars=len(guidance),
+        campaign_guidance_chars=len(campaign_guidance_text(guidance, brief)),
         campaign_guidance_budget_chars=campaign_guidance_char_budget(),
-        over_budget=violation is not None,
+        layers=[
+            {"key": layer.key, "label": layer.label, "content": layer.content}
+            for layer in document.layers
+        ],
+        over_budget=False,
     )
 
 
@@ -353,6 +374,11 @@ async def create_campaign(
             campaign_slots=campaign_data.campaign_slots,
             additional_instructions=campaign_data.system_prompt,
             knowledge_driven=campaign_data.knowledge_driven,
+            campaign_brief=(
+                campaign_data.campaign_brief.model_dump()
+                if campaign_data.campaign_brief
+                else None
+            ),
         )
         # Persist per-name gender tags so each call picks a name matching the
         # selected voice's gender. Backward compatible: absent ⇒ legacy pick.
@@ -524,6 +550,11 @@ async def update_campaign(
             campaign_slots=campaign_data.campaign_slots,
             additional_instructions=campaign_data.system_prompt,
             knowledge_driven=campaign_data.knowledge_driven,
+            campaign_brief=(
+                campaign_data.campaign_brief.model_dump()
+                if campaign_data.campaign_brief
+                else None
+            ),
         )
         if campaign_data.agent_name_genders:
             script_config["agent_name_genders"] = campaign_data.agent_name_genders
@@ -662,7 +693,8 @@ async def start_campaign(
             _sc = _existing_for_gate.get("script_config") or {}
             _violation = guidance_budget_violation(
                 (_sc.get("additional_instructions") if isinstance(_sc, dict) else None)
-                or _existing_for_gate.get("system_prompt")
+                or _existing_for_gate.get("system_prompt"),
+                _sc.get("campaign_brief") if isinstance(_sc, dict) else None,
             )
             if _violation is not None:
                 raise HTTPException(

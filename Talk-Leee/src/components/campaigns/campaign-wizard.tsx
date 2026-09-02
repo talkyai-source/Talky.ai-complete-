@@ -26,6 +26,16 @@ import { AgentNameGender, pruneGenders } from "@/components/campaigns/agent-name
 import { PERSONAS, parseAgentNames } from "@/lib/campaign-personas";
 import { VoiceProviderPicker } from "@/components/campaigns/voice-provider-picker";
 import { CallingScheduleEditor } from "@/components/campaigns/calling-schedule-editor";
+import { CampaignBriefFields } from "@/components/campaigns/campaign-brief-fields";
+import { PromptLayerPreview } from "@/components/campaigns/prompt-layer-preview";
+import {
+    buildCampaignBrief,
+    campaignBriefGuidanceText,
+    campaignBriefValidation,
+    EMPTY_CAMPAIGN_BRIEF_DRAFT,
+    type CampaignBriefDraft,
+} from "@/lib/campaign-brief";
+import { guidanceBudgetStatus } from "@/lib/campaign-guidance";
 import {
     CampaignLeadFieldsPicker,
     useCampaignLeadFieldDraft,
@@ -59,20 +69,46 @@ export function CampaignWizard() {
     const [provider, setProvider] = useState("");
     const [goal, setGoal] = useState("");
     const [schedule, setSchedule] = useState<CampaignCallingSchedule>({});
+    const [briefDraft, setBriefDraft] = useState<CampaignBriefDraft>({
+        ...EMPTY_CAMPAIGN_BRIEF_DRAFT,
+    });
 
     // Step 2 — knowledge
     const [file, setFile] = useState<File | null>(null);
     const fileRef = useRef<HTMLInputElement>(null);
 
     // Step 3 — preview + submit
-    const [preview, setPreview] = useState<{ system_prompt: string; greeting: string } | null>(null);
+    const [preview, setPreview] = useState<{
+        system_prompt: string;
+        greeting: string;
+        prompt_chars: number;
+        layers: Array<{ key: string; label: string; content: string }>;
+    } | null>(null);
     const [previewLoading, setPreviewLoading] = useState(false);
     const [submitting, setSubmitting] = useState(false);
     const [createdCampaignId, setCreatedCampaignId] = useState<string | null>(null);
     const leadFields = useCampaignLeadFieldDraft();
 
     const agentNames = useMemo(() => parseAgentNames(agentNamesRaw), [agentNamesRaw]);
-    const basicsValid = name.trim() && companyName.trim() && agentNames.length >= 1 && voiceId;
+    const requiredLeadFields = leadFields.fields
+        .filter((field) => field.is_required && field.agent_visible)
+        .map((field) => ({ field_key: field.field_key, label: field.label }));
+    const campaignBrief = buildCampaignBrief({
+        draft: briefDraft,
+        brand: companyName,
+        representativeNames: agentNames,
+        requiredLeadFields,
+    });
+    const briefError = campaignBriefValidation(briefDraft);
+    const guidance = guidanceBudgetStatus(campaignBriefGuidanceText(goal, campaignBrief));
+    const basicsValid = Boolean(
+        name.trim()
+        && companyName.trim()
+        && agentNames.length >= 1
+        && voiceId
+        && !briefError
+        && guidance.valid,
+    );
 
     const onPickFile = (f: File | null) => {
         setError(null);
@@ -90,6 +126,10 @@ export function CampaignWizard() {
     };
 
     const goToReview = async () => {
+        if (briefError || !guidance.valid) {
+            setError(briefError ?? guidance.message ?? "Campaign guidance is invalid.");
+            return;
+        }
         setStep(2);
         setPreviewLoading(true);
         setPreview(null);
@@ -100,10 +140,16 @@ export function CampaignWizard() {
                 agent_name: agentNames[0] ?? "Alex",
                 campaign_slots: {},
                 additional_instructions: goal.trim() || undefined,
+                campaign_brief: campaignBrief,
                 direction: "outbound",
                 knowledge_driven: true,
             });
-            setPreview({ system_prompt: res.system_prompt, greeting: res.greeting });
+            setPreview({
+                system_prompt: res.system_prompt,
+                greeting: res.greeting,
+                prompt_chars: res.prompt_chars,
+                layers: res.layers,
+            });
         } catch (err) {
             setError(err instanceof Error ? err.message : "Couldn't build a preview");
         } finally {
@@ -112,6 +158,10 @@ export function CampaignWizard() {
     };
 
     const onCreate = async () => {
+        if (briefError || !guidance.valid) {
+            setError(briefError ?? guidance.message ?? "Campaign guidance is invalid.");
+            return;
+        }
         if (leadFields.isLoading || leadFields.isError) {
             setError("Contact-field settings must load successfully before this campaign can be created.");
             return;
@@ -133,6 +183,7 @@ export function CampaignWizard() {
                     agent_names: agentNames,
                     agent_name_genders: pruneGenders(agentGenders, agentNames),
                     campaign_slots: {},
+                    campaign_brief: campaignBrief,
                     knowledge_driven: true,
                     calling_schedule: schedule,
                 });
@@ -195,7 +246,7 @@ export function CampaignWizard() {
                                 <Input id="cw-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Q3 Web Dev Outreach" className="mt-1" />
                             </div>
                             <div>
-                                <Label htmlFor="cw-company">Company name</Label>
+                                <Label htmlFor="cw-company">Brand / company name</Label>
                                 <Input id="cw-company" value={companyName} onChange={(e) => setCompanyName(e.target.value)} placeholder="Talk-Lee" className="mt-1" />
                             </div>
                         </div>
@@ -221,7 +272,7 @@ export function CampaignWizard() {
                         </div>
 
                         <div>
-                            <Label htmlFor="cw-agents">Agent names</Label>
+                            <Label htmlFor="cw-agents">Representative names</Label>
                             <Input id="cw-agents" value={agentNamesRaw} onChange={(e) => setAgentNamesRaw(e.target.value)} placeholder="Alex, Jordan, Sam" className="mt-1" />
                             <p className="mt-1 text-xs text-muted-foreground">
                                 1–3 names, comma-separated. The agent introduces itself with one (rotated per call).
@@ -230,13 +281,32 @@ export function CampaignWizard() {
                             <AgentNameGender names={agentNames} value={agentGenders} onChange={setAgentGenders} voiceGender={voiceGender} />
                         </div>
 
+                        <CampaignBriefFields
+                            idPrefix="wizard-campaign-brief"
+                            value={briefDraft}
+                            onChange={setBriefDraft}
+                            requiredLeadFields={requiredLeadFields}
+                            disabled={submitting}
+                        />
+
                         <div>
-                            <Label htmlFor="cw-goal">Goal <span className="text-muted-foreground font-normal">(optional)</span></Label>
+                            <div className="flex items-baseline justify-between gap-3">
+                                <Label htmlFor="cw-goal">Additional campaign guidance</Label>
+                                <span className={`text-xs tabular-nums ${guidance.overBudget ? "font-semibold text-destructive" : "text-muted-foreground"}`}>
+                                    {guidance.chars.toLocaleString()} / {guidance.budget.toLocaleString()}
+                                </span>
+                            </div>
                             <textarea
                                 id="cw-goal" value={goal} onChange={(e) => setGoal(e.target.value)} rows={2}
-                                placeholder="e.g. Book a free 30-minute discovery call. Describe what a successful call looks like, the key qualifying questions to ask, and any must-cover points."
+                                placeholder="Optional nuance that is not already captured in the structured brief. Put business facts in Company knowledge."
+                                aria-invalid={guidance.overBudget || undefined}
                                 className="mt-1 w-full resize-y rounded-md border border-gray-300 dark:border-white/15 bg-white dark:bg-zinc-900 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
                             />
+                            <p className={`mt-1 text-xs ${guidance.overBudget ? "text-destructive" : "text-muted-foreground"}`}>
+                                {guidance.overBudget
+                                    ? guidance.message
+                                    : "The counter includes the structured brief and this freeform layer. Nothing is trimmed automatically."}
+                            </p>
                         </div>
 
                         <VoiceProviderPicker
@@ -331,6 +401,10 @@ export function CampaignWizard() {
                             <SummaryRow label="Company" value={companyName} />
                             <SummaryRow label="Persona" value={PERSONAS.find((p) => p.value === personaType)?.title ?? personaType} />
                             <SummaryRow label="Agents" value={agentNames.join(", ")} />
+                            <SummaryRow label="Objective" value={briefDraft.opening_objective} />
+                            <SummaryRow label="Decision role" value={briefDraft.decision_maker_role || "— any informed contact —"} />
+                            <SummaryRow label="Next actions" value={briefDraft.approved_next_actions.length ? briefDraft.approved_next_actions.join(", ").replaceAll("_", " ") : "— none approved —"} />
+                            <SummaryRow label="Objections" value={`${briefDraft.max_objection_attempts} attempts maximum`} />
                             <SummaryRow label="Voice" value={voiceName ? `${voiceName}${provider ? ` (${provider})` : ""}` : voiceId} />
                             <SummaryRow label="Knowledge" value={file ? file.name : "— none —"} />
                             <SummaryRow label="Lead fields" value={leadFields.fields.length ? `${leadFields.fields.length} selected` : "— none —"} />
@@ -344,16 +418,15 @@ export function CampaignWizard() {
                             </div>
                         </div>
 
-                        {preview?.system_prompt && (
-                            <details className="rounded-lg border border-gray-200 dark:border-white/10">
-                                <summary className="cursor-pointer px-3 py-2 text-sm font-medium text-gray-900 dark:text-zinc-100">
-                                    Preview the system prompt
-                                </summary>
-                                <pre className="max-h-64 overflow-auto whitespace-pre-wrap border-t border-gray-200 dark:border-white/10 px-3 py-2 text-xs text-muted-foreground">
-                                    {preview.system_prompt}
-                                </pre>
-                            </details>
-                        )}
+                        {preview?.layers.length ? (
+                            <PromptLayerPreview
+                                layers={preview.layers}
+                                promptChars={preview.prompt_chars}
+                                headingId="wizard-prompt-layers-heading"
+                            />
+                        ) : preview?.system_prompt ? (
+                            <p className="text-sm text-muted-foreground">Prompt layers were not returned by the server.</p>
+                        ) : null}
 
                         <div className="flex justify-between pt-1">
                             <Button variant="ghost" onClick={() => setStep(1)} disabled={submitting}><ArrowLeft className="h-4 w-4" /> Back</Button>
@@ -371,9 +444,9 @@ export function CampaignWizard() {
 
 function SummaryRow({ label, value }: { label: string; value: string }) {
     return (
-        <div className="flex items-baseline gap-2">
-            <span className="w-20 shrink-0 text-xs uppercase tracking-wide text-muted-foreground">{label}</span>
-            <span className="truncate font-medium text-gray-900 dark:text-zinc-100">{value || "—"}</span>
+        <div className="grid grid-cols-[5rem_minmax(0,1fr)] items-start gap-2">
+            <span className="text-xs uppercase tracking-wide text-muted-foreground">{label}</span>
+            <span className="break-words font-medium text-gray-900 dark:text-zinc-100">{value || "—"}</span>
         </div>
     );
 }

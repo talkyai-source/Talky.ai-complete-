@@ -34,8 +34,10 @@ Call site for this composer is exactly one place:
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from typing import Any, Mapping, Optional
 
+from app.domain.services.campaign_brief import render_campaign_brief
 from app.services.scripts.prompts.direction import (
     INBOUND_DIRECTIVE_SENTINEL,
     inbound_directive_block,
@@ -60,6 +62,23 @@ from app.services.scripts.prompts.personas import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class PromptLayer:
+    """One exact, ordered section of the composed system prompt."""
+
+    key: str
+    label: str
+    content: str
+
+
+@dataclass(frozen=True)
+class PromptDocument:
+    """The prompt plus the same boundaries used to assemble it."""
+
+    system_prompt: str
+    layers: tuple[PromptLayer, ...]
 
 
 def _format_pronunciations(value: Any) -> str:
@@ -297,6 +316,8 @@ def compose_prompt(
     opening_mode: str | None = None,
     knowledge_driven: bool = False,
     body_override: str | None = None,
+    campaign_brief: Mapping[str, Any] | None = None,
+    _layer_collector: list[PromptLayer] | None = None,
 ) -> str:
     """Return the final system prompt string.
 
@@ -431,17 +452,28 @@ def compose_prompt(
     )
 
     parts: list[str] = []
+
+    def add_layer(key: str, label: str, content: str) -> None:
+        if not content:
+            return
+        parts.append(content)
+        if _layer_collector is not None:
+            _layer_collector.append(
+                PromptLayer(key=key, label=label, content=content)
+            )
     # Inbound calls get the canonical direction directive at position 0
     # so early-token attention dominates any outbound-flavoured prose
     # that might still be in the persona body. This block also carries
     # the INBOUND_DIRECTIVE_SENTINEL, which the runtime
     # select_inbound_base_prompt() reads as an idempotency signal.
     if callee_first:
-        parts.append(
+        add_layer(
+            "opening",
+            "Opening and direction",
             inbound_directive_block(
                 agent_name=agent_name,
                 company_name=company_name,
-            )
+            ),
         )
         # Metric (T4-B2) — distinguishes preferred compose-time
         # injection from the runtime fallback. A future climb in
@@ -454,24 +486,31 @@ def compose_prompt(
             record_inbound_directive_applied("compose")
         except Exception as exc:  # noqa: BLE001
             logger.debug("voice_metrics_directive_record_failed err=%s", exc)
-    parts.append(guardrails_hard_block)
+    add_layer("non_negotiables", "Identity and non-negotiables", guardrails_hard_block)
     # Knowledge base is the single source of truth — seated DIRECTLY after the
     # HARD RULES (effectively "Hard Rule 11") so the anti-hallucination rule —
     # whose failure (invented prices) is the costliest error — lives in the
     # top-of-prompt attention window, not mid-prompt.
-    parts.append(KNOWLEDGE_PRECEDENCE)
-    parts.append(guardrails_rest_block)
+    add_layer("knowledge_precedence", "Knowledge precedence", KNOWLEDGE_PRECEDENCE)
+    add_layer("voice_guardrails", "Voice guardrails", guardrails_rest_block)
     # Communication-quality rules (7 C's + Grice) — shared with Ask AI via the
     # COMMUNICATION_PRINCIPLES constant, placed right after the guardrails.
-    parts.append(COMMUNICATION_PRINCIPLES)
+    add_layer("communication", "Communication principles", COMMUNICATION_PRINCIPLES)
     # Pronunciations sit between guardrails and persona so the model
     # picks them up before reading the company-name-heavy persona body.
     # Renders to "" when the campaign didn't supply pronunciations,
     # which the join below skips naturally.
     pron_block = _format_pronunciations(campaign_slots.get("pronunciations"))
     if pron_block:
-        parts.append(pron_block)
-    parts.append(persona_block)
+        add_layer("pronunciations", "Pronunciations", pron_block)
+    add_layer("persona", "Persona", persona_block)
+    campaign_brief_block = render_campaign_brief(
+        campaign_brief,
+        representative_name=agent_name,
+        brand=company_name,
+    )
+    if campaign_brief_block:
+        add_layer("campaign_brief", "Campaign brief", campaign_brief_block)
     if additional_instructions:
         extra = additional_instructions.strip()
         if extra:
@@ -480,43 +519,76 @@ def compose_prompt(
             # old closing "Reminder" restated the same point a second time
             # (2026-07-02 prompt-craft audit). Priority is owned by HARD RULES
             # and the compliance floor.
-            parts.append(
+            add_layer(
+                "campaign_guidance",
+                "Additional campaign guidance",
                 "## ADDITIONAL CAMPAIGN INSTRUCTIONS\n"
                 "Follow these campaign-specific instructions wherever they add "
                 "detail; the safety and compliance rules above still hold.\n\n"
-                + extra
+                + extra,
             )
 
-    parts.append(FINAL_RESPONSE_CONTRACT)
+    add_layer("response_contract", "Response contract", FINAL_RESPONSE_CONTRACT)
 
     # Call control (the END_CALL sentinel — the agent's one real way to end a
     # call) + lead-gen conversation craft. Before the compliance floor so the
     # floor keeps the recency slot on its invariants.
     from app.domain.services.voice_pipeline.end_call import call_control_rules
-    parts.append(call_control_rules())
+    add_layer("call_control", "Call control", call_control_rules())
 
     # Wrong-person / gatekeeper pivot + graceful-exit rules (2026-07-08 audit:
     # agent went silent after "is this David?" -> "No."). Placed right after
     # call_control_rules — same trailing, high-recency slot — so the pivot
     # instruction is fresh on every turn, still ahead of the compliance floor.
     from app.domain.services.voice_pipeline.gatekeeper import gatekeeper_rules
-    parts.append(gatekeeper_rules())
+    add_layer("gatekeeper", "Gatekeeper handling", gatekeeper_rules())
 
     # The non-negotiable safety floor goes LAST (after the tenant's own
     # additional_instructions) so it wins on the few invariants via recency —
     # without altering anything the campaign author wrote. See compliance_floor.
-    parts.append(compliance_floor(company_name))
+    add_layer(
+        "compliance",
+        "Compliance floor and brand accuracy",
+        compliance_floor(company_name) + brand_correction_line(company_name),
+    )
 
     composed = "\n\n".join(parts)
-    # Brand accuracy: keep the agent saying the campaign's real company name
-    # even when STT mis-hears it. Appended after the response contract — the
-    # same position telephony used before this moved into the composer.
-    composed += brand_correction_line(company_name)
     logger.debug(
         "compose_prompt persona=%s direction=%s agent=%s company=%s chars=%d",
         persona_type, direction_key, agent_name, company_name, len(composed),
     )
     return composed
+
+
+def compose_prompt_document(
+    persona_type: PersonaType,
+    agent_name: str,
+    company_name: str,
+    campaign_slots: Mapping[str, Any],
+    additional_instructions: Optional[str] = None,
+    *,
+    direction: str = "outbound",
+    opening_mode: str | None = None,
+    knowledge_driven: bool = False,
+    body_override: str | None = None,
+    campaign_brief: Mapping[str, Any] | None = None,
+) -> PromptDocument:
+    """Compose once and expose the real boundaries used by the prompt."""
+    layers: list[PromptLayer] = []
+    system_prompt = compose_prompt(
+        persona_type=persona_type,
+        agent_name=agent_name,
+        company_name=company_name,
+        campaign_slots=campaign_slots,
+        additional_instructions=additional_instructions,
+        direction=direction,
+        opening_mode=opening_mode,
+        knowledge_driven=knowledge_driven,
+        body_override=body_override,
+        campaign_brief=campaign_brief,
+        _layer_collector=layers,
+    )
+    return PromptDocument(system_prompt=system_prompt, layers=tuple(layers))
 
 
 def _prepare_slots(

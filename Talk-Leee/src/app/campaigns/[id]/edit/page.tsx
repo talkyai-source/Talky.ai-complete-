@@ -18,7 +18,6 @@ import {
     type CampaignFormInitial,
 } from "@/components/campaigns/campaign-form";
 import { CampaignBasicsEditor } from "@/components/campaigns/campaign-basics-editor";
-import { CampaignLeadFieldsManager } from "@/components/campaigns/campaign-lead-fields";
 import { dashboardApi, type PersonaType, type CampaignCallingSchedule } from "@/lib/dashboard-api";
 import { ArrowLeft, RefreshCw } from "lucide-react";
 import { motion } from "framer-motion";
@@ -100,6 +99,7 @@ export default function EditCampaignPage() {
                     agent_names: scriptConfig.agent_names ?? [],
                     agent_name_genders: scriptConfig.agent_name_genders ?? {},
                     slots,
+                    campaign_brief: scriptConfig.campaign_brief,
                 });
                 setKnowledgeDriven(
                     Boolean((scriptConfig as Record<string, unknown>).knowledge_driven),
@@ -166,9 +166,9 @@ export default function EditCampaignPage() {
                                 ttsProvider,
                                 goal: initial.goal,
                                 callingSchedule,
+                                campaignBrief: initial.campaign_brief,
                             }}
                         />
-                        <CampaignLeadFieldsManager campaignId={campaignId} />
                     </div>
                 ) : (
                     <CampaignForm mode="edit" campaignId={campaignId} initialData={initial} />
