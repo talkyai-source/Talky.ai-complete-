@@ -15,6 +15,7 @@ import { CheckSquare, Loader2, Square } from "lucide-react";
 import { Modal } from "@/components/ui/modal";
 import { Button } from "@/components/ui/button";
 import { Campaign, dashboardApi } from "@/lib/dashboard-api";
+import { outboundCampaignsOnly } from "@/lib/campaign-direction";
 
 export function ApplyToCampaignsModal({
     open, provider, voiceId, voiceLabel, onClose,
@@ -40,7 +41,7 @@ export function ApplyToCampaignsModal({
         // eslint-disable-next-line react-hooks/set-state-in-effect -- reset-on-open before an async fetch, not derived render state
         setLoading(true); setError(null); setDoneCount(null); setSelected(new Set());
         dashboardApi.listCampaigns()
-            .then((r) => { if (!cancelled) setCampaigns(r.campaigns); })
+            .then((r) => { if (!cancelled) setCampaigns(outboundCampaignsOnly(r.campaigns)); })
             .catch((e) => { if (!cancelled) setError(e instanceof Error ? e.message : "Failed to load campaigns"); })
             .finally(() => { if (!cancelled) setLoading(false); });
         return () => { cancelled = true; };

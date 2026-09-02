@@ -27,6 +27,7 @@ import {
 } from "@/lib/meetings-utils";
 import { isApiClientError } from "@/lib/http-client";
 import { dashboardApi, type Campaign, type Contact } from "@/lib/dashboard-api";
+import { outboundCampaignsOnly } from "@/lib/campaign-direction";
 import type { CalendarEvent } from "@/lib/models";
 import { Copy, Loader2, Plus, XCircle } from "lucide-react";
 
@@ -257,7 +258,7 @@ function MeetingsContent() {
                 setLeadsLoading(true);
                 setLeadsError(null);
                 const campaignsRes = await dashboardApi.listCampaigns();
-                const campaigns: Campaign[] = campaignsRes.campaigns ?? [];
+                const campaigns: Campaign[] = outboundCampaignsOnly(campaignsRes.campaigns ?? []);
                 const all: LeadOption[] = [];
                 for (const camp of campaigns) {
                     const contactsRes = await dashboardApi.listContacts(camp.id, 1, 200);

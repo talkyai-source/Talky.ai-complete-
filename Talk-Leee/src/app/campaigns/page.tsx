@@ -7,13 +7,13 @@ import { CampaignPerformanceTable } from "@/components/campaigns/campaign-perfor
 import { EventStream } from "@/components/campaigns/event-stream";
 import { AlertTimeline } from "@/components/campaigns/alert-timeline";
 import { CommandBar } from "@/components/campaigns/command-bar";
-import { queryKeys, useCampaigns } from "@/lib/api-hooks";
+import { queryKeys, useOutboundCampaigns } from "@/lib/api-hooks";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { notificationsStore } from "@/lib/notifications";
 
 export default function CampaignsPage() {
     const qc = useQueryClient();
-    const campaignsQuery = useCampaigns();
+    const campaignsQuery = useOutboundCampaigns();
     const campaigns = useMemo(() => campaignsQuery.data ?? [], [campaignsQuery.data]);
     const loading = campaignsQuery.isLoading;
     const error = campaignsQuery.isError ? (campaignsQuery.error instanceof Error ? campaignsQuery.error.message : "Failed to load campaigns") : "";

@@ -5,7 +5,7 @@ import { Modal } from "@/components/ui/modal";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { useCampaignContacts, useCampaigns, useSendEmail } from "@/lib/api-hooks";
+import { useCampaignContacts, useOutboundCampaigns, useSendEmail } from "@/lib/api-hooks";
 import type { EmailTemplate } from "@/lib/models";
 import { cn } from "@/lib/utils";
 import { HtmlPreview } from "@/components/email/html-preview";
@@ -42,7 +42,7 @@ export function SendEmailModal({
     connectorBlockReason?: string;
 }) {
     const send = useSendEmail();
-    const campaignsQ = useCampaigns();
+    const campaignsQ = useOutboundCampaigns();
 
     const [step, setStep] = useState<Step>("recipients");
     const [recipientsText, setRecipientsText] = useState("");

@@ -7,6 +7,7 @@ import { Select } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { dashboardApi, Campaign, Contact } from "@/lib/dashboard-api";
+import { outboundCampaignsOnly } from "@/lib/campaign-direction";
 import { extendedApi, BulkImportResponse } from "@/lib/extended-api";
 import { sharedHttpClient } from "@/lib/api";
 import { parseContactsCsv } from "@/lib/contact-csv";
@@ -159,9 +160,10 @@ export default function ContactsPage() {
         try {
             setLoading(true);
             const data = await dashboardApi.listCampaigns();
-            setCampaigns(data.campaigns);
-            if (data.campaigns.length > 0) {
-                setSelectedCampaign(data.campaigns[0].id);
+            const outbound = outboundCampaignsOnly(data.campaigns);
+            setCampaigns(outbound);
+            if (outbound.length > 0) {
+                setSelectedCampaign(outbound[0].id);
             }
         } catch (err) {
             setError(err instanceof Error ? err.message : "Failed to load campaigns");

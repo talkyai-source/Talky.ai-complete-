@@ -12,6 +12,7 @@ import { type AssistantRunsQuery, useAssistantActions, useAssistantExecute, useA
 import { ApiClientError, isApiClientError } from "@/lib/http-client";
 import { captureException, captureMessage } from "@/lib/monitoring";
 import { dashboardApi, type Campaign, type Contact } from "@/lib/dashboard-api";
+import { outboundCampaignsOnly } from "@/lib/campaign-direction";
 import type { AssistantAction, AssistantPlan, AssistantRun, AssistantRunStatus } from "@/lib/models";
 import { cn } from "@/lib/utils";
 import { AlertCircle, CheckCircle2, Clock, Download, FileJson, Loader2, Play, RefreshCw, Search, XCircle } from "lucide-react";
@@ -499,7 +500,7 @@ export default function AssistantActionsPage() {
                 setLeadsLoading(true);
                 setLeadsError(null);
                 const campaignsRes = await dashboardApi.listCampaigns();
-                const campaigns: Campaign[] = campaignsRes.campaigns ?? [];
+                const campaigns: Campaign[] = outboundCampaignsOnly(campaignsRes.campaigns ?? []);
                 const all: LeadOption[] = [];
                 for (const camp of campaigns) {
                     const contactsRes = await dashboardApi.listContacts(camp.id, 1, 200);

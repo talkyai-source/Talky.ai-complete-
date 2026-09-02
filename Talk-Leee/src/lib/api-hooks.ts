@@ -3,6 +3,7 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { backendApi, type AdminResourceListInput, type AuditLogsListInput, type SecurityEventsListInput } from "@/lib/backend-api";
 import { dashboardApi, type Call, type CallListFilters } from "@/lib/dashboard-api";
+import { outboundCampaignsOnly } from "@/lib/campaign-direction";
 import { extendedApi } from "@/lib/extended-api";
 import type { AssistantRun, CalendarEvent, Connector, PartnerSummary, Reminder, TenantSummary } from "@/lib/models";
 import { emailAuditStore } from "@/lib/email-audit";
@@ -602,6 +603,19 @@ export function useCampaigns() {
             const data = await dashboardApi.listCampaigns();
             return data.campaigns;
         },
+    });
+}
+
+/** Outbound-only view of the campaign list. Inbound campaigns are managed
+ *  on /inbound-campaigns; the outbound endpoints 409 on them. */
+export function useOutboundCampaigns() {
+    return useQuery({
+        queryKey: queryKeys.campaigns(),
+        queryFn: async () => {
+            const data = await dashboardApi.listCampaigns();
+            return data.campaigns;
+        },
+        select: outboundCampaignsOnly,
     });
 }
 
