@@ -36,6 +36,7 @@ def build_live_state_block(
     company_name: str,
     has_introduced: bool = False,
     time_of_day_line: str = "",
+    structured_state_block: str = "",
 ) -> str:
     """Return the LIVE STATE block, or '' when there's no identity to anchor.
 
@@ -44,7 +45,8 @@ def build_live_state_block(
     (see voice_pipeline.time_of_day). Empty when the timezone is unknown."""
     name = (agent_name or "").strip()
     company = (company_name or "").strip()
-    if not name and not company and not time_of_day_line:
+    structured = (structured_state_block or "").strip()
+    if not name and not company and not time_of_day_line and not structured:
         return ""
 
     # Phrased as a status line ("You're on this call as …") rather than a fresh
@@ -136,6 +138,8 @@ def build_live_state_block(
     )
     if time_of_day_line:
         lines.append(time_of_day_line)
+    if structured:
+        lines.append(structured)
     if not lines:
         return ""
     return (

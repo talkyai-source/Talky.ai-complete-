@@ -11,9 +11,9 @@ the text to a TTS engine that is nudged with bracketed audio tags
   * A realtime model produces the audio itself, so bracket audio-tags
     ("[laughs]", "<break>") would be spoken literally or ignored — expression
     is steered with plain natural-language direction instead.
-  * The cascaded prompt is tuned around STT quirks, read-back gates, and
-    per-turn captured-slot headers that simply do not exist in a duplex
-    session with server-side VAD.
+  * The cascaded prompt is tuned around STT quirks, read-back gates, and its
+    own captured-slot rendering. Realtime shares only the small, pure,
+    provider-neutral structured-state contract; it does not reuse that prompt.
 
 So this composer deliberately imports NOTHING from
 `app.services.scripts.prompts.*` (composer / guardrails / prompt_builder /
@@ -39,11 +39,17 @@ Output shape (one string, labeled blocks):
                           hears dead silence.
   6. CONNECTED ACTIONS  — completion may be stated only after the matching
                           action tool explicitly permits confirmation.
+  7. LIVE STRUCTURED STATE — bounded evidence replaced in-place each turn.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Optional
+
+from app.domain.services.voice_pipeline.live_structured_state import (
+    LiveConversationState,
+    render_live_state_block,
+)
 
 
 @dataclass
@@ -183,9 +189,9 @@ def _opening_note(persona: "RealtimePersona") -> str:
 def build_realtime_instructions(persona: RealtimePersona) -> str:
     """Compose the full realtime `instructions` string from a persona.
 
-    Pure and dependency-free: no imports from the cascaded prompt machinery,
-    no TTS audio-tag blocks. Returns one plain string ready to drop into the
-    session.update `instructions` field.
+    No imports from the cascaded prompt machinery and no TTS audio-tag blocks.
+    The only shared dependency is the pure structured-state serializer. Returns
+    one plain string ready for the session.update `instructions` field.
     """
     identity = (
         "WHO YOU ARE\n"
@@ -203,5 +209,10 @@ def build_realtime_instructions(persona: RealtimePersona) -> str:
     ]
     if persona.extra_notes and persona.extra_notes.strip():
         blocks.append("ALSO\n" + persona.extra_notes.strip())
+
+    # A marked initial block is present from the handshake onward, so every
+    # realtime response has the same state contract.  RealtimeBridge replaces
+    # this one block after final caller/tool events; it never appends copies.
+    blocks.append(render_live_state_block(LiveConversationState()))
 
     return "\n\n".join(blocks)

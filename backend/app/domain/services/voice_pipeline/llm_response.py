@@ -22,6 +22,11 @@ from app.domain.services.voice_pipeline.action_tools import (
 )
 from app.infrastructure.llm.groq import LLMTimeoutError
 from app.services.scripts import compose_system_prompt, model_prompt_addendum
+from app.services.scripts.prompts.live_state import build_live_state_block
+from app.domain.services.voice_pipeline.live_structured_state import (
+    reduce_cascaded_session_live_state,
+    render_live_state_block,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +82,19 @@ async def generate_llm_response(llm_provider, latency_tracker, session, user_inp
         system_prompt = session.system_prompt
         if session.captured_slots is not None:
             system_prompt = compose_system_prompt(system_prompt, session.captured_slots)
+
+        # Keep this compatibility/non-streaming entry point on the same C2
+        # evidence contract as the production streaming turn path.
+        _structured = reduce_cascaded_session_live_state(session, messages)
+        _agent_cfg = getattr(session, "agent_config", None)
+        _live_block = build_live_state_block(
+            agent_name=(getattr(_agent_cfg, "agent_name", "") or ""),
+            company_name=(getattr(_agent_cfg, "company_name", "") or ""),
+            has_introduced=bool(getattr(session, "_has_introduced", False)),
+            structured_state_block=render_live_state_block(_structured),
+        )
+        if _live_block:
+            system_prompt = f"{system_prompt}\n\n{_live_block}"
 
         # Per-model addendum at the very end (recency slot). Only fires for a
         # model with a verified quirk the shared prompt can't fix — currently

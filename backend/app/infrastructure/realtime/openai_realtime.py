@@ -53,10 +53,14 @@ import base64
 import json
 import logging
 import time
-from dataclasses import dataclass, field
-from typing import Any, Awaitable, Callable, Dict, List, Optional
+from dataclasses import dataclass
+from typing import Any, Dict, List, Optional
 
 import websockets
+
+from app.domain.services.voice_pipeline.live_structured_state import (
+    replace_live_state_block,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -193,6 +197,7 @@ class OpenAIRealtimeSession:
         self._model = model or "gpt-realtime-2"
         self._voice = voice or "marin"
         self._instructions = instructions or ""
+        self._last_published_instructions: Optional[str] = None
         self._tools = list(tools or [])
         self._settings = dict(settings or {})
         self._call_id = call_id or "realtime"
@@ -293,6 +298,7 @@ class OpenAIRealtimeSession:
                              self._call_id)
                 await self._teardown()
                 return False
+            self._last_published_instructions = self._instructions
         except Exception as exc:  # noqa: BLE001
             logger.error("realtime handshake failed call=%s err=%s",
                          self._call_id, exc)
@@ -464,6 +470,50 @@ class OpenAIRealtimeSession:
         except Exception as exc:  # noqa: BLE001
             logger.warning("realtime send_caller_audio failed call=%s err=%s",
                            self._call_id, exc)
+
+    async def update_live_state(self, block: str) -> None:
+        """Replace the one marked live-state block for subsequent responses.
+
+        A session-level instruction persists across every realtime model turn.
+        Replacing it (rather than appending conversation messages) keeps prompt
+        size bounded and avoids promoting assistant text to evidence.  The
+        current caller utterance is already direct model input; this update
+        makes its final, confirmed facts durable for every following turn.
+        """
+        try:
+            updated = replace_live_state_block(self._instructions, block)
+        except ValueError as exc:
+            logger.warning(
+                "realtime live-state update rejected call=%s err=%s",
+                self._call_id,
+                exc,
+            )
+            return
+        self._instructions = updated
+        if (
+            self._ws is None
+            or self._closed.is_set()
+            or updated == self._last_published_instructions
+        ):
+            return
+        try:
+            await self._ws.send(
+                json.dumps(
+                    {
+                        "type": "session.update",
+                        "session": {"instructions": updated},
+                    }
+                )
+            )
+            self._last_published_instructions = updated
+        except websockets.exceptions.ConnectionClosed:
+            self._closed.set()
+        except Exception as exc:  # noqa: BLE001 - state update is fail-soft
+            logger.warning(
+                "realtime live-state publish failed call=%s err=%s",
+                self._call_id,
+                exc,
+            )
 
     async def send_function_result(self, call_id: str, output: Any) -> None:
         """Return a tool/function result to the model and ask it to continue.

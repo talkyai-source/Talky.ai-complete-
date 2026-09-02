@@ -59,6 +59,15 @@ import logging
 import os
 from typing import Any, Awaitable, Callable, Optional
 
+from app.domain.services.voice_pipeline.live_structured_state import (
+    IdentityEvidence,
+    LiveConversationState,
+    ToolResultEvidence,
+    evidence_from_transcript,
+    reduce_live_state,
+    render_live_state_block,
+)
+
 logger = logging.getLogger(__name__)
 
 _WIRE_RATE = 8000  # OpenAI Realtime audio/pcmu is μ-law @ 8 kHz
@@ -123,6 +132,8 @@ class RealtimeBridge:
         self._transcript_service = transcript_service
         self._talklee_call_id = talklee_call_id
         self._turn_index = 0
+        self._live_user_turn_seq = 0
+        self._live_state = LiveConversationState()
         self._call_direction = str(call_direction or "outbound").strip().lower()
         # Shared CallSession for deterministic voice-action results. Optional so
         # older construction sites/tests remain compatible; the bridge itself
@@ -424,12 +435,35 @@ class RealtimeBridge:
                 elif kind == "agent_transcript" and ev.text:
                     logger.debug("realtime agent: %s", ev.text)
                     if getattr(ev, "is_final", False):
+                        # Only an explicitly triggered agent-first opening is a
+                        # delivery proof.  Caller-first output is not inspected
+                        # for claims; assistant text can never establish state.
+                        if (
+                            self._greet_on_start
+                            and self._live_state.identity_introduced is not True
+                        ):
+                            self._live_state = reduce_live_state(
+                                self._live_state,
+                                IdentityEvidence(introduced=True),
+                            )
+                            await self._publish_live_state()
                         self._record_turn("assistant", ev.text)
 
                 elif kind == "caller_transcript" and ev.text:
                     logger.debug("realtime caller: %s", ev.text)
                     if getattr(ev, "is_final", False):
                         self._latest_caller_text = ev.text
+                        self._live_user_turn_seq += 1
+                        evidence = evidence_from_transcript(
+                            role="user",
+                            text=ev.text,
+                            turn_id=f"realtime:{self._live_user_turn_seq}",
+                        )
+                        if evidence is not None:
+                            self._live_state = reduce_live_state(
+                                self._live_state, evidence
+                            )
+                            await self._publish_live_state()
                         _tidx = self._turn_index
                         self._record_turn("user", ev.text)
                         # Real-time voicemail detection on the opening turn(s):
@@ -475,12 +509,44 @@ class RealtimeBridge:
             logger.debug("realtime_bridge record_turn err call=%s: %s",
                          self._call_id, exc)
 
+    async def _publish_live_state(self) -> None:
+        """Replace the persistent realtime state block; never break audio."""
+        publish = getattr(self._rt, "update_live_state", None)
+        if not callable(publish):
+            logger.warning(
+                "realtime_bridge live state unavailable call=%s", self._call_id
+            )
+            return
+        try:
+            await publish(render_live_state_block(self._live_state))
+        except Exception as exc:  # noqa: BLE001 - state steering is fail-soft
+            logger.warning(
+                "realtime_bridge live-state publish err call=%s: %s",
+                self._call_id,
+                exc,
+            )
+
     async def _handle_function_call(self, fc: Any) -> None:
         """Fulfil knowledge and deterministic action tools. Never raises."""
         try:
             if fc.name == "knowledge_lookup":
                 query = fc.parsed_arguments().get("query", "")
                 text = await self._lookup_knowledge(query)
+                success = text not in {
+                    _NO_KB_INFO,
+                    "I couldn't look that up right now.",
+                }
+                self._live_state = reduce_live_state(
+                    self._live_state,
+                    ToolResultEvidence(
+                        tool_name="knowledge_lookup",
+                        success=success,
+                        code="ok" if success else "no_match",
+                    ),
+                )
+                # Publish before send_function_result triggers the continuation,
+                # so that response sees the deterministic tool outcome too.
+                await self._publish_live_state()
                 await self._rt.send_function_result(fc.call_id, text)
             else:
                 from app.domain.services.voice_pipeline.action_tools import (
@@ -490,6 +556,15 @@ class RealtimeBridge:
                 )
 
                 if fc.name not in VOICE_ACTION_NAMES:
+                    self._live_state = reduce_live_state(
+                        self._live_state,
+                        ToolResultEvidence(
+                            tool_name=str(fc.name or "unknown_tool"),
+                            success=False,
+                            code="unknown_tool",
+                        ),
+                    )
+                    await self._publish_live_state()
                     await self._rt.send_function_result(
                         fc.call_id, {"error": f"unknown tool {fc.name}"}
                     )
@@ -501,6 +576,17 @@ class RealtimeBridge:
                     fc.parsed_arguments(),
                     user_text=self._latest_caller_text,
                 )
+                self._live_state = reduce_live_state(
+                    self._live_state,
+                    ToolResultEvidence(
+                        tool_name=str(result.get("action") or fc.name),
+                        success=bool(result.get("success")),
+                        code=str(result.get("status") or "execution_error"),
+                    ),
+                )
+                # The provider continues as soon as the function result lands;
+                # publish its evidence first so the same response sees it.
+                await self._publish_live_state()
                 # Close the tool round-trip before any completion claim or
                 # end-call side effect. send_function_result is awaited, so the
                 # result is on the provider wire before execution continues.
@@ -512,6 +598,15 @@ class RealtimeBridge:
         except Exception as exc:  # noqa: BLE001
             logger.debug("realtime_bridge function-call err call=%s: %s",
                          self._call_id, exc)
+            self._live_state = reduce_live_state(
+                self._live_state,
+                ToolResultEvidence(
+                    tool_name=str(getattr(fc, "name", None) or "unknown_tool"),
+                    success=False,
+                    code="execution_error",
+                ),
+            )
+            await self._publish_live_state()
             try:
                 from app.domain.services.voice_pipeline.action_tools import (
                     VOICE_ACTION_NAMES,

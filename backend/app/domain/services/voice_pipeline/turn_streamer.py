@@ -57,6 +57,7 @@ from app.domain.services.voice_pipeline.sentence_cap import (
 from app.services.scripts.prompts.live_state import build_live_state_block
 from app.domain.services.voice_pipeline.knowledge_tool import (
     KB_TOOL_NAME,
+    NO_KB_FACTS,
     knowledge_tools_for,
     run_knowledge_lookup,
     tool_system_addendum,
@@ -70,6 +71,12 @@ from app.domain.services.voice_pipeline.action_tools import (
     result_json,
     run_voice_action,
     safe_failure_speech,
+)
+from app.domain.services.voice_pipeline.live_structured_state import (
+    ToolResultEvidence,
+    reduce_cascaded_session_live_state,
+    reduce_live_state,
+    render_live_state_block,
 )
 
 logger = logging.getLogger(__name__)
@@ -490,6 +497,8 @@ class TurnStreamer:
         # is what stops weaker models re-introducing / drifting their title over
         # a long call. Identity comes off the session's agent_config.
         _agent_cfg = getattr(session, "agent_config", None)
+
+        _structured = reduce_cascaded_session_live_state(session, messages)
         # Callee-local time-of-day so "morning/afternoon/evening" matches the
         # hour where the phone rang (was always "Morning"). Timezone comes from
         # the campaign (calling_config.timezone), stashed on the session; UK
@@ -511,6 +520,7 @@ class TurnStreamer:
             company_name=(getattr(_agent_cfg, "company_name", "") or ""),
             has_introduced=bool(getattr(session, "_has_introduced", False)),
             time_of_day_line=_tod,
+            structured_state_block=render_live_state_block(_structured),
         )
 
         # Trailing safety block: re-assert the per-model addendum (e.g. the
@@ -683,7 +693,17 @@ class TurnStreamer:
             async def _voice_tool_runner(_name: str, _args: dict) -> str:
                 if _name == KB_TOOL_NAME:
                     q = (_args or {}).get("query") or last_user_text_for_limit
-                    return await run_knowledge_lookup(session, q)
+                    result = await run_knowledge_lookup(session, q)
+                    current = getattr(session, "_live_structured_state", _structured)
+                    session._live_structured_state = reduce_live_state(
+                        current,
+                        ToolResultEvidence(
+                            tool_name="knowledge_lookup",
+                            success=result != NO_KB_FACTS,
+                            code="ok" if result != NO_KB_FACTS else "no_match",
+                        ),
+                    )
+                    return result
                 try:
                     result = await run_voice_action(
                         session,
@@ -698,6 +718,15 @@ class TurnStreamer:
                         _name,
                     )
                     result = execution_failure_result(session, _name)
+                current = getattr(session, "_live_structured_state", _structured)
+                session._live_structured_state = reduce_live_state(
+                    current,
+                    ToolResultEvidence(
+                        tool_name=str(result.get("action") or _name),
+                        success=bool(result.get("success")),
+                        code=str(result.get("status") or "execution_error"),
+                    ),
+                )
                 return result_json(result)
 
             _token_iter = self._p.llm_provider.stream_chat_with_tools(
