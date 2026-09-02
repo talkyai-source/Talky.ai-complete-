@@ -294,7 +294,16 @@ def update_state_from_user_turn(
     active_kind = state.active_contact_kind
     email_intent = has_capture_intent("email", utterance)
     phone_intent = has_capture_intent("phone", utterance)
-    if readback_issued:
+    dual_readback = readback_issued and phone_readback_issued
+    if dual_readback:
+        # The agent may read both pending values in one sentence and ask one
+        # combined "did I get that right?". Both independently computed
+        # verdicts belong to that same question; serialize later clarification,
+        # not application of the answer that was already requested.
+        active_kind = (
+            active_kind if active_kind in {"email", "phone"} else "email"
+        )
+    elif readback_issued:
         active_kind = "email"
     elif phone_readback_issued:
         active_kind = "phone"
@@ -309,7 +318,7 @@ def update_state_from_user_turn(
 
     email_capture = state.email_capture
     phone_capture = state.phone_capture
-    if active_kind == "email" or (email_intent and phone_intent):
+    if active_kind == "email" or (email_intent and phone_intent) or dual_readback:
         email_capture = advance_capture(
             state.email_capture,
             kind="email",
@@ -321,7 +330,7 @@ def update_state_from_user_turn(
             explicit_reask=explicit_contact_reask,
             mode_active=True,
         )
-    if active_kind == "phone" or (email_intent and phone_intent):
+    if active_kind == "phone" or (email_intent and phone_intent) or dual_readback:
         phone_capture = advance_capture(
             state.phone_capture,
             kind="phone",
