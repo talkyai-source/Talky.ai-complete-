@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import React from "react";
@@ -9,6 +9,7 @@ import { ConversationReviewPanel } from "@/components/calls/conversation-review-
 import { extendedApi } from "@/lib/extended-api";
 import { inboundQueryKeys } from "@/lib/queries/inbound-queries";
 import { ensureDom } from "@/test-utils/dom";
+import { createTestQueryClient } from "@/test-utils/render";
 
 ensureDom();
 
@@ -41,9 +42,7 @@ function stubReads() {
 }
 
 function renderPanel(permissions: string[]) {
-    const queryClient = new QueryClient({
-        defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-    });
+    const queryClient = createTestQueryClient();
     queryClient.setQueryData(inboundQueryKeys.permissions, { permissions });
     return render(
         <QueryClientProvider client={queryClient}>
@@ -88,9 +87,7 @@ test("a failed permission lookup is reported as unchecked, not as a refusal", as
     }) as typeof globalThis.fetch;
 
     try {
-        const queryClient = new QueryClient({
-            defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-        });
+        const queryClient = createTestQueryClient();
         // Nothing seeded, and the lookup fails → source "unavailable". The
         // wording has to distinguish this from a refusal: telling someone they
         // lack a permission they may well hold is its own kind of wrong answer.
