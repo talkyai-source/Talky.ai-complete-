@@ -10,7 +10,8 @@
 # the CTest TIMEOUT properties provide elsewhere).
 #
 # Usage:  bash tests/run_gate.sh
-# Env:    CXX (default g++), GATE_TIMEOUT seconds per test run (default 300).
+# Env:    CXX (default g++), GATE_TIMEOUT seconds per test run (default 300),
+#         VOICE_GATEWAY_BUILD_SHA (default dev; otherwise a full commit SHA).
 #
 set -uo pipefail
 
@@ -22,6 +23,12 @@ WARN="-Wall -Wextra -Wpedantic"
 INC="-Iinclude"
 LIB="src/rtp_packet.cpp src/session.cpp src/session_registry.cpp src/http_server.cpp"
 GATE_TIMEOUT="${GATE_TIMEOUT:-300}"
+BUILD_SHA="${VOICE_GATEWAY_BUILD_SHA:-dev}"
+if [[ ! "$BUILD_SHA" =~ ^(dev|[0-9a-f]{40,64})$ ]]; then
+    echo "VOICE_GATEWAY_BUILD_SHA must be 'dev' or a 40-64 character lowercase hex commit" >&2
+    exit 1
+fi
+BUILD_IDENTITY="-DVOICE_GATEWAY_BUILD_SHA=\"${BUILD_SHA}\""
 OUT="$(mktemp -d)"
 fail=0
 
@@ -34,7 +41,7 @@ build() {
     local out="$1"; shift
     local log="$OUT/build_${name}.log"
     echo "== build:${name} =="
-    if $CXX $STD $WARN $INC "$@" -o "$out" -pthread 2>"$log" && [ ! -s "$log" ]; then
+    if $CXX $STD $WARN $INC "$BUILD_IDENTITY" "$@" -o "$out" -pthread 2>"$log" && [ ! -s "$log" ]; then
         echo "  [OK]"
     else
         echo "  [FAIL] build:${name}"

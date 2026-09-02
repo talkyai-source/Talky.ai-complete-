@@ -550,17 +550,19 @@ void test_control_plane_callback_validation() {
 
     const std::string health =
         http_roundtrip(18099, "GET /health HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n");
+    const std::string expected_build_identity =
+        "\"build_sha\":\"" + std::string(VOICE_GATEWAY_BUILD_SHA) + "\"";
     check(health.find("\"status\":\"ok\"") != std::string::npos, "vg18_health_unauthenticated_ok");
     check(health.find("\"protocol_version\":2") != std::string::npos &&
               health.find("\"codecs\":[\"pcmu\"]") != std::string::npos,
           "vg18_health_advertises_protocol_and_codec");
-    check(health.find("\"build_sha\":\"") != std::string::npos,
+    check(health.find(expected_build_identity) != std::string::npos,
           "vg18_health_advertises_build_identity");
 
     const std::string ready =
         http_roundtrip(18099, "GET /ready HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n");
     check(ready.find("\"status\":\"ready\"") != std::string::npos, "vg18_ready_unauthenticated_ok");
-    check(ready.find("\"build_sha\":\"") != std::string::npos,
+    check(ready.find(expected_build_identity) != std::string::npos,
           "vg18_ready_advertises_build_identity");
 
     server.stop();  // exercises the VG-19/VG-03 graceful drain path

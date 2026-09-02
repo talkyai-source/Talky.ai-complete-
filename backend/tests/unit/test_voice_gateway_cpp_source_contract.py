@@ -22,3 +22,17 @@ def test_rtp_source_binding_has_no_removed_first_packet_latches():
 
     assert "from.sin_addr.s_addr != expected_source_address.s_addr" in source
     assert "ntohs(from.sin_port) != config_.remote_port" in source
+
+
+def test_direct_gate_defines_and_exercises_build_identity():
+    """The non-CMake gate must carry the same immutable identity contract."""
+
+    gate = (GATEWAY / "tests" / "run_gate.sh").read_text(encoding="utf-8")
+    runtime_tests = (GATEWAY / "tests" / "test_gateway_fixes.cpp").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'BUILD_SHA="${VOICE_GATEWAY_BUILD_SHA:-dev}"' in gate
+    assert 'BUILD_IDENTITY="-DVOICE_GATEWAY_BUILD_SHA=\\\"${BUILD_SHA}\\\""' in gate
+    assert '"$BUILD_IDENTITY"' in gate
+    assert "std::string(VOICE_GATEWAY_BUILD_SHA)" in runtime_tests
