@@ -489,7 +489,7 @@ class DeepgramFluxSTTProvider(STTProvider):
         }
 
         try:
-            ws = await websockets.connect(url, extra_headers=headers)
+            ws = await websockets.connect(url, additional_headers=headers)
             self._pre_connections[call_id] = ws
             logger.info(
                 "Deepgram Flux pre-connected for call %s "
@@ -1013,7 +1013,7 @@ class DeepgramFluxSTTProvider(STTProvider):
                         )
                     else:
                         _ws_handshake_start = asyncio.get_event_loop().time()
-                        ws = await websockets.connect(url, extra_headers=headers)
+                        ws = await websockets.connect(url, additional_headers=headers)
                         _ws_handshake_ms = (
                             asyncio.get_event_loop().time() - _ws_handshake_start
                         ) * 1000.0

@@ -289,15 +289,14 @@ class OpenAIRealtimeSession:
         Never raises — on any failure it logs, tears down, and returns False.
         """
         url = self._build_url()
-        # websockets==13.1 default connect() is the LEGACY client → extra_headers.
-        # (Matches the Deepgram STT idiom in app/infrastructure/stt/deepgram_flux.py.)
+        # websockets 15 uses the asyncio client's ``additional_headers`` name.
         headers = {
             "Authorization": f"Bearer {self._api_key}",
             "User-Agent": "TalkyAI-VoiceAgent/1.0",
         }
         try:
             self._ws = await asyncio.wait_for(
-                websockets.connect(url, extra_headers=headers, max_size=None),
+                websockets.connect(url, additional_headers=headers, max_size=None),
                 timeout=_CONNECT_HANDSHAKE_TIMEOUT_S,
             )
         except Exception as exc:  # noqa: BLE001 — fail-soft on any connect error

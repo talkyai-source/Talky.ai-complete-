@@ -20,8 +20,12 @@ RUN apt-get update && apt-get install -y \
 # Copy requirements first for better caching
 COPY requirements.txt .
 
-# Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt
+# Install Python dependencies.  The base image's setuptools vendor bundle is
+# part of the final runtime filesystem, so pin the patched bundle explicitly:
+# setuptools 83 vendors jaraco.context 6.1.0 and wheel 0.46.3.
+RUN python -m pip install --no-cache-dir --upgrade "setuptools==83.0.0" \
+    && python -m pip install --no-cache-dir -r requirements.txt \
+    && python -m pip check
 
 # Copy application code
 COPY . .

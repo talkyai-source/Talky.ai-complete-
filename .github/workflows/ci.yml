@@ -136,14 +136,8 @@ jobs:
         run: ruff check app/ --select F --extend-ignore F401,F841
 
       - name: Dependency vulnerability audit (pip-audit)
-        # Fails the build on any unaccepted CVE in production deps.
-        # Temporary reviewed exception (2026-07-16): patched LangSmith requires
-        # websockets>=15, while both realtime provider adapters still use the
-        # websockets 13 connection ABI. The application does not import or
-        # expose LangSmith TracingMiddleware, the affected surface. All other
-        # reported packages are upgraded or removed in requirements.in; delete
-        # this exception as soon as the realtime compatibility migration lands.
-        run: pip-audit -r requirements.txt --ignore-vuln GHSA-f4xh-w4cj-qxq8
+        # Fails the build on every known vulnerability in production deps.
+        run: pip-audit -r requirements.txt
 
       - name: SAST scan (bandit)
         # The repository has a reviewed medium-severity legacy backlog. Keep
