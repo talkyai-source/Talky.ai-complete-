@@ -96,7 +96,11 @@ async def _resolve_provider_and_voice(
 
     ai_config: Optional[AIProviderConfig] = None
     try:
-        async with db_client.pool.acquire() as conn:
+        # tenant_ai_configs is under FORCE RLS: without the tenant GUC this
+        # reads zero rows and the assistant picks the platform default voice.
+        from app.core.db_utils import acquire_with_tenant
+
+        async with acquire_with_tenant(db_client.pool, tenant_id) as conn:
             ai_config = await _fetch_tenant_config(conn, tenant_id)
     except Exception as exc:  # pragma: no cover - defensive
         logger.warning("create_campaign: tenant AI config fetch failed: %s", exc)

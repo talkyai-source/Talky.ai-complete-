@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 
 from app.api.v1.dependencies import get_current_user, get_db_client
+from app.core.db_utils import acquire_with_tenant
 from app.core.postgres_adapter import Client
 from app.domain.models.ai_config import (
     AIProviderConfig,
@@ -66,7 +67,10 @@ async def get_config(
             detail="User is not associated with a tenant",
         )
 
-    async with db_client.pool.acquire() as conn:
+    # tenant_ai_configs is under FORCE RLS (Alembic 0038) and the app role has
+    # no BYPASSRLS: a bare acquire sees zero rows and its bootstrap INSERT is
+    # refused by WITH CHECK (prod 500 on 2026-09-02). Set the tenant GUC.
+    async with acquire_with_tenant(db_client.pool, tenant_id) as conn:
         config = await _fetch_tenant_config(conn, tenant_id)
         if config is None:
             config = AIProviderConfig()
@@ -274,7 +278,7 @@ async def save_config(
             detail="ElevenLabs sample_rate must be one of 8000, 16000, 22050, 24000, 44100",
         )
 
-    async with db_client.pool.acquire() as conn:
+    async with acquire_with_tenant(db_client.pool, tenant_id) as conn:
         await _upsert_tenant_config(conn, tenant_id, config)
 
     # Compute soft latency warnings — advisory only, never blocks saving.

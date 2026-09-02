@@ -15,6 +15,7 @@ from datetime import datetime
 from typing import Any, List, Optional
 
 from fastapi import APIRouter, HTTPException, Request, Depends, Query
+from app.core.db_utils import acquire_with_tenant
 from app.core.postgres_adapter import Client
 from app.core.dotenv_compat import load_dotenv
 
@@ -349,7 +350,9 @@ async def create_campaign(
 
         selected_voice_id = campaign_data.voice_id.strip()
 
-        async with db_client.pool.acquire() as conn:
+        # tenant_ai_configs is under FORCE RLS: a bare acquire reads zero rows
+        # and silently falls back to the platform default provider below.
+        async with acquire_with_tenant(db_client.pool, current_user.tenant_id) as conn:
             ai_config = await _fetch_tenant_config(conn, current_user.tenant_id)
         if ai_config is None:
             ai_config = AIProviderConfig()
@@ -528,7 +531,7 @@ async def update_campaign(
         from app.domain.models.ai_config import AIProviderConfig
 
         selected_voice_id = campaign_data.voice_id.strip()
-        async with db_client.pool.acquire() as conn:
+        async with acquire_with_tenant(db_client.pool, current_user.tenant_id) as conn:
             ai_config = await _fetch_tenant_config(conn, current_user.tenant_id)
         if ai_config is None:
             ai_config = AIProviderConfig()
