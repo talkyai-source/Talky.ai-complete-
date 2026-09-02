@@ -63,3 +63,14 @@ def test_terminal_failure_regression_uses_the_typed_state_contract():
     )
 
     assert "session.state() == voice_gateway::SessionState::Failed" in runtime_tests
+
+
+def test_callback_metadata_regression_observes_the_first_async_post():
+    """Sequence zero must be asserted against the first request, not the latest."""
+
+    runtime_tests = (GATEWAY / "tests" / "test_gateway_fixes.cpp").read_text(
+        encoding="utf-8"
+    )
+
+    assert "std::string first_request() const" in runtime_tests
+    assert "raw = sink.first_request();" in runtime_tests

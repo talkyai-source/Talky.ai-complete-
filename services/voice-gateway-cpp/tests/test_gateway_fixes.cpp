@@ -1046,8 +1046,12 @@ public:
     }
     [[nodiscard]] int posts() const { return posts_.load(); }
     [[nodiscard]] int connections() const { return connections_.load(); }
-    // Raw bytes of the most recent POST (request line + headers + body), so a
-    // test can assert on what the gateway actually put on the wire.
+    // Raw bytes of the first/most recent POST (request line + headers + body),
+    // so tests can assert on what the gateway actually put on the wire.
+    [[nodiscard]] std::string first_request() const {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return first_request_;
+    }
     [[nodiscard]] std::string last_request() const {
         std::lock_guard<std::mutex> lock(mutex_);
         return last_request_;
@@ -1094,6 +1098,9 @@ private:
                 if (raw.rfind("POST", 0) == 0) {
                     posts_.fetch_add(1);
                     std::lock_guard<std::mutex> lock(mutex_);
+                    if (first_request_.empty()) {
+                        first_request_ = raw;
+                    }
                     last_request_ = raw;
                 }
                 const char resp[] =
@@ -1113,7 +1120,8 @@ private:
     std::atomic<bool> running_{true};
     std::atomic<int> posts_{0};
     std::atomic<int> connections_{0};
-    mutable std::mutex mutex_;   // guards last_request_
+    mutable std::mutex mutex_;   // guards captured requests
+    std::string first_request_;
     std::string last_request_;
     std::thread worker_;
 };
@@ -1323,15 +1331,16 @@ void test_audio_callback_sends_internal_token() {
         ts += 160;
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
-    for (int i = 0; i < 200 && sink.posts() == 0; ++i) {
+    std::string raw;
+    for (int i = 0; i < 200 && raw.empty(); ++i) {
+        raw = sink.first_request();
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
-    check(sink.posts() > 0, "token_callback_delivered");
+    check(!raw.empty(), "token_callback_delivered");
 
     // Header name is matched case-sensitively here on purpose: this is the
     // literal the deployed binary emits, and the value is the one main() put in
     // the environment before any http_post read it.
-    const std::string raw = sink.last_request();
     check(raw.find(std::string("X-Internal-Service-Token: ") + kInternalToken + "\r\n") !=
               std::string::npos,
           "audio_callback_carries_internal_service_token");
