@@ -77,6 +77,20 @@ const ACTION_LABELS: Record<CampaignNextAction, string> = {
     end_call: "end the call politely",
 };
 
+function normalizeStructuredText(value: string): string {
+    const withoutControls = Array.from(value, (character) => {
+        const code = character.charCodeAt(0);
+        return code <= 8 || code === 11 || code === 12 || (code >= 14 && code <= 31) || code === 127
+            ? ""
+            : character;
+    }).join("");
+    return withoutControls
+        .replaceAll("{", "(")
+        .replaceAll("}", ")")
+        .replace(/\s+/g, " ")
+        .trim();
+}
+
 export function campaignBriefDraft(value?: Partial<CampaignBrief> | null): CampaignBriefDraft {
     return {
         decision_maker_role: value?.decision_maker_role?.trim() ?? "",
@@ -99,16 +113,16 @@ export function buildCampaignBrief({
     requiredLeadFields: CampaignBriefLeadField[];
 }): CampaignBrief {
     return {
-        representative_name: representativeNames[0]?.trim() ?? "",
-        brand: brand.trim(),
-        decision_maker_role: draft.decision_maker_role.trim(),
+        representative_name: normalizeStructuredText(representativeNames[0] ?? ""),
+        brand: normalizeStructuredText(brand),
+        decision_maker_role: normalizeStructuredText(draft.decision_maker_role),
         approved_next_actions: [...new Set(draft.approved_next_actions)],
-        transfer_destination: draft.transfer_destination.trim(),
+        transfer_destination: normalizeStructuredText(draft.transfer_destination),
         required_lead_fields: requiredLeadFields.map((field) => ({
-            field_key: field.field_key.trim(),
-            label: field.label.trim(),
+            field_key: normalizeStructuredText(field.field_key),
+            label: normalizeStructuredText(field.label),
         })),
-        opening_objective: draft.opening_objective.trim(),
+        opening_objective: normalizeStructuredText(draft.opening_objective),
         max_objection_attempts: draft.max_objection_attempts,
     };
 }

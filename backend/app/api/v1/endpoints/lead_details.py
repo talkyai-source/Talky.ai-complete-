@@ -219,12 +219,24 @@ async def set_lead_fields(
         raise HTTPException(status_code=503, detail="Backend not ready")
 
     from app.core.db_utils import acquire_with_tenant
+    from app.domain.services.campaign_brief import normalize_required_lead_fields
 
-    required_refs = [
-        {"field_key": f.field_key.strip(), "label": f.label.strip()}
-        for f in fields
-        if f.is_required and f.agent_visible
-    ]
+    normalized_fields: list[tuple[LeadFieldIn, dict[str, str]]] = []
+    try:
+        for field in fields:
+            normalized = normalize_required_lead_fields(
+                [{"field_key": field.field_key, "label": field.label}]
+            )[0]
+            normalized_fields.append((field, normalized))
+        required_refs = normalize_required_lead_fields(
+            [
+                normalized
+                for field, normalized in normalized_fields
+                if field.is_required and field.agent_visible
+            ]
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     async with acquire_with_tenant(container.db_pool, tenant_id) as conn:
         campaign = await conn.fetchrow(
             """
@@ -268,7 +280,7 @@ async def set_lead_fields(
             "DELETE FROM campaign_lead_fields WHERE campaign_id = $1::uuid",
             campaign_id,
         )
-        for f in fields:
+        for f, normalized in normalized_fields:
             await conn.execute(
                 """
                 INSERT INTO campaign_lead_fields
@@ -276,7 +288,7 @@ async def set_lead_fields(
                      is_required, agent_visible, user_visible, options, sort_order)
                 VALUES ($1::uuid,$2::uuid,$3,$4,$5,$6,$7,$8,$9::jsonb,$10)
                 """,
-                tenant_id, campaign_id, f.field_key.strip(), f.label.strip(),
+                tenant_id, campaign_id, normalized["field_key"], normalized["label"],
                 f.field_type, f.is_required, f.agent_visible, f.user_visible,
                 __import__("json").dumps(f.options) if f.options else None,
                 f.sort_order,

@@ -48,7 +48,9 @@ def _clean(value: object, *, field: str, max_len: int) -> str:
     raw = str(value or "").strip()
     if too_long(raw, max_len=max_len):
         raise ValueError(f"{field} is too long (max {max_len} characters)")
-    return sanitize_tenant_text(raw, max_len=max_len)
+    # Structured brief values occupy one bullet each. Collapse every whitespace
+    # run so a stored newline cannot manufacture a new trusted prompt section.
+    return " ".join(sanitize_tenant_text(raw, max_len=max_len).split())
 
 
 def _clean_optional(value: object, *, field: str, max_len: int) -> str | None:
@@ -105,12 +107,31 @@ def _normalise_lead_fields(value: object) -> list[dict[str, str]]:
             )
         if not label:
             raise ValueError("required_lead_fields.label is required")
+        from app.services.scripts.prompts.prompt_safety import scan_for_injection
+
+        if scan_for_injection(label):
+            raise ValueError(
+                "required_lead_fields.label must be a field label, not an instruction"
+            )
         folded = key.casefold()
         if folded in seen:
             continue
         seen.add(folded)
         fields.append({"field_key": key, "label": label})
     return fields
+
+
+def normalize_required_lead_fields(value: object) -> list[dict[str, str]]:
+    """Validate prompt-facing lead-field references at every write boundary."""
+    return _normalise_lead_fields(value)
+
+
+def _render_clean(value: object, *, max_len: int) -> str:
+    """Fail closed for legacy/unvalidated JSON read from the database."""
+    try:
+        return _clean(value, field="stored campaign brief value", max_len=max_len)
+    except ValueError:
+        return ""
 
 
 def normalize_campaign_brief(
@@ -210,19 +231,27 @@ def render_campaign_brief(
     """Render only configured facts; never invent an action or destination."""
     if not brief:
         return ""
-    representative = str(
-        representative_name or brief.get("representative_name") or ""
-    ).strip()
-    brand_name = str(brand or brief.get("brand") or "").strip()
+    representative = _render_clean(
+        representative_name or brief.get("representative_name") or "",
+        max_len=MAX_BRIEF_IDENTITY_CHARS,
+    )
+    brand_name = _render_clean(
+        brand or brief.get("brand") or "",
+        max_len=MAX_BRIEF_IDENTITY_CHARS,
+    )
     lines = ["## CAMPAIGN BRIEF"]
     if representative:
         lines.append(f"- Representative on this call: {representative}")
     if brand_name:
         lines.append(f"- Brand represented: {brand_name}")
-    decision_role = str(brief.get("decision_maker_role") or "").strip()
+    decision_role = _render_clean(
+        brief.get("decision_maker_role"), max_len=MAX_DECISION_MAKER_ROLE_CHARS
+    )
     if decision_role:
         lines.append(f"- Intended decision-maker role: {decision_role}")
-    objective = str(brief.get("opening_objective") or "").strip()
+    objective = _render_clean(
+        brief.get("opening_objective"), max_len=MAX_OPENING_OBJECTIVE_CHARS
+    )
     if objective:
         lines.append(f"- Opening objective: {objective}")
 
@@ -233,24 +262,32 @@ def render_campaign_brief(
     ]
     if actions:
         lines.append("- Approved next actions: " + "; ".join(actions))
-    destination = str(brief.get("transfer_destination") or "").strip()
+    destination = _render_clean(
+        brief.get("transfer_destination"), max_len=MAX_TRANSFER_DESTINATION_CHARS
+    )
     if destination:
         lines.append(f"- Approved transfer destination: {destination}")
 
     required_fields = brief.get("required_lead_fields") or []
     rendered_fields = []
     for item in required_fields:
-        if not isinstance(item, Mapping):
+        try:
+            normalized = _normalise_lead_fields([item])
+        except ValueError:
             continue
-        key = str(item.get("field_key") or "").strip()
-        label = str(item.get("label") or "").strip()
-        if key and label:
-            rendered_fields.append(f"{label} ({key})")
+        if normalized:
+            rendered_fields.append(
+                f"{normalized[0]['label']} ({normalized[0]['field_key']})"
+            )
     if rendered_fields:
         lines.append("- Required lead fields: " + "; ".join(rendered_fields))
 
     attempts = brief.get("max_objection_attempts")
-    if attempts is not None:
+    try:
+        attempts = int(attempts)
+    except (TypeError, ValueError):
+        attempts = None
+    if attempts is not None and 1 <= attempts <= 5:
         lines.append(f"- Maximum objection-handling attempts: {attempts}")
     lines.append(
         "Only take an approved next action after its runtime tool reports success. "

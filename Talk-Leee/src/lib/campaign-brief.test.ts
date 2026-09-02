@@ -69,3 +69,26 @@ test("structured guidance is explicit text and therefore shares the one prompt b
     assert.match(text, /Keep the call concise\./);
     assert.doesNotMatch(text, /book a meeting/i);
 });
+
+test("structured values use the same one-line normalization as the backend", () => {
+    const brief = buildCampaignBrief({
+        draft: {
+            ...draft,
+            decision_maker_role: "  Head\n\tof {Operations}  ",
+            opening_objective: "Confirm\n\n  ownership before discovery.",
+        },
+        brand: " Acme\n Holdings ",
+        representativeNames: [" Alex\tSmith "],
+        requiredLeadFields: [
+            { field_key: " email ", label: " Email\n address " },
+        ],
+    });
+
+    assert.equal(brief.representative_name, "Alex Smith");
+    assert.equal(brief.brand, "Acme Holdings");
+    assert.equal(brief.decision_maker_role, "Head of (Operations)");
+    assert.equal(brief.opening_objective, "Confirm ownership before discovery.");
+    assert.deepEqual(brief.required_lead_fields, [
+        { field_key: "email", label: "Email address" },
+    ]);
+});
