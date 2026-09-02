@@ -22,7 +22,6 @@ from app.domain.models.ai_config import (
     DEEPGRAM_TTS_MODELS,
     ELEVENLABS_TTS_MODELS,
     CEREBRAS_MODELS,
-    GEMINI_MODELS,
     GOOGLE_TTS_MODELS,
     GROQ_MODELS,
     ProviderListResponse,
@@ -69,13 +68,13 @@ async def list_providers():
         tts_providers.append("elevenlabs")
         tts_models.extend(model.model_dump() for model in (elevenlabs_models or ELEVENLABS_TTS_MODELS))
 
-    # LLM providers — Gemini is exposed only when the API key is configured;
-    # without it, leaving the option in the dropdown leads to 503s on save.
+    # LLM menu — exactly two entries by product decision (2026-09-02): GPT-OSS
+    # 120B on Cerebras (primary) and GPT-OSS 20B on Groq (fallback). Gemini is
+    # NOT offered even when GEMINI_API_KEY is set; save_config still accepts a
+    # Gemini id a tenant already has stored (hidden, not forbidden), and the
+    # GEMINI_MODELS catalog stays for that validation only.
     llm_providers: list[str] = ["groq"]
     llm_models = [model.model_dump() for model in GROQ_MODELS]
-    if os.getenv("GEMINI_API_KEY"):
-        llm_providers.append("gemini")
-        llm_models.extend(model.model_dump() for model in GEMINI_MODELS)
     if os.getenv("CEREBRAS_API_KEY"):
         llm_providers.append("cerebras")
         llm_models.extend(model.model_dump() for model in CEREBRAS_MODELS)
