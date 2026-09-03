@@ -29,9 +29,11 @@ import asyncio
 import json
 import logging
 import os
-from dataclasses import replace
+import threading
+from contextlib import asynccontextmanager
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
-from uuid import uuid4
+from uuid import UUID, uuid4
 from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, WebSocket
@@ -162,6 +164,15 @@ _telephony_sessions: dict[str, object] = {}  # VoiceSession objects
 _watchdog_task: Optional[asyncio.Task] = None
 _media_watchdog_task: Optional[asyncio.Task] = None
 
+# A provider may have accepted an originate at the exact moment both Redis and
+# Postgres are unavailable.  The request cannot honestly declare that attempt
+# retryable, and an unreferenced ``create_task`` can be garbage-collected while
+# it is the only owner of the cleanup obligation.  Hold one task per provider
+# identity until either durable store accepts the marker; from there the normal
+# orphan/termination-pending watchdog owns recovery across process restarts.
+_LOCAL_ORIGINATION_RECOVERY_RETRY_S = 1.0
+_local_origination_recovery_tasks: dict[str, asyncio.Task] = {}
+
 # Maps C++ gateway session_id → PBX call_id for the audio callback path.
 # Populated in _on_new_call when the AsteriskAdapter registers a gateway session.
 _gateway_session_to_call_id: dict[str, str] = {}
@@ -218,7 +229,7 @@ _ringing_warmup_created_at: dict[str, float] = {}
 _ringing_events: dict[str, asyncio.Event] = {}
 
 
-def _alias_ringing_call_id(original_call_id: str, actual_call_id: str) -> None:
+async def _alias_ringing_call_id(original_call_id: str, actual_call_id: str) -> bool:
     """
     Move pre-originate warmup state when Asterisk replaces our planned channel
     ID with a trunk-created channel ID.
@@ -227,13 +238,40 @@ def _alias_ringing_call_id(original_call_id: str, actual_call_id: str) -> None:
     the first real PBX channel consumes the exact prewarmed session whose
     prompt and _first_speaker were prepared before dialing.
     """
-    moved = get_state_backend().alias_ringing_call(original_call_id, actual_call_id)
+    state_backend = get_state_backend()
+    warmup = state_backend.get_ringing_warmup(original_call_id)
+    voice_session = warmup[0] if warmup else None
+    durable_call_id = str(getattr(voice_session, "_dialer_call_id", "") or "")
+    tenant_id = str(getattr(voice_session, "_dialer_tenant_id", "") or "")
+
+    # Direct tenant-user calls have already committed a calls row and stamp its
+    # durable identity on the pre-warmed session. Persist the actual trunk leg
+    # before exposing it to ringing/answer lifecycle callbacks. Internal dialer
+    # calls deliberately have no such stamp here; their existing worker-owned
+    # persistence protocol remains unchanged.
+    if durable_call_id or tenant_id:
+        if not durable_call_id or not tenant_id:
+            raise RuntimeError("direct outbound alias is missing durable tenant context")
+        from app.core.container import get_container
+
+        await _persist_durable_outbound_channel_alias(
+            getattr(get_container(), "db_pool", None),
+            tenant_id=tenant_id,
+            durable_call_id=durable_call_id,
+            provider="asterisk",
+            original_call_id=original_call_id,
+            actual_call_id=actual_call_id,
+        )
+        voice_session._dialer_provider_call_id = actual_call_id
+
+    moved = state_backend.alias_ringing_call(original_call_id, actual_call_id)
     if moved:
         logger.info(
             "ringing_warmup_alias_moved original_call_id=%s actual_call_id=%s",
             original_call_id[:12],
             actual_call_id[:12],
         )
+    return bool(moved)
 
 
 # ---------------------------------------------------------------------------
@@ -641,6 +679,905 @@ class MakeCallRequest(BaseModel):
     # and it keeps the dialer from having to know which fields the agent is
     # allowed to see. See contact_fields.agent_usable.
     lead_id: Optional[str] = None
+    # Required internal-dialer durability contract. The trusted worker commits
+    # and owns the referenced row before it asks this endpoint to originate.
+    durable_call_id: Optional[str] = None
+    talklee_call_id: Optional[str] = None
+    dialer_job_id: Optional[str] = None
+    dialer_attempt_number: Optional[int] = None
+
+
+_RUNNABLE_OUTBOUND_CAMPAIGN_STATUSES = frozenset({"running", "active"})
+_OUTBOUND_BOUNDARY_DB_TIMEOUT_S = 5.0
+
+
+@dataclass(frozen=True)
+class _InternalDialerIntent:
+    call_id: str
+    talklee_call_id: str
+    dialer_job_id: str
+    attempt_number: int
+    tenant_id: str
+    campaign_id: str
+    lead_id: str
+    destination: str
+    status: str
+    provider: Optional[str]
+    provider_call_id: Optional[str]
+
+
+@dataclass
+class _AttemptLockEntry:
+    lock: asyncio.Lock
+    references: int = 0
+
+
+_attempt_locks_guard = threading.Lock()
+_attempt_locks: dict[str, _AttemptLockEntry] = {}
+
+
+@asynccontextmanager
+async def _serialize_internal_origination(call_id: str):
+    """Serialize in-process replays without leaking one lock per historic call."""
+    with _attempt_locks_guard:
+        entry = _attempt_locks.get(call_id)
+        if entry is None:
+            entry = _AttemptLockEntry(lock=asyncio.Lock())
+            _attempt_locks[call_id] = entry
+        entry.references += 1
+    acquired = False
+    try:
+        await entry.lock.acquire()
+        acquired = True
+        yield
+    finally:
+        if acquired:
+            entry.lock.release()
+        with _attempt_locks_guard:
+            entry.references -= 1
+            if entry.references == 0 and _attempt_locks.get(call_id) is entry:
+                _attempt_locks.pop(call_id, None)
+
+
+def _canonical_uuid(value: object, *, field: str) -> str:
+    try:
+        return str(UUID(str(value)))
+    except (TypeError, ValueError, AttributeError):
+        raise HTTPException(
+            status_code=422,
+            detail={"error": "invalid_dialer_intent", "field": field},
+        ) from None
+
+
+def _dialer_intent_contract(body: MakeCallRequest, *, is_internal: bool) -> bool:
+    values = (
+        body.durable_call_id,
+        body.talklee_call_id,
+        body.dialer_job_id,
+        body.dialer_attempt_number,
+    )
+    supplied = [value is not None for value in values]
+    if any(supplied) and not is_internal:
+        raise HTTPException(
+            status_code=422,
+            detail={"error": "dialer_intent_internal_only"},
+        )
+    if is_internal and not any(supplied):
+        raise HTTPException(
+            status_code=422,
+            detail={"error": "dialer_intent_required"},
+        )
+    if any(supplied) and not all(supplied):
+        raise HTTPException(
+            status_code=422,
+            detail={"error": "incomplete_dialer_intent"},
+        )
+    if all(supplied) and (
+        isinstance(body.dialer_attempt_number, bool)
+        or int(body.dialer_attempt_number or 0) < 1
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail={"error": "invalid_dialer_intent", "field": "dialer_attempt_number"},
+        )
+    return all(supplied)
+
+
+async def _load_internal_dialer_intent(
+    db_pool,
+    *,
+    body: MakeCallRequest,
+    tenant_id: str,
+) -> _InternalDialerIntent:
+    """Verify the worker-owned row; request JSON is never authority."""
+    if db_pool is None:
+        raise HTTPException(
+            status_code=503,
+            headers={"Retry-After": "2"},
+            detail={"error": "dialer_intent_lookup_unavailable"},
+        )
+    durable_call_id = _canonical_uuid(body.durable_call_id, field="durable_call_id")
+    dialer_job_id = _canonical_uuid(body.dialer_job_id, field="dialer_job_id")
+    try:
+        from app.core.db_utils import acquire_with_tenant
+
+        async with asyncio.timeout(_OUTBOUND_BOUNDARY_DB_TIMEOUT_S):
+            async with acquire_with_tenant(
+                db_pool, tenant_id, timeout=_OUTBOUND_BOUNDARY_DB_TIMEOUT_S
+            ) as conn:
+                row = await conn.fetchrow(
+                    """
+                    SELECT id, tenant_id, campaign_id, lead_id, phone_number,
+                           direction, talklee_call_id, dialer_job_id,
+                           dialer_attempt_number, status, provider,
+                           COALESCE(provider_call_id, external_call_uuid)
+                               AS provider_call_id
+                      FROM calls
+                     WHERE id = $1::uuid
+                       AND tenant_id = $2::uuid
+                       AND dialer_job_id = $3::uuid
+                       AND dialer_attempt_number = $4
+                     LIMIT 1
+                    """,
+                    durable_call_id,
+                    tenant_id,
+                    dialer_job_id,
+                    int(body.dialer_attempt_number),
+                )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error(
+            "internal_dialer_intent_lookup_failed call=%s job=%s err=%s",
+            durable_call_id[:8],
+            dialer_job_id[:8],
+            exc,
+        )
+        raise HTTPException(
+            status_code=503,
+            headers={"Retry-After": "2"},
+            detail={"error": "dialer_intent_lookup_unavailable"},
+        ) from exc
+    if row is None:
+        raise HTTPException(
+            status_code=409,
+            detail={"error": "dialer_call_intent_not_found"},
+        )
+
+    campaign_id = _canonical_uuid(row["campaign_id"], field="campaign_id")
+    lead_id = _canonical_uuid(row["lead_id"], field="lead_id")
+    expected_campaign = _canonical_uuid(body.campaign_id, field="campaign_id")
+    expected_lead = _canonical_uuid(body.lead_id, field="lead_id")
+    checks = {
+        "direction": (str(row["direction"] or "").lower(), "outbound"),
+        "campaign_id": (campaign_id, expected_campaign),
+        "lead_id": (lead_id, expected_lead),
+        "phone_number": (str(row["phone_number"] or ""), str(body.destination)),
+        "talklee_call_id": (
+            str(row["talklee_call_id"] or ""),
+            str(body.talklee_call_id or ""),
+        ),
+    }
+    mismatch = next((field for field, pair in checks.items() if pair[0] != pair[1]), None)
+    if mismatch:
+        raise HTTPException(
+            status_code=409,
+            detail={"error": "dialer_call_intent_mismatch", "field": mismatch},
+        )
+    return _InternalDialerIntent(
+        call_id=durable_call_id,
+        talklee_call_id=str(row["talklee_call_id"]),
+        dialer_job_id=dialer_job_id,
+        attempt_number=int(row["dialer_attempt_number"]),
+        tenant_id=tenant_id,
+        campaign_id=campaign_id,
+        lead_id=lead_id,
+        destination=str(row["phone_number"]),
+        status=str(row["status"] or ""),
+        provider=(str(row["provider"]) if row["provider"] else None),
+        provider_call_id=(
+            str(row["provider_call_id"]) if row["provider_call_id"] else None
+        ),
+    )
+
+
+async def _claim_internal_dialer_intent(
+    db_pool,
+    *,
+    intent: _InternalDialerIntent,
+    provider: str,
+    planned_provider_call_id: str,
+) -> tuple[bool, _InternalDialerIntent]:
+    """CAS one durable planned provider identity before ARI can ring."""
+    from app.core.db_utils import acquire_with_tenant
+
+    try:
+        async with asyncio.timeout(_OUTBOUND_BOUNDARY_DB_TIMEOUT_S):
+            async with acquire_with_tenant(
+                db_pool,
+                intent.tenant_id,
+                timeout=_OUTBOUND_BOUNDARY_DB_TIMEOUT_S,
+            ) as conn:
+                row = await conn.fetchrow(
+                    """
+                    UPDATE calls
+                       SET external_call_uuid = $5,
+                           provider_call_id = $5,
+                           provider = $6,
+                           status = 'dialing',
+                           started_at = COALESCE(started_at, NOW()),
+                           updated_at = NOW()
+                     WHERE id = $1::uuid
+                       AND tenant_id = $2::uuid
+                       AND dialer_job_id = $3::uuid
+                       AND dialer_attempt_number = $4
+                       AND direction = 'outbound'
+                       AND provider_call_id IS NULL
+                       AND external_call_uuid IS NULL
+                       AND status IN ('queued', 'initiated')
+                    RETURNING status, provider, provider_call_id
+                    """,
+                    intent.call_id,
+                    intent.tenant_id,
+                    intent.dialer_job_id,
+                    intent.attempt_number,
+                    planned_provider_call_id,
+                    provider,
+                )
+                claimed = row is not None
+                if row is None:
+                    row = await conn.fetchrow(
+                        """
+                        SELECT status, provider,
+                               COALESCE(provider_call_id, external_call_uuid)
+                                   AS provider_call_id
+                          FROM calls
+                         WHERE id = $1::uuid
+                           AND tenant_id = $2::uuid
+                           AND dialer_job_id = $3::uuid
+                           AND dialer_attempt_number = $4
+                         LIMIT 1
+                        """,
+                        intent.call_id,
+                        intent.tenant_id,
+                        intent.dialer_job_id,
+                        intent.attempt_number,
+                    )
+        if row is None:
+            raise RuntimeError("dialer intent disappeared while claiming")
+        return claimed, replace(
+            intent,
+            status=str(row["status"] or ""),
+            provider=(str(row["provider"]) if row["provider"] else None),
+            provider_call_id=(
+                str(row["provider_call_id"]) if row["provider_call_id"] else None
+            ),
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error(
+            "internal_dialer_intent_claim_failed call=%s err=%s",
+            intent.call_id[:8],
+            exc,
+        )
+        raise HTTPException(
+            status_code=503,
+            headers={"Retry-After": "2"},
+            detail={"error": "dialer_intent_claim_unavailable"},
+        ) from exc
+
+
+def _validated_outbound_campaign_snapshot(raw) -> dict:
+    if raw is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"error": "campaign_not_found"},
+        )
+
+    campaign = dict(raw)
+    # Keep prompt construction byte-compatible with prewarm's former raw
+    # lookup: asyncpg pools without registered JSON codecs return jsonb as
+    # strings, while configured pools return dictionaries.
+    for json_field in ("script_config", "calling_config"):
+        raw_json = campaign.get(json_field)
+        if isinstance(raw_json, str) and raw_json:
+            try:
+                campaign[json_field] = json.loads(raw_json)
+            except (TypeError, ValueError):
+                pass
+    direction = str(campaign.get("direction") or "").strip().lower()
+    if direction != "outbound":
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "inbound_campaign_managed_separately",
+                "message": (
+                    "Inbound campaigns are managed through /inbound-campaigns "
+                    "and cannot originate outbound calls."
+                ),
+                "campaign_ids": [str(campaign.get("id") or "")],
+            },
+        )
+
+    status = str(campaign.get("status") or "").strip().lower()
+    if status not in _RUNNABLE_OUTBOUND_CAMPAIGN_STATUSES:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "outbound_campaign_not_runnable",
+                "status": status or None,
+            },
+        )
+    return campaign
+
+
+async def _require_owned_runnable_outbound_campaign(
+    db_pool,
+    *,
+    tenant_id: str,
+    campaign_id: str,
+) -> dict:
+    """Return one owned runnable outbound campaign or fail closed.
+
+    A single tenant-scoped query intentionally makes a foreign campaign
+    indistinguishable from a missing one.  Database uncertainty is retryable;
+    it must never be interpreted as absence and allowed through to a trunk or
+    the adapter.
+    """
+    try:
+        UUID(str(campaign_id))
+    except (TypeError, ValueError, AttributeError):
+        raise HTTPException(
+            status_code=404,
+            detail={"error": "campaign_not_found"},
+        ) from None
+
+    if db_pool is None:
+        raise HTTPException(
+            status_code=503,
+            headers={"Retry-After": "2"},
+            detail={"error": "campaign_lookup_unavailable"},
+        )
+
+    try:
+        from app.core.db_utils import acquire_with_tenant
+
+        async with asyncio.timeout(_OUTBOUND_BOUNDARY_DB_TIMEOUT_S):
+            async with acquire_with_tenant(
+                db_pool, str(tenant_id), timeout=_OUTBOUND_BOUNDARY_DB_TIMEOUT_S
+            ) as conn:
+                raw = await conn.fetchrow(
+                    """
+                    SELECT *
+                      FROM campaigns
+                     WHERE id = $1::uuid
+                       AND tenant_id = $2::uuid
+                     LIMIT 1
+                    """,
+                    str(campaign_id),
+                    str(tenant_id),
+                )
+    except Exception as exc:  # noqa: BLE001 - uncertainty must fail closed
+        logger.error(
+            "outbound_campaign_lookup_failed tenant=%s campaign=%s err=%s",
+            str(tenant_id)[:8],
+            str(campaign_id)[:8],
+            exc,
+        )
+        raise HTTPException(
+            status_code=503,
+            headers={"Retry-After": "2"},
+            detail={"error": "campaign_lookup_unavailable"},
+        ) from exc
+
+    return _validated_outbound_campaign_snapshot(raw)
+
+
+async def _bind_durable_outbound_call_provider(
+    db_pool,
+    *,
+    tenant_id: str,
+    durable_call_id: str,
+    provider: str,
+    provider_call_id: str,
+) -> None:
+    """Bind provider identity after originate; loss of this write is fatal."""
+    try:
+        from app.core.db_utils import acquire_with_tenant
+
+        async with acquire_with_tenant(
+            db_pool, str(tenant_id), timeout=_OUTBOUND_BOUNDARY_DB_TIMEOUT_S
+        ) as conn:
+            updated = await conn.execute(
+                """
+                UPDATE calls
+                   SET external_call_uuid = COALESCE(external_call_uuid, $3),
+                       provider_call_id = CASE
+                           WHEN provider_call_id IS NULL
+                             OR provider_call_id = external_call_uuid
+                           THEN $3
+                           ELSE provider_call_id
+                       END,
+                       provider = $4,
+                       status = CASE
+                           WHEN status IN ('queued', 'initiated') THEN 'dialing'
+                           ELSE status
+                       END,
+                       updated_at = NOW()
+                 WHERE id = $1::uuid
+                   AND tenant_id = $2::uuid
+                   AND direction = 'outbound'
+                """,
+                durable_call_id,
+                str(tenant_id),
+                provider_call_id,
+                provider,
+            )
+        if updated != "UPDATE 1":
+            raise RuntimeError(f"durable call bind affected {updated}")
+    except Exception as exc:  # noqa: BLE001 - a live unbound call is unsafe
+        logger.error(
+            "durable_outbound_call_bind_failed call=%s provider_call=%s err=%s",
+            durable_call_id[:8],
+            provider_call_id[:12],
+            exc,
+        )
+        raise HTTPException(
+            status_code=503,
+            headers={"Retry-After": "2"},
+            detail={"error": "durable_call_bind_failed"},
+        ) from exc
+
+
+async def _persist_durable_outbound_channel_alias(
+    db_pool,
+    *,
+    tenant_id: str,
+    durable_call_id: str,
+    provider: str,
+    original_call_id: str,
+    actual_call_id: str,
+) -> None:
+    """Replace a planned PBX id with its actual leg without losing the audit id.
+
+    ``external_call_uuid`` is the already-existing place that records the
+    planned/original provider reference. ``provider_call_id`` is authoritative
+    for lifecycle events and is moved to the actual Stasis channel. The CAS
+    predicate makes a stale or cross-call alias fail closed.
+    """
+    if not db_pool:
+        raise RuntimeError("database pool unavailable for outbound channel alias")
+    if not original_call_id or not actual_call_id or original_call_id == actual_call_id:
+        return
+    try:
+        from app.core.db_utils import acquire_with_tenant
+
+        async with acquire_with_tenant(
+            db_pool, str(tenant_id), timeout=_OUTBOUND_BOUNDARY_DB_TIMEOUT_S
+        ) as conn:
+            updated = await conn.execute(
+                """
+                UPDATE calls
+                   SET provider_call_id = $4,
+                       provider = $5,
+                       status = CASE
+                           WHEN status IN ('queued', 'initiated') THEN 'dialing'
+                           ELSE status
+                       END,
+                       updated_at = NOW()
+                 WHERE id = $1::uuid
+                   AND tenant_id = $2::uuid
+                   AND direction = 'outbound'
+                   AND external_call_uuid = $3
+                   AND provider_call_id IN ($3, $4)
+                """,
+                durable_call_id,
+                str(tenant_id),
+                original_call_id,
+                actual_call_id,
+                provider,
+            )
+        if updated != "UPDATE 1":
+            raise RuntimeError(f"durable channel alias affected {updated}")
+    except Exception:
+        logger.exception(
+            "durable_outbound_channel_alias_failed call=%s original=%s actual=%s",
+            durable_call_id[:8],
+            original_call_id[:12],
+            actual_call_id[:12],
+        )
+        raise
+
+
+async def _mark_durable_outbound_call_termination_pending(
+    db_pool,
+    *,
+    tenant_id: str,
+    durable_call_id: str,
+    provider: str,
+    provider_call_id: str,
+    reason: str,
+) -> None:
+    """Persist a recoverable provider cleanup obligation before hangup."""
+    if db_pool is None:
+        raise RuntimeError("database pool unavailable for termination marker")
+    from app.core.db_utils import acquire_with_tenant
+
+    async with acquire_with_tenant(
+        db_pool, str(tenant_id), timeout=_OUTBOUND_BOUNDARY_DB_TIMEOUT_S
+    ) as conn:
+        updated = await conn.execute(
+            """
+            UPDATE calls
+               SET external_call_uuid = COALESCE(external_call_uuid, $3),
+                   provider_call_id = CASE
+                       WHEN provider_call_id IS NULL
+                         OR provider_call_id = external_call_uuid
+                         OR provider_call_id = $3
+                       THEN $3
+                       ELSE provider_call_id
+                   END,
+                   provider = $4,
+                   status = 'termination_pending',
+                   failure_reason = COALESCE(failure_reason, $5),
+                   updated_at = NOW()
+             WHERE id = $1::uuid
+               AND tenant_id = $2::uuid
+               AND direction = 'outbound'
+               AND status NOT IN (
+                   'ended', 'completed', 'failed', 'cancelled', 'canceled',
+                   'rejected', 'busy', 'no_answer'
+               )
+            """,
+            durable_call_id,
+            str(tenant_id),
+            provider_call_id,
+            provider,
+            reason[:500],
+        )
+    if updated != "UPDATE 1":
+        raise RuntimeError(f"termination marker affected {updated}")
+
+
+@dataclass(frozen=True)
+class _LocalOriginationRecovery:
+    """In-process handoff context while both durable stores are unavailable."""
+
+    db_pool: object
+    tenant_id: str
+    campaign_id: Optional[str]
+    durable_call_id: str
+    provider: str
+    provider_call_id: str
+    reason: str
+
+
+async def _retry_local_origination_recovery(
+    recovery: _LocalOriginationRecovery,
+) -> None:
+    """Retry until Redis or Postgres durably owns provider cleanup.
+
+    One successful marker is sufficient: Redis is scanned by orphan recovery
+    and ``calls.status='termination_pending'`` is scanned independently from
+    Postgres.  Keeping both attempts in every iteration also heals the common
+    short dual-outage without relying on another request arriving.
+    """
+
+    attempt = 0
+    while True:
+        attempt += 1
+        redis_persisted = False
+        postgres_persisted = False
+        try:
+            await get_state_backend().register_cleanup_obligation(
+                recovery.provider_call_id,
+                tenant_id=recovery.tenant_id,
+                campaign_id=recovery.campaign_id,
+                state="termination_pending",
+                durable_call_id=recovery.durable_call_id,
+                provider=recovery.provider,
+                provider_call_id=recovery.provider_call_id,
+            )
+            redis_persisted = True
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001 - retry locally while Redis is down
+            logger.critical(
+                "local_origination_recovery_redis_unavailable call=%s "
+                "provider_call=%s attempt=%d",
+                recovery.durable_call_id[:8],
+                recovery.provider_call_id[:12],
+                attempt,
+                exc_info=True,
+            )
+
+        try:
+            await _mark_durable_outbound_call_termination_pending(
+                recovery.db_pool,
+                tenant_id=recovery.tenant_id,
+                durable_call_id=recovery.durable_call_id,
+                provider=recovery.provider,
+                provider_call_id=recovery.provider_call_id,
+                reason=recovery.reason,
+            )
+            postgres_persisted = True
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001 - retry locally while Postgres is down
+            logger.critical(
+                "local_origination_recovery_postgres_unavailable call=%s "
+                "provider_call=%s attempt=%d",
+                recovery.durable_call_id[:8],
+                recovery.provider_call_id[:12],
+                attempt,
+                exc_info=True,
+            )
+
+        if redis_persisted or postgres_persisted:
+            logger.warning(
+                "local_origination_recovery_handed_off call=%s provider_call=%s "
+                "redis=%s postgres=%s attempts=%d",
+                recovery.durable_call_id[:8],
+                recovery.provider_call_id[:12],
+                redis_persisted,
+                postgres_persisted,
+                attempt,
+            )
+            return
+        await asyncio.sleep(_LOCAL_ORIGINATION_RECOVERY_RETRY_S)
+
+
+def _retain_local_origination_recovery(
+    *,
+    db_pool,
+    tenant_id: str,
+    campaign_id: Optional[str],
+    durable_call_id: str,
+    provider: str,
+    provider_call_id: str,
+    reason: str,
+) -> asyncio.Task:
+    """Keep exactly one strong task reference for an unpersisted attempt."""
+
+    existing = _local_origination_recovery_tasks.get(provider_call_id)
+    if existing is not None and not existing.done():
+        return existing
+    recovery = _LocalOriginationRecovery(
+        db_pool=db_pool,
+        tenant_id=tenant_id,
+        campaign_id=campaign_id,
+        durable_call_id=durable_call_id,
+        provider=provider,
+        provider_call_id=provider_call_id,
+        reason=reason,
+    )
+    task = asyncio.create_task(
+        _retry_local_origination_recovery(recovery),
+        name=f"origination-recovery-{provider_call_id[:24]}",
+    )
+    _local_origination_recovery_tasks[provider_call_id] = task
+
+    def _release(completed: asyncio.Task) -> None:
+        if _local_origination_recovery_tasks.get(provider_call_id) is completed:
+            _local_origination_recovery_tasks.pop(provider_call_id, None)
+        if completed.cancelled():
+            logger.critical(
+                "local_origination_recovery_cancelled call=%s provider_call=%s",
+                durable_call_id[:8],
+                provider_call_id[:12],
+            )
+            return
+        error = completed.exception()
+        if error is not None:
+            logger.critical(
+                "local_origination_recovery_crashed call=%s provider_call=%s",
+                durable_call_id[:8],
+                provider_call_id[:12],
+                exc_info=(type(error), error, error.__traceback__),
+            )
+
+    task.add_done_callback(_release)
+    return task
+
+
+async def _mark_durable_outbound_call_failed(
+    db_pool,
+    *,
+    tenant_id: str,
+    durable_call_id: Optional[str],
+    dialer_job_id: str,
+    dialer_attempt_number: int,
+    lead_id: str,
+    reason: str,
+) -> bool:
+    """Atomically settle a dialer attempt after provider absence is proven.
+
+    This boundary is called only after a confirmation-aware hangup reports the
+    planned provider leg absent.  The call, exact job and lead therefore move
+    together in one RLS-scoped transaction.  A partial database failure rolls
+    all three back and returns ``False`` so the cleanup ledger remains owned.
+    """
+    if not durable_call_id or db_pool is None:
+        return False
+    try:
+        from app.core.db_utils import acquire_with_tenant
+        from app.domain.services.dialer.job_states import (
+            ACTIVE_STATUSES,
+            LIVE_CALL_STATUSES,
+            TERMINAL_STATUSES,
+        )
+
+        async with acquire_with_tenant(
+            db_pool, str(tenant_id), timeout=_OUTBOUND_BOUNDARY_DB_TIMEOUT_S
+        ) as conn:
+            call_row = await conn.fetchrow(
+                """
+                SELECT status, dialer_job_id, lead_id
+                  FROM calls
+                 WHERE id = $1::uuid
+                   AND tenant_id = $2::uuid
+                   AND dialer_job_id = $3::uuid
+                   AND dialer_attempt_number = $4
+                   AND lead_id = $5::uuid
+                   AND direction = 'outbound'
+                 FOR UPDATE
+                """,
+                durable_call_id,
+                str(tenant_id),
+                str(dialer_job_id),
+                int(dialer_attempt_number),
+                str(lead_id),
+            )
+            if call_row is None:
+                raise RuntimeError("durable call settlement target missing")
+
+            call_status = str(call_row["status"] or "")
+            if call_status not in TERMINAL_CALL_STATUSES:
+                updated = await conn.execute(
+                    """
+                    UPDATE calls
+                       SET status = 'failed',
+                           outcome = 'failed',
+                           failure_reason = COALESCE(failure_reason, $6),
+                           ended_at = COALESCE(ended_at, NOW()),
+                           updated_at = NOW()
+                     WHERE id = $1::uuid
+                       AND tenant_id = $2::uuid
+                       AND dialer_job_id = $3::uuid
+                       AND dialer_attempt_number = $4
+                       AND lead_id = $5::uuid
+                       AND direction = 'outbound'
+                       AND status NOT IN (
+                           'ended', 'completed', 'failed', 'cancelled',
+                           'canceled', 'rejected', 'busy', 'no_answer'
+                       )
+                    """,
+                    durable_call_id,
+                    str(tenant_id),
+                    str(dialer_job_id),
+                    int(dialer_attempt_number),
+                    str(lead_id),
+                    reason[:500],
+                )
+                if updated != "UPDATE 1":
+                    raise RuntimeError(f"durable call terminal update affected {updated}")
+            elif call_status != "failed":
+                # A real lifecycle terminal state won the row lock. Preserve
+                # its outcome and let that owner settle job/lead semantics.
+                return True
+
+            job_row = await conn.fetchrow(
+                """
+                SELECT status, lead_id
+                  FROM dialer_jobs
+                 WHERE id = $1::uuid
+                   AND tenant_id = $2::uuid
+                   AND lead_id = $3::uuid
+                   AND attempt_number = $4
+                 FOR UPDATE
+                """,
+                str(dialer_job_id),
+                str(tenant_id),
+                str(lead_id),
+                int(dialer_attempt_number),
+            )
+            if job_row is None:
+                raise RuntimeError("durable dialer job settlement target missing")
+
+            job_status = str(job_row["status"] or "")
+            if job_status in ACTIVE_STATUSES:
+                job_updated = await conn.execute(
+                    """
+                    UPDATE dialer_jobs
+                       SET status = 'failed',
+                           call_id = $5::uuid,
+                           failure_category = COALESCE(failure_category, 'internal'),
+                           failure_reason = COALESCE(failure_reason, $6),
+                           last_error = COALESCE(last_error, $6),
+                           completed_at = COALESCE(completed_at, NOW()),
+                           updated_at = NOW()
+                     WHERE id = $1::uuid
+                       AND tenant_id = $2::uuid
+                       AND lead_id = $3::uuid
+                       AND attempt_number = $4
+                       AND status = ANY($7::text[])
+                    """,
+                    str(dialer_job_id),
+                    str(tenant_id),
+                    str(lead_id),
+                    int(dialer_attempt_number),
+                    durable_call_id,
+                    reason[:500],
+                    list(ACTIVE_STATUSES),
+                )
+                if job_updated != "UPDATE 1":
+                    raise RuntimeError(
+                        f"durable dialer job terminal update affected {job_updated}"
+                    )
+            elif job_status != "failed":
+                if job_status in TERMINAL_STATUSES:
+                    return True
+                raise RuntimeError(f"unknown durable dialer job status {job_status!r}")
+
+            lead_row = await conn.fetchrow(
+                """
+                SELECT id
+                  FROM leads
+                 WHERE id = $1::uuid
+                   AND tenant_id = $2::uuid
+                 FOR UPDATE
+                """,
+                str(lead_id),
+                str(tenant_id),
+            )
+            if lead_row is None:
+                raise RuntimeError("durable lead settlement target missing")
+
+            lead_updated = await conn.execute(
+                """
+                UPDATE leads AS lead
+                   SET status = CASE
+                           WHEN lead.status IN ('pending', 'queued', 'calling')
+                           THEN 'pending'
+                           ELSE lead.status
+                       END,
+                       updated_at = NOW()
+                 WHERE lead.id = $1::uuid
+                   AND lead.tenant_id = $2::uuid
+                   AND NOT EXISTS (
+                       SELECT 1
+                         FROM dialer_jobs AS other_job
+                        WHERE other_job.tenant_id = $2::uuid
+                          AND other_job.lead_id = $1::uuid
+                          AND other_job.id <> $3::uuid
+                          AND other_job.status = ANY($5::text[])
+                   )
+                   AND NOT EXISTS (
+                       SELECT 1
+                         FROM calls AS other_call
+                        WHERE other_call.tenant_id = $2::uuid
+                          AND other_call.lead_id = $1::uuid
+                          AND other_call.id <> $4::uuid
+                          AND other_call.status = ANY($6::text[])
+                   )
+                """,
+                str(lead_id),
+                str(tenant_id),
+                str(dialer_job_id),
+                durable_call_id,
+                list(ACTIVE_STATUSES),
+                list(LIVE_CALL_STATUSES),
+            )
+            if lead_updated not in {"UPDATE 0", "UPDATE 1"}:
+                raise RuntimeError(f"durable lead release affected {lead_updated}")
+        return True
+    except Exception:  # noqa: BLE001 - retain the original boundary failure
+        logger.exception(
+            "durable_outbound_attempt_settlement_failed call=%s",
+            durable_call_id[:8],
+        )
+        return False
 
 
 async def _load_agent_lead_context(lead_id, tenant_id) -> Optional[dict]:
@@ -710,17 +1647,28 @@ async def make_call(request: Request, body: MakeCallRequest):
     Returns 429 if call is blocked/throttled, 202 if queued.
     """
     # ── Auth gate (SECURITY) ────────────────────────────────────────────
-    # This endpoint has TWO legitimate callers: the internal dialer worker
-    # (trusted via X-Internal-Service-Token) and a logged-in user (JWT →
-    # request.state.tenant_id). Reject anyone who is neither BEFORE doing
-    # any adapter/guard work. On the user path the effective tenant is
-    # ALWAYS derived from the JWT — a client-supplied body.tenant_id can
-    # never override it (that was the cross-tenant origination hole); a
-    # mismatching body tenant is a 403. Only the trusted internal path may
-    # name an arbitrary tenant in the body. Resolve the effective tenant
-    # here (401/403 enforced up-front, before any adapter/guard work).
+    # Production origination has one owner: the dialer worker authenticated
+    # with X-Internal-Service-Token.  There is no supported tenant-user
+    # consumer of this endpoint; keeping that route would expose a second,
+    # non-idempotent provider-origination protocol. Reject it before campaign,
+    # guard, warmup, database, or adapter work.
     caller_ctx = require_internal_or_tenant(request)
+    if not caller_ctx.is_internal:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error": "telephony_call_internal_only",
+                "message": (
+                    "Outbound calls must be submitted through the durable "
+                    "dialer job pipeline."
+                ),
+            },
+        )
     effective_tenant_id = resolve_call_tenant(request, body.tenant_id, ctx=caller_ctx)
+    has_internal_dialer_intent = _dialer_intent_contract(
+        body,
+        is_internal=caller_ctx.is_internal,
+    )
 
     # Unpack the request body into the local names the rest of this
     # handler uses (kept identical so the originate/guard/warmup logic
@@ -728,6 +1676,17 @@ async def make_call(request: Request, body: MakeCallRequest):
     destination = body.destination
     caller_id = body.caller_id
     campaign_id = body.campaign_id
+    if body.lead_id and not (campaign_id and str(campaign_id).strip()):
+        # A lead is campaign-owned.  Without that campaign boundary we cannot
+        # prove the lead belongs to an outbound campaign, so do not even load
+        # its context or invoke any guard/trunk/provider work.
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error": "campaign_id_required_for_lead",
+                "message": "campaign_id is required when lead_id is supplied.",
+            },
+        )
     # NB: no local ``tenant_id = body.tenant_id`` — the tenant is authoritative
     # via effective_tenant_id above; never re-derive it from the raw body.
     first_speaker = body.first_speaker
@@ -820,6 +1779,57 @@ async def make_call(request: Request, body: MakeCallRequest):
     from app.core.container import get_container
 
     container = get_container()
+
+    # Campaign identity is an authority boundary, not prompt decoration.  Pin
+    # one owned/runnable/outbound snapshot before any campaign trunk lookup or
+    # pipeline warmup.  Missing/foreign is deliberately one 404; lookup
+    # uncertainty is a retryable 503 and never falls through to origination.
+    validated_campaign = None
+    if campaign_id:
+        validated_campaign = await _require_owned_runnable_outbound_campaign(
+            getattr(container, "db_pool", None),
+            tenant_id=str(effective_tenant_id),
+            campaign_id=str(campaign_id),
+        )
+    internal_dialer_intent = None
+    if has_internal_dialer_intent:
+        internal_dialer_intent = await _load_internal_dialer_intent(
+            getattr(container, "db_pool", None),
+            body=body,
+            tenant_id=str(effective_tenant_id),
+        )
+
+        # A replay after the first request committed its provider identity must
+        # not re-run CallGuard (which consumes rate-limit budget), warmup, trunk
+        # resolution, or ARI. The row is the authority, not the HTTP caller.
+        if internal_dialer_intent.status in TERMINAL_CALL_STATUSES:
+            return JSONResponse(
+                {
+                    "status": "terminal",
+                    "call_id": internal_dialer_intent.provider_call_id,
+                    "durable_call_id": internal_dialer_intent.call_id,
+                    "idempotent_replay": True,
+                }
+            )
+        if internal_dialer_intent.status == "termination_pending":
+            return JSONResponse(
+                status_code=409,
+                content={
+                    "error": "origination_cleanup_pending",
+                    "durable_call_id": internal_dialer_intent.call_id,
+                    "provider_call_id": internal_dialer_intent.provider_call_id,
+                },
+            )
+        if internal_dialer_intent.provider_call_id:
+            return JSONResponse(
+                {
+                    "status": "calling",
+                    "call_id": internal_dialer_intent.provider_call_id,
+                    "adapter": internal_dialer_intent.provider or _adapter.name,
+                    "durable_call_id": internal_dialer_intent.call_id,
+                    "idempotent_replay": True,
+                }
+            )
 
     # Shared-pool allotment (resolved up-front). If this tenant is allotted a
     # pool account, that account's DID is inherently trusted — the pool trunk is
@@ -990,6 +2000,7 @@ async def make_call(request: Request, body: MakeCallRequest):
         lead_last_name=lead_last_name,
         lead_company=lead_company,
         lead_context=lead_context,
+        campaign_row=validated_campaign,
     )
     effective_first_speaker = prewarm.effective_first_speaker
     pre_warm_session = prewarm.session
@@ -1060,6 +2071,13 @@ async def make_call(request: Request, body: MakeCallRequest):
                     destination,
                     route.reason,
                 )
+                # Warmup owns live STT/TTS/LLM resources. This refusal occurs
+                # before the originate cleanup try/finally below, so release
+                # the session here rather than leaking it on every retry.
+                try:
+                    await _get_orchestrator().end_session(pre_warm_session)
+                except Exception:  # noqa: BLE001 - preserve refusal semantics
+                    logger.exception("refused_outbound_prewarm_cleanup_failed")
                 raise HTTPException(
                     status_code=422,
                     detail={
@@ -1096,12 +2114,309 @@ async def make_call(request: Request, body: MakeCallRequest):
             )
             trunk_endpoint = None
 
-    planned_call_id = (
-        f"talky-out-{uuid4()}" if getattr(_adapter, "name", "") == "asterisk" else None
-    )
+    planned_call_id = None
+    if getattr(_adapter, "name", "") == "asterisk":
+        # Internal retries derive the provider identity from the already
+        # durable call UUID. A process restart therefore cannot mint another
+        # Asterisk channel for the same attempt.
+        planned_call_id = (
+            f"talky-out-{internal_dialer_intent.call_id}"
+            if internal_dialer_intent is not None
+            else f"talky-out-{uuid4()}"
+        )
     stored_call_id: Optional[str] = None
+    durable_call_id: Optional[str] = (
+        internal_dialer_intent.call_id
+        if internal_dialer_intent is not None
+        else None
+    )
+    originated_call_id: Optional[str] = None
+    originate_attempted = False
+
+    async def _cleanup_failed_origination(
+        reason: str,
+    ) -> tuple[Optional[HangupProof], bool]:
+        provider_identity = str(
+            getattr(pre_warm_session, "_dialer_provider_call_id", "")
+            or originated_call_id
+            or planned_call_id
+            or ""
+        )
+        state_ids = tuple(
+            dict.fromkeys(
+                call_id
+                for call_id in (
+                    stored_call_id,
+                    provider_identity if originate_attempted else None,
+                )
+                if call_id
+            )
+        )
+        if state_ids:
+            # Remove the handoff first so a hangup callback cannot consume and
+            # start the session while this failure path is dismantling it.
+            _sb = get_state_backend()
+            for state_call_id in state_ids:
+                _sb.pop_ringing_warmup(state_call_id)
+                _sb.clear_ringing_started_at(state_call_id)
+                _sb.pop_ringing_event(state_call_id)
+                _sb.clear_first_speaker(state_call_id)
+        # An originate transport error is ambiguous: Asterisk may have created
+        # the channel before the response was lost. Put the provider identity
+        # in a recoverable pending row BEFORE the hangup request. A request
+        # acknowledgement is not terminal proof.
+        proof: Optional[HangupProof] = None
+        recovery_required = False
+        pending_persisted = False
+        cleanup_ledger_registered = False
+        if originate_attempted:
+            if (
+                provider_identity
+                and durable_call_id is not None
+                and internal_dialer_intent is not None
+            ):
+                try:
+                    await get_state_backend().register_cleanup_obligation(
+                        provider_identity,
+                        tenant_id=str(effective_tenant_id),
+                        campaign_id=(str(campaign_id) if campaign_id else None),
+                        state="termination_pending",
+                        durable_call_id=durable_call_id,
+                        provider=str(getattr(_adapter, "name", "unknown") or "unknown"),
+                        provider_call_id=provider_identity,
+                    )
+                    cleanup_ledger_registered = True
+                except Exception:  # noqa: BLE001 - never issue an unowned hangup
+                    logger.critical(
+                        "failed_origination_cleanup_ledger_unavailable "
+                        "call=%s provider_call=%s",
+                        durable_call_id[:8],
+                        provider_identity[:12],
+                        exc_info=True,
+                    )
+                try:
+                    await _mark_durable_outbound_call_termination_pending(
+                        getattr(container, "db_pool", None),
+                        tenant_id=str(effective_tenant_id),
+                        durable_call_id=durable_call_id,
+                        provider=str(getattr(_adapter, "name", "unknown") or "unknown"),
+                        provider_call_id=provider_identity,
+                        reason=reason,
+                    )
+                    pending_persisted = True
+                except Exception:  # noqa: BLE001 - still request provider cleanup
+                    logger.exception(
+                        "failed_origination_pending_persist_failed call=%s provider_call=%s",
+                        durable_call_id[:8],
+                        provider_identity[:12],
+                    )
+                if cleanup_ledger_registered:
+                    proof = await request_confirmed_hangup(_adapter, provider_identity)
+                else:
+                    proof = HangupProof(
+                        False,
+                        False,
+                        "cleanup_ledger_unavailable",
+                    )
+                terminal_verified = False
+                if proof.confirmed:
+                    terminal_verified = await _mark_durable_outbound_call_failed(
+                        getattr(container, "db_pool", None),
+                        tenant_id=str(effective_tenant_id),
+                        durable_call_id=durable_call_id,
+                        dialer_job_id=internal_dialer_intent.dialer_job_id,
+                        dialer_attempt_number=internal_dialer_intent.attempt_number,
+                        lead_id=internal_dialer_intent.lead_id,
+                        reason=reason,
+                    )
+                elif not pending_persisted:
+                    # The first marker can fail during the same short DB blip
+                    # that broke binding. Retry once after the bounded provider
+                    # proof attempt; never manufacture a terminal state.
+                    try:
+                        await _mark_durable_outbound_call_termination_pending(
+                            getattr(container, "db_pool", None),
+                            tenant_id=str(effective_tenant_id),
+                            durable_call_id=durable_call_id,
+                            provider=str(getattr(_adapter, "name", "unknown") or "unknown"),
+                            provider_call_id=provider_identity,
+                            reason=reason,
+                        )
+                        pending_persisted = True
+                    except Exception:  # noqa: BLE001 - preserve unconfirmed truth
+                        logger.critical(
+                            "failed_origination_recovery_persist_unavailable "
+                            "call=%s provider_call=%s",
+                            durable_call_id[:8],
+                            provider_identity[:12],
+                            exc_info=True,
+                        )
+                cleanup_complete = bool(
+                    cleanup_ledger_registered
+                    and pending_persisted
+                    and proof.confirmed
+                    and terminal_verified
+                )
+                recovery_required = not cleanup_complete
+                if cleanup_complete:
+                    try:
+                        await get_state_backend().acknowledge_orphan_recovery(
+                            provider_identity
+                        )
+                    except Exception:  # noqa: BLE001 - failed ack retains ledger
+                        logger.exception(
+                            "failed_origination_cleanup_ack_failed call=%s provider_call=%s",
+                            durable_call_id[:8],
+                            provider_identity[:12],
+                        )
+                if recovery_required and not (
+                    cleanup_ledger_registered or pending_persisted
+                ):
+                    # Both cross-process stores were unavailable. Keep an
+                    # explicit in-process owner; an unreferenced task is not a
+                    # durability protocol and can disappear before either
+                    # store recovers.
+                    _retain_local_origination_recovery(
+                        db_pool=getattr(container, "db_pool", None),
+                        tenant_id=str(effective_tenant_id),
+                        campaign_id=(str(campaign_id) if campaign_id else None),
+                        durable_call_id=durable_call_id,
+                        provider=str(
+                            getattr(_adapter, "name", "unknown") or "unknown"
+                        ),
+                        provider_call_id=provider_identity,
+                        reason=reason,
+                    )
+        # Before the adapter is invoked, the bridge does not own the job/lead
+        # retry state. Leave the provider-null intent actionable: the worker's
+        # compare-and-set absence proof terminalises it and schedules the next
+        # legitimate attempt. Marking it failed here could strand an active
+        # dialer job when the HTTP response is lost.
+        if pre_warm_session is not None:
+            try:
+                await _get_orchestrator().end_session(pre_warm_session)
+            except Exception:  # noqa: BLE001 - retain the originating error
+                logger.exception("failed_origination_session_cleanup_failed")
+        if recovery_required:
+            logger.error(
+                "failed_origination_termination_pending call=%s provider_call=%s "
+                "proof=%s recovery_persisted=%s",
+                str(durable_call_id or "-")[:8],
+                provider_identity[:12],
+                proof.code,
+                pending_persisted,
+            )
+        return proof, recovery_required
+
+    def _incomplete_origination_error(proof: HangupProof) -> HTTPException:
+        return HTTPException(
+            status_code=409,
+            detail={
+                "error": "origination_cleanup_pending",
+                "reason": (
+                    "terminal_persistence_failed"
+                    if proof.confirmed
+                    else proof.code
+                ),
+                "durable_call_id": durable_call_id,
+                "provider_call_id": str(
+                    getattr(pre_warm_session, "_dialer_provider_call_id", "")
+                    or originated_call_id
+                    or planned_call_id
+                    or ""
+                ),
+                "provider_hangup_requested": proof.requested,
+                "provider_hangup_confirmed": proof.confirmed,
+            },
+        )
 
     try:
+        # Revalidate after warmup under a campaign row lock. This closes the
+        # final config TOCTOU window before local state is stored and ARI is
+        # allowed to act.
+        if campaign_id:
+            await _require_owned_runnable_outbound_campaign(
+                getattr(container, "db_pool", None),
+                tenant_id=str(effective_tenant_id),
+                campaign_id=str(campaign_id),
+            )
+
+        if internal_dialer_intent is not None:
+            if planned_call_id is None:
+                # FreeSWITCH currently discards caller-supplied channel IDs.
+                # Without a provider id that exists before the network call, a
+                # process death in the response gap cannot be reconciled. Fail
+                # closed until that adapter exposes provider idempotency.
+                raise HTTPException(
+                    status_code=503,
+                    detail={"error": "durable_origination_not_supported"},
+                )
+            async with _serialize_internal_origination(
+                internal_dialer_intent.call_id
+            ):
+                claimed, current_intent = await _claim_internal_dialer_intent(
+                    getattr(container, "db_pool", None),
+                    intent=internal_dialer_intent,
+                    provider=str(getattr(_adapter, "name", "unknown") or "unknown"),
+                    planned_provider_call_id=planned_call_id,
+                )
+            if not claimed:
+                try:
+                    await _get_orchestrator().end_session(pre_warm_session)
+                except Exception:  # noqa: BLE001 - replay remains authoritative
+                    logger.exception(
+                        "internal_dialer_replay_session_cleanup_failed call=%s",
+                        current_intent.call_id[:8],
+                    )
+                if current_intent.status in TERMINAL_CALL_STATUSES:
+                    return JSONResponse(
+                        {
+                            "status": "terminal",
+                            "call_id": current_intent.provider_call_id,
+                            "durable_call_id": current_intent.call_id,
+                            "idempotent_replay": True,
+                        }
+                    )
+                if current_intent.status == "termination_pending":
+                    return JSONResponse(
+                        status_code=409,
+                        content={
+                            "error": "origination_cleanup_pending",
+                            "durable_call_id": current_intent.call_id,
+                            "provider_call_id": current_intent.provider_call_id,
+                        },
+                    )
+                if current_intent.provider_call_id:
+                    return JSONResponse(
+                        {
+                            "status": "calling",
+                            "call_id": current_intent.provider_call_id,
+                            "adapter": current_intent.provider or _adapter.name,
+                            "durable_call_id": current_intent.call_id,
+                            "idempotent_replay": True,
+                        }
+                    )
+                return JSONResponse(
+                    status_code=409,
+                    content={
+                        "error": "origination_in_progress",
+                        "durable_call_id": current_intent.call_id,
+                    },
+                )
+
+            # This stamp precedes state publication and ARI. Answer/ringing can
+            # therefore persist transcript, billing and terminal state even if
+            # the worker's HTTP response is lost.
+            pre_warm_session._dialer_call_id = internal_dialer_intent.call_id
+            pre_warm_session._dialer_tenant_id = internal_dialer_intent.tenant_id
+            pre_warm_session._dialer_campaign_id = internal_dialer_intent.campaign_id
+            pre_warm_session._dialer_lead_id = internal_dialer_intent.lead_id
+            pre_warm_session._dialer_phone = internal_dialer_intent.destination
+            pre_warm_session._dialer_talklee_call_id = (
+                internal_dialer_intent.talklee_call_id
+            )
+            pre_warm_session._dialer_provider_call_id = planned_call_id
+
         # Store the pre-warmed session BEFORE dialing when the adapter supports
         # caller-supplied channel IDs. Asterisk fires _on_ringing from ARI
         # StasisStart, which can happen before originate_call() returns. If the
@@ -1130,6 +2445,7 @@ async def make_call(request: Request, body: MakeCallRequest):
             )
 
         if planned_call_id is not None:
+            originate_attempted = True
             call_id = await _adapter.originate_call(
                 destination=destination,
                 caller_id=caller_id,
@@ -1137,9 +2453,20 @@ async def make_call(request: Request, body: MakeCallRequest):
                 trunk_endpoint=trunk_endpoint,
             )
         else:
+            originate_attempted = True
             call_id = await _adapter.originate_call(
                 destination=destination,
                 caller_id=caller_id,
+            )
+        originated_call_id = call_id
+
+        if durable_call_id is not None:
+            await _bind_durable_outbound_call_provider(
+                getattr(container, "db_pool", None),
+                tenant_id=str(effective_tenant_id),
+                durable_call_id=durable_call_id,
+                provider=str(getattr(_adapter, "name", "unknown") or "unknown"),
+                provider_call_id=call_id,
             )
 
         # Non-Asterisk adapters do not expose a pre-generated channel ID, so we
@@ -1190,22 +2517,29 @@ async def make_call(request: Request, body: MakeCallRequest):
                 "destination": destination,
                 "adapter": _adapter.name,
                 "guard_latency_ms": guard_result.total_latency_ms,
+                "durable_call_id": durable_call_id,
             }
         )
 
+    except HTTPException as exc:
+        proof, recovery_required = await _cleanup_failed_origination(str(exc.detail))
+        if recovery_required and proof is not None and durable_call_id is not None:
+            raise _incomplete_origination_error(proof) from exc
+        raise
+    except asyncio.CancelledError:
+        # Cancellation (client disconnect, task shutdown) must not interrupt the
+        # provider cleanup proof or its durable recovery marker.
+        from app.core.cancellation import finish_critical_handoff
+
+        await finish_critical_handoff(
+            _cleanup_failed_origination("request_cancelled")
+        )
+        raise
     except Exception as exc:
         logger.error(f"Failed to originate call: {exc}")
-        if stored_call_id is not None:
-            _sb = get_state_backend()
-            _sb.pop_ringing_warmup(stored_call_id)
-            _sb.clear_ringing_started_at(stored_call_id)
-            _sb.pop_ringing_event(stored_call_id)
-        # Clean up the pre-warmed session on originate failure
-        if pre_warm_session is not None:
-            try:
-                await _get_orchestrator().end_session(pre_warm_session)
-            except Exception:
-                pass
+        proof, recovery_required = await _cleanup_failed_origination(str(exc))
+        if recovery_required and proof is not None and durable_call_id is not None:
+            raise _incomplete_origination_error(proof) from exc
         raise HTTPException(status_code=500, detail=str(exc))
 
 

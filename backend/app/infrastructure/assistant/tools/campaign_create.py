@@ -28,6 +28,10 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional, Union
 
 from app.core.postgres_adapter import Client
+from app.infrastructure.assistant.tools.campaign_direction import (
+    is_outbound_campaign,
+    outbound_campaign_refusal,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -176,6 +180,8 @@ def _find_duplicate(
     for row in rows:
         if not isinstance(row, dict):
             continue
+        if not is_outbound_campaign(row):
+            continue
         status = str(row.get("status") or "").casefold()
         if status in {"archived", "deleted"}:
             continue
@@ -306,8 +312,9 @@ async def create_campaign(
         try:
             existing = (
                 db_client.table("campaigns")
-                .select("id, name, status, script_config")
+                .select("id, name, status, direction, script_config")
                 .eq("tenant_id", tenant_id)
+                .eq("direction", "outbound")
                 .execute()
             )
             rows = existing.data or []
@@ -455,6 +462,34 @@ async def create_campaign(
     overwrite_id = (overwrite_campaign_id or "").strip()
     try:
         if overwrite_id:
+            # Re-read the exact target at apply time. A stored proposal may sit
+            # open while the campaign is converted inbound, renamed, archived,
+            # or otherwise stops being the duplicate the human approved.
+            target_response = (
+                db_client.table("campaigns")
+                .select("id,name,status,direction,script_config")
+                .eq("id", overwrite_id)
+                .eq("tenant_id", tenant_id)
+                .execute()
+            )
+            if not target_response.data:
+                return {
+                    "error": "overwrite_target_changed",
+                    "message": "The campaign selected for overwrite is no longer available. Preview again.",
+                }
+            target = target_response.data[0]
+            refusal = outbound_campaign_refusal([target])
+            if refusal:
+                return refusal
+            still_matches = _find_duplicate(
+                [target], name=name, company_name=company_name, persona=persona
+            )
+            if not still_matches or still_matches.get("campaign_id") != overwrite_id:
+                return {
+                    "error": "overwrite_target_changed",
+                    "message": "The campaign changed after preview. Preview again before overwriting it.",
+                }
+
             # Overwrite-existing chosen on the duplicate card: replace the
             # existing campaign's definition with this draft (tenant-scoped;
             # traceable via the audit row below).
@@ -464,6 +499,7 @@ async def create_campaign(
                 .update(update_payload)
                 .eq("id", overwrite_id)
                 .eq("tenant_id", tenant_id)
+                .eq("direction", "outbound")
                 .execute()
             )
         else:

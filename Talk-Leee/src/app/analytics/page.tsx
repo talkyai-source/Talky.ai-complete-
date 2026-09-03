@@ -64,6 +64,7 @@ export default function AnalyticsPage() {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState("");
     const [groupBy, setGroupBy] = useState<"day" | "week" | "month">("day");
+    const [direction, setDirection] = useState<"outbound" | "inbound" | "all">("outbound");
     const [dateRange, setDateRange] = useState(30);
     const [barTooltip, setBarTooltip] = useState<{ index: number; x: number; y: number } | null>(null);
     const barsWrapRef = useRef<HTMLDivElement>(null);
@@ -79,8 +80,15 @@ export default function AnalyticsPage() {
                     .toISOString()
                     .split("T")[0];
 
-                const response = await extendedApi.getCallAnalytics(fromDate, toDate, groupBy);
+                const response = await extendedApi.getCallAnalytics(
+                    fromDate,
+                    toDate,
+                    groupBy,
+                    direction,
+                    false,
+                );
                 if (cancelled) return;
+                setError("");
                 setData(response.series);
             } catch (err) {
                 if (cancelled) return;
@@ -96,7 +104,7 @@ export default function AnalyticsPage() {
         return () => {
             cancelled = true;
         };
-    }, [groupBy, dateRange]);
+    }, [groupBy, dateRange, direction]);
 
     const totals = data.reduce(
         (acc, item) => ({
@@ -113,7 +121,10 @@ export default function AnalyticsPage() {
     const activeBar = barTooltip ? data[barTooltip.index] : null;
 
     return (
-        <DashboardLayout title="Analytics" description="Call performance over time">
+        <DashboardLayout
+            title="Analytics"
+            description={`${direction === "all" ? "All real" : `Real ${direction}`} call performance over time`}
+        >
             {/* Filters */}
             <motion.div
                 initial={{ opacity: 0, y: -10 }}
@@ -137,6 +148,26 @@ export default function AnalyticsPage() {
                         <option value="7">Last 7 days</option>
                         <option value="30">Last 30 days</option>
                         <option value="90">Last 90 days</option>
+                    </Select>
+                </motion.div>
+
+                <motion.div
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.99 }}
+                    className="flex items-center gap-2 rounded-xl bg-muted/60 px-3 py-2 shadow-sm transition-[background-color,box-shadow] duration-150 ease-out hover:bg-background hover:shadow-md"
+                >
+                    <Activity className="w-4 h-4 text-muted-foreground" aria-hidden />
+                    <Select
+                        value={direction}
+                        onChange={(value) => setDirection(value as "outbound" | "inbound" | "all")}
+                        ariaLabel="Select call direction"
+                        lightThemeGreen
+                        className="w-40"
+                        selectClassName="border-0 bg-transparent shadow-none h-9 pr-8 focus-visible:ring-0"
+                    >
+                        <option value="outbound">Outbound calls</option>
+                        <option value="inbound">Inbound calls</option>
+                        <option value="all">All directions</option>
                     </Select>
                 </motion.div>
 

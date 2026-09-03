@@ -8,11 +8,14 @@ once in dispatch_tool.
 """
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
 
+from app.core.security.rbac import Permission
 from app.infrastructure.assistant.tools import ALL_TOOLS
+from app.infrastructure.assistant.tools import dispatch as dispatch_module
 from app.infrastructure.assistant.tools.coercion import coerce_bool
 from app.infrastructure.assistant.tools.dispatch import dispatch_tool
 from app.infrastructure.assistant.tools.llm_schemas import GROQ_TOOL_SCHEMAS
@@ -74,7 +77,7 @@ class TestSchemasTolerateStringBooleans:
 
 class TestDispatchCoercion:
     @pytest.mark.asyncio
-    async def test_string_confirm_reaches_tool_as_real_bool(self, monkeypatch):
+    async def test_string_confirm_is_coerced_before_provenance_rejection(self, monkeypatch):
         received = {}
 
         async def fake_tool(tenant_id, db_client, conversation_id=None, **kwargs):
@@ -86,11 +89,16 @@ class TestDispatchCoercion:
         )
 
         result = await dispatch_tool(
-            "create_campaign", "t1", None, None, {"name": "x", "confirm": "true"}
+            "create_campaign",
+            "t1",
+            None,
+            None,
+            {"name": "x", "confirm": "true"},
+            actor_user_id="user-1",
         )
 
-        assert result == {"success": True}
-        assert received["confirm"] is True
+        assert result["error"] == "proposal_confirmation_required"
+        assert received == {}
 
     @pytest.mark.asyncio
     async def test_string_false_never_truthy_strings_into_apply(self, monkeypatch):
@@ -104,8 +112,18 @@ class TestDispatchCoercion:
             ALL_TOOLS, "create_campaign", {"function": fake_tool, "description": "", "input_schema": None}
         )
 
+        async def allow(*_args, **_kwargs):
+            return {Permission.CAMPAIGNS_CREATE}
+
+        monkeypatch.setattr(dispatch_module, "get_effective_permissions", allow)
+
         await dispatch_tool(
-            "create_campaign", "t1", None, None, {"name": "x", "confirm": "false"}
+            "create_campaign",
+            "t1",
+            SimpleNamespace(pool=object()),
+            None,
+            {"name": "x", "confirm": "false"},
+            actor_user_id="user-1",
         )
 
         assert received["confirm"] is False

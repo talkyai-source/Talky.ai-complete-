@@ -74,6 +74,8 @@ export interface CallSeriesItem {
 
 export interface CallAnalyticsResponse {
     series: CallSeriesItem[];
+    direction: "outbound" | "inbound" | "all";
+    include_tests: boolean;
 }
 
 // Recording Types
@@ -215,9 +217,15 @@ class ExtendedApi {
     async getCallAnalytics(
         fromDate?: string,
         toDate?: string,
-        groupBy: "hour" | "day" | "week" | "month" = "day"
+        groupBy: "hour" | "day" | "week" | "month" = "day",
+        direction: "outbound" | "inbound" | "all" = "outbound",
+        includeTests: boolean = false,
     ): Promise<CallAnalyticsResponse> {
-        const params: Record<string, string> = { group_by: groupBy };
+        const params: Record<string, string> = {
+            group_by: groupBy,
+            direction,
+            include_tests: String(includeTests),
+        };
         if (fromDate) params.from = fromDate;
         if (toDate) params.to = toDate;
 
@@ -232,9 +240,15 @@ class ExtendedApi {
     async getCallAnalyticsByCampaign(
         fromDate?: string,
         toDate?: string,
-        groupBy: "hour" | "day" | "week" | "month" = "day"
-    ): Promise<{ campaigns: Array<{ campaign_id: string; name: string; series: Array<{ date: string; total_calls: number; answered: number; failed: number; goal_achieved?: number }> }> }> {
-        const params: Record<string, string> = { group_by: groupBy };
+        groupBy: "hour" | "day" | "week" | "month" = "day",
+        direction: "outbound" | "inbound" | "all" = "outbound",
+        includeTests: boolean = false,
+    ): Promise<{ campaigns: Array<{ campaign_id: string; name: string; series: Array<{ date: string; total_calls: number; answered: number; failed: number; goal_achieved?: number }> }>; direction: "outbound" | "inbound" | "all"; include_tests: boolean }> {
+        const params: Record<string, string> = {
+            group_by: groupBy,
+            direction,
+            include_tests: String(includeTests),
+        };
         if (fromDate) params.from = fromDate;
         if (toDate) params.to = toDate;
 

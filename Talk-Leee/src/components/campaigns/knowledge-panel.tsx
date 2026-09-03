@@ -80,6 +80,7 @@ function filterTree(nodes: KnowledgeNode[], term: string): KnowledgeNode[] {
 
 type TreeNodeProps = {
     node: KnowledgeNode;
+    readOnly: boolean;
     collapsed: Set<string>;
     busy: Set<string>;
     editingId: string | null;
@@ -93,7 +94,7 @@ type TreeNodeProps = {
 };
 
 function KnowledgeTreeNode(props: TreeNodeProps) {
-    const { node, collapsed, busy, editingId, forceExpand } = props;
+    const { node, readOnly, collapsed, busy, editingId, forceExpand } = props;
     const hasChildren = node.children.length > 0;
     const isCollapsed = !forceExpand && collapsed.has(node.id);
     const isBusy = busy.has(node.id);
@@ -129,7 +130,7 @@ function KnowledgeTreeNode(props: TreeNodeProps) {
                     </button>
 
                     <div className="min-w-0 flex-1">
-                        {!isEditing && (
+                        {(!isEditing || readOnly) && (
                             <div className="flex items-center gap-2 flex-wrap">
                                 <span className="text-sm font-medium text-gray-900 dark:text-zinc-100">{node.heading}</span>
                                 {isPinned && <span title="Pinned (prioritised in retrieval)"><Pin className="h-3 w-3 text-amber-500 fill-amber-500" /></span>}
@@ -141,8 +142,8 @@ function KnowledgeTreeNode(props: TreeNodeProps) {
                             </div>
                         )}
 
-                        {!isEditing && answer && <p className="mt-0.5 text-xs text-muted-foreground line-clamp-3">{answer}</p>}
-                        {!isEditing && node.keywords && node.keywords.length > 0 && (
+                        {(!isEditing || readOnly) && answer && <p className="mt-0.5 text-xs text-muted-foreground line-clamp-3">{answer}</p>}
+                        {(!isEditing || readOnly) && node.keywords && node.keywords.length > 0 && (
                             <div className="mt-1 flex flex-wrap gap-1">
                                 {node.keywords.slice(0, 8).map((k) => (
                                     <span key={k} className="rounded bg-gray-100 dark:bg-white/10 px-1.5 py-0.5 text-[10px] text-gray-600 dark:text-zinc-400">{k}</span>
@@ -150,7 +151,7 @@ function KnowledgeTreeNode(props: TreeNodeProps) {
                             </div>
                         )}
 
-                        {isEditing && (
+                        {isEditing && !readOnly && (
                             <div className="mt-1.5 space-y-1.5">
                                 <input
                                     value={draft.heading}
@@ -184,7 +185,7 @@ function KnowledgeTreeNode(props: TreeNodeProps) {
                         )}
                     </div>
 
-                    {!isEditing && (
+                    {!readOnly && !isEditing && (
                         <div className="flex shrink-0 items-center gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
                             <button type="button" onClick={() => props.onStartEdit(node)} className="rounded p-1 text-muted-foreground hover:text-gray-900 dark:hover:text-zinc-100 hover:bg-gray-100 dark:hover:bg-white/10" title="Edit"><Pencil className="h-3.5 w-3.5" /></button>
                             <button type="button" onClick={() => props.onTogglePin(node)} disabled={isBusy} className={`rounded p-1 hover:bg-gray-100 dark:hover:bg-white/10 ${isPinned ? "text-amber-500" : "text-muted-foreground hover:text-gray-900 dark:hover:text-zinc-100"}`} title={isPinned ? "Unpin" : "Pin (prioritise)"}><Pin className={`h-3.5 w-3.5 ${isPinned ? "fill-amber-500" : ""}`} /></button>
@@ -207,9 +208,22 @@ function KnowledgeTreeNode(props: TreeNodeProps) {
     );
 }
 
-export type KnowledgePanelProps = { campaignId: string };
+export type KnowledgePanelProps = {
+    campaignId: string;
+    /** Readers can inspect and test knowledge without seeing mutation controls. */
+    readOnly?: boolean;
+};
 
-export function KnowledgePanel({ campaignId }: KnowledgePanelProps) {
+export function KnowledgePanel(props: KnowledgePanelProps) {
+    return (
+        <KnowledgePanelScope
+            key={`${props.campaignId}:${props.readOnly ? "read-only" : "manage"}`}
+            {...props}
+        />
+    );
+}
+
+function KnowledgePanelScope({ campaignId, readOnly = false }: KnowledgePanelProps) {
     const [data, setData] = useState<CampaignKnowledge | null>(null);
     const [loading, setLoading] = useState(true);
     const [disabled, setDisabled] = useState(false);
@@ -221,6 +235,8 @@ export function KnowledgePanel({ campaignId }: KnowledgePanelProps) {
     const [deletingSourceId, setDeletingSourceId] = useState<string | null>(null);
     const [search, setSearch] = useState("");
     const fileRef = useRef<HTMLInputElement>(null);
+    const requestGeneration = useRef(0);
+    const activeCampaignId = useRef(campaignId);
 
     // Test-a-question
     const [testQuery, setTestQuery] = useState("");
@@ -228,25 +244,46 @@ export function KnowledgePanel({ campaignId }: KnowledgePanelProps) {
     const [testHits, setTestHits] = useState<KnowledgeHit[] | null>(null);
 
     const refresh = useCallback(async () => {
+        const requestedCampaignId = campaignId;
+        const generation = ++requestGeneration.current;
         try {
             const res = await api.getCampaignKnowledge(campaignId);
+            if (
+                generation !== requestGeneration.current
+                || requestedCampaignId !== activeCampaignId.current
+            ) return;
             setData(res);
+            setDisabled(false);
             setError(null);
         } catch (err) {
+            if (
+                generation !== requestGeneration.current
+                || requestedCampaignId !== activeCampaignId.current
+            ) return;
             if (err instanceof ApiClientError && err.status === 404) { setDisabled(true); return; }
             setError(err instanceof Error ? err.message : "Failed to load knowledge");
         } finally {
-            setLoading(false);
+            if (
+                generation === requestGeneration.current
+                && requestedCampaignId === activeCampaignId.current
+            ) setLoading(false);
         }
     }, [campaignId]);
 
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- async knowledge fetch on mount/campaignId change, not derivable during render
-    useEffect(() => { void refresh(); }, [refresh]);
+    useEffect(() => {
+        activeCampaignId.current = campaignId;
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- async knowledge fetch on mount/campaignId change, not derivable during render
+        void refresh();
+        return () => {
+            requestGeneration.current += 1;
+        };
+    }, [campaignId, refresh]);
 
     const markBusy = (id: string, on: boolean) =>
         setBusy((prev) => { const n = new Set(prev); if (on) n.add(id); else n.delete(id); return n; });
 
     const onUpload = async (file: File) => {
+        if (readOnly) return;
         setUploading(true); setError(null);
         try { await api.uploadCampaignKnowledge(campaignId, file); await refresh(); }
         catch (err) { setError(err instanceof Error ? err.message : "Upload failed"); }
@@ -254,7 +291,7 @@ export function KnowledgePanel({ campaignId }: KnowledgePanelProps) {
     };
 
     const mutateNode = async (node: KnowledgeNode, patch: Partial<KnowledgeNode>) => {
-        if (!data) return;
+        if (readOnly || !data) return;
         const prevTree = data.tree;
         setData({ ...data, tree: patchNode(data.tree, node.id, patch) });
         markBusy(node.id, true);
@@ -276,6 +313,7 @@ export function KnowledgePanel({ campaignId }: KnowledgePanelProps) {
     };
 
     const onDeleteSource = async (source: KnowledgeSource) => {
+        if (readOnly) return;
         setDeletingSourceId(source.id); setError(null);
         try { await api.deleteKnowledgeSource(campaignId, source.id); await refresh(); }
         catch (err) { setError(err instanceof Error ? err.message : "Delete failed"); }
@@ -311,11 +349,15 @@ export function KnowledgePanel({ campaignId }: KnowledgePanelProps) {
                 </div>
                 <div className="flex items-center gap-2">
                     {error && <span className="text-xs text-red-600 dark:text-red-400 truncate max-w-[30%]" title={error}>{error}</span>}
-                    <input ref={fileRef} type="file" accept=".md,.txt,text/markdown,text/plain" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) void onUpload(f); }} />
-                    <Button size="sm" variant="outline" onClick={() => fileRef.current?.click()} disabled={uploading} className="h-8 px-2.5 text-xs">
-                        {uploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
-                        {uploading ? "Processing…" : "Upload .md / .txt"}
-                    </Button>
+                    {!readOnly && (
+                        <>
+                            <input ref={fileRef} type="file" accept=".md,.txt,text/markdown,text/plain" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) void onUpload(f); }} />
+                            <Button size="sm" variant="outline" onClick={() => fileRef.current?.click()} disabled={uploading} className="h-8 px-2.5 text-xs">
+                                {uploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
+                                {uploading ? "Processing…" : "Upload .md / .txt"}
+                            </Button>
+                        </>
+                    )}
                 </div>
             </div>
 
@@ -325,7 +367,7 @@ export function KnowledgePanel({ campaignId }: KnowledgePanelProps) {
                 <div className="px-4 py-8 text-center">
                     <BookOpen className="mx-auto h-8 w-8 text-muted-foreground/40" />
                     <p className="mt-2 text-sm font-medium text-gray-900 dark:text-zinc-100">No knowledge yet</p>
-                    <p className="mt-1 text-xs text-muted-foreground max-w-md mx-auto">Upload a Markdown or text doc — pricing, FAQs, services. We&apos;ll parse it into sections, write a spoken answer for each, and the agent will use it on calls.</p>
+                    <p className="mt-1 text-xs text-muted-foreground max-w-md mx-auto">{readOnly ? "No knowledge has been added to this campaign." : "Upload a Markdown or text doc — pricing, FAQs, services. We&apos;ll parse it into sections, write a spoken answer for each, and the agent will use it on calls."}</p>
                 </div>
             ) : (
                 <div className="divide-y divide-gray-200 dark:divide-white/10">
@@ -372,9 +414,11 @@ export function KnowledgePanel({ campaignId }: KnowledgePanelProps) {
                                         <span className={`inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium ${look.cls}`}>{look.spin && <Loader2 className="h-2.5 w-2.5 animate-spin" />}{s.status}</span>
                                         <span className="text-muted-foreground">~{s.token_count} tokens</span>
                                         {s.status === "failed" && s.error && <span className="inline-flex items-center gap-1 text-red-600 dark:text-red-400 truncate" title={s.error}><AlertCircle className="h-3 w-3" /> {s.error}</span>}
-                                        <button type="button" onClick={() => void onDeleteSource(s)} disabled={deletingSourceId === s.id} className="ml-auto rounded p-1 text-muted-foreground hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40" title="Delete this source and its sections">
-                                            {deletingSourceId === s.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
-                                        </button>
+                                        {!readOnly && (
+                                            <button type="button" onClick={() => void onDeleteSource(s)} disabled={deletingSourceId === s.id} className="ml-auto rounded p-1 text-muted-foreground hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40" title="Delete this source and its sections">
+                                                {deletingSourceId === s.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                                            </button>
+                                        )}
                                     </div>
                                 );
                             })}
@@ -403,6 +447,7 @@ export function KnowledgePanel({ campaignId }: KnowledgePanelProps) {
                                 <KnowledgeTreeNode
                                     key={node.id}
                                     node={node}
+                                    readOnly={readOnly}
                                     collapsed={collapsed}
                                     busy={busy}
                                     editingId={editingId}

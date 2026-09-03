@@ -11,12 +11,14 @@ import { SmartCsvImport } from "@/components/campaigns/smart-csv-import";
 import { ContactLists, ActiveContactsSummary } from "@/components/campaigns/contact-lists";
 import { ScriptCard } from "@/components/campaigns/script-card";
 import { LiveCallsPanel } from "@/components/campaigns/live-calls-panel";
-import { RejectedInboundCallsPanel } from "@/components/campaigns/rejected-inbound-calls-panel";
 import { CallIssuesPanel } from "@/components/campaigns/call-issues-panel";
 import { KnowledgePanel } from "@/components/campaigns/knowledge-panel";
 import { TestAgentButton } from "@/components/campaigns/test-agent-button";
 import { Modal } from "@/components/ui/modal";
 import { checkCallingWindow } from "@/lib/calling-window";
+import { inboundCampaignHrefForBase, isOutboundCampaign } from "@/lib/campaign-direction";
+import { inboundApi } from "@/lib/inbound-api";
+import { useEffectivePermissions } from "@/lib/queries/inbound-queries";
 import {
     ArrowLeft,
     Play,
@@ -65,8 +67,18 @@ function getContactStatusStyle(result: string) {
 
 export default function CampaignDetailPage() {
     const params = useParams();
-    const router = useRouter();
     const campaignId = params.id as string;
+
+    return <CampaignDetailScope key={campaignId} campaignId={campaignId} />;
+}
+
+function CampaignDetailScope({ campaignId }: { campaignId: string }) {
+    const router = useRouter();
+    const permissions = useEffectivePermissions();
+    const canManageKnowledge = permissions.isSuccess && (
+        permissions.data.role?.toLowerCase() === "platform_admin"
+        || permissions.data.permissions.includes("campaigns:update")
+    );
 
     const [campaign, setCampaign] = useState<Campaign | null>(null);
     const [contacts, setContacts] = useState<Contact[]>([]);
@@ -81,6 +93,8 @@ export default function CampaignDetailPage() {
     const [actionLoading, setActionLoading] = useState(false);
     const [error, setError] = useState("");
     const [minutes, setMinutes] = useState<MinutesStatus | null>(null);
+    const loadGeneration = useRef(0);
+    const scopeActive = useRef(true);
 
     // Out of plan minutes ⇒ the backend will 402 a Start, so we disable the
     // button up front and explain why. `unlimited` plans are never blocked.
@@ -134,25 +148,47 @@ export default function CampaignDetailPage() {
     });
 
     const loadData = useCallback(async () => {
+        const generation = ++loadGeneration.current;
+        const superseded = () => !scopeActive.current || generation !== loadGeneration.current;
         try {
             setLoading(true);
-            const [campaignData, contactsData, statsData, minutesData] = await Promise.all([
-                dashboardApi.getCampaign(campaignId),
+            const campaignData = await dashboardApi.getCampaign(campaignId);
+            if (superseded()) return;
+            if (!isOutboundCampaign(campaignData.campaign)) {
+                const inboundCampaigns = await inboundApi.list({ includeArchived: true });
+                if (superseded()) return;
+                router.replace(
+                    inboundCampaignHrefForBase(campaignId, inboundCampaigns),
+                );
+                return;
+            }
+
+            const [contactsData, statsData, minutesData] = await Promise.all([
                 dashboardApi.listContacts(campaignId),
                 dashboardApi.getCampaignStats(campaignId),
                 // Best-effort — a quota hiccup must not blank the whole page.
                 dashboardApi.getMinutesStatus().catch(() => null),
             ]);
+            if (superseded()) return;
             setCampaign(campaignData.campaign);
             setContacts(contactsData.items);
             setStats(statsData);
             setMinutes(minutesData);
         } catch (err) {
+            if (superseded()) return;
             setError(err instanceof Error ? err.message : "Failed to load campaign");
         } finally {
-            setLoading(false);
+            if (!superseded()) setLoading(false);
         }
-    }, [campaignId]);
+    }, [campaignId, router]);
+
+    useEffect(() => {
+        scopeActive.current = true;
+        return () => {
+            scopeActive.current = false;
+            loadGeneration.current += 1;
+        };
+    }, []);
 
     useEffect(() => {
         if (campaignId) {
@@ -161,22 +197,25 @@ export default function CampaignDetailPage() {
         }
     }, [campaignId, loadData]);
 
-    // Live-sync campaign status + stats while it's running. Without this the
-    // page loads once and never refreshes, so a Stop issued on another device
-    // (or the campaign finishing on its own) leaves this view stuck showing
-    // "running". Poll is lightweight — only the campaign row + stats, never the
-    // full contacts list — and stops itself once the campaign is no longer
-    // running.
+    // Live-sync running campaigns and unused drafts. Draft polling is required
+    // because a draft can be converted to inbound from another tab; without it
+    // this outbound route keeps rendering controls for a campaign whose
+    // lifecycle has changed. The poll remains lightweight (row + stats only).
     useEffect(() => {
         const status = campaign?.status;
-        if (status !== "running" && status !== "active") return;
+        if (status !== "running" && status !== "active" && status !== "draft") return;
         let cancelled = false;
         const tick = async () => {
             try {
-                const [c, s] = await Promise.all([
-                    dashboardApi.getCampaign(campaignId),
-                    dashboardApi.getCampaignStats(campaignId).catch(() => null),
-                ]);
+                const c = await dashboardApi.getCampaign(campaignId);
+                if (cancelled) return;
+                if (!isOutboundCampaign(c.campaign)) {
+                    const inboundCampaigns = await inboundApi.list({ includeArchived: true });
+                    if (cancelled) return;
+                    router.replace(inboundCampaignHrefForBase(campaignId, inboundCampaigns));
+                    return;
+                }
+                const s = await dashboardApi.getCampaignStats(campaignId).catch(() => null);
                 if (cancelled) return;
                 setCampaign(c.campaign);
                 if (s) setStats(s);
@@ -189,7 +228,7 @@ export default function CampaignDetailPage() {
             cancelled = true;
             window.clearInterval(id);
         };
-    }, [campaign?.status, campaignId]);
+    }, [campaign?.status, campaignId, router]);
 
     function handleStartClick() {
         // Out of plan minutes — don't even open the modal; the backend
@@ -534,15 +573,7 @@ export default function CampaignDetailPage() {
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ delay: 0.3 }}
                     >
-                        <LiveCallsPanel campaignId={campaignId} />
-                    </motion.div>
-
-                    <motion.div
-                        initial={{ opacity: 0, y: 20 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ delay: 0.325 }}
-                    >
-                        <RejectedInboundCallsPanel campaignId={campaignId} />
+                        <LiveCallsPanel campaignId={campaignId} direction="outbound" />
                     </motion.div>
 
                     {/* Call issues — why calls aren't going through (only
@@ -552,7 +583,7 @@ export default function CampaignDetailPage() {
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ delay: 0.35 }}
                     >
-                        <CallIssuesPanel campaignId={campaignId} />
+                        <CallIssuesPanel campaignId={campaignId} direction="outbound" />
                     </motion.div>
 
                     {/* Contact lists row — toggle active/inactive + call a whole list. */}
@@ -769,7 +800,7 @@ export default function CampaignDetailPage() {
                     </motion.div>
 
                     {/* Knowledge base — vectorless-RAG tree the agent answers from */}
-                    <KnowledgePanel campaignId={campaignId} />
+                    <KnowledgePanel campaignId={campaignId} readOnly={!canManageKnowledge} />
 
                     {/* Script Card — transcripts of every call with timestamps */}
                     <ScriptCard campaignId={campaignId} />

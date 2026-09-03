@@ -222,7 +222,7 @@ export function sharedHttpClient() {
 
 export type KnowledgeMode = "none" | "inline" | "map_retrieve" | "retrieve";
 
-/** A stuck/failed dial attempt, explained for the operator (GET /calls/issues). */
+/** A durable outbound placement or inbound processing issue (GET /calls/issues). */
 export interface CallIssue {
     job_id: string;
     phone_number: string;
@@ -753,20 +753,19 @@ class ApiClient {
         return HangupCallResponseSchema.parse(data);
     }
 
-    /**
-     * Recent dial attempts that DIDN'T place a call, each explained with a
-     * title + actionable suggestion. These come from the dialer (out of
-     * minutes, outside hours, caller-ID unverified, TTS warmup failure, rate
-     * limits) — failures that never create a `calls` row, so the live panel
-     * can't show them. This is what tells the operator WHY nothing dialed.
-     */
-    async listCallIssues(input?: { campaignId?: string; windowMinutes?: number }): Promise<{
+    /** Recent durable call issues, selected from the direction's real source. */
+    async listCallIssues(input?: {
+        campaignId?: string;
+        windowMinutes?: number;
+        direction?: "inbound" | "outbound";
+    }): Promise<{
         items: CallIssue[];
         server_time: string;
     }> {
         const query: Record<string, string | number> = {};
         if (input?.campaignId) query.campaign_id = input.campaignId;
         if (input?.windowMinutes !== undefined) query.window_minutes = input.windowMinutes;
+        if (input?.direction) query.direction = input.direction;
         const data = await this.client().request({
             path: "/calls/issues",
             method: "GET",

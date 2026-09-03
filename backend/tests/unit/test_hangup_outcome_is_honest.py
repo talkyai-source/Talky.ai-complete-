@@ -31,11 +31,12 @@ conversation billed zero minutes for it.
 """
 from __future__ import annotations
 
+import ast
 import re
 
 import pytest
 
-from tests.unit._source_scan import app_sources, code, function_body
+from tests.unit._source_scan import BACKEND, app_sources, code, function_body
 
 _HANGUP = "app/api/v1/endpoints/calls.py"
 _ADMIN = "app/api/v1/endpoints/admin/calls.py"
@@ -142,6 +143,39 @@ _OUTCOME_ASSIGN = re.compile(
 )
 
 
+def _queue_stat_outcome_lines(src: str) -> set[int]:
+    """Lines whose ``outcome=`` kwarg is a QUEUE job-stat label, not a call outcome.
+
+    ``QueueService.mark_completed(job_id, outcome=...)`` only does a Redis
+    ``hincrby`` on ``outcome_<label>`` — a per-delivery job statistic. It never
+    reaches ``calls.outcome``; its own default, ``"completed"``, is likewise in
+    neither classification set. That is a separate vocabulary, excluded here for
+    the same reason latency_tracker and resilient_llm are excluded at module
+    level: ``outcome`` is an overloaded word. Narrowing, not loosening — a
+    literal that really is written to the calls table is still flagged.
+
+    Takes RAW source: ``app_sources`` yields comment/docstring-stripped text
+    that no longer parses (a stripped docstring leaves an empty function body).
+    ``code_only`` blanks lines in place, so raw and stripped line numbers agree.
+    """
+    try:
+        tree = ast.parse(src)
+    except SyntaxError:  # pragma: no cover - app sources always parse
+        return set()
+    lines: set[int] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", "")
+        if name not in {"mark_completed", "mark_skipped"}:
+            continue
+        for keyword in node.keywords:
+            if keyword.arg == "outcome":
+                lines.add(keyword.value.lineno)
+    return lines
+
+
 def _writes_the_calls_table(src: str) -> bool:
     """`outcome` is an overloaded word — latency_tracker records a turn
     outcome, resilient_llm an LLM-call outcome. Only modules that write the
@@ -170,7 +204,12 @@ def test_every_literal_outcome_written_anywhere_is_classified():
         if not _writes_the_calls_table(src):
             continue
         scanned += 1
+        queue_stat_lines = _queue_stat_outcome_lines(
+            (BACKEND / rel).read_text(encoding="utf-8")
+        )
         for i, line in enumerate(src.splitlines(), 1):
+            if i in queue_stat_lines:
+                continue
             for match in _OUTCOME_ASSIGN.finditer(line):
                 value = next(g for g in match.groups() if g)
                 if value not in known:
@@ -196,3 +235,30 @@ def test_admin_terminate_maps_both_cases(was_answered, expected):
         else CallOutcome.CANCELLED.value
     )
     assert got == expected
+
+
+def test_the_scanner_still_catches_a_calls_table_offender():
+    """The queue-stat exclusion narrows the scan; it must not blunt it.
+
+    Planted source: one genuine `calls` write with an unclassified literal
+    (must be flagged) and one queue job-stat label (must be ignored).
+    """
+    planted = (
+        'def a(conn):\n'
+        '    conn.execute("UPDATE calls SET outcome = $1", outcome="terminated_by_admin")\n'
+        'async def b(self, job):\n'
+        '    await self.queue_service.mark_completed(\n'
+        '        job.job_id,\n'
+        '        outcome="duplicate_terminal_attempt",\n'
+        '    )\n'
+    )
+    assert _writes_the_calls_table(planted)
+
+    skip = _queue_stat_outcome_lines(planted)
+    found = [
+        next(g for g in m.groups() if g)
+        for i, line in enumerate(planted.splitlines(), 1)
+        if i not in skip
+        for m in _OUTCOME_ASSIGN.finditer(line)
+    ]
+    assert found == ["terminated_by_admin"], found

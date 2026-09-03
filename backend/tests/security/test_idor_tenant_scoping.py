@@ -643,10 +643,15 @@ def _campaign_service(db):
     return CampaignService(db, queue_service=None)
 
 
-def _seed_campaign(db, campaign_id, tenant_id, status="running"):
+def _seed_campaign(db, campaign_id, tenant_id, status="running", direction="outbound"):
+    # `direction` is NOT NULL DEFAULT 'outbound' in the schema, so a real row
+    # always carries it. The fixture predated the column; without it the
+    # outbound-only UPDATE predicate matches nothing and pause/stop raise
+    # CampaignDirectionError instead of exercising the tenant-scoping path
+    # these tests are about.
     db.tables["campaigns"].append({
         "id": campaign_id, "tenant_id": tenant_id, "status": status,
-        "name": "c", "total_leads": 0,
+        "name": "c", "total_leads": 0, "direction": direction,
     })
 
 

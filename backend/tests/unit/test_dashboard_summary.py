@@ -117,6 +117,84 @@ async def test_summary_returns_zeros_for_empty_tenant():
 
 
 @pytest.mark.asyncio
+async def test_active_campaign_count_is_outbound_only():
+    campaign_builder = _FakeBuilder(count=1, data=[])
+    builders = {
+        "calls": [
+            _FakeBuilder(count=0, data=[]),
+            _FakeBuilder(count=0, data=[]),
+            _FakeBuilder(count=0, data=[]),
+        ],
+        "campaigns": [campaign_builder],
+        "tenants": [_FakeBuilder(data=[{"minutes_allocated": 0}])],
+        "dialer_jobs": [_FakeBuilder(count=0, data=[])],
+    }
+
+    result = await get_dashboard_summary(
+        current_user=_user(), db_client=_FakeClient(builders)
+    )
+
+    assert result.active_campaigns == 1
+    assert ("eq", ("status", "running"), {}) in campaign_builder.calls
+    assert ("eq", ("direction", "outbound"), {}) in campaign_builder.calls
+
+
+@pytest.mark.asyncio
+async def test_performance_summary_is_current_month_real_outbound_only():
+    total_builder = _FakeBuilder(count=1, data=[])
+    month_builder = _FakeBuilder(
+        data=[
+            {
+                "id": "11111111-1111-1111-1111-111111111111",
+                "outcome": "answered",
+                "duration_seconds": 60,
+                "is_test": False,
+                "direction": "outbound",
+                "billing_status": "none",
+            },
+            {
+                "id": "22222222-2222-2222-2222-222222222222",
+                "outcome": "failed",
+                "duration_seconds": 300,
+                "is_test": False,
+                "direction": "inbound",
+                "billing_status": "finalized",
+            },
+            {
+                "id": "33333333-3333-3333-3333-333333333333",
+                "outcome": "goal_achieved",
+                "duration_seconds": 600,
+                "is_test": True,
+                "direction": "outbound",
+                "billing_status": "none",
+            },
+        ]
+    )
+    active_builder = _FakeBuilder(count=1, data=[])
+    builders = {
+        "calls": [total_builder, month_builder, active_builder],
+        "call_legs": [_FakeBuilder(data=[])],
+        "campaigns": [_FakeBuilder(count=0, data=[])],
+        "tenants": [_FakeBuilder(data=[{"minutes_allocated": 100}])],
+        "dialer_jobs": [_FakeBuilder(count=0, data=[])],
+    }
+
+    result = await get_dashboard_summary(
+        current_user=_user(), db_client=_FakeClient(builders)
+    )
+
+    assert result.total_calls == 1
+    assert result.answered_calls == 1
+    assert result.failed_calls == 0
+    assert result.avg_call_duration_seconds == 60
+    assert result.outcome_breakdown == {"answered": 1}
+    for builder in (total_builder, active_builder):
+        assert ("eq", ("direction", "outbound"), {}) in builder.calls
+        assert ("eq", ("is_test", False), {}) in builder.calls
+    assert any(call[0] == "gte" and call[1][0] == "created_at" for call in total_builder.calls)
+
+
+@pytest.mark.asyncio
 async def test_summary_computes_avg_duration_from_real_calls():
     """avg_call_duration_seconds = mean of duration_seconds across the
     answered/completed/in_progress rows in the current month, ignoring

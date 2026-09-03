@@ -37,9 +37,24 @@ from typing import Optional
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query
 
+from app.core.security.rbac import (
+    Permission,
+    check_permission,
+    get_effective_permissions,
+)
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Campaign Test"])
+
+
+class CampaignTestDirectionConflict(RuntimeError):
+    """The campaign became non-outbound before test-call persistence."""
+
+
+class CampaignTestUnavailable(RuntimeError):
+    """The durable test-call boundary could not be proven."""
+
 
 # Small concurrency cap so a stuck test tab can't pin an unbounded number of
 # realtime/TTS provider sockets. RFC 6455 close 1013 = "Try Again Later".
@@ -162,7 +177,7 @@ async def _fetch_campaign_row(db_pool, tenant_id: str, campaign_id: str):
 
 async def _record_test_call(
     container, tenant_id, campaign_id, voice_session, config
-) -> Optional[str]:
+) -> str:
     """Write a flagged ``calls`` row for a campaign test session.
 
     Why a row at all: recordings, transcripts, the prompt version on the call,
@@ -175,11 +190,13 @@ async def _record_test_call(
     A test session is billed nothing, consumes no dial slot, burns no lead
     attempt and cannot trip abuse detection.
 
-    Never raises. A test call that cannot be recorded is still a test call.
+    The campaign row lock and insert share the tenant-aware transaction opened
+    by ``acquire_with_tenant``. This serializes against outbound-to-inbound
+    conversion: a test must never continue when its durable row was refused.
     """
     pool = getattr(container, "db_pool", None)
     if pool is None:
-        return None
+        raise CampaignTestUnavailable("campaign-test database pool is unavailable")
     try:
         from app.core.db_utils import acquire_with_tenant
 
@@ -196,18 +213,41 @@ async def _record_test_call(
         # reintroduced here from the other direction.
         call_uuid = str(getattr(voice_session, "call_id", "") or uuid.uuid4())
         talklee_id = getattr(voice_session, "talklee_call_id", None) or call_uuid
+        call_uuid_value = uuid.UUID(call_uuid)
+        tenant_uuid = uuid.UUID(str(tenant_id))
+        campaign_uuid = uuid.UUID(str(campaign_id))
         async with acquire_with_tenant(pool, str(tenant_id)) as conn:
+            campaign = await conn.fetchrow(
+                """
+                SELECT direction
+                  FROM campaigns
+                 WHERE id = $1
+                   AND tenant_id = $2
+                   FOR SHARE
+                """,
+                campaign_uuid,
+                tenant_uuid,
+            )
+            if campaign is None:
+                raise CampaignTestUnavailable(
+                    "campaign disappeared before test-call persistence"
+                )
+            direction = str(campaign.get("direction", "")).strip().lower()
+            if direction != "outbound":
+                raise CampaignTestDirectionConflict(
+                    "campaign is no longer outbound"
+                )
             await conn.execute(
                 """
                 INSERT INTO calls (
-                    id, tenant_id, campaign_id, phone_number, status,
+                    id, tenant_id, campaign_id, phone_number, status, direction,
                     talklee_call_id, is_test,
                     prompt_template, prompt_version, prompt_hash, created_at
-                ) VALUES ($1,$2,$3,$4,'in_progress',$5,TRUE,$6,$7,$8,NOW())
+                ) VALUES ($1,$2,$3,$4,'in_progress','outbound',$5,TRUE,$6,$7,$8,NOW())
                 """,
-                uuid.UUID(call_uuid),
-                uuid.UUID(str(tenant_id)),
-                uuid.UUID(str(campaign_id)),
+                call_uuid_value,
+                tenant_uuid,
+                campaign_uuid,
                 "browser-test",
                 str(talklee_id),
                 getattr(config, "prompt_template", None),
@@ -221,10 +261,31 @@ async def _record_test_call(
             getattr(config, "prompt_version", None),
         )
         return call_uuid
-    except Exception:  # noqa: BLE001 — see docstring
+    except CampaignTestDirectionConflict:
+        logger.info(
+            "campaign_test_call_direction_conflict campaign=%s",
+            str(campaign_id)[:8],
+        )
+        raise
+    except CampaignTestUnavailable:
+        raise
+    except Exception as exc:  # noqa: BLE001 — normalize DB uncertainty below
+        if getattr(exc, "constraint_name", None) in {
+            "calls_outbound_campaign_guard",
+            "calls_test_outbound_campaign_guard",
+        }:
+            logger.info(
+                "campaign_test_call_direction_constraint campaign=%s",
+                str(campaign_id)[:8],
+            )
+            raise CampaignTestDirectionConflict(
+                "campaign is no longer outbound"
+            ) from exc
         logger.warning("campaign_test_call_record_failed campaign=%s",
                        str(campaign_id)[:8], exc_info=True)
-        return None
+        raise CampaignTestUnavailable(
+            "test-call persistence could not be confirmed"
+        ) from exc
 
 
 async def _finalise_test_call(container, tenant_id, call_id, started_at) -> None:
@@ -422,10 +483,61 @@ async def campaign_test_websocket(
         await websocket.close(code=1011, reason="Container not initialized")
         return
 
+    # WebSockets do not run FastAPI's HTTP dependency chain. Resolve effective
+    # grants explicitly so a read-only or subsequently revoked user cannot
+    # consume provider capacity or persist test calls/transcripts.
+    try:
+        permissions = await get_effective_permissions(
+            container.db_pool,
+            user_id,
+            tenant_id,
+        )
+    except Exception as permission_err:  # noqa: BLE001 — authorization fails closed
+        logger.error(
+            "campaign_test_ws: permission lookup failed tenant=%s user=%s err_type=%s",
+            str(tenant_id)[:8],
+            str(user_id)[:8],
+            type(permission_err).__name__,
+        )
+        await websocket.send_json(
+            {
+                "type": "error",
+                "code": "authorization_unavailable",
+                "message": "Authorization is temporarily unavailable. Please retry.",
+            }
+        )
+        await websocket.close(code=1011, reason="Authorization unavailable")
+        return
+    if not check_permission(permissions, Permission.CAMPAIGNS_UPDATE):
+        await websocket.send_json(
+            {
+                "type": "error",
+                "code": "permission_denied",
+                "required": Permission.CAMPAIGNS_UPDATE.value,
+                "message": "You do not have permission to test this campaign.",
+            }
+        )
+        await websocket.close(code=1008, reason="Permission denied")
+        return
+
     campaign_row = await _fetch_campaign_row(container.db_pool, tenant_id, campaign_id)
     if campaign_row is None:
         await websocket.send_json({"type": "error", "message": "Campaign not found."})
         await websocket.close(code=1008, reason="Campaign not found")
+        return
+    if str(campaign_row.get("direction", "outbound")).strip().lower() != "outbound":
+        await websocket.send_json(
+            {
+                "type": "error",
+                "code": "inbound_campaign_managed_separately",
+                "message": (
+                    "Inbound campaigns must be tested through the inbound "
+                    "campaign lifecycle."
+                ),
+                "campaign_ids": [str(campaign_id)],
+            }
+        )
+        await websocket.close(code=1008, reason="Inbound campaign")
         return
 
     # ── Direction and opening mode are two facts. This tests an OUTBOUND
@@ -491,11 +603,40 @@ async def campaign_test_websocket(
             # minutes_quota, billing, dialer concurrency, the per-lead daily
             # cap, all five abuse checks and telephony observability.
             #
-            # Created AFTER the session exists and wrapped: failing to record a
-            # test call must never stop you testing the agent.
-            test_call_id = await _record_test_call(
-                container, tenant_id, campaign_id, voice_session, config
-            )
+            # Created AFTER the session exists. A final locked direction check
+            # prevents a conversion race from leaving an outbound browser
+            # session running without an accepted outbound test-call row.
+            try:
+                test_call_id = await _record_test_call(
+                    container, tenant_id, campaign_id, voice_session, config
+                )
+            except CampaignTestDirectionConflict:
+                await websocket.send_json(
+                    {
+                        "type": "error",
+                        "code": "inbound_campaign_managed_separately",
+                        "message": (
+                            "Inbound campaigns must be tested through the inbound "
+                            "campaign lifecycle."
+                        ),
+                        "campaign_ids": [str(campaign_id)],
+                    }
+                )
+                await websocket.close(code=1008, reason="Inbound campaign")
+                return
+            except CampaignTestUnavailable:
+                await websocket.send_json(
+                    {
+                        "type": "error",
+                        "code": "campaign_test_unavailable",
+                        "message": (
+                            "Campaign testing is temporarily unavailable. "
+                            "Please try again."
+                        ),
+                    }
+                )
+                await websocket.close(code=1011, reason="Campaign test unavailable")
+                return
 
             # Per-call first-speaker on the session (phone path sets both).
             # Also opt this test call into the natural silence handling so it

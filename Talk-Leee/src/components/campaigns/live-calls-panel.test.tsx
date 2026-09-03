@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import React from "react";
 
 import {
     LiveCallsPanel,
+    type LiveCallsPanelProps,
     isTerminalLiveCall,
     terminationView,
 } from "@/components/campaigns/live-calls-panel";
@@ -32,6 +33,14 @@ const objectUrls = globalThis.URL as unknown as {
 const originalCreateObjectURL = objectUrls.createObjectURL;
 const originalRevokeObjectURL = objectUrls.revokeObjectURL;
 const queryClients: QueryClient[] = [];
+
+function deferred<T>() {
+    let resolve!: (value: T) => void;
+    const promise = new Promise<T>((done) => {
+        resolve = done;
+    });
+    return { promise, resolve };
+}
 
 afterEach(() => {
     cleanup();
@@ -70,7 +79,7 @@ function hangupResponse(overrides: Partial<HangupCallResponse> = {}): HangupCall
     };
 }
 
-function renderPanel(permissions: string[] = []) {
+function renderPanel(permissions: string[] = [], props: LiveCallsPanelProps = {}) {
     const queryClient = new QueryClient({
         defaultOptions: {
             queries: { retry: false },
@@ -79,11 +88,21 @@ function renderPanel(permissions: string[] = []) {
     });
     queryClients.push(queryClient);
     queryClient.setQueryData(inboundQueryKeys.permissions, { permissions });
-    return render(
+    const rendered = render(
         <QueryClientProvider client={queryClient}>
-            <LiveCallsPanel />
+            <LiveCallsPanel {...props} />
         </QueryClientProvider>,
     );
+    return {
+        ...rendered,
+        rerenderPanel(nextProps: LiveCallsPanelProps) {
+            rendered.rerender(
+                <QueryClientProvider client={queryClient}>
+                    <LiveCallsPanel {...nextProps} />
+                </QueryClientProvider>,
+            );
+        },
+    };
 }
 
 test("hangup responses require the confirmation-aware contract", () => {
@@ -125,6 +144,91 @@ test("inbound live rows show direction, ANI, DID, admission, and consent", async
     assert.ok(screen.getByText("+15550004444"));
     assert.ok(screen.getByText(/Admission: allowed/));
     assert.ok(screen.getByText(/Consent: not required/));
+});
+
+test("an inbound campaign panel scopes every poll by campaign and direction", async () => {
+    let received: Parameters<typeof api.listLiveCalls>[0];
+    api.listLiveCalls = async (input) => {
+        received = input;
+        return {
+            items: [],
+            server_time: "2026-08-26T10:00:10.000Z",
+        };
+    };
+
+    renderPanel([], { campaignId: "campaign-inbound", direction: "inbound" });
+
+    await waitFor(() => assert.equal(received?.campaignId, "campaign-inbound"));
+    assert.equal(received?.direction, "inbound");
+});
+
+test("a superseded campaign poll cannot replace the current live calls", async () => {
+    const first = deferred<Awaited<ReturnType<typeof api.listLiveCalls>>>();
+    const requested: Array<string | undefined> = [];
+    api.listLiveCalls = async (input) => {
+        requested.push(input?.campaignId);
+        if (input?.campaignId === "campaign-a") return first.promise;
+        return {
+            items: [activeCall({ id: "call-b", to_number: "+15550000002" })],
+            server_time: "2026-09-03T00:00:02Z",
+        };
+    };
+
+    const view = renderPanel([], {
+        campaignId: "campaign-a",
+        direction: "inbound",
+    });
+    await waitFor(() => assert.deepEqual(requested, ["campaign-a"]));
+
+    view.rerenderPanel({ campaignId: "campaign-b", direction: "inbound" });
+    assert.ok(await screen.findByText("+15550000002"));
+
+    await act(async () => {
+        first.resolve({
+            items: [activeCall({ id: "call-a", to_number: "+15550000001" })],
+            server_time: "2026-09-03T00:00:01Z",
+        });
+        await first.promise;
+    });
+
+    await waitFor(() => {
+        assert.ok(screen.getByText("+15550000002"));
+        assert.equal(screen.queryByText("+15550000001"), null);
+    });
+});
+
+test("switching campaigns immediately clears loaded rows and their local action state", async () => {
+    const user = userEvent.setup({ document: globalThis.document });
+    const second = deferred<Awaited<ReturnType<typeof api.listLiveCalls>>>();
+    api.listLiveCalls = async (input) => (
+        input?.campaignId === "campaign-a"
+            ? {
+                items: [activeCall({ id: "call-a", to_number: "+15550000001" })],
+                server_time: "2026-09-03T00:00:01Z",
+            }
+            : second.promise
+    );
+    api.hangupCall = async () => new Promise<HangupCallResponse>(() => {});
+
+    const view = renderPanel([], { campaignId: "campaign-a", direction: "inbound" });
+    const oldHangup = await screen.findByRole("button", { name: "Hang up call to +15550000001" });
+    await user.click(oldHangup);
+    assert.ok(await screen.findByText("Ending"));
+
+    view.rerenderPanel({ campaignId: "campaign-b", direction: "inbound" });
+
+    await waitFor(() => assert.equal(screen.queryByText("+15550000001"), null));
+    assert.equal(screen.queryByText("Ending"), null);
+    assert.equal(screen.queryByRole("button", { name: "Hang up call to +15550000001" }), null);
+
+    await act(async () => {
+        second.resolve({
+            items: [activeCall({ id: "call-b", to_number: "+15550000002" })],
+            server_time: "2026-09-03T00:00:02Z",
+        });
+        await second.promise;
+    });
+    assert.ok(await screen.findByText("+15550000002"));
 });
 
 test("a hangup request shows Ending without optimistically ending the row or allowing a duplicate", async () => {

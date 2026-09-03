@@ -31,7 +31,12 @@ import re
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Callable, Optional
+from typing import Callable, Optional
+
+from app.domain.services.campaign_direction_guard import (
+    OutboundCampaignDirectionConflict,
+    raise_for_outbound_direction_guard,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -144,7 +149,9 @@ def parse_pasted_numbers(text: str) -> list[str]:
     return [tok.strip() for tok in _PASTE_SPLIT.split(text) if tok and tok.strip()]
 
 
-def _load_existing(db_client, campaign_id: str) -> tuple[set, dict]:
+def _load_existing(
+    db_client, campaign_id: str, tenant_id: Optional[str]
+) -> tuple[set, dict]:
     """Return (live_phones, deleted_lead_by_phone) for the campaign.
 
     Always loaded so we never create a second live row for a phone and so
@@ -156,8 +163,11 @@ def _load_existing(db_client, campaign_id: str) -> tuple[set, dict]:
         db_client.table("leads")
         .select("id, phone_number, status, is_lead")
         .eq("campaign_id", campaign_id)
+        .eq("tenant_id", tenant_id)
         .execute()
     )
+    if getattr(resp, "error", None):
+        raise RuntimeError("existing lead lookup failed")
     for row in (getattr(resp, "data", None) or []):
         if row.get("status") == "deleted":
             prev = deleted_by_phone.get(row["phone_number"])
@@ -192,7 +202,9 @@ def ingest_lead_records(
     old one.
     """
     result = IngestResult(total=len(records))
-    live_phones, deleted_by_phone = _load_existing(db_client, campaign_id)
+    live_phones, deleted_by_phone = _load_existing(
+        db_client, campaign_id, tenant_id
+    )
 
     seen: set[str] = set()
     to_insert: list[dict] = []
@@ -256,8 +268,15 @@ def ingest_lead_records(
     for i in range(0, len(to_insert), chunk_size):
         chunk = to_insert[i:i + chunk_size]
         try:
-            db_client.table("leads").insert(chunk).execute()
+            write_response = db_client.table("leads").insert(chunk).execute()
+            if getattr(write_response, "error", None):
+                raise_for_outbound_direction_guard(write_response.error, campaign_id)
+                raise RuntimeError(str(write_response.error))
+            if not getattr(write_response, "data", None):
+                raise RuntimeError("database insert affected no rows")
             result.imported += len(chunk)
+        except OutboundCampaignDirectionConflict:
+            raise
         except Exception as e:
             logger.error("bulk_ingest insert chunk %d-%d failed: %s", i, i + len(chunk), e)
             for lead in chunk:
@@ -283,9 +302,23 @@ def ingest_lead_records(
             # Move a revived lead into the list it was just re-uploaded under.
             if list_id is not None:
                 revive_payload["list_id"] = list_id
-            db_client.table("leads").update(revive_payload).eq("id", rev["id"]).execute()
+            write_response = (
+                db_client.table("leads")
+                .update(revive_payload)
+                .eq("id", rev["id"])
+                .eq("campaign_id", campaign_id)
+                .eq("tenant_id", tenant_id)
+                .execute()
+            )
+            if getattr(write_response, "error", None):
+                raise_for_outbound_direction_guard(write_response.error, campaign_id)
+                raise RuntimeError(str(write_response.error))
+            if not getattr(write_response, "data", None):
+                raise RuntimeError("database revive affected no rows")
             result.revived += 1
             result.imported += 1
+        except OutboundCampaignDirectionConflict:
+            raise
         except Exception as e:
             logger.error("bulk_ingest revive %s failed: %s", rev["id"], e)
             result.errors.append(IngestError(None, f"Revive failed: {e}", None))

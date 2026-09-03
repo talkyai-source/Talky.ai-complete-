@@ -281,9 +281,25 @@ class AsteriskAdapter(CallControlAdapter):
         # Outbound channels waiting for callee to answer:
         # channel_id → {"bridge_id": str, "listen_port": int, "session_id": str}
         self._pending_outbound: Dict[str, Dict[str, Any]] = {}
+        # Answer/media setup is an ownership phase in its own right. The
+        # pending entry is consumed before ExternalMedia and the gateway are
+        # created, while ``_active_sessions`` is published only afterwards.
+        # Keep both the task and its deterministic resource IDs strongly
+        # reachable across that interval so shutdown and terminal events can
+        # hand it to confirmation-aware cleanup.
+        self._outbound_answer_setup_tasks: Dict[str, asyncio.Task] = {}
+        self._outbound_setup_inflight: set[str] = set()
+        self._outbound_answer_setup_resources: Dict[str, Dict[str, Any]] = {}
+        # First confirmed provider Answer for each outbound parent. This is
+        # separate from ``_active_sessions`` because media setup can fail after
+        # the carrier answered but before an active gateway session exists.
+        self._outbound_answered_at_monotonic: Dict[str, float] = {}
+        self._outbound_answered_at_utc: Dict[str, str] = {}
         # ChannelStateChange(Up) events that arrived before _on_outbound_stasis_start
         # ran (race condition when StasisStart is delayed in the ARI WebSocket queue).
         self._preemptive_up_channels: set = set()
+        self._preemptive_up_at_monotonic: Dict[str, float] = {}
+        self._preemptive_up_at_utc: Dict[str, str] = {}
         # Channel IDs originated by originate_call() — used as the primary
         # routing decision in StasisStart so we don't depend on Asterisk
         # reliably passing appArgs through PJSIP trunks.
@@ -549,7 +565,12 @@ class AsteriskAdapter(CallControlAdapter):
                 reason="uncorrelated_outbound_trunk_leg",
             )
             return
-        self._emit_outbound_channel_alias(pre_id, channel_id)
+        if not await self._emit_outbound_channel_alias(pre_id, channel_id):
+            self._schedule_unclaimed_hangup(
+                channel_id,
+                reason="outbound_alias_persist_failed",
+            )
+            return
         logger.info(
             f"AsteriskAdapter: matched trunk-created channel "
             f"{channel_id[:12]} to originated {pre_id[:12]}"
@@ -565,26 +586,39 @@ class AsteriskAdapter(CallControlAdapter):
         """
         return self._hangup_causes.pop(channel_id, None)
 
-    def _emit_outbound_channel_alias(self, original_call_id: str, actual_call_id: str) -> None:
-        if (
-            not self._on_outbound_channel_alias
-            or not original_call_id
-            or not actual_call_id
-            or original_call_id == actual_call_id
-        ):
-            return
+    async def _emit_outbound_channel_alias(
+        self,
+        original_call_id: str,
+        actual_call_id: str,
+    ) -> bool:
+        """Await the durable planned-id to provider-id rebind."""
+
+        if not original_call_id or not actual_call_id or original_call_id == actual_call_id:
+            return True
+        if not self._on_outbound_channel_alias:
+            logger.error(
+                "AsteriskAdapter: outbound channel alias callback missing "
+                "original=%s actual=%s",
+                original_call_id[:12],
+                actual_call_id[:12],
+            )
+            return False
         try:
             result = self._on_outbound_channel_alias(original_call_id, actual_call_id)
             if asyncio.iscoroutine(result):
-                asyncio.create_task(result)
+                result = await result
+            return result is not False
+        except asyncio.CancelledError:
+            raise
         except Exception as exc:
-            logger.warning(
+            logger.error(
                 "AsteriskAdapter: outbound channel alias callback failed "
                 "original=%s actual=%s error=%s",
                 original_call_id[:12],
                 actual_call_id[:12],
                 exc,
             )
+            return False
 
     # ------------------------------------------------------------------
     # CallControlAdapter interface — identity
@@ -670,6 +704,8 @@ class AsteriskAdapter(CallControlAdapter):
         for mapping in (
             self._active_sessions,
             self._pending_outbound,
+            self._outbound_answer_setup_tasks,
+            self._outbound_answer_setup_resources,
             self._inbound_admissions,
             self._inbound_call_meta,
             self._inbound_setup_tasks,
@@ -679,6 +715,7 @@ class AsteriskAdapter(CallControlAdapter):
         ):
             owned.update(str(value) for value in mapping if value)
         owned.update(str(value) for value in self._originated_channels if value)
+        owned.update(str(value) for value in self._outbound_setup_inflight if value)
         owned.update(str(value) for value in self._inbound_setup_inflight if value)
         owned.update(str(value) for value in self._inbound_cleanup_pending if value)
         owned.update(str(parent_id) for parent_id in self._transfers_by_parent if parent_id)
@@ -699,6 +736,11 @@ class AsteriskAdapter(CallControlAdapter):
         excluded.update(str(value) for value in self._ext_channels.values() if value)
         excluded.update(str(value) for value in self._transfers_by_target if value)
         excluded.update(str(value) for value in self._preemptive_up_channels if value)
+        excluded.update(
+            str(resources.get("ext_channel_id"))
+            for resources in self._outbound_answer_setup_resources.values()
+            if resources.get("ext_channel_id")
+        )
         excluded.update(str(value) for value in self._gateway_sessions if value)
         return excluded
 
@@ -755,6 +797,12 @@ class AsteriskAdapter(CallControlAdapter):
 
         setup_tasks = [task for task in self._inbound_setup_tasks.values() if not task.done()]
         await _await_tasks(setup_tasks, cancel_first=True)
+        outbound_setup_tasks = [
+            task
+            for task in self._outbound_answer_setup_tasks.values()
+            if not task.done()
+        ]
+        await _await_tasks(outbound_setup_tasks, cancel_first=True)
 
         pending_handoff_tasks = [
             task
@@ -845,6 +893,7 @@ class AsteriskAdapter(CallControlAdapter):
                         *self._preanswer_hangup_tasks.values(),
                         *self._unclaimed_hangup_tasks.values(),
                         *self._terminal_cleanup_tasks.values(),
+                        *self._outbound_answer_setup_tasks.values(),
                         *self._transfer_handoff_tasks.values(),
                         *self._transfer_failure_cleanup_tasks.values(),
                     ]
@@ -1555,6 +1604,110 @@ class AsteriskAdapter(CallControlAdapter):
 
         task.add_done_callback(_done)
         return True
+
+    def _remember_preemptive_up(
+        self,
+        channel_id: str,
+        *,
+        timestamp: float,
+        timestamp_utc: str,
+    ) -> None:
+        """Retain an early Up clock until Stasis identifies its direction."""
+
+        if len(self._preemptive_up_channels) >= 4000:
+            for stale_id in list(self._preemptive_up_channels)[:2000]:
+                self._preemptive_up_channels.discard(stale_id)
+                self._preemptive_up_at_monotonic.pop(stale_id, None)
+                self._preemptive_up_at_utc.pop(stale_id, None)
+        self._preemptive_up_channels.add(channel_id)
+        self._preemptive_up_at_monotonic.setdefault(channel_id, float(timestamp))
+        self._preemptive_up_at_utc.setdefault(channel_id, str(timestamp_utc))
+
+    def _discard_preemptive_up(self, channel_id: str) -> None:
+        self._preemptive_up_channels.discard(channel_id)
+        self._preemptive_up_at_monotonic.pop(channel_id, None)
+        self._preemptive_up_at_utc.pop(channel_id, None)
+
+    def _record_outbound_answered_at(
+        self,
+        channel_id: str,
+        *,
+        timestamp: Optional[float] = None,
+        timestamp_utc: Optional[str] = None,
+    ) -> float:
+        """Freeze the first authoritative outbound provider Answer event."""
+
+        if len(self._outbound_answered_at_monotonic) >= 4000:
+            for stale_id in list(self._outbound_answered_at_monotonic)[:2000]:
+                self._outbound_answered_at_monotonic.pop(stale_id, None)
+                self._outbound_answered_at_utc.pop(stale_id, None)
+        value = float(
+            asyncio.get_running_loop().time() if timestamp is None else timestamp
+        )
+        frozen = self._outbound_answered_at_monotonic.setdefault(channel_id, value)
+        self._outbound_answered_at_utc.setdefault(
+            channel_id,
+            str(timestamp_utc or datetime.now(timezone.utc).isoformat()),
+        )
+        return frozen
+
+    def _promote_preemptive_up_to_outbound_answer(self, channel_id: str) -> float:
+        timestamp = self._preemptive_up_at_monotonic.get(channel_id)
+        timestamp_utc = self._preemptive_up_at_utc.get(channel_id)
+        self._discard_preemptive_up(channel_id)
+        return self._record_outbound_answered_at(
+            channel_id,
+            timestamp=timestamp,
+            timestamp_utc=timestamp_utc,
+        )
+
+    def _schedule_outbound_answer_setup(self, channel_id: str) -> None:
+        """Start one strongly-owned post-Answer media setup task."""
+
+        existing = self._outbound_answer_setup_tasks.get(channel_id)
+        if existing is not None and not existing.done():
+            return
+        task = asyncio.create_task(
+            self._on_outbound_answered(channel_id),
+            name=f"asterisk-outbound-answer:{channel_id}",
+        )
+        self._outbound_answer_setup_tasks[channel_id] = task
+
+        def _done(done: asyncio.Task) -> None:
+            if self._outbound_answer_setup_tasks.get(channel_id) is done:
+                self._outbound_answer_setup_tasks.pop(channel_id, None)
+            if not done.cancelled() and done.exception() is not None:
+                logger.error(
+                    "outbound_answer_setup_task_failed channel=%s err=%s",
+                    channel_id[:12],
+                    done.exception(),
+                )
+
+        task.add_done_callback(_done)
+
+    async def _cancel_outbound_answer_setup_for_terminal(
+        self,
+        channel_id: str,
+        *,
+        reason: str,
+    ) -> None:
+        """Cancel setup; its cancellation branch remains the cleanup owner."""
+
+        task = self._outbound_answer_setup_tasks.get(channel_id)
+        if task is not None and not task.done() and task is not asyncio.current_task():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+            return
+        resources = self._outbound_answer_setup_resources.get(channel_id)
+        if resources is not None:
+            await self._cleanup_failed_outbound_setup(
+                channel_id,
+                reason=reason,
+                session_id=str(resources.get("session_id") or ""),
+                ext_channel_id=str(resources.get("ext_channel_id") or ""),
+                bridge_id=str(resources.get("bridge_id") or ""),
+                listen_port=resources.get("listen_port"),
+            )
 
     async def _cancel_inbound_setup_for_terminal(
         self,
@@ -2272,6 +2425,10 @@ class AsteriskAdapter(CallControlAdapter):
             # the "oldest" outbound call merely because an origination is
             # ringing at the same time.
             if arg0 == "inbound":
+                # An Up event can beat this StasisStart task. It was retained
+                # only until direction became known; inbound Answer accounting
+                # is owned by the explicit ARI Answer path below.
+                self._discard_preemptive_up(channel_id)
                 self._schedule_inbound_start(channel_id, event)
             elif is_our_originated or arg0 == "outbound" or is_trunk_leg:
                 if is_trunk_leg:
@@ -2292,8 +2449,15 @@ class AsteriskAdapter(CallControlAdapter):
                     and len(self._originated_channels) == 1
                 ):
                     stale_id = self._consume_oldest_originated_channel()
-                    if stale_id is not None:
-                        self._emit_outbound_channel_alias(stale_id, channel_id)
+                    if stale_id is not None and not await self._emit_outbound_channel_alias(
+                        stale_id,
+                        channel_id,
+                    ):
+                        self._schedule_unclaimed_hangup(
+                            channel_id,
+                            reason="outbound_alias_persist_failed",
+                        )
+                        return
                 else:
                     self._discard_originated_channel(channel_id)
                 asyncio.create_task(self._on_outbound_stasis_start(channel_id))
@@ -2301,17 +2465,44 @@ class AsteriskAdapter(CallControlAdapter):
                 # Unknown Stasis calls still pass through the same fail-closed
                 # inbound admission callback. Missing ingress/DID metadata will
                 # be denied; there is no default agent fallback.
+                self._discard_preemptive_up(channel_id)
                 self._schedule_inbound_start(channel_id, event)
 
         elif event_type == "ChannelStateChange":
             # Fired when a channel transitions state, e.g. Ring → Up (callee answered).
             channel_state = str(channel.get("state") or "").lower()
             if channel_state == "up":
+                up_at_monotonic = loop.time()
+                up_at_utc = datetime.now(timezone.utc).isoformat()
                 transfer_leg = self._transfers_by_target.get(channel_id)
                 if transfer_leg is not None:
                     self._mark_transfer_answered(transfer_leg)
                 elif channel_id in self._pending_outbound:
-                    asyncio.create_task(self._on_outbound_answered(channel_id))
+                    self._record_outbound_answered_at(
+                        channel_id,
+                        timestamp=up_at_monotonic,
+                        timestamp_utc=up_at_utc,
+                    )
+                    self._schedule_outbound_answer_setup(channel_id)
+                elif self._is_inbound_parent_channel(channel_id):
+                    # Inbound Answer is explicitly persisted by the admission
+                    # path; a repeated ARI state event is not outbound evidence.
+                    self._discard_preemptive_up(channel_id)
+                elif (
+                    channel_id in self._outbound_answered_at_monotonic
+                    or channel_id in self._outbound_answer_setup_tasks
+                    or channel_id in self._outbound_setup_inflight
+                    or (
+                        isinstance(self._active_sessions.get(channel_id), dict)
+                        and self._active_sessions[channel_id].get("direction")
+                        == "outbound"
+                    )
+                ):
+                    logger.debug(
+                        "AsteriskAdapter: duplicate outbound Up ignored "
+                        "channel=%s",
+                        channel_id[:12],
+                    )
                 else:
                     # StasisStart processing may be pending as a create_task that
                     # hasn't run yet (ARI WS delivers events faster than tasks are
@@ -2321,7 +2512,11 @@ class AsteriskAdapter(CallControlAdapter):
                         f"AsteriskAdapter: ChannelStateChange(Up) arrived before "
                         f"StasisStart processed for channel={channel_id[:12]} — saved for later"
                     )
-                    self._preemptive_up_channels.add(channel_id)
+                    self._remember_preemptive_up(
+                        channel_id,
+                        timestamp=up_at_monotonic,
+                        timestamp_utc=up_at_utc,
+                    )
             elif channel_state in ("ringing", "ring"):
                 # Carrier 180 — the callee's phone just started ringing. Arrives
                 # well before StasisStart, so surface it for live-status now.
@@ -2364,11 +2559,30 @@ class AsteriskAdapter(CallControlAdapter):
                 if len(self._destroyed_channel_ids) >= 4000:
                     self._destroyed_channel_ids.clear()
                 self._destroyed_channel_ids.add(channel_id)
+                if (
+                    channel_id in self._preemptive_up_channels
+                    and not self._is_inbound_parent_channel(channel_id)
+                    and (
+                        channel_id in self._originated_channels
+                        or channel_id.startswith("talky-out")
+                    )
+                ):
+                    # A very fast answer/hangup can destroy the planned
+                    # outbound channel before its Stasis task parks metadata.
+                    # ChannelDestroyed is enough direction evidence for that
+                    # generated identity; preserve the earlier Up boundary so
+                    # lifecycle does not turn a billable answer into zero.
+                    self._promote_preemptive_up_to_outbound_answer(channel_id)
                 # Asterisk also emits ChannelDestroyed for ExternalMedia,
                 # outbound and transfer-target legs. Only the admitted inbound
                 # parent is a billing boundary; recording every child leaked
                 # clocks and could evict the live parent's proof.
                 if self._is_inbound_parent_channel(channel_id):
+                    self._record_terminal_at_monotonic(channel_id)
+                elif self._is_outbound_parent_channel(channel_id) or (
+                    channel_id.startswith("talky-out")
+                    and channel_id not in self._end_dispatched
+                ):
                     self._record_terminal_at_monotonic(channel_id)
             # Capture the hangup cause (Q.850) BEFORE we tear anything down so
             # the outcome resolver can classify no-answer / busy / rejected
@@ -2416,7 +2630,7 @@ class AsteriskAdapter(CallControlAdapter):
                     )
                 return
             # Drop any preemptive Up record for channels that are now gone.
-            self._preemptive_up_channels.discard(channel_id)
+            self._discard_preemptive_up(channel_id)
             self._early_ring_emitted.discard(channel_id)
             self._discard_originated_channel(channel_id)
             # Clean up pending outbound channels that were never answered.
@@ -2426,6 +2640,19 @@ class AsteriskAdapter(CallControlAdapter):
                     lambda: self._cleanup_pending_outbound(
                         channel_id,
                         absence_proven=event_type == "ChannelDestroyed",
+                    ),
+                    reason=event_type,
+                )
+            elif (
+                channel_id in self._outbound_setup_inflight
+                or channel_id in self._outbound_answer_setup_tasks
+                or channel_id in self._outbound_answer_setup_resources
+            ):
+                self._schedule_terminal_cleanup(
+                    channel_id,
+                    lambda: self._cancel_outbound_answer_setup_for_terminal(
+                        channel_id,
+                        reason=event_type,
                     ),
                     reason=event_type,
                 )
@@ -2480,6 +2707,24 @@ class AsteriskAdapter(CallControlAdapter):
                             ),
                             reason=event_type,
                         )
+            elif (
+                outbound_setup_parent := next(
+                    (
+                        parent
+                        for parent, resources in self._outbound_answer_setup_resources.items()
+                        if resources.get("ext_channel_id") == channel_id
+                    ),
+                    None,
+                )
+            ):
+                self._schedule_terminal_cleanup(
+                    outbound_setup_parent,
+                    lambda: self._cancel_outbound_answer_setup_for_terminal(
+                        outbound_setup_parent,
+                        reason=event_type,
+                    ),
+                    reason=event_type,
+                )
             elif (
                 event_type == "ChannelDestroyed"
                 and channel_id not in self._end_dispatched
@@ -2559,12 +2804,12 @@ class AsteriskAdapter(CallControlAdapter):
             # ChannelStateChange(Up) was stored in _preemptive_up_channels;
             # we must fire _on_outbound_answered right now instead of waiting.
             if channel_id in self._preemptive_up_channels:
-                self._preemptive_up_channels.discard(channel_id)
+                self._promote_preemptive_up_to_outbound_answer(channel_id)
                 logger.info(
                     f"AsteriskAdapter: outbound call already answered (preemptive Up) "
                     f"channel={channel_id[:12]} — completing media setup immediately"
                 )
-                asyncio.create_task(self._on_outbound_answered(channel_id))
+                self._schedule_outbound_answer_setup(channel_id)
                 return
 
             logger.info(
@@ -2581,6 +2826,66 @@ class AsteriskAdapter(CallControlAdapter):
                     pass
             await self._release_rtp_port(listen_port)
 
+    async def _persist_outbound_answer_obligation(
+        self,
+        channel_id: str,
+        *,
+        termination_pending: bool,
+    ) -> None:
+        """Make post-Answer ownership successor-visible before media awaits."""
+
+        from app.domain.services.telephony.state_backend import get_state_backend
+
+        backend = get_state_backend()
+        voice_session: Any = None
+        get_ringing = getattr(backend, "get_ringing_warmup", None)
+        if callable(get_ringing):
+            ringing = get_ringing(channel_id)
+            if isinstance(ringing, tuple) and ringing:
+                voice_session = ringing[0]
+        tenant_id = getattr(voice_session, "_dialer_tenant_id", None)
+        campaign_id = getattr(voice_session, "_dialer_campaign_id", None)
+        durable_call_id = getattr(voice_session, "_dialer_call_id", None)
+        provider = str(self.name or "asterisk")
+        answered_at = self._outbound_answered_at_utc.get(channel_id)
+        if not answered_at:
+            raise RuntimeError("outbound Answer clock is missing")
+
+        await backend.register_cleanup_obligation(
+            channel_id,
+            tenant_id=(str(tenant_id) if tenant_id else None),
+            campaign_id=(str(campaign_id) if campaign_id else None),
+            state="answer_pending",
+            durable_call_id=(str(durable_call_id) if durable_call_id else None),
+            provider=provider,
+            provider_call_id=channel_id,
+        )
+        promote = getattr(backend, "promote_answered_cleanup_obligation", None)
+        if not callable(promote):
+            raise RuntimeError("telephony state backend lacks Answer promotion")
+        await promote(
+            channel_id,
+            answered_at=answered_at,
+            tenant_id=(str(tenant_id) if tenant_id else None),
+            campaign_id=(str(campaign_id) if campaign_id else None),
+        )
+        if termination_pending:
+            # Promotion records the confirmed billable Answer timestamp.
+            # ``answer_pending`` is one of the two states the watchdog scans
+            # immediately (including for this live pod) and, unlike generic
+            # ``termination_pending``, tells restart recovery that the carrier
+            # really answered. It therefore preserves outcome truth while a
+            # missing terminal clock remains conservatively unbilled.
+            await backend.register_cleanup_obligation(
+                channel_id,
+                tenant_id=(str(tenant_id) if tenant_id else None),
+                campaign_id=(str(campaign_id) if campaign_id else None),
+                state="answer_pending",
+                durable_call_id=(str(durable_call_id) if durable_call_id else None),
+                provider=provider,
+                provider_call_id=channel_id,
+            )
+
     async def _on_outbound_answered(self, channel_id: str) -> None:
         """
         Complete ExternalMedia + C++ gateway setup once the callee answers.
@@ -2593,10 +2898,23 @@ class AsteriskAdapter(CallControlAdapter):
         if not pending:
             return
 
+        loop = asyncio.get_running_loop()
+        # Direct/internal callers retain a safe fallback, while ARI event
+        # dispatch has already frozen the authoritative ChannelStateChange(Up)
+        # clock before scheduling this task.
+        answered_at_monotonic = self._record_outbound_answered_at(channel_id)
+
         bridge_id = pending["bridge_id"]
         listen_port = pending["listen_port"]
         session_id = pending["session_id"]
         ext_channel_id = ""
+        self._outbound_setup_inflight.add(channel_id)
+        self._outbound_answer_setup_resources[channel_id] = {
+            "bridge_id": bridge_id,
+            "listen_port": listen_port,
+            "session_id": session_id,
+            "ext_channel_id": "",
+        }
 
         logger.info(
             "t_answer channel=%s rtp_port=%s",
@@ -2610,7 +2928,12 @@ class AsteriskAdapter(CallControlAdapter):
         )
 
         try:
-            loop = asyncio.get_running_loop()
+            # A carrier Answer is already billable. Persist its exact UTC
+            # boundary and recovery identity before the first media-side await.
+            await self._persist_outbound_answer_obligation(
+                channel_id,
+                termination_pending=False,
+            )
             _t_setup_start = loop.time()
 
             # 3. Create ExternalMedia channel pointing at C++ Gateway RTP listener.
@@ -2631,6 +2954,9 @@ class AsteriskAdapter(CallControlAdapter):
             ext_channel_id = ext_data.get("id", "")
             if not ext_channel_id:
                 raise RuntimeError("ARI externalMedia returned no channel id")
+            self._outbound_answer_setup_resources[channel_id]["ext_channel_id"] = (
+                ext_channel_id
+            )
 
             # 4/5/6. addChannel + two UNICASTRTP_LOCAL_* GETs are independent of
             # each other (they only share the ext_channel_id dependency), so run
@@ -2694,10 +3020,12 @@ class AsteriskAdapter(CallControlAdapter):
                 "listen_port": listen_port,
                 "bridge_id": bridge_id,
                 "direction": "outbound",
+                "answered_at_monotonic": answered_at_monotonic,
             }
             self._ext_channels[channel_id] = ext_channel_id
             self._bridges[channel_id] = bridge_id
             self._gateway_sessions[channel_id] = session_id
+            self._outbound_answer_setup_resources.pop(channel_id, None)
 
             _setup_ms = (loop.time() - _t_setup_start) * 1000.0
             logger.info(
@@ -2722,33 +3050,155 @@ class AsteriskAdapter(CallControlAdapter):
             elif self._on_new_call:
                 asyncio.create_task(self._on_new_call(channel_id))
 
+        except asyncio.CancelledError:
+            self._end_dispatched.setdefault(channel_id, None)
+            await self._cleanup_failed_outbound_setup(
+                channel_id,
+                reason="answer_setup_cancelled",
+                session_id=session_id,
+                ext_channel_id=ext_channel_id,
+                bridge_id=bridge_id,
+                listen_port=listen_port,
+            )
+            raise
         except Exception as exc:
             logger.error(f"AsteriskAdapter: outbound answered setup failed: {exc}")
-            if session_id:
-                try:
-                    await self._gateway(
-                        "POST",
-                        "/v1/sessions/stop",
-                        payload={"session_id": session_id, "reason": "setup_failed"},
-                    )
-                except Exception:
-                    pass
-            if ext_channel_id:
-                self._drop_channel_varset_cache(ext_channel_id)
-                try:
-                    await self._ari("DELETE", f"/channels/{ext_channel_id}", ok=(200, 204, 404))
-                except Exception:
-                    pass
-            if bridge_id:
-                try:
-                    await self._ari("DELETE", f"/bridges/{bridge_id}", ok=(200, 204, 404))
-                except Exception:
-                    pass
+            self._end_dispatched.setdefault(channel_id, None)
+            await self._cleanup_failed_outbound_setup(
+                channel_id,
+                reason="answer_setup_failed",
+                session_id=session_id,
+                ext_channel_id=ext_channel_id,
+                bridge_id=bridge_id,
+                listen_port=listen_port,
+            )
+        finally:
+            self._outbound_setup_inflight.discard(channel_id)
+
+    async def _cleanup_failed_outbound_setup(
+        self,
+        channel_id: str,
+        *,
+        reason: str,
+        session_id: str,
+        ext_channel_id: str,
+        bridge_id: str,
+        listen_port: Any,
+    ) -> None:
+        """Retain ownership until the answered parent has hard absence proof."""
+
+        # The exact Answer clock was promoted first on the normal path. If the
+        # state store failed at that boundary, retry both the Answer evidence
+        # and termination marker before issuing any unowned DELETE.
+        while True:
             try:
-                await self._ari("DELETE", f"/channels/{channel_id}", ok=(200, 204, 404))
-            except Exception:
-                pass
+                await self._persist_outbound_answer_obligation(
+                    channel_id,
+                    termination_pending=True,
+                )
+                break
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                logger.critical(
+                    "outbound_setup_cleanup_ledger_failed channel=%s "
+                    "reason=%s err=%s",
+                    channel_id[:12],
+                    reason,
+                    exc,
+                )
+                await asyncio.sleep(max(0.05, self._inbound_cleanup_retry_s))
+
+        while True:
+            try:
+                confirmed = await self.hangup_confirmed(channel_id)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                confirmed = False
+                logger.critical(
+                    "outbound_setup_parent_hangup_failed channel=%s "
+                    "reason=%s err=%s",
+                    channel_id[:12],
+                    reason,
+                    exc,
+                )
+            if confirmed:
+                break
+            logger.critical(
+                "outbound_setup_parent_hangup_unconfirmed channel=%s reason=%s",
+                channel_id[:12],
+                reason,
+            )
+            await asyncio.sleep(max(0.05, self._inbound_cleanup_retry_s))
+
+        # ``hangup_confirmed`` freezes the first inventory absence time. Keep
+        # this defensive setdefault for injected/test adapters that implement
+        # the public confirmation contract without the internal helper.
+        self._record_terminal_at_monotonic(channel_id)
+
+        if session_id:
+            try:
+                await self._gateway(
+                    "POST",
+                    "/v1/sessions/stop",
+                    payload={"session_id": session_id, "reason": reason},
+                )
+            except Exception as exc:
+                logger.debug(
+                    "AsteriskAdapter: outbound setup gateway stop failed "
+                    "channel=%s err=%s",
+                    channel_id[:12],
+                    exc,
+                )
+        if ext_channel_id:
+            self._drop_channel_varset_cache(ext_channel_id)
+            try:
+                await self._ari(
+                    "DELETE",
+                    f"/channels/{ext_channel_id}",
+                    ok=(200, 204, 404),
+                )
+            except Exception as exc:
+                logger.debug(
+                    "AsteriskAdapter: outbound setup external cleanup failed "
+                    "channel=%s err=%s",
+                    channel_id[:12],
+                    exc,
+                )
+        if bridge_id:
+            try:
+                await self._ari(
+                    "DELETE",
+                    f"/bridges/{bridge_id}",
+                    ok=(200, 204, 404),
+                )
+            except Exception as exc:
+                logger.debug(
+                    "AsteriskAdapter: outbound setup bridge cleanup failed "
+                    "channel=%s err=%s",
+                    channel_id[:12],
+                    exc,
+                )
+
+        self._outbound_answer_setup_resources.pop(channel_id, None)
+        self._ext_channels.pop(channel_id, None)
+        self._bridges.pop(channel_id, None)
+        self._gateway_sessions.pop(channel_id, None)
+        if isinstance(listen_port, int):
             await self._release_rtp_port(listen_port)
+
+        # Lifecycle owns the calls-row/job/lead transaction and acknowledges
+        # the cleanup ledger only after that settlement is durable. A callback
+        # failure therefore deliberately leaves the answer_pending entry
+        # for the watchdog/successor instead of manufacturing completion.
+        callback = self._call_ended_callbacks.get(channel_id)
+        if callback is not None:
+            await callback(channel_id)
+        elif self._on_any_call_end is not None:
+            await self._on_any_call_end(channel_id)
+        else:
+            raise RuntimeError("outbound lifecycle callback unavailable")
 
     def _extract_inbound_meta(self, event: Dict[str, Any]) -> Dict[str, Any]:
         """Pull the called DID + dialplan context (+ caller number) out of an
@@ -3017,6 +3467,23 @@ class AsteriskAdapter(CallControlAdapter):
         session = self._active_sessions.get(channel_id)
         return isinstance(session, dict) and session.get("direction") == "inbound"
 
+    def _is_outbound_parent_channel(self, channel_id: str) -> bool:
+        """Return whether ``channel_id`` is the human outbound parent leg."""
+
+        if self._is_inbound_parent_channel(channel_id):
+            return False
+        session = self._active_sessions.get(channel_id)
+        if isinstance(session, dict) and session.get("direction") == "outbound":
+            return True
+        return bool(
+            channel_id in self._pending_outbound
+            or channel_id in self._outbound_answer_setup_tasks
+            or channel_id in self._outbound_setup_inflight
+            or channel_id in self._outbound_answer_setup_resources
+            or channel_id in self._outbound_answered_at_monotonic
+            or channel_id in self._originated_channels
+        )
+
     def _record_terminal_at_monotonic(
         self,
         channel_id: str,
@@ -3043,6 +3510,17 @@ class AsteriskAdapter(CallControlAdapter):
 
         self._terminal_at_utc.pop(channel_id, None)
         return self._terminal_at_monotonic.pop(channel_id, None)
+
+    def get_answered_at_monotonic(self, channel_id: str) -> Optional[float]:
+        """Return the frozen outbound Answer clock without consuming it."""
+
+        return self._outbound_answered_at_monotonic.get(channel_id)
+
+    def pop_outbound_answered_at_monotonic(self, channel_id: str) -> Optional[float]:
+        """Return and retire the outbound Answer clock at terminal handling."""
+
+        self._outbound_answered_at_utc.pop(channel_id, None)
+        return self._outbound_answered_at_monotonic.pop(channel_id, None)
 
     def pop_inbound_admission(self, channel_id: str) -> Optional[Dict[str, Any]]:
         handoff_task = self._inbound_handoff_tasks.get(channel_id)
@@ -4920,11 +5398,18 @@ class AsteriskAdapter(CallControlAdapter):
                 owned_channel_ids,
                 reason_code=reason_code,
             )
-        if confirmed and self._is_inbound_parent_channel(owned_channel_ids[0]):
-            self._record_terminal_at_monotonic(owned_channel_ids[0])
-            confirmed = await self._persist_inbound_terminal_proof_for_channel(
-                owned_channel_ids[0]
-            )
+        if confirmed:
+            root_id = owned_channel_ids[0]
+            if self._is_inbound_parent_channel(root_id):
+                self._record_terminal_at_monotonic(root_id)
+                confirmed = await self._persist_inbound_terminal_proof_for_channel(
+                    root_id
+                )
+            elif self._is_outbound_parent_channel(root_id):
+                # Confirmation polling is authoritative when no
+                # ChannelDestroyed event was delivered. Freeze the first
+                # inventory-proven absence before later cleanup awaits.
+                self._record_terminal_at_monotonic(root_id)
         return confirmed
 
     async def _delete_channel_with_reason_fallback(
@@ -5082,6 +5567,17 @@ class AsteriskAdapter(CallControlAdapter):
         """Remove every currently-owned human leg with hard PBX proof."""
 
         channel_ids = [call_id]
+        setup_resources = self._outbound_answer_setup_resources.get(call_id)
+        setup_external_id = (
+            str(setup_resources.get("ext_channel_id") or "")
+            if isinstance(setup_resources, dict)
+            else ""
+        )
+        if setup_external_id:
+            # During post-Answer setup the ExternalMedia leg is not yet in
+            # ``_ext_channels``. Prove it absent under the same deadline so a
+            # failed setup cannot strand a gateway-facing ARI channel.
+            channel_ids.append(setup_external_id)
         transfer = self._transfers_by_parent.get(call_id)
         if transfer is not None:
             channel_ids.append(transfer.target_id)

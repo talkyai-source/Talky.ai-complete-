@@ -287,6 +287,34 @@ async def test_start_trunk_leg_aliases_correct_pair():
     assert A_pre in ad._originated_channels  # A untouched, still ringing
 
 
+async def test_start_trunk_leg_refuses_media_when_alias_persistence_fails():
+    """The actual PBX id must be durable before media setup can own the call."""
+    pre_id = "talky-out-aaaaaaaa"
+    actual_id = "trunk-leg-a"
+    ad = _adapter_with_linkedids({actual_id: pre_id})
+    ad._track_originated_channel(pre_id)
+
+    async def failed_alias(_original, _actual):
+        raise RuntimeError("database unavailable")
+
+    ad.set_outbound_channel_alias_callback(failed_alias)
+    started = []
+    scheduled_hangups = []
+
+    async def fake_start(channel_id):
+        started.append(channel_id)
+
+    ad._on_outbound_stasis_start = fake_start  # type: ignore[assignment]
+    ad._schedule_unclaimed_hangup = (  # type: ignore[assignment]
+        lambda channel_id, *, reason: scheduled_hangups.append((channel_id, reason))
+    )
+
+    await ad._start_trunk_leg(actual_id)
+
+    assert started == []
+    assert scheduled_hangups == [(actual_id, "outbound_alias_persist_failed")]
+
+
 # ---------------------------------------------------------------------------
 # Claim 2 — early audio must never bind to the wrong session via [:12] prefix
 # ---------------------------------------------------------------------------

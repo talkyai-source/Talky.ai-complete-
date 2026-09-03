@@ -28,19 +28,21 @@ def test_parse_empty_returns_empty():
 
 # ── ingest core: fakes ────────────────────────────────────────────
 class _FakeResult:
-    def __init__(self, data):
+    def __init__(self, data, error=None):
         self.data = data
+        self.error = error
 
 
 class _SelectChain:
-    def __init__(self, rows):
+    def __init__(self, rows, error=None):
         self._rows = rows
+        self._error = error
     def select(self, *_a, **_k):
         return self
     def eq(self, *_a, **_k):
         return self
     def execute(self):
-        return _FakeResult(self._rows)
+        return _FakeResult(self._rows, error=self._error)
 
 
 class _InsertChain:
@@ -59,8 +61,18 @@ class _InsertChain:
 
 
 class _FakeDB:
-    def __init__(self, existing_rows):
+    def __init__(
+        self,
+        existing_rows,
+        *,
+        read_error=None,
+        write_error=None,
+        zero_write=False,
+    ):
         self._existing = existing_rows
+        self.read_error = read_error
+        self.write_error = write_error
+        self.zero_write = zero_write
         self.inserted: list = []
         self.updates: list = []
     def table(self, name):
@@ -73,17 +85,32 @@ class _Chain:
     """Supports both the select-existing read and insert/update writes."""
     def __init__(self, db):
         self._db = db
+        self._operation = None
+        self._payload = None
     def select(self, *_a, **_k):
-        return _SelectChain(self._db._existing)
+        return _SelectChain(self._db._existing, error=self._db.read_error)
     def insert(self, chunk):
+        self._operation = "insert"
+        self._payload = chunk
         self._db.inserted.extend(chunk)
         return self
     def update(self, vals):
+        self._operation = "update"
+        self._payload = vals
         self._db.updates.append(vals)
         return self
     def eq(self, *_a, **_k):
         return self
     def execute(self):
+        if self._db.write_error:
+            return _FakeResult([], error=self._db.write_error)
+        if self._db.zero_write:
+            return _FakeResult([])
+        if self._operation == "insert":
+            rows = self._payload if isinstance(self._payload, list) else [self._payload]
+            return _FakeResult(rows)
+        if self._operation == "update":
+            return _FakeResult([self._payload])
         return _FakeResult([])
 
 
@@ -146,6 +173,67 @@ def test_ingest_revives_soft_deleted():
     assert res.imported == 1
     assert db.inserted == []           # revived in place, not inserted
     assert any(u.get("status") == "pending" for u in db.updates)
+
+
+@pytest.mark.parametrize("zero_write", [False, True])
+def test_ingest_never_counts_failed_or_zero_row_insert_as_imported(zero_write):
+    db = _FakeDB(
+        existing_rows=[],
+        write_error=None if zero_write else "direction guard rejected insert",
+        zero_write=zero_write,
+    )
+
+    result = ingest_lead_records(
+        db,
+        campaign_id="c1",
+        tenant_id="t1",
+        records=[LeadRecord("+1 415 555 1234", source_row=1)],
+        normalize=_id_normalize,
+    )
+
+    assert result.imported == 0
+    assert len(result.errors) == 1
+
+
+def test_ingest_never_counts_zero_row_revive_as_imported():
+    db = _FakeDB(
+        existing_rows=[
+            {
+                "id": "DEL1",
+                "phone_number": "+14155551234",
+                "status": "deleted",
+                "is_lead": True,
+            }
+        ],
+        zero_write=True,
+    )
+
+    result = ingest_lead_records(
+        db,
+        campaign_id="c1",
+        tenant_id="t1",
+        records=[LeadRecord("+1 415 555 1234", source_row=1)],
+        normalize=_id_normalize,
+    )
+
+    assert result.imported == 0
+    assert result.revived == 0
+    assert len(result.errors) == 1
+
+
+def test_ingest_fails_closed_when_existing_lead_lookup_failed():
+    db = _FakeDB(existing_rows=[], read_error="database unavailable")
+
+    with pytest.raises(RuntimeError, match="existing lead lookup failed"):
+        ingest_lead_records(
+            db,
+            campaign_id="c1",
+            tenant_id="t1",
+            records=[LeadRecord("+1 415 555 1234", source_row=1)],
+            normalize=_id_normalize,
+        )
+
+    assert db.inserted == []
 
 
 # ── company column ────────────────────────────────────────────────

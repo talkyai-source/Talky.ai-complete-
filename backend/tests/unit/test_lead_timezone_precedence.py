@@ -29,7 +29,7 @@ from app.domain.models import calling_rules as calling_rules_module
 from app.domain.models.calling_rules import CallingRules
 from app.domain.models.dialer_job import DialerJob
 from app.domain.services.dialer import lead_timezone as lt
-from app.workers.dialer_worker import DialerWorker
+from app.workers.dialer_worker import DialerCallIntent, DialerWorker
 
 
 # A Monday. 15:30 UTC is 11:30 New York, 08:30 Los Angeles, 16:30 London —
@@ -182,6 +182,7 @@ def _worker(rules: CallingRules, lead_tz_value):
     w._redis = None
 
     w._get_campaign_status = AsyncMock(return_value="running")
+    w._load_existing_call_intent = AsyncMock(return_value=None)
     w._tenant_minutes_exhausted = AsyncMock(return_value=False)
     w._get_tenant_rules = AsyncMock(return_value=rules)
     w._get_campaign_calling_config = AsyncMock(return_value={})
@@ -198,7 +199,9 @@ def _worker(rules: CallingRules, lead_tz_value):
     w._publish_block = AsyncMock()
     w._update_job_status = AsyncMock()
     w._make_call = AsyncMock(return_value="provider-call-1")
-    w._create_call_record = AsyncMock(return_value=("call-1", "tk-1", "leg-1"))
+    intent = DialerCallIntent("call-1", "tk-1", "leg-1", "initiated", None, True)
+    w._create_call_intent = AsyncMock(return_value=intent)
+    w._bind_call_intent = AsyncMock()
     w._update_lead_status = AsyncMock()
     w._mark_campaign_dialed = AsyncMock()
     w._emit_progress_event_throttled = AsyncMock()

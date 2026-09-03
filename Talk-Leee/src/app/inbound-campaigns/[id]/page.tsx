@@ -5,6 +5,10 @@ import { useParams } from "next/navigation";
 import { useState } from "react";
 import { Archive, ArrowLeft, Edit3, History, Pause, Play, RefreshCw, ShieldCheck } from "lucide-react";
 
+import { CallIssuesPanel } from "@/components/campaigns/call-issues-panel";
+import { KnowledgePanel } from "@/components/campaigns/knowledge-panel";
+import { LiveCallsPanel } from "@/components/campaigns/live-calls-panel";
+import { RejectedInboundCallsPanel } from "@/components/campaigns/rejected-inbound-calls-panel";
 import { InboundErrorState, InboundLoadingState, InboundPermissionState } from "@/components/inbound/inbound-page-state";
 import { InboundReadinessChecklist, InboundStatusBadge, ReadinessBadge } from "@/components/inbound/inbound-status";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
@@ -41,6 +45,7 @@ export default function InboundCampaignDetailPage() {
     const serverCampaignId = campaign?.id.trim() ?? "";
     const readiness = readinessQuery.data ?? campaign?.readiness;
     const canActivate = readinessQuery.isSuccess && readinessQuery.data.ready;
+    const canManageKnowledge = permissions.isSuccess && capabilities.canEdit;
 
     async function confirmAction() {
         if (!action || !campaign) return;
@@ -98,6 +103,21 @@ export default function InboundCampaignDetailPage() {
                             <section className="content-card" aria-labelledby="version-heading"><div className="flex items-center gap-2"><ShieldCheck className="h-4 w-4 text-primary" aria-hidden /><h2 id="version-heading" className="text-sm font-semibold text-foreground">Server state</h2></div><dl className="mt-4 space-y-3"><Info label="Updated" value={formatDate(campaign.updated_at)} /><Info label="Activated" value={formatDate(campaign.active_at)} /></dl></section>
                         </aside>
                     </div>
+
+                    <div className="grid gap-5 xl:grid-cols-2">
+                        <LiveCallsPanel
+                            campaignId={campaign.campaign_id}
+                            direction="inbound"
+                            title="Live inbound calls"
+                        />
+                        <RejectedInboundCallsPanel campaignId={campaign.campaign_id} />
+                    </div>
+                    <CallIssuesPanel
+                        campaignId={campaign.campaign_id}
+                        direction="inbound"
+                        title="Inbound call issues"
+                    />
+                    <KnowledgePanel campaignId={campaign.campaign_id} readOnly={!canManageKnowledge} />
                 </div>
             )}
 

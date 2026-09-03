@@ -266,11 +266,12 @@ def test_make_call_internal_token_passes_gate(monkeypatch):
     assert err.status_code not in (401, 403)
 
 
-def test_make_call_user_own_tenant_passes_gate(monkeypatch):
+def test_make_call_user_own_tenant_is_retired_before_telephony(monkeypatch):
     monkeypatch.delenv("INTERNAL_SERVICE_TOKEN", raising=False)
     req = _request(tenant_id="tenant-A")
     err = _call_make_call(req, _make_body("tenant-A"))
-    assert err.status_code not in (401, 403)
+    assert err.status_code == 403
+    assert err.detail["error"] == "telephony_call_internal_only"
 
 
 # ── P0-6: hangup/transfer call-ownership (IDOR) ──────────────────────────

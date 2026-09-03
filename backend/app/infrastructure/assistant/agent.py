@@ -334,7 +334,14 @@ async def tool_executor(state: AgentState) -> Dict[str, Any]:
         # Route through the shared dispatcher (single source of truth, also
         # used by the streaming loop). dispatch_tool never raises — failures
         # come back as {"error": ...}.
-        result = await dispatch_tool(func_name, tenant_id, db_client, conversation_id, args)
+        result = await dispatch_tool(
+            func_name,
+            tenant_id,
+            db_client,
+            conversation_id,
+            args,
+            actor_user_id=state.get("user_id"),
+        )
         tool_message = ToolMessage(
             content=_dump_json(result),
             tool_call_id=tool_call_id,

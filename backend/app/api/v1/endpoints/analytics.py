@@ -7,11 +7,12 @@ Supports hour/day/week/month buckets and a per-campaign breakdown.
 """
 from fastapi import APIRouter, HTTPException, Depends, Query
 from pydantic import BaseModel
-from typing import Dict, List, Optional
+from typing import Dict, List, Literal, Optional
 from datetime import date, datetime, time, timedelta, timezone
 from app.core.postgres_adapter import Client
 
 from app.api.v1.dependencies import get_db_client, get_current_user, CurrentUser
+from app.core.security.rbac import Permission, require_permission
 from app.utils.tenant_filter import apply_tenant_filter
 from app.domain.services.call_outcomes import (
     ANSWERED_OUTCOMES,
@@ -20,6 +21,7 @@ from app.domain.services.call_outcomes import (
 )
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
+_require_analytics_read = require_permission(Permission.ANALYTICS_READ)
 
 # A call "connected" (answered) vs "failed" is decided by outcome, not status.
 # Canonical definitions live in `call_outcomes`; these aliases are kept so the
@@ -48,10 +50,14 @@ class CampaignSeries(BaseModel):
 
 class CallAnalyticsResponse(BaseModel):
     series: List[CallSeriesItem]
+    direction: Literal["outbound", "inbound", "all"] = "outbound"
+    include_tests: bool = False
 
 
 class CampaignAnalyticsResponse(BaseModel):
     campaigns: List[CampaignSeries]
+    direction: Literal["outbound", "inbound", "all"] = "outbound"
+    include_tests: bool = False
 
 
 def _parse_dt(value) -> Optional[datetime]:
@@ -113,6 +119,25 @@ def _to_series(buckets: Dict[str, dict]) -> List[CallSeriesItem]:
     ]
 
 
+def _apply_call_population(
+    query,
+    *,
+    direction: Literal["outbound", "inbound", "all"],
+    include_tests: bool,
+):
+    """Make the analytics population explicit and fail closed by default.
+
+    Dialer analytics historically mixed real outbound calls, inbound callers,
+    and browser tests.  Every endpoint now passes through this helper so a new
+    chart cannot accidentally reintroduce that mixed population.
+    """
+    if direction != "all":
+        query = query.eq("direction", direction)
+    if not include_tests:
+        query = query.eq("is_test", False)
+    return query
+
+
 class HourStat(BaseModel):
     """Answer/goal performance for one hour-of-day (0–23)."""
     hour: int
@@ -152,7 +177,11 @@ def _rate(numerator: int, denominator: int) -> float:
     return round(numerator / denominator, 4) if denominator else 0.0
 
 
-@router.get("/best-time", response_model=BestTimeResponse)
+@router.get(
+    "/best-time",
+    response_model=BestTimeResponse,
+    dependencies=[Depends(_require_analytics_read)],
+)
 async def get_best_time_to_call(
     from_date: Optional[str] = Query(None, alias="from", description="Start date (YYYY-MM-DD)"),
     to_date: Optional[str] = Query(None, alias="to", description="End date (YYYY-MM-DD)"),
@@ -176,6 +205,9 @@ async def get_best_time_to_call(
         start_dt, end_dt_excl = _resolve_range(from_date, to_date)
         query = db_client.table("calls").select("created_at, outcome")
         query = query.gte("created_at", start_dt).lt("created_at", end_dt_excl)
+        query = _apply_call_population(
+            query, direction="outbound", include_tests=False
+        )
         query = apply_tenant_filter(query, current_user.tenant_id)
         response = query.execute()
         if getattr(response, "error", None):
@@ -213,7 +245,11 @@ async def get_best_time_to_call(
         raise HTTPException(status_code=500, detail=f"Failed to fetch analytics: {str(e)}")
 
 
-@router.get("/retry-effectiveness", response_model=RetryEffectivenessResponse)
+@router.get(
+    "/retry-effectiveness",
+    response_model=RetryEffectivenessResponse,
+    dependencies=[Depends(_require_analytics_read)],
+)
 async def get_retry_effectiveness(
     from_date: Optional[str] = Query(None, alias="from", description="Start date (YYYY-MM-DD)"),
     to_date: Optional[str] = Query(None, alias="to", description="End date (YYYY-MM-DD)"),
@@ -230,6 +266,9 @@ async def get_retry_effectiveness(
         start_dt, end_dt_excl = _resolve_range(from_date, to_date)
         query = db_client.table("calls").select("lead_id, created_at, outcome")
         query = query.gte("created_at", start_dt).lt("created_at", end_dt_excl)
+        query = _apply_call_population(
+            query, direction="outbound", include_tests=False
+        )
         query = apply_tenant_filter(query, current_user.tenant_id)
         response = query.execute()
         if getattr(response, "error", None):
@@ -274,11 +313,19 @@ async def get_retry_effectiveness(
         raise HTTPException(status_code=500, detail=f"Failed to fetch analytics: {str(e)}")
 
 
-@router.get("/calls", response_model=CallAnalyticsResponse)
+@router.get(
+    "/calls",
+    response_model=CallAnalyticsResponse,
+    dependencies=[Depends(_require_analytics_read)],
+)
 async def get_call_analytics(
     from_date: Optional[str] = Query(None, alias="from", description="Start date (YYYY-MM-DD)"),
     to_date: Optional[str] = Query(None, alias="to", description="End date (YYYY-MM-DD)"),
     group_by: str = Query("day", description="Grouping: hour, day, week, month"),
+    direction: Literal["outbound", "inbound", "all"] = Query(
+        "outbound", description="Call direction population"
+    ),
+    include_tests: bool = Query(False, description="Include browser/test calls"),
     current_user: CurrentUser = Depends(get_current_user),
     db_client: Client = Depends(get_db_client),
 ):
@@ -293,6 +340,9 @@ async def get_call_analytics(
         start_dt, end_dt_excl = _resolve_range(from_date, to_date)
         query = db_client.table("calls").select("created_at, outcome")
         query = query.gte("created_at", start_dt).lt("created_at", end_dt_excl)
+        query = _apply_call_population(
+            query, direction=direction, include_tests=include_tests
+        )
         query = apply_tenant_filter(query, current_user.tenant_id)
         response = query.order("created_at").execute()
         if getattr(response, "error", None):
@@ -309,7 +359,11 @@ async def get_call_analytics(
             )
             _classify(call.get("outcome"), bucket)
 
-        return CallAnalyticsResponse(series=_to_series(groups))
+        return CallAnalyticsResponse(
+            series=_to_series(groups),
+            direction=direction,
+            include_tests=include_tests,
+        )
     except HTTPException:
         raise
     except ValueError as e:
@@ -318,11 +372,19 @@ async def get_call_analytics(
         raise HTTPException(status_code=500, detail=f"Failed to fetch analytics: {str(e)}")
 
 
-@router.get("/calls/by-campaign", response_model=CampaignAnalyticsResponse)
+@router.get(
+    "/calls/by-campaign",
+    response_model=CampaignAnalyticsResponse,
+    dependencies=[Depends(_require_analytics_read)],
+)
 async def get_call_analytics_by_campaign(
     from_date: Optional[str] = Query(None, alias="from", description="Start date (YYYY-MM-DD)"),
     to_date: Optional[str] = Query(None, alias="to", description="End date (YYYY-MM-DD)"),
     group_by: str = Query("day", description="Grouping: hour, day, week, month"),
+    direction: Literal["outbound", "inbound", "all"] = Query(
+        "outbound", description="Call direction population"
+    ),
+    include_tests: bool = Query(False, description="Include browser/test calls"),
     current_user: CurrentUser = Depends(get_current_user),
     db_client: Client = Depends(get_db_client),
 ):
@@ -337,6 +399,9 @@ async def get_call_analytics_by_campaign(
         start_dt, end_dt_excl = _resolve_range(from_date, to_date)
         query = db_client.table("calls").select("created_at, outcome, campaign_id")
         query = query.gte("created_at", start_dt).lt("created_at", end_dt_excl)
+        query = _apply_call_population(
+            query, direction=direction, include_tests=include_tests
+        )
         query = apply_tenant_filter(query, current_user.tenant_id)
         response = query.order("created_at").execute()
         if getattr(response, "error", None):
@@ -364,6 +429,8 @@ async def get_call_analytics_by_campaign(
         if cids:
             name_q = db_client.table("campaigns").select("id, name")
             name_q = apply_tenant_filter(name_q, current_user.tenant_id)
+            if direction != "all":
+                name_q = name_q.eq("direction", direction)
             name_q = name_q.in_("id", cids)
             for row in (name_q.execute().data or []):
                 names[str(row.get("id"))] = row.get("name") or "Campaign"
@@ -378,7 +445,11 @@ async def get_call_analytics_by_campaign(
         ]
         # Busiest campaigns first (stable, useful order for the chart legend).
         campaigns.sort(key=lambda c: sum(s.total_calls for s in c.series), reverse=True)
-        return CampaignAnalyticsResponse(campaigns=campaigns)
+        return CampaignAnalyticsResponse(
+            campaigns=campaigns,
+            direction=direction,
+            include_tests=include_tests,
+        )
     except HTTPException:
         raise
     except ValueError as e:

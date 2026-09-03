@@ -4,6 +4,7 @@ import React, { useEffect, useLayoutEffect, useMemo, useState, useRef } from "re
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { CallIssuesBanner } from "@/components/calls/call-issues-banner";
 import { dashboardApi, DashboardSummary, Campaign } from "@/lib/dashboard-api";
+import { outboundCampaignsOnly } from "@/lib/campaign-direction";
 import { extendedApi, CallSeriesItem } from "@/lib/extended-api";
 import { Clock, Megaphone, ArrowUpRight, Activity, AlertTriangle, PhoneCall, TrendingUp, Bot } from "lucide-react";
 import Link from "next/link";
@@ -77,6 +78,14 @@ function statusVariantLowerBetter(value: number, thresholds: { green: number; ye
     if (value <= thresholds.green) return "green" as const;
     if (value <= thresholds.yellow) return "yellow" as const;
     return "red" as const;
+}
+
+function currentUtcMonthRange(now = new Date()): { from: string; to: string } {
+    const from = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+    return {
+        from: from.toISOString().slice(0, 10),
+        to: now.toISOString().slice(0, 10),
+    };
 }
 
 function KpiCard({
@@ -206,7 +215,14 @@ function useLiveBuckets() {
 
         const fetchOnce = async () => {
             try {
-                const resp = await extendedApi.getCallAnalytics();
+                const month = currentUtcMonthRange();
+                const resp = await extendedApi.getCallAnalytics(
+                    month.from,
+                    month.to,
+                    "day",
+                    "outbound",
+                    false,
+                );
                 if (cancelled) return;
                 const buckets = seriesToBuckets(resp?.series ?? []);
                 setState({
@@ -983,19 +999,17 @@ export default function DashboardPage() {
     async function loadData() {
         try {
             setLoading(true);
-            // Last 7 days for the hourly heatmap (real time-of-day distribution).
-            const hourFrom = new Date(Date.now() - 6 * 24 * 60 * 60 * 1000)
-                .toISOString().slice(0, 10);
+            const month = currentUtcMonthRange();
             const [summaryData, campaignsData, analytics, hourly, byCampaign] = await Promise.all([
                 dashboardApi.getDashboardSummary(),
                 dashboardApi.listCampaigns(),
-                extendedApi.getCallAnalytics(),
-                extendedApi.getCallAnalytics(hourFrom, undefined, "hour"),
-                extendedApi.getCallAnalyticsByCampaign(undefined, undefined, "day"),
+                extendedApi.getCallAnalytics(month.from, month.to, "day", "outbound", false),
+                extendedApi.getCallAnalytics(month.from, month.to, "hour", "outbound", false),
+                extendedApi.getCallAnalyticsByCampaign(month.from, month.to, "day", "outbound", false),
             ]);
             setSummary(summaryData);
             setLiveSummary(summaryData);
-            setCampaigns(campaignsData.campaigns ?? []);
+            setCampaigns(outboundCampaignsOnly(campaignsData.campaigns ?? []));
             setSeries(analytics.series ?? []);
             setHourSeries(hourly.series ?? []);
             setCampaignSeries(byCampaign.campaigns ?? []);
@@ -1437,7 +1451,7 @@ export default function DashboardPage() {
         .reverse();
 
     return (
-        <DashboardLayout title="Dashboard" description="Overview of your voice campaigns">
+        <DashboardLayout title="Dashboard" description="Outbound campaign performance and shared voice usage">
             <CallIssuesBanner />
             {loading ? (
                 <div className="flex items-center justify-center h-64">
@@ -1478,7 +1492,7 @@ export default function DashboardPage() {
                             <div className="flex items-center justify-between gap-3 mb-4">
                                 <div className="min-w-0">
                                     <h3 className="text-xl font-bold text-gray-900 dark:text-foreground uppercase tracking-wide">Live Line Chart</h3>
-                                    <p className="text-sm text-gray-600 dark:text-muted-foreground font-medium">Call volume over time</p>
+                                    <p className="text-sm text-gray-600 dark:text-muted-foreground font-medium">Real outbound call volume over time</p>
                                 </div>
                                 <div className="flex items-center gap-2 text-xs font-bold text-emerald-700 bg-emerald-100 border border-emerald-200 px-3 py-1.5 rounded-full animate-pulse">
                                     <Activity className="w-4 h-4" />
@@ -1934,7 +1948,7 @@ export default function DashboardPage() {
                         className="rounded-2xl border border-border bg-background/70 backdrop-blur-sm p-6 shadow-sm transition-[background-color,box-shadow] duration-150 ease-out dark:hover:bg-background dark:hover:shadow-md"
                     >
                         <div className="flex items-center justify-between mb-4">
-                            <h3 className="text-xl font-bold text-gray-900 dark:text-foreground uppercase tracking-wide">Recent Campaigns</h3>
+                            <h3 className="text-xl font-bold text-gray-900 dark:text-foreground uppercase tracking-wide">Recent Outbound Campaigns</h3>
                             <Link
                                 href="/campaigns"
                                 className="text-sm font-semibold text-gray-700 dark:text-muted-foreground transition-colors duration-300 ease-in-out dark:hover:text-foreground"

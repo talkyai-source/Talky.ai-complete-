@@ -1,14 +1,9 @@
-"""
-Authenticated release load driver with explicit evidence boundaries.
+"""Retired direct-origination load driver.
 
-Hits the authenticated outbound-call endpoint with a bounded number of
-simultaneous HTTP requests. Request-worker concurrency is not call concurrency:
-accepted voice calls outlive their origination response. Cluster live-call
-concurrency is sampled separately from the bridge status endpoint's
-Redis-backed ``capacity.global_current`` value.
-Audio realism comes
-from the SIP loopback path (the C++ telephony gateway streams a 60-second
-WAV the dialer points at) — this script is the pressure source.
+The bridge now accepts only worker-owned requests backed by a committed
+``dialer_jobs`` attempt and ``calls`` intent. This legacy script cannot safely
+manufacture those records and therefore fails closed before making a network
+request. Build a load fixture through the normal campaign/dialer queue instead.
 
 Usage:
 
@@ -18,24 +13,9 @@ Usage:
       --evidence-json ./loadtest-evidence.json \\
       --base-url http://localhost:8000
 
-Pass criteria for Phase 1 (per architecture_plan.md §Phase 1.6):
-  - p95 first-audio < 1.2s
-  - p95 turn latency < 1.8s
-  - zero session leaks (watchdog deletions == 0 after drain)
-  - no provider-inflight gauge crosses 85% of cap
-
-Only HTTP 200 with ``status=calling`` and a unique non-empty ``call_id`` counts
-as an origination. HTTP 202 is merely queued, has no call ID to reconcile, and
-therefore invalidates release evidence rather than counting as a live call or
-as one of the required originations. A mixture of real originations and 503
-capacity rejections is valid pressure behaviour, provided every explicit
-evidence threshold is met.
-
-This is a stress driver only; latency / leak measurements are read from
-Prometheus / `/api/v1/sip/telephony/status` after the run.
-
-Authentication is deliberately read only from ``INTERNAL_SERVICE_TOKEN``.
-Putting the token in a CLI argument would expose it in the process list.
+The remaining parsing/measurement helpers stay importable for historical
+evidence validation, but neither ``main`` nor ``_originate_one`` can bypass the
+durable production protocol.
 """
 
 from __future__ import annotations
@@ -54,6 +34,11 @@ import aiohttp
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("loadtest")
+
+RETIRED_ORIGINATION_REASON = (
+    "Direct load-test origination is retired; create durable dialer jobs and "
+    "drive the production worker instead."
+)
 
 
 @dataclass
@@ -88,7 +73,9 @@ async def _originate_one(
     internal_token: str,
     stats: Stats,
 ) -> None:
-    """Submit one request using the bridge's real internal API contract."""
+    """Fail closed: direct requests cannot satisfy the durable intent contract."""
+
+    raise RuntimeError(RETIRED_ORIGINATION_REASON)
 
     t0 = time.monotonic()
     payload = {
@@ -579,6 +566,8 @@ def main() -> None:
         help="Seconds allowed for two consecutive zero-live drain samples.",
     )
     args = p.parse_args()
+
+    p.error(RETIRED_ORIGINATION_REASON)
 
     internal_token = os.getenv("INTERNAL_SERVICE_TOKEN", "").strip()
     if not internal_token:

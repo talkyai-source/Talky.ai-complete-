@@ -21,12 +21,23 @@ import { AlertCircle, Loader2, Phone, Users } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { dashboardApi, ContactList } from "@/lib/dashboard-api";
+import { isApiClientError } from "@/lib/http-client";
 import { notificationsStore } from "@/lib/notifications";
 
 export const UNGROUPED_LIST_ID = "ungrouped";
 
 function errText(err: unknown, fallback: string): string {
     return err instanceof Error ? err.message : fallback;
+}
+
+function activeStateFromCallError(err: unknown, listId: string): boolean | undefined {
+    if (!isApiClientError(err) || !err.details || typeof err.details !== "object") return undefined;
+    const raw = err.details as Record<string, unknown>;
+    const details = raw.detail && typeof raw.detail === "object"
+        ? raw.detail as Record<string, unknown>
+        : raw;
+    if (typeof details.list_id === "string" && details.list_id !== listId) return undefined;
+    return typeof details.is_active === "boolean" ? details.is_active : undefined;
 }
 
 export function ContactLists({
@@ -125,6 +136,12 @@ export function ContactLists({
         setCallingId(list.id);
         try {
             const res = await dashboardApi.callContactList(list.id);
+            // Starting a list activates it first. Reconcile from the response
+            // even when this component is used on /contacts without a parent
+            // refresh callback.
+            setLists((current) => current.map((item) => (
+                item.id === list.id ? { ...item, is_active: res.is_active } : item
+            )));
             notificationsStore.create({
                 type: res.jobs_enqueued > 0 ? "success" : "warning",
                 title: res.jobs_enqueued > 0 ? "Calls started" : "No calls placed",
@@ -134,6 +151,15 @@ export function ContactLists({
             });
             onCallStarted?.();
         } catch (err) {
+            // The backend deliberately returns 503 when activation committed
+            // but enqueue failed. Its structured `is_active` value is server
+            // truth; reverting to the pre-click UI would lie to the operator.
+            const active = activeStateFromCallError(err, list.id);
+            if (active !== undefined) {
+                setLists((current) => current.map((item) => (
+                    item.id === list.id ? { ...item, is_active: active } : item
+                )));
+            }
             notificationsStore.create({
                 type: "error",
                 title: "Couldn't start calls",

@@ -16,6 +16,19 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from app.core.db_utils import acquire_with_tenant
+from app.domain.services.campaign_knowledge_access import (
+    CampaignKnowledgeAccessBusy,
+    CampaignKnowledgeAccessDenied,
+    CampaignKnowledgeAccessError,
+    CampaignKnowledgeAccessUnavailable,
+    CampaignKnowledgeNotFound,
+    campaign_knowledge_access_lease,
+)
+from app.domain.services.phone_number_normalizer import normalize_phone_number
+from app.infrastructure.assistant.tools.campaign_direction import (
+    inbound_campaign_refusal,
+    outbound_campaign_refusal,
+)
 from app.services.scripts.knowledge.retrieval import (
     retrieve_knowledge as retrieve_knowledge_fn,
 )
@@ -34,6 +47,21 @@ _ALLOWED_SCRIPT_CONFIG_KEYS = {
     "knowledge_driven",
 }
 
+
+def _lead_write_conflict(response) -> Dict[str, Any] | None:
+    """Turn PostgREST errors/zero-row writes into an honest tool result."""
+    if not getattr(response, "error", None) and getattr(response, "data", None):
+        return None
+    return {
+        "applied": False,
+        "error": "lead_write_conflict",
+        "message": (
+            "The lead or campaign changed before the write completed. "
+            "Preview the change again."
+        ),
+    }
+
+
 _ALLOWED_TOP_LEVEL_KEYS = {"name", "goal"}
 
 # All keys the owner may change via this tool (union of both sets)
@@ -47,6 +75,36 @@ _ALLOWED_NODE_KEYS = {
     "summary",
     "voice_answer",
 }
+
+
+def _knowledge_access_failure(
+    exc: CampaignKnowledgeAccessError,
+    *,
+    mutation: bool = False,
+) -> Dict[str, Any]:
+    """Return a stable model-facing error without leaking DB internals."""
+
+    result: Dict[str, Any] = {"error": exc.code}
+    if mutation:
+        result["applied"] = False
+    if isinstance(exc, CampaignKnowledgeNotFound):
+        result["error"] = "campaign not found"
+        return result
+    if isinstance(exc, CampaignKnowledgeAccessDenied):
+        if exc.required_permission:
+            result["required"] = exc.required_permission
+        result["message"] = (
+            "You no longer have permission to access this campaign knowledge."
+        )
+        return result
+    if isinstance(exc, CampaignKnowledgeAccessBusy):
+        result["message"] = "Campaign knowledge is busy. Please try again."
+        return result
+    if isinstance(exc, CampaignKnowledgeAccessUnavailable):
+        result["message"] = (
+            "Authorization is temporarily unavailable. Please try again."
+        )
+    return result
 
 
 async def _verify_campaign_owned(
@@ -94,7 +152,7 @@ async def get_campaign_detail(
     """
     try:
         query = db_client.table("campaigns").select(
-            "id,name,status,voice_id,tts_provider,knowledge_mode,"
+            "id,name,status,direction,voice_id,tts_provider,knowledge_mode,"
             "knowledge_model,goal,script_config"
         ).eq("tenant_id", tenant_id)
 
@@ -119,26 +177,36 @@ async def get_knowledge_tree(
     tenant_id: str,
     db_client,
     campaign_id: str,
+    actor_user_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Return all knowledge nodes for a campaign (ordered by path).
     Verifies campaign ownership before querying nodes.
     """
     try:
-        if not await _verify_campaign_owned(db_client, tenant_id, campaign_id):
-            return {"error": "campaign not found"}
-
-        resp = (
-            db_client.table("campaign_knowledge_nodes")
-            .select("id,depth,heading,summary,enabled,hit_count")
-            .eq("campaign_id", campaign_id)
-            .order("path")
-            .execute()
-        )
-        return {"nodes": resp.data or []}
-    except Exception as exc:
-        logger.error("get_knowledge_tree error: %s", exc)
-        return {"error": str(exc)}
+        async with campaign_knowledge_access_lease(
+            db_client.pool,
+            tenant_id=tenant_id,
+            campaign_id=campaign_id,
+            actor_user_id=actor_user_id or "",
+            mutate=False,
+        ) as lease:
+            rows = await lease.conn.fetch(
+                """
+                SELECT id, depth, heading, summary, enabled, hit_count
+                FROM campaign_knowledge_nodes
+                WHERE campaign_id = $1 AND tenant_id = $2
+                ORDER BY path
+                """,
+                lease.campaign_id,
+                lease.tenant_id,
+            )
+        return {"nodes": [dict(row) for row in rows]}
+    except CampaignKnowledgeAccessError as exc:
+        return _knowledge_access_failure(exc)
+    except Exception as exc:  # pragma: no cover - defensive classification
+        logger.error("get_knowledge_tree error type=%s", type(exc).__name__)
+        return _knowledge_access_failure(CampaignKnowledgeAccessUnavailable())
 
 
 async def retrieve_knowledge(
@@ -146,6 +214,7 @@ async def retrieve_knowledge(
     db_client,
     campaign_id: str,
     query: str,
+    actor_user_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Run the live RAG retriever for a query against a campaign's knowledge tree.
@@ -153,17 +222,23 @@ async def retrieve_knowledge(
     Verifies campaign ownership before retrieving.
     """
     try:
-        if not await _verify_campaign_owned(db_client, tenant_id, campaign_id):
-            return {"error": "campaign not found"}
-
-        hits = await retrieve_knowledge_fn(
+        async with campaign_knowledge_access_lease(
             db_client.pool,
-            tenant_id,
-            campaign_id,
-            query,
-            k=3,
-            bump_hits=False,
-        )
+            tenant_id=tenant_id,
+            campaign_id=campaign_id,
+            actor_user_id=actor_user_id or "",
+            mutate=False,
+        ) as lease:
+            hits = await retrieve_knowledge_fn(
+                db_client.pool,
+                lease.tenant_id,
+                lease.campaign_id,
+                query,
+                k=3,
+                bump_hits=False,
+                conn=lease.conn,
+                raise_on_error=True,
+            )
         return {
             "query": query,
             "hits": [
@@ -175,9 +250,11 @@ async def retrieve_knowledge(
                 for h in hits
             ],
         }
-    except Exception as exc:
-        logger.error("retrieve_knowledge tool error: %s", exc)
-        return {"error": str(exc)}
+    except CampaignKnowledgeAccessError as exc:
+        return _knowledge_access_failure(exc)
+    except Exception as exc:  # pragma: no cover - defensive classification
+        logger.error("retrieve_knowledge tool error type=%s", type(exc).__name__)
+        return _knowledge_access_failure(CampaignKnowledgeAccessUnavailable())
 
 
 # ---------------------------------------------------------------------------
@@ -210,7 +287,7 @@ async def update_campaign_config(
         # Fetch current campaign scoped to tenant
         resp = (
             db_client.table("campaigns")
-            .select("id,name,goal,script_config")
+            .select("id,name,goal,script_config,direction")
             .eq("id", campaign_id)
             .eq("tenant_id", tenant_id)
             .execute()
@@ -219,6 +296,9 @@ async def update_campaign_config(
             return {"error": "campaign not found"}
 
         current = resp.data[0]
+        refusal = outbound_campaign_refusal([current])
+        if refusal:
+            return refusal
         current_sc = current.get("script_config") or {}
 
         # Split incoming changes by destination
@@ -306,9 +386,32 @@ async def update_campaign_config(
             update_payload["script_config"] = merged_sc
 
         if update_payload:
-            db_client.table("campaigns").update(update_payload).eq(
-                "id", campaign_id
-            ).eq("tenant_id", tenant_id).execute()
+            response = (
+                db_client.table("campaigns")
+                .update(update_payload)
+                .eq("id", campaign_id)
+                .eq("tenant_id", tenant_id)
+                .eq("direction", "outbound")
+                .execute()
+            )
+            if getattr(response, "error", None):
+                logger.warning(
+                    "update_campaign_config write failed campaign=%s: %s",
+                    campaign_id,
+                    response.error,
+                )
+                return {
+                    "applied": False,
+                    "error": "campaign_update_failed",
+                    "message": (
+                        "The campaign update could not be confirmed. "
+                        "Preview the change again."
+                    ),
+                }
+            if not response.data:
+                refusal = inbound_campaign_refusal([campaign_id])
+                refusal["applied"] = False
+                return refusal
 
         result = {"applied": True, "changes": diff_entries}
         if notes:
@@ -327,6 +430,7 @@ async def update_knowledge_node(
     node_id: str,
     changes: Dict[str, Any],
     confirm: bool = False,
+    actor_user_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Preview or apply changes to a knowledge node.
@@ -340,9 +444,6 @@ async def update_knowledge_node(
     confirm=True  → apply via asyncpg (needed for to_tsvector SQL).
     """
     try:
-        if not await _verify_campaign_owned(db_client, tenant_id, campaign_id):
-            return {"error": "campaign not found"}
-
         filtered = {k: v for k, v in changes.items() if k in _ALLOWED_NODE_KEYS}
         if not filtered:
             return {
@@ -352,95 +453,108 @@ async def update_knowledge_node(
                 )
             }
 
-        # Read current node via pool (we'll write via pool too)
-        current_node: Optional[Dict[str, Any]] = None
-        async with acquire_with_tenant(db_client.pool, tenant_id) as conn:
-            row = await conn.fetchrow(
+        applied_result: Optional[Dict[str, Any]] = None
+        authorized_campaign_id = str(campaign_id)
+        async with campaign_knowledge_access_lease(
+            db_client.pool,
+            tenant_id=tenant_id,
+            campaign_id=campaign_id,
+            actor_user_id=actor_user_id or "",
+            mutate=True,
+        ) as lease:
+            authorized_campaign_id = lease.campaign_id
+            row = await lease.conn.fetchrow(
                 """
                 SELECT heading, content, keywords, example_questions,
                        enabled, priority, summary, voice_answer
                 FROM campaign_knowledge_nodes
-                WHERE id = $1 AND campaign_id = $2
+                WHERE id = $1 AND campaign_id = $2 AND tenant_id = $3
                 """,
                 node_id,
-                campaign_id,
+                lease.campaign_id,
+                lease.tenant_id,
             )
-            if row:
-                current_node = dict(row)
+            if row is None:
+                return {"error": "knowledge node not found"}
+            current_node = dict(row)
 
-        if current_node is None:
-            return {"error": "knowledge node not found"}
+            diff_entries = _build_diff(
+                {k: current_node.get(k) for k in filtered},
+                filtered,
+            )
+            if not diff_entries:
+                return {
+                    "preview": True,
+                    "changes": [],
+                    "note": "No changes detected.",
+                }
+            if not confirm:
+                return {
+                    "preview": True,
+                    "changes": diff_entries,
+                    "note": "Not applied yet. Call again with confirm=true to apply.",
+                }
 
-        # Build diff
-        diff_entries = _build_diff(
-            {k: current_node.get(k) for k in filtered},
-            filtered,
-        )
-
-        if not diff_entries:
-            return {
-                "preview": True,
-                "changes": [],
-                "note": "No changes detected.",
-            }
-
-        if not confirm:
-            return {
-                "preview": True,
-                "changes": diff_entries,
-                "note": "Not applied yet. Call again with confirm=true to apply.",
-            }
-
-        # Apply via pool with tsvector recompute when heading/content changes
-        async with acquire_with_tenant(db_client.pool, tenant_id) as conn:
-            set_parts = [f"{k} = ${i + 3}" for i, k in enumerate(filtered)]
+            # $1/$2/$3 are node, campaign, tenant; edited values begin at $4.
+            set_parts = [f"{key} = ${index + 4}" for index, key in enumerate(filtered)]
             params = list(filtered.values())
-
             if "heading" in filtered or "content" in filtered:
                 heading = filtered.get("heading", current_node.get("heading")) or ""
                 content = filtered.get("content", current_node.get("content")) or ""
-                kw: List[str] = current_node.get("keywords") or []
-                eq_list: List[str] = current_node.get("example_questions") or []
+                keywords: List[str] = current_node.get("keywords") or []
+                questions: List[str] = current_node.get("example_questions") or []
                 search_text = " ".join(
-                    p
-                    for p in [heading, content, " ".join(kw), " ".join(eq_list)]
-                    if p
+                    part
+                    for part in [
+                        heading,
+                        content,
+                        " ".join(keywords),
+                        " ".join(questions),
+                    ]
+                    if part
                 ).strip()
-                idx = len(params) + 3
+                search_index = len(params) + 4
                 params.append(search_text)
-                set_parts.append(f"search_text = ${idx}")
-                set_parts.append(f"search_tsv = to_tsvector('english', ${idx})")
+                set_parts.append(f"search_text = ${search_index}")
+                set_parts.append(
+                    f"search_tsv = to_tsvector('english', ${search_index})"
+                )
 
             sets = ", ".join(set_parts)
-            updated = await conn.fetchval(
+            updated = await lease.conn.fetchval(
                 f"UPDATE campaign_knowledge_nodes SET {sets}, updated_at = NOW() "
-                "WHERE id = $1 AND campaign_id = $2 RETURNING id",
+                "WHERE id = $1 AND campaign_id = $2 AND tenant_id = $3 RETURNING id",
                 node_id,
-                campaign_id,
+                lease.campaign_id,
+                lease.tenant_id,
                 *params,
             )
+            if not updated:
+                return {"error": "knowledge node not found or update failed"}
+            applied_result = {"applied": True, "changes": diff_entries}
 
-        if not updated:
-            return {"error": "knowledge node not found or update failed"}
-
-        # Invalidate the retrieval cache (Case 3) — same write path as the
-        # campaign_knowledge PATCH endpoint, so it must invalidate the same
-        # way or an assistant-tool edit would keep serving a stale answer for
-        # up to the TTL. Fail-soft: never let a cache-clear problem fail an
-        # otherwise-successful edit.
+        # The lease context has committed before cache invalidation. A commit
+        # failure therefore never evicts a still-valid cache entry.
         try:
             from app.services.scripts.knowledge import cache as _kb_cache
-            _kb_cache.invalidate_campaign(tenant_id, campaign_id)
+
+            _kb_cache.invalidate_campaign(tenant_id, authorized_campaign_id)
         except Exception as exc:
             logger.debug(
-                "knowledge cache invalidate failed campaign=%s: %s", str(campaign_id)[:12], exc,
+                "knowledge cache invalidate failed campaign=%s: %s",
+                str(campaign_id)[:12],
+                exc,
             )
+        return applied_result or {"error": "knowledge node update failed"}
 
-        return {"applied": True, "changes": diff_entries}
-
-    except Exception as exc:
-        logger.error("update_knowledge_node error: %s", exc)
-        return {"error": str(exc)}
+    except CampaignKnowledgeAccessError as exc:
+        return _knowledge_access_failure(exc, mutation=True)
+    except Exception as exc:  # pragma: no cover - defensive classification
+        logger.error("update_knowledge_node error type=%s", type(exc).__name__)
+        return _knowledge_access_failure(
+            CampaignKnowledgeAccessUnavailable(),
+            mutation=True,
+        )
 
 
 async def manage_lead(
@@ -470,13 +584,27 @@ async def manage_lead(
         if action not in {"add", "remove", "update"}:
             return {"error": f"Unknown action '{action}'. Use 'add', 'remove', or 'update'."}
 
-        if not await _verify_campaign_owned(db_client, tenant_id, campaign_id):
+        campaign_resp = (
+            db_client.table("campaigns")
+            .select("id,direction")
+            .eq("id", campaign_id)
+            .eq("tenant_id", tenant_id)
+            .execute()
+        )
+        if not campaign_resp.data:
             return {"error": "campaign not found"}
+        refusal = outbound_campaign_refusal([campaign_resp.data[0]])
+        if refusal:
+            return refusal
 
         # ---- ADD -------------------------------------------------------------
         if action == "add":
             if not phone_number or not phone_number.strip():
                 return {"error": "phone_number is required for action='add'"}
+            try:
+                normalized_phone = normalize_phone_number(phone_number)
+            except ValueError as exc:
+                return {"error": str(exc)}
 
             # name param takes precedence over explicit first_name/last_name
             fn: Optional[str] = first_name
@@ -489,7 +617,7 @@ async def manage_lead(
             preview_lead = {
                 "tenant_id": tenant_id,
                 "campaign_id": campaign_id,
-                "phone_number": phone_number.strip(),
+                "phone_number": normalized_phone,
                 "first_name": fn,
                 "last_name": ln,
                 "status": "pending",
@@ -519,7 +647,10 @@ async def manage_lead(
                 "created_at": datetime.utcnow().isoformat(),
             }
             resp = db_client.table("leads").insert(lead_data).execute()
-            inserted = resp.data[0] if resp.data else lead_data
+            conflict = _lead_write_conflict(resp)
+            if conflict:
+                return conflict
+            inserted = resp.data[0]
             return {
                 "applied": True,
                 "changes": [{"field": "lead", "before": None, "after": inserted}],
@@ -536,6 +667,7 @@ async def manage_lead(
                 .select("id,phone_number,first_name,last_name,status,campaign_id")
                 .eq("id", lead_id)
                 .eq("tenant_id", tenant_id)
+                .eq("campaign_id", campaign_id)
                 .execute()
             )
             if not resp.data:
@@ -557,9 +689,17 @@ async def manage_lead(
                 }
 
             # Soft delete — matches DELETE /campaigns/{id}/contacts/{contact_id}
-            db_client.table("leads").update({"status": "deleted"}).eq(
-                "id", lead_id
-            ).eq("tenant_id", tenant_id).execute()
+            write_response = (
+                db_client.table("leads")
+                .update({"status": "deleted"})
+                .eq("id", lead_id)
+                .eq("tenant_id", tenant_id)
+                .eq("campaign_id", campaign_id)
+                .execute()
+            )
+            conflict = _lead_write_conflict(write_response)
+            if conflict:
+                return conflict
 
             return {
                 "applied": True,
@@ -579,6 +719,7 @@ async def manage_lead(
             .select("id,phone_number,first_name,last_name,email,status,campaign_id")
             .eq("id", lead_id)
             .eq("tenant_id", tenant_id)
+            .eq("campaign_id", campaign_id)
             .execute()
         )
         if not resp.data:
@@ -589,7 +730,10 @@ async def manage_lead(
         # Build set of fields the caller wants to change
         candidate: Dict[str, Any] = {}
         if phone_number is not None:
-            candidate["phone_number"] = phone_number.strip()
+            try:
+                candidate["phone_number"] = normalize_phone_number(phone_number)
+            except ValueError as exc:
+                return {"error": str(exc)}
         if first_name is not None:
             candidate["first_name"] = first_name
         if last_name is not None:
@@ -624,9 +768,17 @@ async def manage_lead(
                 "note": "Not applied yet. Call again with confirm=true to apply.",
             }
 
-        db_client.table("leads").update(candidate).eq("id", lead_id).eq(
-            "tenant_id", tenant_id
-        ).execute()
+        write_response = (
+            db_client.table("leads")
+            .update(candidate)
+            .eq("id", lead_id)
+            .eq("tenant_id", tenant_id)
+            .eq("campaign_id", campaign_id)
+            .execute()
+        )
+        conflict = _lead_write_conflict(write_response)
+        if conflict:
+            return conflict
 
         return {"applied": True, "changes": diff_entries}
 

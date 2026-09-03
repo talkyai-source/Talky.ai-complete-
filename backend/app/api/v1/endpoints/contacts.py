@@ -13,8 +13,7 @@ import csv
 import io
 import logging
 import uuid
-from datetime import datetime
-from typing import List, Optional, Set
+from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Query
 from fastapi.responses import Response
@@ -22,7 +21,15 @@ from pydantic import BaseModel
 from app.core.postgres_adapter import Client
 
 from app.api.v1.dependencies import get_db_client, get_current_user, CurrentUser
-from app.utils.tenant_filter import apply_tenant_filter, verify_tenant_access
+from app.api.v1.endpoints._outbound_campaign import (
+    outbound_campaign_conflict,
+    require_owned_outbound_campaign,
+)
+from app.domain.services.campaign_direction_guard import (
+    OutboundCampaignDirectionConflict,
+    raise_for_outbound_direction_guard,
+)
+from app.core.security.rbac import Permission, require_permission
 
 logger = logging.getLogger(__name__)
 
@@ -192,7 +199,11 @@ async def download_import_template(
 # Day 9: Campaign-Scoped CSV Upload Endpoint
 # =============================================================================
 
-@router.post("/campaigns/{campaign_id}/upload", response_model=BulkImportResponse)
+@router.post(
+    "/campaigns/{campaign_id}/upload",
+    response_model=BulkImportResponse,
+    dependencies=[Depends(require_permission(Permission.CAMPAIGNS_UPDATE))],
+)
 async def upload_campaign_contacts(
     campaign_id: str,
     file: UploadFile = File(..., description="CSV file with contacts"),
@@ -228,21 +239,19 @@ async def upload_campaign_contacts(
         )
     
     try:
-        # 1. Validate campaign exists AND belongs to user's tenant
-        campaign_query = db_client.table("campaigns").select(
-            "id, name, tenant_id, script_config"
-        ).eq("id", campaign_id)
-        campaign_query = apply_tenant_filter(campaign_query, current_user.tenant_id)
-        campaign_response = campaign_query.execute()
-
-        if not campaign_response.data:
-            raise HTTPException(status_code=404, detail="Campaign not found")
-
-        campaign_name = campaign_response.data[0].get("name", "Unknown")
-        campaign_tenant_id = campaign_response.data[0].get("tenant_id")
+        # 1. Validate ownership and outbound direction before reading the file
+        # or creating a contact list/lead.
+        campaign = require_owned_outbound_campaign(
+            db_client,
+            campaign_id,
+            tenant_id=current_user.tenant_id,
+            extra_columns=("name", "script_config"),
+        )
+        campaign_name = campaign.get("name", "Unknown")
+        campaign_tenant_id = campaign.get("tenant_id")
         # Same country the manual Add-Contact path uses, so a CSV-imported and
         # a hand-typed national-format number normalise identically.
-        default_country = _campaign_default_country(campaign_response.data[0])
+        default_country = _campaign_default_country(campaign)
 
         # 2. Read and decode file
         content = await file.read()
@@ -361,8 +370,8 @@ async def upload_campaign_contacts(
             ))
 
         # 5. Create (or reuse) the contact list for this upload — named after
-        #    the uploaded file. Best-effort: if it fails, list_id stays None and
-        #    the leads import as Ungrouped rather than the whole upload failing.
+        #    the uploaded file. Ordinary list failures fall back to Ungrouped;
+        #    a direction-trigger rejection aborts with the stable 409 contract.
         from app.api.v1.endpoints.contact_lists import create_contact_list, _live_count
         list_id = create_contact_list(
             db_client,
@@ -392,7 +401,12 @@ async def upload_campaign_contacts(
         list_count = None
         if list_id is not None:
             try:
-                list_count = _live_count(db_client, campaign_id, list_id)
+                list_count = _live_count(
+                    db_client,
+                    campaign_id,
+                    list_id,
+                    tenant_id=campaign_tenant_id or current_user.tenant_id,
+                )
             except Exception:  # noqa: BLE001
                 list_count = None
 
@@ -412,6 +426,14 @@ async def upload_campaign_contacts(
             list_contact_count=list_count,
         )
     
+    except OutboundCampaignDirectionConflict as exc:
+        raise outbound_campaign_conflict(
+            campaign_id,
+            message=(
+                "The campaign changed to inbound before the contact import completed. "
+                "Use the inbound campaign lifecycle."
+            ),
+        ) from exc
     except HTTPException:
         raise
     except Exception as e:
@@ -426,7 +448,11 @@ async def upload_campaign_contacts(
 # Phase 3a: Paste-a-blob bulk import
 # =============================================================================
 
-@router.post("/campaigns/{campaign_id}/paste", response_model=BulkImportResponse)
+@router.post(
+    "/campaigns/{campaign_id}/paste",
+    response_model=BulkImportResponse,
+    dependencies=[Depends(require_permission(Permission.CAMPAIGNS_UPDATE))],
+)
 async def paste_campaign_contacts(
     campaign_id: str,
     body: BulkPasteRequest,
@@ -444,16 +470,15 @@ async def paste_campaign_contacts(
         LeadRecord, ingest_lead_records, parse_pasted_numbers,
     )
 
-    # 1. Validate campaign exists AND belongs to the caller's tenant.
-    campaign_query = db_client.table("campaigns").select(
-        "id, name, tenant_id, script_config"
-    ).eq("id", campaign_id)
-    campaign_query = apply_tenant_filter(campaign_query, current_user.tenant_id)
-    campaign_response = campaign_query.execute()
-    if not campaign_response.data:
-        raise HTTPException(status_code=404, detail="Campaign not found")
-    campaign_tenant_id = campaign_response.data[0].get("tenant_id")
-    default_country = _campaign_default_country(campaign_response.data[0])
+    # 1. Validate ownership and outbound direction before list/lead writes.
+    campaign = require_owned_outbound_campaign(
+        db_client,
+        campaign_id,
+        tenant_id=current_user.tenant_id,
+        extra_columns=("name", "script_config"),
+    )
+    campaign_tenant_id = campaign.get("tenant_id")
+    default_country = _campaign_default_country(campaign)
 
     # 2. Parse the blob into raw tokens.
     tokens = parse_pasted_numbers(body.text)
@@ -470,23 +495,32 @@ async def paste_campaign_contacts(
         create_contact_list, default_paste_list_name, _live_count,
     )
     list_name = default_paste_list_name()
-    list_id = create_contact_list(
-        db_client,
-        campaign_id=campaign_id,
-        tenant_id=campaign_tenant_id or current_user.tenant_id,
-        name=list_name,
-        source="paste",
-    )
+    try:
+        list_id = create_contact_list(
+            db_client,
+            campaign_id=campaign_id,
+            tenant_id=campaign_tenant_id or current_user.tenant_id,
+            name=list_name,
+            source="paste",
+        )
 
-    # 4. Shared ingest core, tagging leads with the list.
-    result = ingest_lead_records(
-        db_client,
-        campaign_id=campaign_id,
-        tenant_id=campaign_tenant_id or current_user.tenant_id,
-        records=records,
-        normalize=lambda p: _normalize_for_user(p, current_user, default_country),
-        list_id=list_id,
-    )
+        # 4. Shared ingest core, tagging leads with the list.
+        result = ingest_lead_records(
+            db_client,
+            campaign_id=campaign_id,
+            tenant_id=campaign_tenant_id or current_user.tenant_id,
+            records=records,
+            normalize=lambda p: _normalize_for_user(p, current_user, default_country),
+            list_id=list_id,
+        )
+    except OutboundCampaignDirectionConflict as exc:
+        raise outbound_campaign_conflict(
+            campaign_id,
+            message=(
+                "The campaign changed to inbound before the contact import completed. "
+                "Use the inbound campaign lifecycle."
+            ),
+        ) from exc
 
     logger.info(
         "Paste import for campaign %s (list=%s): %d imported (%d revived), %d duplicates, "
@@ -498,7 +532,12 @@ async def paste_campaign_contacts(
     list_count = None
     if list_id is not None:
         try:
-            list_count = _live_count(db_client, campaign_id, list_id)
+            list_count = _live_count(
+                db_client,
+                campaign_id,
+                list_id,
+                tenant_id=campaign_tenant_id or current_user.tenant_id,
+            )
         except Exception:  # noqa: BLE001
             list_count = None
 
@@ -522,7 +561,11 @@ async def paste_campaign_contacts(
 # Legacy Endpoint (Preserved for Backward Compatibility)
 # =============================================================================
 
-@router.post("/bulk", response_model=BulkImportResponse)
+@router.post(
+    "/bulk",
+    response_model=BulkImportResponse,
+    dependencies=[Depends(require_permission(Permission.CAMPAIGNS_UPDATE))],
+)
 async def bulk_import_contacts(
     file: UploadFile = File(..., description="CSV file with contacts"),
     campaign_id: Optional[str] = None,
@@ -550,6 +593,19 @@ async def bulk_import_contacts(
         )
     
     try:
+        # The legacy endpoint used to trust any campaign UUID and only discover
+        # it after parsing/writing rows. Resolve the same outbound boundary as
+        # every other campaign-contact mutation before reading the upload.
+        campaign = None
+        if campaign_id:
+            campaign = require_owned_outbound_campaign(
+                db_client,
+                campaign_id,
+                tenant_id=current_user.tenant_id,
+                extra_columns=("script_config",),
+            )
+        default_country = _campaign_default_country(campaign or {})
+
         # Read file content
         content = await file.read()
         
@@ -583,14 +639,19 @@ async def bulk_import_contacts(
                     errors.append(ImportError(row=row_num, error="Missing phone_number"))
                     continue
                 
-                # Clean phone number
-                phone = phone.replace(' ', '').replace('-', '').replace('(', '').replace(')', '')
-                if not phone.startswith('+'):
-                    phone = '+' + phone
-                
-                # Basic phone validation
-                if len(phone) < 8 or not phone[1:].isdigit():
-                    errors.append(ImportError(row=row_num, error="Invalid phone number"))
+                # Use the single domain normalizer shared by manual add, paste,
+                # CSV and the dialer. The old strip/prefix parser accepted
+                # impossible numbers and mangled national formats.
+                try:
+                    phone = _normalize_for_user(phone, current_user, default_country)
+                except ValueError as exc:
+                    errors.append(
+                        ImportError(
+                            row=row_num,
+                            error=f"Invalid phone number: {exc}",
+                            field="phone_number",
+                        )
+                    )
                     continue
                 
                 # Prepare data
@@ -601,7 +662,7 @@ async def bulk_import_contacts(
                 
                 if campaign_id:
                     # Add as lead to campaign (with tenant_id)
-                    db_client.table("leads").insert({
+                    write_response = db_client.table("leads").insert({
                         "id": str(uuid.uuid4()),
                         "tenant_id": current_user.tenant_id,
                         "campaign_id": campaign_id,
@@ -615,7 +676,7 @@ async def bulk_import_contacts(
                 else:
                     # Add as client
                     name = f"{first_name or ''} {last_name or ''}".strip() or "Unknown"
-                    db_client.table("clients").insert({
+                    write_response = db_client.table("clients").insert({
                         "tenant_id": current_user.tenant_id,
                         "name": name,
                         "company": company,
@@ -623,9 +684,21 @@ async def bulk_import_contacts(
                         "email": email,
                         "tags": []
                     }).execute()
+
+                if getattr(write_response, "error", None):
+                    if campaign_id:
+                        raise_for_outbound_direction_guard(
+                            write_response.error,
+                            campaign_id,
+                        )
+                    raise RuntimeError("Database write failed")
+                if not getattr(write_response, "data", None):
+                    raise RuntimeError("Database write affected no rows")
                 
                 imported += 1
             
+            except OutboundCampaignDirectionConflict:
+                raise
             except Exception as e:
                 errors.append(ImportError(row=row_num, error=str(e)))
         
@@ -637,6 +710,14 @@ async def bulk_import_contacts(
             errors=errors[:50]  # Limit errors returned
         )
     
+    except OutboundCampaignDirectionConflict as exc:
+        raise outbound_campaign_conflict(
+            str(campaign_id),
+            message=(
+                "The campaign changed to inbound before the contact import completed. "
+                "Use the inbound campaign lifecycle."
+            ),
+        ) from exc
     except HTTPException:
         raise
     except Exception as e:
@@ -644,4 +725,3 @@ async def bulk_import_contacts(
             status_code=500,
             detail=f"Failed to import contacts: {str(e)}"
         )
-

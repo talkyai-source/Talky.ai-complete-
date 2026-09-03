@@ -367,6 +367,7 @@ async def stream_assistant_reply(
                 db_client,
                 conversation_id,
                 forced_email_args,
+                actor_user_id=user_id,
             )
             # Only explicitly classified inbox errors are safe to show here.
             # dispatch_tool turns unexpected exceptions into raw strings for
@@ -508,7 +509,12 @@ async def stream_assistant_reply(
                         args = {}
                     yield {"type": "tool_start", "name": name}
                     result = await dispatch_tool(
-                        name, tenant_id, db_client, conversation_id, args
+                        name,
+                        tenant_id,
+                        db_client,
+                        conversation_id,
+                        args,
+                        actor_user_id=user_id,
                     )
                     # An edit tool's preview becomes a first-class proposal: end
                     # the turn here and let the UI's Apply/Reject drive the

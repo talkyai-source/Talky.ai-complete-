@@ -14,6 +14,7 @@ import sys
 import time
 import json
 import uuid
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Optional, List, Dict, Any
 
@@ -39,6 +40,28 @@ from app.core.db import init_db_pool, close_db_pool, Database
 from app.core.db_utils import acquire_with_tenant
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class DialerCallIntent:
+    """One durable provider-attempt identity.
+
+    ``dialer_job_id`` alone is not an idempotency key because a job can make a
+    legitimate later retry.  The database uniqueness boundary is the job plus
+    its one-based attempt number; every replay of that pair receives these same
+    call identities.
+    """
+
+    call_id: str
+    talklee_call_id: str
+    leg_id: str
+    status: str
+    provider_call_id: Optional[str]
+    created: bool
+
+
+class CampaignStatusUnavailable(RuntimeError):
+    """Campaign existence/runnability could not be proven due to DB failure."""
 
 # Configure logging for worker
 logging.basicConfig(
@@ -228,13 +251,53 @@ class DialerWorker:
         # next one.
         self._last_bridge_http_status = None
         self._last_bridge_body = None
+        call_intent: Optional[DialerCallIntent] = None
+        tenant_pacing_claimed = False
         # Set only when the opt-in TESTING schedule override let this job past
         # the calling-window gate; read by `_create_call_record` so the call
         # is stamped as placed-under-override and stays auditable afterwards.
         self._schedule_override = None
 
         try:
-            campaign_status = await self._get_campaign_status(job.campaign_id)
+            # Resolve a previously committed attempt before applying campaign
+            # state. A stopped campaign may still own a live/ambiguous PSTN leg;
+            # terminally skipping its job first would release the per-lead slot
+            # and allow a duplicate call on resume.
+            try:
+                call_intent = await self._load_existing_call_intent(job)
+            except Exception as exc:
+                logger.error(
+                    "dialer_intent_reconciliation_unavailable job=%s attempt=%s err=%s",
+                    job.job_id,
+                    job.attempt_number,
+                    exc,
+                )
+                await self._redefer_before_intent_resolution(
+                    job,
+                    reason="intent_reconciliation_unavailable",
+                )
+                return
+
+            if call_intent is not None and self._call_status_is_terminal(
+                call_intent.status
+            ):
+                await self._resume_existing_call_intent(job, call_intent)
+                return
+
+            try:
+                campaign_status = await self._get_campaign_status(
+                    job.campaign_id,
+                    job.tenant_id,
+                )
+            except CampaignStatusUnavailable:
+                if call_intent is not None:
+                    await self._park_uncertain_origination(job, call_intent)
+                else:
+                    await self._redefer_before_intent_resolution(
+                        job,
+                        reason="campaign_status_unavailable",
+                    )
+                return
             if campaign_status not in {"running", "active"}:
                 reason = f"campaign_not_runnable:{campaign_status or 'missing'}"
                 logger.info(
@@ -243,9 +306,36 @@ class DialerWorker:
                     job.campaign_id,
                     campaign_status or "missing",
                 )
+                if call_intent is not None:
+                    # A provider-bound or non-initial intent stays active until
+                    # the bridge/reaper proves every leg absent. A provider-null
+                    # initial row can be terminalized with a guarded CAS because
+                    # the bridge stamps the planned provider ID before ARI.
+                    provider_absent = (
+                        call_intent.provider_call_id is None
+                        and call_intent.status in {"queued", "initiated"}
+                        and await self._mark_call_intent_not_originated(
+                            job,
+                            call_intent,
+                            reason=reason,
+                        )
+                    )
+                    if not provider_absent:
+                        await self._park_uncertain_origination(job, call_intent)
+                        return
                 await self._publish_block(job, reason)
                 await self.queue_service.mark_skipped(job.job_id, reason="campaign_stopped")
-                await self._update_job_status(job.job_id, JobStatus.SKIPPED, error=reason)
+                await self._update_job_status(job, JobStatus.SKIPPED, error=reason)
+                return
+
+            # A transport-ambiguous attempt is re-deferred with the SAME
+            # attempt number. Reconcile its existing intent before any
+            # new-call gate: the intent itself would consume batch_size=1,
+            # and pacing/CallGuard have already been charged for this attempt.
+            # Re-running those gates can wedge the replay forever or double
+            # count rate-limit side effects.
+            if call_intent is not None:
+                await self._resume_existing_call_intent(job, call_intent)
                 return
 
             # 0.5 Minutes quota gate. Stop originating once the tenant has burned
@@ -260,7 +350,7 @@ class DialerWorker:
                 await self._publish_block(job, "out_of_minutes")
                 await self._emit_out_of_minutes_event(job)
                 await self.queue_service.mark_skipped(job.job_id, reason="out_of_minutes")
-                await self._update_job_status(job.job_id, JobStatus.SKIPPED, error="out_of_minutes")
+                await self._update_job_status(job, JobStatus.SKIPPED, error="out_of_minutes")
                 return
 
             # 1. Calling rules: tenant defaults overlaid with the campaign's
@@ -424,12 +514,12 @@ class DialerWorker:
                         f"Clearing stale last_called_at for lead {job.lead_id} "
                         f"(was set at origination, not at answer)"
                     )
-                    await self._clear_lead_last_called(job.lead_id)
+                    await self._clear_lead_last_called(job)
                     # Re-enqueue directly into the tenant queue for immediate pickup
                     job.attempt_number += 1
                     await self.queue_service.enqueue_job(job)
                     await self._publish_reason(job, blocked)
-                    await self._update_job_status(job.job_id, JobStatus.SKIPPED, reason=reason)
+                    await self._update_job_status(job, JobStatus.SKIPPED, reason=reason)
                     return
                 elif "daily_lead_cap" in reason:
                     # The per-day ceiling resets at UTC midnight. Reschedule
@@ -461,7 +551,7 @@ class DialerWorker:
                 blocked = classify(reason, rules=rules, retry_after_seconds=delay)
                 await self._publish_reason(job, blocked)
                 await self.queue_service.schedule_retry(job, delay_seconds=delay)
-                await self._update_job_status(job.job_id, JobStatus.SKIPPED, reason=reason)
+                await self._update_job_status(job, JobStatus.SKIPPED, reason=reason)
                 return
 
             # 4. Concurrency is now tracked authoritatively by the telephony
@@ -478,7 +568,17 @@ class DialerWorker:
             # passed the top-of-function check still originates into a stopped
             # campaign — a call stuck "dialing" that the stop-sweep (already run)
             # never sees.
-            campaign_status = await self._get_campaign_status(job.campaign_id)
+            try:
+                campaign_status = await self._get_campaign_status(
+                    job.campaign_id,
+                    job.tenant_id,
+                )
+            except CampaignStatusUnavailable:
+                await self._redefer_before_intent_resolution(
+                    job,
+                    reason="campaign_status_unavailable",
+                )
+                return
             if campaign_status not in {"running", "active"}:
                 logger.info(
                     "Campaign %s went %s during job %s validation — skipping originate",
@@ -489,7 +589,7 @@ class DialerWorker:
                 await self._publish_block(job, "campaign_stopped_before_originate")
                 await self.queue_service.mark_skipped(job.job_id, reason="campaign_stopped")
                 await self._update_job_status(
-                    job.job_id,
+                    job,
                     JobStatus.SKIPPED,
                     error="campaign_stopped_before_originate",
                 )
@@ -525,7 +625,7 @@ class DialerWorker:
                     )
                     await self.queue_service.schedule_retry(job, delay_seconds=5)
                     await self._update_job_status(
-                        job.job_id,
+                        job,
                         JobStatus.RETRY_SCHEDULED,
                         reason="batch_capacity",
                     )
@@ -559,7 +659,7 @@ class DialerWorker:
                     )
                     await self.queue_service.schedule_retry(job, delay_seconds=wait)
                     await self._update_job_status(
-                        job.job_id,
+                        job,
                         JobStatus.RETRY_SCHEDULED,
                         reason="call_gap",
                     )
@@ -592,11 +692,12 @@ class DialerWorker:
                 )
                 await self.queue_service.schedule_retry(job, delay_seconds=_tenant_wait)
                 await self._update_job_status(
-                    job.job_id,
+                    job,
                     JobStatus.RETRY_SCHEDULED,
                     reason="tenant_gap",
                 )
                 return
+            tenant_pacing_claimed = True
 
             # 4.95. Run Call Guard validation. Moved here (2026-07-13) from
             # BEFORE the batch/call_gap/tenant_gap gates above:
@@ -628,7 +729,7 @@ class DialerWorker:
                     # Block the call - mark job as blocked, don't retry
                     await self._publish_block(job, "call_guard_blocked", rules=rules)
                     await self._update_job_status(
-                        job.job_id, JobStatus.BLOCKED, reason="call_guard_blocked"
+                        job, JobStatus.BLOCKED, reason="call_guard_blocked"
                     )
                     return
                 elif guard_decision == "throttle":
@@ -653,7 +754,7 @@ class DialerWorker:
                     # RETRY_SCHEDULED; these two call-guard branches were the
                     # odd ones out.
                     await self._update_job_status(
-                        job.job_id,
+                        job,
                         JobStatus.RETRY_SCHEDULED,
                         reason="call_guard_throttled",
                     )
@@ -672,15 +773,58 @@ class DialerWorker:
                     # retry is still pending in Redis, allowing a duplicate
                     # job (and so a duplicate call) for the same person.
                     await self._update_job_status(
-                        job.job_id,
+                        job,
                         JobStatus.RETRY_SCHEDULED,
                         reason="call_guard_queued",
                     )
                     return
 
             try:
-                # 5. Initiate the call via the provider/PBX.
-                provider_call_id = await self._make_call(job, rules)
+                # 5. Commit the attempt BEFORE any provider/PBX action.  The
+                # (dialer_job_id, attempt_number) uniqueness boundary makes a
+                # crash replay reuse this row while still allowing a genuine
+                # later retry (attempt N+1) to own a new row.
+                call_intent = await self._create_call_intent(job)
+
+                if self._call_status_is_terminal(call_intent.status):
+                    # A stale Redis delivery replayed an attempt whose call has
+                    # already settled. Never re-originate it. The durable call
+                    # finalizer owns the authoritative DB job/lead disposition;
+                    # this only drops the duplicate queue delivery.
+                    job.call_id = call_intent.call_id
+                    await self.queue_service.mark_completed(
+                        job.job_id,
+                        outcome="duplicate_terminal_attempt",
+                    )
+                    logger.warning(
+                        "dialer_attempt_terminal_replay job=%s attempt=%s call=%s status=%s",
+                        job.job_id,
+                        job.attempt_number,
+                        call_intent.call_id,
+                        call_intent.status,
+                    )
+                    return
+
+                # 6. Initiate through the bridge using the already-committed
+                # identity. The bridge treats that identity as an idempotency
+                # key and stamps it onto the voice session before ARI runs.
+                provider_call_id = await self._make_call(
+                    job,
+                    rules,
+                    call_intent=call_intent,
+                )
+
+                if provider_call_id == self._ORIGINATION_UNCERTAIN:
+                    await self._park_uncertain_origination(job, call_intent)
+                    return
+
+                if provider_call_id == self._ATTEMPT_ALREADY_TERMINAL:
+                    job.call_id = call_intent.call_id
+                    await self.queue_service.mark_completed(
+                        job.job_id,
+                        outcome="duplicate_terminal_attempt",
+                    )
+                    return
 
                 # Voice pipeline temporarily unavailable (TTS/STT warmup
                 # failed). Reschedule with a short delay and DON'T consume
@@ -688,6 +832,13 @@ class DialerWorker:
                 # bad lead. Without this guard, a 30-second outage burns
                 # every job's max_retries and marks them all FAILED.
                 if provider_call_id == self._PIPELINE_UNAVAILABLE:
+                    if not await self._mark_call_intent_not_originated(
+                        job,
+                        call_intent,
+                        reason="voice_pipeline_unavailable",
+                    ):
+                        await self._park_uncertain_origination(job, call_intent)
+                        return
                     # Nothing dialed — give the tenant slot back so the other
                     # campaign isn't paced against a failed attempt.
                     await release_tenant_dial_slot(self._redis, job.tenant_id)
@@ -697,20 +848,38 @@ class DialerWorker:
                         rules=rules,
                         retry_after_seconds=60,
                     )
-                    await self._update_lead_status(job.lead_id, "pending")
+                    await self._update_lead_status(job, "pending")
                     await self.queue_service.schedule_retry(job, delay_seconds=60)
                     await self._update_job_status(
-                        job.job_id,
+                        job,
                         JobStatus.RETRY_SCHEDULED,
                         reason="voice_pipeline_unavailable",
                     )
                     return
 
                 if provider_call_id:
-                    # 6. Create tracked DB records using an internal UUID plus provider call ID.
-                    internal_call_id, talklee_call_id, leg_id = await self._create_call_record(
-                        job, provider_call_id
-                    )
+                    # The bridge already bound the provider to this durable row.
+                    # Reconcile the worker-owned leg metadata idempotently; do
+                    # not create another calls row after the provider response.
+                    try:
+                        await self._bind_call_intent(
+                            job,
+                            call_intent,
+                            provider_call_id,
+                        )
+                    except Exception as bind_exc:
+                        logger.error(
+                            "dialer_call_intent_bind_uncertain job=%s call=%s err=%s",
+                            job.job_id,
+                            call_intent.call_id,
+                            bind_exc,
+                        )
+                        await self._park_uncertain_origination(job, call_intent)
+                        return
+
+                    internal_call_id = call_intent.call_id
+                    talklee_call_id = call_intent.talklee_call_id
+                    leg_id = call_intent.leg_id
 
                     # B1: transition the call into the public state machine
                     # (Track B). The dialer worker drove the call to "dialing"
@@ -745,14 +914,14 @@ class DialerWorker:
                         )
 
                     # 7. Update lead status to 'calling'
-                    await self._update_lead_status(job.lead_id, "calling")
+                    await self._update_lead_status(job, "calling")
 
                     # 8. Update job with the internal DB call UUID
                     job.call_id = internal_call_id
                     job.status = JobStatus.PROCESSING
                     job.processed_at = datetime.now(timezone.utc)
                     await self._update_job_status(
-                        job.job_id, JobStatus.PROCESSING, call_id=internal_call_id
+                        job, JobStatus.PROCESSING, call_id=internal_call_id
                     )
 
                     # 9. Voice worker notification DISABLED — telephony bridge
@@ -795,6 +964,9 @@ class DialerWorker:
                     )
                     await self._emit_progress_event_throttled(job)
                 else:
+                    # The generic failure boundary below owns the provider-null
+                    # absence proof. Keeping it in one place prevents a second
+                    # CAS from mistaking our own terminal row for ambiguity.
                     raise Exception("No call_id returned from telephony provider")
 
             finally:
@@ -802,7 +974,37 @@ class DialerWorker:
                 # For now, we track at initiation level
                 pass
 
+        except asyncio.CancelledError:
+            # A shutdown/client cancellation after the intent commit is just as
+            # ambiguous as a lost HTTP response. Re-stage the exact Redis
+            # payload (same job + attempt) before propagating cancellation; a
+            # later worker replay is fenced by the durable call row and bridge
+            # CAS, so it can reconcile but cannot place a second call.
+            recovery = (
+                self._park_uncertain_origination(job, call_intent)
+                if call_intent is not None
+                else self._redefer_cancelled_before_origination(job)
+            )
+            from app.core.cancellation import finish_critical_handoff
+
+            await finish_critical_handoff(recovery)
+            raise
         except Exception as e:
+            if call_intent is not None:
+                # Once the durable row exists, an unexpected downstream error
+                # must not manufacture attempt N+1 unless Postgres still proves
+                # that no provider identity was ever claimed. This covers
+                # failures in worker-owned metadata after a successful bridge
+                # response (lead/job/progress writes): the PSTN leg may be live
+                # even though those bookkeeping writes failed.
+                absence_proved = await self._mark_call_intent_not_originated(
+                    job,
+                    call_intent,
+                    reason="worker_exception_before_origination_confirmation",
+                )
+                if not absence_proved:
+                    await self._park_uncertain_origination(job, call_intent)
+                    return
             # Nothing dialed — release the tenant pacing slot (best-effort)
             # so a failed originate doesn't burn the whole gap window.
             try:
@@ -810,7 +1012,8 @@ class DialerWorker:
                     release_tenant_dial_slot,
                 )
 
-                await release_tenant_dial_slot(self._redis, job.tenant_id)
+                if tenant_pacing_claimed:
+                    await release_tenant_dial_slot(self._redis, job.tenant_id)
             except Exception:
                 pass
             self._jobs_failed += 1
@@ -865,7 +1068,7 @@ class DialerWorker:
             # never let a logging/DB hiccup mask the original failure.
             try:
                 await self._record_job_failure_classification(
-                    job_id=job.job_id,
+                    job=job,
                     category=decision.category.value,
                     reason=decision.reason,
                 )
@@ -877,23 +1080,23 @@ class DialerWorker:
                 )
 
             if decision.should_retry:
-                await self._update_lead_status(job.lead_id, "pending")
+                await self._update_lead_status(job, "pending")
                 await self.queue_service.schedule_retry(
                     job,
                     delay_seconds=decision.delay_seconds,
                 )
                 await self._update_job_status(
-                    job.job_id,
+                    job,
                     JobStatus.RETRY_SCHEDULED,
                     error=str(e),
                 )
             else:
                 # Either the category disallows retries (INVALID_INPUT)
                 # or the per-category attempt budget is exhausted.
-                await self._update_lead_status(job.lead_id, "failed")
+                await self._update_lead_status(job, "failed")
                 await self.queue_service.mark_failed(job.job_id, str(e))
                 await self._update_job_status(
-                    job.job_id,
+                    job,
                     JobStatus.FAILED,
                     error=str(e),
                 )
@@ -903,6 +1106,17 @@ class DialerWorker:
     # so process_job can apply infrastructure-aware backoff without
     # consuming the job's retry budget.
     _PIPELINE_UNAVAILABLE = "__pipeline_unavailable__"
+
+    # The HTTP result is unknown after a transport timeout/disconnect, or the
+    # bridge explicitly reports proof-aware cleanup in progress. Retrying as a
+    # new attempt could call the same person twice, so process_job parks the
+    # existing durable attempt for bridge/reaper reconciliation instead.
+    _ORIGINATION_UNCERTAIN = "__origination_uncertain__"
+
+    # A race can settle an attempt after the worker loads its intent but before
+    # the bridge handles the replay. This explicit bridge response drops only
+    # that stale queue delivery and never manufactures a provider identity.
+    _ATTEMPT_ALREADY_TERMINAL = "__attempt_already_terminal__"
 
     # Set by `_make_call` whenever a non-success response from the
     # telephony bridge would otherwise return None. The except-clause
@@ -968,7 +1182,13 @@ class DialerWorker:
             return
         await self._publish_reason(job, reason)
 
-    async def _make_call(self, job: DialerJob, rules: CallingRules) -> Optional[str]:
+    async def _make_call(
+        self,
+        job: DialerJob,
+        rules: CallingRules,
+        *,
+        call_intent: Optional[DialerCallIntent] = None,
+    ) -> Optional[str]:
         """
         Initiate an outbound call through the telephony bridge HTTP endpoint.
 
@@ -1015,6 +1235,18 @@ class DialerWorker:
         # contact_fields.agent_usable, and cannot drift out of step here.
         if getattr(job, "lead_id", None):
             payload["lead_id"] = str(job.lead_id)
+        if call_intent is not None:
+            # These fields are not caller-selected identities. They name the
+            # row this worker already committed for this exact attempt; the
+            # internal-only bridge path verifies every field against Postgres.
+            payload.update(
+                {
+                    "durable_call_id": call_intent.call_id,
+                    "talklee_call_id": call_intent.talklee_call_id,
+                    "dialer_job_id": str(job.job_id),
+                    "dialer_attempt_number": int(job.attempt_number),
+                }
+            )
 
         # Authenticate as an internal service with the shared-secret
         # X-Internal-Service-Token header (CSRF-exempt + accepted by the
@@ -1039,8 +1271,8 @@ class DialerWorker:
                 async with session.post(
                     url, headers=headers, json=payload, timeout=aiohttp.ClientTimeout(total=15)
                 ) as resp:
+                    body = await resp.text()
                     if resp.status == 503:
-                        body = await resp.text()
                         logger.warning(
                             "Voice pipeline unavailable (503) — will retry "
                             "without consuming attempt budget. dest=%s body=%s",
@@ -1049,7 +1281,6 @@ class DialerWorker:
                         )
                         return self._PIPELINE_UNAVAILABLE
                     if resp.status not in (200, 202):
-                        body = await resp.text()
                         # Stash for the classifier in process_job's except branch.
                         self._last_bridge_http_status = resp.status
                         self._last_bridge_body = body
@@ -1059,9 +1290,34 @@ class DialerWorker:
                             body[:200],
                             job.phone_number,
                         )
+                        if resp.status == 409:
+                            try:
+                                parsed = json.loads(body)
+                                detail = parsed.get("detail", parsed)
+                                error = detail.get("error") if isinstance(detail, dict) else None
+                            except (TypeError, ValueError):
+                                error = None
+                            if error in {
+                                "origination_cleanup_pending",
+                                "origination_in_progress",
+                            }:
+                                return self._ORIGINATION_UNCERTAIN
                         return None
 
-                    data = await resp.json()
+                    try:
+                        data = json.loads(body)
+                    except (TypeError, ValueError):
+                        # A success response whose body was lost/corrupt may
+                        # still represent a live call. Never turn it into a new
+                        # attempt; the durable identity can be reconciled.
+                        logger.error(
+                            "Bridge success response was not valid JSON; "
+                            "origination result is unknown for job=%s",
+                            job.job_id,
+                        )
+                        return self._ORIGINATION_UNCERTAIN
+                    if data.get("status") == "terminal":
+                        return self._ATTEMPT_ALREADY_TERMINAL
                     call_id: Optional[str] = data.get("call_id")
                     self._last_provider_name = data.get("adapter", "asterisk")
 
@@ -1084,9 +1340,13 @@ class DialerWorker:
                         )
                     return call_id
 
+        except asyncio.CancelledError:
+            # Worker shutdown must not translate cancellation into a retry.
+            # The committed intent remains available to the reaper/next run.
+            raise
         except Exception as e:
             logger.error("Originate error for %s: %s", job.phone_number, e)
-            return None
+            return self._ORIGINATION_UNCERTAIN
 
     async def _evaluate_call_guard(self, job: DialerJob, rules: CallingRules) -> str:
         """
@@ -1176,10 +1436,9 @@ class DialerWorker:
     async def _reap_stuck_jobs_tick(self) -> None:
         """Reap zombies each tick, best-effort:
         * stuck dialer JOBS (hung originate) → marked failed, lead freed;
-        * stuck CALL rows (non-terminal past the max call lifetime) → closed
-          as ended, so they leave the live-calls panel AND free their
-          batch-dispatch slot (a stale 'dialing' row must never wedge the
-          batch gate);
+        * stale CALL rows → moved to proof-aware termination_pending using
+          separate pre-answer and four-hour-safe connected thresholds (a
+          phantom pre-ARI claim must heal without killing a live call);
         * ORPHANED retry_scheduled jobs (past any legitimate retry delay) →
           marked failed, freeing the lead's active-job slot. Without this a
           job whose Redis schedule entry was lost holds that slot forever and
@@ -1264,17 +1523,30 @@ class DialerWorker:
         except Exception as exc:  # noqa: BLE001
             logger.debug("emit out_of_minutes failed: %s", exc)
 
-    async def _get_campaign_status(self, campaign_id: str) -> Optional[str]:
+    async def _get_campaign_status(
+        self,
+        campaign_id: str,
+        tenant_id: str,
+    ) -> Optional[str]:
         """Return campaign status so dequeued jobs can be revalidated before originate."""
         try:
             async with self._acquire_db() as conn:
                 return await conn.fetchval(
-                    "SELECT status FROM campaigns WHERE id = $1 AND direction='outbound'",
+                    """
+                    SELECT status
+                      FROM campaigns
+                     WHERE id = $1::uuid
+                       AND tenant_id = $2::uuid
+                       AND direction = 'outbound'
+                    """,
                     campaign_id,
+                    tenant_id,
                 )
-        except Exception as e:
-            logger.error(f"Failed to get campaign status for {campaign_id}: {e}")
-            return None
+        except Exception as exc:
+            logger.error("Failed to get campaign status for %s: %s", campaign_id, exc)
+            raise CampaignStatusUnavailable(
+                f"campaign status unavailable for {campaign_id}"
+            ) from exc
 
     async def _get_tenant_rules(self, tenant_id: str) -> CallingRules:
         """Get calling rules for a tenant."""
@@ -1337,18 +1609,18 @@ class DialerWorker:
         a batch slot (dialing / ringing / answered / in_call / initiated).
         Terminal states (ended / completed / failed) have freed their slot.
 
-        Anti-wedge safety net: a call whose status is non-terminal but that is
-        OLDER than the max plausible call lifetime is a zombie (originate hung,
-        an ARI hangup event was lost, a worker died mid-call) — it is NOT really
-        in flight. We stop counting it after DIALER_INFLIGHT_MAX_AGE_S so a
-        handful of stuck 'dialing' rows can never permanently wedge the batch
-        gate. The stuck-call reaper (run each tick) then closes them for real.
+        Anti-wedge safety net applies only before answer: a stale initiated /
+        dialing / ringing claim stops consuming a slot after the configured
+        pre-answer age. Answered/in-call rows keep consuming a slot until the
+        proof-aware stuck-call reaper moves them to termination_pending; their
+        supported lifetime can be four hours, so the old global 600s age filter
+        silently over-dialled batch_size after ten minutes.
 
         Fail-open: on a transient DB error return 0 so a hiccup never wedges
         dispatch (the concurrency guard remains as a backstop).
         """
-        # Ring window (30s) + hard call ceiling (8m) + buffer. A non-terminal
-        # call older than this cannot still be a live conversation.
+        # Ring/prewarm ceiling plus buffer. Connected calls deliberately have
+        # no short age predicate here; the state-aware reaper owns that bound.
         max_age = int(os.getenv("DIALER_INFLIGHT_MAX_AGE_S", "600"))
         try:
             async with self._acquire_db() as conn:
@@ -1356,10 +1628,14 @@ class DialerWorker:
                     """
                     SELECT count(*) FROM calls
                      WHERE campaign_id = $1
-                       AND status IN (
-                           'dialing', 'ringing', 'answered', 'in_call', 'initiated'
+                       AND (
+                              status IN ('answered', 'in_call')
+                           OR (
+                                  status IN ('dialing', 'ringing', 'initiated')
+                              AND created_at
+                                  > now() - make_interval(secs => $2::int)
+                              )
                        )
-                       AND created_at > now() - make_interval(secs => $2::int)
                        -- A browser test session holds no telephony channel, so
                        -- counting it would throttle real dialling.
                        AND NOT is_test
@@ -1492,186 +1768,716 @@ class DialerWorker:
             logger.warning(f"Failed to count lead attempts today: {e}")
         return 0
 
-    async def _create_call_record(
-        self, job: DialerJob, provider_call_id: str
-    ) -> tuple[str, str, str]:
+    @staticmethod
+    def _new_call_identity() -> tuple[str, str, str]:
+        return str(uuid.uuid4()), generate_talklee_call_id(), str(uuid.uuid4())
+
+    @staticmethod
+    def _call_status_is_terminal(status: str) -> bool:
+        return str(status or "").strip().lower() in {
+            "ended",
+            "completed",
+            "failed",
+            "cancelled",
+            "canceled",
+            "rejected",
+            "busy",
+            "no_answer",
+        }
+
+    def _schedule_override_audit(self) -> dict:
+        if not self._schedule_override:
+            return {}
+        try:
+            from app.domain.services.dialer.testing_override import (
+                override_audit_payload,
+            )
+
+            return override_audit_payload(
+                source=self._schedule_override.get("source", "unknown"),
+                blocked_reason=self._schedule_override.get("blocked_reason"),
+                schedule=self._schedule_override.get("schedule"),
+            )
+        except Exception as exc:  # noqa: BLE001 - audit cannot bypass durability
+            logger.warning("schedule_override audit payload failed: %s", exc)
+            return {"schedule_override": True}
+
+    @staticmethod
+    def _validated_existing_call_intent(job: DialerJob, existing) -> DialerCallIntent:
+        """Convert a tenant-scoped row into the exact attempt's replay token."""
+        expected = {
+            "tenant_id": str(job.tenant_id),
+            "campaign_id": str(job.campaign_id),
+            "lead_id": str(job.lead_id),
+            "phone_number": str(job.phone_number),
+            "direction": "outbound",
+        }
+        for field, value in expected.items():
+            if str(existing[field] or "") != value:
+                raise RuntimeError(f"replayed call intent has mismatched {field}")
+        if not existing["talklee_call_id"] or not existing["leg_id"]:
+            raise RuntimeError("replayed call intent is incomplete")
+        return DialerCallIntent(
+            call_id=str(existing["id"]),
+            talklee_call_id=str(existing["talklee_call_id"]),
+            leg_id=str(existing["leg_id"]),
+            status=str(existing["status"]),
+            provider_call_id=(
+                str(existing["provider_call_id"])
+                if existing["provider_call_id"]
+                else None
+            ),
+            created=False,
+        )
+
+    async def _load_existing_call_intent(
+        self, job: DialerJob
+    ) -> Optional[DialerCallIntent]:
+        """Load an already-committed attempt without creating a new one."""
+        async with self._acquire_db() as conn:
+            existing = await conn.fetchrow(
+                """
+                SELECT c.id, c.tenant_id, c.campaign_id, c.lead_id,
+                       c.phone_number, c.direction, c.talklee_call_id,
+                       c.status,
+                       COALESCE(c.provider_call_id, c.external_call_uuid)
+                           AS provider_call_id,
+                       leg.id AS leg_id
+                  FROM calls AS c
+                  LEFT JOIN LATERAL (
+                      SELECT id
+                        FROM call_legs
+                       WHERE call_id = c.id
+                         AND leg_type = 'pstn_outbound'
+                       ORDER BY created_at, id
+                       LIMIT 1
+                  ) AS leg ON TRUE
+                 WHERE c.tenant_id = $1::uuid
+                   AND c.dialer_job_id = $2::uuid
+                   AND c.dialer_attempt_number = $3
+                 LIMIT 1
+                """,
+                str(job.tenant_id),
+                str(job.job_id),
+                int(job.attempt_number),
+            )
+        if existing is None:
+            return None
+        return self._validated_existing_call_intent(job, existing)
+
+    async def _create_call_intent(self, job: DialerJob) -> DialerCallIntent:
+        """Commit or load the one durable row for this exact dial attempt.
+
+        Provider identity is deliberately absent at insert time. The internal
+        bridge verifies this row, persists its planned provider identity, and
+        only then invokes ARI. Any database error raises: no durable row means
+        the worker must never ask the provider to dial.
         """
-        Create a call record in the database with separate internal and provider IDs.
-
-        Returns:
-            tuple: (internal_call_id, talklee_call_id, leg_id)
-        """
-        talklee_call_id = generate_talklee_call_id()
-        internal_call_id = str(uuid.uuid4())
-
-        # AUDIT: when the explicit TESTING override let this call past the
-        # calling-window gate, stamp that fact on the call itself so it is
-        # provable afterwards which calls went out outside the configured
-        # hours, under which switch, and what would otherwise have blocked
-        # them. Uses existing JSONB columns (call_legs.metadata,
-        # call_events.event_data) — no schema change.
-        override_audit: dict = {}
-        if self._schedule_override:
-            try:
-                from app.domain.services.dialer.testing_override import (
-                    override_audit_payload,
-                )
-
-                override_audit = override_audit_payload(
-                    source=self._schedule_override.get("source", "unknown"),
-                    blocked_reason=self._schedule_override.get("blocked_reason"),
-                    schedule=self._schedule_override.get("schedule"),
-                )
-            except Exception as exc:  # noqa: BLE001 — never fail a live call
-                logger.warning("schedule_override audit payload failed: %s", exc)
-                override_audit = {"schedule_override": True}
-
+        call_id, talklee_call_id, leg_id = self._new_call_identity()
+        override_audit = self._schedule_override_audit()
         try:
             async with self._acquire_db() as conn:
-                await conn.execute(
+                inserted = await conn.fetchrow(
                     """
                     INSERT INTO calls (
                         id, tenant_id, campaign_id, lead_id, phone_number,
-                        external_call_uuid, status, talklee_call_id,
-                        dialer_job_id, created_at
-                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
+                        status, talklee_call_id, dialer_job_id,
+                        dialer_attempt_number, direction, created_at, updated_at
+                    ) VALUES (
+                        $1::uuid, $2::uuid, $3::uuid, $4::uuid, $5,
+                        'initiated', $6, $7::uuid, $8, 'outbound', NOW(), NOW()
+                    )
+                    ON CONFLICT (dialer_job_id, dialer_attempt_number)
+                        WHERE dialer_job_id IS NOT NULL
+                          AND dialer_attempt_number IS NOT NULL
+                    DO NOTHING
+                    RETURNING id, talklee_call_id, status, provider_call_id
                     """,
-                    internal_call_id,
-                    job.tenant_id,
-                    job.campaign_id,
-                    job.lead_id,
-                    job.phone_number,
-                    provider_call_id,
-                    "initiated",
+                    call_id,
+                    str(job.tenant_id),
+                    str(job.campaign_id),
+                    str(job.lead_id),
+                    str(job.phone_number),
                     talklee_call_id,
-                    # 2026-07-13 fix: this was never written, so the pooled
-                    # teardown path (call_service._handle_call_status_pooled)
-                    # could never resolve dialer_job_id from the calls row —
-                    # leads/dialer_jobs were never finalized on the
-                    # production (pooled) teardown path. See call_service.py.
-                    job.job_id,
+                    str(job.job_id),
+                    int(job.attempt_number),
                 )
-                logger.debug(
-                    "Created call record internal=%s provider=%s talklee=%s",
-                    internal_call_id,
-                    provider_call_id,
-                    talklee_call_id,
-                )
-
-                leg_id = str(uuid.uuid4())
-                await conn.execute(
-                    """
-                    INSERT INTO call_legs (
-                        id, call_id, talklee_call_id, leg_type, direction,
-                        provider, provider_leg_id, to_number, status, metadata, created_at
-                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
-                    """,
-                    leg_id,
-                    internal_call_id,
-                    talklee_call_id,
-                    "pstn_outbound",
-                    "outbound",
-                    getattr(self, "_last_provider_name", "sip"),
-                    provider_call_id,
-                    job.phone_number,
-                    "initiated",
-                    json.dumps(
-                        {
-                            "job_id": job.job_id,
-                            "campaign_id": job.campaign_id,
-                            "provider_call_id": provider_call_id,
-                            **override_audit,
-                        }
-                    ),
-                )
-
-                await conn.execute(
-                    """
-                    INSERT INTO call_events (
-                        call_id, talklee_call_id, leg_id, event_type, source,
-                        event_data, new_state, created_at
-                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
-                    """,
-                    internal_call_id,
-                    talklee_call_id,
-                    leg_id,
-                    "leg_started",
-                    "dialer_worker",
-                    json.dumps(
-                        {
-                            "leg_type": "pstn_outbound",
-                            "provider": getattr(self, "_last_provider_name", "sip"),
-                            "provider_call_id": provider_call_id,
-                            **override_audit,
-                        }
-                    ),
-                    "initiated",
-                )
-
-                if override_audit:
-                    # A dedicated, greppable audit event — one row per call
-                    # placed under the testing override. `event_type` is
-                    # varchar(30); "schedule_override" is 17 chars.
+                if inserted is not None:
+                    await conn.execute(
+                        """
+                        INSERT INTO call_legs (
+                            id, call_id, talklee_call_id, leg_type, direction,
+                            provider, provider_leg_id, to_number, status,
+                            metadata, created_at
+                        ) VALUES (
+                            $1::uuid, $2::uuid, $3, 'pstn_outbound', 'outbound',
+                            'pending', NULL, $4, 'initiated', $5::jsonb, NOW()
+                        )
+                        """,
+                        leg_id,
+                        call_id,
+                        talklee_call_id,
+                        str(job.phone_number),
+                        json.dumps(
+                            {
+                                "job_id": str(job.job_id),
+                                "campaign_id": str(job.campaign_id),
+                                "dialer_attempt_number": int(job.attempt_number),
+                                **override_audit,
+                            }
+                        ),
+                    )
                     await conn.execute(
                         """
                         INSERT INTO call_events (
                             call_id, talklee_call_id, leg_id, event_type, source,
-                            event_data, created_at
-                        ) VALUES ($1, $2, $3, $4, $5, $6, NOW())
+                            event_data, new_state, created_at
+                        ) VALUES (
+                            $1::uuid, $2, $3::uuid, 'origination_intent',
+                            'dialer_worker', $4::jsonb, 'initiated', NOW()
+                        )
                         """,
-                        internal_call_id,
+                        call_id,
                         talklee_call_id,
                         leg_id,
-                        "schedule_override",
-                        "dialer_worker",
-                        json.dumps(override_audit),
+                        json.dumps(
+                            {
+                                "job_id": str(job.job_id),
+                                "campaign_id": str(job.campaign_id),
+                                "dialer_attempt_number": int(job.attempt_number),
+                                **override_audit,
+                            }
+                        ),
+                    )
+                    if override_audit:
+                        await conn.execute(
+                            """
+                            INSERT INTO call_events (
+                                call_id, talklee_call_id, leg_id, event_type,
+                                source, event_data, created_at
+                            ) VALUES (
+                                $1::uuid, $2, $3::uuid, 'schedule_override',
+                                'dialer_worker', $4::jsonb, NOW()
+                            )
+                            """,
+                            call_id,
+                            talklee_call_id,
+                            leg_id,
+                            json.dumps(override_audit),
+                        )
+                    return DialerCallIntent(
+                        call_id=str(inserted["id"]),
+                        talklee_call_id=str(inserted["talklee_call_id"]),
+                        leg_id=leg_id,
+                        status=str(inserted["status"]),
+                        provider_call_id=(
+                            str(inserted["provider_call_id"])
+                            if inserted["provider_call_id"]
+                            else None
+                        ),
+                        created=True,
                     )
 
-                return internal_call_id, talklee_call_id, leg_id
+                # A concurrent worker or crash replay won the unique key. This
+                # is a separate statement so READ COMMITTED sees the winner
+                # after ON CONFLICT waited for it to commit.
+                existing = await conn.fetchrow(
+                    """
+                    SELECT c.id, c.tenant_id, c.campaign_id, c.lead_id,
+                           c.phone_number, c.direction, c.talklee_call_id,
+                           c.status,
+                           COALESCE(c.provider_call_id, c.external_call_uuid)
+                               AS provider_call_id,
+                           leg.id AS leg_id
+                      FROM calls AS c
+                      LEFT JOIN LATERAL (
+                          SELECT id
+                            FROM call_legs
+                           WHERE call_id = c.id
+                             AND leg_type = 'pstn_outbound'
+                           ORDER BY created_at, id
+                           LIMIT 1
+                      ) AS leg ON TRUE
+                     WHERE c.tenant_id = $1::uuid
+                       AND c.dialer_job_id = $2::uuid
+                       AND c.dialer_attempt_number = $3
+                     LIMIT 1
+                    """,
+                    str(job.tenant_id),
+                    str(job.job_id),
+                    int(job.attempt_number),
+                )
+                if existing is None:
+                    raise RuntimeError("idempotency winner is not tenant-visible")
+                return self._validated_existing_call_intent(job, existing)
+        except Exception as exc:
+            logger.error(
+                "durable_call_intent_failed job=%s attempt=%s err=%s",
+                job.job_id,
+                job.attempt_number,
+                exc,
+            )
+            raise RuntimeError("durable call intent could not be committed") from exc
 
-        except Exception as e:
-            logger.error(f"Failed to create call record: {e}")
-            return internal_call_id, talklee_call_id, ""
+    async def _resume_existing_call_intent(
+        self,
+        job: DialerJob,
+        intent: DialerCallIntent,
+    ) -> None:
+        """Reconcile one committed attempt without charging new-call gates."""
+        if self._call_status_is_terminal(intent.status):
+            job.call_id = intent.call_id
+            await self.queue_service.mark_completed(
+                job.job_id,
+                outcome="duplicate_terminal_attempt",
+            )
+            return
 
-    async def _update_lead_status(self, lead_id: str, status: str) -> None:
-        """Update lead status in database."""
+        from app.domain.services.dialer.campaign_schedule import effective_rules
+
+        tenant_rules = await self._get_tenant_rules(job.tenant_id)
+        campaign_cfg = await self._get_campaign_calling_config(job.campaign_id)
+        rules = effective_rules(tenant_rules, campaign_cfg)
+        provider_call_id = await self._make_call(
+            job,
+            rules,
+            call_intent=intent,
+        )
+        if provider_call_id == self._ORIGINATION_UNCERTAIN:
+            await self._park_uncertain_origination(job, intent)
+            return
+        if provider_call_id == self._ATTEMPT_ALREADY_TERMINAL:
+            job.call_id = intent.call_id
+            await self.queue_service.mark_completed(
+                job.job_id,
+                outcome="duplicate_terminal_attempt",
+            )
+            return
+        if provider_call_id == self._PIPELINE_UNAVAILABLE:
+            if not await self._mark_call_intent_not_originated(
+                job,
+                intent,
+                reason="voice_pipeline_unavailable",
+            ):
+                await self._park_uncertain_origination(job, intent)
+                return
+            await self._publish_block(
+                job,
+                "voice_pipeline_unavailable",
+                rules=rules,
+                retry_after_seconds=60,
+            )
+            await self._update_lead_status(job, "pending")
+            await self.queue_service.schedule_retry(job, delay_seconds=60)
+            await self._update_job_status(
+                job,
+                JobStatus.RETRY_SCHEDULED,
+                reason="voice_pipeline_unavailable",
+            )
+            return
+        if not provider_call_id:
+            # `process_job` performs the single absence-proof CAS before its
+            # retry policy is allowed to manufacture attempt N+1.
+            raise RuntimeError("No call_id returned from telephony provider")
+
+        try:
+            await self._bind_call_intent(job, intent, provider_call_id)
+        except Exception as exc:
+            logger.error(
+                "dialer_call_intent_replay_bind_uncertain job=%s call=%s err=%s",
+                job.job_id,
+                intent.call_id,
+                exc,
+            )
+            await self._park_uncertain_origination(job, intent)
+            return
+
+        try:
+            from app.domain.services.call_status import CallState, record_call_state
+
+            await record_call_state(
+                self._db_pool,
+                call_id=intent.call_id,
+                tenant_id=job.tenant_id,
+                campaign_id=job.campaign_id,
+                new_state=CallState.DIALING,
+                metadata={
+                    "phone_number": str(job.phone_number),
+                    "agent_name": getattr(job, "agent_name", None),
+                    "provider_call_id": provider_call_id,
+                    "description": f"Dialing {job.phone_number}",
+                },
+            )
+        except Exception as exc:
+            logger.warning(
+                "call_status.dialing_replay_emit_failed call=%s err=%s",
+                intent.call_id,
+                exc,
+            )
+
+        await self._update_lead_status(job, "calling")
+        job.call_id = intent.call_id
+        job.status = JobStatus.PROCESSING
+        job.processed_at = datetime.now(timezone.utc)
+        await self._update_job_status(
+            job,
+            JobStatus.PROCESSING,
+            call_id=intent.call_id,
+        )
+        self._jobs_processed += 1
+        await self._mark_campaign_dialed(job.campaign_id)
+        try:
+            from app.domain.services.dialer.block_state import clear_block_reason
+
+            await clear_block_reason(self._redis, job.campaign_id)
+        except Exception as exc:
+            logger.debug("block_state replay clear failed: %s", exc)
+        logger.info(
+            "Call replay reconciled: internal_call_id=%s provider_call_id=%s job=%s",
+            intent.call_id,
+            provider_call_id,
+            job.job_id,
+        )
+        await self._emit_progress_event_throttled(job)
+
+    async def _bind_call_intent(
+        self,
+        job: DialerJob,
+        intent: DialerCallIntent,
+        provider_call_id: str,
+    ) -> None:
+        """Idempotently attach the bridge-confirmed provider to intent metadata."""
+        provider = str(getattr(self, "_last_provider_name", "sip") or "sip")
+        async with self._acquire_db() as conn:
+            updated = await conn.execute(
+                """
+                UPDATE calls
+                   SET external_call_uuid = COALESCE(external_call_uuid, $5),
+                       provider_call_id = CASE
+                           WHEN provider_call_id IS NULL
+                             OR provider_call_id = external_call_uuid
+                           THEN $5
+                           ELSE provider_call_id
+                       END,
+                       provider = $6,
+                       status = CASE
+                           WHEN status IN ('queued', 'initiated') THEN 'dialing'
+                           ELSE status
+                       END,
+                       updated_at = NOW()
+                 WHERE id = $1::uuid
+                   AND tenant_id = $2::uuid
+                   AND dialer_job_id = $3::uuid
+                   AND dialer_attempt_number = $4
+                   AND direction = 'outbound'
+                """,
+                intent.call_id,
+                str(job.tenant_id),
+                str(job.job_id),
+                int(job.attempt_number),
+                str(provider_call_id),
+                provider,
+            )
+            if updated != "UPDATE 1":
+                raise RuntimeError(f"durable call bind affected {updated}")
+            leg_updated = await conn.execute(
+                """
+                UPDATE call_legs
+                   SET provider = $3,
+                       provider_leg_id = COALESCE(provider_leg_id, $4),
+                       status = CASE
+                           WHEN status IN ('queued', 'initiated') THEN 'dialing'
+                           ELSE status
+                       END
+                 WHERE id = $1::uuid
+                   AND call_id = $2::uuid
+                   AND leg_type = 'pstn_outbound'
+                """,
+                intent.leg_id,
+                intent.call_id,
+                provider,
+                str(provider_call_id),
+            )
+            if leg_updated != "UPDATE 1":
+                raise RuntimeError(f"durable call leg bind affected {leg_updated}")
+
+    async def _mark_call_intent_not_originated(
+        self,
+        job: DialerJob,
+        intent: DialerCallIntent,
+        *,
+        reason: str,
+    ) -> bool:
+        """Terminalize only when the row still proves no provider was bound."""
         try:
             async with self._acquire_db() as conn:
-                if status in ("pending", "calling"):
-                    # "pending"  — resetting for retry, keep last_called_at unchanged
-                    # "calling"  — origination only, call not yet answered; setting
-                    #              last_called_at here would poison the per-lead cooldown
-                    #              and block all retries for 2 hours even if the call
-                    #              never connected.  last_called_at is set on terminal
-                    #              states (completed / failed) instead.
-                    await conn.execute(
-                        "UPDATE leads SET status = $1 WHERE id = $2", status, lead_id
-                    )
-                else:
-                    # Terminal / completion states (failed, completed, etc.) —
-                    # record the timestamp so per-lead cooldown is enforced correctly.
-                    await conn.execute(
-                        """
-                        UPDATE leads SET status = $1, last_called_at = NOW()
-                        WHERE id = $2
-                        """,
-                        status,
-                        lead_id,
-                    )
-        except Exception as e:
-            logger.error(f"Failed to update lead status: {e}")
+                updated = await conn.execute(
+                    """
+                    UPDATE calls
+                       SET status = 'failed', outcome = 'failed',
+                           failure_reason = COALESCE(failure_reason, $5),
+                           ended_at = COALESCE(ended_at, NOW()), updated_at = NOW()
+                     WHERE id = $1::uuid
+                       AND tenant_id = $2::uuid
+                       AND dialer_job_id = $3::uuid
+                       AND dialer_attempt_number = $4
+                       AND direction = 'outbound'
+                       AND provider_call_id IS NULL
+                       AND external_call_uuid IS NULL
+                       AND status IN ('queued', 'initiated')
+                    """,
+                    intent.call_id,
+                    str(job.tenant_id),
+                    str(job.job_id),
+                    int(job.attempt_number),
+                    reason[:500],
+                )
+                return updated == "UPDATE 1"
+        except Exception as exc:
+            logger.error(
+                "dialer_call_intent_terminalize_failed call=%s err=%s",
+                intent.call_id,
+                exc,
+            )
+            return False
 
-    async def _clear_lead_last_called(self, lead_id: str) -> None:
-        """Clear last_called_at so a stale origination-time timestamp cannot block retries."""
+    async def _park_uncertain_origination(
+        self,
+        job: DialerJob,
+        intent: DialerCallIntent,
+    ) -> None:
+        """Keep one ambiguous attempt owned; never turn it into attempt N+1."""
+        job.call_id = intent.call_id
+        same_attempt_redeferred = False
         try:
+            # `_redefer_inflight` reads the crash-safe original payload and
+            # stages it without incrementing attempt_number. This is a replay,
+            # not a new call attempt: the bridge will return the existing
+            # provider identity or atomically claim the still-unclaimed row.
+            same_attempt_redeferred = bool(
+                await self.queue_service._redefer_inflight(
+                    str(job.job_id),
+                    "origination_result_unknown",
+                )
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            # Keeping PROCESSING is safer than scheduling attempt N+1. The DB
+            # and call reapers remain the last-resort proof-aware recovery.
+            logger.error(
+                "dialer_same_attempt_redefer_failed job=%s call=%s err=%s",
+                job.job_id,
+                intent.call_id,
+                exc,
+            )
+        parked_status = (
+            JobStatus.RETRY_SCHEDULED
+            if same_attempt_redeferred
+            else JobStatus.PROCESSING
+        )
+        job.status = parked_status
+        job.processed_at = datetime.now(timezone.utc)
+        state_recorded = await self._record_ambiguous_attempt_state(
+            job,
+            intent,
+            parked_status=parked_status,
+        )
+        logger.error(
+            "dialer_origination_result_unknown job=%s attempt=%s call=%s; "
+            "same_attempt_redeferred=%s state_recorded=%s",
+            job.job_id,
+            job.attempt_number,
+            intent.call_id,
+            same_attempt_redeferred,
+            state_recorded,
+        )
+
+    async def _record_ambiguous_attempt_state(
+        self,
+        job: DialerJob,
+        intent: DialerCallIntent,
+        *,
+        parked_status: JobStatus,
+    ) -> bool:
+        """Keep an ambiguous attempt active only while its call is nonterminal.
+
+        The bridge may have proved the provider leg absent and atomically
+        failed call/job/lead while this worker was losing its HTTP response or
+        being cancelled. A blind status write here would resurrect that job as
+        ``retry_scheduled`` and put the lead back into ``calling``. The guarded
+        transaction makes the durable call row the authority.
+        """
+        try:
+            from app.domain.services.call_status import TERMINAL_CALL_STATUSES
+            from app.domain.services.dialer.job_states import ACTIVE_STATUSES
+
+            status_value = (
+                parked_status.value
+                if hasattr(parked_status, "value")
+                else str(parked_status)
+            )
             async with self._acquire_db() as conn:
-                await conn.execute("UPDATE leads SET last_called_at = NULL WHERE id = $1", lead_id)
-        except Exception as e:
-            logger.error(f"Failed to clear lead last_called_at: {e}")
+                updated = await conn.execute(
+                    """
+                    UPDATE dialer_jobs AS job
+                       SET status = $5,
+                           call_id = $4::uuid,
+                           processed_at = COALESCE(job.processed_at, NOW()),
+                           last_error = 'origination_result_unknown',
+                           updated_at = NOW()
+                     WHERE job.id = $1::uuid
+                       AND job.tenant_id = $2::uuid
+                       AND job.lead_id = $3::uuid
+                       AND job.attempt_number = $7
+                       AND job.status = ANY($6::text[])
+                       AND EXISTS (
+                           SELECT 1
+                             FROM calls AS call_row
+                            WHERE call_row.id = $4::uuid
+                              AND call_row.tenant_id = $2::uuid
+                              AND call_row.dialer_job_id = $1::uuid
+                              AND call_row.dialer_attempt_number = $7
+                              AND call_row.lead_id = $3::uuid
+                              AND call_row.direction = 'outbound'
+                              AND call_row.status <> ALL($8::text[])
+                       )
+                    """,
+                    str(job.job_id),
+                    str(job.tenant_id),
+                    str(job.lead_id),
+                    intent.call_id,
+                    status_value,
+                    list(ACTIVE_STATUSES),
+                    int(job.attempt_number),
+                    list(TERMINAL_CALL_STATUSES),
+                )
+                if updated != "UPDATE 1":
+                    return False
+                lead_updated = await conn.execute(
+                    """
+                    UPDATE leads
+                       SET status = 'calling', updated_at = NOW()
+                     WHERE id = $1::uuid
+                       AND tenant_id = $2::uuid
+                       AND status IN ('pending', 'queued', 'calling')
+                    """,
+                    str(job.lead_id),
+                    str(job.tenant_id),
+                )
+                if lead_updated not in {"UPDATE 0", "UPDATE 1"}:
+                    raise RuntimeError(
+                        f"ambiguous attempt lead update affected {lead_updated}"
+                    )
+            return True
+        except Exception as exc:
+            logger.error(
+                "dialer_ambiguous_attempt_state_failed job=%s call=%s err=%s",
+                job.job_id,
+                intent.call_id,
+                exc,
+            )
+            return False
+
+    async def _redefer_cancelled_before_origination(self, job: DialerJob) -> None:
+        """Return a cancelled pre-provider payload without minting an attempt."""
+        await self._redefer_before_intent_resolution(
+            job,
+            reason="worker_cancelled_before_origination",
+        )
+
+    async def _redefer_before_intent_resolution(
+        self,
+        job: DialerJob,
+        *,
+        reason: str,
+    ) -> None:
+        """Re-stage the same payload when attempt ownership is not yet known."""
+        same_attempt_redeferred = False
+        try:
+            same_attempt_redeferred = bool(
+                await self.queue_service._redefer_inflight(
+                    str(job.job_id),
+                    reason,
+                )
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.error(
+                "dialer_pre_intent_redefer_failed job=%s reason=%s err=%s",
+                job.job_id,
+                reason,
+                exc,
+            )
+        if not same_attempt_redeferred:
+            # Never manufacture attempt N+1 when the crash-safe payload cannot
+            # be moved. Its existing inflight copy remains the reaper's evidence.
+            return
+        job.status = JobStatus.RETRY_SCHEDULED
+        await self._update_lead_status(job, "pending")
+        await self._update_job_status(
+            job,
+            JobStatus.RETRY_SCHEDULED,
+            error=reason,
+        )
+        logger.info(
+            "dialer_pre_intent_redeferred job=%s attempt=%s reason=%s",
+            job.job_id,
+            job.attempt_number,
+            reason,
+        )
+
+    async def _update_lead_status(self, job: DialerJob, status: str) -> None:
+        """Update exactly the lead owned by this tenant/campaign payload."""
+        async with self._acquire_db() as conn:
+            timestamp = (
+                ""
+                if status in ("pending", "calling")
+                else ", last_called_at = NOW()"
+            )
+            updated = await conn.execute(
+                f"""
+                UPDATE leads
+                   SET status = $1{timestamp}
+                 WHERE id = $2::uuid
+                   AND tenant_id = $3::uuid
+                   AND campaign_id = $4::uuid
+                """,
+                status,
+                str(job.lead_id),
+                str(job.tenant_id),
+                str(job.campaign_id),
+            )
+            if updated != "UPDATE 1":
+                raise RuntimeError(
+                    f"lead ownership update affected {updated} for job {job.job_id}"
+                )
+
+    async def _clear_lead_last_called(self, job: DialerJob) -> None:
+        """Clear cooldown only on the fully owned lead row."""
+        async with self._acquire_db() as conn:
+            updated = await conn.execute(
+                """
+                UPDATE leads
+                   SET last_called_at = NULL
+                 WHERE id = $1::uuid
+                   AND tenant_id = $2::uuid
+                   AND campaign_id = $3::uuid
+                """,
+                str(job.lead_id),
+                str(job.tenant_id),
+                str(job.campaign_id),
+            )
+            if updated != "UPDATE 1":
+                raise RuntimeError(
+                    f"lead cooldown ownership update affected {updated} "
+                    f"for job {job.job_id}"
+                )
 
     async def _update_job_status(
         self,
-        job_id: str,
+        job: DialerJob,
         status: JobStatus,
         call_id: Optional[str] = None,
         error: Optional[str] = None,
@@ -1706,15 +2512,33 @@ class DialerWorker:
                 if status in [JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.GOAL_ACHIEVED]:
                     data["completed_at"] = datetime.now(timezone.utc)
 
-                await db.update("dialer_jobs", data, "id = $1", [job_id])
-
-        except Exception as e:
-            logger.error(f"Failed to update job status: {e}")
+                rows = await db.update(
+                    "dialer_jobs",
+                    data,
+                    (
+                        "id = $1::uuid AND tenant_id = $2::uuid "
+                        "AND campaign_id = $3::uuid AND lead_id = $4::uuid"
+                    ),
+                    [
+                        str(job.job_id),
+                        str(job.tenant_id),
+                        str(job.campaign_id),
+                        str(job.lead_id),
+                    ],
+                )
+                if len(rows) != 1:
+                    raise RuntimeError(
+                        f"dialer job ownership update affected {len(rows)} "
+                        f"rows for {job.job_id}"
+                    )
+        except Exception as exc:
+            logger.error("Failed to update job status: %s", exc)
+            raise
 
     async def _record_job_failure_classification(
         self,
         *,
-        job_id: str,
+        job: DialerJob,
         category: str,
         reason: str,
     ) -> None:
@@ -1727,23 +2551,33 @@ class DialerWorker:
         """
         try:
             async with self._acquire_db() as conn:
-                await conn.execute(
+                updated = await conn.execute(
                     """
                     UPDATE dialer_jobs
                     SET failure_category = $2,
                         failure_reason = $3,
                         updated_at = NOW()
-                    WHERE id = $1
+                    WHERE id = $1::uuid
+                      AND tenant_id = $4::uuid
+                      AND campaign_id = $5::uuid
+                      AND lead_id = $6::uuid
                     """,
-                    job_id,
+                    str(job.job_id),
                     category,
                     reason,
+                    str(job.tenant_id),
+                    str(job.campaign_id),
+                    str(job.lead_id),
                 )
+                if updated != "UPDATE 1":
+                    raise RuntimeError(
+                        f"job classification ownership update affected {updated}"
+                    )
         except Exception as exc:
             logger.warning(
                 "could not write failure_category/reason for job=%s "
                 "(missing columns? not yet migrated?): %s",
-                job_id,
+                job.job_id,
                 exc,
             )
 

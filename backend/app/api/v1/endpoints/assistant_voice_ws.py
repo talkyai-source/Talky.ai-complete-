@@ -467,6 +467,7 @@ async def _run_voice_session(
                         args=ev.get("args") or {},
                         result=ev.get("result") or {},
                         tenant_id=tenant_id,
+                        actor_user_id=user_id,
                         conversation_id=current_conversation_id,
                     )
                     await send_json({
@@ -567,7 +568,11 @@ async def _run_voice_session(
     async def apply_proposal(proposal_id: Optional[str], mode: Optional[str] = None) -> None:
         # Atomic consume (Case 4): pop so two concurrent applies of the same
         # proposal can't both dispatch and double-create.
-        proposal = pop_proposal(proposal_id, tenant_id) if isinstance(proposal_id, str) else None
+        proposal = (
+            pop_proposal(proposal_id, tenant_id, user_id)
+            if isinstance(proposal_id, str)
+            else None
+        )
         if not proposal:
             await send_json({"type": "proposal_result", "proposal_id": proposal_id, "applied": False,
                              "error": "That proposal is no longer available — please ask again."})
@@ -585,6 +590,8 @@ async def _run_voice_session(
             result = await dispatch_tool(
                 proposal["tool"], tenant_id, db_client, current_conversation_id,
                 apply_args,
+                actor_user_id=user_id,
+                trusted_proposal_apply=True,
             )
             applied = (
                 isinstance(result, dict)
@@ -665,7 +672,7 @@ async def _run_voice_session(
             elif mtype == "reject_proposal":
                 pid = data.get("proposal_id")
                 if isinstance(pid, str):
-                    clear_proposal(pid)
+                    clear_proposal(pid, tenant_id, user_id)
                 await send_json({"type": "proposal_result", "proposal_id": pid, "applied": False})
             elif mtype == "end":
                 break

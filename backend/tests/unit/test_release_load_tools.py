@@ -67,37 +67,22 @@ class _RecordingSession:
 
 
 @pytest.mark.asyncio
-async def test_origination_uses_authenticated_json_bridge_contract():
+async def test_legacy_loadtest_origination_is_retired_before_network():
     session = _RecordingSession()
     stats = loadtest.Stats()
 
-    await loadtest._originate_one(
-        session,
-        "https://staging.example.test/",
-        "+15551234567",
-        "11111111-1111-1111-1111-111111111111",
-        "+15557654321",
-        "internal-test-token",
-        stats,
-    )
+    with pytest.raises(RuntimeError, match="durable dialer jobs"):
+        await loadtest._originate_one(
+            session,
+            "https://staging.example.test/",
+            "+15551234567",
+            "11111111-1111-1111-1111-111111111111",
+            "+15557654321",
+            "internal-test-token",
+            stats,
+        )
 
-    assert len(session.calls) == 1
-    url, request = session.calls[0]
-    assert url == "https://staging.example.test/api/v1/sip/telephony/call"
-    assert "params" not in request
-    assert request["json"] == {
-        "destination": "+15551234567",
-        "caller_id": "+15557654321",
-        "tenant_id": "11111111-1111-1111-1111-111111111111",
-    }
-    assert request["headers"] == {
-        "Content-Type": "application/json",
-        "X-Internal-Service-Token": "internal-test-token",
-    }
-    assert stats.originated == 1
-    assert stats.originated_call_ids == ["call-1"]
-    assert stats.max_request_inflight == 1
-    assert stats.request_inflight == 0
+    assert session.calls == []
 
 
 @pytest.mark.asyncio
@@ -105,17 +90,18 @@ async def test_queued_response_is_not_counted_as_an_origination():
     session = _RecordingSession(status=202, payload={"status": "queued"})
     stats = loadtest.Stats()
 
-    await loadtest._originate_one(
-        session,
-        "https://staging.example.test/",
-        "+15551234567",
-        "11111111-1111-1111-1111-111111111111",
-        "+15557654321",
-        "internal-test-token",
-        stats,
-    )
+    with pytest.raises(RuntimeError, match="durable dialer jobs"):
+        await loadtest._originate_one(
+            session,
+            "https://staging.example.test/",
+            "+15551234567",
+            "11111111-1111-1111-1111-111111111111",
+            "+15557654321",
+            "internal-test-token",
+            stats,
+        )
 
-    assert stats.queued == 1
+    assert stats.queued == 0
     assert stats.originated == 0
     assert stats.originated_call_ids == []
 
@@ -312,7 +298,7 @@ def test_cli_rejects_one_call_floor_and_removed_concurrent_alias(tmp_path):
         check=False,
     )
     assert one_call.returncode == 2
-    assert "must be at least 300" in one_call.stderr
+    assert "durable dialer jobs" in one_call.stderr
 
     removed_alias = subprocess.run(
         [*base, "--concurrent", "50"],

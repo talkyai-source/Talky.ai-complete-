@@ -183,6 +183,7 @@ async def test_manage_lead_remove_soft_delete_confirm():
     """confirm=True for remove must call update with status='deleted', NOT hard delete."""
     db = _campaign_db()
     db.configure_response("leads", "select", data=[LEAD_ROW.copy()])
+    db.configure_response("leads", "update", data=[{"id": "lead-1"}])
 
     result = await manage_lead(
         tenant_id="t1",
@@ -257,6 +258,7 @@ async def test_manage_lead_update_confirm_applies_changed_fields():
     """action=update, confirm=True → calls update once with only changed fields."""
     db = _campaign_db()
     db.configure_response("leads", "select", data=[LEAD_ROW.copy()])
+    db.configure_response("leads", "update", data=[{"id": "lead-1"}])
 
     result = await manage_lead(
         tenant_id="t1",
@@ -283,6 +285,33 @@ async def test_manage_lead_update_confirm_applies_changed_fields():
     eq_fields = {f: v for (f, v) in db._update_calls[0]["eq"]}
     assert eq_fields.get("tenant_id") == "t1"
     assert eq_fields.get("id") == "lead-1"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("action", ["add", "remove", "update"])
+async def test_manage_lead_never_claims_success_for_zero_row_write(action):
+    db = _campaign_db()
+    kwargs = {
+        "tenant_id": "t1",
+        "db_client": db,
+        "campaign_id": "c1",
+        "action": action,
+        "confirm": True,
+    }
+    if action == "add":
+        kwargs["phone_number"] = "+15551234567"
+        db.configure_response("leads", "insert", data=[])
+    else:
+        db.configure_response("leads", "select", data=[LEAD_ROW.copy()])
+        db.configure_response("leads", "update", data=[])
+        kwargs["lead_id"] = "lead-1"
+        if action == "update":
+            kwargs["first_name"] = "Changed"
+
+    result = await manage_lead(**kwargs)
+
+    assert result["applied"] is False
+    assert result["error"] == "lead_write_conflict"
 
 
 @pytest.mark.asyncio
@@ -477,6 +506,9 @@ async def test_apply_campaign_voice_valid_confirm_updates_each(monkeypatch):
         "select",
         data=[{"id": "c1", "name": "Camp 1", "tts_provider": "google", "voice_id": "voice-old"}],
     )
+    db.configure_response(
+        "campaigns", "update", data=[{"id": "c1", "direction": "outbound"}]
+    )
 
     result = await apply_campaign_voice(
         tenant_id="t1",
@@ -499,6 +531,83 @@ async def test_apply_campaign_voice_valid_confirm_updates_each(monkeypatch):
         assert call["payload"] == {"tts_provider": "deepgram", "voice_id": "voice-valid-2"}
         eq_fields = {f: v for (f, v) in call["eq"]}
         assert eq_fields.get("tenant_id") == "t1"
+
+
+@pytest.mark.asyncio
+async def test_apply_campaign_voice_reports_zero_row_direction_race(monkeypatch):
+    monkeypatch.setattr(
+        "app.infrastructure.assistant.tools.campaign_ai_options._voice_catalog_for_provider",
+        _fake_catalog,
+    )
+    db = FakeDbClient()
+    db.configure_response(
+        "campaigns",
+        "select",
+        data=[
+            {
+                "id": "campaign-1",
+                "name": "Campaign",
+                "direction": "outbound",
+                "tts_provider": "google",
+                "voice_id": "voice-old",
+            }
+        ],
+    )
+    db.configure_response("campaigns", "update", data=[])
+
+    result = await apply_campaign_voice(
+        tenant_id="t1",
+        db_client=db,
+        campaign_ids=["campaign-1"],
+        tts_provider="google",
+        voice_id="voice-valid-1",
+        confirm=True,
+    )
+
+    assert result["applied"] is False
+    assert result["error"] == "inbound_campaign_managed_separately"
+    assert result["campaign_ids"] == ["campaign-1"]
+    assert result["updated_campaign_ids"] == []
+
+
+@pytest.mark.asyncio
+async def test_apply_campaign_voice_does_not_report_database_error_as_direction_race(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        "app.infrastructure.assistant.tools.campaign_ai_options._voice_catalog_for_provider",
+        _fake_catalog,
+    )
+    db = FakeDbClient()
+    db.configure_response(
+        "campaigns",
+        "select",
+        data=[
+            {
+                "id": "campaign-1",
+                "name": "Campaign",
+                "direction": "outbound",
+                "tts_provider": "google",
+                "voice_id": "voice-old",
+            }
+        ],
+    )
+    db.configure_response("campaigns", "update", data=[])
+    db._responses[("campaigns", "update")].error = "database unavailable"
+
+    result = await apply_campaign_voice(
+        tenant_id="t1",
+        db_client=db,
+        campaign_ids=["campaign-1"],
+        tts_provider="google",
+        voice_id="voice-valid-1",
+        confirm=True,
+    )
+
+    assert result["applied"] is False
+    assert result["error"] == "campaign_voice_update_failed"
+    assert result["failed_campaign_ids"] == ["campaign-1"]
+    assert "campaign_ids" not in result
 
 
 @pytest.mark.asyncio
@@ -545,4 +654,98 @@ async def test_apply_campaign_voice_empty_list(monkeypatch):
     )
 
     assert "error" in result
+    assert db._update_calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("confirm", [False, True])
+async def test_apply_campaign_voice_refuses_inbound_before_preview_or_apply(
+    monkeypatch, confirm
+):
+    monkeypatch.setattr(
+        "app.infrastructure.assistant.tools.campaign_ai_options._voice_catalog_for_provider",
+        _fake_catalog,
+    )
+    db = FakeDbClient()
+    db.configure_response(
+        "campaigns",
+        "select",
+        data=[
+            {
+                "id": "inbound-1",
+                "name": "Main line",
+                "direction": "inbound",
+                "tts_provider": "google",
+                "voice_id": "voice-old",
+            }
+        ],
+    )
+
+    result = await apply_campaign_voice(
+        tenant_id="t1",
+        db_client=db,
+        campaign_ids=["inbound-1"],
+        tts_provider="google",
+        voice_id="voice-valid-1",
+        confirm=confirm,
+    )
+
+    assert result["error"] == "inbound_campaign_managed_separately"
+    assert result["campaign_ids"] == ["inbound-1"]
+    assert db._update_calls == []
+
+
+@pytest.mark.asyncio
+async def test_apply_campaign_voice_rechecks_direction_when_proposal_is_applied(monkeypatch):
+    monkeypatch.setattr(
+        "app.infrastructure.assistant.tools.campaign_ai_options._voice_catalog_for_provider",
+        _fake_catalog,
+    )
+    db = FakeDbClient()
+    db.configure_response(
+        "campaigns",
+        "select",
+        data=[
+            {
+                "id": "campaign-1",
+                "name": "Campaign",
+                "direction": "outbound",
+                "tts_provider": "google",
+                "voice_id": "voice-old",
+            }
+        ],
+    )
+    preview = await apply_campaign_voice(
+        tenant_id="t1",
+        db_client=db,
+        campaign_ids=["campaign-1"],
+        tts_provider="google",
+        voice_id="voice-valid-1",
+        confirm=False,
+    )
+    assert preview["preview"] is True
+
+    db.configure_response(
+        "campaigns",
+        "select",
+        data=[
+            {
+                "id": "campaign-1",
+                "name": "Campaign",
+                "direction": "inbound",
+                "tts_provider": "google",
+                "voice_id": "voice-old",
+            }
+        ],
+    )
+    applied = await apply_campaign_voice(
+        tenant_id="t1",
+        db_client=db,
+        campaign_ids=["campaign-1"],
+        tts_provider="google",
+        voice_id="voice-valid-1",
+        confirm=True,
+    )
+
+    assert applied["error"] == "inbound_campaign_managed_separately"
     assert db._update_calls == []

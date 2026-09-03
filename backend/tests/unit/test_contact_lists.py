@@ -146,7 +146,7 @@ def test_ingest_retags_revived_lead():
     db = FakeDB()
     db.tables["leads"].append(
         {"id": "DEL1", "campaign_id": "c1", "phone_number": "+14155551234",
-         "status": "deleted", "is_lead": True, "list_id": "OLD"}
+         "tenant_id": "t1", "status": "deleted", "is_lead": True, "list_id": "OLD"}
     )
     ingest_lead_records(
         db, campaign_id="c1", tenant_id="t1",
@@ -240,3 +240,27 @@ def test_create_contact_list_distinct_names():
                             name="b.csv", source="csv")
     assert a != b
     assert len(db.tables["contact_lists"]) == 2
+
+
+def test_live_count_is_tenant_scoped_even_when_ids_collide():
+    from app.api.v1.endpoints.contact_lists import _live_count
+
+    db = FakeDB()
+    db.tables["leads"] = [
+        {
+            "id": "ONE",
+            "campaign_id": "c1",
+            "tenant_id": "t1",
+            "list_id": "L1",
+            "status": "pending",
+        },
+        {
+            "id": "TWO",
+            "campaign_id": "c1",
+            "tenant_id": "t2",
+            "list_id": "L1",
+            "status": "pending",
+        },
+    ]
+
+    assert _live_count(db, "c1", "L1", tenant_id="t1") == 1

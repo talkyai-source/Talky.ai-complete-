@@ -25,6 +25,7 @@ from app.utils.tenant_filter import verify_tenant_access
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/calls", tags=["calls"])
+_require_calls_read = require_permission(Permission.CALLS_READ)
 
 
 def _json_object(value: Any) -> dict:
@@ -275,11 +276,12 @@ class CallListResponse(BaseModel):
 
 
 class CallIssueItem(BaseModel):
-    """One stuck/failed dial attempt, explained for the operator.
+    """One durable call-placement or call-processing issue.
 
-    These come from ``dialer_jobs`` (NOT ``calls``) because the gates that
-    stop a call — out of minutes, outside hours, caller-ID unverified, TTS
-    warmup failure, rate limits — all fire before a ``calls`` row exists.
+    Outbound issues come from ``dialer_jobs`` because their gates fire before
+    a ``calls`` row exists. Inbound issues come only from inbound ``calls``
+    rows whose durable processing state or terminal pipeline outcome is
+    explicitly ``failed``.
     """
 
     job_id: str
@@ -295,12 +297,12 @@ class CallIssueItem(BaseModel):
     stage: str
     attempts: int = 0
     updated_at: Optional[str] = None
-    # Structured block reason (additive — see
+    # Structured outbound block reason (additive — see
     # app/domain/services/dialer/block_reasons.py). `reason_code` above stays
-    # the RAW dialer string for backwards compatibility; `block_code` is the
-    # stable machine value a UI should switch on, `block_message` the human
-    # sentence that says what to do, and `next_eligible_at` the ISO timestamp
-    # of the next moment this call can go out (when computable).
+    # the raw dialer string on outbound and a stable failure-state code on
+    # inbound. `block_code` is the stable outbound machine value a UI should
+    # switch on, `block_message` the human sentence that says what to do, and
+    # `next_eligible_at` the next moment the outbound call can go out.
     block_code: Optional[str] = None
     block_message: Optional[str] = None
     next_eligible_at: Optional[str] = None
@@ -309,6 +311,102 @@ class CallIssueItem(BaseModel):
 class CallIssuesResponse(BaseModel):
     items: List[CallIssueItem]
     server_time: str
+
+
+async def _list_inbound_call_issues(
+    *,
+    tenant_id: UUID,
+    campaign_id: Optional[str],
+    window_minutes: int,
+    db_client: Client,
+    now_iso: str,
+) -> CallIssuesResponse:
+    """Read inbound calls with an explicit durable processing or pipeline failure.
+
+    The rejected feed remains the complete audit trail for pre-answer denials,
+    after-hours, capacity, and quota outcomes. This view does not duplicate
+    them or infer failures from missing media telemetry.
+    """
+
+    args: list[Any] = [tenant_id, window_minutes]
+    campaign_filter = ""
+    if campaign_id:
+        try:
+            campaign_uuid = UUID(campaign_id)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=422, detail="Invalid campaign_id")
+        args.append(campaign_uuid)
+        campaign_filter = f"AND c.campaign_id = ${len(args)}"
+
+    sql = f"""
+        SELECT c.id,
+               CASE
+                   WHEN c.caller_ani_private THEN COALESCE(c.called_did, '')
+                   ELSE COALESCE(NULLIF(c.caller_ani, ''), c.called_did, '')
+               END AS phone_number,
+               c.campaign_id,
+               camp.name AS campaign_name,
+               COALESCE(c.status, 'failed') AS status,
+               c.processing_status,
+               c.outcome,
+               COALESCE(c.ended_at, c.updated_at, c.created_at) AS updated_at
+        FROM calls c
+        LEFT JOIN campaigns camp
+          ON camp.id=c.campaign_id AND camp.tenant_id=c.tenant_id
+        WHERE c.tenant_id=$1
+          AND c.direction='inbound'
+          AND c.admission_status='allowed'
+          AND (c.processing_status='failed' OR c.outcome='failed')
+          AND COALESCE(c.admission_reason, '') <> 'after_hours_closed'
+          AND COALESCE(c.ended_at, c.updated_at, c.created_at)
+                >= NOW() - make_interval(mins => $2)
+          {campaign_filter}
+        ORDER BY updated_at DESC, c.id
+        LIMIT 50
+    """
+
+    try:
+        async with acquire_with_tenant(db_client.pool, tenant_id) as conn:
+            rows = await conn.fetch(sql, *args)
+    except Exception as exc:
+        logger.error("list_call_issues inbound failed: %s", exc)
+        raise HTTPException(status_code=500, detail="Failed to list call issues") from exc
+
+    items: List[CallIssueItem] = []
+    for row in rows:
+        pipeline_failed = (
+            str(row["outcome"] or "").strip().lower() == "failed"
+            and str(row["processing_status"] or "").strip().lower() != "failed"
+        )
+        items.append(
+            CallIssueItem(
+                job_id=str(row["id"]),
+                phone_number=str(row["phone_number"] or ""),
+                campaign_id=str(row["campaign_id"]) if row["campaign_id"] else None,
+                campaign_name=row["campaign_name"],
+                status=str(row["status"] or "unknown"),
+                reason_code=(
+                    "inbound_pipeline_failed"
+                    if pipeline_failed
+                    else "inbound_processing_failed"
+                ),
+                category="inbound_pipeline" if pipeline_failed else "inbound_processing",
+                title=(
+                    "Inbound voice pipeline failed"
+                    if pipeline_failed
+                    else "Inbound call processing failed"
+                ),
+                suggestion=(
+                    "Review call history and provider logs before asking the caller to retry."
+                ),
+                severity="error",
+                stage="processing",
+                attempts=1,
+                updated_at=(row["updated_at"].isoformat() if row["updated_at"] else None),
+            )
+        )
+
+    return CallIssuesResponse(items=items, server_time=now_iso)
 
 
 class LiveCallItem(BaseModel):
@@ -638,7 +736,11 @@ async def hangup_live_call(
         raise HTTPException(status_code=500, detail="Failed to hang up call")
 
 
-@router.get("/live", response_model=LiveCallsResponse)
+@router.get(
+    "/live",
+    response_model=LiveCallsResponse,
+    dependencies=[Depends(_require_calls_read)],
+)
 async def list_live_calls(
     campaign_id: Optional[UUID] = Query(
         None,
@@ -768,7 +870,11 @@ async def list_live_calls(
     )
 
 
-@router.get("/rejected", response_model=RejectedInboundCallsResponse)
+@router.get(
+    "/rejected",
+    response_model=RejectedInboundCallsResponse,
+    dependencies=[Depends(_require_calls_read)],
+)
 async def list_rejected_inbound_calls(
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=100),
@@ -892,7 +998,11 @@ async def list_rejected_inbound_calls(
     )
 
 
-@router.get("/issues", response_model=CallIssuesResponse)
+@router.get(
+    "/issues",
+    response_model=CallIssuesResponse,
+    dependencies=[Depends(_require_calls_read)],
+)
 async def list_call_issues(
     campaign_id: Optional[str] = Query(None, description="If set, restrict to this campaign."),
     window_minutes: int = Query(
@@ -901,16 +1011,18 @@ async def list_call_issues(
         le=1440,
         description="How far back to look for stuck/failed dial attempts.",
     ),
+    direction: Literal["outbound", "inbound"] = Query(
+        "outbound",
+        description="Issue source direction. Defaults to the existing outbound dialer feed.",
+    ),
     current_user: CurrentUser = Depends(get_current_user),
     db_client: Client = Depends(get_db_client),
 ):
-    """Recent dial attempts that DIDN'T place a call, each explained — and
-    only while the problem is STILL true.
+    """Recent durable call issues for one direction.
 
-    The live-calls panel only shows rows in ``calls``; the gates that stop a
-    call (out of minutes, outside hours, campaign stopped, caller-ID
-    unverified, TTS warmup failure, rate limits) all fire in the dialer
-    before a ``calls`` row exists. This reads those from ``dialer_jobs``.
+    Outbound remains the default and retains its existing dialer-job behavior.
+    Inbound uses only calls whose persisted processing state is ``failed``; it
+    does not manufacture media telemetry or duplicate rejected-call outcomes.
 
     Staleness guards — a fixed problem must disappear, not linger:
       * A later successful call for the same lead supersedes the issue
@@ -925,6 +1037,15 @@ async def list_call_issues(
     now_iso = datetime.now(timezone.utc).isoformat()
     if not current_user.tenant_id:
         return CallIssuesResponse(items=[], server_time=now_iso)
+
+    if direction == "inbound":
+        return await _list_inbound_call_issues(
+            tenant_id=UUID(str(current_user.tenant_id)),
+            campaign_id=campaign_id,
+            window_minutes=window_minutes,
+            db_client=db_client,
+            now_iso=now_iso,
+        )
 
     args: list = [current_user.tenant_id, window_minutes]
     where_campaign = ""
@@ -1067,7 +1188,11 @@ async def list_call_issues(
     return CallIssuesResponse(items=items[:50], server_time=now_iso)
 
 
-@router.get("/", response_model=CallListResponse)
+@router.get(
+    "/",
+    response_model=CallListResponse,
+    dependencies=[Depends(_require_calls_read)],
+)
 async def list_calls(
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(20, ge=1, le=100, description="Items per page"),
@@ -1248,7 +1373,11 @@ async def list_calls(
         raise HTTPException(status_code=500, detail="Failed to fetch calls")
 
 
-@router.get("/{call_id}", response_model=CallDetail)
+@router.get(
+    "/{call_id}",
+    response_model=CallDetail,
+    dependencies=[Depends(_require_calls_read)],
+)
 async def get_call(
     call_id: str,
     current_user: CurrentUser = Depends(get_current_user),
@@ -1426,7 +1555,10 @@ async def get_call(
         raise HTTPException(status_code=500, detail="Failed to fetch call")
 
 
-@router.get("/{call_id}/transcript")
+@router.get(
+    "/{call_id}/transcript",
+    dependencies=[Depends(_require_calls_read)],
+)
 async def get_call_transcript(
     call_id: str,
     format: str = Query("json", description="Format: 'json' or 'text'"),
@@ -1514,7 +1646,10 @@ async def get_call_transcript(
         raise HTTPException(status_code=500, detail="Failed to fetch transcript")
 
 
-@router.get("/{call_id}/summary")
+@router.get(
+    "/{call_id}/summary",
+    dependencies=[Depends(_require_calls_read)],
+)
 async def get_call_summary(
     call_id: str,
     current_user: CurrentUser = Depends(get_current_user),
@@ -1542,7 +1677,10 @@ async def get_call_summary(
 # =============================================================================
 
 
-@router.get("/{call_id}/events")
+@router.get(
+    "/{call_id}/events",
+    dependencies=[Depends(_require_calls_read)],
+)
 async def get_call_events(
     call_id: str,
     limit: int = Query(100, ge=1, le=500),
@@ -1586,7 +1724,10 @@ async def get_call_events(
         raise HTTPException(status_code=500, detail="Failed to fetch call events")
 
 
-@router.get("/{call_id}/legs")
+@router.get(
+    "/{call_id}/legs",
+    dependencies=[Depends(_require_calls_read)],
+)
 async def get_call_legs(
     call_id: str,
     current_user: CurrentUser = Depends(get_current_user),

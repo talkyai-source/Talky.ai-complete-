@@ -3184,6 +3184,44 @@ def _confirmed_inbound_duration_seconds(
     return min(elapsed, _pinned_inbound_max_duration(admission))
 
 
+def _confirmed_outbound_duration_seconds(
+    voice_session: Any,
+    terminal_at_monotonic: Any,
+    *,
+    answered_at_monotonic: Any = None,
+) -> int:
+    """Measure confirmed provider Answer to the frozen terminal callback.
+
+    ``CallSession.started_at`` is intentionally ignored: outbound sessions are
+    created during prewarm/ringing and therefore precede billable Answer. A
+    missing Answer or terminal proof is held at zero instead of inventing
+    usage. The per-session hard ceiling remains the billing cap.
+    """
+
+    answered_at = answered_at_monotonic
+    if answered_at is None and voice_session is not None:
+        answered_at = getattr(voice_session, "_answered_at_monotonic", None)
+    if isinstance(answered_at, bool) or not isinstance(answered_at, (int, float)):
+        return 0
+    if isinstance(terminal_at_monotonic, bool) or not isinstance(
+        terminal_at_monotonic,
+        (int, float),
+    ):
+        return 0
+    elapsed = max(
+        1,
+        math.ceil(max(0.0, float(terminal_at_monotonic) - float(answered_at))),
+    )
+    cap = (
+        getattr(voice_session, "_max_call_duration_seconds", _SESSION_MAX_DURATION_S)
+        if voice_session is not None
+        else _SESSION_MAX_DURATION_S
+    )
+    if isinstance(cap, bool) or not isinstance(cap, (int, float)) or cap <= 0:
+        cap = _SESSION_MAX_DURATION_S
+    return min(elapsed, int(cap))
+
+
 async def _enforce_inbound_deadline(
     call_id: str,
     max_duration_seconds: int,
@@ -3966,6 +4004,30 @@ async def _on_new_call(call_id: str, inbound_admission: Any = None) -> None:
             config = _build_telephony_session_config(gateway_type=gateway_type)
             voice_session = await orchestrator.create_voice_session(config)
 
+        if not is_true_inbound:
+            # This callback is post-Answer. Asterisk exposes the earlier event
+            # clock captured before media setup; other adapters use callback
+            # entry as their confirmed Answer boundary.
+            answered_at_monotonic = setup_reference_monotonic
+            answered_at_getter = getattr(
+                get_adapter(),
+                "get_answered_at_monotonic",
+                None,
+            )
+            if callable(answered_at_getter):
+                adapter_answered_at = answered_at_getter(call_id)
+                if isinstance(adapter_answered_at, (int, float)) and not isinstance(
+                    adapter_answered_at,
+                    bool,
+                ):
+                    answered_at_monotonic = float(adapter_answered_at)
+            voice_session._answered_at_monotonic = float(answered_at_monotonic)
+            outbound_call_session = getattr(voice_session, "call_session", None)
+            if outbound_call_session is not None:
+                outbound_call_session._answered_at_monotonic = float(
+                    answered_at_monotonic
+                )
+
         _sb.set_voice_session(call_id, voice_session)
 
         # True inbound first-speaker comes only from the admitted, pinned
@@ -4700,6 +4762,12 @@ def _resolve_inbound_terminal_outcome(
     """
 
     if voice_session is not None:
+        call_session = getattr(voice_session, "call_session", None)
+        if bool(
+            getattr(voice_session, "_pipeline_failed", False)
+            or getattr(call_session, "_tts_terminal_failure_hangup", False)
+        ):
+            return "failed"
         selected_action = (
             str(getattr(voice_session, "_inbound_selected_action", "") or "").strip().lower()
         )
@@ -4712,9 +4780,7 @@ def _resolve_inbound_terminal_outcome(
                 selected_action = str(inbound_config.get("selected_action") or "").strip().lower()
 
         if selected_action == "voicemail":
-            return (
-                "failed" if bool(getattr(voice_session, "_pipeline_failed", False)) else "answered"
-            )
+            return "answered"
         return resolve_call_outcome(
             voice_session,
             hangup_reason=hangup_reason,
@@ -4740,6 +4806,30 @@ def _resolve_inbound_terminal_outcome(
     return "answered" if was_answered else "failed"
 
 
+def _inbound_processing_terminal_status(
+    *,
+    outcome: str,
+    voice_session: Any,
+    admission: Mapping[str, Any],
+    recovery_context: Optional[Mapping[str, Any]],
+) -> str:
+    """Project technical failure onto the durable processing state.
+
+    A session can exist and still terminate because its STT/LLM/TTS/media
+    pipeline failed.  ``voice_session is not None`` therefore proves that
+    processing started, not that it completed successfully.
+    """
+    if str(outcome or "").strip().lower() == "failed":
+        return "failed"
+    return (
+        "completed"
+        if voice_session is not None
+        or bool(admission.get("_transfer_connected"))
+        or bool((recovery_context or {}).get("was_answered"))
+        else "failed"
+    )
+
+
 async def _on_call_ended(
     call_id: str,
     *,
@@ -4756,6 +4846,7 @@ async def _on_call_ended(
     logical path converged. Durable ledger deletion is separately controllable
     so recovery can make it its final, awaited commit point.
     """
+    terminal_callback_at_monotonic = asyncio.get_running_loop().time()
     if recovery_context is None:
         managed_context = _orphan_recovery_contexts_by_call.get(call_id)
         if managed_context is not None:
@@ -4816,6 +4907,13 @@ async def _on_call_ended(
         )
         if callable(pop_terminal_time):
             terminal_at_monotonic = pop_terminal_time(call_id)
+    if recovery_context is None and (
+        isinstance(terminal_at_monotonic, bool)
+        or not isinstance(terminal_at_monotonic, (int, float))
+    ):
+        # Non-Asterisk adapters invoke this callback from their authoritative
+        # terminal event and do not expose a separate frozen event clock.
+        terminal_at_monotonic = terminal_callback_at_monotonic
     is_true_inbound = bool(
         (recovery_context or {}).get("direction") == "inbound" or inbound_admission.get("allowed")
     )
@@ -4827,6 +4925,8 @@ async def _on_call_ended(
     outbound_settlement_verified = bool(is_true_inbound or recovery_context)
     inbound_transfer_settlement_verified = True
     inbound_duration_s = 0
+    outbound_duration_s = 0
+    adapter_answered_at: Any = None
     inbound_terminal_reason: Optional[str] = (
         str(inbound_admission.get("_terminal_reason"))
         if inbound_admission.get("_terminal_reason")
@@ -4853,6 +4953,20 @@ async def _on_call_ended(
         inbound_duration_s = recovery_duration
     if is_true_inbound:
         await _cancel_inbound_runtime_guards(call_id)
+    elif recovery_context is None:
+        adapter = get_adapter()
+        pop_answered_at = getattr(
+            adapter,
+            "pop_outbound_answered_at_monotonic",
+            None,
+        )
+        if callable(pop_answered_at):
+            adapter_answered_at = pop_answered_at(call_id)
+        outbound_duration_s = _confirmed_outbound_duration_seconds(
+            None,
+            terminal_at_monotonic,
+            answered_at_monotonic=adapter_answered_at,
+        )
 
     # Avoid leaking the audio-route failure trackers across calls.
     _audio_route_failure_counts.pop(call_id, None)
@@ -4940,16 +5054,11 @@ async def _on_call_ended(
                 inbound_duration_s = 0
                 inbound_terminal_reason = "process_restart_answer_ambiguous"
         elif not is_true_inbound:
-            try:
-                inbound_duration_s = int(
-                    getattr(
-                        getattr(voice_session, "call_session", None),
-                        "get_duration_seconds",
-                        lambda: 0,
-                    )()
-                )
-            except Exception:
-                inbound_duration_s = 0
+            outbound_duration_s = _confirmed_outbound_duration_seconds(
+                voice_session,
+                terminal_at_monotonic,
+                answered_at_monotonic=adapter_answered_at,
+            )
         session_terminal_reason = getattr(voice_session, "_hangup_reason", None)
         if inbound_terminal_reason != "process_restart_answer_ambiguous":
             inbound_terminal_reason = session_terminal_reason
@@ -5085,13 +5194,7 @@ async def _on_call_ended(
                         voice_session,
                         hangup_reason=getattr(voice_session, "_hangup_reason", None),
                     )
-                    duration = int(
-                        getattr(
-                            getattr(voice_session, "call_session", None),
-                            "get_duration_seconds",
-                            lambda: 0,
-                        )()
-                    )
+                    duration = outbound_duration_s
                     # The hangup hook runs without a request-scoped JWT,
                     # so the postgres adapter's tenant context is empty
                     # and every RPC (update_call_status, increment_
@@ -5243,7 +5346,17 @@ async def _on_call_ended(
                         call_id,
                     )
                 if _row is not None:
-                    outcome = resolve_call_outcome(None, hangup_reason=_cause)
+                    from app.domain.models.dialer_job import CallOutcome
+
+                    answer_was_confirmed = isinstance(
+                        adapter_answered_at,
+                        (int, float),
+                    ) and not isinstance(adapter_answered_at, bool)
+                    outcome = (
+                        CallOutcome.FAILED
+                        if answer_was_confirmed
+                        else resolve_call_outcome(None, hangup_reason=_cause)
+                    )
                     from app.core.security.tenant_isolation import (
                         set_bypass_rls,
                         set_current_tenant_id,
@@ -5261,7 +5374,7 @@ async def _on_call_ended(
                     settlement_result = await call_service.handle_call_status(
                         call_uuid=str(_row["id"]),
                         outcome=outcome,
-                        duration=0,
+                        duration=outbound_duration_s,
                     )
                     if not settlement_result.durable:
                         raise RuntimeError(
@@ -5352,12 +5465,11 @@ async def _on_call_ended(
                 await _finalize_inbound_admission(
                     call_id,
                     inbound_admission,
-                    terminal_status=(
-                        "completed"
-                        if voice_session is not None
-                        or bool(inbound_admission.get("_transfer_connected"))
-                        or bool((recovery_context or {}).get("was_answered"))
-                        else "failed"
+                    terminal_status=_inbound_processing_terminal_status(
+                        outcome=inbound_outcome,
+                        voice_session=voice_session,
+                        admission=inbound_admission,
+                        recovery_context=recovery_context,
                     ),
                     duration_seconds=inbound_duration_s,
                     outcome=inbound_outcome,
@@ -5392,12 +5504,19 @@ async def _on_call_ended(
         or not inbound_transfer_settlement_verified
     )
     if settlement_failed:
+        answered_retry_obligation = (
+            not is_true_inbound
+            and isinstance(adapter_answered_at, (int, float))
+            and not isinstance(adapter_answered_at, bool)
+        )
         # Promote the current-pod ledger entry to an explicit cleanup
         # obligation. Ordinary active entries owned by this live incarnation
-        # are intentionally excluded from orphan scans; termination_pending
-        # entries are retried by the <=30s watchdog even when this pod remains
-        # healthy. Never leave the ten-minute in-process duplicate marker in
-        # front of that retry.
+        # are intentionally excluded from orphan scans. Both retry states are
+        # retried by the <=30s watchdog even when this pod remains healthy;
+        # answer_pending additionally preserves confirmed Answer truth for a
+        # successor when setup failed before the calls row could be stamped.
+        # Never leave the ten-minute in-process duplicate marker in front of
+        # that retry.
         try:
             tenant_for_retry = inbound_admission.get("tenant_id") or getattr(
                 voice_session, "_dialer_tenant_id", None
@@ -5409,7 +5528,11 @@ async def _on_call_ended(
                 call_id,
                 tenant_id=(str(tenant_for_retry) if tenant_for_retry else None),
                 campaign_id=(str(campaign_for_retry) if campaign_for_retry else None),
-                state="termination_pending",
+                state=(
+                    "answer_pending"
+                    if answered_retry_obligation
+                    else "termination_pending"
+                ),
             )
         except Exception as exc:
             logger.error(

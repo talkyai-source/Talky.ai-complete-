@@ -7,6 +7,15 @@ from typing import Optional, Dict, Any
 from datetime import datetime
 from pydantic import BaseModel, Field
 from app.core.postgres_adapter import Client
+from app.domain.services.campaign_service import (
+    CampaignError,
+    CampaignNotFoundError,
+    CampaignService,
+    CampaignStateError,
+)
+from app.infrastructure.assistant.tools.campaign_direction import (
+    outbound_campaign_refusal,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -14,6 +23,15 @@ logger = logging.getLogger(__name__)
 class StartCampaignInput(BaseModel):
     """Input for start_campaign tool"""
     campaign_id: str
+
+
+def _get_campaign_service(db_client: Client) -> CampaignService:
+    """Use the same queue-backed domain service as the HTTP campaign endpoint."""
+    from app.core.container import get_container
+
+    container = get_container()
+    queue_service = container.queue_service if container.is_initialized else None
+    return CampaignService(db_client, queue_service=queue_service)
 
 
 async def get_campaigns(
@@ -26,7 +44,7 @@ async def get_campaigns(
     """
     try:
         query = db_client.table("campaigns").select(
-            "id, name, status, goal, total_leads, calls_completed, calls_failed, created_at",
+            "id, name, status, direction, goal, total_leads, calls_completed, calls_failed, created_at",
             count="exact"
         ).eq("tenant_id", tenant_id)
 
@@ -54,23 +72,20 @@ async def start_campaign(
     Start or resume a campaign.
     """
     try:
-        # Verify campaign belongs to tenant
-        campaign = db_client.table("campaigns").select(
-            "id, name, status"
-        ).eq("id", campaign_id).eq("tenant_id", tenant_id).single().execute()
+        service = _get_campaign_service(db_client)
+        campaign = await service.get_campaign(campaign_id, tenant_id=tenant_id)
+        refusal = outbound_campaign_refusal([campaign], include_success=True)
+        if refusal:
+            return refusal
 
-        if not campaign.data:
-            return {"success": False, "error": "Campaign not found"}
-
-        current_status = campaign.data.get("status")
-        if current_status == "running":
-            return {"success": False, "error": "Campaign is already running"}
-
-        # Update campaign status
-        db_client.table("campaigns").update({
-            "status": "running",
-            "started_at": datetime.utcnow().isoformat() if current_status == "draft" else None
-        }).eq("id", campaign_id).execute()
+        current_status = campaign.get("status")
+        started = await service.start_campaign(campaign_id, tenant_id=tenant_id)
+        if not started.success:
+            return {
+                "success": False,
+                "error": started.error or started.message,
+                "campaign_id": campaign_id,
+            }
 
         # Log action
         db_client.table("assistant_actions").insert({
@@ -81,15 +96,32 @@ async def start_campaign(
             "conversation_id": conversation_id,
             "campaign_id": campaign_id,
             "input_data": json.dumps({"campaign_id": campaign_id}),
-            "output_data": json.dumps({"previous_status": current_status}),
+            "output_data": json.dumps({
+                "previous_status": current_status,
+                "jobs_enqueued": started.jobs_enqueued,
+            }),
             "completed_at": datetime.utcnow().isoformat()
         }).execute()
 
         return {
             "success": True,
-            "message": f"Campaign '{campaign.data.get('name')}' has been started",
-            "campaign_id": campaign_id
+            "message": f"Campaign '{campaign.get('name')}' has been started",
+            "campaign_id": campaign_id,
+            "jobs_enqueued": started.jobs_enqueued,
         }
+    except CampaignNotFoundError:
+        return {"success": False, "error": "Campaign not found"}
+    except CampaignStateError as exc:
+        if "inbound campaign" in exc.message.lower():
+            refusal = outbound_campaign_refusal(
+                [{"id": campaign_id, "direction": "inbound"}],
+                include_success=True,
+            )
+            if refusal:
+                return refusal
+        return {"success": False, "error": exc.message}
+    except CampaignError as exc:
+        return {"success": False, "error": exc.message}
     except Exception as e:
         logger.error(f"Error starting campaign: {e}")
         return {"success": False, "error": str(e)}

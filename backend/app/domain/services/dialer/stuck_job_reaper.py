@@ -28,14 +28,41 @@ logger = logging.getLogger(__name__)
 DEFAULT_STUCK_TIMEOUT_S = int(os.getenv("DIALER_STUCK_TIMEOUT_S", "120"))
 STUCK_REASON = "stuck_timeout"
 
-# How long a CALL row may sit in a non-terminal status before it's a zombie.
-# Must exceed the max plausible live-call lifetime (ring window + the hard call
-# ceiling) so a real 8-minute conversation is never reaped mid-call. Default
-# 600s. Env-overridable.
+# Pre-answer rows have no billable conversation and should settle within the
+# carrier ring window. Connected rows are different: inbound transfer policy
+# supports calls up to four hours, and ``calls.updated_at`` is not a heartbeat.
+# Give the two states separate clocks so a phantom pre-ARI claim still heals
+# quickly without terminating a legitimate long conversation.
 CALL_STUCK_TIMEOUT_S = int(os.getenv("DIALER_CALL_STUCK_TIMEOUT_S", "600"))
-_INFLIGHT_CALL_STATUSES = (
-    "dialing", "ringing", "answered", "in_call", "initiated",
+_PREANSWER_CALL_STATUSES = (
+    "dialing",
+    "ringing",
+    "initiated",
 )
+_CONNECTED_CALL_STATUSES = ("answered", "in_call")
+_INFLIGHT_CALL_STATUSES = _PREANSWER_CALL_STATUSES + _CONNECTED_CALL_STATUSES
+_MAX_SUPPORTED_CALL_DURATION_S = 14_400
+
+
+def _env_int(name: str, default: int) -> int:
+    try:
+        return int(os.getenv(name, str(default)))
+    except (TypeError, ValueError):
+        logger.warning("invalid %s; using %s", name, default)
+        return default
+
+
+def connected_call_stuck_timeout_seconds(configured: int | None = None) -> int:
+    """Return a connected-call timeout above every supported call ceiling."""
+    runtime_max = max(1, _env_int("TELEPHONY_MAX_CALL_DURATION_S", 600))
+    grace = max(60, _env_int("DIALER_CONNECTED_CALL_GRACE_S", 300))
+    safe_floor = max(_MAX_SUPPORTED_CALL_DURATION_S, runtime_max) + grace
+    requested = (
+        _env_int("DIALER_CONNECTED_CALL_STUCK_TIMEOUT_S", safe_floor)
+        if configured is None
+        else int(configured)
+    )
+    return max(safe_floor, requested)
 
 # Call statuses that prove the originate actually landed and a conversation is
 # (or was, moments ago) genuinely under way. A job whose linked `calls` row is
@@ -44,9 +71,8 @@ _INFLIGHT_CALL_STATUSES = (
 # "initiated": that status means a call row was created but the provider never
 # even confirmed the channel, which is exactly the hung-origination case the
 # reaper exists to catch. A call wedged in one of THESE live statuses is still
-# bounded — `reap_stuck_calls` (CALL_STUCK_TIMEOUT_S, default 600s) closes it
-# independently, which drops it out of this set and makes the job reapable on
-# the next tick.
+# bounded — `reap_stuck_calls` uses a short timeout for pre-answer states and
+# a four-hour-safe connected timeout, then moves it to proof-aware teardown.
 _LIVE_CALL_STATUSES = (
     "dialing",
     "ringing",
@@ -206,41 +232,50 @@ async def reap_stuck_calls(
     conn,
     *,
     timeout_seconds: int = CALL_STUCK_TIMEOUT_S,
+    connected_timeout_seconds: int | None = None,
 ) -> int:
     """Mark stale calls for confirmation-aware owner recovery.
 
-    A call that has sat in ``dialing`` / ``ringing`` / ``answered`` / ``in_call``
-    longer than the max plausible call lifetime is a zombie: the originate hung,
-    or an ARI hangup event was lost, so ``_on_call_ended`` never fired to mark it
-    ENDED. Left alone it lingers as "dialing" in the live-calls panel forever AND
-    — now that batch dispatch counts in-flight calls — holds a batch slot,
-    eventually wedging the campaign. Age proves the row is stale, but it does
-    *not* prove that the provider/PBX channel is absent. Therefore the reaper
-    moves it to the nonterminal ``termination_pending`` state. The telephony
-    owner watchdog picks that state up within 30 seconds, proves every leg
-    absent, and only then performs normal settlement. This frees the dialer
-    batch slot without lying to operators or billing.
+    Pre-answer claims use the short origination timeout. Answered/in-call rows
+    use a separately clamped timeout above the platform's four-hour supported
+    ceiling plus recovery grace. Age proves the row is stale, but it does *not*
+    prove the provider/PBX channel is absent, so both paths move only to the
+    nonterminal ``termination_pending`` state. The telephony owner then proves
+    every leg absent before normal settlement.
 
     Idempotent and cheap (one indexed UPDATE); safe on every worker tick.
     """
+    connected_timeout = connected_call_stuck_timeout_seconds(
+        connected_timeout_seconds
+    )
     rows = await conn.fetch(
         """
         UPDATE calls
            SET status     = 'termination_pending',
                updated_at = now()
-         WHERE status = ANY($1::text[])
-           AND created_at < now() - make_interval(secs => $2::int)
+         WHERE (
+                   status = ANY($1::text[])
+               AND created_at < now() - make_interval(secs => $2::int)
+               )
+            OR (
+                   status = ANY($3::text[])
+               AND COALESCE(answered_at, created_at)
+                   < now() - make_interval(secs => $4::int)
+               )
         RETURNING id
         """,
-        list(_INFLIGHT_CALL_STATUSES),
+        list(_PREANSWER_CALL_STATUSES),
         int(timeout_seconds),
+        list(_CONNECTED_CALL_STATUSES),
+        connected_timeout,
     )
     reaped = len(rows)
     if reaped:
         logger.warning(
             "reaper: queued %d stuck call(s) for proof-aware termination "
-            "(in-flight > %ss)",
+            "(pre-answer > %ss or connected > %ss)",
             reaped,
             timeout_seconds,
+            connected_timeout,
         )
     return reaped

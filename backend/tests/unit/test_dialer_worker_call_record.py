@@ -1,17 +1,8 @@
-"""FIX 1(a) (2026-07-13): `_create_call_record` must persist `dialer_job_id`
-on the `calls` row at INSERT time.
+"""Regression coverage for the dialer's durable pre-provider call row."""
 
-Root cause: the pooled call-teardown path (`call_service._handle_call_
-status_pooled`) resolves the dialer job to finalize from `calls.dialer_
-job_id`. Before this fix, the dialer worker never wrote that column, so
-the column was always NULL for every dialer-originated call and job
-finalization (lead status update + dialer_jobs PROCESSING -> terminal)
-was permanently dead on the pooled (production) path.
-"""
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
-from typing import Any
 
 import pytest
 
@@ -19,98 +10,75 @@ from app.domain.models.dialer_job import DialerJob
 from app.workers.dialer_worker import DialerWorker
 
 
-class _RecordingConn:
-    """Records every executed query + its positional args. No real state —
-    `_create_call_record` only ever calls `execute`, never reads results."""
-
-    def __init__(self) -> None:
-        self.calls: list[tuple[str, tuple[Any, ...]]] = []
+class _Conn:
+    def __init__(self, *, fail: bool = False) -> None:
+        self.fail = fail
+        self.queries = []
 
     @asynccontextmanager
     async def transaction(self):
         yield self
 
-    async def execute(self, query: str, *args: Any) -> None:
-        self.calls.append((" ".join(query.split()), args))
+    async def execute(self, query, *args):
+        self.queries.append((" ".join(query.split()), args))
+        return "INSERT 0 1"
 
-
-class _FakePool:
-    def __init__(self, conn: _RecordingConn) -> None:
-        self._conn = conn
-
-    def acquire(self):
-        outer = self
-
-        class _Ctx:
-            async def __aenter__(self):
-                return outer._conn
-
-            async def __aexit__(self, *a):
-                return None
-
-        return _Ctx()
-
-
-@pytest.mark.asyncio
-async def test_create_call_record_persists_dialer_job_id():
-    worker = DialerWorker()
-    conn = _RecordingConn()
-    worker._db_pool = _FakePool(conn)
-
-    job = DialerJob(
-        job_id="job-abc-123",
-        campaign_id="camp-1",
-        lead_id="lead-1",
-        tenant_id="tenant-1",
-        phone_number="+15551234567",
-    )
-
-    internal_call_id, talklee_call_id, leg_id = await worker._create_call_record(
-        job, "provider-call-99",
-    )
-
-    assert internal_call_id and talklee_call_id and leg_id
-
-    insert_calls_queries = [
-        (q, args) for q, args in conn.calls if q.startswith("INSERT INTO calls")
-    ]
-    assert insert_calls_queries, "expected an INSERT INTO calls statement"
-    query, args = insert_calls_queries[0]
-
-    assert "dialer_job_id" in query, (
-        "INSERT INTO calls must write dialer_job_id — without it the "
-        "pooled teardown path can never resolve the dialer_jobs row to "
-        "finalize (see call_service._handle_call_status_pooled)."
-    )
-    assert job.job_id in args, (
-        "the job's id must be one of the bound INSERT parameters"
-    )
-
-
-@pytest.mark.asyncio
-async def test_create_call_record_swallows_db_errors_and_still_returns_ids():
-    class _BoomConn:
-        @asynccontextmanager
-        async def transaction(self):
-            yield self
-
-        async def execute(self, *a, **k):
+    async def fetchrow(self, query, *args):
+        self.queries.append((" ".join(query.split()), args))
+        if self.fail:
             raise RuntimeError("db down")
+        return {
+            "id": args[0],
+            "talklee_call_id": args[5],
+            "status": "initiated",
+            "provider_call_id": None,
+        }
 
-    worker = DialerWorker()
-    worker._db_pool = _FakePool(_BoomConn())  # type: ignore[arg-type]
 
-    job = DialerJob(
-        job_id="job-xyz",
-        campaign_id="camp-1",
-        lead_id="lead-1",
-        tenant_id="tenant-1",
+class _Pool:
+    def __init__(self, conn) -> None:
+        self.conn = conn
+
+    @asynccontextmanager
+    async def acquire(self):
+        yield self.conn
+
+
+def _job() -> DialerJob:
+    return DialerJob(
+        job_id="11111111-1111-4111-8111-111111111111",
+        campaign_id="22222222-2222-4222-8222-222222222222",
+        lead_id="33333333-3333-4333-8333-333333333333",
+        tenant_id="44444444-4444-4444-8444-444444444444",
         phone_number="+15551234567",
+        attempt_number=2,
     )
 
-    internal_call_id, talklee_call_id, leg_id = await worker._create_call_record(
-        job, "provider-call-1",
-    )
-    assert internal_call_id
-    assert talklee_call_id
-    assert leg_id == ""
+
+@pytest.mark.asyncio
+async def test_call_intent_persists_job_and_attempt_before_provider_identity():
+    worker = DialerWorker()
+    conn = _Conn()
+    worker._db_pool = _Pool(conn)
+
+    intent = await worker._create_call_intent(_job())
+
+    query, args = next((q, a) for q, a in conn.queries if "INSERT INTO calls" in q)
+    columns = query.split("VALUES", 1)[0]
+    assert "dialer_job_id" in columns
+    assert "dialer_attempt_number" in columns
+    assert "external_call_uuid" not in columns
+    assert "provider_call_id" not in columns
+    assert _job().job_id in args
+    assert _job().attempt_number in args
+    assert intent.call_id
+    assert intent.talklee_call_id
+
+
+@pytest.mark.asyncio
+async def test_call_intent_does_not_swallow_database_failure():
+    worker = DialerWorker()
+    worker._db_pool = _Pool(_Conn(fail=True))
+
+    with pytest.raises(RuntimeError, match="durable call intent"):
+        await worker._create_call_intent(_job())

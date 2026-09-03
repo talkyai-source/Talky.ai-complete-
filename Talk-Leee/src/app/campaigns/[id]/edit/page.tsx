@@ -19,6 +19,8 @@ import {
 } from "@/components/campaigns/campaign-form";
 import { CampaignBasicsEditor } from "@/components/campaigns/campaign-basics-editor";
 import { dashboardApi, type PersonaType, type CampaignCallingSchedule } from "@/lib/dashboard-api";
+import { inboundCampaignHrefForBase, isOutboundCampaign } from "@/lib/campaign-direction";
+import { inboundApi } from "@/lib/inbound-api";
 import { ArrowLeft, RefreshCw } from "lucide-react";
 import { motion } from "framer-motion";
 
@@ -77,6 +79,15 @@ export default function EditCampaignPage() {
                 setLoading(true);
                 const { campaign } = await dashboardApi.getCampaign(campaignId);
                 if (cancelled) return;
+                if (!isOutboundCampaign(campaign)) {
+                    const inboundCampaigns = await inboundApi.list({ includeArchived: true });
+                    if (!cancelled) {
+                        router.replace(
+                            inboundCampaignHrefForBase(campaignId, inboundCampaigns),
+                        );
+                    }
+                    return;
+                }
 
                 const scriptConfig = campaign.script_config ?? {};
                 const slots: Record<string, string> = {};
@@ -119,7 +130,7 @@ export default function EditCampaignPage() {
         return () => {
             cancelled = true;
         };
-    }, [campaignId]);
+    }, [campaignId, router]);
 
     return (
         <DashboardLayout

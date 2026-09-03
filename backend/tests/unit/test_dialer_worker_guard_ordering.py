@@ -22,7 +22,7 @@ import pytest
 
 from app.domain.models.calling_rules import CallingRules
 from app.domain.models.dialer_job import DialerJob
-from app.workers.dialer_worker import DialerWorker
+from app.workers.dialer_worker import DialerCallIntent, DialerWorker
 
 
 def _job() -> DialerJob:
@@ -44,6 +44,7 @@ def _base_worker() -> DialerWorker:
     worker._redis = None  # tenant-pacing / release_tenant_dial_slot fail-open on None
 
     worker._get_campaign_status = AsyncMock(return_value="running")
+    worker._load_existing_call_intent = AsyncMock(return_value=None)
     worker._tenant_minutes_exhausted = AsyncMock(return_value=False)
     worker._get_tenant_rules = AsyncMock(return_value=CallingRules.default())
     worker._get_campaign_calling_config = AsyncMock(return_value={})
@@ -66,7 +67,9 @@ def _base_worker() -> DialerWorker:
     # defeat the assertion that ONLY a guard block/throttle/queue releases
     # it).
     worker._make_call = AsyncMock(return_value="provider-call-1")
-    worker._create_call_record = AsyncMock(return_value=("call-1", "tk-1", "leg-1"))
+    intent = DialerCallIntent("call-1", "tk-1", "leg-1", "initiated", None, True)
+    worker._create_call_intent = AsyncMock(return_value=intent)
+    worker._bind_call_intent = AsyncMock()
     worker._update_lead_status = AsyncMock()
     worker._mark_campaign_dialed = AsyncMock()
     worker._emit_progress_event_throttled = AsyncMock()

@@ -254,11 +254,22 @@ function elapsedSeconds(startIso: string | null | undefined, nowMs: number): num
 export type LiveCallsPanelProps = {
     /** When set, scopes the panel to one campaign. Omit for tenant-wide view. */
     campaignId?: string;
+    /** When set, prevents this operational surface from mixing call directions. */
+    direction?: "inbound" | "outbound";
     /** Optional title override. */
     title?: string;
 };
 
-export function LiveCallsPanel({ campaignId, title = "Live calls" }: LiveCallsPanelProps) {
+export function LiveCallsPanel(props: LiveCallsPanelProps = {}) {
+    return (
+        <LiveCallsPanelScope
+            key={`${props.campaignId ?? "all"}:${props.direction ?? "all"}`}
+            {...props}
+        />
+    );
+}
+
+function LiveCallsPanelScope({ campaignId, direction, title = "Live calls" }: LiveCallsPanelProps) {
     const permissions = useEffectivePermissions();
     const recordingCapabilities = getRecordingCapabilities(
         permissions.isSuccess ? permissions.data.permissions : undefined,
@@ -472,15 +483,17 @@ export function LiveCallsPanel({ campaignId, title = "Live calls" }: LiveCallsPa
 
     useEffect(() => {
         aborted.current = false;
+        let cancelled = false;
         let cancelTimer: number | undefined;
 
         const poll = async () => {
             try {
                 const res = await api.listLiveCalls({
                     campaignId,
+                    direction,
                     recentWindowSeconds: RECENT_WINDOW_SECONDS,
                 });
-                if (aborted.current) return;
+                if (cancelled) return;
                 setItems(res.items);
                 setTerminations((current) => {
                     const polledById = new Map(res.items.map((item) => [item.id, item]));
@@ -509,11 +522,11 @@ export function LiveCallsPanel({ campaignId, title = "Live calls" }: LiveCallsPa
                 });
                 setError(null);
             } catch (err) {
-                if (aborted.current) return;
+                if (cancelled) return;
                 // Don't blank the panel on a transient error — just surface it.
                 setError(err instanceof Error ? err.message : "Failed to load live calls");
             } finally {
-                if (!aborted.current) {
+                if (!cancelled) {
                     cancelTimer = window.setTimeout(poll, POLL_INTERVAL_MS);
                 }
             }
@@ -523,11 +536,12 @@ export function LiveCallsPanel({ campaignId, title = "Live calls" }: LiveCallsPa
         const tick = window.setInterval(() => setNowMs(Date.now()), 1000);
 
         return () => {
+            cancelled = true;
             aborted.current = true;
             if (cancelTimer !== undefined) window.clearTimeout(cancelTimer);
             window.clearInterval(tick);
         };
-    }, [campaignId]);
+    }, [campaignId, direction]);
 
     const live = useMemo(
         () => items.filter((it) => !isTerminalLiveCall(it.status)),

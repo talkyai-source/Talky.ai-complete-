@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -1255,6 +1256,30 @@ class CampaignTrunkResponse(BaseModel):
     caller_id: Optional[str] = None
 
 
+_CAMPAIGN_ASSIGNMENT_DB_TIMEOUT_S = 5.0
+
+
+def _campaign_assignment_boundary_problem(request: Request, campaign) -> Optional[JSONResponse]:
+    """Translate an owned campaign snapshot into the public boundary contract."""
+    if campaign is None:
+        return _problem(
+            request=request,
+            status_code=404,
+            title="Campaign Not Found",
+            detail="No such campaign under this tenant.",
+            type_suffix="campaign-not-found",
+        )
+    if str(campaign["direction"] or "").strip().lower() != "outbound":
+        return _problem(
+            request=request,
+            status_code=409,
+            title="Inbound Campaign Managed Separately",
+            detail="SIP trunk assignment on this route is only valid for outbound campaigns.",
+            type_suffix="inbound-campaign-managed-separately",
+        )
+    return None
+
+
 async def _fetch_assignable_trunk(conn, trunk_id: str, tenant_id):
     """Read one active trunk this tenant may dial on: their OWN trunk or a
     shared-pool account. RLS bypassed inside a transaction (pool rows live
@@ -1270,6 +1295,7 @@ async def _fetch_assignable_trunk(conn, trunk_id: str, tenant_id):
         FROM tenant_sip_trunks
         WHERE id = $1::uuid AND is_active = TRUE
           AND (tenant_id = $2::uuid OR metadata->>'pool' = 'true')
+        FOR SHARE
         """,
         trunk_id,
         str(tenant_id),
@@ -1286,16 +1312,45 @@ async def get_campaign_trunk_assignment(
     tenant_problem = _require_tenant(request, current_user)
     if tenant_problem:
         return tenant_problem
-    async with acquire_with_tenant(
-        db_pool, current_user.tenant_id, user_id=current_user.id
-    ) as conn:
-        await apply_tenant_rls_context(conn, current_user.tenant_id, current_user.id)
-        raw = await conn.fetchval(
-            "SELECT calling_config->'trunk' FROM campaigns "
-            "WHERE id = $1::uuid AND tenant_id = $2::uuid",
-            campaign_id,
-            current_user.tenant_id,
+    try:
+        campaign_id = str(UUID(str(campaign_id)))
+    except (TypeError, ValueError, AttributeError):
+        return _problem(
+            request=request,
+            status_code=422,
+            title="Invalid Campaign ID",
+            detail="campaign_id must be a valid UUID.",
+            type_suffix="invalid-campaign-id",
         )
+    try:
+        async with asyncio.timeout(_CAMPAIGN_ASSIGNMENT_DB_TIMEOUT_S):
+            async with acquire_with_tenant(
+                db_pool,
+                current_user.tenant_id,
+                user_id=current_user.id,
+                timeout=_CAMPAIGN_ASSIGNMENT_DB_TIMEOUT_S,
+            ) as conn:
+                await apply_tenant_rls_context(conn, current_user.tenant_id, current_user.id)
+                campaign = await conn.fetchrow(
+                    "SELECT id, direction, calling_config->'trunk' AS trunk_config "
+                    "FROM campaigns "
+                    "WHERE id = $1::uuid AND tenant_id = $2::uuid",
+                    campaign_id,
+                    current_user.tenant_id,
+                )
+    except Exception as exc:  # noqa: BLE001 - absence cannot be inferred on DB failure
+        logger.error("campaign_trunk_assignment_lookup_failed: %s", exc)
+        return _problem(
+            request=request,
+            status_code=503,
+            title="Campaign Lookup Unavailable",
+            detail="Campaign ownership could not be verified. Retry later.",
+            type_suffix="campaign-lookup-unavailable",
+        )
+    boundary_problem = _campaign_assignment_boundary_problem(request, campaign)
+    if boundary_problem:
+        return boundary_problem
+    raw = campaign["trunk_config"]
     if not raw:
         return CampaignTrunkResponse(campaign_id=campaign_id)
     ct = raw if isinstance(raw, dict) else json.loads(raw)
@@ -1324,74 +1379,112 @@ async def set_campaign_trunk_assignment(
     campaign_id = str(body.campaign_id)
     tid = str(body.trunk_id) if body.trunk_id is not None else None
 
-    if tid is None:
-        async with acquire_with_tenant(
-            db_pool, current_user.tenant_id, user_id=current_user.id
-        ) as conn:
-            await apply_tenant_rls_context(conn, current_user.tenant_id, current_user.id)
-            await conn.execute(
-                "UPDATE campaigns SET calling_config = "
-                "(COALESCE(calling_config,'{}'::jsonb) - 'trunk'), updated_at = NOW() "
-                "WHERE id = $1::uuid AND tenant_id = $2::uuid",
-                campaign_id,
-                current_user.tenant_id,
-            )
+    try:
+        # One transaction holds a row lock from direction verification through
+        # mutation.  The bypass is necessary only because an assignable shared
+        # trunk can belong to the pool tenant; every campaign statement still
+        # carries an explicit tenant predicate.
+        async with asyncio.timeout(_CAMPAIGN_ASSIGNMENT_DB_TIMEOUT_S):
+            async with acquire_with_tenant(
+                db_pool,
+                None,
+                user_id=current_user.id,
+                timeout=_CAMPAIGN_ASSIGNMENT_DB_TIMEOUT_S,
+            ) as conn:
+                campaign = await conn.fetchrow(
+                    "SELECT id, direction FROM campaigns "
+                    "WHERE id = $1::uuid AND tenant_id = $2::uuid FOR UPDATE",
+                    campaign_id,
+                    current_user.tenant_id,
+                )
+                boundary_problem = _campaign_assignment_boundary_problem(request, campaign)
+                if boundary_problem:
+                    return boundary_problem
+
+                if tid is None:
+                    updated = await conn.execute(
+                        "UPDATE campaigns SET calling_config = "
+                        "(COALESCE(calling_config,'{}'::jsonb) - 'trunk'), "
+                        "updated_at = NOW() "
+                        "WHERE id = $1::uuid AND tenant_id = $2::uuid "
+                        "AND direction = 'outbound'",
+                        campaign_id,
+                        current_user.tenant_id,
+                    )
+                    snapshot = None
+                else:
+                    trunk = await _fetch_assignable_trunk(conn, tid, current_user.tenant_id)
+                    runtime = (
+                        evaluate_trunk_runtime(dict(trunk), require_inbound=False)
+                        if trunk is not None
+                        else None
+                    )
+                    outbound_direction = bool(
+                        trunk is not None and trunk["direction"] in {"outbound", "both"}
+                    )
+                    if trunk is None or not runtime or not runtime.ready or not outbound_direction:
+                        runtime_detail = (
+                            "The trunk is not outbound-capable."
+                            if trunk is not None and not outbound_direction
+                            else runtime.detail if runtime else "The trunk is unavailable."
+                        )
+                        return _problem(
+                            request=request,
+                            status_code=400,
+                            title="Invalid Trunk",
+                            detail=f"That trunk is not safe to assign: {runtime_detail}",
+                            type_suffix="invalid-campaign-trunk",
+                        )
+                    from app.domain.services.telephony.trunk_resolver import (
+                        env_default_endpoint,
+                        platform_default_trunk_name,
+                    )
+
+                    is_platform_default = (
+                        str(trunk["trunk_name"] or "").strip().lower()
+                        == platform_default_trunk_name().strip().lower()
+                    )
+                    snapshot = {
+                        "id": str(trunk["id"]),
+                        "endpoint": (
+                            env_default_endpoint()
+                            if is_platform_default
+                            else f"trunk-{trunk['id']}"
+                        ),
+                        "caller_id": trunk["caller_id"],
+                        "label": trunk["trunk_name"] or trunk["auth_username"],
+                    }
+                    updated = await conn.execute(
+                        "UPDATE campaigns SET calling_config = "
+                        "COALESCE(calling_config,'{}'::jsonb) "
+                        "|| jsonb_build_object('trunk', $3::jsonb), updated_at = NOW() "
+                        "WHERE id = $1::uuid AND tenant_id = $2::uuid "
+                        "AND direction = 'outbound'",
+                        campaign_id,
+                        current_user.tenant_id,
+                        # Raw dict — see create-path comment above.
+                        snapshot,
+                    )
+    except Exception as exc:  # noqa: BLE001 - DB uncertainty is not not-found
+        logger.error("campaign_trunk_assignment_write_failed: %s", exc)
+        return _problem(
+            request=request,
+            status_code=503,
+            title="Campaign Assignment Unavailable",
+            detail="Campaign ownership and direction could not be verified. Retry later.",
+            type_suffix="campaign-assignment-unavailable",
+        )
+
+    if updated != "UPDATE 1":
+        return _problem(
+            request=request,
+            status_code=409,
+            title="Campaign Assignment Conflict",
+            detail="The campaign changed while its trunk assignment was being updated.",
+            type_suffix="campaign-assignment-conflict",
+        )
+    if snapshot is None:
         return CampaignTrunkResponse(campaign_id=campaign_id)
-
-    async with acquire_with_tenant(db_pool, None, user_id=current_user.id) as conn:
-        trunk = await _fetch_assignable_trunk(conn, tid, current_user.tenant_id)
-    runtime = (
-        evaluate_trunk_runtime(dict(trunk), require_inbound=False) if trunk is not None else None
-    )
-    outbound_direction = bool(trunk is not None and trunk["direction"] in {"outbound", "both"})
-    if trunk is None or not runtime or not runtime.ready or not outbound_direction:
-        runtime_detail = (
-            "The trunk is not outbound-capable."
-            if trunk is not None and not outbound_direction
-            else runtime.detail if runtime else "The trunk is unavailable."
-        )
-        return _problem(
-            request=request,
-            status_code=400,
-            title="Invalid Trunk",
-            detail=f"That trunk is not safe to assign: {runtime_detail}",
-            type_suffix="invalid-campaign-trunk",
-        )
-    from app.domain.services.telephony.trunk_resolver import (
-        env_default_endpoint,
-        platform_default_trunk_name,
-    )
-
-    is_platform_default = (
-        str(trunk["trunk_name"] or "").strip().lower()
-        == platform_default_trunk_name().strip().lower()
-    )
-    snapshot = {
-        "id": str(trunk["id"]),
-        "endpoint": env_default_endpoint() if is_platform_default else f"trunk-{trunk['id']}",
-        "caller_id": trunk["caller_id"],
-        "label": trunk["trunk_name"] or trunk["auth_username"],
-    }
-    async with acquire_with_tenant(
-        db_pool, current_user.tenant_id, user_id=current_user.id
-    ) as conn:
-        updated = await conn.execute(
-            "UPDATE campaigns SET calling_config = COALESCE(calling_config,'{}'::jsonb) "
-            "|| jsonb_build_object('trunk', $3::jsonb), updated_at = NOW() "
-            "WHERE id = $1::uuid AND tenant_id = $2::uuid",
-            # Raw dict — see create-path comment above.
-            campaign_id,
-            current_user.tenant_id,
-            snapshot,
-        )
-    if updated == "UPDATE 0":
-        return _problem(
-            request=request,
-            status_code=404,
-            title="Campaign Not Found",
-            detail="No such campaign under this tenant.",
-            type_suffix="campaign-not-found",
-        )
     return CampaignTrunkResponse(
         campaign_id=campaign_id,
         trunk_id=snapshot["id"],

@@ -35,14 +35,16 @@ import enum
 import logging
 import time
 from dataclasses import dataclass
-from typing import Optional, Set, List, Dict, Any
+from typing import TYPE_CHECKING, Optional, Set, List, Dict, Any
 from functools import wraps
 
 from fastapi import Depends, HTTPException, status, Request
 
-from app.api.v1.dependencies import CurrentUser, get_current_user
 from app.core.db_utils import acquire_with_tenant
 from app.core.postgres_adapter import Client
+
+if TYPE_CHECKING:
+    from app.api.v1.dependencies import CurrentUser
 
 logger = logging.getLogger(__name__)
 
@@ -867,7 +869,12 @@ def require_role(
         ):
             ...
     """
-    async def role_checker(user: CurrentUser = Depends(get_current_user)) -> CurrentUser:
+    # Import lazily: dependencies.py re-exports this module after defining its
+    # authentication dependency.  Importing dependencies at module load time
+    # makes `import rbac` fail whenever it happens before `import dependencies`.
+    from app.api.v1.dependencies import get_current_user
+
+    async def role_checker(user: Any = Depends(get_current_user)) -> Any:
         user_role = normalize_role(user.role)
 
         # Platform admin bypass (if enabled)
@@ -908,10 +915,12 @@ def require_permission(
         ):
             ...
     """
+    from app.api.v1.dependencies import get_current_user
+
     async def permission_checker(
         request: Request,
-        user: CurrentUser = Depends(get_current_user),
-    ) -> CurrentUser:
+        user: Any = Depends(get_current_user),
+    ) -> Any:
         # Extract tenant_id from request
         tenant_id = None
         if tenant_id_from == "header":
@@ -997,10 +1006,12 @@ def require_tenant_member(
         ):
             ...
     """
+    from app.api.v1.dependencies import get_current_user
+
     async def tenant_checker(
         request: Request,
-        user: CurrentUser = Depends(get_current_user),
-    ) -> CurrentUser:
+        user: Any = Depends(get_current_user),
+    ) -> Any:
         tenant_id = request.path_params.get(tenant_id_param) or request.headers.get("X-Tenant-ID")
 
         if not tenant_id:
@@ -1058,6 +1069,8 @@ def requires_permission(permission: Permission):
     def decorator(func):
         @wraps(func)
         async def wrapper(*args, **kwargs):
+            from app.api.v1.dependencies import CurrentUser
+
             # Extract user from kwargs or args
             user = kwargs.get('user') or kwargs.get('current_user')
             if not user and args:

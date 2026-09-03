@@ -36,6 +36,7 @@ from app.domain.models.ai_config import AIProviderConfig
 from app.domain.services.voice_tuning import VoiceTuning
 from app.domain.services.voice_orchestrator import Direction
 from app.api.v1.endpoints import campaign_test_ws
+from app.core.security.rbac import Permission
 
 
 # ---------------------------------------------------------------------------
@@ -115,7 +116,14 @@ def _end_call_frame():
 class _Harness:
     """Sets up every patch the endpoint needs and records the resolved config."""
 
-    def __init__(self, *, tenant_cfg, campaign_row, tenant_id="tenant-A"):
+    def __init__(
+        self,
+        *,
+        tenant_cfg,
+        campaign_row,
+        tenant_id="tenant-A",
+        permissions=None,
+    ):
         self.tenant_cfg = tenant_cfg
         self.campaign_row = campaign_row
         self.tenant_id = tenant_id
@@ -124,6 +132,17 @@ class _Harness:
         self.orchestrator.start_pipeline = AsyncMock()
         self.orchestrator.send_greeting = AsyncMock()
         self.orchestrator.end_session = AsyncMock()
+        self.record_test_call = AsyncMock(return_value="row-1")
+        self.persist_test_transcript = AsyncMock()
+        self.finalise_test_call = AsyncMock()
+        self.get_effective_permissions = AsyncMock(
+            return_value=(
+                permissions
+                if permissions is not None
+                else {Permission.CAMPAIGNS_UPDATE}
+            )
+        )
+        self.fetch_campaign = AsyncMock(return_value=campaign_row)
 
         def _create(config):
             self.captured["config"] = config
@@ -167,7 +186,24 @@ class _Harness:
             patch("app.core.container.get_container", return_value=self.container),
             patch(
                 "app.api.v1.endpoints.campaign_test_ws._fetch_campaign_row",
-                AsyncMock(return_value=campaign_row),
+                self.fetch_campaign,
+            ),
+            patch(
+                "app.api.v1.endpoints.campaign_test_ws.get_effective_permissions",
+                self.get_effective_permissions,
+                create=True,
+            ),
+            patch(
+                "app.api.v1.endpoints.campaign_test_ws._record_test_call",
+                self.record_test_call,
+            ),
+            patch(
+                "app.api.v1.endpoints.campaign_test_ws._persist_test_transcript",
+                self.persist_test_transcript,
+            ),
+            patch(
+                "app.api.v1.endpoints.campaign_test_ws._finalise_test_call",
+                self.finalise_test_call,
             ),
             patch(
                 "app.domain.services.telephony_session_config.build_telephony_session_config",
@@ -197,6 +233,7 @@ class _Harness:
 _CAMPAIGN = {
     "id": "camp-1",
     "tenant_id": "tenant-A",
+    "direction": "outbound",
     "script_config": {"company_name": "Acme", "agent_names": ["Alex"]},
 }
 
@@ -317,6 +354,35 @@ async def test_auth_refusal_carries_the_machine_readable_code():
     )
 
 
+@pytest.mark.asyncio
+async def test_readonly_user_cannot_start_campaign_test_or_consume_providers():
+    tenant_cfg = AIProviderConfig(pipeline_mode="cascaded")
+    with _Harness(
+        tenant_cfg=tenant_cfg,
+        campaign_row=_CAMPAIGN,
+        permissions={Permission.CAMPAIGNS_READ},
+    ) as h:
+        ws = FakeWebSocket(
+            cookies={"talky_at": "tok"},
+            recv_frames=[_end_call_frame()],
+        )
+        await campaign_test_ws.campaign_test_websocket(
+            ws,
+            "camp-1",
+            first_speaker="agent",
+        )
+
+    assert ws.closed_code == 1008
+    assert any(
+        frame.get("code") == "permission_denied"
+        and frame.get("required") == Permission.CAMPAIGNS_UPDATE.value
+        for frame in ws.sent
+    )
+    h.fetch_campaign.assert_not_awaited()
+    h.orchestrator.create_voice_session.assert_not_called()
+    h.record_test_call.assert_not_awaited()
+
+
 # ---------------------------------------------------------------------------
 # 3b. transcripts — the row id, the persist, and the order of the two
 # ---------------------------------------------------------------------------
@@ -348,7 +414,19 @@ async def test_the_test_call_row_id_is_the_voice_session_id():
 
     session_uuid = str(_uuid.uuid4())
     voice_session = SimpleNamespace(call_id=session_uuid, talklee_call_id=None)
-    conn = SimpleNamespace(execute=AsyncMock())
+    events: list[str] = []
+
+    async def _fetchrow(*_args):
+        events.append("campaign_lock")
+        return {"direction": "outbound"}
+
+    async def _execute(*_args):
+        events.append("insert")
+
+    conn = SimpleNamespace(
+        fetchrow=AsyncMock(side_effect=_fetchrow),
+        execute=AsyncMock(side_effect=_execute),
+    )
     container = SimpleNamespace(db_pool=object())
     config = SimpleNamespace(
         prompt_template="tpl", prompt_version="lead_gen@3", prompt_hash="deadbeef"
@@ -369,6 +447,115 @@ async def test_the_test_call_row_id_is_the_voice_session_id():
         "The per-turn transcript flush targets the session id and will match "
         "zero rows."
     )
+    insert_sql = conn.execute.await_args.args[0].lower()
+    assert "direction" in insert_sql
+    assert "'outbound'" in insert_sql
+    lock_sql = conn.fetchrow.await_args.args[0].lower()
+    assert "from campaigns" in lock_sql
+    assert "tenant_id" in lock_sql
+    assert "for share" in lock_sql
+    assert events == ["campaign_lock", "insert"]
+
+
+@pytest.mark.asyncio
+async def test_record_test_call_raises_typed_direction_conflict_before_insert():
+    import uuid as _uuid
+
+    conn = SimpleNamespace(
+        fetchrow=AsyncMock(return_value={"direction": "inbound"}),
+        execute=AsyncMock(),
+    )
+    container = SimpleNamespace(db_pool=object())
+    voice_session = SimpleNamespace(call_id=str(_uuid.uuid4()), talklee_call_id=None)
+    config = SimpleNamespace(prompt_template=None, prompt_version=None, prompt_hash=None)
+
+    with patch(
+        "app.core.db_utils.acquire_with_tenant",
+        lambda pool, tid: _FakeAcquire(conn),
+    ), pytest.raises(campaign_test_ws.CampaignTestDirectionConflict):
+        await campaign_test_ws._record_test_call(
+            container, str(_uuid.uuid4()), str(_uuid.uuid4()), voice_session, config
+        )
+
+    conn.execute.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_record_test_call_raises_typed_unavailable_on_database_error():
+    import uuid as _uuid
+
+    conn = SimpleNamespace(
+        fetchrow=AsyncMock(side_effect=RuntimeError("database unavailable")),
+        execute=AsyncMock(),
+    )
+    container = SimpleNamespace(db_pool=object())
+    voice_session = SimpleNamespace(call_id=str(_uuid.uuid4()), talklee_call_id=None)
+    config = SimpleNamespace(prompt_template=None, prompt_version=None, prompt_hash=None)
+
+    with patch(
+        "app.core.db_utils.acquire_with_tenant",
+        lambda pool, tid: _FakeAcquire(conn),
+    ), pytest.raises(campaign_test_ws.CampaignTestUnavailable):
+        await campaign_test_ws._record_test_call(
+            container, str(_uuid.uuid4()), str(_uuid.uuid4()), voice_session, config
+        )
+
+
+@pytest.mark.asyncio
+async def test_record_test_call_maps_direction_trigger_rejection_to_conflict():
+    import uuid as _uuid
+
+    class _DirectionConstraintError(RuntimeError):
+        constraint_name = "calls_outbound_campaign_guard"
+
+    conn = SimpleNamespace(
+        fetchrow=AsyncMock(return_value={"direction": "outbound"}),
+        execute=AsyncMock(side_effect=_DirectionConstraintError("race lost")),
+    )
+    container = SimpleNamespace(db_pool=object())
+    voice_session = SimpleNamespace(call_id=str(_uuid.uuid4()), talklee_call_id=None)
+    config = SimpleNamespace(prompt_template=None, prompt_version=None, prompt_hash=None)
+
+    with patch(
+        "app.core.db_utils.acquire_with_tenant",
+        lambda pool, tid: _FakeAcquire(conn),
+    ), pytest.raises(campaign_test_ws.CampaignTestDirectionConflict):
+        await campaign_test_ws._record_test_call(
+            container, str(_uuid.uuid4()), str(_uuid.uuid4()), voice_session, config
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("failure_name", "error_code", "close_code"),
+    [
+        ("CampaignTestDirectionConflict", "inbound_campaign_managed_separately", 1008),
+        ("CampaignTestUnavailable", "campaign_test_unavailable", 1011),
+    ],
+)
+async def test_persistence_refusal_closes_before_test_pipeline(
+    failure_name, error_code, close_code
+):
+    tenant_cfg = AIProviderConfig(pipeline_mode="cascaded")
+    with _Harness(tenant_cfg=tenant_cfg, campaign_row=_CAMPAIGN) as h:
+        failure_type = getattr(campaign_test_ws, failure_name)
+        h.record_test_call.side_effect = failure_type("refused at final persistence check")
+        ws = FakeWebSocket(cookies={"talky_at": "tok"})
+
+        await campaign_test_ws.campaign_test_websocket(
+            ws, "camp-1", first_speaker="agent"
+        )
+
+    assert ws.closed_code == close_code
+    error = next(frame for frame in ws.sent if frame.get("type") == "error")
+    assert error["code"] == error_code
+    if error_code == "inbound_campaign_managed_separately":
+        assert error["campaign_ids"] == ["camp-1"]
+    assert _ready(ws) is None
+    h.orchestrator.start_pipeline.assert_not_awaited()
+    h.orchestrator.send_greeting.assert_not_awaited()
+    h.persist_test_transcript.assert_not_awaited()
+    h.orchestrator.end_session.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -453,6 +640,52 @@ async def test_campaign_not_found_closes_1008():
 
     assert ws.closed_code == 1008
     h.orchestrator.create_voice_session.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_inbound_campaign_closes_1008_before_session_or_call_row():
+    tenant_cfg = AIProviderConfig(pipeline_mode="cascaded")
+    inbound = {**_CAMPAIGN, "direction": "inbound"}
+    with _Harness(tenant_cfg=tenant_cfg, campaign_row=inbound) as h, patch.object(
+        campaign_test_ws,
+        "_record_test_call",
+        new=AsyncMock(),
+    ) as record_call:
+        ws = FakeWebSocket(cookies={"talky_at": "tok"})
+        await campaign_test_ws.campaign_test_websocket(
+            ws, "camp-1", first_speaker="agent"
+        )
+
+    assert ws.closed_code == 1008
+    assert any(
+        frame.get("code") == "inbound_campaign_managed_separately"
+        for frame in ws.sent
+    )
+    h.orchestrator.create_voice_session.assert_not_awaited()
+    record_call.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_null_direction_closes_1008_before_session_or_call_row():
+    tenant_cfg = AIProviderConfig(pipeline_mode="cascaded")
+    malformed = {**_CAMPAIGN, "direction": None}
+    with _Harness(tenant_cfg=tenant_cfg, campaign_row=malformed) as h, patch.object(
+        campaign_test_ws,
+        "_record_test_call",
+        new=AsyncMock(),
+    ) as record_call:
+        ws = FakeWebSocket(cookies={"talky_at": "tok"})
+        await campaign_test_ws.campaign_test_websocket(
+            ws, "camp-1", first_speaker="agent"
+        )
+
+    assert ws.closed_code == 1008
+    assert any(
+        frame.get("code") == "inbound_campaign_managed_separately"
+        for frame in ws.sent
+    )
+    h.orchestrator.create_voice_session.assert_not_awaited()
+    record_call.assert_not_awaited()
 
 
 # ---------------------------------------------------------------------------

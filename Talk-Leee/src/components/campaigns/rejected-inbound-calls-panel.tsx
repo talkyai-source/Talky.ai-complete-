@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Clock3, PhoneIncoming, RefreshCw, ShieldAlert } from "lucide-react";
 
 import { api, type RejectedInboundCallItem } from "@/lib/api";
@@ -36,29 +36,40 @@ export type RejectedInboundCallsPanelProps = {
     campaignId?: string;
 };
 
-export function RejectedInboundCallsPanel({ campaignId }: RejectedInboundCallsPanelProps) {
+export function RejectedInboundCallsPanel(props: RejectedInboundCallsPanelProps) {
+    return <RejectedInboundCallsPanelScope key={props.campaignId ?? "all"} {...props} />;
+}
+
+function RejectedInboundCallsPanelScope({ campaignId }: RejectedInboundCallsPanelProps) {
     const [items, setItems] = useState<RejectedInboundCallItem[]>([]);
     const [total, setTotal] = useState(0);
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const requestGeneration = useRef(0);
 
     const load = useCallback(async (background = false) => {
+        const generation = ++requestGeneration.current;
         if (background) setRefreshing(true);
+        else setLoading(true);
         try {
             const response = await api.listRejectedInboundCalls({
                 campaignId,
                 page: 1,
                 pageSize: PAGE_SIZE,
             });
+            if (generation !== requestGeneration.current) return;
             setItems(response.items);
             setTotal(response.total);
             setError(null);
         } catch (err) {
+            if (generation !== requestGeneration.current) return;
             setError(err instanceof Error ? err.message : "Failed to load rejected inbound calls");
         } finally {
-            setLoading(false);
-            setRefreshing(false);
+            if (generation === requestGeneration.current) {
+                setLoading(false);
+                setRefreshing(false);
+            }
         }
     }, [campaignId]);
 
@@ -75,6 +86,7 @@ export function RejectedInboundCallsPanel({ campaignId }: RejectedInboundCallsPa
         timer = window.setTimeout(() => void poll(false), 0);
         return () => {
             cancelled = true;
+            requestGeneration.current += 1;
             if (timer !== undefined) window.clearTimeout(timer);
         };
     }, [load]);

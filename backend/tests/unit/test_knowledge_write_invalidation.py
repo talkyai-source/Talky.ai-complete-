@@ -16,7 +16,8 @@ from __future__ import annotations
 
 import uuid
 from contextlib import asynccontextmanager
-from unittest.mock import AsyncMock, patch
+from types import SimpleNamespace
+from unittest.mock import patch
 
 import pytest
 
@@ -38,7 +39,7 @@ class _FakeConn:
         yield
 
     async def execute(self, query, *args, **kwargs):
-        return "OK"
+        return "UPDATE 1"
 
     async def fetchval(self, query, *args, **kwargs):
         q = query
@@ -93,6 +94,18 @@ def _fake_acquire_with_tenant(conn: _FakeConn):
     return _acquire_with_tenant
 
 
+def _fake_knowledge_access(conn: _FakeConn):
+    @asynccontextmanager
+    async def _lease(*_args, **kwargs):
+        yield SimpleNamespace(
+            conn=conn,
+            campaign_id=str(kwargs["campaign_id"]),
+            tenant_id=str(kwargs["tenant_id"]),
+        )
+
+    return _lease
+
+
 # ─────────────────────────── 1. ingest_markdown ───────────────────────────
 
 async def test_ingest_markdown_invalidates_cache_on_success():
@@ -141,6 +154,32 @@ async def test_ingest_markdown_invalidation_failure_does_not_fail_ingest():
     assert result["node_count"] >= 1
 
 
+async def test_ingest_markdown_reuses_caller_held_direction_lease():
+    from app.services.scripts.knowledge import ingest_service
+
+    conn = _FakeConn()
+    pool = _FakePool(conn)
+
+    async def unexpected_acquire(*_args, **_kwargs):
+        raise AssertionError("ingest must not acquire a second pool connection")
+
+    with patch.object(
+        ingest_service, "acquire_with_tenant", unexpected_acquire
+    ), patch(
+        "app.services.scripts.knowledge.cache.invalidate_campaign"
+    ):
+        result = await ingest_service.ingest_markdown(
+            pool,
+            campaign_id=_CAMPAIGN,
+            tenant_id=_TENANT,
+            raw_md="# Rates\nOur standard rate is $50/hr.",
+            filename="rates.md",
+            conn=conn,
+        )
+
+    assert result["node_count"] >= 1
+
+
 # ─────────────────────── 2 & 3. campaign_knowledge endpoints ───────────────
 
 class _User:
@@ -156,11 +195,14 @@ async def test_update_node_endpoint_invalidates_cache():
     class _DB:
         pool = _FakePool(conn)
 
-    with patch.object(ck, "knowledge_enabled", return_value=True), patch.object(
-        ck, "_assert_campaign_owned", AsyncMock(return_value=None)
-    ), patch.object(
-        ck, "acquire_with_tenant", _fake_acquire_with_tenant(conn)
-    ), patch(
+    mutation = ck._KnowledgeMutationLease(
+        conn=conn,
+        tenant_id=_TENANT,
+        direction="outbound",
+        current_user=_User(_TENANT),
+        campaign_id=_CAMPAIGN,
+    )
+    with patch.object(ck, "knowledge_enabled", return_value=True), patch(
         "app.services.scripts.knowledge.cache.invalidate_campaign"
     ) as mock_inval:
         result = await ck.update_node(
@@ -169,7 +211,11 @@ async def test_update_node_endpoint_invalidates_cache():
             payload={"voice_answer": "New answer"},
             current_user=_User(_TENANT),
             db_client=_DB(),
+            mutation=mutation,
         )
+        assert mutation.cache_dirty is True
+        mock_inval.assert_not_called()
+        ck._invalidate_campaign_cache_fail_soft(_TENANT, _CAMPAIGN)
 
     assert result["updated"] == ["voice_answer"]
     mock_inval.assert_called_once_with(_TENANT, _CAMPAIGN)
@@ -183,11 +229,14 @@ async def test_update_node_invalidation_failure_does_not_fail_request():
     class _DB:
         pool = _FakePool(conn)
 
-    with patch.object(ck, "knowledge_enabled", return_value=True), patch.object(
-        ck, "_assert_campaign_owned", AsyncMock(return_value=None)
-    ), patch.object(
-        ck, "acquire_with_tenant", _fake_acquire_with_tenant(conn)
-    ), patch(
+    mutation = ck._KnowledgeMutationLease(
+        conn=conn,
+        tenant_id=_TENANT,
+        direction="outbound",
+        current_user=_User(_TENANT),
+        campaign_id=_CAMPAIGN,
+    )
+    with patch.object(ck, "knowledge_enabled", return_value=True), patch(
         "app.services.scripts.knowledge.cache.invalidate_campaign",
         side_effect=RuntimeError("boom"),
     ):
@@ -197,7 +246,10 @@ async def test_update_node_invalidation_failure_does_not_fail_request():
             payload={"voice_answer": "New answer"},
             current_user=_User(_TENANT),
             db_client=_DB(),
+            mutation=mutation,
         )
+        assert mutation.cache_dirty is True
+        ck._invalidate_campaign_cache_fail_soft(_TENANT, _CAMPAIGN)
     assert result["updated"] == ["voice_answer"]
 
 
@@ -209,11 +261,14 @@ async def test_delete_source_endpoint_invalidates_cache():
     class _DB:
         pool = _FakePool(conn)
 
-    with patch.object(ck, "knowledge_enabled", return_value=True), patch.object(
-        ck, "_assert_campaign_owned", AsyncMock(return_value=None)
-    ), patch.object(
-        ck, "acquire_with_tenant", _fake_acquire_with_tenant(conn)
-    ), patch(
+    mutation = ck._KnowledgeMutationLease(
+        conn=conn,
+        tenant_id=_TENANT,
+        direction="outbound",
+        current_user=_User(_TENANT),
+        campaign_id=_CAMPAIGN,
+    )
+    with patch.object(ck, "knowledge_enabled", return_value=True), patch(
         "app.services.scripts.knowledge.cache.invalidate_campaign"
     ) as mock_inval:
         result = await ck.delete_source(
@@ -221,7 +276,11 @@ async def test_delete_source_endpoint_invalidates_cache():
             source_id=str(uuid.uuid4()),
             current_user=_User(_TENANT),
             db_client=_DB(),
+            mutation=mutation,
         )
+        assert mutation.cache_dirty is True
+        mock_inval.assert_not_called()
+        ck._invalidate_campaign_cache_fail_soft(_TENANT, _CAMPAIGN)
 
     assert result["deleted"]
     mock_inval.assert_called_once_with(_TENANT, _CAMPAIGN)
@@ -235,11 +294,14 @@ async def test_delete_source_invalidation_failure_does_not_fail_request():
     class _DB:
         pool = _FakePool(conn)
 
-    with patch.object(ck, "knowledge_enabled", return_value=True), patch.object(
-        ck, "_assert_campaign_owned", AsyncMock(return_value=None)
-    ), patch.object(
-        ck, "acquire_with_tenant", _fake_acquire_with_tenant(conn)
-    ), patch(
+    mutation = ck._KnowledgeMutationLease(
+        conn=conn,
+        tenant_id=_TENANT,
+        direction="outbound",
+        current_user=_User(_TENANT),
+        campaign_id=_CAMPAIGN,
+    )
+    with patch.object(ck, "knowledge_enabled", return_value=True), patch(
         "app.services.scripts.knowledge.cache.invalidate_campaign",
         side_effect=RuntimeError("boom"),
     ):
@@ -248,7 +310,10 @@ async def test_delete_source_invalidation_failure_does_not_fail_request():
             source_id=str(uuid.uuid4()),
             current_user=_User(_TENANT),
             db_client=_DB(),
+            mutation=mutation,
         )
+        assert mutation.cache_dirty is True
+        ck._invalidate_campaign_cache_fail_soft(_TENANT, _CAMPAIGN)
     assert result["deleted"]
 
 
@@ -266,9 +331,7 @@ async def test_assistant_tool_update_node_invalidates_cache():
             raise AssertionError("this write path uses the pool, not .table()")
 
     with patch.object(
-        ca, "_verify_campaign_owned", AsyncMock(return_value=True)
-    ), patch.object(
-        ca, "acquire_with_tenant", _fake_acquire_with_tenant(conn)
+        ca, "campaign_knowledge_access_lease", _fake_knowledge_access(conn)
     ), patch(
         "app.services.scripts.knowledge.cache.invalidate_campaign"
     ) as mock_inval:
@@ -279,6 +342,7 @@ async def test_assistant_tool_update_node_invalidates_cache():
             node_id=str(uuid.uuid4()),
             changes={"voice_answer": "Updated answer"},
             confirm=True,
+            actor_user_id=str(uuid.uuid4()),
         )
 
     assert result.get("applied") is True
@@ -294,9 +358,7 @@ async def test_assistant_tool_invalidation_failure_does_not_fail_request():
         pool = _FakePool(conn)
 
     with patch.object(
-        ca, "_verify_campaign_owned", AsyncMock(return_value=True)
-    ), patch.object(
-        ca, "acquire_with_tenant", _fake_acquire_with_tenant(conn)
+        ca, "campaign_knowledge_access_lease", _fake_knowledge_access(conn)
     ), patch(
         "app.services.scripts.knowledge.cache.invalidate_campaign",
         side_effect=RuntimeError("boom"),
@@ -308,5 +370,6 @@ async def test_assistant_tool_invalidation_failure_does_not_fail_request():
             node_id=str(uuid.uuid4()),
             changes={"voice_answer": "Updated answer"},
             confirm=True,
+            actor_user_id=str(uuid.uuid4()),
         )
     assert result.get("applied") is True

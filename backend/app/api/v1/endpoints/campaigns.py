@@ -22,7 +22,11 @@ from app.core.dotenv_compat import load_dotenv
 from app.domain.models.dialer_job import DialerJob, JobStatus
 from app.domain.services.queue_service import DialerQueueService
 from app.domain.services.campaign_service import (
-    CampaignService, CampaignError, CampaignNotFoundError, CampaignStateError
+    CampaignDirectionError,
+    CampaignError,
+    CampaignNotFoundError,
+    CampaignService,
+    CampaignStateError,
 )
 from app.domain.services.phone_number_normalizer import (
     normalize_phone_number,
@@ -46,8 +50,41 @@ from app.api.v1.schemas.campaigns import (
     ContactUpdate,
     ContactListResponse,
 )
+from app.api.v1.endpoints._outbound_campaign import require_owned_outbound_campaign
 
 load_dotenv()
+
+
+def _require_contact_write(response, campaign_id: str, operation: str) -> dict:
+    """Reject adapter errors/zero rows instead of fabricating API success."""
+    error = str(getattr(response, "error", "") or "")
+    if "leads_outbound_campaign_guard" in error:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "inbound_campaign_managed_separately",
+                "message": (
+                    "The campaign changed to inbound before the contact write "
+                    "completed. Use the inbound campaign lifecycle."
+                ),
+                "campaign_ids": [str(campaign_id)],
+            },
+        )
+    if error:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to {operation} contact",
+        )
+    data = getattr(response, "data", None)
+    if not data:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "contact_write_conflict",
+                "message": "The contact changed before the write completed. Reload and retry.",
+            },
+        )
+    return data[0]
 
 logger = logging.getLogger(__name__)
 
@@ -117,6 +154,184 @@ def _reject_inbound_campaign_mutation(
                 "campaign_ids": inbound_ids,
             },
         )
+
+
+def _update_owned_outbound_campaign(
+    db_client: Client,
+    *,
+    campaign_id: str,
+    tenant_id: str,
+    payload: dict[str, Any],
+    operation: str,
+) -> dict[str, Any]:
+    """Compare-and-set one legacy campaign mutation at its final write.
+
+    The earlier direction read exists for a useful error, but it is not a
+    lock. An inbound conversion that commits while validation/provider calls
+    are in flight must win; matching direction and tenant on the UPDATE makes
+    that decision atomic and prevents downstream outbound side effects.
+    """
+
+    response = (
+        db_client.table("campaigns")
+        .update(payload)
+        .eq("id", campaign_id)
+        .eq("tenant_id", tenant_id)
+        .eq("direction", "outbound")
+        .execute()
+    )
+    error = getattr(response, "error", None)
+    if error:
+        logger.error("Failed to %s %s: %s", operation, campaign_id, error)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to {operation}",
+        )
+    data = getattr(response, "data", None)
+    if not data:
+        # Classify the compare-and-set miss inside the authenticated tenant.
+        # Missing and foreign IDs deliberately share the same 404 response;
+        # only a tenant-owned inbound row earns the lifecycle-specific 409.
+        probe = (
+            db_client.table("campaigns")
+            .select("id, direction")
+            .eq("id", campaign_id)
+            .eq("tenant_id", tenant_id)
+            .execute()
+        )
+        probe_error = getattr(probe, "error", None)
+        if probe_error:
+            logger.error(
+                "Failed to classify zero-row %s for %s: %s",
+                operation,
+                campaign_id,
+                probe_error,
+            )
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to {operation}",
+            )
+        owned_rows = getattr(probe, "data", None) or []
+        if not owned_rows:
+            raise HTTPException(status_code=404, detail="Campaign not found")
+        if str(owned_rows[0].get("direction") or "outbound").lower() != "inbound":
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "error": "campaign_write_conflict",
+                    "message": (
+                        "The campaign changed before the write completed. "
+                        "Reload it and retry."
+                    ),
+                    "campaign_ids": [str(campaign_id)],
+                },
+            )
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "inbound_campaign_managed_separately",
+                "message": (
+                    "The campaign changed before the outbound write completed. "
+                    "Reload it and use the inbound lifecycle if it was converted."
+                ),
+                "campaign_ids": [str(campaign_id)],
+            },
+        )
+    return dict(data[0])
+
+
+async def _apply_tts_config_atomically(
+    db_client: Client,
+    *,
+    campaign_ids: list[str],
+    tenant_id: str,
+    provider: str,
+    voice_id: str,
+) -> list[str]:
+    """Update one exact tenant-owned outbound campaign set in one transaction."""
+
+    # Preserve request order in the response while treating equivalent UUID
+    # spellings and repeated IDs as a single set member.
+    try:
+        requested_ids = list(
+            dict.fromkeys(str(uuid.UUID(str(value))) for value in campaign_ids)
+        )
+    except (AttributeError, TypeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=404,
+            detail="One or more campaigns were not found",
+        ) from exc
+    async with acquire_with_tenant(db_client.pool, tenant_id) as conn:
+        # The row locks serialize this bulk update with inbound conversion.
+        rows = await conn.fetch(
+            """
+            SELECT id::text AS id, direction
+              FROM campaigns
+             WHERE tenant_id = $1::uuid
+               AND id::text = ANY($2::text[])
+             ORDER BY id
+             FOR UPDATE
+            """,
+            tenant_id,
+            requested_ids,
+        )
+        owned_by_id = {str(row["id"]): row for row in rows}
+        if set(owned_by_id) != set(requested_ids):
+            # Do not disclose which requested ID belongs to another tenant.
+            raise HTTPException(
+                status_code=404,
+                detail="One or more campaigns were not found",
+            )
+
+        inbound_ids = [
+            campaign_id
+            for campaign_id in requested_ids
+            if str(owned_by_id[campaign_id]["direction"] or "outbound").lower()
+            == "inbound"
+        ]
+        if inbound_ids:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "error": "inbound_campaign_managed_separately",
+                    "message": (
+                        "Inbound campaigns must be changed through the inbound "
+                        "campaign versioned lifecycle."
+                    ),
+                    "campaign_ids": inbound_ids,
+                },
+            )
+
+        updated_rows = await conn.fetch(
+            """
+            UPDATE campaigns
+               SET tts_provider = $3,
+                   voice_id = $4
+             WHERE tenant_id = $1::uuid
+               AND id::text = ANY($2::text[])
+               AND direction = 'outbound'
+             RETURNING id::text AS id
+            """,
+            tenant_id,
+            requested_ids,
+            provider,
+            voice_id,
+        )
+        updated_ids = {str(row["id"]) for row in updated_rows}
+        if updated_ids != set(requested_ids):
+            # This exception is raised before the transaction exits, so every
+            # selected row rolls back instead of exposing a partial update.
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "error": "campaign_write_conflict",
+                    "message": (
+                        "The selected campaigns changed before the write completed. "
+                        "Reload them and retry."
+                    ),
+                },
+            )
+    return requested_ids
 
 
 def _build_validated_script_config(
@@ -442,12 +657,6 @@ async def apply_tts_config(
     if not current_user.tenant_id:
         raise HTTPException(status_code=400, detail="Current user is not associated with a tenant")
 
-    _reject_inbound_campaign_mutation(
-        db_client,
-        [str(value) for value in body.campaign_ids],
-        tenant_id=current_user.tenant_id,
-    )
-
     provider = (body.tts_provider or "").strip()
     voice_id = (body.tts_voice_id or "").strip()
     valid_voice_ids = await _valid_voice_ids_for_provider(provider)
@@ -457,20 +666,22 @@ async def apply_tts_config(
             detail=f"Voice '{voice_id}' is not available for TTS provider '{provider}'.",
         )
 
-    updated: list[str] = []
-    for cid in body.campaign_ids:
-        try:
-            resp = (
-                db_client.table("campaigns")
-                .update({"tts_provider": provider, "voice_id": voice_id})
-                .eq("id", cid)
-                .eq("tenant_id", current_user.tenant_id)
-                .execute()
-            )
-            if getattr(resp, "data", None):
-                updated.append(str(cid))
-        except Exception as exc:
-            logger.warning("apply_tts_config failed for campaign=%s: %s", cid, exc)
+    try:
+        updated = await _apply_tts_config_atomically(
+            db_client,
+            campaign_ids=[str(value) for value in body.campaign_ids],
+            tenant_id=current_user.tenant_id,
+            provider=provider,
+            voice_id=voice_id,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("Atomic TTS campaign update failed: %s", exc)
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to apply TTS configuration",
+        ) from exc
     return {"updated": updated, "count": len(updated), "tts_provider": provider, "voice_id": voice_id}
 
 
@@ -489,6 +700,11 @@ async def get_campaign(
     rows and the edit page sees "Campaign not found".
     """
     try:
+        if not current_user.tenant_id:
+            raise HTTPException(
+                status_code=400,
+                detail="Current user is not associated with a tenant",
+            )
         service = _get_campaign_service(db_client)
         campaign = await service.get_campaign(campaign_id)
         # asyncpg returns uuid columns as `uuid.UUID`, but current_user.tenant_id
@@ -499,6 +715,8 @@ async def get_campaign(
         if current_user.tenant_id and row_tenant_str not in (None, current_user.tenant_id):
             raise CampaignNotFoundError(campaign_id)
         return {"campaign": campaign}
+    except HTTPException:
+        raise
     except CampaignNotFoundError:
         raise HTTPException(status_code=404, detail="Campaign not found")
     except Exception as e:
@@ -575,20 +793,14 @@ async def update_campaign(
         if _sched is not None:
             update_payload["calling_config"] = _sched
 
-        response = (
-            db_client.table("campaigns")
-            .update(update_payload)
-            .eq("id", campaign_id)
-            .eq("tenant_id", current_user.tenant_id)
-            .execute()
+        updated_campaign = _update_owned_outbound_campaign(
+            db_client,
+            campaign_id=campaign_id,
+            tenant_id=current_user.tenant_id,
+            payload=update_payload,
+            operation="update campaign",
         )
-        if response.error:
-            logger.error(f"Error updating campaign {campaign_id}: {response.error}")
-            raise HTTPException(status_code=500, detail=f"Failed to update campaign: {response.error}")
-        if not response.data:
-            raise HTTPException(status_code=404, detail="Campaign not found")
-
-        return {"campaign": response.data[0]}
+        return {"campaign": updated_campaign}
     except HTTPException:
         raise
     except Exception as e:
@@ -662,6 +874,11 @@ async def start_campaign(
     Validates, enqueues jobs, and updates status atomically.
     """
     try:
+        if not current_user.tenant_id:
+            raise HTTPException(
+                status_code=400,
+                detail="Current user is not associated with a tenant",
+            )
         service = _get_campaign_service(db_client)
 
         _reject_inbound_campaign_mutation(
@@ -673,9 +890,7 @@ async def start_campaign(
         # Trust the authenticated user's tenant_id over any value the
         # client ships in the body — clients shouldn't be able to start
         # someone else's campaign by spoofing tenant_id in JSON.
-        tenant_id = current_user.tenant_id or (
-            start_request.tenant_id if start_request else None
-        )
+        tenant_id = current_user.tenant_id
         priority_override = (start_request.priority_override if start_request else None)
         first_speaker = (start_request.first_speaker if start_request else "agent")
 
@@ -719,9 +934,20 @@ async def start_campaign(
                     _cfg["batch_size"] = int(_batch_size)
                 if _call_gap is not None:
                     _cfg["call_gap_seconds"] = int(_call_gap)
-                db_client.table("campaigns").update(
-                    {"calling_config": _cfg}
-                ).eq("id", campaign_id).execute()
+                if not tenant_id:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Current user is not associated with a tenant",
+                    )
+                _update_owned_outbound_campaign(
+                    db_client,
+                    campaign_id=campaign_id,
+                    tenant_id=tenant_id,
+                    payload={"calling_config": _cfg},
+                    operation="update campaign pacing",
+                )
+            except HTTPException:
+                raise
             except Exception as _bs_exc:
                 logger.warning(
                     "failed to persist pacing config for campaign %s: %s",
@@ -788,6 +1014,17 @@ async def start_campaign(
         if idempotency_key:
             await release_idempotency_lock(request)
         raise HTTPException(status_code=404, detail="Campaign not found")
+    except CampaignDirectionError as e:
+        if idempotency_key:
+            await release_idempotency_lock(request)
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "inbound_campaign_managed_separately",
+                "message": e.message,
+                "campaign_ids": [str(campaign_id)],
+            },
+        )
     except CampaignStateError as e:
         if idempotency_key:
             await release_idempotency_lock(request)
@@ -826,13 +1063,21 @@ async def pause_campaign(
     ``start_campaign`` / ``stop_campaign``.
     """
     try:
+        if not current_user.tenant_id:
+            raise HTTPException(
+                status_code=400,
+                detail="Current user is not associated with a tenant",
+            )
         service = _get_campaign_service(db_client)
         _reject_inbound_campaign_mutation(
             db_client,
             [campaign_id],
             tenant_id=current_user.tenant_id,
         )
-        campaign = await service.pause_campaign(campaign_id)
+        campaign = await service.pause_campaign(
+            campaign_id,
+            tenant_id=current_user.tenant_id,
+        )
         termination = campaign.get("termination_summary") or {}
         deferred = int(
             termination.get("deferred", termination.get("unconfirmed", 0)) or 0
@@ -871,6 +1116,17 @@ async def pause_campaign(
         }
     except CampaignNotFoundError:
         raise HTTPException(status_code=404, detail="Campaign not found")
+    except CampaignDirectionError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "inbound_campaign_managed_separately",
+                "message": exc.message,
+                "campaign_ids": [str(campaign_id)],
+            },
+        )
+    except CampaignStateError as exc:
+        raise HTTPException(status_code=400, detail=exc.message)
     except HTTPException:
         raise
     except Exception as e:
@@ -898,13 +1154,22 @@ async def stop_campaign(
         clear_queue: If True, mark pending jobs as skipped
     """
     try:
+        if not current_user.tenant_id:
+            raise HTTPException(
+                status_code=400,
+                detail="Current user is not associated with a tenant",
+            )
         service = _get_campaign_service(db_client)
         _reject_inbound_campaign_mutation(
             db_client,
             [campaign_id],
             tenant_id=current_user.tenant_id,
         )
-        campaign = await service.stop_campaign(campaign_id, clear_queue=clear_queue)
+        campaign = await service.stop_campaign(
+            campaign_id,
+            clear_queue=clear_queue,
+            tenant_id=current_user.tenant_id,
+        )
         termination = campaign.get("termination_summary") or {}
         deferred = int(
             termination.get("deferred", termination.get("unconfirmed", 0)) or 0
@@ -947,6 +1212,17 @@ async def stop_campaign(
         }
     except CampaignNotFoundError:
         raise HTTPException(status_code=404, detail="Campaign not found")
+    except CampaignDirectionError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "inbound_campaign_managed_separately",
+                "message": exc.message,
+                "campaign_ids": [str(campaign_id)],
+            },
+        )
+    except CampaignStateError as exc:
+        raise HTTPException(status_code=400, detail=exc.message)
     except HTTPException:
         raise
     except Exception as e:
@@ -977,15 +1253,25 @@ async def delete_campaign(
     campaign reappeared on refresh. This is the real delete.
     """
     try:
+        if not current_user.tenant_id:
+            raise HTTPException(
+                status_code=400,
+                detail="Current user is not associated with a tenant",
+            )
         _reject_inbound_campaign_mutation(
             db_client,
             [campaign_id],
             tenant_id=current_user.tenant_id,
         )
         # Confirm it exists for THIS tenant (RLS-scoped) before mutating.
-        existing = db_client.table("campaigns").select("id, status").eq(
-            "id", campaign_id
-        ).neq("status", "deleted").execute()
+        existing = (
+            db_client.table("campaigns")
+            .select("id, status")
+            .eq("id", campaign_id)
+            .eq("tenant_id", current_user.tenant_id)
+            .neq("status", "deleted")
+            .execute()
+        )
         if not existing.data:
             raise HTTPException(status_code=404, detail="Campaign not found")
 
@@ -993,7 +1279,11 @@ async def delete_campaign(
         # Already-stopped/draft campaigns raise or no-op here — that's fine.
         try:
             service = _get_campaign_service(db_client)
-            await service.stop_campaign(campaign_id, clear_queue=True)
+            await service.stop_campaign(
+                campaign_id,
+                clear_queue=True,
+                tenant_id=current_user.tenant_id,
+            )
         except CampaignNotFoundError:
             raise HTTPException(status_code=404, detail="Campaign not found")
         except Exception as stop_err:
@@ -1001,14 +1291,13 @@ async def delete_campaign(
                 f"delete_campaign: stop step skipped for {campaign_id}: {stop_err}"
             )
 
-        updated = db_client.table("campaigns").update(
-            {"status": "deleted"}
-        ).eq("id", campaign_id).execute()
-        if getattr(updated, "error", None):
-            logger.error(
-                f"Error soft-deleting campaign {campaign_id}: {updated.error}"
-            )
-            raise HTTPException(status_code=500, detail="Failed to delete campaign")
+        _update_owned_outbound_campaign(
+            db_client,
+            campaign_id=campaign_id,
+            tenant_id=current_user.tenant_id,
+            payload={"status": "deleted"},
+            operation="delete campaign",
+        )
 
         if current_user.tenant_id:
             async with db_client.pool.acquire() as conn:
@@ -1395,21 +1684,19 @@ async def add_contact_to_campaign(
     """
     db_client = supabase
     try:
-        # 1. Validate campaign exists and belongs to the current tenant
+        # 1. Validate campaign exists, belongs to the current tenant and is an
+        #    outbound campaign before any lead lookup or write.
         #    `script_config` is selected because step 2 reads the campaign's
         #    country out of it. It was NOT in this projection before, so
         #    `campaign.get("script_config")` was always None and T2.5's
         #    per-campaign country silently never applied on this path — every
         #    manually added number normalised as US regardless of the campaign.
-        campaign_query = db_client.table("campaigns").select(
-            "id, name, status, tenant_id, script_config"
-        ).eq("id", campaign_id)
-        if current_user.tenant_id:
-            campaign_query = campaign_query.eq("tenant_id", current_user.tenant_id)
-        campaign_response = campaign_query.execute()
-        if not campaign_response.data:
-            raise HTTPException(status_code=404, detail="Campaign not found")
-        campaign = campaign_response.data[0]
+        campaign = require_owned_outbound_campaign(
+            db_client,
+            campaign_id,
+            tenant_id=current_user.tenant_id,
+            extra_columns=("name", "status", "script_config"),
+        )
 
         # 2. Normalize phone number — T2.5 uses the campaign's
         # default country (from script_config.campaign_slots or
@@ -1439,6 +1726,8 @@ async def add_contact_to_campaign(
             "id, status, is_lead"
         ).eq(
             "campaign_id", campaign_id
+        ).eq(
+            "tenant_id", current_user.tenant_id
         ).eq(
             "phone_number", normalized_phone
         ).execute()
@@ -1473,14 +1762,16 @@ async def add_contact_to_campaign(
             revived = db_client.table("leads").update({
                 "status": "pending",
                 **expanded_values,
-            }).eq("id", revive_id).execute()
-            if revived.error or not revived.data:
-                logger.error(f"Error reviving lead {revive_id} for campaign {campaign_id}: {getattr(revived, 'error', None)}")
-                raise HTTPException(status_code=500, detail="Failed to add contact")
+            }).eq("id", revive_id).eq(
+                "tenant_id", current_user.tenant_id
+            ).eq(
+                "campaign_id", campaign_id
+            ).execute()
+            revived_row = _require_contact_write(revived, campaign_id, "revive")
             logger.info(f"Contact revived in campaign {campaign_id}: {normalized_phone} (lead {revive_id})")
             return {
                 "message": "Contact added successfully",
-                "contact": _contact_response(revived.data[0])
+                "contact": _contact_response(revived_row)
             }
 
         # 4. Create lead record
@@ -1498,18 +1789,13 @@ async def add_contact_to_campaign(
         }
 
         response = db_client.table("leads").insert(lead_data).execute()
-
-        if response.error:
-            logger.error(f"Error creating lead for campaign {campaign_id}: {response.error}")
-            raise HTTPException(status_code=500, detail=f"Failed to create contact: {response.error}")
-        if not response.data:
-            raise HTTPException(status_code=500, detail="Failed to create contact")
+        created = _require_contact_write(response, campaign_id, "create")
 
         logger.info(f"Contact added to campaign {campaign_id}: {normalized_phone}")
 
         return {
             "message": "Contact added successfully",
-            "contact": _contact_response(response.data[0])
+            "contact": _contact_response(created)
         }
         
     except HTTPException:
@@ -1533,6 +1819,11 @@ async def update_contact_in_campaign(
     """
     db_client = supabase
     try:
+        require_owned_outbound_campaign(
+            db_client,
+            campaign_id,
+            tenant_id=current_user.tenant_id,
+        )
         existing = (
             db_client.table("leads")
             .select("*")
@@ -1559,6 +1850,7 @@ async def update_contact_in_campaign(
             dupe = (
                 db_client.table("leads").select("id")
                 .eq("campaign_id", campaign_id)
+                .eq("tenant_id", current_user.tenant_id)
                 .eq("phone_number", normalized_phone)
                 .neq("status", "deleted")
                 .neq("id", contact_id)
@@ -1604,9 +1896,10 @@ async def update_contact_in_campaign(
             .update(update_payload)
             .eq("id", contact_id)
             .eq("tenant_id", current_user.tenant_id)
+            .eq("campaign_id", campaign_id)
             .execute()
         )
-        updated = resp.data[0] if resp.data else {**existing.data[0], **update_payload}
+        updated = _require_contact_write(resp, campaign_id, "update")
         logger.info("Contact %s updated in campaign %s", contact_id, campaign_id)
         return {"message": "Contact updated successfully", "contact": _contact_response(updated)}
 
@@ -1724,11 +2017,18 @@ async def remove_contact_from_campaign(
     preserving history for analytics.
     """
     try:
+        require_owned_outbound_campaign(
+            db_client,
+            campaign_id,
+            tenant_id=current_user.tenant_id,
+        )
         # Verify contact belongs to campaign
         existing = db_client.table("leads").select("id").eq(
             "id", contact_id
         ).eq(
             "campaign_id", campaign_id
+        ).eq(
+            "tenant_id", current_user.tenant_id
         ).execute()
         
         if not existing.data:
@@ -1737,7 +2037,12 @@ async def remove_contact_from_campaign(
         # Soft delete
         response = db_client.table("leads").update({
             "status": "deleted"
-        }).eq("id", contact_id).execute()
+        }).eq("id", contact_id).eq(
+            "tenant_id", current_user.tenant_id
+        ).eq(
+            "campaign_id", campaign_id
+        ).execute()
+        _require_contact_write(response, campaign_id, "remove")
 
         # Soft-delete leaves the leads row, so the FK cascade does NOT remove
         # this lead's dialer jobs — they'd keep dialing a number you just

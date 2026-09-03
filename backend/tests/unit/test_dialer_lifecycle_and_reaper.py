@@ -8,7 +8,10 @@ from app.domain.services.dialer.stuck_job_reaper import (
     reap_stuck_calls,
     STUCK_REASON,
     _INFLIGHT_CALL_STATUSES,
+    _PREANSWER_CALL_STATUSES,
+    _CONNECTED_CALL_STATUSES,
     _LIVE_CALL_STATUSES,
+    connected_call_stuck_timeout_seconds,
 )
 from app.domain.services.dialer.job_lifecycle import (
     cancel_active_jobs_for_campaign,
@@ -73,8 +76,10 @@ async def test_stuck_call_reaper_queues_proof_aware_termination():
     n = await reap_stuck_calls(conn, timeout_seconds=600)
     assert n == 2
     sql, args = conn.calls[0]
-    assert args[0] == list(_INFLIGHT_CALL_STATUSES)
+    assert args[0] == list(_PREANSWER_CALL_STATUSES)
     assert args[1] == 600
+    assert args[2] == list(_CONNECTED_CALL_STATUSES)
+    assert args[3] >= 14_460
     assert "UPDATE calls" in sql and "'termination_pending'" in sql
     assert "ended_at" not in sql
     assert "outcome" not in sql
@@ -84,6 +89,60 @@ async def test_stuck_call_reaper_queues_proof_aware_termination():
 async def test_stuck_call_reaper_noop_returns_zero():
     conn = _FakeConn(returned_ids=[])
     assert await reap_stuck_calls(conn) == 0
+
+
+class _StaleCallSemanticConn:
+    def __init__(self, rows):
+        self.rows = rows
+        self.calls = []
+
+    async def fetch(self, sql, *args):
+        self.calls.append((sql, args))
+        preanswer, preanswer_timeout, connected, connected_timeout = args
+        reaped = []
+        for row in self.rows:
+            threshold = (
+                preanswer_timeout
+                if row["status"] in preanswer
+                else connected_timeout
+                if row["status"] in connected
+                else None
+            )
+            if threshold is not None and row["age_seconds"] > threshold:
+                reaped.append({"id": row["id"]})
+        return reaped
+
+
+@pytest.mark.asyncio
+async def test_answered_ten_minute_call_is_not_reaped_with_short_preanswer_timeout(
+    monkeypatch,
+):
+    monkeypatch.setenv("TELEPHONY_MAX_CALL_DURATION_S", "1800")
+    monkeypatch.setenv("DIALER_CONNECTED_CALL_GRACE_S", "300")
+    monkeypatch.setenv("DIALER_CONNECTED_CALL_STUCK_TIMEOUT_S", "600")
+    conn = _StaleCallSemanticConn(
+        [
+            {"id": "answered-live", "status": "answered", "age_seconds": 601},
+            {"id": "phantom-intent", "status": "initiated", "age_seconds": 601},
+        ]
+    )
+
+    reaped = await reap_stuck_calls(conn, timeout_seconds=600)
+
+    assert reaped == 1
+    _sql, args = conn.calls[0]
+    assert args[0] == list(_PREANSWER_CALL_STATUSES)
+    assert args[1] == 600
+    assert args[2] == list(_CONNECTED_CALL_STATUSES)
+    assert args[3] >= 14_700
+
+
+def test_connected_call_timeout_is_clamped_above_every_supported_call(monkeypatch):
+    monkeypatch.setenv("TELEPHONY_MAX_CALL_DURATION_S", "20000")
+    monkeypatch.setenv("DIALER_CONNECTED_CALL_GRACE_S", "300")
+    monkeypatch.setenv("DIALER_CONNECTED_CALL_STUCK_TIMEOUT_S", "1")
+
+    assert connected_call_stuck_timeout_seconds() == 20_300
 
 
 # ── reaper: must not kill a live/answered call's job (BUG 1 fix) ──────────

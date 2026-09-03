@@ -2,7 +2,7 @@
 
 An audit claimed ``calls.prompt_version`` is NULL on every outbound call
 because ``voice_orchestrator`` joins on a ``talklee_call_id`` the dialer never
-wrote.  **That stated mechanism is wrong**: ``dialer_worker._create_call_record``
+wrote.  **That stated mechanism is wrong**: ``dialer_worker._create_call_intent``
 does generate a ``talklee_call_id`` and the ``INSERT INTO calls`` column list
 does include it (pinned by ``test_the_dialer_does_write_talklee_call_id``).
 
@@ -10,7 +10,7 @@ The conclusion was still right, for a different reason, and it is settled here
 by executing both real construction paths against one in-memory ``calls``
 table instead of by argument:
 
-    dialer_worker._create_call_record()   -> INSERT INTO calls (talklee_call_id = A)
+    dialer_worker._create_call_intent()   -> INSERT INTO calls (talklee_call_id = A)
     VoiceOrchestrator.create_voice_session() -> mints talklee_call_id = B
 
 A and B are two independent ``generate_talklee_call_id()`` results, so an
@@ -104,6 +104,31 @@ class FakeConn:
 
         return "OK"
 
+    async def fetchrow(self, query: str, *args: Any):
+        q = " ".join(query.split())
+        upper = q.upper()
+        if upper.startswith("INSERT INTO CALLS "):
+            row = {
+                "id": args[0],
+                "tenant_id": args[1],
+                "campaign_id": args[2],
+                "lead_id": args[3],
+                "phone_number": args[4],
+                "status": "initiated",
+                "talklee_call_id": args[5],
+                "dialer_job_id": args[6],
+                "dialer_attempt_number": args[7],
+                "direction": "outbound",
+            }
+            self._db.rows.append(row)
+            return {
+                "id": row["id"],
+                "talklee_call_id": row["talklee_call_id"],
+                "status": "initiated",
+                "provider_call_id": None,
+            }
+        raise AssertionError(f"unsupported fetchrow in test double: {q}")
+
 
 class _ConnCtx:
     def __init__(self, conn: FakeConn) -> None:
@@ -160,10 +185,8 @@ async def _dial(db: FakeCallsDB) -> tuple[str, str]:
     """Run the REAL dialer insert. Returns (calls.id, talklee_call_id)."""
     worker = DialerWorker()
     worker._db_pool = FakePool(db)  # type: ignore[assignment]
-    internal_call_id, talklee_call_id, _leg = await worker._create_call_record(
-        _job(), "pbx-channel-1",
-    )
-    return internal_call_id, talklee_call_id
+    intent = await worker._create_call_intent(_job())
+    return intent.call_id, intent.talklee_call_id
 
 
 async def _session(db: FakeCallsDB, orch: Optional[VoiceOrchestrator] = None):

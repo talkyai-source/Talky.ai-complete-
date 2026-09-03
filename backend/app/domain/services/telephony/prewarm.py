@@ -316,14 +316,21 @@ async def prepare_prewarmed_session(
     lead_last_name: Optional[str] = None,
     lead_company: Optional[str] = None,
     lead_context: Optional[dict] = None,
+    campaign_row: Optional[dict] = None,
 ) -> PrewarmResult:
     """Build + fully warm a VoiceSession before the SIP call is originated.
 
     Returns a :class:`PrewarmResult`. On any warmup failure the session is
     cleaned up and ``session`` is None with ``failure_reason`` set.
+
+    ``campaign_row`` is the tenant-scoped, outbound-only snapshot validated by
+    the origination boundary.  Accepting it here avoids a second unscoped
+    campaign lookup between authorization and prompt construction.  The
+    fallback remains for non-bridge callers that have no campaign snapshot.
     """
     effective_first_speaker = _resolve_first_speaker(first_speaker)
-    campaign_row = await _lookup_campaign_row(campaign_id)
+    if campaign_row is None:
+        campaign_row = await _lookup_campaign_row(campaign_id)
 
     pre_warm_session = None
     warmup_failure_reason: Optional[str] = None

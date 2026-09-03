@@ -16,6 +16,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+from contextlib import nullcontext
 from difflib import SequenceMatcher
 from typing import List, Optional
 
@@ -119,6 +120,8 @@ async def retrieve_knowledge(
     k: int = 2,
     bump_hits: bool = False,
     acquire_timeout: Optional[float] = None,
+    conn=None,
+    raise_on_error: bool = False,
 ) -> List[dict]:
     """Top-k knowledge nodes for `query` (a user transcript). Hybrid FTS + trgm.
 
@@ -152,8 +155,13 @@ async def retrieve_knowledge(
         # fails fast into the caller's retrieve budget instead of queueing
         # unbounded behind it. None preserves the previous (unbounded) behavior
         # for non-voice callers that don't pass it.
-        async with acquire_with_tenant(pool, tenant_id, timeout=acquire_timeout) as conn:
-            rows = await conn.fetch(
+        connection_context = (
+            nullcontext(conn)
+            if conn is not None
+            else acquire_with_tenant(pool, tenant_id, timeout=acquire_timeout)
+        )
+        async with connection_context as active_conn:
+            rows = await active_conn.fetch(
                 # `cand` bounds how many campaign nodes reach the expensive
                 # ts_rank/word_similarity ranking (Case 3 defensive cap). The set
                 # is already campaign-scoped (small), so the 200 cap is a
@@ -173,6 +181,7 @@ async def retrieve_knowledge(
                            n.search_tsv, n.search_text, n.priority, n.hit_count
                     FROM campaign_knowledge_nodes n, tq
                     WHERE n.campaign_id = $1
+                      AND n.tenant_id = $5
                       AND n.enabled
                       AND (
                            n.search_tsv @@ tq.q_and
@@ -198,20 +207,23 @@ async def retrieve_knowledge(
                     c.hit_count DESC
                 LIMIT $3
                 """,
-                campaign_id, q, k, _WORD_SIM_FLOOR,
+                campaign_id, q, k, _WORD_SIM_FLOOR, tenant_id,
             )
             if rows and bump_hits:
                 # analytics: best-effort hit_count bump, same txn (cheap).
                 # Skipped for the owner's "test a question" panel so trials
                 # don't inflate the usage stats.
-                await conn.execute(
+                await active_conn.execute(
                     "UPDATE campaign_knowledge_nodes SET hit_count = hit_count + 1 "
-                    "WHERE id = ANY($1::uuid[])",
+                    "WHERE id = ANY($1::uuid[]) AND tenant_id = $2",
                     [r["id"] for r in rows],
+                    tenant_id,
                 )
             return [dict(r) for r in rows]
     except Exception as exc:
         logger.warning("retrieve_knowledge failed campaign=%s: %s", str(campaign_id)[:12], exc)
+        if raise_on_error:
+            raise
         return []
 
 

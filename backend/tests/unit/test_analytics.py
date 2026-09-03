@@ -8,10 +8,20 @@ from datetime import datetime, timezone
 from app.api.v1.endpoints.analytics import (
     _ANSWERED_OUTCOMES,
     _FAILED_OUTCOMES,
+    _apply_call_population,
     _bucket_key,
     _classify,
     _to_series,
 )
+
+
+class _RecordingQuery:
+    def __init__(self):
+        self.filters = []
+
+    def eq(self, column, value):
+        self.filters.append((column, value))
+        return self
 
 
 def test_classify_keys_on_outcome():
@@ -46,3 +56,23 @@ def test_to_series_is_sorted_by_bucket():
     series = _to_series(buckets)
     assert [s.date for s in series] == ["2026-06-08", "2026-06-09"]
     assert series[0].goal_achieved == 1
+
+
+def test_call_population_defaults_to_real_outbound_calls():
+    query = _apply_call_population(
+        _RecordingQuery(), direction="outbound", include_tests=False
+    )
+
+    assert query.filters == [("direction", "outbound"), ("is_test", False)]
+
+
+def test_call_population_can_explicitly_select_inbound_or_all_and_tests():
+    inbound = _apply_call_population(
+        _RecordingQuery(), direction="inbound", include_tests=False
+    )
+    all_with_tests = _apply_call_population(
+        _RecordingQuery(), direction="all", include_tests=True
+    )
+
+    assert inbound.filters == [("direction", "inbound"), ("is_test", False)]
+    assert all_with_tests.filters == []

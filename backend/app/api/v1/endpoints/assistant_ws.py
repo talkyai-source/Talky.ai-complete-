@@ -538,6 +538,7 @@ async def assistant_chat(
                                 args=ev.get("args") or {},
                                 result=ev.get("result") or {},
                                 tenant_id=tenant_id,
+                                actor_user_id=user_id,
                                 conversation_id=current_conversation_id,
                             )
                             await manager.send_json(connection_id, {
@@ -600,7 +601,11 @@ async def assistant_chat(
                 # the same proposal (two tabs / double-click) gets None below and
                 # cannot double-insert. On dispatch failure the proposal is gone —
                 # the user re-asks, same as a restart.
-                proposal = pop_proposal(proposal_id, tenant_id) if isinstance(proposal_id, str) else None
+                proposal = (
+                    pop_proposal(proposal_id, tenant_id, user_id)
+                    if isinstance(proposal_id, str)
+                    else None
+                )
                 if not proposal:
                     await manager.send_json(connection_id, {
                         "type": "proposal_result",
@@ -622,6 +627,8 @@ async def assistant_chat(
                     result = await dispatch_tool(
                         proposal["tool"], tenant_id, db_client,
                         current_conversation_id, apply_args,
+                        actor_user_id=user_id,
+                        trusted_proposal_apply=True,
                     )
                     # Edit tools return {applied: True}; send_email returns
                     # {success: True}. Either counts as a successful apply.
@@ -668,7 +675,7 @@ async def assistant_chat(
             elif data.get("type") == "reject_proposal":
                 proposal_id = data.get("proposal_id")
                 if isinstance(proposal_id, str):
-                    clear_proposal(proposal_id)
+                    clear_proposal(proposal_id, tenant_id, user_id)
                 await manager.send_json(connection_id, {
                     "type": "proposal_result",
                     "proposal_id": proposal_id,

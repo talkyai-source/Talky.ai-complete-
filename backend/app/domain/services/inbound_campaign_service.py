@@ -21,6 +21,9 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import asyncpg
 
 from app.core.db_utils import acquire_with_tenant
+from app.domain.services.campaign_direction_guard import (
+    acquire_campaign_direction_lock,
+)
 from app.domain.services.telephony.business_hours import evaluate_business_hours
 from app.domain.services.telephony.inbound_overrides import validate_qualification_overrides
 from app.domain.services.telephony.inbound_router import (
@@ -1208,6 +1211,11 @@ class InboundCampaignService:
                 config_id=None,
             )
 
+            # Knowledge mutations hold this same lock from direction-aware
+            # authorization through their final write.  Taking it before the
+            # campaign row lock prevents an outbound editor from crossing the
+            # boundary into a newly inbound campaign mid-request.
+            await acquire_campaign_direction_lock(conn, campaign_id)
             campaign = await conn.fetchrow(
                 "SELECT * FROM campaigns WHERE id = $1 AND tenant_id = $2 FOR UPDATE",
                 campaign_id,
@@ -1221,31 +1229,77 @@ class InboundCampaignService:
                         "Only a draft outbound campaign can be converted to inbound",
                         code="campaign_direction_conflict",
                     )
+                outbound_calling_config = _json_obj(campaign.get("calling_config"))
+                if outbound_calling_config.get("trunk"):
+                    raise InboundConflictError(
+                        "Clear the outbound trunk assignment before converting this campaign to inbound",
+                        code="campaign_direction_conflict",
+                    )
                 used = await conn.fetchval(
-                    "SELECT EXISTS(SELECT 1 FROM calls WHERE campaign_id = $1)", campaign_id
+                    """
+                    SELECT EXISTS(
+                        SELECT 1 FROM calls
+                        WHERE campaign_id = $1 AND tenant_id = $2
+                    )
+                    """,
+                    campaign_id,
+                    tenant_id,
                 )
-                queued = await conn.fetchval(
+                job_history = await conn.fetchval(
                     """
                     SELECT EXISTS(
                         SELECT 1 FROM dialer_jobs
                         WHERE campaign_id = $1
-                          AND status IN ('pending', 'processing', 'retry_scheduled')
+                          AND tenant_id = $2
                     )
                     """,
                     campaign_id,
+                    tenant_id,
                 )
-                if used or queued:
+                live_lead = await conn.fetchval(
+                    """
+                    SELECT EXISTS(
+                        SELECT 1 FROM leads
+                        WHERE campaign_id = $1
+                          AND tenant_id = $2
+                          AND status IS DISTINCT FROM 'deleted'
+                    )
+                    """,
+                    campaign_id,
+                    tenant_id,
+                )
+                contact_list = await conn.fetchval(
+                    """
+                    SELECT EXISTS(
+                        SELECT 1 FROM contact_lists
+                        WHERE campaign_id = $1 AND tenant_id = $2
+                    )
+                    """,
+                    campaign_id,
+                    tenant_id,
+                )
+                if used or job_history or live_lead or contact_list:
                     raise InboundConflictError(
                         "Campaign already has outbound activity and cannot change direction",
                         code="campaign_direction_conflict",
                     )
                 await conn.execute(
-                    "UPDATE campaigns SET direction='inbound', updated_at=NOW() WHERE id=$1",
+                    """
+                    UPDATE campaigns
+                       SET direction = 'inbound', updated_at = NOW()
+                     WHERE id = $1 AND tenant_id = $2
+                    """,
                     campaign_id,
+                    tenant_id,
                 )
 
             existing_config = await conn.fetchval(
-                "SELECT id FROM inbound_campaign_configs WHERE campaign_id = $1", campaign_id
+                """
+                SELECT id FROM inbound_campaign_configs
+                 WHERE campaign_id = $1 AND tenant_id = $2
+                """,
+                campaign_id,
+                tenant_id,
             )
             if existing_config:
                 raise InboundConflictError(

@@ -421,17 +421,25 @@ async def test_terminal_proof_is_durable_before_media_and_lifecycle_cleanup():
 
 
 @pytest.mark.asyncio
-async def test_destroyed_non_parent_channel_does_not_consume_terminal_proof_capacity():
+async def test_destroyed_outbound_parent_freezes_terminal_proof():
     adapter = AsteriskAdapter()
     adapter._active_sessions["outbound-1"] = {"direction": "outbound"}
+    adapter._ext_channels["outbound-1"] = "external-1"
     adapter._schedule_terminal_cleanup = lambda *_args, **_kwargs: None
+
+    await adapter._handle_ari_event(
+        {"type": "ChannelDestroyed", "channel": {"id": "external-1"}}
+    )
+
+    assert "external-1" not in adapter._terminal_at_monotonic
+    assert "external-1" not in adapter._terminal_at_utc
 
     await adapter._handle_ari_event(
         {"type": "ChannelDestroyed", "channel": {"id": "outbound-1"}}
     )
 
-    assert "outbound-1" not in adapter._terminal_at_monotonic
-    assert "outbound-1" not in adapter._terminal_at_utc
+    assert "outbound-1" in adapter._terminal_at_monotonic
+    assert "outbound-1" in adapter._terminal_at_utc
 
 
 @pytest.mark.asyncio

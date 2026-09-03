@@ -10,9 +10,19 @@
  * "outbound" and is NOT NULL, so the client mirrors that default.
  */
 export function isOutboundCampaign(campaign: { direction?: "inbound" | "outbound" | string | null }): boolean {
-    return campaign.direction !== "inbound";
+    return campaign.direction === "outbound" || campaign.direction === undefined;
 }
 
 export function outboundCampaignsOnly<T extends { direction?: "inbound" | "outbound" | string | null }>(campaigns: readonly T[]): T[] {
     return campaigns.filter(isOutboundCampaign);
+}
+
+export function inboundCampaignHrefForBase(
+    baseCampaignId: string,
+    campaigns: readonly { id: string; campaign_id: string }[],
+): string {
+    const match = campaigns.find((campaign) => campaign.campaign_id === baseCampaignId);
+    return match
+        ? `/inbound-campaigns/${encodeURIComponent(match.id)}`
+        : "/inbound-campaigns";
 }

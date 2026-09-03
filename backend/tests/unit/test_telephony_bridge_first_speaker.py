@@ -337,7 +337,8 @@ class TestOutboundFirstSpeaker:
         # Must not raise.
         _apply_caller_first_inbound_prompt(voice_session)
 
-    def test_ringing_alias_moves_caller_first_prewarm_state(self):
+    @pytest.mark.asyncio
+    async def test_ringing_alias_moves_caller_first_prewarm_state(self):
         """Asterisk trunk channel IDs must consume the planned caller-first session."""
         from app.api.v1.endpoints import telephony_bridge as bridge
 
@@ -351,7 +352,7 @@ class TestOutboundFirstSpeaker:
             bridge._ringing_warmup_created_at[original_call_id] = 123.0
             bridge._ringing_events[original_call_id] = evt
 
-            bridge._alias_ringing_call_id(original_call_id, actual_call_id)
+            await bridge._alias_ringing_call_id(original_call_id, actual_call_id)
 
             assert original_call_id not in bridge._ringing_warmups
             assert original_call_id not in bridge._ringing_warmup_created_at

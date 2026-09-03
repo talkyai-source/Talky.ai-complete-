@@ -30,6 +30,15 @@ from pydantic import BaseModel
 
 from app.core.postgres_adapter import Client
 from app.api.v1.dependencies import get_db_client, get_current_user, CurrentUser
+from app.api.v1.endpoints._outbound_campaign import (
+    outbound_campaign_conflict,
+    require_owned_outbound_campaign,
+)
+from app.core.security.rbac import Permission, require_permission
+from app.domain.services.campaign_direction_guard import (
+    OutboundCampaignDirectionConflict,
+    raise_for_outbound_direction_guard,
+)
 from app.utils.tenant_filter import apply_tenant_filter
 
 logger = logging.getLogger(__name__)
@@ -91,21 +100,24 @@ def create_contact_list(
     the user's perspective (the list's contact_count just grows). A caller that
     wants a distinct list should pass a distinct name.
 
-    Best-effort: on any failure returns None so the caller falls back to an
-    Ungrouped import (leads with list_id NULL) instead of failing the whole
-    upload. The lists feature is additive — a missing list must never lose a
-    contact.
+    Best-effort: on an ordinary list failure returns None so the caller falls
+    back to an Ungrouped import (leads with list_id NULL). A database direction
+    guard is different: it raises ``OutboundCampaignDirectionConflict`` so an
+    API cannot claim an inbound campaign import partially succeeded.
     """
     name = (name or "").strip() or "Untitled list"
     src = source if source in ("csv", "paste", "manual") else "manual"
     try:
         existing = db_client.table("contact_lists").select("id")\
-            .eq("campaign_id", campaign_id).eq("name", name).execute()
+            .eq("campaign_id", campaign_id).eq("tenant_id", tenant_id)\
+            .eq("name", name).execute()
+        if getattr(existing, "error", None):
+            raise RuntimeError("contact-list lookup failed")
         if getattr(existing, "data", None):
             return str(existing.data[0]["id"])
 
         new_id = str(uuid.uuid4())
-        db_client.table("contact_lists").insert({
+        inserted = db_client.table("contact_lists").insert({
             "id": new_id,
             "campaign_id": campaign_id,
             "tenant_id": tenant_id,
@@ -114,7 +126,14 @@ def create_contact_list(
             "is_active": True,
             "created_at": datetime.now(timezone.utc).isoformat(),
         }).execute()
-        return new_id
+        if getattr(inserted, "error", None):
+            raise_for_outbound_direction_guard(inserted.error, campaign_id)
+            raise RuntimeError("contact-list insert was not applied")
+        if not getattr(inserted, "data", None):
+            raise RuntimeError("contact-list insert was not applied")
+        return str(inserted.data[0].get("id") or new_id)
+    except OutboundCampaignDirectionConflict:
+        raise
     except Exception as exc:  # noqa: BLE001 — never fail an import over the list
         logger.warning(
             "create_contact_list failed for campaign %s (%r): %s — importing as "
@@ -160,10 +179,17 @@ def _fetch_list_or_404(db_client: Client, list_id: str, current_user: CurrentUse
     return resp.data[0]
 
 
-def _live_count(db_client: Client, campaign_id: str, list_id: Optional[str]) -> int:
+def _live_count(
+    db_client: Client,
+    campaign_id: str,
+    list_id: Optional[str],
+    *,
+    tenant_id: Optional[str],
+) -> int:
     """Count non-deleted leads for a list (or the Ungrouped/NULL bucket)."""
     q = db_client.table("leads").select("id", count="exact")\
-        .eq("campaign_id", campaign_id).neq("status", "deleted")
+        .eq("campaign_id", campaign_id).eq("tenant_id", tenant_id)\
+        .neq("status", "deleted")
     if list_id is None:
         q = q.is_("list_id", None)
     else:
@@ -204,11 +230,21 @@ async def list_contact_lists(
             name=r.get("name") or "Untitled list",
             source=r.get("source") or "manual",
             is_active=bool(r.get("is_active", True)),
-            contact_count=_live_count(db_client, campaign_id, str(r["id"])),
+            contact_count=_live_count(
+                db_client,
+                campaign_id,
+                str(r["id"]),
+                tenant_id=current_user.tenant_id,
+            ),
             created_at=str(r.get("created_at")) if r.get("created_at") else None,
         ))
 
-    ungrouped_count = _live_count(db_client, campaign_id, None)
+    ungrouped_count = _live_count(
+        db_client,
+        campaign_id,
+        None,
+        tenant_id=current_user.tenant_id,
+    )
     if ungrouped_count > 0:
         out.append(ContactListOut(
             id=UNGROUPED_ID,
@@ -225,7 +261,11 @@ async def list_contact_lists(
 # PATCH /contact-lists/{list_id}
 # =============================================================================
 
-@router.patch("/contact-lists/{list_id}", response_model=ContactListOut)
+@router.patch(
+    "/contact-lists/{list_id}",
+    response_model=ContactListOut,
+    dependencies=[Depends(require_permission(Permission.CAMPAIGNS_UPDATE))],
+)
 async def toggle_contact_list(
     list_id: str,
     body: ContactListToggle,
@@ -238,13 +278,41 @@ async def toggle_contact_list(
     pass; it does NOT hang up calls already in flight.
     """
     row = _fetch_list_or_404(db_client, list_id, current_user)
+    campaign_id = str(row["campaign_id"])
+    require_owned_outbound_campaign(
+        db_client,
+        campaign_id,
+        tenant_id=current_user.tenant_id,
+    )
 
     upd = db_client.table("contact_lists").update(
         {"is_active": bool(body.is_active)}
-    ).eq("id", list_id)
+    ).eq("id", list_id).eq("campaign_id", campaign_id)
     upd = apply_tenant_filter(upd, current_user.tenant_id)
     resp = upd.execute()
-    updated = resp.data[0] if getattr(resp, "data", None) else {**row, "is_active": bool(body.is_active)}
+    write_error = getattr(resp, "error", None)
+    if write_error:
+        try:
+            raise_for_outbound_direction_guard(write_error, campaign_id)
+        except OutboundCampaignDirectionConflict as exc:
+            raise outbound_campaign_conflict(
+                campaign_id,
+                message=(
+                    "The campaign changed to inbound before the list was updated. "
+                    "Use the inbound campaign lifecycle."
+                ),
+            ) from exc
+        logger.error("contact_list toggle failed list=%s error=%s", list_id, write_error)
+        raise HTTPException(
+            status_code=503,
+            detail="Contact-list update could not be confirmed",
+        )
+    if not getattr(resp, "data", None):
+        raise HTTPException(
+            status_code=409,
+            detail="Contact list changed before update; reload and retry",
+        )
+    updated = resp.data[0]
 
     logger.info(
         "contact_list %s set is_active=%s (campaign=%s)",
@@ -255,7 +323,12 @@ async def toggle_contact_list(
         name=updated.get("name") or "Untitled list",
         source=updated.get("source") or "manual",
         is_active=bool(updated.get("is_active", True)),
-        contact_count=_live_count(db_client, str(row["campaign_id"]), list_id),
+        contact_count=_live_count(
+            db_client,
+            str(row["campaign_id"]),
+            list_id,
+            tenant_id=current_user.tenant_id,
+        ),
         created_at=str(updated.get("created_at")) if updated.get("created_at") else None,
     )
 
@@ -264,7 +337,11 @@ async def toggle_contact_list(
 # POST /contact-lists/{list_id}/call
 # =============================================================================
 
-@router.post("/contact-lists/{list_id}/call", response_model=CallListResponse)
+@router.post(
+    "/contact-lists/{list_id}/call",
+    response_model=CallListResponse,
+    dependencies=[Depends(require_permission(Permission.CAMPAIGNS_UPDATE))],
+)
 async def call_contact_list(
     list_id: str,
     current_user: CurrentUser = Depends(get_current_user),
@@ -281,16 +358,45 @@ async def call_contact_list(
     row = _fetch_list_or_404(db_client, list_id, current_user)
     campaign_id = str(row["campaign_id"])
 
+    # A stale/hand-crafted list reference must not activate an inbound
+    # campaign through the outbound dialer path.
+    require_owned_outbound_campaign(
+        db_client,
+        campaign_id,
+        tenant_id=current_user.tenant_id,
+    )
+
     # 1. Activate the list (idempotent).
     upd = db_client.table("contact_lists").update({"is_active": True}).eq("id", list_id)
     upd = apply_tenant_filter(upd, current_user.tenant_id)
-    upd.execute()
+    activation = upd.eq("campaign_id", campaign_id).execute()
+    activation_error = str(getattr(activation, "error", "") or "")
+    if "contact_lists_outbound_campaign_guard" in activation_error:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "inbound_campaign_managed_separately",
+                "message": (
+                    "The campaign changed to inbound before the list was activated. "
+                    "Use the inbound campaign lifecycle."
+                ),
+                "campaign_ids": [campaign_id],
+            },
+        )
+    if activation_error:
+        raise HTTPException(status_code=500, detail="Failed to activate contact list")
+    if not getattr(activation, "data", None):
+        raise HTTPException(
+            status_code=409,
+            detail="Contact list changed before activation; reload and retry",
+        )
 
     # 2. Eligible = live pending/calling leads in this list.
     eligible = 0
     try:
         elig_resp = db_client.table("leads").select("id", count="exact")\
             .eq("campaign_id", campaign_id).eq("list_id", list_id)\
+            .eq("tenant_id", current_user.tenant_id)\
             .in_("status", ["pending", "calling"]).execute()
         eligible = elig_resp.count or 0
     except Exception as exc:  # noqa: BLE001
@@ -312,13 +418,42 @@ async def call_contact_list(
         jobs_enqueued = result.jobs_enqueued
         started = True
         message = f"List activated — {jobs_enqueued} contact(s) queued for dialing."
+    except HTTPException:
+        # Preserve lifecycle conflicts (notably the outbound/inbound 409)
+        # rather than returning an HTTP-200 partial-success envelope.
+        raise
     except Exception as exc:  # noqa: BLE001 — surface partial success honestly
         logger.error("call_contact_list enqueue failed for %s: %s", list_id, exc)
-        message = (
-            f"List activated ({eligible} eligible contact(s)), but starting the "
-            f"dialer failed: {exc}. The list will still be dialed on the next "
-            f"campaign start."
+        has_dispatch_counts = hasattr(exc, "jobs_enqueued") or hasattr(
+            exc, "jobs_pending"
         )
+        confirmed_jobs = max(0, int(getattr(exc, "jobs_enqueued", 0) or 0))
+        pending_jobs = max(0, int(getattr(exc, "jobs_pending", 0) or 0))
+        if has_dispatch_counts:
+            message = (
+                "The list was activated, but queue dispatch was not fully "
+                "confirmed. Retry this action; pending durable jobs will "
+                "be reconciled without creating a second job."
+            )
+        else:
+            message = (
+                "The list was activated, but its contacts were not queued. "
+                "Retry this action; do not assume a later campaign start will dial them."
+            )
+        detail = {
+            "error": "contact_list_start_failed_after_activation",
+            "message": message,
+            "list_id": list_id,
+            "campaign_id": campaign_id,
+            "is_active": True,
+            "jobs_enqueued": confirmed_jobs,
+        }
+        if has_dispatch_counts:
+            detail["jobs_pending"] = pending_jobs
+        raise HTTPException(
+            status_code=503,
+            detail=detail,
+        ) from exc
 
     return CallListResponse(
         list_id=list_id,

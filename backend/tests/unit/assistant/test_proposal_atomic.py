@@ -8,18 +8,20 @@ from __future__ import annotations
 
 from app.infrastructure.assistant import proposals
 from app.infrastructure.assistant.proposals import (
+    clear_proposal,
     store_proposal,
     get_proposal,
     pop_proposal,
 )
 
 
-def _store(tenant="t1"):
+def _store(tenant="t1", actor="user-1"):
     p = store_proposal(
         tool="create_campaign",
         args={"name": "AI estimation", "confirm": True},
         result={"campaigns": [{"campaign_id": "new", "changes": []}]},
         tenant_id=tenant,
+        actor_user_id=actor,
     )
     return p["proposal_id"]
 
@@ -30,25 +32,34 @@ def setup_function():
 
 def test_pop_returns_then_consumes():
     pid = _store()
-    first = pop_proposal(pid, "t1")
+    first = pop_proposal(pid, "t1", "user-1")
     assert first is not None and first["tool"] == "create_campaign"
     # Second pop of the SAME id — the double-apply race — gets nothing.
-    assert pop_proposal(pid, "t1") is None
+    assert pop_proposal(pid, "t1", "user-1") is None
 
 
 def test_pop_strips_confirm_from_stored_args():
     pid = _store()
-    p = pop_proposal(pid, "t1")
+    p = pop_proposal(pid, "t1", "user-1")
     assert "confirm" not in p["args"]  # store_proposal drops it; apply re-adds
 
 
 def test_pop_tenant_mismatch_does_not_consume():
     pid = _store(tenant="owner")
     # A different tenant's pop must fail AND leave the proposal intact.
-    assert pop_proposal(pid, "attacker") is None
-    assert get_proposal(pid, "owner") is not None  # still there for the owner
-    assert pop_proposal(pid, "owner") is not None  # owner can still consume
+    assert pop_proposal(pid, "attacker", "user-1") is None
+    assert get_proposal(pid, "owner", "user-1") is not None
+    assert pop_proposal(pid, "owner", "user-1") is not None
 
 
 def test_pop_unknown_id_is_none():
-    assert pop_proposal("prop_does_not_exist", "t1") is None
+    assert pop_proposal("prop_does_not_exist", "t1", "user-1") is None
+
+
+def test_same_tenant_other_actor_cannot_apply_or_reject():
+    pid = _store(tenant="t1", actor="owner")
+
+    assert pop_proposal(pid, "t1", "other-user") is None
+    assert clear_proposal(pid, "t1", "other-user") is False
+    assert get_proposal(pid, "t1", "owner") is not None
+    assert clear_proposal(pid, "t1", "owner") is True

@@ -154,6 +154,33 @@ def test_ai_message_intake_projects_answered_not_outbound_voicemail():
     )
 
 
+def test_terminal_tts_failure_projects_a_durable_inbound_failure():
+    voice_session = SimpleNamespace(
+        _inbound_selected_action="agent",
+        _pipeline_failed=False,
+        call_session=SimpleNamespace(_tts_terminal_failure_hangup=True),
+    )
+
+    outcome = lifecycle._resolve_inbound_terminal_outcome(voice_session, {})
+
+    assert outcome == "failed"
+    assert lifecycle._inbound_processing_terminal_status(
+        outcome=outcome,
+        voice_session=voice_session,
+        admission={},
+        recovery_context=None,
+    ) == "failed"
+
+
+def test_successful_inbound_session_keeps_completed_processing_status():
+    assert lifecycle._inbound_processing_terminal_status(
+        outcome="answered",
+        voice_session=object(),
+        admission={},
+        recovery_context=None,
+    ) == "completed"
+
+
 def test_recovered_inbound_outcome_is_deterministic_without_live_session():
     assert (
         lifecycle._resolve_inbound_terminal_outcome(
