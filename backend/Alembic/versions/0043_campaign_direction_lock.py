@@ -74,9 +74,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.execute(
-        text(
-            f"DROP TRIGGER IF EXISTS {_TRIGGER_NAME} ON public.campaigns"
-        )
+    raise RuntimeError(
+        "Refusing to downgrade 0043_campaign_direction_lock: production "
+        "migrations are forward-only; ship a compensating migration instead"
     )
-    op.execute(text(f"DROP FUNCTION IF EXISTS {_FUNCTION_NAME}()"))
