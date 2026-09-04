@@ -183,6 +183,11 @@ class _Harness:
         self._patches = [
             patch("app.core.jwt_security.decode_and_validate_token", return_value={"sub": "user-1"}),
             patch("app.api.v1.dependencies.get_db_client", return_value=db_client),
+            patch.object(
+                campaign_test_ws,
+                "_resolve_user_tenant",
+                AsyncMock(return_value=tenant_id),
+            ),
             patch("app.core.container.get_container", return_value=self.container),
             patch(
                 "app.api.v1.endpoints.campaign_test_ws._fetch_campaign_row",
@@ -352,6 +357,87 @@ async def test_auth_refusal_carries_the_machine_readable_code():
     assert errors[0].get("code") == "auth_required", (
         f"auth refusal must carry code='auth_required'; got {errors[0]!r}"
     )
+
+
+@pytest.mark.asyncio
+async def test_profile_lookup_bootstraps_through_pool_before_tenant_context():
+    """The profile query discovers the tenant, so it cannot require one.
+
+    WebSockets do not pass through TenantMiddleware.  The compatibility table
+    adapter therefore sees the nil tenant and returns no row even while the
+    same cookie succeeds on ``GET /auth/me``.  The trusted pool lookup must
+    bootstrap identity first, with the signed JWT subject as audit context.
+    """
+    tenant_cfg = AIProviderConfig(pipeline_mode="cascaded")
+    conn = SimpleNamespace(
+        fetchrow=AsyncMock(return_value={"tenant_id": "tenant-A"}),
+    )
+    db_client = MagicMock(pool=object())
+    (
+        db_client.table.return_value.select.return_value.eq.return_value.single
+        .return_value.execute.return_value
+    ) = SimpleNamespace(data=None)
+    acquire = MagicMock(side_effect=lambda *args, **kwargs: _FakeAcquire(conn))
+    real_resolve = campaign_test_ws._resolve_user_tenant
+
+    with (
+        _Harness(tenant_cfg=tenant_cfg, campaign_row=_CAMPAIGN) as h,
+        patch.object(campaign_test_ws, "_resolve_user_tenant", real_resolve),
+        patch("app.api.v1.dependencies.get_db_client", return_value=db_client),
+        patch("app.core.db_utils.acquire_with_tenant", acquire),
+    ):
+        ws = FakeWebSocket(
+            cookies={"talky_at": "tok"}, recv_frames=[_end_call_frame()]
+        )
+        await campaign_test_ws.campaign_test_websocket(
+            ws, "camp-1", first_speaker="agent"
+        )
+
+    assert not any(
+        frame.get("message") == "User profile not found." for frame in ws.sent
+    ), ws.sent
+    h.orchestrator.create_voice_session.assert_awaited_once()
+    acquire.assert_called_once_with(db_client.pool, None, user_id="user-1")
+    conn.fetchrow.assert_awaited_once()
+    assert conn.fetchrow.await_args.args[-1] == "user-1"
+
+
+@pytest.mark.asyncio
+async def test_missing_profile_has_stable_error_code():
+    tenant_cfg = AIProviderConfig(pipeline_mode="cascaded")
+    missing = AsyncMock(return_value=None)
+
+    with _Harness(tenant_cfg=tenant_cfg, campaign_row=_CAMPAIGN) as h, patch.object(
+        campaign_test_ws, "_resolve_user_tenant", missing,
+    ):
+        ws = FakeWebSocket(cookies={"talky_at": "tok"})
+        await campaign_test_ws.campaign_test_websocket(
+            ws, "camp-1", first_speaker="agent"
+        )
+
+    error = next(frame for frame in ws.sent if frame.get("type") == "error")
+    assert error["code"] == "profile_not_found"
+    assert ws.closed_code == 1008
+    h.orchestrator.create_voice_session.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_profile_database_failure_has_distinct_stable_error_code():
+    tenant_cfg = AIProviderConfig(pipeline_mode="cascaded")
+    failed = AsyncMock(side_effect=RuntimeError("database unavailable"))
+
+    with _Harness(tenant_cfg=tenant_cfg, campaign_row=_CAMPAIGN) as h, patch.object(
+        campaign_test_ws, "_resolve_user_tenant", failed,
+    ):
+        ws = FakeWebSocket(cookies={"talky_at": "tok"})
+        await campaign_test_ws.campaign_test_websocket(
+            ws, "camp-1", first_speaker="agent"
+        )
+
+    error = next(frame for frame in ws.sent if frame.get("type") == "error")
+    assert error["code"] == "profile_lookup_failed"
+    assert ws.closed_code == 1011
+    h.orchestrator.create_voice_session.assert_not_called()
 
 
 @pytest.mark.asyncio

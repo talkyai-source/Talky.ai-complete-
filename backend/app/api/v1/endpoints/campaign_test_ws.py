@@ -143,6 +143,31 @@ def _is_origin_allowed(websocket: WebSocket) -> bool:
     return origin in get_settings().allowed_origins
 
 
+async def _resolve_user_tenant(db_pool, user_id: str) -> Optional[str]:
+    """Resolve a signed JWT subject before the WS has a tenant context.
+
+    The compatibility ``.table()`` adapter is tenant-scoped.  A WebSocket has
+    not passed through TenantMiddleware, so using that adapter for this
+    bootstrap query installs the nil tenant and hides the user's own profile.
+    Use the trusted pooled path that REST authentication uses, with an explicit
+    subject predicate and user audit context; the caller installs the returned
+    tenant context immediately afterwards.
+
+    ``None`` means the signed subject has no tenant-backed profile.  Database
+    failures deliberately propagate so the endpoint can distinguish an auth
+    miss from a temporary backend failure.
+    """
+    from app.core.db_utils import acquire_with_tenant
+
+    async with acquire_with_tenant(db_pool, None, user_id=user_id) as conn:
+        row = await conn.fetchrow(
+            "SELECT tenant_id FROM user_profiles WHERE id = $1",
+            user_id,
+        )
+    tenant_id = row.get("tenant_id") if row else None
+    return str(tenant_id) if tenant_id else None
+
+
 async def _fetch_campaign_row(db_pool, tenant_id: str, campaign_id: str):
     """Fetch one campaign row as a dict, scoped to ``tenant_id`` (IDOR guard).
 
@@ -450,22 +475,25 @@ async def campaign_test_websocket(
 
     from app.api.v1.dependencies import get_db_client
 
-    db_client = get_db_client()
     try:
-        profile = db_client.table("user_profiles").select(
-            "tenant_id"
-        ).eq("id", user_id).single().execute()
-        tenant_id = (
-            str(profile.data.get("tenant_id"))
-            if profile.data and profile.data.get("tenant_id")
-            else None
-        )
-    except Exception as profile_err:  # noqa: BLE001
-        logger.error("campaign_test_ws: profile lookup failed: %s", profile_err)
-        tenant_id = None
+        db_client = get_db_client()
+        tenant_id = await _resolve_user_tenant(db_client.pool, user_id)
+    except Exception:  # noqa: BLE001 — return a stable, non-sensitive WS error
+        logger.error("campaign_test_ws: profile lookup failed", exc_info=True)
+        await websocket.send_json({
+            "type": "error",
+            "code": "profile_lookup_failed",
+            "message": "Unable to load your user profile. Please try again.",
+        })
+        await websocket.close(code=1011, reason="Profile lookup failed")
+        return
 
     if not tenant_id:
-        await websocket.send_json({"type": "error", "message": "User profile not found."})
+        await websocket.send_json({
+            "type": "error",
+            "code": "profile_not_found",
+            "message": "User profile not found.",
+        })
         await websocket.close(code=1008, reason="No tenant")
         return
 
