@@ -106,6 +106,33 @@ _FOREIGN_KEYS: tuple[tuple[str, str, str], ...] = (
         "FOREIGN KEY (campaign_id, tenant_id) "
         "REFERENCES public.campaigns (id, tenant_id)",
     ),
+    # Ownership chain, keyed on TENANT and deliberately not on campaign.
+    # "A job's campaign equals its lead's current campaign" is false of
+    # history: on 2026-09-03 production held 2749 dialer_jobs and 15 calls
+    # whose lead had since been re-pointed to another campaign — every one
+    # terminal, same tenant, one campaign. Including campaign_id would abort
+    # the preflight and, because talky-migrate runs on every deploy, block
+    # every future release to enforce an invariant the product never had.
+    # Each row's own campaign_id is already tied to a real same-tenant
+    # campaign by the *_campaign_tenant_fk entries above.
+    (
+        "dialer_jobs",
+        "dialer_jobs_lead_tenant_fk",
+        "FOREIGN KEY (lead_id, tenant_id) "
+        "REFERENCES public.leads (id, tenant_id)",
+    ),
+    (
+        "calls",
+        "calls_lead_tenant_fk",
+        "FOREIGN KEY (lead_id, tenant_id) "
+        "REFERENCES public.leads (id, tenant_id)",
+    ),
+    (
+        "calls",
+        "calls_dialer_job_tenant_fk",
+        "FOREIGN KEY (dialer_job_id, tenant_id) "
+        "REFERENCES public.dialer_jobs (id, tenant_id)",
+    ),
 )
 
 
@@ -644,6 +671,33 @@ def _preflight() -> None:
                        AND parent.tenant_id = child.tenant_id
                      WHERE parent.direction IS DISTINCT FROM 'outbound'
                     UNION ALL
+                    -- Ownership chain. Keyed on tenant only, exactly like the
+                    -- constraints it gates; see _FOREIGN_KEYS for why campaign
+                    -- is excluded. All three are 0 on production 2026-09-03.
+                    SELECT 'dialer_jobs.lead_ownership', count(*)
+                      FROM public.dialer_jobs AS child
+                      LEFT JOIN public.leads AS parent
+                        ON parent.id = child.lead_id
+                       AND parent.tenant_id = child.tenant_id
+                     WHERE child.lead_id IS NOT NULL
+                       AND parent.id IS NULL
+                    UNION ALL
+                    SELECT 'calls.lead_ownership', count(*)
+                      FROM public.calls AS child
+                      LEFT JOIN public.leads AS parent
+                        ON parent.id = child.lead_id
+                       AND parent.tenant_id = child.tenant_id
+                     WHERE child.lead_id IS NOT NULL
+                       AND parent.id IS NULL
+                    UNION ALL
+                    SELECT 'calls.dialer_job_ownership', count(*)
+                      FROM public.calls AS child
+                      LEFT JOIN public.dialer_jobs AS parent
+                        ON parent.id = child.dialer_job_id
+                       AND parent.tenant_id = child.tenant_id
+                     WHERE child.dialer_job_id IS NOT NULL
+                       AND parent.id IS NULL
+                    UNION ALL
                     -- Mirrors calls_outbound_campaign_guard exactly: an
                     -- outbound-DIRECTION call may never sit on an inbound
                     -- campaign. A genuine inbound call carries
@@ -695,6 +749,12 @@ def upgrade() -> None:
         text(
             "ALTER TABLE public.leads "
             "ADD CONSTRAINT leads_id_tenant_unique UNIQUE (id, tenant_id)"
+        )
+    )
+    op.execute(
+        text(
+            "ALTER TABLE public.dialer_jobs "
+            "ADD CONSTRAINT dialer_jobs_id_tenant_unique UNIQUE (id, tenant_id)"
         )
     )
     op.execute(
@@ -806,6 +866,12 @@ def downgrade() -> None:
         text(
             "ALTER TABLE public.leads "
             "DROP CONSTRAINT IF EXISTS leads_id_tenant_unique"
+        )
+    )
+    op.execute(
+        text(
+            "ALTER TABLE public.dialer_jobs "
+            "DROP CONSTRAINT IF EXISTS dialer_jobs_id_tenant_unique"
         )
     )
     op.execute(

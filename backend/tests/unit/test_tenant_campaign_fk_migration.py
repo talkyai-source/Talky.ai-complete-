@@ -216,24 +216,26 @@ def test_0041_downgrade_removes_only_its_reversible_constraints(monkeypatch):
     assert "DELETE FROM" not in sql
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "NOT IMPLEMENTED — 0041 ownership-chain constraints are specified here "
-        "but deliberately not installed yet, because production data does not "
-        "satisfy them and the preflight would abort every future deploy.\n"
-        "Measured on production 2026-09-03: 2749 dialer_jobs and 15 calls "
-        "reference a lead whose campaign_id differs from their own. tenant_id "
-        "matches in EVERY case (0 cross-tenant rows), and no lead is missing — "
-        "these are same-tenant leads re-pointed between two campaigns, leaving "
-        "historical jobs attributed to the old one.\n"
-        "Finishing this needs a data decision, not more SQL: (a) backfill the "
-        "historical rows, (b) drop campaign_id from the FK and key ownership on "
-        "(lead_id, tenant_id), or (c) exclude terminal rows from the guard. "
-        "Rehearse on a restored replica before shipping, per docs/DEPLOYMENT.md."
-    ),
-)
 def test_0041_installs_the_lead_and_job_ownership_chain(monkeypatch):
+    """Ownership is keyed on tenant, deliberately NOT on campaign.
+
+    A job/call must belong to a real lead of the SAME TENANT — that is the
+    isolation property worth enforcing, and production satisfies it exactly
+    (0 violations across all three relations on 2026-09-03).
+
+    Including campaign_id in the key was specified first and abandoned on
+    evidence: 2749 dialer_jobs and 15 calls reference a lead that now sits on a
+    different campaign — every one of them terminal (skipped/cancelled/failed/
+    completed, zero active), same tenant, confined to a single campaign whose
+    leads were re-pointed. "A job's campaign equals its lead's CURRENT campaign"
+    is simply not true of history, and a lead may legitimately move. Asserting
+    it would abort the preflight and, because talky-migrate runs on every
+    deploy, block every future release to fix nothing.
+
+    Campaign integrity is not lost: dialer_jobs_campaign_tenant_fk and
+    calls_campaign_tenant_fk already tie each row's own campaign_id to a real
+    campaign in the same tenant.
+    """
     migration = _migration()
     statements: list[str] = []
     monkeypatch.setattr(
@@ -245,22 +247,28 @@ def test_0041_installs_the_lead_and_job_ownership_chain(monkeypatch):
     migration.upgrade()
 
     sql = " ".join(statements)
-    assert "dialer_jobs_lead_campaign_tenant_fk" in sql
+    assert "dialer_jobs_id_tenant_unique" in sql
+    assert "dialer_jobs_lead_tenant_fk" in sql
+    assert "calls_lead_tenant_fk" in sql
     assert (
-        "FOREIGN KEY (lead_id, campaign_id, tenant_id) "
-        "REFERENCES public.leads (id, campaign_id, tenant_id)"
+        "FOREIGN KEY (lead_id, tenant_id) REFERENCES public.leads (id, tenant_id)"
     ) in sql
-    assert "calls_lead_campaign_tenant_fk" in sql
-    assert "calls_dialer_job_ownership_fk" in sql
+    assert "calls_dialer_job_tenant_fk" in sql
     assert (
-        "FOREIGN KEY (dialer_job_id, lead_id, campaign_id, tenant_id) "
-        "REFERENCES public.dialer_jobs (id, lead_id, campaign_id, tenant_id)"
+        "FOREIGN KEY (dialer_job_id, tenant_id) "
+        "REFERENCES public.dialer_jobs (id, tenant_id)"
     ) in sql
-    assert "leads_id_campaign_tenant_unique" in sql
-    assert "dialer_jobs_id_lead_campaign_tenant_unique" in sql
+    # Campaign must NOT be part of the ownership key (see docstring).
+    assert "REFERENCES public.leads (id, campaign_id, tenant_id)" not in sql
+
+    preflight = next(
+        statement
+        for statement in statements
+        if "0041 tenant/campaign preflight failed" in statement
+    )
     for relation in (
         "dialer_jobs.lead_ownership",
         "calls.lead_ownership",
         "calls.dialer_job_ownership",
     ):
-        assert relation in sql
+        assert relation in preflight
