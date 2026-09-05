@@ -7,6 +7,33 @@
 
 namespace voice_gateway {
 
+namespace {
+void add_media_totals(ProcessStatsSnapshot& total, const SessionStatsSnapshot& current) {
+    total.packets_in += current.packets_in;
+    total.packets_out += current.packets_out;
+    total.bytes_in += current.bytes_in;
+    total.bytes_out += current.bytes_out;
+    total.invalid_packets += current.invalid_packets;
+    total.dropped_packets += current.dropped_packets;
+    total.jitter_buffer_overflow_drops += current.jitter_buffer_overflow_drops;
+    total.jitter_buffer_late_drops += current.jitter_buffer_late_drops;
+    total.duplicate_packets += current.duplicate_packets;
+    total.out_of_order_packets += current.out_of_order_packets;
+    total.timeout_events_total += current.timeout_events_total;
+    total.tts_segments_started_total += current.tts_segments_started_total;
+    total.tts_segments_completed_total += current.tts_segments_completed_total;
+    total.tts_segments_interrupted_total += current.tts_segments_interrupted_total;
+    total.tts_frames_enqueued_total += current.tts_frames_enqueued_total;
+    total.tts_frames_sent_total += current.tts_frames_sent_total;
+    total.tts_frames_dropped_total += current.tts_frames_dropped_total;
+    total.stt_frames_emitted_total += current.stt_frames_emitted_total;
+    total.stt_floor_dropped_total += current.stt_floor_dropped_total;
+    total.stt_probation_dropped_total += current.stt_probation_dropped_total;
+    total.stt_restarts_committed_total += current.stt_restarts_committed_total;
+    total.tts_chunks_rejected_stale_total += current.tts_chunks_rejected_stale_total;
+}
+}  // namespace
+
 SessionRegistry::SessionRegistry(const std::size_t max_sessions)
     : max_sessions_(std::min(std::max<std::size_t>(1, max_sessions), kDefaultMaxConcurrentSessions)) {
     reaper_thread_ = std::thread(&SessionRegistry::reaper_loop, this);
@@ -121,8 +148,8 @@ bool SessionRegistry::stop_session(const std::string& session_id, const std::str
             return true;
         }
         session = it->second;
-        sessions_.erase(it);            // single-winner claim
-        stopping_.insert(session_id);   // reserve the id/port until teardown done
+        stopping_.emplace(session_id, session);  // allocate before removing ownership
+        sessions_.erase(it);                    // single-winner claim
         ++sessions_stopped_total_;
     }
 
@@ -132,14 +159,21 @@ bool SessionRegistry::stop_session(const std::string& session_id, const std::str
     // rejected until the old sockets are actually closed (VG-16). stop() is
     // idempotent via the session teardown latch, so any concurrent stop()/reaper
     // is safe.
-    session->stop(reason.empty() ? "stopped_by_request" : reason);
-
-    {
-        std::lock_guard<std::mutex> lock(mutex_);
-        stopping_.erase(session_id);
-        stopped_since_.erase(session_id);  // clear any reaper bookkeeping for this id
-    }
+    finish_retirement(session_id, session, reason.empty() ? "stopped_by_request" : reason);
     return true;
+}
+
+void SessionRegistry::finish_retirement(const std::string& id, const RtpSessionPtr& session,
+                                        const std::string& reason) {
+    session->stop(reason);
+    const auto final_stats = session->snapshot();  // never take a session lock under mutex_
+    std::lock_guard<std::mutex> lock(mutex_);
+    const auto it = stopping_.find(id);
+    if (it != stopping_.end() && it->second == session) {
+        add_media_totals(retired_media_totals_, final_stats);
+        stopping_.erase(it);
+        stopped_since_.erase(id);
+    }
 }
 
 RtpSessionPtr SessionRegistry::get_session(const std::string& session_id) const {
@@ -196,11 +230,17 @@ ProcessStatsSnapshot SessionRegistry::snapshot() const {
     std::vector<RtpSessionPtr> sessions_copy;
     {
         std::lock_guard<std::mutex> lock(mutex_);
+        snap = retired_media_totals_;
         snap.sessions_started_total = sessions_started_total_;
         snap.sessions_stopped_total = sessions_stopped_total_;
         snap.sessions_reaped_total = sessions_reaped_total_;
-        sessions_copy.reserve(sessions_.size());
+        sessions_copy.reserve(sessions_.size() + stopping_.size());
         for (const auto& [_, session] : sessions_) {
+            sessions_copy.push_back(session);
+        }
+        // Retirement transfers a session to the totals under this same lock.
+        // A snapshot includes either the pointer or its final totals, never both.
+        for (const auto& [_, session] : stopping_) {
             sessions_copy.push_back(session);
         }
     }
@@ -215,29 +255,8 @@ ProcessStatsSnapshot SessionRegistry::snapshot() const {
         } else {
             ++snap.stopped_sessions;
         }
-        snap.packets_in += session_stats.packets_in;
-        snap.packets_out += session_stats.packets_out;
-        snap.bytes_in += session_stats.bytes_in;
-        snap.bytes_out += session_stats.bytes_out;
-        snap.invalid_packets += session_stats.invalid_packets;
-        snap.dropped_packets += session_stats.dropped_packets;
-        snap.jitter_buffer_overflow_drops += session_stats.jitter_buffer_overflow_drops;
-        snap.jitter_buffer_late_drops += session_stats.jitter_buffer_late_drops;
-        snap.duplicate_packets += session_stats.duplicate_packets;
-        snap.out_of_order_packets += session_stats.out_of_order_packets;
-        snap.timeout_events_total += session_stats.timeout_events_total;
-        snap.tts_segments_started_total += session_stats.tts_segments_started_total;
-        snap.tts_segments_completed_total += session_stats.tts_segments_completed_total;
-        snap.tts_segments_interrupted_total += session_stats.tts_segments_interrupted_total;
-        snap.tts_frames_enqueued_total += session_stats.tts_frames_enqueued_total;
-        snap.tts_frames_sent_total += session_stats.tts_frames_sent_total;
-        snap.tts_frames_dropped_total += session_stats.tts_frames_dropped_total;
+        add_media_totals(snap, session_stats);
         snap.tts_queue_depth_frames += session_stats.tts_queue_depth_frames;
-        snap.stt_frames_emitted_total += session_stats.stt_frames_emitted_total;
-        snap.stt_floor_dropped_total += session_stats.stt_floor_dropped_total;
-        snap.stt_probation_dropped_total += session_stats.stt_probation_dropped_total;
-        snap.stt_restarts_committed_total += session_stats.stt_restarts_committed_total;
-        snap.tts_chunks_rejected_stale_total += session_stats.tts_chunks_rejected_stale_total;
     }
 
     return snap;
@@ -271,7 +290,7 @@ void SessionRegistry::reap_once() {
     // ~RtpSession (which joins the session's threads); doing that outside mutex_
     // keeps start/stop/snapshot from stalling behind a thread join.
     std::vector<RtpSessionPtr> to_teardown;  // deferred epilogue to run now (VG-15)
-    std::vector<RtpSessionPtr> to_destroy;
+    std::vector<std::pair<std::string, RtpSessionPtr>> to_retire;
     const auto now = std::chrono::steady_clock::now();
 
     {
@@ -313,10 +332,10 @@ void SessionRegistry::reap_once() {
                 continue;
             }
 
-            to_destroy.push_back(std::move(it->second));
-            stopped_since_.erase(since);
-            it = sessions_.erase(it);
-            ++sessions_reaped_total_;
+            // Retain ownership until teardown and snapshot complete outside the
+            // lock. Allocation failure leaves every session available to retry.
+            to_retire.emplace_back(id, session);
+            ++it;
         }
     }
     // Outside mutex_: force the deferred teardown epilogue for freshly
@@ -325,7 +344,18 @@ void SessionRegistry::reap_once() {
     for (const auto& session : to_teardown) {
         session->stop("reaper_teardown");
     }
-    // to_destroy destructs here, outside mutex_.
+    for (const auto& [id, session] : to_retire) {
+        session->stop("reaper_retirement");
+        const auto final_stats = session->snapshot();
+        std::lock_guard<std::mutex> lock(mutex_);
+        const auto it = sessions_.find(id);
+        if (it != sessions_.end() && it->second == session) {
+            add_media_totals(retired_media_totals_, final_stats);
+            sessions_.erase(it);
+            stopped_since_.erase(id);
+            ++sessions_reaped_total_;
+        }
+    }
 }
 
 bool SessionRegistry::validate_config(const SessionConfig& config, std::string& error) {

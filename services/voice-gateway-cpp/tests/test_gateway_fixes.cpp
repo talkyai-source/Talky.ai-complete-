@@ -201,6 +201,90 @@ void test_session_start_digest_is_idempotent_and_conflict_safe() {
     registry.stop_session(cfg.session_id, "test_done", already);
 }
 
+void test_media_totals_survive_stop_and_session_id_reuse() {
+    voice_gateway::SessionRegistry registry;
+    const int tx = make_udp_bound(43512);
+    sockaddr_in dst{};
+    dst.sin_family = AF_INET;
+    dst.sin_port = htons(43511);
+    inet_pton(AF_INET, "127.0.0.1", &dst.sin_addr);
+    for (int round = 0; round < 2; ++round) {
+        SessionConfig cfg = base_config("lifetime-stats", 43511, 43512);
+        std::string error;
+        std::promise<void> finishing;
+        auto finishing_future = finishing.get_future();
+        std::promise<void> release;
+        auto release_future = release.get_future().share();
+        check(registry.start_session(cfg, error, {}, [&]() {
+                  finishing.set_value();
+                  release_future.wait();
+              }) == voice_gateway::StartSessionResult::Started,
+              "lifetime_stats_session_start");
+        auto session = registry.get_session(cfg.session_id);
+        send_rtp(tx, dst, 10, 1600, 0x7777u, 0xFF);
+        for (int i = 0; i < 100 && session->snapshot().packets_in == 0; ++i) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        check(session->snapshot().packets_in == 1, "lifetime_stats_received_packet");
+        const auto before = registry.snapshot();
+        bool already = false;
+        auto stopped = std::async(std::launch::async, [&]() {
+            return registry.stop_session(cfg.session_id, "test_done", already);
+        });
+        check(finishing_future.wait_for(std::chrono::seconds(2)) == std::future_status::ready,
+              "lifetime_stats_teardown_entered");
+        check(registry.snapshot().packets_in == before.packets_in,
+              "lifetime_stats_visible_while_teardown_is_blocked");
+        release.set_value();
+        check(stopped.get(), "lifetime_stats_teardown_completed");
+        const auto after = registry.snapshot();
+        check(after.packets_in >= before.packets_in && after.packets_in == static_cast<uint64_t>(round + 1),
+              "lifetime_media_totals_do_not_reset_after_stop");
+        check(after.bytes_in > 0 && after.active_sessions == 0 && after.tts_queue_depth_frames == 0,
+              "lifetime_counters_retained_but_gauges_reset");
+        registry.stop_session(cfg.session_id, "duplicate_stop", already);
+        registry.reap_once();
+        check(registry.snapshot().packets_in == after.packets_in,
+              "lifetime_totals_duplicate_stop_does_not_double_count");
+    }
+    close(tx);
+}
+
+void test_media_totals_survive_reaper_retirement() {
+    voice_gateway::SessionRegistry registry;
+    auto cfg = base_config("reaped-stats", 43521, 43522);
+    std::string error;
+    check(registry.start_session(cfg, error) == voice_gateway::StartSessionResult::Started,
+          "reaped_stats_start");
+    auto session = registry.get_session(cfg.session_id);
+    const int tx = make_udp_bound(43522);
+    sockaddr_in dst{};
+    dst.sin_family = AF_INET;
+    dst.sin_port = htons(43521);
+    inet_pton(AF_INET, "127.0.0.1", &dst.sin_addr);
+    send_rtp(tx, dst, 10, 1600, 0x8888u);
+    for (int i = 0; i < 100 && session->snapshot().packets_in == 0; ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    check(session->snapshot().packets_in == 1, "reaped_stats_packet_received");
+    session->stop_async("test_self_stop");
+    registry.reap_once();
+    const auto before = registry.snapshot();
+    // Exercise the real production grace interval, without a test-only bypass.
+    std::this_thread::sleep_for(std::chrono::milliseconds(60050));
+    registry.reap_once();
+    const auto after = registry.snapshot();
+    check(!registry.get_session(cfg.session_id) && after.sessions_reaped_total == 1,
+          "reaped_stats_session_removed");
+    check(after.packets_in == 1 && after.bytes_in == before.bytes_in &&
+          after.tts_frames_dropped_total == before.tts_frames_dropped_total &&
+          after.timeout_events_total == before.timeout_events_total,
+          "reaped_stats_counters_preserved");
+    registry.reap_once();
+    check(registry.snapshot().sessions_reaped_total == 1, "reaped_stats_not_counted_twice");
+    close(tx);
+}
+
 void test_readiness_reflects_session_admission_capacity() {
     voice_gateway::SessionRegistry registry(1);
     voice_gateway::HttpServer server("127.0.0.1", 18093, registry);
@@ -1371,6 +1455,8 @@ int main() {
     test_failure_state_is_not_overwritten_by_stopped();
     test_session_start_digest_is_idempotent_and_conflict_safe();
     test_readiness_reflects_session_admission_capacity();
+    test_media_totals_survive_stop_and_session_id_reuse();
+    test_media_totals_survive_reaper_retirement();
     test_tts_overflow_accounting();
     test_jitter_flood_no_deadlock();
     test_stt_reorder_ordering();
