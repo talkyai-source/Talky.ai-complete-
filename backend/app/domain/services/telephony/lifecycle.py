@@ -1464,6 +1464,9 @@ async def _load_termination_pending_candidates() -> list[dict[str, Any]]:
         )
         return []
     async with acquire_with_tenant(db_pool, None, timeout=5.0) as conn:
+        from app.domain.services.telephony.legacy_pending_identity import reconcile_pending_identity
+
+        await reconcile_pending_identity(conn, adapter_provider)
         rows = list(
             await conn.fetch(
                 """

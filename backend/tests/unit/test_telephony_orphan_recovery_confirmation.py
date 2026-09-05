@@ -663,6 +663,15 @@ async def test_pending_scan_includes_termination_and_terminal_reserved_inbound(
     class Conn:
         query = ""
 
+        async def execute(self, query, provider):
+            assert "UPDATE calls" in query
+            assert provider == "asterisk"
+            return "UPDATE 0"
+
+        async def fetchval(self, query):
+            assert "termination_pending" in query
+            return 0
+
         async def fetch(self, query, provider):
             self.query = query
             assert provider == "asterisk"
