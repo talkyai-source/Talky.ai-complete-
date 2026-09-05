@@ -2778,14 +2778,19 @@ class AsteriskAdapter(CallControlAdapter):
         logger.info(f"AsteriskAdapter: outbound call ringing channel={channel_id[:12]}")
         listen_port = await self._alloc_rtp_port()
         session_id = f"asterisk-{uuid.uuid4().hex}"
-        bridge_id = ""
+        # Choose ownership before the network await: a lost create response
+        # must not leave cleanup with an unknowable server-generated ID.
+        bridge_id = f"talky-outbound-bridge-{uuid.uuid4().hex[:20]}"
 
         try:
             # 1. Create mixing bridge
-            bridge = await self._ari("POST", "/bridges", params={"type": "mixing"})
-            bridge_id = bridge.get("id", "")
-            if not bridge_id:
+            bridge = await self._ari(
+                "POST", "/bridges", params={"type": "mixing", "bridgeId": bridge_id}
+            )
+            returned_bridge_id = str((bridge or {}).get("id") or "").strip()
+            if not returned_bridge_id:
                 raise RuntimeError("ARI bridge create returned no id")
+            bridge_id = returned_bridge_id
 
             # 2. Add outbound channel to bridge (starts ringing the remote party)
             await self._ari(
@@ -2830,7 +2835,7 @@ class AsteriskAdapter(CallControlAdapter):
                 f"channel={channel_id[:12]} bridge={bridge_id[:12]} rtp_port={listen_port}"
             )
 
-        except Exception as exc:
+        except (Exception, asyncio.CancelledError) as exc:
             logger.error(f"AsteriskAdapter: outbound stasis start failed: {exc}")
             if bridge_id:
                 try:
@@ -2838,6 +2843,8 @@ class AsteriskAdapter(CallControlAdapter):
                 except Exception:
                     pass
             await self._release_rtp_port(listen_port)
+            if isinstance(exc, asyncio.CancelledError):
+                raise
 
     async def _persist_outbound_answer_obligation(
         self,
@@ -2920,13 +2927,13 @@ class AsteriskAdapter(CallControlAdapter):
         bridge_id = pending["bridge_id"]
         listen_port = pending["listen_port"]
         session_id = pending["session_id"]
-        ext_channel_id = ""
+        ext_channel_id = f"talky-outbound-media-{uuid.uuid4().hex[:20]}"
         self._outbound_setup_inflight.add(channel_id)
         self._outbound_answer_setup_resources[channel_id] = {
             "bridge_id": bridge_id,
             "listen_port": listen_port,
             "session_id": session_id,
-            "ext_channel_id": "",
+            "ext_channel_id": ext_channel_id,
         }
 
         logger.info(
@@ -2962,11 +2969,13 @@ class AsteriskAdapter(CallControlAdapter):
                     "transport": "udp",
                     "connection_type": "client",
                     "direction": "both",
+                    "channelId": ext_channel_id,
                 },
             )
-            ext_channel_id = ext_data.get("id", "")
-            if not ext_channel_id:
+            returned_ext_channel_id = str((ext_data or {}).get("id") or "").strip()
+            if not returned_ext_channel_id:
                 raise RuntimeError("ARI externalMedia returned no channel id")
+            ext_channel_id = returned_ext_channel_id
             self._outbound_answer_setup_resources[channel_id]["ext_channel_id"] = (
                 ext_channel_id
             )
