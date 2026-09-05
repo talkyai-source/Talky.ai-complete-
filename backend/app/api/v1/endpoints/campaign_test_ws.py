@@ -920,14 +920,18 @@ async def campaign_test_websocket(
                 auth_task.cancel()
                 try:
                     await auth_task
-                except (asyncio.CancelledError, WebSocketDisconnect, RuntimeError):
+                except asyncio.CancelledError:
                     pass
+                except Exception:
+                    logger.warning("campaign_test_auth_task_cleanup_failed", exc_info=True)
             if receiver_task and not receiver_task.done():
                 receiver_task.cancel()
                 try:
                     await receiver_task
                 except asyncio.CancelledError:
                     pass
+                except Exception:
+                    logger.warning("campaign_test_receiver_cleanup_failed", exc_info=True)
             # BEFORE teardown, like the phone path: end_session cancels the
             # pipeline, and the transcript buffer lives on that pipeline's
             # transcript_service. Persist first or there is nothing left to read.

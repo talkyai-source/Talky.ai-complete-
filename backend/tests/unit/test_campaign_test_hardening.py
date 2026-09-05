@@ -216,6 +216,23 @@ async def test_campaign_miss_keeps_ownership_predicate_and_policy_close():
 
 
 @pytest.mark.asyncio
+async def test_failed_auth_watchdog_cannot_skip_session_cleanup():
+    with _Harness(tenant_cfg=AIProviderConfig(), campaign_row=_CAMPAIGN) as h:
+        with patch.object(ep, "_watch_login_session", AsyncMock(side_effect=OSError("transport closed"))):
+            ws = FakeWebSocket(cookies={"talky_at": "signed"})
+            async def receive():
+                await asyncio.sleep(1)
+                return {"type": "websocket.disconnect"}
+            ws.receive = receive
+            try:
+                await ep.campaign_test_websocket(ws, "camp-1", first_speaker="user")
+            except OSError:
+                pass
+    h.orchestrator.end_session.assert_awaited_once()
+    h.finalise_test_call.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("membership", ["suspended", "removed"])
 async def test_direct_grant_cannot_override_inactive_membership(membership):
     with _Harness(tenant_cfg=AIProviderConfig(), campaign_row=_CAMPAIGN) as h:
