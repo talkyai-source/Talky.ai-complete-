@@ -59,6 +59,8 @@ class CampaignTestUnavailable(RuntimeError):
 # Small concurrency cap so a stuck test tab can't pin an unbounded number of
 # realtime/TTS provider sockets. RFC 6455 close 1013 = "Try Again Later".
 _MAX_CONCURRENT_TEST = 8
+_AUTH_RECHECK_SECONDS = 15.0
+_AUTH_TIMEOUT_SECONDS = 5.0
 _test_semaphore: Optional[asyncio.Semaphore] = None
 
 
@@ -141,6 +143,45 @@ def _is_origin_allowed(websocket: WebSocket) -> bool:
     from app.core.config import get_settings
 
     return origin in get_settings().allowed_origins
+
+
+async def _session_is_active(db_pool, user_id: str, session_id: str) -> bool:
+    """Use REST's revocable session lookup, bound to the signed user."""
+    from app.core.db_utils import acquire_with_tenant
+    from app.core.security.sessions import get_session_by_id
+
+    try:
+        uuid.UUID(user_id)
+        uuid.UUID(session_id)
+    except (ValueError, TypeError, AttributeError):
+        return False
+    async with acquire_with_tenant(db_pool, None, user_id=user_id, timeout=_AUTH_TIMEOUT_SECONDS) as conn:
+        return await get_session_by_id(conn, session_id, user_id=user_id) is not None
+
+
+async def _check_login_session(websocket, pool, user_id, session_id) -> bool:
+    try:
+        active = bool(session_id) and await asyncio.wait_for(
+            _session_is_active(pool, user_id, session_id), timeout=_AUTH_TIMEOUT_SECONDS,
+        )
+    except Exception:
+        logger.warning("campaign_test_session_check_failed", exc_info=True)
+        await websocket.send_json({"type": "error", "code": "authorization_unavailable",
+                                   "message": "Authorization is temporarily unavailable. Please retry."})
+        await websocket.close(code=1011, reason="Authorization unavailable")
+        return False
+    if not active:
+        await websocket.send_json({"type": "error", "code": "auth_required",
+                                   "message": "Your session has expired. Reload the page and sign in again."})
+        await websocket.close(code=1008, reason="Inactive login session")
+    return active
+
+
+async def _watch_login_session(websocket, pool, user_id, session_id):
+    while True:
+        await asyncio.sleep(_AUTH_RECHECK_SECONDS)
+        if not await _check_login_session(websocket, pool, user_id, session_id):
+            return
 
 
 async def _resolve_user_tenant(db_pool, user_id: str) -> Optional[str]:
@@ -477,6 +518,8 @@ async def campaign_test_websocket(
 
     try:
         db_client = get_db_client()
+        if not await _check_login_session(websocket, db_client.pool, user_id, payload.get("sid")):
+            return
         tenant_id = await _resolve_user_tenant(db_client.pool, user_id)
     except Exception:  # noqa: BLE001 — return a stable, non-sensitive WS error
         logger.error("campaign_test_ws: profile lookup failed", exc_info=True)
@@ -597,6 +640,7 @@ async def campaign_test_websocket(
 
     voice_session = None
     receiver_task: Optional[asyncio.Task] = None
+    auth_task: Optional[asyncio.Task] = None
     test_call_id = None
     test_started_at = time.time()
 
@@ -824,7 +868,12 @@ async def campaign_test_websocket(
                         pass
                 # caller-first: send nothing; the pipeline reacts to the first turn.
 
-            await receiver_task
+            auth_task = asyncio.create_task(_watch_login_session(
+                websocket, db_client.pool, user_id, payload.get("sid"),
+            ))
+            done, _ = await asyncio.wait({receiver_task, auth_task}, return_when=asyncio.FIRST_COMPLETED)
+            for task in done:
+                await task
 
         except WebSocketDisconnect:
             logger.info("campaign_test_ws disconnected campaign=%s", str(campaign_id)[:8])
@@ -836,6 +885,12 @@ async def campaign_test_websocket(
             except Exception:  # noqa: BLE001
                 pass
         finally:
+            if auth_task:
+                auth_task.cancel()
+                try:
+                    await auth_task
+                except (asyncio.CancelledError, WebSocketDisconnect, RuntimeError):
+                    pass
             if receiver_task and not receiver_task.done():
                 receiver_task.cancel()
                 try:
