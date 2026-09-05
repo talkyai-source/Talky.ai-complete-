@@ -374,91 +374,19 @@ def campaign_guidance_char_budget() -> int:
     return _tenant_prompt_char_budget()
 
 
-def _cap_tenant_additional_instructions(text, *, campaign_id=None):
-    """Cap the tenant-authored ``additional_instructions`` (campaign Goal /
-    operator ROLE text) to an approximate token budget before it enters
-    prompt composition, so one runaway operator prompt can't bloat every
-    turn of every call on that campaign.
-
-    Truncation is boundary-safe — it cuts back to the last whitespace so a
-    word is never severed mid-token — and logs a WARNING with the original
-    vs. capped size whenever truncation actually happens. Text at or under
-    budget (the normal case) is returned completely untouched: no
-    truncation, no log line.
-    """
-    if not text:
-        return text
-    budget = _tenant_prompt_char_budget()
-    original_len = len(text)
-    if original_len <= budget:
-        return text
-
-    # KEEP THE END, NOT JUST THE BEGINNING (2026-08-13).
-    #
-    # This used to be a plain head-truncation: text[:budget]. Raising the
-    # budget 6000 -> 12000 on 2026-08-12 fixed the campaign in front of us and
-    # a longer one hit the new ceiling the very next day:
-    #
-    #   telephony_tenant_prompt_capped original_chars=14665 capped_chars=11998
-    #   budget_chars=12000 LOST_chars=2667 (18%)
-    #
-    # Raising a ceiling does not fix head-truncation, it moves the cliff. And
-    # the tail is the worst part to lose: operators write role and context
-    # first, then objection handling, pricing rules and closing steps LAST.
-    # Head-truncation reliably discards the part of the script that decides
-    # how a call ENDS.
-    #
-    # So: keep the first 60% of the budget and the last 40%, with an explicit
-    # elision marker between them. The model sees how to open AND how to
-    # close, and — because the marker is visible — it knows something was
-    # removed rather than silently believing the script simply stops.
-    _HEAD_SHARE = 0.60
-    _MARKER = "\n\n[... middle of these instructions omitted for length ...]\n\n"
-
-    usable = max(0, budget - len(_MARKER))
-    head_len = int(usable * _HEAD_SHARE)
-    tail_len = usable - head_len
-
-    # A budget too small to carry the marker AND a useful head and tail must
-    # fall back to plain head-truncation. Otherwise a tiny budget spends its
-    # whole allowance on the elision notice and ships a prompt that says only
-    # "some instructions were omitted" — strictly worse than the first
-    # sentence of the operator's script. The threshold is deliberately
-    # generous: below this the head/tail split is not buying anything.
-    if usable < 200 or tail_len < 60:
-        head = text[:budget]
-        capped = (head.rsplit(" ", 1)[0] if " " in head else head).rstrip()
-        lost = original_len - len(capped)
-        logger.warning(
-            "telephony_tenant_prompt_capped campaign=%s original_chars=%d "
-            "capped_chars=%d budget_chars=%d LOST_chars=%d (%.0f%%) — budget "
-            "too small to preserve the ending, so the TAIL was discarded.",
-            campaign_id, original_len, len(capped), budget,
-            lost, 100.0 * lost / max(original_len, 1),
-        )
-        return capped
-
-    head = text[:head_len]
-    head = head.rsplit(" ", 1)[0] if " " in head else head
-
-    tail = text[-tail_len:] if tail_len > 0 else ""
-    # Start the tail at a word boundary so it does not open mid-token.
-    if " " in tail:
-        tail = tail.split(" ", 1)[1]
-
-    capped = (head.rstrip() + _MARKER + tail.lstrip()).rstrip()
-    lost = original_len - len(capped)
-    logger.warning(
-        "telephony_tenant_prompt_capped campaign=%s original_chars=%d "
-        "capped_chars=%d budget_chars=%d LOST_chars=%d (%.0f%%) — the MIDDLE "
-        "of this campaign's instructions was omitted; the opening and the "
-        "closing/objection sections are both kept. Fix: shorten the script, "
-        "or move FACTS into the knowledge base so they are retrieved per turn "
-        "instead of competing for prompt budget.",
-        campaign_id, original_len, len(capped), budget,
-        lost, 100.0 * lost / max(original_len, 1),
+def _cap_tenant_additional_instructions(text, *, campaign_id=None, campaign_brief=None):
+    """Preserve guidance verbatim or refuse it; kept as a compatibility entry point."""
+    from app.domain.services.campaign_prompt_service import (
+        CampaignPromptValidationError,
+        guidance_budget_violation,
+        guidance_budget_error_message,
     )
-    return capped
+    violation = guidance_budget_violation(text, campaign_brief)
+    if violation:
+        chars, budget = violation
+        logger.warning("campaign_guidance_rejected campaign=%s chars=%d budget=%d", campaign_id, chars, budget)
+        raise CampaignPromptValidationError(guidance_budget_error_message(chars, budget))
+    return text
 
 
 def _telephony_mute_during_tts_default() -> bool:
@@ -1373,13 +1301,7 @@ def build_telephony_session_config(
     else:
         agent_name = _fallback_agent_name(_voice_gender, seed=_name_seed)
 
-    # Cap the tenant-authored ROLE/GOAL text once, up front, so both the
-    # primary compose attempt and the knowledge-driven retry below (see
-    # PromptCompositionError handling) use the same capped text.
-    _tenant_additional_instructions = _cap_tenant_additional_instructions(
-        script_config.get("additional_instructions"),
-        campaign_id=_campaign_id(campaign),
-    )
+    _tenant_additional_instructions = script_config.get("additional_instructions")
 
     # If the agent's name was substituted because the configured one could not
     # be spoken by this voice, rename it in the operator's own ROLE/GOAL text
@@ -1429,6 +1351,12 @@ def build_telephony_session_config(
     _campaign_brief = script_config.get("campaign_brief")
     if not isinstance(_campaign_brief, dict):
         _campaign_brief = None
+    # Validate the final guidance (including any name substitution and brief)
+    # against the same budget used at save/start/preview. Never elide instructions.
+    _tenant_additional_instructions = _cap_tenant_additional_instructions(
+        _tenant_additional_instructions, campaign_id=_campaign_id(campaign),
+        campaign_brief=_campaign_brief,
+    )
 
     def _compose(kd: bool) -> str:
         return compose_prompt(

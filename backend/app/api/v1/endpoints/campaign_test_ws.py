@@ -627,6 +627,7 @@ async def campaign_test_websocket(
     from app.domain.services.telephony_session_config import (
         build_telephony_session_config,
     )
+    from app.domain.services.campaign_prompt_service import CampaignPromptValidationError
     from app.domain.services.tenant_ai_config_resolver import (
         get_tenant_ai_config_resolver,
         TenantAIConfigUnavailable,
@@ -889,6 +890,10 @@ async def campaign_test_websocket(
             for task in done:
                 await task
 
+        except CampaignPromptValidationError as exc:
+            await websocket.send_json({"type": "error", "code": "campaign_prompt_invalid",
+                                       "message": str(exc)})
+            await websocket.close(code=1008, reason="Invalid campaign prompt")
         except WebSocketDisconnect:
             logger.info("campaign_test_ws disconnected campaign=%s", str(campaign_id)[:8])
         except Exception as e:  # noqa: BLE001

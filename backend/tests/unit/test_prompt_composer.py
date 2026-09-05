@@ -457,10 +457,7 @@ def test_scope_guardrail_beats_tenant_additional_instructions():
     assert out.index("NON-NEGOTIABLES") < out.index(_SCOPE_RULE_ANCHOR)
 
 
-def test_scope_guardrail_survives_tenant_prompt_truncation():
-    # Production caps tenant additional_instructions at ~6000 chars. The safety
-    # bullet lives in the composer's own floor, NOT in tenant text, so a runaway
-    # operator prompt that gets truncated can neither push it out nor carry it.
+def test_scope_guardrail_remains_after_maximum_accepted_guidance():
     from app.domain.services.telephony_session_config import (
         _cap_tenant_additional_instructions,
         _tenant_prompt_char_budget,
@@ -468,8 +465,11 @@ def test_scope_guardrail_survives_tenant_prompt_truncation():
 
     budget = _tenant_prompt_char_budget()
     runaway = ("blah " * 4000)  # 20k chars, well over budget
-    capped = _cap_tenant_additional_instructions(runaway, campaign_id="c1")
-    assert len(capped) <= budget < len(runaway)
+    from app.domain.services.campaign_prompt_service import CampaignPromptValidationError
+    with pytest.raises(CampaignPromptValidationError):
+        _cap_tenant_additional_instructions(runaway, campaign_id="c1")
+    capped = _cap_tenant_additional_instructions("x" * budget, campaign_id="c1")
+    assert len(capped) == budget < len(runaway)
 
     out = compose_prompt(
         "lead_gen", "Alex", "Acme", LEAD_GEN_SLOTS, additional_instructions=capped,

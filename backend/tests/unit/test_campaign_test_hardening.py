@@ -114,6 +114,18 @@ async def test_voice_tuning_outage_refuses_to_substitute_defaults():
 
 
 @pytest.mark.asyncio
+async def test_oversized_test_prompt_is_rejected_before_provider_creation(monkeypatch):
+    monkeypatch.setenv("TELEPHONY_TENANT_PROMPT_MAX_CHARS", "600")
+    campaign = {**_CAMPAIGN, "script_config": {**_CAMPAIGN["script_config"], "additional_instructions": "context " * 100}}
+    with _Harness(tenant_cfg=AIProviderConfig(), campaign_row=campaign) as h:
+        ws = FakeWebSocket(cookies={"talky_at": "signed"}, recv_frames=[_end_call_frame()])
+        await ep.campaign_test_websocket(ws, "camp-1", first_speaker="user")
+    assert ws.closed_code == 1008
+    assert any(f.get("code") == "campaign_prompt_invalid" for f in ws.sent)
+    h.orchestrator.create_voice_session.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("membership", ["suspended", "removed"])
 async def test_direct_grant_cannot_override_inactive_membership(membership):
     with _Harness(tenant_cfg=AIProviderConfig(), campaign_row=_CAMPAIGN) as h:
