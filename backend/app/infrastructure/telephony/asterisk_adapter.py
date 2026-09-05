@@ -111,6 +111,19 @@ _INBOUND_TRANSIENT_REASONS = frozenset(
 )
 
 
+class GatewayResponseError(RuntimeError):
+    """A received HTTP rejection, distinct from an ambiguous network timeout."""
+
+    def __init__(self, status: int, body: str):
+        super().__init__(f"Gateway response {status}: {body[:300]}")
+        self.status = status
+        try:
+            payload = json.loads(body)
+            self.code = payload.get("error") if isinstance(payload, dict) else None
+        except (ValueError, TypeError):
+            self.code = None
+
+
 class TtsDeliveryError(RuntimeError):
     """Raised by send_tts_audio when a TTS packet could NOT be delivered to the
     caller (no live gateway session, or the gateway POST failed / timed out).
@@ -1175,7 +1188,7 @@ class AsteriskAdapter(CallControlAdapter):
         ) as resp:
             if resp.status not in ok:
                 body = await resp.text()
-                raise RuntimeError(f"Gateway {method} {path} → {resp.status}: {body[:300]}")
+                raise GatewayResponseError(resp.status, body)
             try:
                 return await resp.json(content_type=None)
             except Exception:
@@ -5027,18 +5040,38 @@ class AsteriskAdapter(CallControlAdapter):
 
         try:
             pcmu_b64 = base64.b64encode(pcmu_audio).decode()
-
-            await self._gateway(
-                "POST",
-                "/v1/sessions/tts/play",
-                payload={
+            if not pcmu_audio or len(pcmu_audio) % 160:
+                raise TtsDeliveryError("TTS payload must contain complete 20ms PCMU frames")
+            payload = {
                     "session_id": session_id,
                     "pcmu_base64": pcmu_b64,
                     "clear_existing": False,
                     "utterance_id": utt["utterance_id"],
                     "chunk_seq": chunk_seq,
-                },
-            )
+            }
+            for attempt in range(3):
+                # An interrupt during backpressure invalidates this submission.
+                # Never stamp old audio with a newly-created utterance identity.
+                current_utterance = self._tts_utterances.get(call_id, {})
+                if current_utterance.get("utterance_id") != payload["utterance_id"]:
+                    raise TtsDeliveryError("TTS utterance interrupted during queue admission")
+                try:
+                    ack = await self._gateway("POST", "/v1/sessions/tts/play", payload=payload)
+                    break
+                except GatewayResponseError as exc:
+                    # Only this explicit all-or-nothing refusal is safe to retry.
+                    # Timeouts/other failures may have accepted audio already.
+                    if exc.status != 429 or exc.code != "tts_queue_full" or attempt == 2:
+                        raise
+                    await asyncio.sleep(0.040)
+            if (
+                not isinstance(ack, dict)
+                or ack.get("status") != "queued"
+                or ack.get("session_id") != session_id
+                or type(ack.get("queued_frames")) is not int
+                or ack["queued_frames"] != len(pcmu_audio) // 160
+            ):
+                raise TtsDeliveryError("Gateway TTS acknowledgement did not confirm all submitted frames")
             # Reset error counter on first successful delivery.
             self._tts_error_counts.pop(call_id, None)
 

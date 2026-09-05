@@ -303,8 +303,8 @@ void test_readiness_reflects_session_admission_capacity() {
     server.stop();
 }
 
-// VG-25: submitting more frames than the queue capacity must return the number
-// actually retained (the tail), never the raw submitted count.
+// Admission is all-or-nothing: rejected speech cannot evict accepted speech
+// or consume the chunk sequence needed for a safe explicit backpressure retry.
 void test_tts_overflow_accounting() {
     SessionConfig cfg = base_config("tts-of", 34101, 34102);
     cfg.tts_max_queue_frames = 10;
@@ -316,9 +316,18 @@ void test_tts_overflow_accounting() {
     std::vector<uint8_t> audio(25 * 160, 0xFF);  // 25 frames into a 10-frame queue
     std::size_t queued = 0;
     std::string e2;
-    const bool ok = session.enqueue_tts_ulaw(audio, false, queued, e2);
-    check(ok, "vg25_enqueue_ok");
-    check(queued == 10, "vg25_reports_retained_not_submitted (queued=" + std::to_string(queued) + ")");
+    const bool ok = session.enqueue_tts_ulaw(audio, false, queued, e2, "utterance", 0);
+    check(!ok && e2 == "tts_submission_exceeds_capacity", "tts_oversized_submission_rejected");
+    check(queued == 0 && session.snapshot().tts_frames_enqueued_total == 0,
+          "tts_rejected_submission_does_not_mutate_queue");
+    std::vector<uint8_t> valid_audio(2 * 160, 0xFF);
+    check(session.enqueue_tts_ulaw(valid_audio, false, queued, e2, "utterance", 0) && queued == 2,
+          "tts_rejection_does_not_consume_chunk_identity");
+    const auto before_rejected_replace = session.snapshot();
+    check(!session.enqueue_tts_ulaw(audio, true, queued, e2, "replacement", 0),
+          "tts_invalid_replacement_rejected");
+    check(session.snapshot().tts_frames_dropped_total == before_rejected_replace.tts_frames_dropped_total,
+          "tts_invalid_replacement_does_not_discard_accepted_speech");
     // Depth is a live value the transmitter drains concurrently, so assert the
     // race-free invariant: it is capped and never exceeds tts_max_queue_frames.
     check(session.snapshot().tts_queue_depth_frames <= 10, "vg25_queue_depth_never_exceeds_cap");

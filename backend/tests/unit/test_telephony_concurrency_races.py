@@ -113,7 +113,7 @@ async def test_send_tts_success_does_not_raise():
 
     async def ok_gateway(method, path, payload=None, ok=(200,)):
         calls.append(path)
-        return {}
+        return {"status": "queued", "session_id": payload["session_id"], "queued_frames": 1}
 
     ad._gateway = ok_gateway  # type: ignore[assignment]
 
@@ -132,7 +132,7 @@ async def test_first_inbound_agent_audio_is_measured_once_after_gateway_accepts(
     observed: list[float] = []
 
     async def ok_gateway(method, path, payload=None, ok=(200,)):
-        return {}
+        return {"status": "queued", "session_id": payload["session_id"], "queued_frames": 1}
 
     monkeypatch.setattr(ad, "_gateway", ok_gateway)
     monkeypatch.setattr(

@@ -561,6 +561,21 @@ bool RtpSession::enqueue_tts_ulaw(
         return false;
     }
 
+    queued_frames = 0;
+    const std::size_t frame_count = ulaw_audio.size() / static_cast<std::size_t>(kPcmuTimestampStep);
+    const std::size_t cap = config_.tts_max_queue_frames;
+    // Admission is atomic. Reject before clearing a prior utterance, consuming
+    // chunk identity or touching accepted audio. Ingress may shed stale audio;
+    // generated speech must never silently discard words already acknowledged.
+    if (frame_count > cap) {
+        error = "tts_submission_exceeds_capacity";
+        return false;
+    }
+    if (!clear_existing && frame_count > cap - tts_queue_.size()) {
+        error = "tts_queue_full";
+        return false;
+    }
+
     if (clear_existing) {
         clear_tts_queue_locked("clear_existing");
     }
@@ -590,25 +605,12 @@ bool RtpSession::enqueue_tts_ulaw(
         }
     }
 
-    const std::size_t frame_count = ulaw_audio.size() / static_cast<std::size_t>(kPcmuTimestampStep);
-    const std::size_t cap = config_.tts_max_queue_frames;
-
-    // If this single submission alone exceeds the queue capacity, only its LAST
-    // `cap` frames could ever survive the drop-oldest trim below. Skip the
-    // leading frames instead of copying them just to immediately evict them —
-    // this avoids a transient allocation/lock-hold spike on an oversized body
-    // and makes the accounting honest. The leading (skipped) frames are the
-    // START of the utterance and are genuinely not spoken; that is reported to
-    // the caller via queued_frames rather than masked (VG-25).
-    const std::size_t skip_leading = (frame_count > cap) ? (frame_count - cap) : 0;
-    const std::size_t submit_count = frame_count - skip_leading;
-
     const uint32_t segment_id = next_tts_segment_id_++;
-    tts_segments_[segment_id] = TtsSegmentState{submit_count, false};
+    tts_segments_[segment_id] = TtsSegmentState{frame_count, false};
     tts_segments_started_total_.fetch_add(1);
-    tts_frames_enqueued_total_.fetch_add(submit_count);
+    tts_frames_enqueued_total_.fetch_add(frame_count);
 
-    for (std::size_t i = skip_leading; i < frame_count; ++i) {
+    for (std::size_t i = 0; i < frame_count; ++i) {
         const std::size_t offset = i * static_cast<std::size_t>(kPcmuTimestampStep);
         QueuedTtsFrame frame{};
         frame.segment_id = segment_id;
@@ -619,20 +621,7 @@ bool RtpSession::enqueue_tts_ulaw(
         tts_queue_.push_back(std::move(frame));
     }
 
-    // Trim to capacity by dropping the oldest queued frames. Count how many of
-    // THIS submission are evicted so queued_frames reflects only what actually
-    // remains to be played — never the raw submitted count.
-    std::size_t dropped_from_this = 0;
-    while (tts_queue_.size() > cap) {
-        const auto dropped = tts_queue_.front();
-        tts_queue_.pop_front();
-        if (dropped.segment_id == segment_id) {
-            ++dropped_from_this;
-        }
-        mark_tts_frame_dropped_locked(dropped.segment_id);
-    }
-
-    queued_frames = submit_count - dropped_from_this;
+    queued_frames = frame_count;
     tts_last_stop_reason_ = "running";
     // notify_all, not notify_one: the watchdog waits on the same cv, and a
     // notify_one it consumed would be a lost wakeup for the transmitter.

@@ -2058,7 +2058,9 @@ void HttpServer::handle_client(const int client_fd) {
             // distinguishable from malformed requests so the backend can treat
             // them as benign.
             const bool stale = (error == "utterance_interrupted" || error == "stale_or_duplicate_chunk");
-            write_response(client_fd, stale ? 409 : 400, stale ? "Conflict" : "Bad Request",
+            const bool backpressure = error == "tts_queue_full";
+            write_response(client_fd, backpressure ? 429 : (stale ? 409 : 400),
+                           backpressure ? "Too Many Requests" : (stale ? "Conflict" : "Bad Request"),
                            "{\"error\":\"" + escape_json(error) + "\"}");
             return;
         }
