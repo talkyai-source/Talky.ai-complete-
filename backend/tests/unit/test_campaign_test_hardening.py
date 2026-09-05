@@ -181,6 +181,41 @@ async def test_transcript_timeout_or_cancellation_still_finalizes_test(monkeypat
 
 
 @pytest.mark.asyncio
+async def test_campaign_read_outage_is_retryable_not_missing():
+    real_fetch = ep._fetch_campaign_row
+    with _Harness(tenant_cfg=AIProviderConfig(), campaign_row=_CAMPAIGN) as h:
+        with (
+            patch.object(ep, "_fetch_campaign_row", real_fetch),
+            patch("app.core.db_utils.acquire_with_tenant", side_effect=RuntimeError("private database outage")),
+        ):
+            ws = FakeWebSocket(cookies={"talky_at": "signed"}, recv_frames=[_end_call_frame()])
+            await ep.campaign_test_websocket(ws, str(uuid.uuid4()), first_speaker="user")
+    assert ws.closed_code == 1011
+    assert any(f.get("code") == "campaign_lookup_failed" for f in ws.sent)
+    assert "private database outage" not in str(ws.sent)
+    h.orchestrator.create_voice_session.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_campaign_miss_keeps_ownership_predicate_and_policy_close():
+    real_fetch = ep._fetch_campaign_row
+    conn = SimpleNamespace(fetchrow=AsyncMock(return_value=None))
+    cid = str(uuid.uuid4())
+    with _Harness(tenant_cfg=AIProviderConfig(), campaign_row=_CAMPAIGN) as h:
+        with (
+            patch.object(ep, "_fetch_campaign_row", real_fetch),
+            patch("app.core.db_utils.acquire_with_tenant", return_value=_FakeAcquire(conn)),
+        ):
+            ws = FakeWebSocket(cookies={"talky_at": "signed"})
+            await ep.campaign_test_websocket(ws, cid, first_speaker="user")
+    sql, call_campaign, tenant = conn.fetchrow.await_args.args
+    assert "id = $1 AND tenant_id = $2" in sql
+    assert call_campaign == cid and tenant == "tenant-A"
+    assert ws.closed_code == 1008
+    h.orchestrator.create_voice_session.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("membership", ["suspended", "removed"])
 async def test_direct_grant_cannot_override_inactive_membership(membership):
     with _Harness(tenant_cfg=AIProviderConfig(), campaign_row=_CAMPAIGN) as h:

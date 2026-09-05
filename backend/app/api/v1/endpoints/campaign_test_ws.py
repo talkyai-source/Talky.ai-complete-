@@ -252,9 +252,8 @@ async def _resolve_user_tenant(db_pool, user_id: str) -> Optional[str]:
 async def _fetch_campaign_row(db_pool, tenant_id: str, campaign_id: str):
     """Fetch one campaign row as a dict, scoped to ``tenant_id`` (IDOR guard).
 
-    Returns ``None`` on a miss or on any error, and the caller then refuses the
-    connection with 1008 "Campaign not found" — a tenant can never open a test
-    session against somebody else's campaign.
+    Returns ``None`` only on a miss or malformed campaign ID. Infrastructure
+    failures remain distinguishable from tenant-scoped ownership misses.
 
     2026-08-27: this used to be imported from
     ``app.domain.services.telephony.lifecycle``, but the inbound refactor moved
@@ -263,11 +262,15 @@ async def _fetch_campaign_row(db_pool, tenant_id: str, campaign_id: str):
     connection). The query is reproduced here, where its only caller lives.
     """
     if db_pool is None:
+        raise CampaignTestUnavailable("Campaign database unavailable")
+    try:
+        uuid.UUID(campaign_id)
+    except (ValueError, TypeError, AttributeError):
         return None
     try:
         from app.core.db_utils import acquire_with_tenant
 
-        async with acquire_with_tenant(db_pool, None) as conn:
+        async with acquire_with_tenant(db_pool, tenant_id, timeout=_AUTH_TIMEOUT_SECONDS) as conn:
             row = await conn.fetchrow(
                 "SELECT * FROM campaigns WHERE id = $1 AND tenant_id = $2",
                 campaign_id, tenant_id,
@@ -278,7 +281,7 @@ async def _fetch_campaign_row(db_pool, tenant_id: str, campaign_id: str):
             "campaign_test_campaign_fetch_failed tenant=%s campaign=%s err=%s",
             str(tenant_id)[:8], str(campaign_id)[:8], exc,
         )
-        return None
+        raise CampaignTestUnavailable("Campaign lookup failed") from exc
 
 
 async def _record_test_call(
@@ -597,7 +600,15 @@ async def campaign_test_websocket(
     if not await _check_campaign_permission(websocket, container.db_pool, user_id, tenant_id):
         return
 
-    campaign_row = await _fetch_campaign_row(container.db_pool, tenant_id, campaign_id)
+    try:
+        campaign_row = await asyncio.wait_for(
+            _fetch_campaign_row(container.db_pool, tenant_id, campaign_id), timeout=_AUTH_TIMEOUT_SECONDS,
+        )
+    except (CampaignTestUnavailable, TimeoutError):
+        await websocket.send_json({"type": "error", "code": "campaign_lookup_failed",
+                                   "message": "Unable to load this campaign. Please retry."})
+        await websocket.close(code=1011, reason="Campaign lookup unavailable")
+        return
     if campaign_row is None:
         await websocket.send_json({"type": "error", "message": "Campaign not found."})
         await websocket.close(code=1008, reason="Campaign not found")
