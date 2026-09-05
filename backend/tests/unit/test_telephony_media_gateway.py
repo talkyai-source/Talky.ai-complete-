@@ -10,6 +10,22 @@ from app.infrastructure.telephony.telephony_media_gateway import TelephonyMediaG
 
 
 @pytest.mark.asyncio
+async def test_every_drop_oldest_audio_eviction_is_counted_and_warned():
+    gateway = TelephonyMediaGateway()
+    await gateway.initialize({"sample_rate": 8000})
+    await gateway.on_call_started("audit", {"adapter": AsyncMock(), "recording_enabled": False})
+    session = gateway._sessions["audit"]
+    session.input_queue = asyncio.Queue(maxsize=1)
+    session.input_queue.put_nowait(b"previous-audio")
+    with patch("app.infrastructure.telephony.telephony_media_gateway.logger.warning") as warning:
+        for _ in range(10):
+            await gateway.on_audio_received("audit", b"\xff" * 320)
+    assert session.dropped_input_chunks == 10
+    assert session.input_queue.qsize() == 1
+    assert warning.call_count == 1
+
+
+@pytest.mark.asyncio
 async def test_hangup_call_uses_adapter_pbx_call_id():
     gateway = TelephonyMediaGateway()
     adapter = AsyncMock()
