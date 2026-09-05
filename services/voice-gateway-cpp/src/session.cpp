@@ -576,31 +576,36 @@ bool RtpSession::enqueue_tts_ulaw(
         return false;
     }
 
-    if (clear_existing) {
-        clear_tts_queue_locked("clear_existing");
-    }
-
-    // VG-13 idempotency gate — only when the backend stamps an utterance id.
-    // clear_existing ran first, so a replacement submission retires the PREVIOUS
-    // utterance and then admits its own id here.
+    // Validate identity before ANY queue mutation. A stale replacement must
+    // not clear accepted speech and only then discover it cannot be admitted.
     if (!utterance_id.empty()) {
-        if (utterance_id == tts_retired_utterance_id_) {
+        if (utterance_id == tts_retired_utterance_id_ ||
+            (clear_existing && utterance_id == tts_current_utterance_id_)) {
             // A chunk of an utterance that was already interrupted/replaced —
             // the delayed-delivery race that used to re-speak pre-barge-in audio.
             tts_chunks_rejected_stale_total_.fetch_add(1);
             error = "utterance_interrupted";
             return false;
         }
+        if (!clear_existing && utterance_id == tts_current_utterance_id_ &&
+            chunk_seq >= 0 && chunk_seq <= tts_last_chunk_seq_) {
+            tts_chunks_rejected_stale_total_.fetch_add(1);
+            error = "stale_or_duplicate_chunk";
+            return false;
+        }
+    }
+
+    if (clear_existing) {
+        clear_tts_queue_locked("clear_existing");
+    }
+
+    // All refusal conditions passed. Commit the accepted identity and audio.
+    if (!utterance_id.empty()) {
         if (utterance_id != tts_current_utterance_id_) {
             tts_current_utterance_id_ = utterance_id;
             tts_last_chunk_seq_ = -1;
         }
         if (chunk_seq >= 0) {
-            if (chunk_seq <= tts_last_chunk_seq_) {
-                tts_chunks_rejected_stale_total_.fetch_add(1);
-                error = "stale_or_duplicate_chunk";
-                return false;
-            }
             tts_last_chunk_seq_ = chunk_seq;
         }
     }

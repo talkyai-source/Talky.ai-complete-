@@ -323,6 +323,12 @@ void test_tts_overflow_accounting() {
     std::vector<uint8_t> valid_audio(2 * 160, 0xFF);
     check(session.enqueue_tts_ulaw(valid_audio, false, queued, e2, "utterance", 0) && queued == 2,
           "tts_rejection_does_not_consume_chunk_identity");
+    const auto before_stale_replace = session.snapshot();
+    check(!session.enqueue_tts_ulaw(valid_audio, true, queued, e2, "utterance", 0),
+          "tts_stale_replacement_rejected");
+    check(session.snapshot().tts_last_stop_reason != "clear_existing" &&
+          session.snapshot().tts_frames_dropped_total == before_stale_replace.tts_frames_dropped_total,
+          "tts_stale_replacement_preserves_accepted_speech");
     const auto before_rejected_replace = session.snapshot();
     check(!session.enqueue_tts_ulaw(audio, true, queued, e2, "replacement", 0),
           "tts_invalid_replacement_rejected");
@@ -332,6 +338,27 @@ void test_tts_overflow_accounting() {
     // race-free invariant: it is capped and never exceeds tts_max_queue_frames.
     check(session.snapshot().tts_queue_depth_frames <= 10, "vg25_queue_depth_never_exceeds_cap");
 
+    session.stop("test_done");
+}
+
+void test_tts_queue_full_preserves_prior_acceptance() {
+    SessionConfig cfg = base_config("tts-full", 34111, 34112);
+    cfg.tts_max_queue_frames = 1000;
+    RtpSession session(cfg);
+    std::string error;
+    check(session.start(error), "tts_full_start");
+    // Twenty seconds of accepted speech keeps the capacity test independent
+    // of ordinary scheduler jitter while the sender drains concurrently.
+    std::vector<uint8_t> audio(1000 * 160, 0xFF);
+    std::size_t queued = 0;
+    check(session.enqueue_tts_ulaw(audio, false, queued, error, "long", 0),
+          "tts_full_initial_acceptance");
+    check(!session.enqueue_tts_ulaw(audio, false, queued, error, "long", 1) &&
+          error == "tts_queue_full" && queued == 0,
+          "tts_full_explicit_atomic_refusal");
+    const auto snapshot = session.snapshot();
+    check(snapshot.tts_frames_enqueued_total == 1000 && snapshot.tts_frames_dropped_total == 0,
+          "tts_full_does_not_evict_or_partially_accept");
     session.stop("test_done");
 }
 
@@ -1467,6 +1494,7 @@ int main() {
     test_media_totals_survive_stop_and_session_id_reuse();
     test_media_totals_survive_reaper_retirement();
     test_tts_overflow_accounting();
+    test_tts_queue_full_preserves_prior_acceptance();
     test_jitter_flood_no_deadlock();
     test_stt_reorder_ordering();
     test_stt_reorder_rejects_late_after_emit();
