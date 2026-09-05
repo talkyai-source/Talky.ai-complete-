@@ -56,15 +56,15 @@ def test_unmeasured_is_not_the_same_as_healthy():
     assert "unmeasured" not in event_loop_lag.describe()
 
 
-def test_a_healthy_loop_reads_as_not_ours():
+def test_a_healthy_sample_is_observation_not_fault_attribution():
     event_loop_lag.record(0.0005)          # 0.5ms — ordinary scheduler noise
-    assert "stall=not-ours" in event_loop_lag.describe()
+    assert "loop_recent=healthy source=undetermined" in event_loop_lag.describe()
 
 
-def test_a_stalled_loop_reads_as_ours():
+def test_a_stalled_sample_is_reported_without_exclusive_fault_attribution():
     event_loop_lag.record(0.250)           # 250ms — we were blocked
     d = event_loop_lag.describe()
-    assert "stall=ours" in d
+    assert "loop_recent=stalled source=undetermined" in d
     assert "loop_lag_ms=250.0" in d
 
 
@@ -123,13 +123,13 @@ async def test_gap_warning_carries_both_discriminators(caplog):
     msg = warnings[-1].getMessage()
     assert "arrived_ratio=" in msg, "cannot tell late from lost"
     assert "loop_lag_ms=" in msg, "cannot tell whose stall it was"
-    assert "stall=ours" in msg
+    assert "loop_recent=stalled source=undetermined" in msg
     assert warnings[-1].loop_lag_ms == pytest.approx(180.0)
 
 
 @pytest.mark.asyncio
-async def test_gap_warning_says_not_ours_when_the_loop_was_idle(caplog):
-    """The other half of the verdict — this is what rules our own code OUT."""
+async def test_gap_warning_does_not_exonerate_gateway_when_loop_sample_is_healthy(caplog):
+    """A recent sample cannot rule our own media path out."""
     call_id = "gap-external"
     gateway = await _gateway_with_session(call_id)
     session = gateway._sessions[call_id]
@@ -142,7 +142,16 @@ async def test_gap_warning_says_not_ours_when_the_loop_was_idle(caplog):
         await gateway.on_audio_received(call_id, frame)
 
     msg = [r for r in caplog.records if "telephony_audio_gap" in r.getMessage()][-1].getMessage()
-    assert "stall=not-ours" in msg
+    assert "loop_recent=healthy source=undetermined" in msg
+
+
+def test_recent_healthy_sample_does_not_assign_audio_gap_fault_to_carrier():
+    event_loop_lag.record(0.3)
+    event_loop_lag.record(0)
+    description = event_loop_lag.describe()
+    assert "stall=not-ours" not in description
+    assert "source=undetermined" in description
+    assert "loop_lag_peak_ms=300.0" in description
 
 
 @pytest.mark.asyncio

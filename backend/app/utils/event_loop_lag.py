@@ -83,10 +83,14 @@ def reset() -> None:
 def describe() -> str:
     """Compact summary for embedding in another log line.
 
-    Emits ``stall=ours`` / ``stall=not-ours`` so the reader of a gap warning
-    gets the verdict without having to remember what a healthy lag looks like.
+    A recent scheduling observation is not a causal verdict about an audio
+    gap. A healthy sample cannot exonerate earlier stalls, the gateway or the
+    callback transport; a stalled sample cannot prove the carrier was healthy.
     """
     if _last_ms is None:
         return "loop_lag=unmeasured"
-    verdict = "ours" if _last_ms > _NOISE_FLOOR_MS else "not-ours"
-    return f"loop_lag_ms={_last_ms:.1f} loop_lag_peak_ms={_peak_ms:.1f} stall={verdict}"
+    observation = "stalled" if _last_ms > _NOISE_FLOOR_MS else "healthy"
+    return (
+        f"loop_lag_ms={_last_ms:.1f} loop_lag_peak_ms={_peak_ms:.1f} "
+        f"loop_recent={observation} source=undetermined"
+    )
