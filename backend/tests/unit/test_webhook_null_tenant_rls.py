@@ -2,6 +2,7 @@
 import importlib.util
 from pathlib import Path
 from unittest.mock import MagicMock
+import pytest
 
 
 def load_migration():
@@ -38,3 +39,11 @@ def test_alembic_owns_webhook_schema_before_it_installs_security():
         assert create < policy
     assert any("url TEXT NOT NULL" in s and "events JSONB" in s for s in sql)
     assert any("webhook_id UUID" in s and "status TEXT" in s for s in sql)
+
+
+def test_downgrade_cannot_restore_cross_tenant_webhook_access():
+    migration = load_migration()
+    migration.op = MagicMock()
+    with pytest.raises(RuntimeError, match="Refusing to downgrade"):
+        migration.downgrade()
+    migration.op.execute.assert_not_called()

@@ -51,5 +51,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    # Restore the previous policy semantics; no ownership or row data changes.
-    _apply(SCOPE + " OR tenant_id IS NULL")
+    raise RuntimeError(
+        "Refusing to downgrade 0044_webhook_null_tenant_rls: production migrations "
+        "are forward-only; ship a compensating migration instead"
+    )
