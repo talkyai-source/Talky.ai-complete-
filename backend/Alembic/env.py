@@ -81,6 +81,15 @@ def do_run_migrations(connection: Connection) -> None:
         transaction_per_migration=False,
     )
     with context.begin_transaction():
+        # The app role has neither SUPERUSER nor BYPASSRLS (since 2026-08-30)
+        # and the tenant tables are FORCE ROW LEVEL SECURITY. Without a
+        # tenant GUC every policy evaluates false, so a migration's data
+        # preflight SELECTs see ZERO rows and pass vacuously — proven on
+        # production 2026-09-05 (leads=0, dialer_jobs=0 on this connection;
+        # 34133 / 25510 with the bypass). Every canonical policy honours
+        # app.bypass_rls; set it transaction-locally so migrations read the
+        # whole table. DDL and constraint VALIDATE were never subject to RLS.
+        connection.exec_driver_sql("SET LOCAL app.bypass_rls = 'true'")
         context.run_migrations()
 
 
