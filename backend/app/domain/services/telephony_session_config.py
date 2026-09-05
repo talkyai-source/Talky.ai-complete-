@@ -1188,6 +1188,9 @@ def build_telephony_session_config(
             tts_model = ""
 
     script_config = _extract_script_config(campaign) or {}
+    _pipeline_mode = script_config.get("pipeline_mode") or getattr(source_config, "pipeline_mode", "cascaded") or "cascaded"
+    _realtime_voice = script_config.get("realtime_voice") or getattr(source_config, "realtime_voice", "marin")
+    _identity_voice = _realtime_voice if _pipeline_mode == "realtime" else tts_voice_id
     configured_persona = script_config.get("persona_type")
     # Single composition path. A campaign-less / persona-less call (a bare test
     # dial, or a pre-persona campaign) defaults to a knowledge-driven lead_gen
@@ -1217,13 +1220,9 @@ def build_telephony_session_config(
     if not isinstance(_agent_name_genders, dict):
         _agent_name_genders = None
 
-    # The agent NAME must match the gender of the voice the callee actually
-    # hears. `tts_voice_id` above is already the EFFECTIVE voice (campaign
-    # override applied, else the tenant/global default), so resolving gender
-    # from it here is correct for every path that reaches this builder —
-    # including the ones that pass no agent_name_override (inbound calls, the
-    # campaign "Test agent" WS, and campaigns with no durable job name).
-    _voice_gender = _resolve_voice_gender_safe(tts_voice_id)
+    # Name selection follows the active speech engine, including campaign
+    # realtime overrides. Unused cascaded TTS settings cannot change identity.
+    _voice_gender = _resolve_voice_gender_safe(_identity_voice)
 
     # Seed the substitution on the campaign so a retry, or a second call on the
     # same campaign, does not introduce itself with a different name than the
@@ -1259,14 +1258,14 @@ def build_telephony_session_config(
                 "overridden for this call",
                 _campaign_id(campaign), _substituted_from, agent_name,
                 "female" if _voice_gender == "male" else "male",
-                tts_voice_id, _voice_gender,
+                _identity_voice, _voice_gender,
             )
         else:
             # Still mismatched but deliberately kept (see resolve_name_against_
             # voice) — say so loudly; it is otherwise silent.
             _warn_on_agent_name_voice_mismatch(
                 agent_name, _agent_name_genders, _voice_gender,
-                campaign_id=_campaign_id(campaign), voice_id=tts_voice_id,
+                campaign_id=_campaign_id(campaign), voice_id=_identity_voice,
             )
     elif agent_names_pool:
         try:
@@ -1291,12 +1290,12 @@ def build_telephony_session_config(
                     "agent_name_substituted campaign=%s %r -> %r — no configured "
                     "name is usable with the %s voice %s",
                     _campaign_id(campaign), _substituted_from, agent_name,
-                    _voice_gender, tts_voice_id,
+                    _voice_gender, _identity_voice,
                 )
             else:
                 _warn_on_agent_name_voice_mismatch(
                     agent_name, _agent_name_genders, _voice_gender,
-                    campaign_id=_campaign_id(campaign), voice_id=tts_voice_id,
+                    campaign_id=_campaign_id(campaign), voice_id=_identity_voice,
                 )
     else:
         agent_name = _fallback_agent_name(_voice_gender, seed=_name_seed)
@@ -1586,18 +1585,9 @@ def build_telephony_session_config(
     # override per-campaign via its script_config, so one tenant can run some
     # campaigns on the realtime speech-to-speech pipeline and others cascaded.
     # Default "cascaded" keeps every existing call byte-for-byte unchanged.
-    _pipeline_mode = (
-        script_config.get("pipeline_mode")
-        or getattr(source_config, "pipeline_mode", "cascaded")
-        or "cascaded"
-    )
     _realtime_model = (
         script_config.get("realtime_model")
         or getattr(source_config, "realtime_model", "gpt-realtime-2")
-    )
-    _realtime_voice = (
-        script_config.get("realtime_voice")
-        or getattr(source_config, "realtime_voice", "marin")
     )
     _realtime_settings = (
         script_config.get("realtime_settings")
