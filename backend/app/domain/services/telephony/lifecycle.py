@@ -4773,10 +4773,15 @@ def _resolve_inbound_terminal_outcome(
 
         if selected_action == "voicemail":
             return "answered"
-        return resolve_call_outcome(
-            voice_session,
-            hangup_reason=hangup_reason,
-        ).value
+        # This session was created by the inbound answered lifecycle. Caller
+        # speech, session length and outbound AMD text heuristics cannot undo
+        # that answer. Keep business outcomes separate from pickup evidence.
+        context = getattr(call_session, "conversation_context", None)
+        if getattr(voice_session, "_goal_achieved", False) or getattr(context, "goal_achieved", False):
+            return "goal_achieved"
+        if getattr(voice_session, "_goal_failed", False):
+            return "goal_not_achieved"
+        return "answered"
 
     # Restart recovery may already have an outcome from a prior partial
     # projection. Preserve known canonical values; the finalizer uses COALESCE
