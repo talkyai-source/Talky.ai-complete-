@@ -67,3 +67,42 @@ async def test_open_test_stops_when_login_is_revoked(monkeypatch):
     assert ws.closed_code == 1008
     assert any(f.get("code") == "auth_required" for f in ws.sent)
     h.orchestrator.end_session.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("membership", ["suspended", "removed"])
+async def test_direct_grant_cannot_override_inactive_membership(membership):
+    with _Harness(tenant_cfg=AIProviderConfig(), campaign_row=_CAMPAIGN) as h:
+        with patch.object(ep, "_has_test_membership", AsyncMock(return_value=False), create=True):
+            ws = FakeWebSocket(cookies={"talky_at": "signed"}, recv_frames=[_end_call_frame()])
+            await ep.campaign_test_websocket(ws, "camp-1", first_speaker="user")
+    assert ws.closed_code == 1008
+    assert any(f.get("code") == "permission_denied" for f in ws.sent)
+    h.orchestrator.create_voice_session.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_membership_lookup_checks_active_tenant_or_explicit_platform_role():
+    conn = SimpleNamespace(fetchval=AsyncMock(return_value=True))
+    with patch("app.core.db_utils.acquire_with_tenant", return_value=_FakeAcquire(conn)):
+        assert await ep._has_test_membership(object(), "user-1", "tenant-A")
+    sql, uid, tenant = conn.fetchval.await_args.args
+    assert "tenant_id = $2" in sql and "status = 'active'" in sql
+    assert "r.name = 'platform_admin'" in sql and "r.tenant_scoped = FALSE" in sql
+    assert uid == "user-1" and tenant == "tenant-A"
+
+
+@pytest.mark.asyncio
+async def test_open_test_stops_when_membership_is_removed(monkeypatch):
+    monkeypatch.setattr(ep, "_AUTH_RECHECK_SECONDS", 0)
+    with _Harness(tenant_cfg=AIProviderConfig(), campaign_row=_CAMPAIGN) as h:
+        with patch.object(ep, "_has_test_membership", AsyncMock(side_effect=[True, False]), create=True):
+            ws = FakeWebSocket(cookies={"talky_at": "signed"})
+            async def receive():
+                await asyncio.sleep(1)
+                return {"type": "websocket.disconnect"}
+            ws.receive = receive
+            await ep.campaign_test_websocket(ws, "camp-1", first_speaker="user")
+    assert ws.closed_code == 1008
+    assert any(f.get("code") == "permission_denied" for f in ws.sent)
+    h.orchestrator.end_session.assert_awaited_once()

@@ -177,10 +177,49 @@ async def _check_login_session(websocket, pool, user_id, session_id) -> bool:
     return active
 
 
-async def _watch_login_session(websocket, pool, user_id, session_id):
+async def _has_test_membership(pool, user_id, tenant_id) -> bool:
+    """Direct grants do not revive suspended membership; global admins are explicit."""
+    from app.core.db_utils import acquire_with_tenant
+
+    async with acquire_with_tenant(pool, None, user_id=user_id, timeout=_AUTH_TIMEOUT_SECONDS) as conn:
+        return bool(await conn.fetchval("""
+            SELECT EXISTS (
+                SELECT 1 FROM tenant_users
+                WHERE user_id = $1 AND tenant_id = $2 AND status = 'active'
+            ) OR EXISTS (
+                SELECT 1 FROM tenant_users tu JOIN roles r ON r.id = tu.role_id
+                WHERE tu.user_id = $1 AND tu.status = 'active'
+                  AND r.name = 'platform_admin' AND r.tenant_scoped = FALSE
+            )
+        """, user_id, tenant_id))
+
+
+async def _check_campaign_permission(websocket, pool, user_id, tenant_id) -> bool:
+    try:
+        async with asyncio.timeout(_AUTH_TIMEOUT_SECONDS):
+            member = await _has_test_membership(pool, user_id, tenant_id)
+            permissions = await get_effective_permissions(pool, user_id, tenant_id) if member else set()
+    except Exception:
+        logger.warning("campaign_test_permission_check_failed", exc_info=True)
+        await websocket.send_json({"type": "error", "code": "authorization_unavailable",
+                                   "message": "Authorization is temporarily unavailable. Please retry."})
+        await websocket.close(code=1011, reason="Authorization unavailable")
+        return False
+    if not check_permission(permissions, Permission.CAMPAIGNS_UPDATE):
+        await websocket.send_json({"type": "error", "code": "permission_denied",
+                                   "required": Permission.CAMPAIGNS_UPDATE.value,
+                                   "message": "You do not have permission to test this campaign."})
+        await websocket.close(code=1008, reason="Permission denied")
+        return False
+    return True
+
+
+async def _watch_login_session(websocket, pool, user_id, session_id, tenant_id):
     while True:
         await asyncio.sleep(_AUTH_RECHECK_SECONDS)
         if not await _check_login_session(websocket, pool, user_id, session_id):
+            return
+        if not await _check_campaign_permission(websocket, pool, user_id, tenant_id):
             return
 
 
@@ -554,41 +593,7 @@ async def campaign_test_websocket(
         await websocket.close(code=1011, reason="Container not initialized")
         return
 
-    # WebSockets do not run FastAPI's HTTP dependency chain. Resolve effective
-    # grants explicitly so a read-only or subsequently revoked user cannot
-    # consume provider capacity or persist test calls/transcripts.
-    try:
-        permissions = await get_effective_permissions(
-            container.db_pool,
-            user_id,
-            tenant_id,
-        )
-    except Exception as permission_err:  # noqa: BLE001 — authorization fails closed
-        logger.error(
-            "campaign_test_ws: permission lookup failed tenant=%s user=%s err_type=%s",
-            str(tenant_id)[:8],
-            str(user_id)[:8],
-            type(permission_err).__name__,
-        )
-        await websocket.send_json(
-            {
-                "type": "error",
-                "code": "authorization_unavailable",
-                "message": "Authorization is temporarily unavailable. Please retry.",
-            }
-        )
-        await websocket.close(code=1011, reason="Authorization unavailable")
-        return
-    if not check_permission(permissions, Permission.CAMPAIGNS_UPDATE):
-        await websocket.send_json(
-            {
-                "type": "error",
-                "code": "permission_denied",
-                "required": Permission.CAMPAIGNS_UPDATE.value,
-                "message": "You do not have permission to test this campaign.",
-            }
-        )
-        await websocket.close(code=1008, reason="Permission denied")
+    if not await _check_campaign_permission(websocket, container.db_pool, user_id, tenant_id):
         return
 
     campaign_row = await _fetch_campaign_row(container.db_pool, tenant_id, campaign_id)
@@ -869,7 +874,7 @@ async def campaign_test_websocket(
                 # caller-first: send nothing; the pipeline reacts to the first turn.
 
             auth_task = asyncio.create_task(_watch_login_session(
-                websocket, db_client.pool, user_id, payload.get("sid"),
+                websocket, container.db_pool, user_id, payload.get("sid"), tenant_id,
             ))
             done, _ = await asyncio.wait({receiver_task, auth_task}, return_when=asyncio.FIRST_COMPLETED)
             for task in done:
