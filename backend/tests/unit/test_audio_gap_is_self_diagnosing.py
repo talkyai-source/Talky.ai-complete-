@@ -6,19 +6,10 @@ stall, upstream RTP loss — and distinguished none of them, so not one was
 actionable. The comment above the log call even records that naming a suspect
 had previously sent an investigation down the wrong path.
 
-Reconstructing the answer afterwards from the ``audio_level`` sample counts of
-that run gave a delivery ratio of p50 exactly 1.000 / mean 1.0089, with 3.4% of
-one-second windows short against 3.1% long — near-symmetric, which is bunching,
-not loss. Nothing was ever lost. "RTP loss" could have been struck off on day
-one if the warning had carried the number.
-
-So the fix is not a new theory about the cause; it is two fields that make the
-NEXT occurrence self-diagnosing:
-
-  arrived_ratio  ~1.0 => nothing lost, purely a timing artefact
-                 <1.0 sustained => real loss, a different problem
-  loop_lag_ms    high => we were too busy to take the callback; ours to fix
-                 ~0   => we were idle and waiting; it arrived late from outside
+The warning carries delivery ratio and recent loop lag as observations, not
+proof of which component caused the gap. Near-one ratios can suggest bunching;
+a healthy last loop sample does not cover the entire interval or rule out a
+local stall. Causal attribution remains explicitly undetermined.
 
 These tests pin both, and pin that "unmeasured" stays distinguishable from
 "healthy" — conflating those two is the ambiguity the whole change exists to
