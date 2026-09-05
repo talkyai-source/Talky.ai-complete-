@@ -49,6 +49,10 @@ logger = logging.getLogger(__name__)
 DBLookup = Callable[[str], Awaitable[Optional[AIProviderConfig]]]
 
 
+class TenantAIConfigUnavailable(RuntimeError):
+    """A saved configuration could not be resolved reliably."""
+
+
 class TenantAIConfigResolver:
     """Resolves the per-tenant :class:`AIProviderConfig` used to build a call.
 
@@ -82,7 +86,7 @@ class TenantAIConfigResolver:
         from app.domain.services.global_ai_config import get_global_config
         return get_global_config()
 
-    async def for_tenant_async(self, tenant_id: Optional[str]) -> AIProviderConfig:
+    async def for_tenant_async(self, tenant_id: Optional[str], *, require_available: bool = False) -> AIProviderConfig:
         """Production resolution path: tenant DB row → process default.
 
         DB results are not cached — an operator editing AI Options expects the
@@ -101,11 +105,15 @@ class TenantAIConfigResolver:
         """
         lookup = self._db_lookup
         if lookup is None or not tenant_id:
+            if require_available:
+                raise TenantAIConfigUnavailable("Tenant AI configuration lookup is unavailable")
             return self.default()
 
         try:
             config = await lookup(str(tenant_id))
         except Exception as exc:  # noqa: BLE001 — never block a call
+            if require_available:
+                raise TenantAIConfigUnavailable("Tenant AI configuration lookup failed") from exc
             logger.warning(
                 "tenant_ai_config_lookup_failed tenant=%s err=%s "
                 "— falling back to process default",

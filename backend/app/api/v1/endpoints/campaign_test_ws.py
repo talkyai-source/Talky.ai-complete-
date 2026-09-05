@@ -629,6 +629,7 @@ async def campaign_test_websocket(
     )
     from app.domain.services.tenant_ai_config_resolver import (
         get_tenant_ai_config_resolver,
+        TenantAIConfigUnavailable,
     )
     from app.domain.services.voice_tuning import get_voice_tuning_resolver
 
@@ -655,8 +656,16 @@ async def campaign_test_websocket(
             # These resolvers are cache-bypassed, so an AI-Options edit takes
             # effect on the next connection (requirement: test agent reacts to
             # AI Options).
-            ai_cfg = await get_tenant_ai_config_resolver().for_tenant_async(tenant_id)
-            vt = await get_voice_tuning_resolver().for_tenant_async(tenant_id)
+            try:
+                async with asyncio.timeout(_AUTH_TIMEOUT_SECONDS):
+                    ai_cfg = await get_tenant_ai_config_resolver().for_tenant_async(tenant_id, require_available=True)
+                    vt = await get_voice_tuning_resolver().for_tenant_async(tenant_id, require_available=True)
+            except (TenantAIConfigUnavailable, TimeoutError):
+                logger.warning("campaign_test_ai_config_unavailable tenant=%s", tenant_id, exc_info=True)
+                await websocket.send_json({"type": "error", "code": "ai_config_unavailable",
+                                           "message": "Unable to load your AI settings. Please retry."})
+                await websocket.close(code=1011, reason="AI configuration unavailable")
+                return
 
             config = build_telephony_session_config(
                 gateway_type="browser",

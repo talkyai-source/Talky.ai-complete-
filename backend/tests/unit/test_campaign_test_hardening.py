@@ -70,6 +70,50 @@ async def test_open_test_stops_when_login_is_revoked(monkeypatch):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("lookup_state", ["failure", "unwired"])
+async def test_unreadable_tenant_config_refuses_default_agent(lookup_state):
+    from app.domain.services.tenant_ai_config_resolver import TenantAIConfigResolver
+    resolver = TenantAIConfigResolver()
+    if lookup_state == "failure":
+        resolver.set_db_lookup(AsyncMock(side_effect=RuntimeError("private config outage")))
+    with _Harness(tenant_cfg=AIProviderConfig(), campaign_row=_CAMPAIGN) as h:
+        with patch("app.domain.services.tenant_ai_config_resolver.get_tenant_ai_config_resolver", return_value=resolver):
+            ws = FakeWebSocket(cookies={"talky_at": "signed"}, recv_frames=[_end_call_frame()])
+            await ep.campaign_test_websocket(ws, "camp-1", first_speaker="user")
+    assert ws.closed_code == 1011
+    assert any(f.get("code") == "ai_config_unavailable" for f in ws.sent)
+    assert "private config outage" not in str(ws.sent)
+    h.orchestrator.create_voice_session.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_new_tenant_without_config_uses_documented_defaults():
+    from app.domain.services.tenant_ai_config_resolver import TenantAIConfigResolver
+    resolver = TenantAIConfigResolver()
+    resolver.set_db_lookup(AsyncMock(return_value=None))
+    with _Harness(tenant_cfg=AIProviderConfig(), campaign_row=_CAMPAIGN) as h:
+        with patch("app.domain.services.tenant_ai_config_resolver.get_tenant_ai_config_resolver", return_value=resolver):
+            ws = FakeWebSocket(cookies={"talky_at": "signed"}, recv_frames=[_end_call_frame()])
+            await ep.campaign_test_websocket(ws, "camp-1", first_speaker="user")
+    h.orchestrator.create_voice_session.assert_awaited_once()
+    assert any(f.get("type") == "ready" for f in ws.sent)
+
+
+@pytest.mark.asyncio
+async def test_voice_tuning_outage_refuses_to_substitute_defaults():
+    from app.domain.services.voice_tuning import VoiceTuningResolver
+    resolver = VoiceTuningResolver()
+    resolver.set_db_lookup(AsyncMock(side_effect=RuntimeError("tuning unavailable")))
+    with _Harness(tenant_cfg=AIProviderConfig(), campaign_row=_CAMPAIGN) as h:
+        with patch("app.domain.services.voice_tuning.get_voice_tuning_resolver", return_value=resolver):
+            ws = FakeWebSocket(cookies={"talky_at": "signed"}, recv_frames=[_end_call_frame()])
+            await ep.campaign_test_websocket(ws, "camp-1", first_speaker="user")
+    assert ws.closed_code == 1011
+    assert any(f.get("code") == "ai_config_unavailable" for f in ws.sent)
+    h.orchestrator.create_voice_session.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("membership", ["suspended", "removed"])
 async def test_direct_grant_cannot_override_inactive_membership(membership):
     with _Harness(tenant_cfg=AIProviderConfig(), campaign_row=_CAMPAIGN) as h:
