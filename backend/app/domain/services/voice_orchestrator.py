@@ -1081,6 +1081,10 @@ class VoiceOrchestrator:
                 await session.pipeline_task
             except asyncio.CancelledError:
                 pass
+            except Exception:
+                # A pipeline may fail in its own finally while being cancelled.
+                # Gateway/provider cleanup and active-session removal still apply.
+                logger.warning("voice_pipeline_cancel_failed call=%s", call_id[:8], exc_info=True)
 
         # Realtime teardown (idempotent): cancelling pipeline_task already runs
         # bridge.run()'s finally→stop(), which closes the speech-to-speech

@@ -61,6 +61,7 @@ class CampaignTestUnavailable(RuntimeError):
 _MAX_CONCURRENT_TEST = 8
 _AUTH_RECHECK_SECONDS = 15.0
 _AUTH_TIMEOUT_SECONDS = 5.0
+_CLEANUP_TIMEOUT_SECONDS = 10.0
 _test_semaphore: Optional[asyncio.Semaphore] = None
 
 
@@ -919,16 +920,29 @@ async def campaign_test_websocket(
             # BEFORE teardown, like the phone path: end_session cancels the
             # pipeline, and the transcript buffer lives on that pipeline's
             # transcript_service. Persist first or there is nothing left to read.
-            if voice_session and test_call_id:
-                await _persist_test_transcript(
-                    voice_session, tenant_id, test_call_id, container
-                )
-            if voice_session:
-                await container.voice_orchestrator.end_session(voice_session)
-            # Close the flagged row out so the call detail page shows a finished
-            # call you can play, review and leave a voice note on. The duration
-            # is recorded for display only — minutes_quota sums NOT is_test.
-            await _finalise_test_call(
-                container, tenant_id, test_call_id, test_started_at
-            )
+            # Each obligation runs even if another fails or is cancelled.
+            # Nested finally preserves caller cancellation after cleanup.
+            try:
+                if voice_session and test_call_id:
+                    try:
+                        await asyncio.wait_for(_persist_test_transcript(
+                            voice_session, tenant_id, test_call_id, container,
+                        ), timeout=_CLEANUP_TIMEOUT_SECONDS)
+                    except Exception:
+                        logger.warning("campaign_test_transcript_cleanup_failed", exc_info=True)
+            finally:
+                try:
+                    if voice_session:
+                        try:
+                            await asyncio.wait_for(container.voice_orchestrator.end_session(voice_session),
+                                                   timeout=_CLEANUP_TIMEOUT_SECONDS)
+                        except Exception:
+                            logger.warning("campaign_test_session_cleanup_failed", exc_info=True)
+                finally:
+                    try:
+                        await asyncio.wait_for(_finalise_test_call(
+                            container, tenant_id, test_call_id, test_started_at,
+                        ), timeout=_CLEANUP_TIMEOUT_SECONDS)
+                    except Exception:
+                        logger.warning("campaign_test_row_finalization_failed", exc_info=True)
             logger.info("campaign_test_ws session ended campaign=%s", str(campaign_id)[:8])

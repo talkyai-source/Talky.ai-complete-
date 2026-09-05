@@ -126,6 +126,61 @@ async def test_oversized_test_prompt_is_rejected_before_provider_creation(monkey
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["transcript", "teardown", "finalize"])
+async def test_cleanup_failure_does_not_skip_other_obligations(failure):
+    with _Harness(tenant_cfg=AIProviderConfig(), campaign_row=_CAMPAIGN) as h:
+        target = {"transcript": h.persist_test_transcript, "teardown": h.orchestrator.end_session,
+                  "finalize": h.finalise_test_call}[failure]
+        target.side_effect = RuntimeError("cleanup failed")
+        ws = FakeWebSocket(cookies={"talky_at": "signed"}, recv_frames=[_end_call_frame()])
+        await ep.campaign_test_websocket(ws, "camp-1", first_speaker="user")
+    h.persist_test_transcript.assert_awaited_once()
+    h.orchestrator.end_session.assert_awaited_once()
+    h.finalise_test_call.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_pipeline_exception_during_cancel_still_releases_gateway_and_session():
+    from app.domain.services.voice_orchestrator import VoiceOrchestrator
+    async def pipeline():
+        try:
+            await asyncio.Event().wait()
+        finally:
+            raise RuntimeError("pipeline finally failed")
+    task = asyncio.create_task(pipeline())
+    await asyncio.sleep(0)
+    gateway = SimpleNamespace(on_call_ended=AsyncMock(), cleanup=AsyncMock())
+    session = SimpleNamespace(call_id="call-1", pipeline_task=task, realtime_bridge=None,
+                              realtime_session=None, pipeline=None, event_repo=None, config=None,
+                              media_gateway=gateway, tts_provider=None)
+    orchestrator = object.__new__(VoiceOrchestrator)
+    orchestrator._active_sessions = {session.call_id: session}
+    await orchestrator.end_session(session)
+    gateway.cleanup.assert_awaited_once()
+    assert not orchestrator._active_sessions
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["timeout", "cancelled"])
+async def test_transcript_timeout_or_cancellation_still_finalizes_test(monkeypatch, mode):
+    monkeypatch.setattr(ep, "_CLEANUP_TIMEOUT_SECONDS", 0.01)
+    async def persist(*args):
+        if mode == "cancelled":
+            raise asyncio.CancelledError()
+        await asyncio.Event().wait()
+    with _Harness(tenant_cfg=AIProviderConfig(), campaign_row=_CAMPAIGN) as h:
+        h.persist_test_transcript.side_effect = persist
+        ws = FakeWebSocket(cookies={"talky_at": "signed"}, recv_frames=[_end_call_frame()])
+        if mode == "cancelled":
+            with pytest.raises(asyncio.CancelledError):
+                await ep.campaign_test_websocket(ws, "camp-1", first_speaker="user")
+        else:
+            await ep.campaign_test_websocket(ws, "camp-1", first_speaker="user")
+    h.orchestrator.end_session.assert_awaited_once()
+    h.finalise_test_call.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("membership", ["suspended", "removed"])
 async def test_direct_grant_cannot_override_inactive_membership(membership):
     with _Harness(tenant_cfg=AIProviderConfig(), campaign_row=_CAMPAIGN) as h:
