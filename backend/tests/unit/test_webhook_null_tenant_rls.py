@@ -19,9 +19,22 @@ def test_webhook_policy_excludes_unowned_rows_without_removing_platform_access()
     statements = [str(call.args[0]) for call in migration.op.execute.call_args_list]
     assert migration.down_revision == "0043_campaign_direction_lock"
     for table in ("webhook_endpoints", "webhook_deliveries"):
-        policy = next(sql for sql in statements if f"ALTER POLICY {table}_tenant_isolation" in sql)
+        policy = next(sql for sql in statements if f"CREATE POLICY {table}_tenant_isolation" in sql)
         assert "tenant_id IS NULL" not in policy
         assert "USING" in policy and "WITH CHECK" in policy
         assert "app.bypass_rls" in policy and "app.current_tenant_id" in policy
         assert any(f"ALTER TABLE public.{table} FORCE ROW LEVEL SECURITY" in sql for sql in statements)
     assert not any("DELETE" in sql or "UPDATE public." in sql for sql in statements)
+
+
+def test_alembic_owns_webhook_schema_before_it_installs_security():
+    migration = load_migration()
+    migration.op = MagicMock()
+    migration.upgrade()
+    sql = [str(call.args[0]) for call in migration.op.execute.call_args_list]
+    for table in migration.TABLES:
+        create = next(i for i, statement in enumerate(sql) if f"CREATE TABLE IF NOT EXISTS public.{table}" in statement)
+        policy = next(i for i, statement in enumerate(sql) if f"CREATE POLICY {table}_tenant_isolation" in statement)
+        assert create < policy
+    assert any("url TEXT NOT NULL" in s and "events JSONB" in s for s in sql)
+    assert any("webhook_id UUID" in s and "status TEXT" in s for s in sql)
