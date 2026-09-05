@@ -256,12 +256,33 @@ def _python_schema_evidence(source: str) -> tuple[set[str], set[str]]:
             if isinstance(sub, ast.Constant) and isinstance(sub.value, str)
         )
 
-    policy_installers = {
-        node.name
-        for node in tree.body
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-        and "create policy" in strings_in(node).lower()
-    }
+    # A helper may take a policy expression rather than a table, or place the
+    # table argument second. Follow only parameters interpolated into ON's
+    # identifier position; treating every first argument as a table fabricates
+    # schema entries and misses the actual protected tables.
+    policy_installers: dict[str, list[tuple[int, str]]] = {}
+    for node in tree.body:
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        table_variables: set[str] = set()
+        for child in ast.walk(node):
+            if not isinstance(child, ast.JoinedStr):
+                continue
+            template = "".join(
+                part.value if isinstance(part, ast.Constant) else
+                "{" + part.value.id + "}" if isinstance(part, ast.FormattedValue)
+                and isinstance(part.value, ast.Name) else "?"
+                for part in child.values
+            )
+            if "create policy" in template.lower():
+                table_variables.update(re.findall(
+                    r'\bON\s+(?:public\.)?"?\{(\w+)\}', template, re.IGNORECASE
+                ))
+        parameters = node.args.posonlyargs + node.args.args
+        bindings = [(index, arg.arg) for index, arg in enumerate(parameters)
+                    if arg.arg in table_variables]
+        if bindings:
+            policy_installers[node.name] = bindings
 
     rls_tables: set[str] = set()
     tenant_scoped: set[str] = set()
@@ -293,8 +314,12 @@ def _python_schema_evidence(source: str) -> tuple[set[str], set[str]]:
                 if has_tenant_column:
                     tenant_scoped.update(table_names)
 
-            if call_name in policy_installers and node.args:
-                rls_tables.update(_literal_string_set(node.args[0], constants))
+            if call_name in policy_installers:
+                keywords = {kw.arg: kw.value for kw in node.keywords}
+                for index, name in policy_installers[call_name]:
+                    argument = node.args[index] if index < len(node.args) else keywords.get(name)
+                    if argument is not None:
+                        rls_tables.update(_literal_string_set(argument, constants))
 
         if isinstance(node, (ast.For, ast.AsyncFor)):
             body = ast.Module(body=node.body, type_ignores=[])
