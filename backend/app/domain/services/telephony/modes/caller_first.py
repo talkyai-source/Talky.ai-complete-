@@ -1,23 +1,9 @@
-"""Caller-speaks-first prompt shaping.
+"""Legacy caller-first OUTBOUND shaping and inbound recording helpers.
 
-When the campaign owner picks ``first_speaker = "user"`` the AI must sound
-like the person who answered the phone, not like an outbound caller. The
-persona prompts the rest of the system was built around assume an outbound
-opener, so something has to re-frame the call before the first LLM call.
-
-Every active prompt is now produced by
-:func:`app.services.scripts.prompts.compose_prompt` (the legacy hardcoded
-estimation prompt was retired 2026-06-18). We do *not* want to throw away the
-persona's voice, objection handling, slot-collection rules, etc. — those are
-the customer's configuration. Instead we prepend a short, dominant directive
-block that re-frames the call direction. The LLM weighs early tokens most
-heavily, so a top-anchored directive beats anything below it that says "you
-are calling them".
-
-Persona-composed prompts built with ``direction=INBOUND`` already carry the
-directive (and its sentinel) from compose time, so this runtime pass is a
-no-op for them — it only fires for caller-first OUTBOUND calls, where the
-prompt was composed outbound and needs re-framing before the first LLM call.
+Choosing who speaks first does not change who originated the call. New
+outbound prompts already carry the callee-first directive from composition;
+the runtime helper is an idempotent fallback for legacy outbound sessions.
+True carrier-inbound sessions are excluded and use their admitted prompt.
 """
 from __future__ import annotations
 
@@ -43,17 +29,20 @@ __all__ = [
 
 
 def select_inbound_base_prompt(voice_session) -> None:
-    """Re-frame ``voice_session.call_session.system_prompt`` for caller-first.
+    """Add the outbound callee-first directive only to eligible legacy sessions.
 
-    Idempotent — safe to call multiple times. Every prompt receives a
-    top-anchored directive block that overrides outbound framing while
-    preserving the persona's voice below it.
+    Idempotent, and a no-op for true inbound sessions.
     """
     session = getattr(voice_session, "call_session", None)
     if session is None:
         # Defensive: unusual but possible during teardown races.
         logger.info("caller_first_skip_swap reason=no_call_session")
         return
+
+    direction = getattr(getattr(voice_session, "config", None), "direction", None)
+    direction = getattr(direction, "value", direction) or getattr(session, "_call_direction", None)
+    if direction == "inbound":
+        return  # Carrier-inbound composition is owned by the admitted snapshot.
 
     current = session.system_prompt or ""
     if INBOUND_DIRECTIVE_SENTINEL in current:

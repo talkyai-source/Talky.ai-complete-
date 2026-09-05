@@ -12,7 +12,7 @@ without creating an import cycle:
 * ``inbound_directive_block(...)`` — the canonical block that frames a
   CALLER-SPEAKS-FIRST outbound call: the agent dialed the callee but waits
   for them to speak, then leads with its own introduction + purpose. Used
-  both by ``compose_prompt`` (when ``direction=INBOUND``) and by
+  both by ``compose_prompt`` (outbound with ``opening_mode=callee_first``) and by
   ``select_inbound_base_prompt`` (runtime fallback for legacy / non-
   composed prompts).
 

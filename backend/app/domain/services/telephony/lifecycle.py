@@ -3432,18 +3432,7 @@ def _pinned_inbound_ai_config(
     return ai_config, voice_tuning
 
 
-_TRUE_INBOUND_DIRECTIVE = """\
-TRUE INBOUND CALL — THE CALLER CONTACTED THE COMPANY (this overrides any
-outbound/cold-call framing below):
-- The caller dialed this number. Never say or imply that you called them.
-- Answer their direct question first. Then ask at most one relevant question.
-- Be a concise, warm inbound representative: understand why they called,
-  collect only what is needed, and move to the appropriate approved next step.
-- Never claim that booking, transfer, callback, opt-out, or another external
-  action succeeded unless the corresponding runtime action confirms it.
-- Respect opt-out, safety, wrong-number, privacy, and human-transfer requests
-  before qualification or sales goals.
-"""
+from app.services.scripts.prompts.inbound import TRUE_INBOUND_DIRECTIVE as _TRUE_INBOUND_DIRECTIVE
 
 _AFTER_HOURS_VOICEMAIL_DIRECTIVE = """\
 AFTER-HOURS AI MESSAGE INTAKE (this overrides sales and qualification stages):
@@ -3480,18 +3469,22 @@ def _build_pinned_inbound_config(
         inbound_cfg.get("qualification_config") or {},
     )
     ai_config, voice_tuning = _pinned_inbound_ai_config(admission_payload)
+    first_speaker, pinned_greeting = _pinned_inbound_opening(admission_payload)
     config = _build_telephony_session_config(
         gateway_type=gateway_type,
         campaign=pinned_campaign,
         direction=Direction.INBOUND,
+        opening_mode="agent_first" if first_speaker == "agent" or selected_action == "voicemail" else "callee_first",
         voice_tuning_override=voice_tuning,
         ai_config_override=ai_config,
     )
-    base_prompt = str(getattr(config, "system_prompt", "") or "").strip()
-    directive = _TRUE_INBOUND_DIRECTIVE
     if selected_action == "voicemail":
-        directive += "\n" + _AFTER_HOURS_VOICEMAIL_DIRECTIVE
-    config.system_prompt = f"{directive}\n\n{base_prompt}" if base_prompt else directive
+        config.system_prompt = f"{config.system_prompt}\n\n{_AFTER_HOURS_VOICEMAIL_DIRECTIVE}"
+    # Direction is composed into the base itself, not prepended over a
+    # contradictory outbound playbook. Include the pinned after-hours behavior
+    # in the stable identity recorded for this call.
+    from app.services.scripts.prompts.versions import hash_prompt
+    config.prompt_hash = hash_prompt(config.system_prompt)
 
     # Realtime builds its session instructions before ``VoiceSession`` exists,
     # so its opening policy must travel on the config now.  Deriving this from
@@ -3499,7 +3492,6 @@ def _build_pinned_inbound_config(
     # realtime call to caller-first, leaving configured agent-first calls and
     # after-hours message intake silent.  Only the immutable admission snapshot
     # is consulted here.
-    first_speaker, pinned_greeting = _pinned_inbound_opening(admission_payload)
     if selected_action == "voicemail":
         first_speaker = "agent"
         raw_message = inbound_cfg.get("after_hours_message")

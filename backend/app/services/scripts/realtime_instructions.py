@@ -73,6 +73,7 @@ class RealtimePersona:
     call_direction: str = "outbound"
     opening_greeting: Optional[str] = None
     message_intake: bool = False
+    campaign_guidance: str = ""
 
 
 # ── Block 2: expressive delivery, written for a speech-to-speech model ───────
@@ -228,6 +229,8 @@ def build_realtime_instructions(persona: RealtimePersona) -> str:
     ]
     if persona.extra_notes and persona.extra_notes.strip():
         blocks.append("ALSO\n" + persona.extra_notes.strip())
+    if persona.campaign_guidance:
+        blocks.append("CAMPAIGN GUIDANCE\n" + persona.campaign_guidance)
 
     # A marked initial block is present from the handshake onward, so every
     # realtime response has the same state contract.  RealtimeBridge replaces

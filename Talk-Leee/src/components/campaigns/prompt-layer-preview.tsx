@@ -23,7 +23,7 @@ export function PromptLayerPreview({
                 <Label id={headingId} className="text-xs">Composed prompt layers</Label>
                 <span className="text-xs text-muted-foreground">
                     {layers.length} layers · {promptChars.toLocaleString()} chars
-                    {hasInboundDirective ? " · callee-first directive applied" : ""}
+                    {hasInboundDirective ? " · direction-specific opening applied" : ""}
                 </span>
             </div>
             <ol className="space-y-2">

@@ -144,6 +144,20 @@ CALL_CONTROL_RULES = f"""\
 """
 
 
-def call_control_rules() -> str:
-    """The composed-prompt block granting END_CALL + conversation craft."""
+INBOUND_CALL_CONTROL_RULES = f"""\
+## ENDING THE CALL
+- When the caller clearly says goodbye, asks to end, or confirms their request
+  is resolved, say at most one short closing line. If an `end_call` tool is
+  offered this turn, call it; otherwise finish with the exact token {END_CALL_TOKEN} .
+- A tool result or the token is required; words like "hangs up" do nothing.
+- A request for support, a different department, or a human is not a reason to
+  abandon the caller. Follow the approved assistance or transfer policy.
+- Do not promise a callback or another external action without runtime confirmation.
+"""
+
+
+def call_control_rules(*, direction: str = "outbound") -> str:
+    """Call ending stays shared; outbound sales behavior does not enter inbound."""
+    if direction == "inbound":
+        return INBOUND_CALL_CONTROL_RULES
     return CALL_CONTROL_RULES

@@ -1,4 +1,4 @@
-"""Layered system-prompt composer for CAMPAIGN outbound telephony calls.
+"""Direction-separated system-prompt composer for campaign telephony calls.
 
 Assembles the final system prompt in this order (each layer is stable or
 grows less stable as you go down — this lets future Anthropic/OpenAI
@@ -41,6 +41,9 @@ from app.domain.services.campaign_brief import render_campaign_brief
 from app.services.scripts.prompts.direction import (
     INBOUND_DIRECTIVE_SENTINEL,
     inbound_directive_block,
+)
+from app.services.scripts.prompts.inbound import (
+    TRUE_INBOUND_DIRECTIVE, INBOUND_LEAD_BODY, INBOUND_LEAD_DETAILS,
 )
 from app.services.scripts.prompts.guardrails import (
     COMMUNICATION_PRINCIPLES,
@@ -343,10 +346,8 @@ def compose_prompt(
         first_speaker.
     opening_mode:
         ``"agent_first"`` / ``"callee_first"`` — who talks first. Callee-first
-        selects the persona's callee-speaks-first OPENING block and prepends
-        the canonical directive at position 0. ``None`` (legacy callers)
-        falls back to the direction-derived choice, so a bare
-        ``direction="inbound"`` still gets the block it always did.
+        controls turn-taking within the selected call direction. ``None``
+        defaults to caller-first for inbound and agent-first for outbound.
 
     Raises
     ------
@@ -366,22 +367,33 @@ def compose_prompt(
             f"Unknown direction {direction_key!r}. Known directions: "
             "['inbound', 'outbound']"
         )
-    # The persona OPENING blocks are keyed "outbound" (agent opens) and
-    # "inbound" (the other party speaks first, agent then leads). The second
-    # key predates the realisation that "callee speaks first" is a turn-taking
-    # choice, not a direction; the text under it is outbound-framed. Select it
-    # from opening_mode when given, otherwise from direction as before.
+    # Only lead_gen's legacy 'inbound' opening means caller-first outbound.
+    # Select true call direction before consulting those historical keys.
+    true_inbound = direction_key == "inbound"
+    if true_inbound and body_override:
+        # The existing archive has no direction metadata and includes outbound
+        # openings/playbooks. Never silently apply one to a carrier-inbound call.
+        raise PromptCompositionError("Archived persona bodies are not approved for inbound calls")
     if opening_mode:
         callee_first = opening_mode.strip().lower() == "callee_first"
     else:
         callee_first = direction_key == "inbound"
     opening_key = "inbound" if callee_first else "outbound"
+    if true_inbound:
+        opening_key = "inbound"
+    elif persona_type != "lead_gen":
+        # Support/receptionist's legacy 'inbound' openings really are inbound;
+        # only lead_gen's legacy key means callee-first OUTBOUND.
+        opening_key = "outbound"
 
     if knowledge_driven:
         # Knowledge-first campaign: skip the per-persona content slots and use
         # a lean identity + tone body. The substance is injected from the
         # campaign's knowledge base at call time (knowledge/session_inject).
-        persona_block = _compose_knowledge_driven_body(
+        persona_block = (
+            INBOUND_LEAD_BODY.format(agent_name=agent_name, company_name=company_name)
+            + _KNOWLEDGE_DRIVEN_SUFFIX
+        ) if true_inbound and persona_type == "lead_gen" else _compose_knowledge_driven_body(
             persona_type, agent_name, company_name,
             body_override=body_override, opening_key=opening_key,
         )
@@ -423,6 +435,12 @@ def compose_prompt(
         persona_template = (
             persona_openings[opening_key] + "\n" + persona_body
         )
+        if true_inbound and persona_type == "lead_gen":
+            persona_template = INBOUND_LEAD_BODY + "\n" + INBOUND_LEAD_DETAILS
+        elif not true_inbound and callee_first and persona_type != "lead_gen":
+            # The canonical callee-first directive owns this opening. Neither
+            # a receptionist greeting nor an already-played agent greeting fits.
+            persona_template = persona_body
         # The {direction_opening} marker on the body is a no-op placeholder
         # for the legacy / backward-compat alias path that pre-merged the
         # opening into the body string. With the explicit concatenation
@@ -461,12 +479,16 @@ def compose_prompt(
             _layer_collector.append(
                 PromptLayer(key=key, label=label, content=content)
             )
-    # Inbound calls get the canonical direction directive at position 0
-    # so early-token attention dominates any outbound-flavoured prose
-    # that might still be in the persona body. This block also carries
-    # the INBOUND_DIRECTIVE_SENTINEL, which the runtime
-    # select_inbound_base_prompt() reads as an idempotency signal.
-    if callee_first:
+    # Direction-specific instructions lead a body selected for that direction.
+    # No true-inbound prompt contains the outbound caller-first directive.
+    if true_inbound:
+        opening_policy = (
+            "Wait for the caller before speaking. Answer their request without a second greeting."
+            if callee_first else
+            "Greet the caller once, then listen. Do not repeat a greeting already delivered by the runtime."
+        )
+        add_layer("opening", "Opening and direction", TRUE_INBOUND_DIRECTIVE + "\n" + opening_policy)
+    elif callee_first:
         add_layer(
             "opening",
             "Opening and direction",
@@ -534,14 +556,15 @@ def compose_prompt(
     # call) + lead-gen conversation craft. Before the compliance floor so the
     # floor keeps the recency slot on its invariants.
     from app.domain.services.voice_pipeline.end_call import call_control_rules
-    add_layer("call_control", "Call control", call_control_rules())
+    add_layer("call_control", "Call control", call_control_rules(direction=direction_key))
 
     # Wrong-person / gatekeeper pivot + graceful-exit rules (2026-07-08 audit:
     # agent went silent after "is this David?" -> "No."). Placed right after
     # call_control_rules — same trailing, high-recency slot — so the pivot
     # instruction is fresh on every turn, still ahead of the compliance floor.
     from app.domain.services.voice_pipeline.gatekeeper import gatekeeper_rules
-    add_layer("gatekeeper", "Gatekeeper handling", gatekeeper_rules())
+    if not true_inbound:
+        add_layer("gatekeeper", "Gatekeeper handling", gatekeeper_rules())
 
     # The non-negotiable safety floor goes LAST (after the tenant's own
     # additional_instructions) so it wins on the few invariants via recency —

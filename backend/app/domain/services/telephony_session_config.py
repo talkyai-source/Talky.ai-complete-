@@ -1674,6 +1674,7 @@ def build_telephony_session_config(
         contact_phone_region=_contact_phone_region,
         agent_config=agent_config,
         system_prompt=system_prompt,
+        campaign_guidance=campaign_guidance_text(_tenant_additional_instructions, _campaign_brief),
         # Carried so the per-call log and the calls row can name the exact
         # instructions this call ran on (goals.md §6).
         prompt_template=prompt_identity.template,

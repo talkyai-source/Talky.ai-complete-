@@ -245,7 +245,8 @@ class TestBuildTelephonySessionConfigDirection:
         )
         assert cfg.direction == Direction.INBOUND
         # Inbound sentinel leads the prompt — the LLM weights this most.
-        assert cfg.system_prompt.startswith(INBOUND_DIRECTIVE_SENTINEL)
+        assert cfg.system_prompt.startswith("TRUE INBOUND CALL")
+        assert INBOUND_DIRECTIVE_SENTINEL not in cfg.system_prompt
         # Outbound persona markers are NOT in the inbound base prompt.
         assert "Business Development Specialist" not in cfg.system_prompt
         assert "GREETING RESPONSE" not in cfg.system_prompt

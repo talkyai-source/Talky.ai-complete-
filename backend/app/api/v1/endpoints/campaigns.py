@@ -471,6 +471,7 @@ async def preview_prompt(
     from app.services.scripts.prompts.direction import (
         INBOUND_DIRECTIVE_SENTINEL,
     )
+    from app.services.scripts.prompts.inbound import TRUE_INBOUND_DIRECTIVE
 
     # Preview uses the exact same normalized campaign brief and the exact same
     # budget as save/start. It refuses an over-budget draft rather than showing
@@ -519,7 +520,10 @@ async def preview_prompt(
         system_prompt=document.system_prompt,
         greeting=greeting,
         direction=body.direction,
-        has_inbound_directive=INBOUND_DIRECTIVE_SENTINEL in document.system_prompt,
+        has_inbound_directive=(
+            document.system_prompt.startswith(TRUE_INBOUND_DIRECTIVE)
+            or document.system_prompt.startswith(INBOUND_DIRECTIVE_SENTINEL)
+        ),
         prompt_chars=len(document.system_prompt),
         opening_mode=opening_mode,
         campaign_guidance_chars=len(campaign_guidance_text(guidance, brief)),

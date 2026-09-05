@@ -123,7 +123,11 @@ class TestOutboundFirstSpeaker:
         )
         assert captured["ai_config_override"] == "pinned-ai"
         assert captured["voice_tuning_override"] == "pinned-tuning"
-        assert config.system_prompt.startswith(lifecycle._TRUE_INBOUND_DIRECTIVE)
+        # The composer owns direction now; the wrapper must not prepend a
+        # competing prompt around its result (real composition is tested too).
+        assert captured["direction"].value == "inbound"
+        assert captured["opening_mode"] == "callee_first"
+        assert config.system_prompt == "Composed base prompt"
 
     @pytest.mark.parametrize(
         ("opening_mode", "expected"),

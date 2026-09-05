@@ -258,6 +258,9 @@ class VoiceSessionConfig:
     telephony_provider: str = "sip"  # "sip" | "vonage" | "twilio" | "browser"
     agent_config: Optional[AgentConfig] = None
     system_prompt: str = ""
+    # Validated tenant-authored guidance only, without cascaded voice tags or
+    # an outbound persona body. Shared with the realtime instruction builder.
+    campaign_guidance: str = ""
     # ── Prompt identity (goals.md §6) ────────────────────────────────────
     # Which instructions this call actually ran on. `prompt_version` is the
     # name a human rolls back to; `prompt_hash` is derived from the composed
@@ -1954,6 +1957,7 @@ class VoiceOrchestrator:
             role=str(role),
             goal=str(goal),
             extra_notes=extra_notes,
+            campaign_guidance=config.campaign_guidance,
             call_direction=direction_text,
             opening_greeting=getattr(
                 config, "realtime_opening_greeting", None
