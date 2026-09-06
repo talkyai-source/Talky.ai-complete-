@@ -1960,6 +1960,27 @@ async function handleInner(request: Request, segments: string[], state: { cached
         }
     }
 
+    if (path === "/connectors/salesforce/settings" && (method === "GET" || method === "PUT")) {
+        return json({
+            server_configured: false,
+            connected: false,
+            status: "disconnected",
+            connector_id: null,
+            org_id: null,
+            username: null,
+            instance_url: null,
+            api_version: "v60.0",
+            login_url: "https://login.salesforce.com",
+            settings: { callback_campaign_id: null, log_calls: true, create_leads: true, sync_inbound: true, callback_priority: 8 },
+            webhook: { callback_url: null, outbound_message_url: null, token_set: false, token_masked: null, token: null },
+            last_synced_call_at: null,
+        });
+    }
+
+    if (path === "/connectors/salesforce/webhook-token" || path === "/connectors/salesforce/test" || path === "/connectors/salesforce/import") {
+        return json({ detail: { error: "salesforce_not_connected", message: "Connect Salesforce first (dev stub)." } }, { status: 409 });
+    }
+
     if (method === "GET" && path === "/connector-accounts") {
         return json({ items: [] });
     }

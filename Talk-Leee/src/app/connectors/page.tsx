@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { Button } from "@/components/ui/button";
 import { ConnectorCard } from "@/components/connectors/connector-card";
+import { SalesforceSettingsPanel } from "@/components/connectors/salesforce-settings";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useConnectorStatuses, queryKeys } from "@/lib/api-hooks";
 import { isApiClientError } from "@/lib/http-client";
@@ -62,7 +63,7 @@ const PROVIDERS: ProviderCard[] = [
     {
         type: "salesforce",
         name: "Salesforce",
-        description: "Send approved qualified and interested leads to Salesforce with tenant-scoped OAuth.",
+        description: "Log every call as a Salesforce Task, create Leads for new callees, and let Salesforce request agent callbacks.",
         accent: "border-blue-500/20 bg-gradient-to-br from-blue-500/10 to-cyan-500/5",
         icon: Cloud,
     },
@@ -232,7 +233,7 @@ export default function ConnectorsPage() {
                                         oauthCallbackPath={`/connectors/${p.type}/callback`}
                                         available={p.type !== "salesforce" || Boolean(data)}
                                         unavailableReason={p.type === "salesforce" && !data
-                                            ? "Salesforce is not enabled by this server yet. No OAuth request will be started until the backend advertises the capability."
+                                            ? "Salesforce is not enabled by this server yet (SALESFORCE_CLIENT_ID / SALESFORCE_CLIENT_SECRET missing). No OAuth request will be started until the backend advertises the capability."
                                             : undefined}
                                     />
                                 );
@@ -240,6 +241,7 @@ export default function ConnectorsPage() {
                         </div>
                     </CardContent>
                 </Card>
+                {byType.has("salesforce") ? <SalesforceSettingsPanel connected={byType.get("salesforce")?.status === "connected"} /> : null}
             </div>
         </DashboardLayout>
     );

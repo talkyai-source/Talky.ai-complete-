@@ -68,6 +68,12 @@ _AUTH_FLOWS = {
 _WEBHOOKS = {
     "POST /api/v1/billing/webhooks": "Stripe webhook; signature verified inline",
     "GET /api/v1/connectors/callback": "OAuth callback; state token verified inline",
+    "POST /api/v1/connectors/salesforce/callback-requests/{tenant_id}/{token}": (
+        "Salesforce -> Talky callback request; per-tenant webhook token verified inline"
+    ),
+    "POST /api/v1/connectors/salesforce/outbound-message/{tenant_id}/{token}": (
+        "Salesforce Outbound Message (SOAP); per-tenant webhook token + org id verified inline"
+    ),
     "POST /api/v1/webhooks/call/goal-achieved": "internal call hook; signature verified",
     "POST /api/v1/webhooks/call/mark-spam": "internal call hook; signature verified",
     "POST /api/v1/webhooks/secure/call/goal-achieved": "signature-verified webhook",

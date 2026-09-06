@@ -511,6 +511,16 @@ async def _safe_generate(pool, tenant_id, call_id) -> None:
         await generate_and_store(pool, tenant_id, call_id)
     except Exception as exc:
         logger.warning("call summary generation failed for %s: %s", call_id[:12], exc)
+    # Summary (or its absence) is now final for this pass: hand the call to
+    # the CRM sync. For outbound calls the settlement hook already logged the
+    # call and this amends it with the summary; for inbound calls (settled
+    # inside the inbound lifecycle, which has no CRM hook) this IS the log.
+    try:
+        from app.services.crm_sync_service import run_crm_sync
+
+        await run_crm_sync(str(call_id), tenant_id=str(tenant_id), reason="summary")
+    except Exception as exc:  # noqa: BLE001 — never break the summary task
+        logger.warning("crm sync after summary failed for %s: %s", call_id[:12], exc)
 
 
 def _safe_clear(transcript_service, session_call_id: str) -> None:

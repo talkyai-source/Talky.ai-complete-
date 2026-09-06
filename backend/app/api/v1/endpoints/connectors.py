@@ -27,6 +27,7 @@ from app.infrastructure.connectors.calendar.google_calendar import GoogleCalenda
 from app.infrastructure.connectors.calendar.outlook_calendar import OutlookCalendarConnector  # noqa: F401
 from app.infrastructure.connectors.email.gmail import GmailConnector  # noqa: F401
 from app.infrastructure.connectors.crm.hubspot import HubSpotConnector  # noqa: F401
+from app.infrastructure.connectors.crm.salesforce import SalesforceConnector  # noqa: F401
 from app.infrastructure.connectors.drive.google_drive import GoogleDriveConnector  # noqa: F401
 
 logger = logging.getLogger(__name__)
@@ -103,6 +104,15 @@ PROVIDER_METADATA = {
         "description": "Sync contacts and deals with HubSpot CRM",
         "requires_oauth": True
     },
+    "salesforce": {
+        "type": "crm",
+        "name": "Salesforce",
+        "description": (
+            "Log every call as a Salesforce Task, create Leads for new callees, "
+            "and let Salesforce request agent callbacks"
+        ),
+        "requires_oauth": True
+    },
     "google_drive": {
         "type": "drive",
         "name": "Google Drive",
@@ -114,7 +124,9 @@ PROVIDER_METADATA = {
 
 def _frontend_callback_url(frontend_url: str, *, status: str, provider: Optional[str] = None, error: Optional[str] = None) -> str:
     params = [("status", status)]
-    provider_type = PROVIDER_METADATA.get(provider or "", {}).get("type")
+    # The dashboard keys its cards by CARD key (Salesforce has its own card
+    # even though its connector type is "crm"), so report that, not the type.
+    provider_type = CARD_KEY_BY_PROVIDER.get(provider or "") or PROVIDER_METADATA.get(provider or "", {}).get("type")
     if provider_type:
         params.append(("type", provider_type))
     if provider:
@@ -212,7 +224,36 @@ DEFAULT_PROVIDER_BY_TYPE = {
     "drive": "google_drive",
 }
 
+# Dashboard CARD key -> (connector type, provider). The first four cards are
+# one-per-type; Salesforce is a second CRM card, so its rows still carry
+# type="crm" (the CRM sync resolves by type) but the card UI addresses it as
+# "salesforce". Every type-keyed shim below speaks CARD keys.
+CARD_PROVIDERS: dict[str, tuple[str, str]] = {
+    **{t: (t, p) for t, p in DEFAULT_PROVIDER_BY_TYPE.items()},
+    "salesforce": ("crm", "salesforce"),
+}
+CARD_KEY_BY_PROVIDER: dict[str, str] = {p: key for key, (_t, p) in CARD_PROVIDERS.items()}
+
 _KNOWN_TYPES = set(DEFAULT_PROVIDER_BY_TYPE.keys())
+
+
+def _card_key_for_row(row: dict) -> Optional[str]:
+    """Which dashboard card a connector row belongs to (None = not shown)."""
+    provider = str(row.get("provider") or "")
+    key = CARD_KEY_BY_PROVIDER.get(provider)
+    if key:
+        return key
+    conn_type = row.get("type")
+    return conn_type if conn_type in _KNOWN_TYPES else None
+
+
+def _salesforce_card_advertised(rows: list[dict]) -> bool:
+    """The Salesforce card is only offered when the server can actually run
+    the OAuth flow (Connected App credentials present) or the tenant already
+    has Salesforce rows to manage."""
+    if any(str(r.get("provider") or "") == "salesforce" for r in rows):
+        return True
+    return ConnectorFactory.is_registered("salesforce") and SalesforceConnector.is_configured()
 
 _GMAIL_READ_SCOPES = {
     "https://mail.google.com/",
@@ -353,16 +394,19 @@ async def list_connector_statuses(
         )
         raise HTTPException(status_code=503, detail="Connector status is temporarily unavailable")
 
-    connectors_by_type: dict[str, list[dict]] = {
-        type_name: [] for type_name in DEFAULT_PROVIDER_BY_TYPE
-    }
-    for conn in (response.data or []):
-        t = conn.get("type")
-        if t in _KNOWN_TYPES:
-            connectors_by_type[t].append(conn)
+    rows = list(response.data or [])
+    connectors_by_type: dict[str, list[dict]] = {key: [] for key in CARD_PROVIDERS}
+    for conn in rows:
+        key = _card_key_for_row(conn)
+        if key in connectors_by_type:
+            connectors_by_type[key].append(conn)
+
+    card_keys = [k for k in CARD_PROVIDERS if k != "salesforce"]
+    if _salesforce_card_advertised(rows):
+        card_keys.append("salesforce")
 
     items: List[ConnectorTypeStatus] = []
-    for type_name in DEFAULT_PROVIDER_BY_TYPE:
+    for type_name in card_keys:
         candidates = connectors_by_type[type_name]
         if not candidates:
             items.append(ConnectorTypeStatus(type=type_name, status="disconnected", provider=None))
@@ -454,19 +498,24 @@ async def authorize_connector_by_type(
     current_user: CurrentUser = Depends(get_current_user),
     db_client: Client = Depends(get_db_client),
 ):
-    """Start OAuth for the default provider of this connector type."""
-    if type not in DEFAULT_PROVIDER_BY_TYPE:
+    """Start OAuth for the provider behind this dashboard card."""
+    if type not in CARD_PROVIDERS:
         raise HTTPException(status_code=400, detail=f"Unknown connector type: {type}")
 
-    provider = DEFAULT_PROVIDER_BY_TYPE[type]
+    conn_type, provider = CARD_PROVIDERS[type]
     if not ConnectorFactory.is_registered(provider):
         raise HTTPException(status_code=503, detail=f"Provider not configured: {provider}")
+    if provider == "salesforce" and not SalesforceConnector.is_configured():
+        raise HTTPException(
+            status_code=503,
+            detail="Salesforce is not enabled on this server (SALESFORCE_CLIENT_ID/SECRET missing)",
+        )
 
     # Reuse the same flow as /authorize but inline so we don't have to fake
     # a CreateConnectorRequest with a duplicate code path.
     connector_data = {
         "tenant_id": current_user.tenant_id,
-        "type": type,
+        "type": conn_type,
         "provider": provider,
         "name": PROVIDER_METADATA.get(provider, {}).get("name"),
         "status": "pending",
@@ -507,15 +556,21 @@ async def disconnect_connector_by_type(
     current_user: CurrentUser = Depends(get_current_user),
     db_client: Client = Depends(get_db_client),
 ):
-    """Disconnect every connector of the given type for this tenant."""
-    if type not in DEFAULT_PROVIDER_BY_TYPE:
+    """Disconnect every connector behind this dashboard card for this tenant.
+
+    Provider-scoped: the CRM type now has two cards (HubSpot, Salesforce), so
+    disconnecting one must never remove the other's rows.
+    """
+    if type not in CARD_PROVIDERS:
         raise HTTPException(status_code=400, detail=f"Unknown connector type: {type}")
 
+    conn_type, provider = CARD_PROVIDERS[type]
     response = (
         db_client.table("connectors")
-        .select("id")
+        .select("id, provider")
         .eq("tenant_id", current_user.tenant_id)
-        .eq("type", type)
+        .eq("type", conn_type)
+        .eq("provider", provider)
         .execute()
     )
     ids = [row["id"] for row in (response.data or [])]
@@ -674,7 +729,7 @@ async def oauth_callback(
 
         connector_row = (
             db_client.table("connectors")
-            .select("id, type, provider, status")
+            .select("id, type, provider, status, config")
             .eq("id", connector_id)
             .eq("tenant_id", tenant_id)
             .single()
@@ -770,6 +825,8 @@ async def oauth_callback(
         # green connection.  This catches disabled APIs and denied scopes even
         # when OAuth token exchange itself succeeded.
         account_email = None
+        external_account_id = None
+        persisted_config: dict = {}
         await connector.set_access_token(tokens.access_token)
         if provider == "gmail":
             try:
@@ -778,6 +835,38 @@ async def oauth_callback(
             except Exception as exc:
                 logger.warning(
                     "OAuth callback: Gmail capability check failed connector=%s type=%s",
+                    connector_id,
+                    type(exc).__name__,
+                )
+                db_client.table("connectors").update({"status": "error"}).eq("id", connector_id).eq(
+                    "tenant_id", tenant_id
+                ).execute()
+                return RedirectResponse(
+                    _frontend_callback_url(
+                        frontend_url, status="error", error="capability_check_failed"
+                    )
+                )
+        else:
+            # Providers that carry state beyond the tokens (Salesforce's
+            # instance_url) and/or offer an identity probe. A failed probe is
+            # an unverified connection and must not activate.
+            try:
+                extra_config = connector.config_from_tokens(tokens)
+                if isinstance(extra_config, dict):
+                    persisted_config.update(extra_config)
+                identity = await connector.fetch_account_identity()
+                if isinstance(identity, dict):
+                    account_email = identity.get("email") or None
+                    external_account_id = identity.get("external_account_id") or None
+                    identity_config = identity.get("config")
+                    if isinstance(identity_config, dict):
+                        persisted_config.update(
+                            {k: v for k, v in identity_config.items() if v is not None}
+                        )
+            except Exception as exc:
+                logger.warning(
+                    "OAuth callback: %s identity check failed connector=%s type=%s",
+                    provider,
                     connector_id,
                     type(exc).__name__,
                 )
@@ -804,6 +893,7 @@ async def oauth_callback(
             "token_expires_at": tokens.expires_at.isoformat() if tokens.expires_at else None,
             "scopes": sorted(granted_scopes) if granted_scopes else connector.oauth_scopes,
             "account_email": account_email,
+            "external_account_id": external_account_id,
             "status": "active",
             "last_refreshed_at": datetime.now(timezone.utc).isoformat(),
         }
@@ -824,9 +914,17 @@ async def oauth_callback(
             )
 
         new_account_id = acc_resp.data[0]["id"]
+        activate_update: dict = {"status": "active"}
+        if persisted_config:
+            # Merge over whatever the pending row already holds (settings a
+            # reconnect must keep, e.g. the Salesforce callback campaign).
+            existing_config = connector_row.data.get("config") if isinstance(connector_row.data, dict) else None
+            merged = dict(existing_config) if isinstance(existing_config, dict) else {}
+            merged.update(persisted_config)
+            activate_update["config"] = merged
         conn_resp = (
             db_client.table("connectors")
-            .update({"status": "active"})
+            .update(activate_update)
             .eq("id", connector_id)
             .eq("tenant_id", tenant_id)
             .execute()
@@ -858,11 +956,14 @@ async def oauth_callback(
             logger.warning("OAuth callback: old account cleanup failed connector=%s", connector_id)
 
         if conn_type:
+            # Scoped to (type, provider): connecting Salesforce must not
+            # retire a working HubSpot connection and vice versa.
             active_rows = (
                 db_client.table("connectors")
                 .select("id, created_at")
                 .eq("tenant_id", tenant_id)
                 .eq("type", conn_type)
+                .eq("provider", provider)
                 .eq("status", "active")
                 .execute()
             )

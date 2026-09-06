@@ -38,6 +38,7 @@ from app.api.v1.endpoints.inbound_campaigns import router as inbound_campaigns_r
 from app.api.v1.endpoints.campaign_knowledge import router as campaign_knowledge_router
 from app.api.v1.endpoints.clients import router as clients_router
 from app.api.v1.endpoints.connectors import router as connectors_router
+from app.api.v1.endpoints.salesforce import router as salesforce_router
 from app.api.v1.endpoints.contacts import router as contacts_router
 from app.api.v1.endpoints.contact_lists import router as contact_lists_router
 from app.api.v1.endpoints.dashboard import router as dashboard_router
@@ -105,6 +106,7 @@ api_router.include_router(billing_topups_admin_router)
 api_router.include_router(billing_router)
 api_router.include_router(plans_router)
 api_router.include_router(clients_router)
+api_router.include_router(salesforce_router)
 api_router.include_router(connectors_router)
 api_router.include_router(meetings_router)
 api_router.include_router(webhooks_router)

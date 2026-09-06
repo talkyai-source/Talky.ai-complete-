@@ -7,6 +7,9 @@ import {
     ConnectorResponseSchema,
     ConnectorAccountSchema,
     ConnectorProviderStatusSchema,
+    SalesforceImportResultSchema,
+    SalesforceProbeSchema,
+    SalesforceSettingsResponseSchema,
     EmailSendResponseSchema,
     EmailTemplateResponseSchema,
     ListResponseSchema,
@@ -41,6 +44,24 @@ import {
     type VoiceCallStartResponse,
     type VoiceFeature,
 } from "@/lib/models";
+import type { SalesforceImportResult, SalesforceProbe, SalesforceSettingsResponse } from "@/lib/models";
+
+export type SalesforceSettingsUpdateInput = {
+    callback_campaign_id?: string | null;
+    clear_callback_campaign?: boolean;
+    log_calls?: boolean;
+    create_leads?: boolean;
+    sync_inbound?: boolean;
+    callback_priority?: number;
+};
+
+export type SalesforceImportInput = {
+    campaign_id: string;
+    object_type: "Lead" | "Contact";
+    where?: string;
+    limit?: number;
+    list_name?: string;
+};
 import { extractAuthorizationUrl } from "@/lib/connectors-utils";
 import { sharedHttpClient } from "@/lib/api";
 
@@ -218,6 +239,54 @@ export const backendApi = {
                 method: backendEndpoints.connectorsDisconnect.method,
                 timeoutMs: 12_000,
             });
+        },
+    },
+    salesforce: {
+        settings: async (signal?: AbortSignal): Promise<SalesforceSettingsResponse> => {
+            const data = await httpClient().request({ path: backendEndpoints.salesforceSettings.path, timeoutMs: 12_000, signal });
+            return parseOrThrow(SalesforceSettingsResponseSchema, data);
+        },
+        updateSettings: async (input: SalesforceSettingsUpdateInput): Promise<SalesforceSettingsResponse> => {
+            const data = await httpClient().request({
+                path: backendEndpoints.salesforceSettingsUpdate.path,
+                method: backendEndpoints.salesforceSettingsUpdate.method,
+                body: input,
+                timeoutMs: 12_000,
+            });
+            return parseOrThrow(SalesforceSettingsResponseSchema, data);
+        },
+        revealWebhookToken: async (): Promise<SalesforceSettingsResponse> => {
+            const data = await httpClient().request({
+                path: backendEndpoints.salesforceWebhookTokenReveal.path,
+                method: backendEndpoints.salesforceWebhookTokenReveal.method,
+                timeoutMs: 12_000,
+            });
+            return parseOrThrow(SalesforceSettingsResponseSchema, data);
+        },
+        rotateWebhookToken: async (): Promise<SalesforceSettingsResponse> => {
+            const data = await httpClient().request({
+                path: backendEndpoints.salesforceWebhookTokenRotate.path,
+                method: backendEndpoints.salesforceWebhookTokenRotate.method,
+                timeoutMs: 12_000,
+            });
+            return parseOrThrow(SalesforceSettingsResponseSchema, data);
+        },
+        test: async (): Promise<SalesforceProbe> => {
+            const data = await httpClient().request({
+                path: backendEndpoints.salesforceTest.path,
+                method: backendEndpoints.salesforceTest.method,
+                timeoutMs: 30_000,
+            });
+            return parseOrThrow(SalesforceProbeSchema, data);
+        },
+        importPeople: async (input: SalesforceImportInput): Promise<SalesforceImportResult> => {
+            const data = await httpClient().request({
+                path: backendEndpoints.salesforceImport.path,
+                method: backendEndpoints.salesforceImport.method,
+                body: input,
+                timeoutMs: 60_000,
+            });
+            return parseOrThrow(SalesforceImportResultSchema, data);
         },
     },
     connectorAccounts: {

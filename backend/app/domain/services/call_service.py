@@ -365,6 +365,12 @@ class CallService:
                 result.terminal_outcome,
             )
             
+            # --- CRM sync (additive, fire-and-forget) -------------------
+            # Every settled outbound call - answered or not - is logged into
+            # the tenant's connected CRMs (HubSpot / Salesforce). Scheduled,
+            # never awaited: a slow CRM must not hold the call teardown.
+            self._schedule_crm_sync(call_uuid)
+
             # --- Day 1: Event logging (additive, non-blocking) ---
             try:
                 from app.domain.repositories.call_event_repository import CallEventRepository
@@ -395,6 +401,21 @@ class CallService:
                 error=str(e),
             )
     
+    @staticmethod
+    def _schedule_crm_sync(call_uuid: str) -> None:
+        """Best-effort hand-off to the CRM sync; never raises."""
+        try:
+            from app.core.security.tenant_isolation import get_current_tenant_id
+            from app.services.crm_sync_service import schedule_crm_sync
+
+            schedule_crm_sync(
+                str(call_uuid),
+                tenant_id=get_current_tenant_id(),
+                reason="settlement",
+            )
+        except Exception as exc:  # noqa: BLE001 - auxiliary side effect
+            logger.debug("crm_sync scheduling skipped for %s: %s", call_uuid, exc)
+
     async def _try_atomic_update(
         self, call_uuid: str, outcome_value: str, duration: Optional[int]
     ) -> Optional[dict]:
