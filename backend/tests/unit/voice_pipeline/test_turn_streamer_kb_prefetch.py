@@ -55,7 +55,7 @@ class _FakeLLMProvider:
         self._primary = None
         self._secondary = None
 
-    def stream_chat_with_timeout(self, messages, *, system_prompt, temperature, max_tokens):
+    def stream_chat_with_timeout(self, messages, *, system_prompt, temperature, max_tokens, **_kwargs):
         self._call_log.append(("llm_stream_start", time.monotonic()))
 
         async def _gen():

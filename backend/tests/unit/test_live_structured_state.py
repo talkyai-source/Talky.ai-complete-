@@ -232,7 +232,7 @@ class _CapturingLLM:
     def __init__(self):
         self.system_prompt = ""
 
-    def stream_chat_with_timeout(self, _messages, *, system_prompt, temperature, max_tokens):
+    def stream_chat_with_timeout(self, _messages, *, system_prompt, temperature, max_tokens, **_kwargs):
         self.system_prompt = system_prompt
 
         async def _tokens():

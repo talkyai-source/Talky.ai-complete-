@@ -40,6 +40,15 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_LLM_TIMEOUT = 10.0
 _LLM_MAX_RETRIES = 2
+# gpt-oss on Cerebras cannot turn reasoning off (minimum effort "low"), and
+# Cerebras counts reasoning tokens INSIDE max_completion_tokens. A tenant's
+# 90-token answer budget therefore had to pay for the model's thinking first:
+# a 3-token confirmation request returned finish_reason=length with EMPTY text
+# on the live account (2026-09-06 audit, F01), and knowledge-grounded answers
+# were cut or empty ("zero_token_turn"). Groq has had the same reserve since
+# the GPT-OSS rollout (GROQ_THINKING_RESERVE_TOKENS); this mirrors it so the
+# caller's max_tokens stays fully available for the spoken reply.
+_THINKING_RESERVE_TOKENS = int(os.getenv("CEREBRAS_THINKING_RESERVE_TOKENS", "1024"))
 _LLM_RETRY_BASE_DELAY = 0.3  # match Groq — fast first retry inside the voice budget
 
 DEFAULT_CEREBRAS_MODEL = CerebrasModel.GEMMA_4_31B.value
@@ -208,19 +217,25 @@ class CerebrasLLMProvider(LLMProvider):
                 continue
             api_messages.append({"role": msg.role.value, "content": msg.content})
 
+        answer_budget = self._max_tokens if max_tokens is None else max_tokens
+        effort = self._reasoning_effort(model)
+        # Reasoning shares the completion ceiling: when the model will think,
+        # add the reserve on top so the visible answer keeps its full budget.
+        completion_budget = (
+            answer_budget + _THINKING_RESERVE_TOKENS
+            if effort not in (None, "none")
+            else answer_budget
+        )
         request: dict = {
             "model": model,
             "messages": api_messages,
             "temperature": (
                 self._temperature if temperature is None else temperature
             ),
-            "max_completion_tokens": (
-                self._max_tokens if max_tokens is None else max_tokens
-            ),
+            "max_completion_tokens": completion_budget,
             "stream": True,
         }
 
-        effort = self._reasoning_effort(model)
         if effort is not None:
             request["reasoning_effort"] = effort
 

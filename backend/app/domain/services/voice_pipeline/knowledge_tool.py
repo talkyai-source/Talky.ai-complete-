@@ -29,6 +29,7 @@ from app.domain.models.session import CallSession
 # Reuse the exact per-turn budget + trimming from the inject path so the two
 # modes return identically-sized facts (one source of truth for KB sizing).
 from app.domain.services.voice_pipeline.kb_budget import (
+    fit_kb_body,
     _KB_MAX_CHUNKS,
     _KB_CHUNK_CHARS,
     _KB_TOTAL_CHARS,
@@ -246,7 +247,7 @@ async def run_knowledge_lookup(session: CallSession, query: str) -> str:
             # AND appends the truncation ellipsis. Pre-truncating in the renderer
             # loses that marker, leaving the model with a silently-cut fact.
             raw = render_node_answer(h)
-            body = _trim_kb_body(raw, _KB_CHUNK_CHARS)
+            body = fit_kb_body(raw, h, _KB_CHUNK_CHARS)
             if not body:
                 continue
             heading = h.get("heading") or ""
