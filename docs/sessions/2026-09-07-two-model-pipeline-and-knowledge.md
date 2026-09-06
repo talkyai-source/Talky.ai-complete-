@@ -51,3 +51,20 @@ cap=90    finish=stop    text='yes'  completion_tokens=36 reasoning_tokens=25
 Three test doubles (`_FakeLLMProvider` ×2, `_CapturingLLM`) encoded the old
 call shape without `**kwargs`; they now accept keyword arguments like the real
 providers do. No production test was loosened.
+
+## Second pass (same day) — best-practice fixes + dead model code
+
+| Audit item | Change |
+|---|---|
+| F03 stall = EOF | `LLMStreamStalled(LLMTimeoutError)` in `llm/groq.py`; both timeout wrappers (Groq, Cerebras) raise it when the stream stalls or the wait budget expires AFTER tokens were yielded. The turn streamer's existing timeout handler then drops the unfinished tail (or, if nothing was spoken yet, replaces the fragment with the repeat-request line) instead of voicing "Your appointment is" as a complete answer. |
+| F04 nested retries | `AsyncGroq(..., max_retries=0)` — the provider's own attempt loop + breaker + first-token deadline are the single retry owner, as Cerebras already was. |
+| F05 client lifetime | `cleanup()` on both providers now awaits the SDK client's `close()` (all key-bound Groq clients), then drops references. |
+| F07 TTS fallback contracts | `ResilientTTSProvider` normalises the secondary's PCM to the primary's declared format (float32 ↔ int16) so the gateway's once-per-session `tts_source_format` stays true, and warns when a cross-vendor fallback runs with no voice mapping. |
+| F09 STT language | `VoiceSessionConfig.stt_language` ← `AIProviderConfig.stt_language`; `CallSession.stt_language`; `audio_ingest` passes `language=` on every stream; a non-English language forces the Nova-3 primary (Flux is English-only) in both the session builder and the orchestrator. |
+| Dead model code | Groq Qwen-only request branch (`_is_qwen3_model`, top_p 0.8, `reasoning_format=hidden`) removed; `GroqModel.QWEN_3_6_27B` and the qwen/llama entries of `GROQ_MODELS_HIDDEN` removed (all tenant rows migrated, backup `tenant_ai_configs_backup_20260907`); `LLMTestRequest` default → gpt-oss-20b; AI Options latency advice no longer recommends the 404'ing llama; unused `dental_workflow.py` (hardcoded llama-3.1-8b-instant, zero importers) deleted. |
+
+Kept on purpose: Gemini provider module and prompt addenda (inert — not offered, not defaulted), the realtime add-on pipeline, F08 Cerebras tool parity (action executors other than end_call are stubs; adding tool orchestration to the primary would change behaviour for no delivered capability).
+
+Tests: `test_two_model_pipeline.py` grew to cover stall→incomplete on both providers, retry ownership, client close, language plumbing and PCM conversion; `test_groq_llm` / `test_groq_model_menu` / `test_ai_options` re-stated for the two-model contract (no assertion loosened — each now asserts the new invariant).
+
+Second-pass verification (real output): `pytest tests/unit tests/security` → **8865 passed, 7 skipped in 641.04s**; Ruff F-gate → All checks passed!

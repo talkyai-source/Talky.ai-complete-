@@ -148,3 +148,204 @@ def test_budget_defaults_fit_the_live_rates_node():
     # 600 chars of a 1,501-char node reaches the script; 350 did not.
     assert kb_budget._KB_CHUNK_CHARS >= 600
     assert kb_budget._KB_TOTAL_CHARS >= 3 * 600 + 200 or kb_budget._KB_TOTAL_CHARS >= 2000
+
+
+# ---------------------------------------------------------------------------
+# F03 — a stall after tokens is an incomplete stream, never a normal end
+# ---------------------------------------------------------------------------
+
+import asyncio  # noqa: E402
+
+from app.infrastructure.llm.groq import GroqLLMProvider, LLMStreamStalled, LLMTimeoutError  # noqa: E402
+
+
+def _stalling_stream(first_delay: float, stall: float):
+    async def _gen(messages, **kwargs):
+        await asyncio.sleep(first_delay)
+        yield "Your appointment is"
+        await asyncio.sleep(stall)
+        yield " on Tuesday."
+    return _gen
+
+
+@pytest.mark.asyncio
+async def test_groq_stall_after_tokens_raises_incomplete_not_eof():
+    provider = GroqLLMProvider()
+    provider.stream_chat = _stalling_stream(0.0, 0.3)
+    got = []
+    with pytest.raises(LLMStreamStalled):
+        async for tok in provider.stream_chat_with_timeout(
+            [Message(role=MessageRole.USER, content="when?")], timeout_seconds=0.1
+        ):
+            got.append(tok)
+    assert got == ["Your appointment is"]      # what was yielded stays yielded
+    assert issubclass(LLMStreamStalled, LLMTimeoutError)  # turn streamer's handler catches it
+
+
+@pytest.mark.asyncio
+async def test_cerebras_stall_after_tokens_raises_incomplete_not_eof():
+    provider = CerebrasLLMProvider()
+    provider.stream_chat = _stalling_stream(0.0, 0.3)
+    got = []
+    with pytest.raises(LLMStreamStalled):
+        async for tok in provider.stream_chat_with_timeout(
+            [Message(role=MessageRole.USER, content="when?")], timeout_seconds=0.1
+        ):
+            got.append(tok)
+    assert got == ["Your appointment is"]
+
+
+@pytest.mark.asyncio
+async def test_a_stream_that_finishes_inside_the_budget_is_untouched():
+    provider = GroqLLMProvider()
+    provider.stream_chat = _stalling_stream(0.0, 0.0)
+    got = [t async for t in provider.stream_chat_with_timeout(
+        [Message(role=MessageRole.USER, content="when?")], timeout_seconds=1.0
+    )]
+    assert got == ["Your appointment is", " on Tuesday."]
+
+
+# ---------------------------------------------------------------------------
+# F04 / F05 — one retry owner, deterministic client close
+# ---------------------------------------------------------------------------
+
+def test_groq_sdk_retries_are_off_so_the_provider_owns_retries(monkeypatch):
+    from app.infrastructure.llm import groq as groq_module
+
+    seen = {}
+
+    class _Recorder:
+        def __init__(self, **kwargs):
+            seen.update(kwargs)
+
+    monkeypatch.setattr(groq_module, "AsyncGroq", _Recorder)
+    provider = GroqLLMProvider()
+    provider._http_timeout = 7.0
+    provider._client_for("key-1")
+    assert seen["max_retries"] == 0
+    assert seen["api_key"] == "key-1"
+
+
+@pytest.mark.asyncio
+async def test_groq_cleanup_closes_every_client_once():
+    from unittest.mock import AsyncMock
+
+    provider = GroqLLMProvider()
+    a, b = AsyncMock(), AsyncMock()
+    provider._clients_by_key = {"k1": a, "k2": b}
+    provider._client = a
+    await provider.cleanup()
+    a.close.assert_awaited_once()
+    b.close.assert_awaited_once()
+    assert provider._client is None and provider._clients_by_key == {}
+
+
+@pytest.mark.asyncio
+async def test_cerebras_cleanup_closes_the_client():
+    from unittest.mock import AsyncMock
+
+    provider = CerebrasLLMProvider()
+    client = AsyncMock()
+    provider._client = client
+    await provider.cleanup()
+    client.close.assert_awaited_once()
+    assert provider._client is None
+
+
+# ---------------------------------------------------------------------------
+# F09 — the saved STT language is carried, and non-English forces Nova-3
+# ---------------------------------------------------------------------------
+
+def test_session_config_default_language_is_english_on_flux():
+    from app.domain.services.voice_orchestrator import VoiceSessionConfig
+
+    cfg = VoiceSessionConfig()
+    assert cfg.stt_language == "en" and cfg.stt_model == "flux-general-en"
+
+
+def test_call_session_carries_stt_language():
+    from app.domain.models.session import CallSession
+
+    assert "stt_language" in CallSession.model_fields
+
+
+def test_audio_ingest_passes_the_session_language_to_the_stt_stream():
+    from app.domain.services.voice_pipeline import audio_ingest
+
+    src = inspect.getsource(audio_ingest)
+    assert 'language=getattr(session, "stt_language", None) or "en"' in src
+
+
+def test_builder_forces_nova_for_non_english_and_carries_the_language():
+    from app.domain.services import telephony_session_config as tsc
+
+    src = inspect.getsource(tsc.build_telephony_session_config)
+    assert "stt_language=_stt_language" in src
+    assert "stt_language_forces_nova" in src
+
+
+# ---------------------------------------------------------------------------
+# F07 — cross-vendor TTS fallback keeps the primary's PCM format
+# ---------------------------------------------------------------------------
+
+from app.domain.services.resilient_tts import ResilientTTSProvider, TTSFailoverPolicy  # noqa: E402
+
+
+class _TTSStub:
+    def __init__(self, name, chunks=None, fail=False):
+        self.name = name
+        self._chunks = chunks or []
+        self._fail = fail
+        self.seen_voice = None
+
+    async def initialize(self, config):
+        pass
+
+    async def cleanup(self):
+        pass
+
+    async def get_available_voices(self):
+        return []
+
+    async def stream_synthesize(self, text, voice_id, sample_rate=16000, **kwargs):
+        self.seen_voice = voice_id
+        if self._fail:
+            raise RuntimeError("primary down")
+        for c in self._chunks:
+            yield c
+
+
+def test_pcm_format_classification():
+    assert ResilientTTSProvider._pcm_format("cartesia") == "f32le"
+    assert ResilientTTSProvider._pcm_format("google") == "f32le"
+    assert ResilientTTSProvider._pcm_format("deepgram") == "s16le"
+    assert ResilientTTSProvider._pcm_format("elevenlabs") == "s16le"
+    assert ResilientTTSProvider._pcm_format("resilient(cartesia)") == "f32le"
+
+
+@pytest.mark.asyncio
+async def test_secondary_float32_is_converted_to_the_primary_int16_contract():
+    import numpy as np
+    from app.domain.models.conversation import AudioChunk
+
+    floats = np.array([0.0, 0.5, -0.5, 1.0], dtype=np.float32).tobytes()
+    primary = _TTSStub("deepgram", fail=True)
+    secondary = _TTSStub("cartesia", chunks=[AudioChunk(data=floats, sample_rate=16000, channels=1)])
+    wrapper = ResilientTTSProvider(primary, secondary, policy=TTSFailoverPolicy(voice_id_map={"aura-2-thalia-en": "cartesia-voice"}))
+    out = [c async for c in wrapper.stream_synthesize("hi", "aura-2-thalia-en", 16000)]
+    assert len(out) == 1
+    ints = np.frombuffer(out[0].data, dtype=np.int16)
+    assert list(ints) == [0, 16383, -16383, 32767]      # 4 samples in, 4 samples out
+    assert secondary.seen_voice == "cartesia-voice"      # mapped, not the Deepgram id
+
+
+@pytest.mark.asyncio
+async def test_same_format_vendors_pass_bytes_through_unchanged():
+    from app.domain.models.conversation import AudioChunk
+
+    raw = b"\x01\x00\x02\x00"
+    primary = _TTSStub("deepgram", fail=True)
+    secondary = _TTSStub("elevenlabs", chunks=[AudioChunk(data=raw, sample_rate=16000, channels=1)])
+    wrapper = ResilientTTSProvider(primary, secondary)
+    out = [c async for c in wrapper.stream_synthesize("hi", "v", 16000)]
+    assert out[0].data == raw

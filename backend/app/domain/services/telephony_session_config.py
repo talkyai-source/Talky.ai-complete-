@@ -1574,7 +1574,17 @@ def build_telephony_session_config(
     # (acoustic VAD/endpointing). The orchestrator builds the matching primary;
     # the failover secondary is wired separately. Default = Flux (prior behaviour).
     _stt_engine = (getattr(source_config, "stt_engine", None) or "deepgram_flux").lower()
+    # Saved STT language (F09). Flux is English-only, so anything else routes
+    # the primary to Nova-3 — the setting used to be stored and then ignored.
+    _stt_language = str(getattr(source_config, "stt_language", None) or "en").strip().lower() or "en"
+    _english = _stt_language in ("en", "en-us", "en-gb", "en-au", "en-in", "en-nz")
     if _stt_engine in ("deepgram_nova", "deepgram-nova", "nova", "nova-3"):
+        _stt_provider_type, _stt_model = "deepgram_nova", "nova-3"
+    elif not _english:
+        logger.info(
+            "stt_language_forces_nova campaign=%s language=%s (Flux is English-only)",
+            str(_campaign_id(campaign)) if campaign else "telephony", _stt_language,
+        )
         _stt_provider_type, _stt_model = "deepgram_nova", "nova-3"
     else:
         _stt_provider_type, _stt_model = "deepgram_flux", "flux-general-en"
@@ -1623,6 +1633,7 @@ def build_telephony_session_config(
         llm_provider_type=_llm_provider_type,
         tts_provider_type=tts_provider_type,
         stt_model=_stt_model,
+        stt_language=_stt_language,
         stt_sample_rate=16000,
         stt_encoding="linear16",
         # Conversational-rhythm tunables come from the tenant resolver.

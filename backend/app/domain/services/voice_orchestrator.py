@@ -200,6 +200,11 @@ class VoiceSessionConfig:
 
     # STT settings
     stt_model: str = "flux-general-en"
+    # Saved in AI Options (AIProviderConfig.stt_language). Flux is English-only
+    # ("flux-general-en"), so a non-English language forces the Nova-3 primary
+    # and is passed to Deepgram on every stream (2026-09-06 audit, F09 — the
+    # setting was accepted, stored and then never sent anywhere).
+    stt_language: str = "en"
     stt_sample_rate: int = 16000
     stt_encoding: str = "linear16"
     stt_eot_threshold: float = 0.7
@@ -636,6 +641,7 @@ class VoiceOrchestrator:
             llm_model=config.llm_model,
             llm_temperature=config.llm_temperature,
             llm_max_tokens=config.llm_max_tokens,
+            stt_language=config.stt_language or "en",
             voice_id=config.voice_id,
             contact_phone_region=config.contact_phone_region,
             started_at=datetime.utcnow(),
@@ -1267,6 +1273,15 @@ class VoiceOrchestrator:
         # PRIMARY = the engine the tenant picked in AI Options (default Flux).
         engine = (config.stt_provider_type or "deepgram_flux").lower()
         is_nova_primary = engine in ("deepgram_nova", "deepgram-nova", "nova", "nova-3")
+        # Flux only ships an English model; a non-English tenant language can
+        # only be honoured by Nova-3. Switch here as well as in the session
+        # builder so non-telephony callers get the same rule.
+        _lang = (getattr(config, "stt_language", None) or "en").strip().lower()
+        if not is_nova_primary and _lang not in ("en", "en-us", "en-gb", "en-au", "en-in", "en-nz"):
+            logger.info(
+                "stt_language_forces_nova language=%s (Flux is English-only)", _lang,
+            )
+            is_nova_primary = True
         if is_nova_primary:
             primary, primary_init = _build_nova(config.stt_model or "nova-3")
         else:

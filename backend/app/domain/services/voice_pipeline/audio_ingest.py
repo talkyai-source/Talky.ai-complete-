@@ -998,6 +998,10 @@ class AudioIngest:
 
                 async for transcript in self._p.stt_provider.stream_transcribe(
                     audio_stream(),
+                    # The tenant's saved STT language (F09). Deepgram Nova
+                    # honours it per stream; Flux is English-only and the
+                    # orchestrator already routed non-English to Nova.
+                    language=getattr(session, "stt_language", None) or "en",
                     call_id=call_id,
                     on_barge_in=_on_barge_in_direct,
                 ):

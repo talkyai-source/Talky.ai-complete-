@@ -184,6 +184,37 @@ class ResilientTTSProvider(TTSProvider):
 
     # ──────────────────────────────────────────────────────────────────
 
+    # Which PCM byte format each TTS vendor yields. The gateway is told the
+    # primary's format ONCE per session (voice_orchestrator tts_source_format),
+    # so a secondary that yields the other format would have its bytes
+    # reinterpreted — four float32 samples became eight unrelated int16 values
+    # in the 2026-09-06 audit (F07). Normalise the secondary to the primary.
+    _F32_PROVIDERS = frozenset({"cartesia", "google"})
+
+    @classmethod
+    def _pcm_format(cls, provider_name: str) -> str:
+        base = str(provider_name or "").lower()
+        for vendor in cls._F32_PROVIDERS:
+            if vendor in base:
+                return "f32le"
+        return "s16le"
+
+    @staticmethod
+    def _convert_pcm(data: bytes, src: str, dst: str) -> bytes:
+        if src == dst or not data:
+            return data
+        import numpy as np
+
+        if src == "f32le" and dst == "s16le":
+            usable = len(data) - (len(data) % 4)
+            samples = np.frombuffer(data[:usable], dtype=np.float32)
+            return (np.clip(samples, -1.0, 1.0) * 32767.0).astype(np.int16).tobytes()
+        if src == "s16le" and dst == "f32le":
+            usable = len(data) - (len(data) % 2)
+            samples = np.frombuffer(data[:usable], dtype=np.int16)
+            return (samples.astype(np.float32) / 32768.0).tobytes()
+        return data
+
     async def _stream_secondary(
         self,
         text: str,
@@ -197,7 +228,24 @@ class ResilientTTSProvider(TTSProvider):
             if self._policy.voice_id_map
             else voice_id
         )
+        if mapped_voice == voice_id and self._pcm_format(self._primary.name) != self._pcm_format(self._secondary.name):
+            # Cross-vendor with no voice mapping: the primary's voice id is
+            # meaningless to the other vendor. Say so loudly; the secondary's
+            # own default/validation decides what happens next.
+            logger.warning(
+                "resilient_tts_voice_unmapped primary=%s secondary=%s voice=%s — "
+                "set TTS_SECONDARY_VOICE_MAP",
+                self._primary.name, self._secondary.name, voice_id,
+            )
+        src_fmt = self._pcm_format(self._secondary.name)
+        dst_fmt = self._pcm_format(self._primary.name)
         async for chunk in self._secondary.stream_synthesize(
             text, mapped_voice, sample_rate, **kwargs,
         ):
+            if src_fmt != dst_fmt and getattr(chunk, "data", None):
+                chunk = AudioChunk(
+                    data=self._convert_pcm(chunk.data, src_fmt, dst_fmt),
+                    sample_rate=getattr(chunk, "sample_rate", sample_rate),
+                    channels=getattr(chunk, "channels", 1),
+                )
             yield chunk

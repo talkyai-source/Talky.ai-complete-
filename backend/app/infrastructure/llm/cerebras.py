@@ -391,7 +391,7 @@ class CerebrasLLMProvider(LLMProvider):
         Raises:
             LLMTimeoutError: no token arrived before the TTFT deadline.
         """
-        from app.infrastructure.llm.groq import LLMTimeoutError
+        from app.infrastructure.llm.groq import LLMStreamStalled, LLMTimeoutError
 
         _INTERTOKEN_TIMEOUT = 2.0
 
@@ -411,10 +411,12 @@ class CerebrasLLMProvider(LLMProvider):
                     if tokens_received > 0:
                         logger.warning(
                             "Cerebras-wait budget expired mid-stream "
-                            "(limit=%.1fs, tokens=%d) — treating as stream end",
+                            "(limit=%.1fs, tokens=%d) — stream incomplete",
                             timeout_seconds, tokens_received,
                         )
-                        break
+                        raise LLMStreamStalled(
+                            f"Cerebras stream stalled after {tokens_received} token(s)"
+                        )
                     logger.error(
                         "Cerebras deadline exceeded before first token "
                         "(limit=%.1fs)", timeout_seconds,
@@ -447,9 +449,11 @@ class CerebrasLLMProvider(LLMProvider):
                     if tokens_received > 0:
                         logger.warning(
                             "Cerebras inter-token stall after %.2fs (tokens=%d) "
-                            "— treating as stream end", elapsed, tokens_received,
+                            "— stream incomplete", elapsed, tokens_received,
                         )
-                        break
+                        raise LLMStreamStalled(
+                            f"Cerebras stream stalled after {tokens_received} token(s)"
+                        )
                     logger.error(
                         "Cerebras timeout waiting for first token after %.2fs "
                         "(limit=%.1fs)", elapsed, timeout_seconds,
@@ -469,8 +473,17 @@ class CerebrasLLMProvider(LLMProvider):
                     pass
 
     async def cleanup(self) -> None:
-        """Release the client reference."""
-        self._client = None
+        """Close the SDK client (its httpx pool) exactly once, then drop it."""
+        client, self._client = self._client, None
+        close = getattr(client, "close", None)
+        if close is None:
+            return
+        try:
+            result = close()
+            if hasattr(result, "__await__"):
+                await result
+        except Exception as exc:  # noqa: BLE001 — teardown must not raise
+            logger.debug("cerebras client close failed: %s", exc)
 
     @property
     def name(self) -> str:
