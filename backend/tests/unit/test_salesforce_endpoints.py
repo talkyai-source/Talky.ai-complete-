@@ -355,3 +355,32 @@ def test_import_request_accepts_lead_or_contact_only():
     assert sf.ImportRequest(campaign_id=CAMPAIGN, object_type="contact").object_type == "contact"
     with pytest.raises(Exception):
         sf.ImportRequest(campaign_id=CAMPAIGN, object_type="Account")
+
+
+# ---------------------------------------------------------------------------
+# Security middleware must let Salesforce's SOAP (text/xml) reach the endpoint
+# ---------------------------------------------------------------------------
+
+def test_security_middleware_admits_text_xml_on_the_outbound_message_path():
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from app.core.api_security_middleware import APISecurityMiddleware
+
+    app = FastAPI()
+    app.add_middleware(APISecurityMiddleware)
+
+    @app.post("/api/v1/connectors/salesforce/outbound-message/{tenant_id}/{token}")
+    async def om(tenant_id: str, token: str):
+        return {"ok": True}
+
+    @app.post("/api/v1/other")
+    async def other():
+        return {"ok": True}
+
+    client = TestClient(app)
+    headers = {"Content-Type": "text/xml; charset=UTF-8", "User-Agent": "SFDC-Callout/60.0"}
+    ok = client.post(f"/api/v1/connectors/salesforce/outbound-message/{TENANT}/tok", content="<x/>", headers=headers)
+    assert ok.status_code == 200, ok.text
+    blocked = client.post("/api/v1/other", content="<x/>", headers=headers)
+    assert blocked.status_code == 415

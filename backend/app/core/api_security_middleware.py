@@ -357,9 +357,18 @@ class APISecurityMiddleware(BaseHTTPMiddleware):
             return True
         return False
 
+    # Public inbound webhooks whose path does not contain "/webhook". The
+    # Salesforce Outbound Message endpoint receives SOAP (text/xml) from
+    # Salesforce and would otherwise be rejected by the content-type gate.
+    _WEBHOOK_PATH_PREFIXES = (
+        "/api/v1/connectors/salesforce/outbound-message/",
+        "/api/v1/connectors/salesforce/callback-requests/",
+    )
+
     def _is_webhook_path(self, path: str) -> bool:
         """Check if path is a webhook endpoint."""
-        return "/webhook" in path.lower()
+        lowered = path.lower()
+        return "/webhook" in lowered or lowered.startswith(self._WEBHOOK_PATH_PREFIXES)
 
     def _is_suspicious_ua(self, ua: str) -> bool:
         """Check if user agent is suspicious."""
