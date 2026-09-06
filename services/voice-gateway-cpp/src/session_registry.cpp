@@ -31,6 +31,9 @@ void add_media_totals(ProcessStatsSnapshot& total, const SessionStatsSnapshot& c
     total.stt_probation_dropped_total += current.stt_probation_dropped_total;
     total.stt_restarts_committed_total += current.stt_restarts_committed_total;
     total.tts_chunks_rejected_stale_total += current.tts_chunks_rejected_stale_total;
+    total.callback_batches_delivered_total += current.callback_delivery.delivered;
+    total.callback_batches_failed_total += current.callback_delivery.failed;
+    total.callback_batches_dropped_total += current.callback_delivery.dropped;
 }
 }  // namespace
 

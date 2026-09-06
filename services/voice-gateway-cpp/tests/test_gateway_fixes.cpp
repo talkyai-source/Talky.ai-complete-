@@ -1166,6 +1166,7 @@ public:
     }
     [[nodiscard]] int posts() const { return posts_.load(); }
     [[nodiscard]] int connections() const { return connections_.load(); }
+    void reject(bool value) { reject_.store(value); }
     // Raw bytes of the first/most recent POST (request line + headers + body),
     // so tests can assert on what the gateway actually put on the wire.
     [[nodiscard]] std::string first_request() const {
@@ -1223,9 +1224,10 @@ private:
                     }
                     last_request_ = raw;
                 }
-                const char resp[] =
-                    "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: keep-alive\r\n\r\nok";
-                if (send(c, resp, sizeof(resp) - 1, MSG_NOSIGNAL) <= 0) {
+                const std::string resp = reject_.load()
+                    ? "HTTP/1.1 503 Unavailable\r\nContent-Length: 2\r\nConnection: keep-alive\r\n\r\nno"
+                    : "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: keep-alive\r\n\r\nok";
+                if (send(c, resp.data(), resp.size(), MSG_NOSIGNAL) <= 0) {
                     break;
                 }
                 if (raw.find("Connection: close") != std::string::npos) {
@@ -1237,6 +1239,7 @@ private:
     }
 
     int fd_{-1};
+    std::atomic<bool> reject_{false};
     std::atomic<bool> running_{true};
     std::atomic<int> posts_{0};
     std::atomic<int> connections_{0};
@@ -1476,6 +1479,61 @@ void test_audio_callback_sends_internal_token() {
     server_thread.join();
 }
 
+void test_callback_failure_is_visible_and_recovers_without_stopping_rtp() {
+    MiniHttpSink sink(18089);
+    sink.reject(true);
+    voice_gateway::SessionRegistry registry;
+    voice_gateway::HttpServer server("127.0.0.1", 18097, registry);
+    std::string error;
+    check(server.start(error), "delivery_health_server_start");
+    std::thread serving([&server] { server.run(); });
+    const std::string body =
+        "{\"session_id\":\"delivery-health\",\"config_digest\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\","
+        "\"listen_ip\":\"127.0.0.1\",\"listen_port\":41730,\"remote_ip\":\"127.0.0.1\",\"remote_port\":41731,"
+        "\"codec\":\"pcmu\",\"ptime_ms\":20,"
+        "\"audio_callback_batch_frames\":2,\"audio_callback_url\":\"http://127.0.0.1:18089/api/v1/sip/telephony/audio/delivery-health\"}";
+    const auto started = http_roundtrip(18097, post_request("/v1/sessions/start", body));
+    check(started.find("\"status\":\"started\"") != std::string::npos,
+          "delivery_health_session_start " + started);
+    const auto stats = [&] {
+        return http_roundtrip(18097, std::string("GET /v1/sessions HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer ") +
+                              kControlToken + "\r\nConnection: close\r\n\r\n");
+    };
+    check(stats().find("\"callback_delivery_healthy\":true") != std::string::npos,
+          "delivery_health_no_audio_is_not_failure");
+    const int tx = socket(AF_INET, SOCK_DGRAM, 0);
+    sockaddr_in dst{};
+    dst.sin_family = AF_INET;
+    dst.sin_port = htons(41730);
+    inet_pton(AF_INET, "127.0.0.1", &dst.sin_addr);
+    uint16_t seq = 1;
+    for (; seq <= 220; ++seq) {
+        send_rtp(tx, dst, seq, seq * 160, 0x9898);
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+    const auto failed = stats();
+    check(failed.find("\"state\":\"Active\"") != std::string::npos ||
+          failed.find("\"state\":\"active\"") != std::string::npos, "delivery_health_rtp_stays_active");
+    check(failed.find("\"callback_delivery_healthy\":false") != std::string::npos,
+          "delivery_health_rejecting_backend_is_visible");
+    sink.reject(false);
+    bool recovered = false;
+    for (int i = 0; i < 100 && !recovered; ++i, ++seq) {
+        send_rtp(tx, dst, seq, seq * 160, 0x9898);
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        recovered = stats().find("\"callback_delivery_healthy\":true") != std::string::npos;
+    }
+    check(recovered, "delivery_health_success_resets_failure_streak");
+    (void)http_roundtrip(18097, post_request("/v1/sessions/stop", "{\"session_id\":\"delivery-health\"}"));
+    const auto totals = http_roundtrip(18097, "GET /stats HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n");
+    check(totals.find("\"callback_batches_failed_total\":") != std::string::npos &&
+          totals.find("\"callback_batches_failed_total\":0") == std::string::npos,
+          "delivery_health_failures_survive_session_retirement");
+    close(tx);
+    server.stop();
+    serving.join();
+}
+
 }  // namespace
 
 int main() {
@@ -1513,6 +1571,7 @@ int main() {
     test_interrupt_send_barrier();
     test_sink_finish_flushes_tail();
     test_audio_callback_sends_internal_token();
+    test_callback_failure_is_visible_and_recovers_without_stopping_rtp();
     test_slowloris_header_deadline();
     std::cout << "passed=" << g_pass << " failed=" << g_fail << "\n";
     return g_fail == 0 ? 0 : 1;

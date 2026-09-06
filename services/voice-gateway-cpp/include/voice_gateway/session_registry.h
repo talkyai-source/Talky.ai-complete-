@@ -56,6 +56,9 @@ struct ProcessStatsSnapshot {
     uint64_t stt_restarts_committed_total{0};
     // TTS chunks refused by the utterance/chunk-seq idempotency gate (VG-13).
     uint64_t tts_chunks_rejected_stale_total{0};
+    uint64_t callback_batches_delivered_total{0};
+    uint64_t callback_batches_failed_total{0};
+    uint64_t callback_batches_dropped_total{0};
 };
 
 class SessionRegistry {

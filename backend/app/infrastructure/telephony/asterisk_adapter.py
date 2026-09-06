@@ -1091,6 +1091,12 @@ class AsteriskAdapter(CallControlAdapter):
                 continue
             sid = entry.get("session_id")
             state = str(entry.get("state") or "").strip().lower()
+            if entry.get("callback_delivery_healthy") is False:
+                # RTP can remain active while every HTTP callback to STT fails.
+                # Only explicit persistent-failure evidence is unhealthy; old
+                # gateways lacking this field retain their existing semantics.
+                logger.warning("gateway_callback_delivery_unhealthy session=%s", sid)
+                continue
             # Failed/stopped sessions remain visible for evidence until the C++
             # reaper removes them. They are not live media and must not keep an
             # answered SIP call out of the dead-media watchdog.

@@ -34,6 +34,29 @@ enum class SessionState {
 
 [[nodiscard]] const char* session_state_to_string(SessionState state);
 
+struct CallbackDeliverySnapshot {
+    uint64_t delivered{0};
+    uint64_t failed{0};
+    uint64_t dropped{0};
+    int64_t failure_streak_ms{0};
+    bool healthy{true};
+};
+
+// Shared by the HTTP sender and session snapshot; never owns either worker.
+// Health follows observed failed deliveries, not caller silence or RTP state.
+class CallbackDeliveryState {
+public:
+    void record(bool delivered, std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now());
+    void drop(uint64_t count);
+    void worker_failed();
+    [[nodiscard]] CallbackDeliverySnapshot snapshot() const;
+private:
+    mutable std::mutex mutex_;
+    CallbackDeliverySnapshot stats_;
+    std::chrono::steady_clock::time_point first_failure_{};
+    bool failing_{false};
+};
+
 struct SessionConfig {
     std::string session_id;
     // SHA-256 of the canonical start payload, supplied by the controller.
@@ -74,6 +97,7 @@ struct SessionConfig {
     // The backend uses this to feed caller audio into the STT pipeline.
     // Optional — if empty, received audio is only used for echo/jitter buffer.
     std::string audio_callback_url;
+    std::shared_ptr<CallbackDeliveryState> callback_delivery;
     // Maximum number of audio frames to batch into a single callback POST.
     // 1 = one POST per 20 ms frame (lowest latency). Default: 1.
     int audio_callback_batch_frames{1};
@@ -149,6 +173,7 @@ struct SessionStatsSnapshot {
     // a chunk for an interrupted (retired) utterance, or a duplicate/backwards
     // chunk_seq. Visibility for the canary before the backend relies on it.
     uint64_t tts_chunks_rejected_stale_total{0};
+    CallbackDeliverySnapshot callback_delivery;
 };
 
 class RtpSession {

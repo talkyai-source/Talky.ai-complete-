@@ -491,6 +491,39 @@ const std::string& RtpSession::config_digest() const noexcept {
     return config_.config_digest;
 }
 
+void CallbackDeliveryState::record(const bool delivered, const std::chrono::steady_clock::time_point now) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (delivered) {
+        ++stats_.delivered;
+        failing_ = false;
+        stats_.failure_streak_ms = 0;
+        stats_.healthy = true;
+    } else {
+        ++stats_.failed;
+        if (!failing_) {
+            first_failure_ = now;
+            failing_ = true;
+        }
+        stats_.failure_streak_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - first_failure_).count();
+        stats_.healthy = stats_.failure_streak_ms < 3000;
+    }
+}
+
+void CallbackDeliveryState::drop(const uint64_t count) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    stats_.dropped += count;
+}
+
+void CallbackDeliveryState::worker_failed() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    stats_.healthy = false;
+}
+
+CallbackDeliverySnapshot CallbackDeliveryState::snapshot() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return stats_;
+}
+
 SessionStatsSnapshot RtpSession::snapshot() const {
     SessionStatsSnapshot snap;
     snap.session_id = config_.session_id;
@@ -534,6 +567,9 @@ SessionStatsSnapshot RtpSession::snapshot() const {
     snap.stt_probation_dropped_total = stt_probation_dropped_total_.load();
     snap.stt_restarts_committed_total = stt_restarts_committed_total_.load();
     snap.tts_chunks_rejected_stale_total = tts_chunks_rejected_stale_total_.load();
+    if (config_.callback_delivery) {
+        snap.callback_delivery = config_.callback_delivery->snapshot();
+    }
 
     return snap;
 }
