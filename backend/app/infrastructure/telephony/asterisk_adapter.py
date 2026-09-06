@@ -765,6 +765,34 @@ class AsteriskAdapter(CallControlAdapter):
         if self._ws_task is not None and not self._ws_task.done():
             self._ws_task.cancel()
 
+    async def reconcile_orphaned_media(self, *, owner_check, exclusions) -> int:
+        from app.infrastructure.telephony.media_reconciliation import reconcile_orphan_media
+
+        if not self._session:
+            return 0
+
+        now = time.monotonic()
+        if now < getattr(self, "_next_media_reconcile_at", 0.0):
+            return 0
+        # Shared by startup and watchdog invocations. A slow ARI must not turn
+        # resource housekeeping into a per-tick query storm or block call care.
+        self._next_media_reconcile_at = now + 30.0
+
+        def protected_resources():
+            protected = exclusions()
+            if protected is None:
+                raise RuntimeError("local media ownership inventory unavailable")
+            protected = set(protected)
+            protected.update(self._bridges.values())
+            for resources in (*self._pending_outbound.values(), *self._outbound_answer_setup_resources.values()):
+                protected.update(str(resources[key]) for key in ("bridge_id", "ext_channel_id") if resources.get(key))
+            return protected
+
+        return await asyncio.wait_for(
+            reconcile_orphan_media(self._ari, self._app_name, owner=owner_check, exclusions=protected_resources),
+            timeout=2.0,
+        )
+
     async def disconnect(
         self,
         *,
@@ -2781,6 +2809,8 @@ class AsteriskAdapter(CallControlAdapter):
         session are NOT started here — they are deferred to _on_outbound_answered
         so that no RTP timeout fires while we are waiting for the callee to pick up.
         """
+        from app.infrastructure.telephony.media_reconciliation import media_bridge_name
+
         logger.info(f"AsteriskAdapter: outbound call ringing channel={channel_id[:12]}")
         listen_port = await self._alloc_rtp_port()
         session_id = f"asterisk-{uuid.uuid4().hex}"
@@ -2791,7 +2821,8 @@ class AsteriskAdapter(CallControlAdapter):
         try:
             # 1. Create mixing bridge
             bridge = await self._ari(
-                "POST", "/bridges", params={"type": "mixing", "bridgeId": bridge_id}
+                "POST", "/bridges", params={"type": "mixing", "bridgeId": bridge_id,
+                                            "name": media_bridge_name(self._app_name, channel_id)}
             )
             returned_bridge_id = str((bridge or {}).get("id") or "").strip()
             if not returned_bridge_id:
@@ -2977,6 +3008,7 @@ class AsteriskAdapter(CallControlAdapter):
                     "direction": "both",
                     "channelId": ext_channel_id,
                 },
+                json_body={"variables": {"TALKY_MEDIA_OWNER": self._app_name, "TALKY_MEDIA_PARENT": channel_id}},
             )
             returned_ext_channel_id = str((ext_data or {}).get("id") or "").strip()
             if not returned_ext_channel_id:
@@ -4495,10 +4527,12 @@ class AsteriskAdapter(CallControlAdapter):
             # can still delete the exact resource instead of leaking an
             # unknowable server-generated ID.
             bridge_id = f"talky-inbound-bridge-{uuid.uuid4().hex[:20]}"
+            from app.infrastructure.telephony.media_reconciliation import media_bridge_name
+
             bridge = await self._ari(
                 "POST",
                 "/bridges",
-                params={"type": "mixing", "bridgeId": bridge_id},
+                params={"type": "mixing", "bridgeId": bridge_id, "name": media_bridge_name(self._app_name, channel_id)},
             )
             returned_bridge_id = str((bridge or {}).get("id") or "").strip()
             if returned_bridge_id:
@@ -4529,6 +4563,7 @@ class AsteriskAdapter(CallControlAdapter):
                     "direction": "both",
                     "channelId": ext_channel_id,
                 },
+                json_body={"variables": {"TALKY_MEDIA_OWNER": self._app_name, "TALKY_MEDIA_PARENT": channel_id}},
             )
             returned_ext_channel_id = str((ext_data or {}).get("id") or "").strip()
             if returned_ext_channel_id:

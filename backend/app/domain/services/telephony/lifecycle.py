@@ -1772,6 +1772,15 @@ async def recover_orphaned_calls() -> int:
     if callable(ownership_check) and not ownership_check():
         logger.warning("orphan_recovery_skipped_nonowner")
         return 0
+    media_reconcile = getattr(active_adapter, "reconcile_orphaned_media", None)
+    if callable(ownership_check) and callable(media_reconcile):
+        try:
+            await media_reconcile(
+                owner_check=ownership_check,
+                exclusions=lambda: _current_recovery_exclusions(sb, active_adapter),
+            )
+        except Exception as exc:
+            logger.warning("orphan_media_reconciliation_deferred err=%s", exc)
     try:
         await _register_unknown_asterisk_cleanup_candidates(
             sb,
