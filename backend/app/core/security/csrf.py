@@ -64,6 +64,12 @@ _EXEMPT_PATH_PREFIXES = (
     # silent on every call. Hardening follow-up: have the gateway present
     # X-Internal-Service-Token so this can be authenticated rather than exempt.
     "/api/v1/sip/telephony/audio",
+    # Salesforce -> Talky webhooks (Flow HTTP callout / Outbound Message).
+    # Server-to-server POSTs: no browser, no cookie, no Origin header. They
+    # authenticate with a per-tenant secret token in the URL (SHA-256 compared
+    # in constant time by the endpoint), so CSRF protection adds nothing here.
+    "/api/v1/connectors/salesforce/callback-requests/",
+    "/api/v1/connectors/salesforce/outbound-message/",
 )
 
 

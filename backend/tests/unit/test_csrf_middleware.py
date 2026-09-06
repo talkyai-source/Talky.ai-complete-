@@ -182,3 +182,24 @@ async def test_empty_internal_token_header_does_not_bypass(middleware_with_token
     )
     resp = await middleware_with_token.dispatch(req, _call_next_ok)
     assert resp.status_code == 403
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/api/v1/connectors/salesforce/callback-requests/11111111-1111-1111-1111-111111111111/tok",
+        "/api/v1/connectors/salesforce/outbound-message/11111111-1111-1111-1111-111111111111/tok",
+    ],
+)
+async def test_salesforce_webhooks_exempt(middleware, path):
+    """Salesforce posts server-to-server with no Origin; the endpoint verifies
+    the per-tenant token itself."""
+    request = _build_request(method="POST", path=path, headers={"user-agent": "SFDC-Callout/60.0"})
+    response = await middleware.dispatch(request, _call_next_ok)
+    assert response.status_code == 200
+
+
+async def test_other_connector_posts_still_protected(middleware):
+    request = _build_request(method="POST", path="/api/v1/connectors/salesforce/settings")
+    response = await middleware.dispatch(request, _call_next_ok)
+    assert response.status_code == 403
