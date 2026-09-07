@@ -60,3 +60,10 @@ New tests: `test_recording_encoding.py` (13), `test_device_fingerprint_stability
 `recording-policy-section.test.ts` (4). Two legacy tests re-stated to the new contracts
 (byte-identical offload test pinned to the raw codec; fingerprint format test asserts the
 versioned value).
+
+## 2026-09-08 follow-up (owner approved)
+
+- **Backfill applied** (as root — the recordings dir is root-owned, the first run as `admins` hit `PermissionError` and changed nothing): `converted=427`, 0 failures, `recordings_s3` now 429 rows all `audio/mpeg` (223 MB); `/opt/talky/backend/recordings` 1.8 GB → 260 MB. 6 orphan WAVs with no DB row were left untouched.
+- **First live MP3 recording** confirmed: 142 s, 1.1 MB, mp3 16 kHz stereo (ffprobe) — 8x smaller than the WAV path.
+- **AllState tenant `790ca2db`** policy set: two_party, default notice, opt-out key 9, notice everywhere, 90 days.
+- Stuck call `c9c2ca44` has since settled (`completed / no_answer`).
