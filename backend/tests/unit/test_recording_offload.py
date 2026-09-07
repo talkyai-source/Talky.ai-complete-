@@ -263,6 +263,10 @@ async def test_buffer_snapshot_immune_to_concurrent_clear():
 @pytest.mark.asyncio
 async def test_local_save_offloaded_and_byte_identical(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCAL_RECORDINGS_DIR", str(tmp_path))
+    # Storage encoding (MP3 by default) is covered in test_recording_encoding;
+    # this test is about the offloaded write being byte-identical to the WAV.
+    import app.domain.services.recording_service as _rs
+    monkeypatch.setattr(_rs, "RECORDING_AUDIO_CODEC", "wav")
 
     buf = RecordingBuffer(call_id="call-1", sample_rate=16000, channels=2, bit_depth=16)
     buf.add_chunk(b"\x01\x02" * 500)

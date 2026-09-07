@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Optional
 import asyncpg
 
 from app.core.security.device_fingerprint import (
+    is_legacy_fingerprint,
     compare_fingerprints,
     generate_device_fingerprint,
     is_ip_change_significant,
@@ -285,6 +286,19 @@ async def validate_session(
                 session["suspicious_reason"] = f"ip_mismatch:{ip_check['reason']}"
 
     # Day 5: Device fingerprint validation ------------------------------------
+    # Sessions created before the stable v2 fingerprint scheme (2026-09-07)
+    # carry a v1 value that can never equal a v2 one. Re-bind them once to the
+    # current fingerprint instead of flagging every request for the rest of
+    # the session's life.
+    if current_fingerprint and is_legacy_fingerprint(session.get("device_fingerprint")):
+        await conn.execute(
+            "UPDATE security_sessions SET device_fingerprint = $1 WHERE id = $2",
+            current_fingerprint,
+            session["id"],
+        )
+        session["device_fingerprint"] = current_fingerprint
+        logger.info("session_fingerprint_rebound_to_v2 session=%s", session["id"])
+
     if current_fingerprint and session.get("device_fingerprint"):
         fp_check = compare_fingerprints(
             session["device_fingerprint"], current_fingerprint

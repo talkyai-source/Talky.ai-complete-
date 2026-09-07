@@ -385,6 +385,78 @@ class S3Client:
             raise
 
 
+# ── Storage encoding ─────────────────────────────────────────────────────────
+#
+# The gateway hands us 16 kHz stereo PCM16 (caller left, agent right). Stored
+# raw, that is 3.8 MB per minute — and the carrier leg is G.711 at 8 kHz, so
+# "16 kHz WAV" carries no fidelity that a 64 kbps MP3 or 32 kbps Opus does not.
+# Every call-recording product (Twilio, Aircall, Dialpad, Gong) stores MP3 or
+# Opus and keeps the two parties on separate channels; we do the same here,
+# with ffmpeg (present on the production host) and a WAV fallback when it is
+# not. RECORDING_AUDIO_CODEC: mp3 (default, plays in every browser incl.
+# Safari) | opus (best voice quality per byte; Ogg container) | wav (raw).
+RECORDING_AUDIO_CODEC = (os.getenv("RECORDING_AUDIO_CODEC", "mp3") or "mp3").strip().lower()
+_DEFAULT_BITRATES = {"mp3": "64k", "opus": "32k"}
+RECORDING_AUDIO_BITRATE = (
+    os.getenv("RECORDING_AUDIO_BITRATE") or _DEFAULT_BITRATES.get(RECORDING_AUDIO_CODEC, "64k")
+).strip()
+_ENCODE_TIMEOUT_S = float(os.getenv("RECORDING_ENCODE_TIMEOUT_S", "120"))
+
+_CODEC_SPECS: Dict[str, tuple[list[str], str, str]] = {
+    # ffmpeg args after "-i pipe:0", file extension, MIME type
+    "mp3": (["-c:a", "libmp3lame", "-b:a", RECORDING_AUDIO_BITRATE, "-f", "mp3"], ".mp3", "audio/mpeg"),
+    "opus": (
+        ["-c:a", "libopus", "-b:a", RECORDING_AUDIO_BITRATE, "-application", "voip", "-vbr", "on", "-f", "ogg"],
+        ".ogg",
+        "audio/ogg",
+    ),
+}
+
+
+def encode_recording_audio(
+    wav_data: bytes,
+    codec: Optional[str] = None,
+    *,
+    ffmpeg_path: Optional[str] = None,
+) -> tuple[bytes, str, str]:
+    """Return ``(bytes, extension, mime_type)`` for storage.
+
+    Blocking (subprocess); callers run it through ``asyncio.to_thread``. Any
+    failure — ffmpeg missing, non-zero exit, timeout, empty output — falls
+    back to the original WAV so a recording is never lost to an encoder.
+    """
+    codec = (codec or RECORDING_AUDIO_CODEC).lower()
+    spec = _CODEC_SPECS.get(codec)
+    if spec is None or not wav_data:
+        return wav_data, ".wav", "audio/wav"
+    import shutil
+    import subprocess
+
+    binary = ffmpeg_path or shutil.which("ffmpeg")
+    if not binary:
+        logger.warning("recording_encode_skipped codec=%s reason=ffmpeg_not_found — storing WAV", codec)
+        return wav_data, ".wav", "audio/wav"
+    args, ext, mime = spec
+    cmd = [binary, "-hide_banner", "-loglevel", "error", "-nostdin", "-f", "wav", "-i", "pipe:0", *args, "pipe:1"]
+    try:
+        proc = subprocess.run(cmd, input=wav_data, capture_output=True, timeout=_ENCODE_TIMEOUT_S, check=False)
+    except Exception as exc:  # noqa: BLE001 — encoder problems must not lose audio
+        logger.warning("recording_encode_failed codec=%s err=%r — storing WAV", codec, exc)
+        return wav_data, ".wav", "audio/wav"
+    if proc.returncode != 0 or not proc.stdout:
+        logger.warning(
+            "recording_encode_failed codec=%s rc=%s stderr=%s — storing WAV",
+            codec, proc.returncode, (proc.stderr or b"")[:200].decode("utf-8", "replace"),
+        )
+        return wav_data, ".wav", "audio/wav"
+    logger.info(
+        "recording_encoded codec=%s bitrate=%s wav_bytes=%d out_bytes=%d ratio=%.1fx",
+        codec, RECORDING_AUDIO_BITRATE, len(wav_data), len(proc.stdout),
+        len(wav_data) / max(1, len(proc.stdout)),
+    )
+    return proc.stdout, ext, mime
+
+
 def _write_wav_file(recordings_dir: str, filepath: str, wav_data: bytes) -> None:
     """Synchronous makedirs+write, run off the event loop via
     ``asyncio.to_thread`` by ``RecordingService._save_local``. Kept as a
@@ -429,7 +501,7 @@ class RecordingService:
     # ── Key generation ────────────────────────────────────────────
 
     @staticmethod
-    def _s3_key(tenant_id: str, campaign_id: str, call_id: str) -> str:
+    def _s3_key(tenant_id: str, campaign_id: str, call_id: str, ext: str = ".wav") -> str:
         """
         Build a structured S3 object key.
         Format: {tenant_id}/{campaign_id}/{call_id}.wav
@@ -439,7 +511,7 @@ class RecordingService:
         def safe(s: str) -> str:
             return s.replace("/", "-").replace("\\", "-").replace("..", "-") if s else "unknown"
 
-        return f"{safe(tenant_id)}/{safe(campaign_id)}/{safe(call_id)}.wav"
+        return f"{safe(tenant_id)}/{safe(campaign_id)}/{safe(call_id)}{ext}"
 
     def _generate_storage_path(self, call_id: str, tenant_id: str, campaign_id: str) -> str:
         """Backward-compatible storage path helper used by legacy tests/callers."""
@@ -560,8 +632,10 @@ class RecordingService:
             return await self._save_local(call_id, buffer, tenant_id, campaign_id)
 
         try:
-            wav_data = buffer.get_wav_bytes()
-            key = self._s3_key(tenant_id, campaign_id, call_id)
+            wav_data, ext, mime_type = await asyncio.to_thread(
+                encode_recording_audio, buffer.get_wav_bytes()
+            )
+            key = self._s3_key(tenant_id, campaign_id, call_id, ext)
             upload_started = datetime.utcnow()
 
             logger.info(
@@ -579,7 +653,7 @@ class RecordingService:
             # result so save_and_link's return value / ordering is
             # unchanged. `wav_data`/`key` are plain immutable bytes/str, so
             # there is nothing for the thread to race against.
-            await asyncio.to_thread(self._s3.upload, key, wav_data, content_type="audio/wav")
+            await asyncio.to_thread(self._s3.upload, key, wav_data, content_type=mime_type)
             upload_finished = datetime.utcnow()
 
             logger.info(f"Recording uploaded: {key}")
@@ -593,6 +667,7 @@ class RecordingService:
                 duration_seconds=int(buffer.get_duration_seconds()),
                 upload_started=upload_started,
                 upload_finished=upload_finished,
+                mime_type=mime_type,
             )
 
             await self._update_call_recording_url(call_id, tenant_id, recording_id)
@@ -650,12 +725,16 @@ class RecordingService:
 
         recordings_dir = os.getenv("LOCAL_RECORDINGS_DIR", "./recordings")
         abs_dir = os.path.abspath(recordings_dir)
-        filepath = os.path.join(abs_dir, f"{call_id}.wav")
+        mime_type = "audio/wav"
         try:
-            wav_data = buffer.get_wav_bytes()
-            if not wav_data:
+            raw_wav = buffer.get_wav_bytes()
+            if not raw_wav:
                 logger.warning(f"No WAV data to save locally for call {call_id}")
                 return None
+            # Compress for storage (MP3 by default; see encode_recording_audio).
+            # The encoder is a subprocess, so it runs off the event loop too.
+            wav_data, ext, mime_type = await asyncio.to_thread(encode_recording_audio, raw_wav)
+            filepath = os.path.join(abs_dir, f"{call_id}{ext}")
             # ROOT CAUSE FIX (2026-07-13): os.makedirs + open()/write() are
             # synchronous filesystem calls — blocking on this process's
             # single asyncio event loop for as long as the disk write takes
@@ -690,6 +769,7 @@ class RecordingService:
             s3_bucket="local",
             s3_region="local",
             status="uploaded",
+            mime_type=mime_type,
         )
 
         if recording_id:
@@ -832,6 +912,7 @@ class RecordingService:
         s3_bucket: Optional[str] = None,
         s3_region: Optional[str] = None,
         status: str = "uploaded",
+        mime_type: str = "audio/wav",
     ) -> Optional[UUID]:
         """Insert a row into recordings_s3 and return the new UUID.
 
@@ -881,8 +962,9 @@ class RecordingService:
                             call_id, tenant_id, campaign_id,
                             s3_bucket, s3_key, s3_region,
                             file_size_bytes, duration_seconds,
-                            status, upload_started_at, upload_finished_at
-                        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+                            status, upload_started_at, upload_finished_at,
+                            mime_type
+                        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
                         RETURNING id
                         """,
                         resolved_call_id,
@@ -896,6 +978,7 @@ class RecordingService:
                         status,
                         upload_started,
                         upload_finished,
+                        mime_type,
                     )
                 return row["id"] if row else None
         except Exception as exc:

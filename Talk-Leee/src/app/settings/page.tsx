@@ -15,6 +15,7 @@ import DeviceList from "@/components/auth/device-list";
 import LogoutButton from "@/components/auth/logout-button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { TelephonyProvidersSection } from "@/components/settings/telephony-providers-section";
+import { RecordingPolicySection } from "@/components/settings/recording-policy-section";
 import { useAuth } from "@/lib/auth-context";
 import { useAccessToken } from "@/lib/auth-hooks";
 import { api } from "@/lib/api";
@@ -240,6 +241,7 @@ export default function SettingsPage() {
                                 <TabsTrigger value="security">Security</TabsTrigger>
                                 <TabsTrigger value="devices">Devices</TabsTrigger>
                                 <TabsTrigger value="telephony">Telephony</TabsTrigger>
+                                <TabsTrigger value="recording">Recording</TabsTrigger>
                                 <TabsTrigger value="logout">Logout</TabsTrigger>
                             </TabsList>
 
@@ -356,6 +358,10 @@ export default function SettingsPage() {
                             {/* Telephony Tab */}
                             <TabsContent value="telephony" className="space-y-4">
                                 <TelephonyProvidersSection />
+                            </TabsContent>
+
+                            <TabsContent value="recording" className="space-y-4">
+                                <RecordingPolicySection canEdit={["tenant_admin", "platform_admin", "admin", "owner"].includes(String(user?.role ?? ""))} />
                             </TabsContent>
 
                             {/* Logout Tab */}
