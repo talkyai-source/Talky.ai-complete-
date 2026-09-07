@@ -33,6 +33,20 @@ export interface MinutesStatus {
     exhausted: boolean;
 }
 
+/**
+ * Whether the tenant's monthly minute quota is exhausted — the same signal
+ * that gates outbound Start (`outOfMinutes` above) and, on the inbound side,
+ * the admission reservation the call-guard takes before answer
+ * (`backend/app/domain/services/telephony/inbound_admission.py:1071-1087`
+ * reads this tenant's `minutes_allocated` against product-wide accounted
+ * usage regardless of call direction). `unlimited` tenants are never
+ * exhausted; a missing/unloaded status is treated as not exhausted rather
+ * than guessed.
+ */
+export function isMinutesExhausted(status: MinutesStatus | null | undefined): boolean {
+    return Boolean(status) && !status!.unlimited && status!.exhausted;
+}
+
 // Campaign Types
 export interface Campaign {
     id: string;
@@ -107,6 +121,68 @@ export interface CampaignCreate {
     calling_schedule?: CampaignCallingSchedule;
 }
 
+/**
+ * One transfer leg of a call, exactly as `GET /calls/{call_id}` returns it.
+ *
+ * Every key is optional because the server projects each row straight from
+ * nullable `call_legs` columns and serialises the dict verbatim. Nothing here
+ * is frontend-invented — the key set is the server's SELECT list.
+ *   backend/app/api/v1/endpoints/calls.py:265       — CallDetail.transfer_legs
+ *   backend/app/api/v1/endpoints/calls.py:1329-1337 — the selected columns
+ */
+export interface TransferLeg {
+    id?: string | null;
+    leg_type?: string | null;
+    direction?: string | null;
+    provider?: string | null;
+    provider_leg_id?: string | null;
+    from_number?: string | null;
+    to_number?: string | null;
+    status?: string | null;
+    started_at?: string | null;
+    answered_at?: string | null;
+    ended_at?: string | null;
+    duration_seconds?: number | null;
+    metadata?: Record<string, unknown> | null;
+}
+
+/**
+ * The server's own reason a transfer leg reached its terminal state, or null
+ * when it did not supply one. Written into the leg metadata alongside the
+ * terminal status — backend/app/domain/services/telephony/inbound_transfer.py:1410-1435
+ * (`parent_already_terminal`, the raw adapter status, or `provider_target_absent`).
+ * Returns null rather than a placeholder so the caller renders nothing.
+ */
+export function transferLegTerminalReason(leg: TransferLeg): string | null {
+    const value = leg?.metadata?.terminal_reason;
+    if (typeof value !== "string") return null;
+    const trimmed = value.trim();
+    return trimmed ? trimmed : null;
+}
+
+/**
+ * The message to show when starting a campaign is refused.
+ *
+ * The out-of-minutes gate answers 402 with a structured detail carrying its
+ * own `message`, already naming the allocation and the minutes used, and the
+ * http client exposes that object as `.details`:
+ *   backend/app/api/v1/endpoints/campaigns.py:657-671
+ *
+ * That server sentence is preferred over anything written here, because it is
+ * the only one that knows the tenant's real numbers. Nothing is computed from
+ * the allocation/used/remaining figures the payload also carries — they are
+ * the server's to phrase. Falls back to the transport error, then to a plain
+ * statement of what failed; never invents a reason.
+ */
+export function campaignStartErrorMessage(error: unknown): string {
+    const detail = (error as { details?: { message?: unknown } } | null)?.details;
+    const serverMessage = typeof detail?.message === "string" ? detail.message.trim() : "";
+    if (serverMessage) return serverMessage;
+    const transportMessage = error instanceof Error ? error.message.trim() : "";
+    if (transportMessage) return transportMessage;
+    return "Failed to start campaign";
+}
+
 // Call Types
 export interface Call {
     id: string;
@@ -151,9 +227,26 @@ export interface Call {
     processing_status?: string | null;
     billing_status?: string | null;
     billing_hold_reason?: string | null;
+    /**
+     * Seconds the server actually settled for this call — read straight off
+     * the immutable usage ledger, NOT off `duration_seconds`.
+     *   backend/app/api/v1/endpoints/calls.py:263 (field)
+     *   backend/app/api/v1/endpoints/calls.py:1306-1312 (ledger read)
+     *
+     * Detail-only: the list endpoint does not project it. Null/absent for
+     * every call the server has not settled — an unsettled or held call has
+     * no billed quantity, and one must never be inferred from its duration.
+     */
+    billed_duration_seconds?: number | null;
     recording_status?: string | null;
     transcript_status?: string | null;
     media_state?: string | null;
+    /**
+     * Transfer legs of this call. Detail-only — the list endpoint does not
+     * project them. Undefined when the server sent no array at all; an empty
+     * array is the ordinary case for a call that was never transferred.
+     */
+    transfer_legs?: TransferLeg[];
 }
 
 export interface CampaignTerminationSummary {
@@ -648,6 +741,8 @@ class DashboardApi {
             campaign_id?: string;
             lead_id?: string;
             summary?: string;
+            billed_duration_seconds?: number | null;
+            transfer_legs?: TransferLeg[];
         }>({
             path: `/calls/${id}`,
             method: "GET",
@@ -683,12 +778,24 @@ class DashboardApi {
             processing_status: response.processing_status,
             billing_status: response.billing_status,
             billing_hold_reason: response.billing_hold_reason,
+            // Passed through as sent. A non-number (absent field, older
+            // server, explicit null for an unsettled call) becomes undefined
+            // so that "the server billed nothing yet" stays distinguishable
+            // from a billed zero — neither is ever derived from duration.
+            billed_duration_seconds:
+                typeof response.billed_duration_seconds === "number"
+                    ? response.billed_duration_seconds
+                    : undefined,
             recording_status: response.recording_status,
             transcript_status: response.transcript_status,
             media_state: response.media_state,
+            // Passed through untouched. A non-array (absent field, older
+            // server) becomes undefined rather than an invented empty list, so
+            // "the server said nothing" stays distinguishable from "no legs".
+            transfer_legs: Array.isArray(response.transfer_legs) ? response.transfer_legs : undefined,
         };
     }
-    
+
     async getCallTranscript(id: string, format: "json" | "text" = "json"): Promise<{
         format: string;
         turns?: Array<{ role: string; content: string; timestamp: string }>;

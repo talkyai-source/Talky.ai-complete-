@@ -5,14 +5,17 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tansta
 
 import {
     inboundApi,
-    inboundErrorKind,
+    inboundErrorCode,
+    inboundErrorStatus,
     createInboundIdempotencyKey,
     INBOUND_RETRY_WINDOW_MS,
     type InboundCampaign,
     type InboundCampaignInput,
 } from "@/lib/inbound-api";
+import { inboundStateForError } from "@/lib/inbound/inbound-types";
 import { fetchEffectivePermissions } from "@/lib/inbound-permissions";
 import { notificationsStore } from "@/lib/notifications";
+import { dashboardApi } from "@/lib/dashboard-api";
 
 export const inboundQueryKeys = {
     all: ["inbound-campaigns"] as const,
@@ -28,10 +31,26 @@ export const inboundQueryKeys = {
         "capabilities",
         configId ?? "new",
     ] as const,
+    // Tenant-wide, not inbound-specific — same `/campaigns/minutes/status`
+    // figure the outbound Start button reads — but the quota it reports also
+    // gates inbound admission (inbound_admission.py:1071-1087), so the
+    // inbound campaign page reads it too.
+    minutesStatus: ["billing", "minutes-status"] as const,
 };
 
 function campaignNumber(campaign: InboundCampaign): string {
     return campaign.phone_number?.masked_number ?? "The assigned number";
+}
+
+/**
+ * Reads the server's own code and status off a rejected request and resolves
+ * the single named state the notification copy switches on.
+ *
+ * `inboundStateForError` is the one mapper; this wrapper exists only so the
+ * two `onError` handlers below extract the code and status identically.
+ */
+function inboundErrorState(error: unknown) {
+    return inboundStateForError(inboundErrorStatus(error), inboundErrorCode(error));
 }
 
 export function commitInboundCampaignCache(qc: ReturnType<typeof useQueryClient>, campaign: InboundCampaign) {
@@ -89,6 +108,16 @@ export function useTenantInboundControls(enabled = true) {
         queryKey: inboundQueryKeys.controls,
         queryFn: ({ signal }) => inboundApi.getControls(signal),
         enabled,
+    });
+}
+
+/** Best-effort: a quota-status hiccup must not block the campaign page. */
+export function useMinutesStatus(enabled = true) {
+    return useQuery({
+        queryKey: inboundQueryKeys.minutesStatus,
+        queryFn: () => dashboardApi.getMinutesStatus(),
+        enabled,
+        retry: false,
     });
 }
 
@@ -192,12 +221,19 @@ export function useUpdateInboundCampaign(id: string) {
         },
         onError: (error) => {
             void qc.invalidateQueries({ queryKey: inboundQueryKeys.detail(id) });
+            const state = inboundErrorState(error);
             notificationsStore.create({
                 type: "error",
-                title: inboundErrorKind(error) === "conflict" ? "Campaign changed elsewhere" : "Could not save inbound campaign",
-                message: inboundErrorKind(error) === "conflict"
+                title: state === "conflict"
+                    ? "Campaign changed elsewhere"
+                    : state === "authorization-unavailable"
+                        ? "Permissions could not be confirmed"
+                        : "Could not save inbound campaign",
+                message: state === "conflict"
                     ? "Reload the latest configuration, review it, and apply your changes again."
-                    : error instanceof Error ? error.message : "Please try again.",
+                    : state === "authorization-unavailable"
+                        ? "Nothing was saved. Your access was not denied — the permission lookup itself failed. Try again in a moment."
+                        : error instanceof Error ? error.message : "Please try again.",
             });
         },
     });
@@ -214,17 +250,27 @@ function useLifecycleMutation(id: string, action: "activate" | "deactivate" | "a
         onError: (error) => {
             void qc.invalidateQueries({ queryKey: inboundQueryKeys.detail(id) });
             void qc.invalidateQueries({ queryKey: inboundQueryKeys.readiness(id) });
-            const kind = inboundErrorKind(error);
+            const state = inboundErrorState(error);
             notificationsStore.create({
                 type: "error",
-                title: kind === "conflict"
+                title: state === "conflict"
                     ? "Campaign changed elsewhere"
-                    : kind === "forbidden"
+                    : state === "no-permission"
                         ? "Permission denied"
-                        : action === "activate" ? "Activation blocked" : action === "archive" ? "Could not archive" : "Could not deactivate",
-                message: kind === "conflict"
+                        // Distinct from "Permission denied": the lookup
+                        // failed, so no denial has been established.
+                        : state === "authorization-unavailable"
+                            ? "Permissions could not be confirmed"
+                            : state === "activation-blocked"
+                                ? "Activation blocked by server readiness"
+                                : action === "activate" ? "Activation blocked" : action === "archive" ? "Could not archive" : "Could not deactivate",
+                message: state === "conflict"
                     ? "Reload the latest server version before changing live routing."
-                    : error instanceof Error ? error.message : "Refresh the latest server state and try again.",
+                    : state === "authorization-unavailable"
+                        ? "Live routing was not changed. Your access was not denied — the permission lookup itself failed. Try again in a moment."
+                        : state === "activation-blocked"
+                            ? "Open the campaign and resolve each readiness blocker before activating."
+                            : error instanceof Error ? error.message : "Refresh the latest server state and try again.",
             });
         },
         onSuccess: (updated) => {

@@ -8,7 +8,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useCampaigns } from "@/lib/api-hooks";
-import { inboundErrorCode, inboundErrorKind, type InboundCampaign, type InboundCampaignInput, type InboundPhoneNumber } from "@/lib/inbound-api";
+import { inboundErrorCode, inboundErrorStatus, type InboundCampaign, type InboundCampaignInput, type InboundPhoneNumber } from "@/lib/inbound-api";
+import { inboundStateForError } from "@/lib/inbound/inbound-types";
 import {
     INBOUND_AFTER_HOURS_OPTIONS,
     initialInboundCampaignInput,
@@ -18,15 +19,45 @@ import {
     verifiedTransferConfigurationAvailable,
     type InboundFormErrors,
 } from "@/lib/inbound-validation";
+import { useVoicesQuery } from "@/lib/queries/ai-options-queries";
 import { useInboundPhoneNumbers, useInboundRuntimeCapabilities } from "@/lib/queries/inbound-queries";
 import { useSipTrunks } from "@/lib/telephony-api";
 import { cn } from "@/lib/utils";
 
-const TIMEZONES = [
+/**
+ * Last-resort timezone list.
+ *
+ * Reachable only when `Intl.supportedValuesOf` throws or is missing, which
+ * no supported browser or the project's Node does. The real list is read
+ * from the runtime's own IANA database by `supportedTimezones()` below; the
+ * backend accepts any IANA name up to 64 characters
+ * (schemas/inbound_campaigns.py:32), so a curated subset was never the
+ * contract — it was a guess that silently excluded most of the world.
+ */
+const TIMEZONE_FALLBACK = [
     "UTC", "America/New_York", "America/Chicago", "America/Denver", "America/Los_Angeles",
     "Europe/London", "Europe/Berlin", "Asia/Dubai", "Asia/Karachi", "Asia/Kolkata",
     "Asia/Singapore", "Australia/Sydney",
 ];
+
+/** Every zone this runtime knows, or the fallback if it cannot say. */
+function supportedTimezones(): string[] {
+    try {
+        const zones = Intl.supportedValuesOf("timeZone");
+        return zones.length > 0 ? zones : TIMEZONE_FALLBACK;
+    } catch {
+        return TIMEZONE_FALLBACK;
+    }
+}
+
+/** This browser's own zone, when it will tell us. */
+function browserTimezone(): string | null {
+    try {
+        return Intl.DateTimeFormat().resolvedOptions().timeZone || null;
+    } catch {
+        return null;
+    }
+}
 const DAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 
 export function InboundCampaignForm({ mode, initialValue, pending, canAssignNumber, onSubmit }: {
@@ -40,12 +71,19 @@ export function InboundCampaignForm({ mode, initialValue, pending, canAssignNumb
     const trunksQuery = useSipTrunks();
     const numbersQuery = useInboundPhoneNumbers(canAssignNumber);
     const runtimeCapabilitiesQuery = useInboundRuntimeCapabilities(initialValue?.id);
+    const voicesQuery = useVoicesQuery();
     const [value, setValue] = useState<InboundCampaignInput>(() => initialInboundCampaignInput(initialValue));
     const [errors, setErrors] = useState<InboundFormErrors>({});
     const errorSummaryRef = useRef<HTMLDivElement | null>(null);
 
     const campaigns = useMemo(() => (campaignsQuery.data ?? []).filter((campaign) => campaign.status !== "deleted"), [campaignsQuery.data]);
     const eligibleCampaigns = useMemo(() => campaigns.filter(isEligibleInboundBaseCampaign), [campaigns]);
+    // The base campaign whose knowledge this number inherits. Read from the
+    // campaign list this form already loads — no extra request is made for it.
+    const selectedCampaign = useMemo(
+        () => campaigns.find((campaign) => campaign.id === value.campaign_id),
+        [campaigns, value.campaign_id],
+    );
     const inboundTrunks = useMemo(() => (trunksQuery.data ?? []).filter((trunk) => trunk.direction === "inbound" || trunk.direction === "both"), [trunksQuery.data]);
     const eligibleInboundTrunks = useMemo(() => inboundTrunks.filter(isEligibleInboundTrunk), [inboundTrunks]);
     const availableNumbers = useMemo(() => {
@@ -53,7 +91,25 @@ export function InboundCampaignForm({ mode, initialValue, pending, canAssignNumb
         const current = initialValue?.phone_number;
         return current && !rows.some((number) => number.id === current.id) ? [current, ...rows] : rows;
     }, [initialValue?.phone_number, numbersQuery.data]);
-    const timezoneOptions = useMemo(() => Array.from(new Set([...TIMEZONES, value.timezone || "UTC"])), [value.timezone]);
+    // The saved zone is unioned in last so an existing campaign whose zone
+    // this runtime does not enumerate still shows its own value selected
+    // rather than silently falling back to the first option.
+    const timezoneOptions = useMemo(
+        () => Array.from(new Set([...supportedTimezones(), browserTimezone(), value.timezone || "UTC"].filter((zone): zone is string => Boolean(zone)))),
+        [value.timezone],
+    );
+    // The saved voice is unioned in so an id the catalogue no longer lists
+    // still renders as the selected option instead of vanishing to "inherit".
+    const voiceOptions = useMemo(() => {
+        const voices = voicesQuery.data?.voices ?? [];
+        const saved = (value.voice_id ?? "").trim();
+        return saved && !voices.some((voice) => voice.id === saved)
+            ? [{ id: saved, name: saved, language: "", provider: "saved on this campaign" }, ...voices]
+            : voices;
+    }, [voicesQuery.data?.voices, value.voice_id]);
+    // Only a real failure drops to free text. A pending query still renders
+    // the select, disabled, so the control does not change shape on load.
+    const voiceSelectUnavailable = voicesQuery.isError || (voicesQuery.isSuccess && voiceOptions.length === 0);
     const dependenciesLoading = campaignsQuery.isLoading || trunksQuery.isLoading || (canAssignNumber && numbersQuery.isLoading);
     const dependencyError = campaignsQuery.isError || trunksQuery.isError || (canAssignNumber && numbersQuery.isError);
     const transferConfigurationAvailable = verifiedTransferConfigurationAvailable(runtimeCapabilitiesQuery);
@@ -112,18 +168,24 @@ export function InboundCampaignForm({ mode, initialValue, pending, canAssignNumb
         try {
             await onSubmit(value);
         } catch (error) {
-            const kind = inboundErrorKind(error);
             const code = inboundErrorCode(error);
+            const state = inboundStateForError(inboundErrorStatus(error), code);
             const transferGateClosed = code === "transfer_runtime_unavailable"
                 || code === "transfer_platform_disabled"
                 || code === "transfer_staging_scope_mismatch";
             showErrors({
                 form: transferGateClosed && error instanceof Error
                     ? error.message
-                    : kind === "conflict"
+                    : state === "conflict"
                     ? "This campaign changed in another session. Reload the latest version, review it, and apply your changes again."
-                    : kind === "forbidden"
+                    : state === "no-permission"
                         ? "Your current role does not allow this change. Ask a tenant administrator to review your access."
+                        // A failed permission lookup is not a denial. Never
+                        // tell the user they lack access on this branch.
+                        : state === "authorization-unavailable"
+                        ? "Your permissions could not be confirmed, so nothing was saved. Try again in a moment."
+                        : state === "activation-blocked"
+                        ? "Server readiness checks are not satisfied yet. Open the campaign and resolve each readiness blocker before retrying."
                         : error instanceof Error ? error.message : "The configuration could not be saved.",
             });
         }
@@ -198,14 +260,24 @@ export function InboundCampaignForm({ mode, initialValue, pending, canAssignNumb
 
             <section className="content-card space-y-6" aria-labelledby="inbound-agent-heading">
                 <div className="flex items-start gap-3"><Bot className="mt-0.5 h-5 w-5 text-primary" aria-hidden /><div><h2 id="inbound-agent-heading" className="text-lg font-semibold text-foreground">AI behavior</h2><p className="mt-1 text-sm text-muted-foreground">Blank fields inherit the selected campaign. Inbound purpose, style, instructions, voice, and opening-silence settings are pinned before Answer.</p></div></div>
-                <div className="rounded-xl border border-sky-500/30 bg-sky-500/5 p-3 text-sm text-foreground" role="status"><strong>Knowledge and executable tools stay campaign-owned.</strong> Configure those on the selected base AI campaign; this route cannot silently invent capabilities.</div>
+                <InheritedKnowledge campaign={selectedCampaign} />
                 <div className="grid gap-5 md:grid-cols-2">
                     <Field label="Inbound call purpose" htmlFor="inbound-purpose" hint="Added to the base campaign goal for this number only."><Input id="inbound-purpose" value={value.purpose ?? ""} onChange={(event) => update("purpose", event.target.value)} maxLength={2000} placeholder="Handle new enquiries and arrange the right next step" /></Field>
                     <Field label="Inbound agent style" htmlFor="inbound-agent_persona" hint="A short behavior description; the approved base persona remains intact."><Input id="inbound-agent_persona" value={value.agent_persona ?? ""} onChange={(event) => update("agent_persona", event.target.value)} maxLength={2000} placeholder="Warm, concise receptionist" /></Field>
                 </div>
                 <Field label="System prompt override" htmlFor="inbound-system_prompt" hint="Appended to—not substituted for—the approved base campaign instructions."><textarea id="inbound-system_prompt" value={value.system_prompt ?? ""} onChange={(event) => update("system_prompt", event.target.value)} rows={7} maxLength={20000} placeholder="Optional inbound-specific instructions…" className={textareaClass} /></Field>
                 <div className="grid gap-5 md:grid-cols-2">
-                    <Field label="Voice ID override" htmlFor="inbound-voice_id" hint="Leave blank to inherit the base campaign voice."><Input id="inbound-voice_id" value={value.voice_id ?? ""} onChange={(event) => update("voice_id", event.target.value)} maxLength={255} placeholder="Inherit from campaign" /></Field>
+                    <Field label="Voice override" htmlFor="inbound-voice_id" hint={voiceSelectUnavailable ? "The voice catalogue is unavailable, so the voice id is entered directly. Leave blank to inherit the base campaign voice." : "Leave blank to inherit the base campaign voice."}>
+                        {voiceSelectUnavailable
+                            // Fail open: a voice-catalogue outage must not
+                            // block campaign creation, and the saved id is
+                            // still a plain string on the contract.
+                            ? <Input id="inbound-voice_id" value={value.voice_id ?? ""} onChange={(event) => update("voice_id", event.target.value)} maxLength={255} placeholder="Inherit from campaign" />
+                            : <select id="inbound-voice_id" value={value.voice_id ?? ""} onChange={(event) => update("voice_id", event.target.value)} disabled={voicesQuery.isLoading} className={selectClass}>
+                                <option value="">Inherit from campaign</option>
+                                {voiceOptions.map((voice) => <option key={voice.id} value={voice.id}>{voice.name}{voice.language ? ` · ${voice.language}` : ""}{voice.provider ? ` · ${voice.provider}` : ""}</option>)}
+                            </select>}
+                    </Field>
                 </div>
             </section>
 
@@ -293,6 +365,41 @@ export function InboundCampaignForm({ mode, initialValue, pending, canAssignNumb
 
 function NumberOption({ number, checked, disabled, current, onSelect }: { number: InboundPhoneNumber; checked: boolean; disabled: boolean; current: boolean; onSelect: () => void }) {
     return <label className={cn("flex items-start gap-3 rounded-xl border p-3", checked ? "border-primary bg-primary/5" : "border-border bg-background", disabled ? "cursor-not-allowed opacity-60" : "cursor-pointer")}><input type="radio" name="verified-phone-number" value={number.id} checked={checked} disabled={disabled} onChange={onSelect} className="mt-1 h-4 w-4 accent-primary" /><span className="min-w-0"><span className="block text-sm font-medium text-foreground">{number.label || "Verified number"}</span><span className="block font-mono text-sm text-muted-foreground">{number.masked_number}</span><span className="mt-1 block text-xs text-emerald-700 dark:text-emerald-300">Verified{current ? " · Current assignment" : " · Available"}</span></span></label>;
+}
+
+/**
+ * Which knowledge this number will answer from — read only, writes nothing.
+ *
+ * Knowledge is deliberately NOT an inbound field. `_SUPPORTED` in
+ * backend/app/domain/services/telephony/inbound_overrides.py:9-15 is a closed
+ * set of five keys, and `apply_qualification_overrides` raises on anything
+ * outside it, so a knowledge control here would save cleanly and then fail the
+ * call at admission. The backend states the split itself: "configure knowledge
+ * and executable tools on the selected base campaign"
+ * (inbound_campaign_service.py:967-970).
+ *
+ * So this names the campaign whose knowledge is inherited and links to where
+ * that knowledge is actually edited. It deliberately shows no mode and no node
+ * count: neither is on the campaign payload this form already loads (`Campaign`
+ * in lib/dashboard-api.ts carries no knowledge field), and displaying a made-up
+ * value would be a placeholder.
+ */
+function InheritedKnowledge({ campaign }: { campaign?: { id: string; name: string } }) {
+    return (
+        <div className="rounded-xl border border-sky-500/30 bg-sky-500/5 p-3 text-sm text-foreground" role="status">
+            <strong>Knowledge and executable tools stay campaign-owned.</strong>{" "}
+            {campaign ? (
+                <>
+                    This number answers from the knowledge of <span className="font-medium">{campaign.name}</span>.{" "}
+                    <Link href={`/campaigns/${encodeURIComponent(campaign.id)}`} className="font-medium text-primary underline underline-offset-4">
+                        Open campaign knowledge
+                    </Link>
+                </>
+            ) : (
+                "Choose an AI campaign above to see which knowledge this number will answer from."
+            )}
+        </div>
+    );
 }
 
 function Field({ label, htmlFor, hint, error, children }: { label: string; htmlFor: string; hint?: string; error?: string; children: React.ReactNode }) {

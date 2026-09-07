@@ -41,3 +41,20 @@ test("a summary with no actionable classification does not invent confidence", (
     assert.equal(screen.queryByText("Needs review"), null);
     assert.doesNotMatch(document.body.textContent ?? "", /\d+% confidence/i);
 });
+
+test("a failed summary offers a retry that re-runs the request", async () => {
+    let retried = 0;
+    render(<CallSummaryCard isLoading={false} isError error={new Error("upstream timed out")} onRetry={() => { retried += 1; }} />);
+
+    assert.ok(screen.getByText("upstream timed out"));
+    const button = screen.getByRole("button", { name: "Retry" });
+    button.click();
+    assert.equal(retried, 1);
+});
+
+test("a failed summary offers no retry when the caller cannot re-run it", () => {
+    render(<CallSummaryCard isLoading={false} isError error={new Error("upstream timed out")} />);
+
+    assert.ok(screen.getByText("upstream timed out"));
+    assert.equal(screen.queryByRole("button", { name: "Retry" }), null);
+});

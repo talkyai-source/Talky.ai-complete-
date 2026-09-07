@@ -25,6 +25,39 @@ const nextConfig: NextConfig = {
     experimental: {
         optimizePackageImports: ["lucide-react", "framer-motion"],
     },
+    // The /inbound* routes were a parallel, fixture-backed inbound frontend.
+    // They issued no request: their create and update calls reported success
+    // while persisting nothing. Removed 2026-09-01 in favour of
+    // /inbound-campaigns, which is wired to the real backend.
+    //
+    // Redirected rather than deleted outright so existing bookmarks and
+    // links do not 404. `trailingSlash: true` is set above, so each source
+    // is listed in both forms: `skipTrailingSlashRedirect` disables Next's
+    // built-in normalisation, and the replacement in src/proxy.ts runs
+    // AFTER redirects, so a bare `/inbound` would otherwise miss a
+    // slash-only rule.
+    //
+    // `/inbound/:id/edit` lands on the list, not on an edit page: its ids
+    // were fixture strings such as `cfg-1001`, while the backend coerces
+    // config_id to a UUID (inbound_campaign_service.py:91) and answers a
+    // non-UUID with 400 invalid_identifier. A per-id redirect would send
+    // every old link to a guaranteed error.
+    async redirects() {
+        const target = (destination: string) => [
+            { source: "/inbound", destination, permanent: false },
+            { source: "/inbound/", destination, permanent: false },
+        ];
+        return [
+            { source: "/inbound/new", destination: "/inbound-campaigns/new", permanent: false },
+            { source: "/inbound/new/", destination: "/inbound-campaigns/new", permanent: false },
+            { source: "/inbound/calls", destination: "/calls?direction=inbound", permanent: false },
+            { source: "/inbound/calls/", destination: "/calls?direction=inbound", permanent: false },
+            { source: "/inbound/:id/edit", destination: "/inbound-campaigns", permanent: false },
+            { source: "/inbound/:id/edit/", destination: "/inbound-campaigns", permanent: false },
+            // Listed last: `/inbound` must not shadow the deeper paths above.
+            ...target("/inbound-campaigns"),
+        ];
+    },
     async headers() {
         return [
             {

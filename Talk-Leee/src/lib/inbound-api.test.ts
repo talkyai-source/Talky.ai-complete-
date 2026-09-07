@@ -131,6 +131,45 @@ test("transfer capability request is scoped to the edited inbound config", async
     }
 });
 
+test("verified inventory is masked from e164, the only key that carries the number", async () => {
+    // GET /tenant-phone-numbers/ returns a BARE ARRAY of rows whose number
+    // lives under `e164` and under no other name
+    // (backend/app/domain/models/tenant_phone_number.py:38). It carries no
+    // masked_number, display_number, phone_number or number field, so a
+    // masking helper that does not read e164 renders the whole picker as
+    // "Number not assigned" while selection still works — a display-only
+    // defect that is invisible to an id assertion.
+    const previousFetch = globalThis.fetch;
+    process.env.NEXT_PUBLIC_API_BASE_URL = "http://localhost:8000/api/v1";
+    globalThis.fetch = (async (url: RequestInfo | URL) => {
+        const value = String(url);
+        const body = value.includes("/inbound-campaigns/dids/availability")
+            ? { did_number: "+14155550123", available: true, reason: "available" }
+            : [
+                { id: "did-1", tenant_id: "t-1", e164: "+14155550123", status: "verified", label: "Main line", provider: "manual_admin" },
+                { id: "did-2", tenant_id: "t-1", e164: "+14155550124", status: "pending_verification", label: "Unverified", provider: "manual_admin" },
+            ];
+        return new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
+    }) as typeof fetch;
+    try {
+        const numbers = await inboundApi.availablePhoneNumbers();
+        assert.equal(numbers.length, 1, "only the verified number survives");
+        assert.equal(numbers[0]?.e164, "+14155550123");
+        assert.notEqual(
+            numbers[0]?.masked_number,
+            "Number not assigned",
+            "the masked number must be derived from e164, not lost",
+        );
+        assert.match(numbers[0]?.masked_number ?? "", /23$/, "masking keeps the last two digits");
+        assert.ok(
+            (numbers[0]?.masked_number ?? "").includes("•"),
+            "the number is masked for display, never rendered in full",
+        );
+    } finally {
+        globalThis.fetch = previousFetch;
+    }
+});
+
 test("archived campaign inventory is requested only for the archived view", async () => {
     const previousFetch = globalThis.fetch;
     const urls: string[] = [];
@@ -292,6 +331,41 @@ test("archive uses the confirmed lifecycle endpoint and optimistic version", asy
         assert.equal(body.expected_version, serverCampaign.version);
         assert.equal(archived.status, "archived");
         assert.equal(archived.version, 5);
+    } finally {
+        globalThis.fetch = previousFetch;
+    }
+});
+
+/**
+ * R8 — the opening mode the operator chose is the opening mode the server is
+ * told about, for both values.
+ *
+ * `opening_mode` is the only field that decides who speaks first on a live
+ * inbound call: admission pins it and the runtime refuses the call outright
+ * if the pin and the snapshot disagree (`_pinned_inbound_opening`,
+ * backend/app/domain/services/telephony/lifecycle.py:3133-3147). A form that
+ * silently emitted one constant would still save, still pass readiness, and
+ * only reveal itself as the wrong agent greeting a real caller. Both branches
+ * are asserted because a hard-coded default passes a single-value check.
+ */
+test("create emits the selected opening_mode verbatim for both caller_first and agent_first", async () => {
+    const previousFetch = globalThis.fetch;
+    const bodies: string[] = [];
+    globalThis.fetch = (async (_url: RequestInfo | URL, init?: RequestInit) => {
+        bodies.push(String(init?.body));
+        return new Response(JSON.stringify(serverCampaign), { status: 201, headers: { "content-type": "application/json" } });
+    }) as typeof fetch;
+    try {
+        await inboundApi.create({ ...input, opening_mode: "caller_first" }, input.did_number);
+        await inboundApi.create({ ...input, opening_mode: "agent_first", greeting: "Hello, thanks for calling." }, input.did_number);
+
+        const callerFirst = JSON.parse(bodies[0]) as Record<string, unknown>;
+        const agentFirst = JSON.parse(bodies[1]) as Record<string, unknown>;
+        assert.equal(callerFirst.opening_mode, "caller_first");
+        assert.equal(agentFirst.opening_mode, "agent_first");
+        // The greeting travels with agent_first; it is the audio the caller
+        // actually hears, and dropping it leaves an agent-first call silent.
+        assert.equal(agentFirst.greeting, "Hello, thanks for calling.");
     } finally {
         globalThis.fetch = previousFetch;
     }

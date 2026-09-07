@@ -2,18 +2,19 @@
 
 import { useMemo, useState, useRef, useCallback, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
-import Link from "next/link";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, Phone, PhoneIncoming, PhoneOutgoing, Clock, FileText, Play, Download, Pause, Loader2, Route, ShieldCheck } from "lucide-react";
+import { ArrowLeft, PhoneIncoming, PhoneOutgoing, Clock, FileText, Play, Download, Pause, Loader2 } from "lucide-react";
 import { motion } from "framer-motion";
 import { useCall, useCallTranscript } from "@/lib/api-hooks";
 import { extendedApi } from "@/lib/extended-api";
-import { statusPillClass } from "@/lib/status-colors";
+import { callStatusLabel, statusPillClass } from "@/lib/status-colors";
+import { CallBillingPanel, CallLoadError, CallPartiesPanel, InboundConsentStatePanel, InboundRouteSnapshot, TransferLegsPanel } from "@/components/calls/call-panels";
 import { VoiceFeedbackRecorder } from "@/components/calls/voice-feedback-recorder";
 import { ConversationReviewPanel } from "@/components/calls/conversation-review-panel";
 import { LeadDetailsPanel } from "@/components/calls/lead-details-panel";
 import { getRecordingCapabilities } from "@/lib/media-permissions";
+import { getInboundCapabilities } from "@/lib/inbound-permissions";
 import { useEffectivePermissions } from "@/lib/queries/inbound-queries";
 
 // Shared util so call detail agrees with call history + contacts on green/red.
@@ -54,6 +55,13 @@ export default function CallDetailPage() {
     const inboundCampaignId = typeof call?.inbound_campaign_id === "string"
         ? call.inbound_campaign_id.trim()
         : "";
+    // Same capability the /inbound-campaigns screens gate on. Caller identity
+    // (phone/ANI, Called DID) is never gated by this — only the routing and
+    // consent detail below it, which is what those screens already protect.
+    const canViewInboundDetails = getInboundCapabilities(
+        undefined,
+        permissions.isSuccess ? permissions.data.permissions : undefined,
+    ).canView;
     const transcript = useMemo(() => (transcriptQuery.data?.turns ?? []) as TranscriptTurn[], [transcriptQuery.data?.turns]);
     const error = callQuery.isError ? (callQuery.error instanceof Error ? callQuery.error.message : "Failed to load call details") : "";
 
@@ -194,9 +202,7 @@ export default function CallDetailPage() {
                     <div className="h-8 w-8 animate-spin rounded-full border-b-2 border-foreground/60" />
                 </div>
             ) : error ? (
-                <div className="content-card border-destructive/30 text-destructive">
-                    {error}
-                </div>
+                <CallLoadError message={error} onRetry={() => void callQuery.refetch()} />
             ) : call ? (
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                     {/* Call Info */}
@@ -208,26 +214,11 @@ export default function CallDetailPage() {
                         >
                             <div className="flex items-center justify-between gap-3 mb-4">
                                 <h2 className="text-sm font-semibold text-foreground">Call Details</h2>
-                                <div className="flex flex-wrap justify-end gap-2"><span className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-semibold ${call.direction === "inbound" ? "border-blue-500/30 bg-blue-500/10 text-blue-700 dark:text-blue-300" : "border-border bg-muted text-muted-foreground"}`}>{call.direction === "inbound" ? <PhoneIncoming className="h-3.5 w-3.5" aria-hidden /> : <PhoneOutgoing className="h-3.5 w-3.5" aria-hidden />}{call.direction === "inbound" ? "Inbound" : "Outbound"}</span><span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${getStatusStyle(call.status)}`}>{call.status}</span></div>
+                                <div className="flex flex-wrap justify-end gap-2"><span className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-semibold ${call.direction === "inbound" ? "border-blue-500/30 bg-blue-500/10 text-blue-700 dark:text-blue-300" : "border-border bg-muted text-muted-foreground"}`}>{call.direction === "inbound" ? <PhoneIncoming className="h-3.5 w-3.5" aria-hidden /> : <PhoneOutgoing className="h-3.5 w-3.5" aria-hidden />}{call.direction === "inbound" ? "Inbound" : "Outbound"}</span><span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${getStatusStyle(call.status)}`}>{callStatusLabel(call.status)}</span></div>
                             </div>
 
                             <div className="space-y-3">
-                                <div className="group flex items-center gap-3 rounded-2xl border border-border bg-muted/60 p-3 shadow-sm transition-[transform,background-color,border-color,box-shadow] duration-150 ease-out hover:-translate-y-0.5 hover:bg-background hover:shadow-md">
-                                    <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-background/60 text-foreground transition-colors group-hover:bg-background">
-                                        <Phone className="h-5 w-5" />
-                                    </div>
-                                    <div className="min-w-0 flex-1">
-                                        <div className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">{call.direction === "inbound" ? "Caller ANI" : "Phone Number"}</div>
-                                        <div className="mt-0.5 truncate text-sm font-semibold text-foreground">{call.phone_number}</div>
-                                    </div>
-                                </div>
-
-                                {call.direction === "inbound" ? (
-                                    <div className="group flex items-center gap-3 rounded-2xl border border-border bg-muted/60 p-3 shadow-sm">
-                                        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-background/60 text-foreground"><PhoneIncoming className="h-5 w-5" /></div>
-                                        <div className="min-w-0 flex-1"><div className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">Called DID</div><div className="mt-0.5 truncate text-sm font-semibold text-foreground">{call.to_number || "Unavailable"}</div></div>
-                                    </div>
-                                ) : null}
+                                <CallPartiesPanel direction={call.direction} phoneNumber={call.phone_number} toNumber={call.to_number} />
 
                                 <div className="group flex items-center gap-3 rounded-2xl border border-border bg-muted/60 p-3 shadow-sm transition-[transform,background-color,border-color,box-shadow] duration-150 ease-out hover:-translate-y-0.5 hover:bg-background hover:shadow-md">
                                     <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-background/60 text-foreground transition-colors group-hover:bg-background">
@@ -260,27 +251,42 @@ export default function CallDetailPage() {
                         </motion.div>
 
                         {call.direction === "inbound" ? (
-                            <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.08 }} className="content-card">
-                                <h2 className="mb-4 flex items-center gap-2 text-sm font-semibold text-foreground"><Route className="h-4 w-4 text-primary" aria-hidden />Inbound route snapshot</h2>
-                                <dl className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
-                                    <Metadata label="Inbound campaign" value={inboundCampaignId || undefined} />
-                                    <Metadata label="Assignment" value={call.assignment_id} />
-                                    <Metadata label="Route" value={call.route_id} />
-                                    <Metadata label="Route version" value={call.route_version} />
-                                    <Metadata label="Config version" value={call.config_version} />
-                                    <Metadata label="Config checksum" value={call.config_checksum ? `${call.config_checksum.slice(0, 12)}…` : undefined} />
-                                </dl>
-                                {inboundCampaignId ? <Button asChild variant="outline" size="sm" className="mt-4"><Link href={`/inbound-campaigns/${encodeURIComponent(inboundCampaignId)}`}>Open inbound campaign</Link></Button> : null}
+                            <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.08 }}>
+                                <InboundRouteSnapshot
+                                    canView={canViewInboundDetails}
+                                    inboundCampaignId={inboundCampaignId}
+                                    assignmentId={call.assignment_id}
+                                    routeId={call.route_id}
+                                    routeVersion={call.route_version}
+                                    configVersion={call.config_version}
+                                    configChecksum={call.config_checksum}
+                                />
                             </motion.div>
                         ) : null}
 
-                        {call.direction === "inbound" && (call.admission_status || call.consent_status || call.processing_status || call.media_state || call.recording_status || call.transcript_status) ? (
-                            <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.12 }} className="content-card">
-                                <h2 className="mb-4 flex items-center gap-2 text-sm font-semibold text-foreground"><ShieldCheck className="h-4 w-4 text-primary" aria-hidden />Consent and media state</h2>
-                                <dl className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1"><Metadata label="Admission" value={call.admission_status} /><Metadata label="Consent" value={call.consent_status} /><Metadata label="Processing" value={call.processing_status} /><Metadata label="Media" value={call.media_state} /><Metadata label="Recording" value={call.recording_status} /><Metadata label="Transcript" value={call.transcript_status} /></dl>
-                                {call.admission_reason ? <p className="mt-3 rounded-lg border border-amber-500/25 bg-amber-500/5 p-2 text-xs text-muted-foreground">{call.admission_reason}</p> : null}
+                        {call.direction === "inbound" ? (
+                            <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.12 }}>
+                                <InboundConsentStatePanel
+                                    canView={canViewInboundDetails}
+                                    admissionStatus={call.admission_status}
+                                    consentStatus={call.consent_status}
+                                    processingStatus={call.processing_status}
+                                    mediaState={call.media_state}
+                                    recordingStatus={call.recording_status}
+                                    transcriptStatus={call.transcript_status}
+                                    admissionReason={call.admission_reason}
+                                />
                             </motion.div>
                         ) : null}
+
+                        <CallBillingPanel
+                            billingStatus={call.billing_status}
+                            billingHoldReason={call.billing_hold_reason}
+                            billedDurationSeconds={call.billed_duration_seconds}
+                        />
+
+                        <TransferLegsPanel legs={call.transfer_legs} />
+
 
                         {call.summary && (
                             <motion.div
@@ -397,7 +403,16 @@ export default function CallDetailPage() {
                                 <FileText className="h-5 w-5 text-muted-foreground" aria-hidden />
                                 Transcript
                             </h2>
-                            {transcript.length === 0 ? (
+                            {transcriptQuery.isError ? (
+                                // A failed load is not an empty transcript. Saying
+                                // "none available" for a request that never
+                                // returned tells the operator something untrue
+                                // about the call.
+                                <CallLoadError
+                                    message={transcriptQuery.error instanceof Error ? transcriptQuery.error.message : "Failed to load transcript."}
+                                    onRetry={() => void transcriptQuery.refetch()}
+                                />
+                            ) : transcript.length === 0 ? (
                                 <div className="py-8 text-center text-sm text-muted-foreground">
                                     No transcript available
                                 </div>
@@ -437,8 +452,4 @@ export default function CallDetailPage() {
             ) : null}
         </DashboardLayout>
     );
-}
-
-function Metadata({ label, value }: { label: string; value: string | number | null | undefined }) {
-    return <div className="rounded-xl border border-border bg-muted/40 px-3 py-2"><dt className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{label}</dt><dd className="mt-1 break-all font-mono text-xs text-foreground">{value === null || value === undefined || value === "" ? "Unknown" : String(value)}</dd></div>;
 }

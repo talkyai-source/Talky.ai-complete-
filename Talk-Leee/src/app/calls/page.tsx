@@ -8,6 +8,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useCalls, useCallTranscript, useCallSummary } from "@/lib/api-hooks";
 import type { Call, CallSummaryEnvelope } from "@/lib/dashboard-api";
 import { CallSummaryCard } from "@/components/calls/CallSummaryCard";
+import { CallsLoadError, distinctDidOptions, inboundCampaignFilterOptions } from "@/components/calls/call-panels";
 import { statusPillClass } from "@/lib/status-colors";
 import { extendedApi } from "@/lib/extended-api";
 import { CallIssuesBanner } from "@/components/calls/call-issues-banner";
@@ -484,6 +485,7 @@ function CallRow({
                                 isError={summaryQuery.isError}
                                 error={summaryQuery.error}
                                 data={summaryQuery.data}
+                                onRetry={() => void summaryQuery.refetch()}
                             />
                         </div>
                     </motion.div>
@@ -511,9 +513,10 @@ function CallRow({
                                     Loading transcript…
                                 </div>
                             ) : transcriptQuery.isError ? (
-                                <p className="text-sm text-destructive">
-                                    {transcriptQuery.error instanceof Error ? transcriptQuery.error.message : "Failed to load transcript."}
-                                </p>
+                                <CallsLoadError
+                                    message={transcriptQuery.error instanceof Error ? transcriptQuery.error.message : "Failed to load transcript."}
+                                    onRetry={() => void transcriptQuery.refetch()}
+                                />
                             ) : transcriptQuery.data?.turns && transcriptQuery.data.turns.length > 0 ? (
                                 <div className="max-h-72 space-y-2 overflow-y-auto pr-1">
                                     {transcriptQuery.data.turns.map((turn, i) => {
@@ -718,6 +721,7 @@ export default function CallsPage() {
             };
         });
     }, []);
+    const [selectedDid, setSelectedDid] = useState<string | undefined>();
 
     useEffect(() => {
         const timer = window.setTimeout(() => {
@@ -747,11 +751,14 @@ export default function CallsPage() {
         }
     }, [allCalls]);
 
+    const didOptions = useMemo(() => distinctDidOptions(allCalls), [allCalls]);
+    const campaignOptions = useMemo(() => inboundCampaignFilterOptions(allCalls), [allCalls]);
     const calls = useMemo(() => {
         const term = search.trim().toLowerCase();
         return allCalls.filter((c) => {
             if (direction !== "all" && c.direction !== direction) return false;
             if (inboundCampaignId && c.inbound_campaign_id !== inboundCampaignId) return false;
+            if (selectedDid && c.to_number !== selectedDid) return false;
             if (term && ![c.phone_number, c.from_number, c.to_number, c.campaign_name].some((entry) => (entry || "").toLowerCase().includes(term))) return false;
             const v = (c.lead_outcome || "").toLowerCase();
             if (filter === "leads") return v.startsWith("qualified") || v.startsWith("callback");
@@ -760,12 +767,12 @@ export default function CallsPage() {
             }
             return true;
         });
-    }, [allCalls, search, filter, direction, inboundCampaignId]);
+    }, [allCalls, search, filter, direction, inboundCampaignId, selectedDid]);
     const total = q.data?.total ?? 0;
     const error = q.isError ? (q.error instanceof Error ? q.error.message : "Failed to load calls") : "";
     const groups = useMemo(() => groupByCampaign(calls), [calls]);
     const totalPages = Math.ceil(total / pageSize);
-    const hasActiveFilters = Boolean(search.trim()) || filter !== "all" || direction !== "all" || Boolean(inboundCampaignId);
+    const hasActiveFilters = Boolean(search.trim()) || filter !== "all" || direction !== "all" || Boolean(inboundCampaignId) || Boolean(selectedDid);
 
     return (
         <DashboardLayout title="Call History" description="Review calls, classify leads, capture notes, and complete follow-up forms">
@@ -775,7 +782,7 @@ export default function CallsPage() {
                     <div aria-hidden className="h-8 w-8 animate-spin rounded-full border-b-2 border-foreground/60" />
                 </div>
             ) : error ? (
-                <div role="alert" className="content-card border-destructive/30 text-destructive">{error}</div>
+                <CallsLoadError message={error} onRetry={() => void q.refetch()} />
             ) : allCalls.length === 0 && !hasActiveFilters ? (
                 <motion.div
                     initial={{ opacity: 0, y: 20 }}
@@ -829,6 +836,26 @@ export default function CallsPage() {
                                 </button>
                             ))}
                         </div>
+                        <label htmlFor="call-history-did-filter" className="sr-only">Filter calls by DID</label>
+                        <select
+                            id="call-history-did-filter"
+                            value={selectedDid ?? ""}
+                            onChange={(e) => { setSelectedDid(e.target.value || undefined); setPage(1); }}
+                            className="rounded-lg border border-border bg-background px-3 py-2 text-xs font-semibold text-foreground focus:outline-none focus:ring-2 focus:ring-ring/40"
+                        >
+                            <option value="">All DIDs</option>
+                            {didOptions.map((did) => <option key={did} value={did}>{did}</option>)}
+                        </select>
+                        <label htmlFor="call-history-campaign-filter" className="sr-only">Filter calls by inbound campaign</label>
+                        <select
+                            id="call-history-campaign-filter"
+                            value={inboundCampaignId ?? ""}
+                            onChange={(e) => { setInboundCampaignId(e.target.value || undefined); setPage(1); }}
+                            className="rounded-lg border border-border bg-background px-3 py-2 text-xs font-semibold text-foreground focus:outline-none focus:ring-2 focus:ring-ring/40"
+                        >
+                            <option value="">All campaigns</option>
+                            {campaignOptions.map((campaign) => <option key={campaign.id} value={campaign.id}>{campaign.name}</option>)}
+                        </select>
                         </div>
                     </div>
 
@@ -842,6 +869,7 @@ export default function CallsPage() {
                                     setFilter("all");
                                     setDirection("all");
                                     setInboundCampaignId(undefined);
+                                    setSelectedDid(undefined);
                                     setPage(1);
                                 }}
                                 className="mt-3 text-sm font-semibold text-foreground underline-offset-4 hover:underline"

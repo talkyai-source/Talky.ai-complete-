@@ -6,7 +6,7 @@ import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { dashboardApi, Campaign, Contact, ContactList, MinutesStatus } from "@/lib/dashboard-api";
+import { dashboardApi, campaignStartErrorMessage, Campaign, Contact, ContactList, MinutesStatus } from "@/lib/dashboard-api";
 import { SmartCsvImport } from "@/components/campaigns/smart-csv-import";
 import { ContactLists, ActiveContactsSummary } from "@/components/campaigns/contact-lists";
 import { ScriptCard } from "@/components/campaigns/script-card";
@@ -95,6 +95,9 @@ function CampaignDetailScope({ campaignId }: { campaignId: string }) {
     const [minutes, setMinutes] = useState<MinutesStatus | null>(null);
     const loadGeneration = useRef(0);
     const scopeActive = useRef(true);
+    // Why the last Start attempt was refused, in the server's own words.
+    // Empty until something is actually refused; never pre-populated.
+    const [startError, setStartError] = useState("");
 
     // Out of plan minutes ⇒ the backend will 402 a Start, so we disable the
     // button up front and explain why. `unlimited` plans are never blocked.
@@ -234,12 +237,13 @@ function CampaignDetailScope({ campaignId }: { campaignId: string }) {
         // Out of plan minutes — don't even open the modal; the backend
         // would 402 anyway. The banner above the button explains why.
         if (outOfMinutes) {
-            alert(
+            setStartError(
                 `You're out of plan minutes (${minutes?.used_minutes}/${minutes?.allocated} used this month). ` +
                 "Add minutes or upgrade your plan to start campaigns.",
             );
             return;
         }
+        setStartError("");
         // Default back to "agent" every time so a previous choice doesn't
         // silently carry over into the next Start.
         setFirstSpeaker("agent");
@@ -263,15 +267,15 @@ function CampaignDetailScope({ campaignId }: { campaignId: string }) {
                 batch_size: batchSize,
                 call_gap_seconds: callGap,
             });
+            setStartError("");
             await loadData();
         } catch (err) {
             // The backend's out-of-minutes 402 ships a structured detail
             // ({ message, ... }) the http client exposes as `.details`.
-            const detail = (err as { details?: { message?: string } })?.details;
-            const msg =
-                (detail && typeof detail.message === "string" && detail.message) ||
-                (err instanceof Error ? err.message : "Failed to start campaign");
-            alert(msg);
+            // Shown in the page rather than an alert(): the quota figures next
+            // to it refresh underneath, so the reason stays readable beside the
+            // numbers that explain it instead of vanishing on acknowledge.
+            setStartError(campaignStartErrorMessage(err));
             // Refresh quota so the button/banner reflect reality after a 402.
             void loadData();
         } finally {
@@ -471,6 +475,15 @@ function CampaignDetailScope({ campaignId }: { campaignId: string }) {
                             </div>
                         </div>
                     )}
+
+                    {/* Why the last Start was refused, in the server's words —
+                        beside the quota figures, which refresh underneath it. */}
+                    {startError ? (
+                        <div role="alert" className="content-card border-red-500/30 bg-red-500/5 flex items-start gap-3">
+                            <AlertTriangle className="w-5 h-5 text-red-500 shrink-0 mt-0.5" aria-hidden />
+                            <p className="text-sm text-muted-foreground">{startError}</p>
+                        </div>
+                    ) : null}
 
                     {/* Active-contacts summary — which lists get dialed on Start.
                         "View more" scrolls to the full lists row below. */}

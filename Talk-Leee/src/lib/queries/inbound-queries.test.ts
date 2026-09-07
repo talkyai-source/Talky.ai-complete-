@@ -3,7 +3,8 @@ import { test } from "node:test";
 
 import { QueryClient } from "@tanstack/react-query";
 
-import type { InboundCampaign, InboundRuntimeCapabilities } from "@/lib/inbound-api";
+import { inboundErrorCode, inboundErrorStatus, type InboundCampaign, type InboundRuntimeCapabilities } from "@/lib/inbound-api";
+import { inboundStateForError } from "@/lib/inbound/inbound-types";
 import { commitInboundCampaignCache, inboundQueryKeys } from "@/lib/queries/inbound-queries";
 
 test("campaign cache commits never rewrite capability objects", () => {
@@ -24,7 +25,6 @@ test("campaign cache commits never rewrite capability objects", () => {
             config_checksum: "checksum",
             campaign_id: "campaign-1",
             sip_trunk_id: "trunk-1",
-            allowed_tools: [],
             opening_mode: "caller_first",
             greeting: "Hello",
             silence_timeout_seconds: 5,
@@ -54,4 +54,37 @@ test("campaign cache commits never rewrite capability objects", () => {
     } finally {
         client.clear();
     }
+});
+
+/**
+ * Regression guard for the state the old three-bucket mapper could not
+ * express. A 503 `authorization_unavailable` means the permission LOOKUP
+ * failed, not that the user was refused: rendering it as no-permission
+ * tells them something false about their own access.
+ */
+test("a 503 authorization_unavailable is not rendered as no-permission", () => {
+    const state = inboundStateForError(
+        inboundErrorStatus({ status: 503, code: "authorization_unavailable" }),
+        inboundErrorCode({ status: 503, code: "authorization_unavailable" }),
+    );
+
+    assert.equal(state, "authorization-unavailable");
+    assert.notEqual(state, "no-permission");
+
+    // A real 403 must still resolve to a denial, so the guard above is not
+    // simply collapsing every permission failure into the softer state.
+    assert.equal(
+        inboundStateForError(
+            inboundErrorStatus({ status: 403, code: "permission_denied" }),
+            inboundErrorCode({ status: 403, code: "permission_denied" }),
+        ),
+        "no-permission",
+    );
+
+    // A bare 503 with no code carries the same meaning: status decides only
+    // where the body named nothing.
+    assert.equal(
+        inboundStateForError(inboundErrorStatus({ status: 503 }), inboundErrorCode({ status: 503 })),
+        "authorization-unavailable",
+    );
 });
