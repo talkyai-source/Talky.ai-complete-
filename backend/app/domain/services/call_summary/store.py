@@ -177,6 +177,11 @@ def _caller_turns(transcript_json: Any) -> int:
     for turn in turns:
         if not isinstance(turn, dict):
             continue
+        # The transcript keeps every STT interim as its own row (is_final=False)
+        # so one spoken sentence can appear 15 times while it is being
+        # recognised. Only final recognitions are caller turns.
+        if turn.get("is_final") is False:
+            continue
         role = str(turn.get("role") or turn.get("speaker") or "").lower()
         text = str(turn.get("content") or turn.get("text") or "").strip()
         if role in ("user", "caller", "customer") and len(text.split()) >= 2:

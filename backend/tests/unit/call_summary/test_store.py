@@ -406,6 +406,19 @@ class TestLeadMarking:
         assert _caller_turns(_SUBSTANCE_THIN["transcript_json"]) == 0   # "Hello?" is one word
         assert _caller_turns(None) == 0 and _caller_turns("not json") == 0
 
+    def test_caller_turns_ignore_stt_interims(self):
+        """Prod call c63cdaff stored 253 'user' rows for a 212 s call: every
+        Deepgram interim of one sentence is its own row with is_final=False.
+        Counting them made a one-sentence caller look like a conversation."""
+        from app.domain.services.call_summary.store import _caller_turns
+        growing = "I just wanna see how you know"
+        turns = [
+            {"role": "user", "content": " ".join(growing.split()[: i + 1]), "is_final": False}
+            for i in range(1, len(growing.split()))
+        ] + [{"role": "user", "content": growing, "is_final": True},
+             {"role": "assistant", "content": "Sure — what would help most?", "is_final": True}]
+        assert _caller_turns(turns) == 1
+
     async def test_mark_lead_skips_when_not_a_lead(self):
         from app.domain.services.call_summary.store import mark_lead_from_summary
         conn = _make_conn(None)
