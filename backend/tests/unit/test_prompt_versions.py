@@ -96,6 +96,11 @@ _EXPECTED_HASHES: dict[str, str] = {
     "lead_gen@5": "4fb88dc0b97580cc",
     "customer_support@4": "98f3b72dbefed9f4",
     "receptionist@4": "cdef4b6192408322",
+    # v6/v5 (2026-09-08): a declined or hesitant contact detail is a no — one
+    # ask per call, and the unknown-fact fallback no longer defaults to email.
+    "lead_gen@6": "2f9dc73448dcba14",
+    "customer_support@5": "e466ec4d2443d75f",
+    "receptionist@5": "821091476cbc551a",
 }
 
 

@@ -92,6 +92,14 @@ _TEMPLATES: Final[Mapping[str, str]] = {
 
 #: Current version per persona. Bump on any change to the composed text.
 _VERSIONS: Final[Mapping[str, str]] = {
+    # @6 / @5 (2026-09-08): a declined or hesitant contact detail is a no.
+    # Prod call c63cdaff: the caller said "I know if I should give you my
+    # email", the agent re-asked, the caller said they were not comfortable.
+    # Two shared blocks scripted "what's the best email for it?" as the reply
+    # to ANY unknown fact, and nothing named hesitation as refusal. Hard rule
+    # 7 now caps every contact-detail ask at once per call and treats
+    # hesitation as no; rule 6 and the composer's knowledge fallback no longer
+    # default to asking for an email.
     # @5 / @4 (2026-09-02): connected voice actions replaced END_CALL's
     # sentinel-only wording with the deterministic tool-result contract. The
     # shared call-control block changes every composed persona.
@@ -103,9 +111,9 @@ _VERSIONS: Final[Mapping[str, str]] = {
     # knowledge-driven lead_gen body reuses the shared opening for its
     # opening mode instead of a private agent-first copy. customer_support
     # and receptionist move only because the shared guardrails text changed.
-    "lead_gen": "lead_gen@5",
-    "customer_support": "customer_support@4",
-    "receptionist": "receptionist@4",
+    "lead_gen": "lead_gen@6",
+    "customer_support": "customer_support@5",
+    "receptionist": "receptionist@5",
 }
 
 #: Fallback for a persona that is not in the registry yet. Deliberately visible
