@@ -103,10 +103,21 @@ class SessionSecurityMiddleware(BaseHTTPMiddleware):
         ip_address = self._get_client_ip(request)
         fingerprint = generate_device_fingerprint(request)
 
-        # Validate session with binding
+        # Validate session with binding.
+        #
+        # This runs BEFORE any tenant is known, and validate_session joins
+        # user_profiles, which is under forced RLS since 0038. A raw
+        # pool.acquire() carries no app.bypass_rls, so from 2026-08-30 the join
+        # returned no row for EVERY live session: the cookie was silently
+        # rejected and deleted on the first request after login (0 validations
+        # in 72 h, last_active_at never moved). Use the bypass path that REST's
+        # _resolve_cookie_session already uses — the lookup is bounded by the
+        # token hash, not by tenant.
         try:
+            from app.core.db_utils import acquire_with_tenant
+
             pool = get_db_pool_from_container()
-            async with pool.acquire() as conn:
+            async with acquire_with_tenant(pool, None) as conn:
                 session = await validate_session(
                     conn,
                     session_cookie,
@@ -116,7 +127,13 @@ class SessionSecurityMiddleware(BaseHTTPMiddleware):
                 )
 
                 if session is None:
-                    # Session invalid - clear cookie to prevent loops
+                    # Session invalid - clear cookie to prevent loops. Say so:
+                    # this path had no log line, which is how a dead cookie went
+                    # unnoticed for nine days.
+                    logger.info(
+                        "session cookie rejected (unknown, revoked, expired or idle) — clearing it path=%s",
+                        request.url.path,
+                    )
                     response = await call_next(request)
                     response.delete_cookie(
                         key=SESSION_COOKIE_NAME,

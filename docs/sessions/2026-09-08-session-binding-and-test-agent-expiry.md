@@ -48,14 +48,40 @@ Checked two readings:
   that feed — if that is what "not live from the logs" means, it is a feature to add, not a
   bug here.
 
+## Follow-up (same day, owner: "fix that issue as well") — the session cookie WAS reaching the API
+
+Evidence: prod has 5 live `security_sessions`. The exact join `validate_session` runs
+(`security_sessions JOIN user_profiles`) returns **0 rows without `app.bypass_rls`** and 5 with
+it — `user_profiles` is under forced RLS since 0038. `SessionSecurityMiddleware` validated the
+cookie on a raw `pool.acquire()` (no bypass, no tenant), so every cookie was "invalid", the
+middleware deleted it on the first request after login, and nothing was logged. Same defect
+class as the assistant socket this morning.
+
+Changes:
+- Middleware validates on `acquire_with_tenant(pool, None)` (the bypass path REST's own cookie
+  resolution already used) and logs a rejected cookie (`session cookie rejected …`).
+- `SESSION_IDLE_TIMEOUT_MINUTES` is now env-overridable (default 30). The idle rule is **live
+  for the first time** on REST: 30 minutes without any request (an open tab's polling counts as
+  activity) revokes the session; the next refresh then ends the login (0045 makes refresh honour
+  revocation). Set the env var if 30 is too short.
+- Deploy step 7b resets `last_active_at = now()` on live sessions so nobody is idle-revoked by
+  the first request after the deploy.
+- Tests: `test_session_middleware_rls_bypass.py` (3).
+
+Not changed: IP/fingerprint binding stays in non-strict mode (`SESSION_STRICT_BINDING=False`):
+a mismatch marks the session suspicious and logs, it does not revoke.
+
+## Call History clock (owner request)
+
+The time column is now a **clock icon only**, centred right before the AI summary; date, time,
+duration and timezone show on hover/focus, not in the row. `components/calls/call-timestamp.tsx`
+(+ test). Grid column shrunk to icon width.
+
 ## Beyond brief (found, not changed)
 
-- **The server-side session cookie never reaches the API.** 0 session-middleware validations
-  in 72 h and `last_active_at == created_at` on every session since Sep 1. The `talky_sid`
-  cookie is set host-only (no `domain=`) while `talky_at`/`talky_rt` use `AUTH_COOKIE_DOMAIN`;
-  whatever the exact reason, the 30-minute idle timeout, IP/fingerprint binding and the
-  "suspicious session" handling are all inert for REST today (same shape as RLS-was-decorative).
-  Fixing it would start enforcing the 30-minute idle logout — a product decision first.
+- ~~**The server-side session cookie never reaches the API.**~~ Root-caused and fixed above.
+
+
 - `refresh_tokens` re-issues the successor with the **client-supplied** IP/UA only; fine.
 
 ## Verification
@@ -70,4 +96,10 @@ ruff check app/ --select F --extend-ignore F401,F841 → All checks passed!
 ```text
 backend/.venv/Scripts/python -m pytest tests/unit tests/security -q
 8898 passed, 8 skipped in 304.80s (0:05:04)
+```
+
+```text
+after the middleware fix + clock change:
+backend/.venv/Scripts/python -m pytest tests/unit tests/security -q → 8901 passed, 8 skipped in 666.83s
+ruff → All checks passed! · Talk-Leee typecheck 0 · lint 0 · tests 467, pass 465, fail 0, skipped 2 · build exit=0
 ```
