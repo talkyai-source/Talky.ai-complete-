@@ -140,8 +140,16 @@ def test_policy_body_validates_modes_digits_and_country_codes():
 def test_policy_response_explains_the_absent_state():
     out = rec_ep._policy_response(None)
     assert out.configured is False and "NOT recorded" in out.effect
-    out = rec_ep._policy_response({"default_consent_mode": "one_party", "retention_days": 90, "two_party_country_codes": None})
+    out = rec_ep._policy_response({"default_consent_mode": "one_party", "retention_days": 90, "two_party_country_codes": None, "announcement_text": ""})
     assert out.configured and out.default_consent_mode == "one_party" and out.two_party_country_codes == []
+    assert out.announcement_text is None  # NOT NULL column stores '' for "none"
+
+
+def test_two_party_without_wording_gets_the_platform_default_notice():
+    assert "recorded" in rec_ep.DEFAULT_ANNOUNCEMENT_TEXT and "Press 9" in rec_ep.DEFAULT_ANNOUNCEMENT_TEXT
+    import inspect
+    src = inspect.getsource(rec_ep.put_recording_policy)
+    assert "announcement = DEFAULT_ANNOUNCEMENT_TEXT" in src and "body.announcement_text or \"\"" in src
 
 
 def test_policy_routes_are_registered_before_the_dynamic_recording_routes():

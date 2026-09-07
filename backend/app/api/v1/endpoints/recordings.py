@@ -149,6 +149,12 @@ async def _safe_audit(audit_logger: AuditLogger, **kwargs: Any) -> None:
 # two endpoints are that missing surface.
 
 _CONSENT_MODES = ("disabled", "one_party", "two_party")
+# Column default on tenant_recording_policy.announcement_text (NOT NULL). Used
+# when a two-party policy is saved without custom wording.
+DEFAULT_ANNOUNCEMENT_TEXT = (
+    "This call may be recorded for quality and training purposes. "
+    "Press 9 at any time to opt out of recording."
+)
 _COUNTRY_CODE_RE = r"^[A-Z]{2}(-[A-Z0-9]{1,3})?$"
 
 
@@ -228,7 +234,7 @@ def _policy_response(row: Any) -> RecordingPolicyResponse:
     return RecordingPolicyResponse(
         configured=True,
         default_consent_mode=row.get("default_consent_mode"),
-        announcement_text=row.get("announcement_text"),
+        announcement_text=(row.get("announcement_text") or None),
         opt_out_dtmf_digit=row.get("opt_out_dtmf_digit"),
         two_party_country_codes=list(row.get("two_party_country_codes") or []),
         retention_days=row.get("retention_days"),
@@ -263,6 +269,12 @@ async def put_recording_policy(
     A consent mode is a legal assertion by the tenant, so it is audited.
     """
     tenant_id = _tenant_id(user)
+    # announcement_text and two_party_country_codes are NOT NULL columns; the
+    # existing rows use '' / '{}' for "none". A two-party policy saved without
+    # wording gets the platform default notice so the agent has something to say.
+    announcement = body.announcement_text or ""
+    if body.default_consent_mode == "two_party" and not announcement:
+        announcement = DEFAULT_ANNOUNCEMENT_TEXT
     async with acquire_with_tenant(db_pool, tenant_id) as conn:
         row = await conn.fetchrow(
             """
@@ -281,7 +293,7 @@ async def put_recording_policy(
             """,
             UUID(tenant_id),
             body.default_consent_mode,
-            body.announcement_text,
+            announcement,
             body.opt_out_dtmf_digit,
             body.two_party_country_codes,
             body.retention_days,
