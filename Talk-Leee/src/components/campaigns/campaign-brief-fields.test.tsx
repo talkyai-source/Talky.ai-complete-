@@ -12,6 +12,12 @@ import { ensureDom } from "@/test-utils/dom";
 ensureDom();
 afterEach(cleanup);
 
+test("direction-aware preview does not mislabel inbound agent-first as callee-first", () => {
+    render(<PromptLayerPreview headingId="direction-test" promptChars={20} layers={[]} hasInboundDirective />);
+    assert.ok(screen.getByText(/direction-specific opening applied/));
+    assert.equal(screen.queryByText(/callee-first directive applied/), null);
+});
+
 const configured: CampaignBriefDraft = {
     decision_maker_role: "Head of Operations",
     approved_next_actions: ["schedule_callback", "transfer"],

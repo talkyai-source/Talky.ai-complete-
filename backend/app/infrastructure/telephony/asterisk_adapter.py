@@ -111,6 +111,19 @@ _INBOUND_TRANSIENT_REASONS = frozenset(
 )
 
 
+class GatewayResponseError(RuntimeError):
+    """A received HTTP rejection, distinct from an ambiguous network timeout."""
+
+    def __init__(self, status: int, body: str):
+        super().__init__(f"Gateway response {status}: {body[:300]}")
+        self.status = status
+        try:
+            payload = json.loads(body)
+            self.code = payload.get("error") if isinstance(payload, dict) else None
+        except (ValueError, TypeError):
+            self.code = None
+
+
 class TtsDeliveryError(RuntimeError):
     """Raised by send_tts_audio when a TTS packet could NOT be delivered to the
     caller (no live gateway session, or the gateway POST failed / timed out).
@@ -752,6 +765,34 @@ class AsteriskAdapter(CallControlAdapter):
         if self._ws_task is not None and not self._ws_task.done():
             self._ws_task.cancel()
 
+    async def reconcile_orphaned_media(self, *, owner_check, exclusions) -> int:
+        from app.infrastructure.telephony.media_reconciliation import reconcile_orphan_media
+
+        if not self._session:
+            return 0
+
+        now = time.monotonic()
+        if now < getattr(self, "_next_media_reconcile_at", 0.0):
+            return 0
+        # Shared by startup and watchdog invocations. A slow ARI must not turn
+        # resource housekeeping into a per-tick query storm or block call care.
+        self._next_media_reconcile_at = now + 30.0
+
+        def protected_resources():
+            protected = exclusions()
+            if protected is None:
+                raise RuntimeError("local media ownership inventory unavailable")
+            protected = set(protected)
+            protected.update(self._bridges.values())
+            for resources in (*self._pending_outbound.values(), *self._outbound_answer_setup_resources.values()):
+                protected.update(str(resources[key]) for key in ("bridge_id", "ext_channel_id") if resources.get(key))
+            return protected
+
+        return await asyncio.wait_for(
+            reconcile_orphan_media(self._ari, self._app_name, owner=owner_check, exclusions=protected_resources),
+            timeout=2.0,
+        )
+
     async def disconnect(
         self,
         *,
@@ -1078,6 +1119,12 @@ class AsteriskAdapter(CallControlAdapter):
                 continue
             sid = entry.get("session_id")
             state = str(entry.get("state") or "").strip().lower()
+            if entry.get("callback_delivery_healthy") is False:
+                # RTP can remain active while every HTTP callback to STT fails.
+                # Only explicit persistent-failure evidence is unhealthy; old
+                # gateways lacking this field retain their existing semantics.
+                logger.warning("gateway_callback_delivery_unhealthy session=%s", sid)
+                continue
             # Failed/stopped sessions remain visible for evidence until the C++
             # reaper removes them. They are not live media and must not keep an
             # answered SIP call out of the dead-media watchdog.
@@ -1175,7 +1222,7 @@ class AsteriskAdapter(CallControlAdapter):
         ) as resp:
             if resp.status not in ok:
                 body = await resp.text()
-                raise RuntimeError(f"Gateway {method} {path} → {resp.status}: {body[:300]}")
+                raise GatewayResponseError(resp.status, body)
             try:
                 return await resp.json(content_type=None)
             except Exception:
@@ -2762,17 +2809,25 @@ class AsteriskAdapter(CallControlAdapter):
         session are NOT started here — they are deferred to _on_outbound_answered
         so that no RTP timeout fires while we are waiting for the callee to pick up.
         """
+        from app.infrastructure.telephony.media_reconciliation import media_bridge_name
+
         logger.info(f"AsteriskAdapter: outbound call ringing channel={channel_id[:12]}")
         listen_port = await self._alloc_rtp_port()
         session_id = f"asterisk-{uuid.uuid4().hex}"
-        bridge_id = ""
+        # Choose ownership before the network await: a lost create response
+        # must not leave cleanup with an unknowable server-generated ID.
+        bridge_id = f"talky-outbound-bridge-{uuid.uuid4().hex[:20]}"
 
         try:
             # 1. Create mixing bridge
-            bridge = await self._ari("POST", "/bridges", params={"type": "mixing"})
-            bridge_id = bridge.get("id", "")
-            if not bridge_id:
+            bridge = await self._ari(
+                "POST", "/bridges", params={"type": "mixing", "bridgeId": bridge_id,
+                                            "name": media_bridge_name(self._app_name, channel_id)}
+            )
+            returned_bridge_id = str((bridge or {}).get("id") or "").strip()
+            if not returned_bridge_id:
                 raise RuntimeError("ARI bridge create returned no id")
+            bridge_id = returned_bridge_id
 
             # 2. Add outbound channel to bridge (starts ringing the remote party)
             await self._ari(
@@ -2817,7 +2872,7 @@ class AsteriskAdapter(CallControlAdapter):
                 f"channel={channel_id[:12]} bridge={bridge_id[:12]} rtp_port={listen_port}"
             )
 
-        except Exception as exc:
+        except (Exception, asyncio.CancelledError) as exc:
             logger.error(f"AsteriskAdapter: outbound stasis start failed: {exc}")
             if bridge_id:
                 try:
@@ -2825,6 +2880,8 @@ class AsteriskAdapter(CallControlAdapter):
                 except Exception:
                     pass
             await self._release_rtp_port(listen_port)
+            if isinstance(exc, asyncio.CancelledError):
+                raise
 
     async def _persist_outbound_answer_obligation(
         self,
@@ -2907,13 +2964,13 @@ class AsteriskAdapter(CallControlAdapter):
         bridge_id = pending["bridge_id"]
         listen_port = pending["listen_port"]
         session_id = pending["session_id"]
-        ext_channel_id = ""
+        ext_channel_id = f"talky-outbound-media-{uuid.uuid4().hex[:20]}"
         self._outbound_setup_inflight.add(channel_id)
         self._outbound_answer_setup_resources[channel_id] = {
             "bridge_id": bridge_id,
             "listen_port": listen_port,
             "session_id": session_id,
-            "ext_channel_id": "",
+            "ext_channel_id": ext_channel_id,
         }
 
         logger.info(
@@ -2949,11 +3006,14 @@ class AsteriskAdapter(CallControlAdapter):
                     "transport": "udp",
                     "connection_type": "client",
                     "direction": "both",
+                    "channelId": ext_channel_id,
                 },
+                json_body={"variables": {"TALKY_MEDIA_OWNER": self._app_name, "TALKY_MEDIA_PARENT": channel_id}},
             )
-            ext_channel_id = ext_data.get("id", "")
-            if not ext_channel_id:
+            returned_ext_channel_id = str((ext_data or {}).get("id") or "").strip()
+            if not returned_ext_channel_id:
                 raise RuntimeError("ARI externalMedia returned no channel id")
+            ext_channel_id = returned_ext_channel_id
             self._outbound_answer_setup_resources[channel_id]["ext_channel_id"] = (
                 ext_channel_id
             )
@@ -4467,10 +4527,12 @@ class AsteriskAdapter(CallControlAdapter):
             # can still delete the exact resource instead of leaking an
             # unknowable server-generated ID.
             bridge_id = f"talky-inbound-bridge-{uuid.uuid4().hex[:20]}"
+            from app.infrastructure.telephony.media_reconciliation import media_bridge_name
+
             bridge = await self._ari(
                 "POST",
                 "/bridges",
-                params={"type": "mixing", "bridgeId": bridge_id},
+                params={"type": "mixing", "bridgeId": bridge_id, "name": media_bridge_name(self._app_name, channel_id)},
             )
             returned_bridge_id = str((bridge or {}).get("id") or "").strip()
             if returned_bridge_id:
@@ -4501,6 +4563,7 @@ class AsteriskAdapter(CallControlAdapter):
                     "direction": "both",
                     "channelId": ext_channel_id,
                 },
+                json_body={"variables": {"TALKY_MEDIA_OWNER": self._app_name, "TALKY_MEDIA_PARENT": channel_id}},
             )
             returned_ext_channel_id = str((ext_data or {}).get("id") or "").strip()
             if returned_ext_channel_id:
@@ -5027,18 +5090,38 @@ class AsteriskAdapter(CallControlAdapter):
 
         try:
             pcmu_b64 = base64.b64encode(pcmu_audio).decode()
-
-            await self._gateway(
-                "POST",
-                "/v1/sessions/tts/play",
-                payload={
+            if not pcmu_audio or len(pcmu_audio) % 160:
+                raise TtsDeliveryError("TTS payload must contain complete 20ms PCMU frames")
+            payload = {
                     "session_id": session_id,
                     "pcmu_base64": pcmu_b64,
                     "clear_existing": False,
                     "utterance_id": utt["utterance_id"],
                     "chunk_seq": chunk_seq,
-                },
-            )
+            }
+            for attempt in range(3):
+                # An interrupt during backpressure invalidates this submission.
+                # Never stamp old audio with a newly-created utterance identity.
+                current_utterance = self._tts_utterances.get(call_id, {})
+                if current_utterance.get("utterance_id") != payload["utterance_id"]:
+                    raise TtsDeliveryError("TTS utterance interrupted during queue admission")
+                try:
+                    ack = await self._gateway("POST", "/v1/sessions/tts/play", payload=payload)
+                    break
+                except GatewayResponseError as exc:
+                    # Only this explicit all-or-nothing refusal is safe to retry.
+                    # Timeouts/other failures may have accepted audio already.
+                    if exc.status != 429 or exc.code != "tts_queue_full" or attempt == 2:
+                        raise
+                    await asyncio.sleep(0.040)
+            if (
+                not isinstance(ack, dict)
+                or ack.get("status") != "queued"
+                or ack.get("session_id") != session_id
+                or type(ack.get("queued_frames")) is not int
+                or ack["queued_frames"] != len(pcmu_audio) // 160
+            ):
+                raise TtsDeliveryError("Gateway TTS acknowledgement did not confirm all submitted frames")
             # Reset error counter on first successful delivery.
             self._tts_error_counts.pop(call_id, None)
 

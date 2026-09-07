@@ -91,23 +91,20 @@ def test_at_least_one_caching_model_is_offered():
     )
 
 
-def test_no_tenant_is_locked_out_by_the_narrowed_menu():
-    """Hidden means "cannot pick it any more", NOT "cannot save" (2026-08-24).
-
-    The menu narrowed to the MVP pair, but validation reads offered + hidden.
-    Dropping an id that tenants still store would 400 them on a value they
-    never chose to have — locking them out of their own settings page to
-    enforce a menu change. `llama-3.1-8b-instant` is deliberately in the hidden
-    list despite 404ing on the account: 5 tenants store it, and blocking their
-    save does not repair them, it only traps them.
+def test_only_the_two_production_models_validate_on_groq():
+    """2026-09-07: every tenant row that stored qwen/llama was migrated to
+    cerebras/gpt-oss-120b (backup tenant_ai_configs_backup_20260907), so the
+    hidden list no longer needs to hold retired ids open. Offered + hidden is
+    exactly the gpt-oss pair; a stale qwen/llama value is now rejected with a
+    validation error instead of silently routing to a model that 404s or that
+    the product no longer supports.
     """
     from app.domain.models.ai_config import GROQ_MODELS_HIDDEN
 
     accepted = set(_menu_ids()) | set(GROQ_MODELS_HIDDEN)
-    for stored in ("qwen/qwen3.6-27b", "llama-3.1-8b-instant", "openai/gpt-oss-120b"):
-        assert stored in accepted, (
-            f"{stored} is stored by real tenants and must still validate"
-        )
+    assert accepted == {"openai/gpt-oss-20b", "openai/gpt-oss-120b"}
+    for retired in ("qwen/qwen3.6-27b", "llama-3.1-8b-instant", "llama-3.3-70b-versatile"):
+        assert retired not in accepted
 
 
 @pytest.mark.parametrize("model", sorted(_CACHING & {"openai/gpt-oss-120b", "openai/gpt-oss-20b"}))

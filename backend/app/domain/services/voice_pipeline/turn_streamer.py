@@ -148,6 +148,7 @@ def _truncate_history(history: list, max_pairs: int = _MAX_HISTORY_PAIRS) -> lis
 # path; it lives in kb_budget so the two modes stay identical. Re-exported here
 # so existing references (and tests) resolve via this module.
 from app.domain.services.voice_pipeline.kb_budget import (  # noqa: E402
+    fit_kb_body,
     _KB_MAX_CHUNKS,
     _KB_CHUNK_CHARS,
     _KB_TOTAL_CHARS,
@@ -286,7 +287,9 @@ async def _knowledge_block_for_turn(session: CallSession, messages: list) -> str
             # pre-truncate silently and that marker would be lost — a truncated
             # fact the model believes is whole is exactly the hallucination shape
             # this pipeline is trying to avoid.
-            body = _trim_kb_body(render_node_answer(h), _KB_CHUNK_CHARS)
+            # fit_kb_body trims the source but keeps the node's spoken answer —
+            # a trimmed preamble with the answer cut off was the live failure.
+            body = fit_kb_body(render_node_answer(h), h, _KB_CHUNK_CHARS)
             if not body:
                 continue
             heading = h.get("heading") or ""
@@ -737,6 +740,11 @@ class TurnStreamer:
                 require_tool_result_before_content=bool(action_tools),
                 temperature=getattr(session, "llm_temperature", None),
                 max_tokens=getattr(session, "llm_max_tokens", None),
+                # Prompt-cache routing hint (Cerebras prompt_cache_key). The
+                # campaign, not the call, is the right key: every call in a
+                # campaign shares the same static prefix. Previously only the
+                # llm_response.py path passed it (2026-09-06 audit, F10).
+                campaign_id=getattr(session, "campaign_id", None),
             )
         else:
             _token_iter = self._p.llm_provider.stream_chat_with_timeout(
@@ -746,6 +754,7 @@ class TurnStreamer:
                 # back to the provider's configured default inside stream_chat.
                 temperature=getattr(session, "llm_temperature", None),
                 max_tokens=getattr(session, "llm_max_tokens", None),
+                campaign_id=getattr(session, "campaign_id", None),
             )
 
         try:

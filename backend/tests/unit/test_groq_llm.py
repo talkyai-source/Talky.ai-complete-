@@ -92,33 +92,9 @@ async def test_non_reasoning_models_do_not_force_reasoning_format():
 
 
 @pytest.mark.asyncio
-async def test_qwen3_defaults_to_hidden_non_thinking_mode_for_voice_dialogue():
-    provider = GroqLLMProvider()
-    create = AsyncMock(return_value=_FakeStream(["Hi"]))
-    provider._client = SimpleNamespace(
-        chat=SimpleNamespace(
-            completions=SimpleNamespace(create=create)
-        )
-    )
-
-    async for _ in provider.stream_chat(
-        messages=[Message(role=MessageRole.USER, content="Tell me about the product")],
-        system_prompt="Use plain spoken text only.",
-        model="qwen/qwen3-32b",
-    ):
-        pass
-
-    assert create.await_args.kwargs["reasoning_effort"] == "none"
-    assert create.await_args.kwargs["reasoning_format"] == "hidden"
-    assert create.await_args.kwargs["top_p"] == 0.8
-    # Thinking fully off → no reserve; max_completion_tokens is purely the answer.
-    assert create.await_args.kwargs["max_completion_tokens"] == provider._max_tokens
-
-
-@pytest.mark.asyncio
-async def test_qwen3_6_27b_disables_thinking_with_no_reserve():
-    """Qwen 3.6 27B (dot, not dash) is matched by the Qwen3 family rule and runs
-    with reasoning_effort="none" → thinking off, so no answer-token reserve."""
+async def test_models_outside_the_gpt_oss_family_get_a_plain_request():
+    """The Qwen-specific branch is gone (2026-09-07): any non-gpt-oss id gets
+    no reasoning parameters, top_p 1.0 and no answer-token reserve."""
     provider = GroqLLMProvider()
     create = AsyncMock(return_value=_FakeStream(["Hi"]))
     provider._client = SimpleNamespace(
@@ -132,9 +108,13 @@ async def test_qwen3_6_27b_disables_thinking_with_no_reserve():
     ):
         pass
 
-    assert create.await_args.kwargs["reasoning_effort"] == "none"
-    assert create.await_args.kwargs["reasoning_format"] == "hidden"
-    assert create.await_args.kwargs["max_completion_tokens"] == provider._max_tokens
+    kwargs = create.await_args.kwargs
+    assert "reasoning_effort" not in kwargs
+    assert "reasoning_format" not in kwargs
+    assert "include_reasoning" not in kwargs
+    assert kwargs["top_p"] == 1.0
+    assert kwargs["max_completion_tokens"] == provider._max_tokens
+    assert not hasattr(GroqLLMProvider, "_is_qwen3_model")
 
 
 # --------------------------------------------------------------------------- #
@@ -180,18 +160,24 @@ async def test_slow_consumer_playback_does_not_truncate_stream():
 @pytest.mark.asyncio
 async def test_genuine_groq_midstream_stall_is_caught():
     """Groq sends two tokens fast, then goes silent (no token for >2s) while the
-    consumer is ready. The inter-token stall guard must break cleanly, keeping
-    the tokens already delivered — not hang, not raise."""
+    consumer is ready. The inter-token stall guard must not hang: the tokens
+    already delivered stay delivered, and the stream ends with LLMStreamStalled
+    (a LLMTimeoutError) so the turn streamer knows the reply is INCOMPLETE and
+    drops the unfinished tail instead of speaking it as a full sentence
+    (2026-09-06 audit, F03 — before this it looked like a normal end of stream)."""
+    from app.infrastructure.llm.groq import LLMStreamStalled
+
     provider = GroqLLMProvider()
     # Third token would arrive only after 5s of Groq silence.
     _groq_stub(provider, ["Hi", " there", " END"], before_token_delays=[0.0, 0.0, 5.0])
 
     received = []
-    async for token in provider.stream_chat_with_timeout(
-        messages=[Message(role=MessageRole.USER, content="hi")],
-        timeout_seconds=10.0,  # generous total budget; the 2s intertoken guard fires first
-    ):
-        received.append(token)
+    with pytest.raises(LLMStreamStalled):
+        async for token in provider.stream_chat_with_timeout(
+            messages=[Message(role=MessageRole.USER, content="hi")],
+            timeout_seconds=10.0,  # generous total budget; the 2s intertoken guard fires first
+        ):
+            received.append(token)
 
     assert received == ["Hi", " there"], "stall guard should keep delivered tokens only"
 

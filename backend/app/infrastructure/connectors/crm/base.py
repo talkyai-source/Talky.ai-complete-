@@ -97,3 +97,18 @@ class CRMProvider(BaseConnector):
         """
         ...
 
+    async def update_call_log(
+        self,
+        call_log_id: str,
+        *,
+        call_body: Optional[str] = None,
+        outcome: Optional[str] = None,
+    ) -> bool:
+        """Amend a previously logged call (e.g. attach the AI summary that is
+        generated a few seconds after the call settled).
+
+        Optional: providers without an update path return ``False`` and the
+        sync service leaves the original log untouched.
+        """
+        return False
+

@@ -149,7 +149,7 @@ class VoiceTuningResolver:
 
         return VoiceTuning(**merged)
 
-    async def for_tenant_async(self, tenant_id: Optional[str]) -> VoiceTuning:
+    async def for_tenant_async(self, tenant_id: Optional[str], *, require_available: bool = False) -> VoiceTuning:
         """Production resolution path: DB → env override → env default → code.
 
         DB results are not cached — operators editing voice tuning in
@@ -181,10 +181,16 @@ class VoiceTuningResolver:
         # resolver's lock so a slow DB round-trip can't stall other
         # tenant resolutions.
         lookup = self._db_lookup
+        if require_available and (lookup is None or not tenant_id):
+            from app.domain.services.tenant_ai_config_resolver import TenantAIConfigUnavailable
+            raise TenantAIConfigUnavailable("Voice tuning lookup is unavailable")
         if lookup is not None and tenant_id:
             try:
                 db_partial = await lookup(str(tenant_id))
             except Exception as exc:  # noqa: BLE001 — never block a call
+                if require_available:
+                    from app.domain.services.tenant_ai_config_resolver import TenantAIConfigUnavailable
+                    raise TenantAIConfigUnavailable("Voice tuning lookup failed") from exc
                 logger.warning(
                     "voice_tuning_db_lookup_failed tenant=%s err=%s "
                     "— falling back to env+defaults",

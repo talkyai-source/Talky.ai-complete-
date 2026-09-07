@@ -534,28 +534,28 @@ class TelephonyMediaGateway(MediaGateway):
             # Drop oldest super-frame and make room (keeps latency low)
             try:
                 session.input_queue.get_nowait()
+                session.dropped_input_chunks += 1
             except asyncio.QueueEmpty:
                 pass
             try:
                 session.input_queue.put_nowait(batch)
             except asyncio.QueueFull:
                 session.dropped_input_chunks += 1
-                # Rate-limited warning so backpressure is visible in production
-                # logs instead of being lost in a silent counter. One per call
-                # per second is enough to alert without flooding.
-                if (now - session.last_queue_drop_warn_at) > 1.0:
-                    session.last_queue_drop_warn_at = now
-                    logger.warning(
-                        "stt_input_queue_overrun call_id=%s dropped_total=%d — "
-                        "STT pipeline is not draining audio fast enough; check "
-                        "Deepgram WS health or per-frame resample CPU",
-                        call_id, session.dropped_input_chunks,
-                        extra={
-                            "call_id": call_id,
-                            "dropped_input_chunks": session.dropped_input_chunks,
-                            "alert": "stt_input_queue_overrun",
-                        },
-                    )
+            # Successful replacement still discarded caller audio. Count and
+            # report it, not just the exceptional failed second enqueue.
+            if session.last_queue_drop_warn_at == 0 or (now - session.last_queue_drop_warn_at) > 1.0:
+                session.last_queue_drop_warn_at = now
+                logger.warning(
+                    "stt_input_queue_overrun call_id=%s dropped_total=%d — "
+                    "STT pipeline is not draining audio fast enough; check "
+                    "Deepgram WS health or per-frame resample CPU",
+                    call_id, session.dropped_input_chunks,
+                    extra={
+                        "call_id": call_id,
+                        "dropped_input_chunks": session.dropped_input_chunks,
+                        "alert": "stt_input_queue_overrun",
+                    },
+                )
 
     # ------------------------------------------------------------------
     # Outbound audio (TTS → caller)

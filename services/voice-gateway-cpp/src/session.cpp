@@ -491,6 +491,39 @@ const std::string& RtpSession::config_digest() const noexcept {
     return config_.config_digest;
 }
 
+void CallbackDeliveryState::record(const bool delivered, const std::chrono::steady_clock::time_point now) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (delivered) {
+        ++stats_.delivered;
+        failing_ = false;
+        stats_.failure_streak_ms = 0;
+        stats_.healthy = true;
+    } else {
+        ++stats_.failed;
+        if (!failing_) {
+            first_failure_ = now;
+            failing_ = true;
+        }
+        stats_.failure_streak_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - first_failure_).count();
+        stats_.healthy = stats_.failure_streak_ms < 3000;
+    }
+}
+
+void CallbackDeliveryState::drop(const uint64_t count) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    stats_.dropped += count;
+}
+
+void CallbackDeliveryState::worker_failed() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    stats_.healthy = false;
+}
+
+CallbackDeliverySnapshot CallbackDeliveryState::snapshot() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return stats_;
+}
+
 SessionStatsSnapshot RtpSession::snapshot() const {
     SessionStatsSnapshot snap;
     snap.session_id = config_.session_id;
@@ -534,6 +567,9 @@ SessionStatsSnapshot RtpSession::snapshot() const {
     snap.stt_probation_dropped_total = stt_probation_dropped_total_.load();
     snap.stt_restarts_committed_total = stt_restarts_committed_total_.load();
     snap.tts_chunks_rejected_stale_total = tts_chunks_rejected_stale_total_.load();
+    if (config_.callback_delivery) {
+        snap.callback_delivery = config_.callback_delivery->snapshot();
+    }
 
     return snap;
 }
@@ -561,54 +597,61 @@ bool RtpSession::enqueue_tts_ulaw(
         return false;
     }
 
-    if (clear_existing) {
-        clear_tts_queue_locked("clear_existing");
+    queued_frames = 0;
+    const std::size_t frame_count = ulaw_audio.size() / static_cast<std::size_t>(kPcmuTimestampStep);
+    const std::size_t cap = config_.tts_max_queue_frames;
+    // Admission is atomic. Reject before clearing a prior utterance, consuming
+    // chunk identity or touching accepted audio. Ingress may shed stale audio;
+    // generated speech must never silently discard words already acknowledged.
+    if (frame_count > cap) {
+        error = "tts_submission_exceeds_capacity";
+        return false;
+    }
+    if (!clear_existing && frame_count > cap - tts_queue_.size()) {
+        error = "tts_queue_full";
+        return false;
     }
 
-    // VG-13 idempotency gate — only when the backend stamps an utterance id.
-    // clear_existing ran first, so a replacement submission retires the PREVIOUS
-    // utterance and then admits its own id here.
+    // Validate identity before ANY queue mutation. A stale replacement must
+    // not clear accepted speech and only then discover it cannot be admitted.
     if (!utterance_id.empty()) {
-        if (utterance_id == tts_retired_utterance_id_) {
+        if (utterance_id == tts_retired_utterance_id_ ||
+            (clear_existing && utterance_id == tts_current_utterance_id_)) {
             // A chunk of an utterance that was already interrupted/replaced —
             // the delayed-delivery race that used to re-speak pre-barge-in audio.
             tts_chunks_rejected_stale_total_.fetch_add(1);
             error = "utterance_interrupted";
             return false;
         }
+        if (!clear_existing && utterance_id == tts_current_utterance_id_ &&
+            chunk_seq >= 0 && chunk_seq <= tts_last_chunk_seq_) {
+            tts_chunks_rejected_stale_total_.fetch_add(1);
+            error = "stale_or_duplicate_chunk";
+            return false;
+        }
+    }
+
+    if (clear_existing) {
+        clear_tts_queue_locked("clear_existing");
+    }
+
+    // All refusal conditions passed. Commit the accepted identity and audio.
+    if (!utterance_id.empty()) {
         if (utterance_id != tts_current_utterance_id_) {
             tts_current_utterance_id_ = utterance_id;
             tts_last_chunk_seq_ = -1;
         }
         if (chunk_seq >= 0) {
-            if (chunk_seq <= tts_last_chunk_seq_) {
-                tts_chunks_rejected_stale_total_.fetch_add(1);
-                error = "stale_or_duplicate_chunk";
-                return false;
-            }
             tts_last_chunk_seq_ = chunk_seq;
         }
     }
 
-    const std::size_t frame_count = ulaw_audio.size() / static_cast<std::size_t>(kPcmuTimestampStep);
-    const std::size_t cap = config_.tts_max_queue_frames;
-
-    // If this single submission alone exceeds the queue capacity, only its LAST
-    // `cap` frames could ever survive the drop-oldest trim below. Skip the
-    // leading frames instead of copying them just to immediately evict them —
-    // this avoids a transient allocation/lock-hold spike on an oversized body
-    // and makes the accounting honest. The leading (skipped) frames are the
-    // START of the utterance and are genuinely not spoken; that is reported to
-    // the caller via queued_frames rather than masked (VG-25).
-    const std::size_t skip_leading = (frame_count > cap) ? (frame_count - cap) : 0;
-    const std::size_t submit_count = frame_count - skip_leading;
-
     const uint32_t segment_id = next_tts_segment_id_++;
-    tts_segments_[segment_id] = TtsSegmentState{submit_count, false};
+    tts_segments_[segment_id] = TtsSegmentState{frame_count, false};
     tts_segments_started_total_.fetch_add(1);
-    tts_frames_enqueued_total_.fetch_add(submit_count);
+    tts_frames_enqueued_total_.fetch_add(frame_count);
 
-    for (std::size_t i = skip_leading; i < frame_count; ++i) {
+    for (std::size_t i = 0; i < frame_count; ++i) {
         const std::size_t offset = i * static_cast<std::size_t>(kPcmuTimestampStep);
         QueuedTtsFrame frame{};
         frame.segment_id = segment_id;
@@ -619,20 +662,7 @@ bool RtpSession::enqueue_tts_ulaw(
         tts_queue_.push_back(std::move(frame));
     }
 
-    // Trim to capacity by dropping the oldest queued frames. Count how many of
-    // THIS submission are evicted so queued_frames reflects only what actually
-    // remains to be played — never the raw submitted count.
-    std::size_t dropped_from_this = 0;
-    while (tts_queue_.size() > cap) {
-        const auto dropped = tts_queue_.front();
-        tts_queue_.pop_front();
-        if (dropped.segment_id == segment_id) {
-            ++dropped_from_this;
-        }
-        mark_tts_frame_dropped_locked(dropped.segment_id);
-    }
-
-    queued_frames = submit_count - dropped_from_this;
+    queued_frames = frame_count;
     tts_last_stop_reason_ = "running";
     // notify_all, not notify_one: the watchdog waits on the same cv, and a
     // notify_one it consumed would be a lost wakeup for the transmitter.

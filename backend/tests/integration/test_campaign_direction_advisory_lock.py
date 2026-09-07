@@ -39,7 +39,7 @@ async def test_direction_update_waits_for_knowledge_style_advisory_lease():
     try:
         assert (
             await setup.fetchval("SELECT version_num FROM alembic_version")
-            == "0043_campaign_direction_lock"
+            == "0044_webhook_null_tenant_rls"
         )
         await setup.execute(
             "INSERT INTO tenants (id, business_name) VALUES ($1, $2)",

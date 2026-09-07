@@ -59,6 +59,9 @@ class CampaignTestUnavailable(RuntimeError):
 # Small concurrency cap so a stuck test tab can't pin an unbounded number of
 # realtime/TTS provider sockets. RFC 6455 close 1013 = "Try Again Later".
 _MAX_CONCURRENT_TEST = 8
+_AUTH_RECHECK_SECONDS = 15.0
+_AUTH_TIMEOUT_SECONDS = 5.0
+_CLEANUP_TIMEOUT_SECONDS = 10.0
 _test_semaphore: Optional[asyncio.Semaphore] = None
 
 
@@ -143,12 +146,114 @@ def _is_origin_allowed(websocket: WebSocket) -> bool:
     return origin in get_settings().allowed_origins
 
 
+async def _session_is_active(db_pool, user_id: str, session_id: str) -> bool:
+    """Use REST's revocable session lookup, bound to the signed user."""
+    from app.core.db_utils import acquire_with_tenant
+    from app.core.security.sessions import get_session_by_id
+
+    try:
+        uuid.UUID(user_id)
+        uuid.UUID(session_id)
+    except (ValueError, TypeError, AttributeError):
+        return False
+    async with acquire_with_tenant(db_pool, None, user_id=user_id, timeout=_AUTH_TIMEOUT_SECONDS) as conn:
+        return await get_session_by_id(conn, session_id, user_id=user_id) is not None
+
+
+async def _check_login_session(websocket, pool, user_id, session_id) -> bool:
+    try:
+        active = bool(session_id) and await asyncio.wait_for(
+            _session_is_active(pool, user_id, session_id), timeout=_AUTH_TIMEOUT_SECONDS,
+        )
+    except Exception:
+        logger.warning("campaign_test_session_check_failed", exc_info=True)
+        await websocket.send_json({"type": "error", "code": "authorization_unavailable",
+                                   "message": "Authorization is temporarily unavailable. Please retry."})
+        await websocket.close(code=1011, reason="Authorization unavailable")
+        return False
+    if not active:
+        await websocket.send_json({"type": "error", "code": "auth_required",
+                                   "message": "Your session has expired. Reload the page and sign in again."})
+        await websocket.close(code=1008, reason="Inactive login session")
+    return active
+
+
+async def _has_test_membership(pool, user_id, tenant_id) -> bool:
+    """Direct grants do not revive suspended membership; global admins are explicit."""
+    from app.core.db_utils import acquire_with_tenant
+
+    async with acquire_with_tenant(pool, None, user_id=user_id, timeout=_AUTH_TIMEOUT_SECONDS) as conn:
+        return bool(await conn.fetchval("""
+            SELECT EXISTS (
+                SELECT 1 FROM tenant_users
+                WHERE user_id = $1 AND tenant_id = $2 AND status = 'active'
+            ) OR EXISTS (
+                SELECT 1 FROM tenant_users tu JOIN roles r ON r.id = tu.role_id
+                WHERE tu.user_id = $1 AND tu.status = 'active'
+                  AND r.name = 'platform_admin' AND r.tenant_scoped = FALSE
+            )
+        """, user_id, tenant_id))
+
+
+async def _check_campaign_permission(websocket, pool, user_id, tenant_id) -> bool:
+    try:
+        async with asyncio.timeout(_AUTH_TIMEOUT_SECONDS):
+            member = await _has_test_membership(pool, user_id, tenant_id)
+            permissions = await get_effective_permissions(pool, user_id, tenant_id) if member else set()
+    except Exception:
+        logger.warning("campaign_test_permission_check_failed", exc_info=True)
+        await websocket.send_json({"type": "error", "code": "authorization_unavailable",
+                                   "message": "Authorization is temporarily unavailable. Please retry."})
+        await websocket.close(code=1011, reason="Authorization unavailable")
+        return False
+    if not check_permission(permissions, Permission.CAMPAIGNS_UPDATE):
+        await websocket.send_json({"type": "error", "code": "permission_denied",
+                                   "required": Permission.CAMPAIGNS_UPDATE.value,
+                                   "message": "You do not have permission to test this campaign."})
+        await websocket.close(code=1008, reason="Permission denied")
+        return False
+    return True
+
+
+async def _watch_login_session(websocket, pool, user_id, session_id, tenant_id):
+    while True:
+        await asyncio.sleep(_AUTH_RECHECK_SECONDS)
+        if not await _check_login_session(websocket, pool, user_id, session_id):
+            return
+        if not await _check_campaign_permission(websocket, pool, user_id, tenant_id):
+            return
+
+
+async def _resolve_user_tenant(db_pool, user_id: str) -> Optional[str]:
+    """Resolve a signed JWT subject before the WS has a tenant context.
+
+    The compatibility ``.table()`` adapter is tenant-scoped.  A WebSocket has
+    not passed through TenantMiddleware, so using that adapter for this
+    bootstrap query installs the nil tenant and hides the user's own profile.
+    Use the trusted pooled path that REST authentication uses, with an explicit
+    subject predicate and user audit context; the caller installs the returned
+    tenant context immediately afterwards.
+
+    ``None`` means the signed subject has no tenant-backed profile.  Database
+    failures deliberately propagate so the endpoint can distinguish an auth
+    miss from a temporary backend failure.
+    """
+    from app.core.db_utils import acquire_with_tenant
+
+    async with acquire_with_tenant(db_pool, None, user_id=user_id) as conn:
+        row = await conn.fetchrow(
+            "SELECT tenant_id FROM user_profiles WHERE id = $1",
+            user_id,
+        )
+    tenant_id = row.get("tenant_id") if row else None
+    return str(tenant_id) if tenant_id else None
+
+
 async def _fetch_campaign_row(db_pool, tenant_id: str, campaign_id: str):
     """Fetch one campaign row as a dict, scoped to ``tenant_id`` (IDOR guard).
 
-    Returns ``None`` on a miss or on any error, and the caller then refuses the
-    connection with 1008 "Campaign not found" — a tenant can never open a test
-    session against somebody else's campaign.
+    Returns ``None`` only on a miss or malformed campaign ID. Infrastructure
+    failures remain distinguishable from tenant-scoped ownership misses.
 
     2026-08-27: this used to be imported from
     ``app.domain.services.telephony.lifecycle``, but the inbound refactor moved
@@ -157,11 +262,15 @@ async def _fetch_campaign_row(db_pool, tenant_id: str, campaign_id: str):
     connection). The query is reproduced here, where its only caller lives.
     """
     if db_pool is None:
+        raise CampaignTestUnavailable("Campaign database unavailable")
+    try:
+        uuid.UUID(campaign_id)
+    except (ValueError, TypeError, AttributeError):
         return None
     try:
         from app.core.db_utils import acquire_with_tenant
 
-        async with acquire_with_tenant(db_pool, None) as conn:
+        async with acquire_with_tenant(db_pool, tenant_id, timeout=_AUTH_TIMEOUT_SECONDS) as conn:
             row = await conn.fetchrow(
                 "SELECT * FROM campaigns WHERE id = $1 AND tenant_id = $2",
                 campaign_id, tenant_id,
@@ -172,7 +281,7 @@ async def _fetch_campaign_row(db_pool, tenant_id: str, campaign_id: str):
             "campaign_test_campaign_fetch_failed tenant=%s campaign=%s err=%s",
             str(tenant_id)[:8], str(campaign_id)[:8], exc,
         )
-        return None
+        raise CampaignTestUnavailable("Campaign lookup failed") from exc
 
 
 async def _record_test_call(
@@ -450,22 +559,27 @@ async def campaign_test_websocket(
 
     from app.api.v1.dependencies import get_db_client
 
-    db_client = get_db_client()
     try:
-        profile = db_client.table("user_profiles").select(
-            "tenant_id"
-        ).eq("id", user_id).single().execute()
-        tenant_id = (
-            str(profile.data.get("tenant_id"))
-            if profile.data and profile.data.get("tenant_id")
-            else None
-        )
-    except Exception as profile_err:  # noqa: BLE001
-        logger.error("campaign_test_ws: profile lookup failed: %s", profile_err)
-        tenant_id = None
+        db_client = get_db_client()
+        if not await _check_login_session(websocket, db_client.pool, user_id, payload.get("sid")):
+            return
+        tenant_id = await _resolve_user_tenant(db_client.pool, user_id)
+    except Exception:  # noqa: BLE001 — return a stable, non-sensitive WS error
+        logger.error("campaign_test_ws: profile lookup failed", exc_info=True)
+        await websocket.send_json({
+            "type": "error",
+            "code": "profile_lookup_failed",
+            "message": "Unable to load your user profile. Please try again.",
+        })
+        await websocket.close(code=1011, reason="Profile lookup failed")
+        return
 
     if not tenant_id:
-        await websocket.send_json({"type": "error", "message": "User profile not found."})
+        await websocket.send_json({
+            "type": "error",
+            "code": "profile_not_found",
+            "message": "User profile not found.",
+        })
         await websocket.close(code=1008, reason="No tenant")
         return
 
@@ -483,44 +597,18 @@ async def campaign_test_websocket(
         await websocket.close(code=1011, reason="Container not initialized")
         return
 
-    # WebSockets do not run FastAPI's HTTP dependency chain. Resolve effective
-    # grants explicitly so a read-only or subsequently revoked user cannot
-    # consume provider capacity or persist test calls/transcripts.
-    try:
-        permissions = await get_effective_permissions(
-            container.db_pool,
-            user_id,
-            tenant_id,
-        )
-    except Exception as permission_err:  # noqa: BLE001 — authorization fails closed
-        logger.error(
-            "campaign_test_ws: permission lookup failed tenant=%s user=%s err_type=%s",
-            str(tenant_id)[:8],
-            str(user_id)[:8],
-            type(permission_err).__name__,
-        )
-        await websocket.send_json(
-            {
-                "type": "error",
-                "code": "authorization_unavailable",
-                "message": "Authorization is temporarily unavailable. Please retry.",
-            }
-        )
-        await websocket.close(code=1011, reason="Authorization unavailable")
-        return
-    if not check_permission(permissions, Permission.CAMPAIGNS_UPDATE):
-        await websocket.send_json(
-            {
-                "type": "error",
-                "code": "permission_denied",
-                "required": Permission.CAMPAIGNS_UPDATE.value,
-                "message": "You do not have permission to test this campaign.",
-            }
-        )
-        await websocket.close(code=1008, reason="Permission denied")
+    if not await _check_campaign_permission(websocket, container.db_pool, user_id, tenant_id):
         return
 
-    campaign_row = await _fetch_campaign_row(container.db_pool, tenant_id, campaign_id)
+    try:
+        campaign_row = await asyncio.wait_for(
+            _fetch_campaign_row(container.db_pool, tenant_id, campaign_id), timeout=_AUTH_TIMEOUT_SECONDS,
+        )
+    except (CampaignTestUnavailable, TimeoutError):
+        await websocket.send_json({"type": "error", "code": "campaign_lookup_failed",
+                                   "message": "Unable to load this campaign. Please retry."})
+        await websocket.close(code=1011, reason="Campaign lookup unavailable")
+        return
     if campaign_row is None:
         await websocket.send_json({"type": "error", "message": "Campaign not found."})
         await websocket.close(code=1008, reason="Campaign not found")
@@ -551,8 +639,10 @@ async def campaign_test_websocket(
     from app.domain.services.telephony_session_config import (
         build_telephony_session_config,
     )
+    from app.domain.services.campaign_prompt_service import CampaignPromptValidationError
     from app.domain.services.tenant_ai_config_resolver import (
         get_tenant_ai_config_resolver,
+        TenantAIConfigUnavailable,
     )
     from app.domain.services.voice_tuning import get_voice_tuning_resolver
 
@@ -569,6 +659,7 @@ async def campaign_test_websocket(
 
     voice_session = None
     receiver_task: Optional[asyncio.Task] = None
+    auth_task: Optional[asyncio.Task] = None
     test_call_id = None
     test_started_at = time.time()
 
@@ -578,8 +669,16 @@ async def campaign_test_websocket(
             # These resolvers are cache-bypassed, so an AI-Options edit takes
             # effect on the next connection (requirement: test agent reacts to
             # AI Options).
-            ai_cfg = await get_tenant_ai_config_resolver().for_tenant_async(tenant_id)
-            vt = await get_voice_tuning_resolver().for_tenant_async(tenant_id)
+            try:
+                async with asyncio.timeout(_AUTH_TIMEOUT_SECONDS):
+                    ai_cfg = await get_tenant_ai_config_resolver().for_tenant_async(tenant_id, require_available=True)
+                    vt = await get_voice_tuning_resolver().for_tenant_async(tenant_id, require_available=True)
+            except (TenantAIConfigUnavailable, TimeoutError):
+                logger.warning("campaign_test_ai_config_unavailable tenant=%s", tenant_id, exc_info=True)
+                await websocket.send_json({"type": "error", "code": "ai_config_unavailable",
+                                           "message": "Unable to load your AI settings. Please retry."})
+                await websocket.close(code=1011, reason="AI configuration unavailable")
+                return
 
             config = build_telephony_session_config(
                 gateway_type="browser",
@@ -796,8 +895,17 @@ async def campaign_test_websocket(
                         pass
                 # caller-first: send nothing; the pipeline reacts to the first turn.
 
-            await receiver_task
+            auth_task = asyncio.create_task(_watch_login_session(
+                websocket, container.db_pool, user_id, payload.get("sid"), tenant_id,
+            ))
+            done, _ = await asyncio.wait({receiver_task, auth_task}, return_when=asyncio.FIRST_COMPLETED)
+            for task in done:
+                await task
 
+        except CampaignPromptValidationError as exc:
+            await websocket.send_json({"type": "error", "code": "campaign_prompt_invalid",
+                                       "message": str(exc)})
+            await websocket.close(code=1008, reason="Invalid campaign prompt")
         except WebSocketDisconnect:
             logger.info("campaign_test_ws disconnected campaign=%s", str(campaign_id)[:8])
         except Exception as e:  # noqa: BLE001
@@ -808,25 +916,48 @@ async def campaign_test_websocket(
             except Exception:  # noqa: BLE001
                 pass
         finally:
+            if auth_task:
+                auth_task.cancel()
+                try:
+                    await auth_task
+                except asyncio.CancelledError:
+                    pass
+                except Exception:
+                    logger.warning("campaign_test_auth_task_cleanup_failed", exc_info=True)
             if receiver_task and not receiver_task.done():
                 receiver_task.cancel()
                 try:
                     await receiver_task
                 except asyncio.CancelledError:
                     pass
+                except Exception:
+                    logger.warning("campaign_test_receiver_cleanup_failed", exc_info=True)
             # BEFORE teardown, like the phone path: end_session cancels the
             # pipeline, and the transcript buffer lives on that pipeline's
             # transcript_service. Persist first or there is nothing left to read.
-            if voice_session and test_call_id:
-                await _persist_test_transcript(
-                    voice_session, tenant_id, test_call_id, container
-                )
-            if voice_session:
-                await container.voice_orchestrator.end_session(voice_session)
-            # Close the flagged row out so the call detail page shows a finished
-            # call you can play, review and leave a voice note on. The duration
-            # is recorded for display only — minutes_quota sums NOT is_test.
-            await _finalise_test_call(
-                container, tenant_id, test_call_id, test_started_at
-            )
+            # Each obligation runs even if another fails or is cancelled.
+            # Nested finally preserves caller cancellation after cleanup.
+            try:
+                if voice_session and test_call_id:
+                    try:
+                        await asyncio.wait_for(_persist_test_transcript(
+                            voice_session, tenant_id, test_call_id, container,
+                        ), timeout=_CLEANUP_TIMEOUT_SECONDS)
+                    except Exception:
+                        logger.warning("campaign_test_transcript_cleanup_failed", exc_info=True)
+            finally:
+                try:
+                    if voice_session:
+                        try:
+                            await asyncio.wait_for(container.voice_orchestrator.end_session(voice_session),
+                                                   timeout=_CLEANUP_TIMEOUT_SECONDS)
+                        except Exception:
+                            logger.warning("campaign_test_session_cleanup_failed", exc_info=True)
+                finally:
+                    try:
+                        await asyncio.wait_for(_finalise_test_call(
+                            container, tenant_id, test_call_id, test_started_at,
+                        ), timeout=_CLEANUP_TIMEOUT_SECONDS)
+                    except Exception:
+                        logger.warning("campaign_test_row_finalization_failed", exc_info=True)
             logger.info("campaign_test_ws session ended campaign=%s", str(campaign_id)[:8])

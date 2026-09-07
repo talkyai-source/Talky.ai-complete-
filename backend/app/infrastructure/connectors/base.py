@@ -162,6 +162,36 @@ class BaseConnector(ABC):
         """Store an access token for subsequent API calls."""
         self._access_token = token
 
+    # ------------------------------------------------------------------
+    # Optional per-provider persistence hooks (default: nothing to persist)
+    # ------------------------------------------------------------------
+
+    def config_from_tokens(self, tokens: "OAuthTokens") -> Optional[Dict[str, object]]:
+        """Provider state that must outlive the token exchange.
+
+        Some providers return more than tokens: Salesforce hands back the
+        org's ``instance_url`` and identity URL, without which every later
+        API call has nowhere to go.  The OAuth callback and the resolver's
+        refresh path merge whatever this returns into ``connectors.config``.
+        Return ``None`` when the provider has nothing to persist.
+        """
+        return None
+
+    def apply_config(self, config: Optional[Dict[str, object]]) -> None:
+        """Restore state previously saved through :meth:`config_from_tokens`."""
+        return None
+
+    async def fetch_account_identity(self) -> Optional[Dict[str, object]]:
+        """Return ``{"email", "external_account_id", ...}`` for the connected
+        account, or ``None`` when the provider offers no identity probe.
+
+        Called by the OAuth callback with a fresh access token so a green
+        connection is proven against the real account, not just a token
+        response.  Raise on failure — the callback marks the connector
+        ``error`` rather than activate an unverified connection.
+        """
+        return None
+
     def __repr__(self) -> str:
         return (
             f"<{self.__class__.__name__} provider={self.provider_name} "

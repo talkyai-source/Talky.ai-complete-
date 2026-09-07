@@ -87,9 +87,8 @@ class TestPreviewPromptEndpoint:
 
         assert resp.direction == "inbound"
         assert resp.has_inbound_directive is True
-        # The caller-first directive was reframed: a caller-speaks-first call
-        # is still OUR outbound call (see the caller-first "hello dojo" fix).
-        assert "OUTBOUND CALL — CALLEE SPEAKS FIRST" in resp.system_prompt
+        assert resp.system_prompt.startswith("TRUE INBOUND CALL")
+        assert "OUTBOUND CALL — CALLEE SPEAKS FIRST" not in resp.system_prompt
         # Inbound greeting variant 0 contains the canonical phrase.
         assert "thanks for reaching out" in resp.greeting.lower()
 

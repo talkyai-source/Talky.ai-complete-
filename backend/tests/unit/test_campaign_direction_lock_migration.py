@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import importlib
 
+import pytest
+
 from app.domain.services.campaign_direction_guard import CAMPAIGN_DIRECTION_LOCK_SQL
 
 
@@ -63,16 +65,16 @@ def test_0043_trigger_is_direction_only_idempotent_safety_net(monkeypatch):
     assert "deadlock victim" in (migration.__doc__ or "")
 
 
-def test_0043_downgrade_removes_only_revision_owned_objects(monkeypatch):
-    statements = _statements(monkeypatch, "downgrade")
-    sql = " ".join(statements)
+def test_0043_downgrade_refuses_before_mutating_schema(monkeypatch):
+    migration = _migration()
+    statements: list[str] = []
+    monkeypatch.setattr(
+        migration.op,
+        "execute",
+        lambda value: statements.append(str(value)),
+    )
 
-    assert (
-        "DROP TRIGGER IF EXISTS campaigns_direction_advisory_lock "
-        "ON public.campaigns" in sql
-    )
-    assert (
-        "DROP FUNCTION IF EXISTS public.talky_lock_campaign_direction_update()" in sql
-    )
-    assert "DROP TABLE" not in sql
-    assert "DELETE FROM" not in sql
+    with pytest.raises(RuntimeError, match="Refusing to downgrade 0043"):
+        migration.downgrade()
+
+    assert statements == []

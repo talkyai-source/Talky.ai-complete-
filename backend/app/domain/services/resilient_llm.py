@@ -260,7 +260,16 @@ class ResilientLLMProvider(LLMProvider):
                 raise _FirstTokenMiss(repr(exc)) from exc
 
             if not has_token:
-                return  # clean zero-token completion — nothing to say, no failover
+                # A clean zero-token completion means the provider ended the
+                # stream without a single visible token — on a reasoning model
+                # that is almost always a budget exhausted by thinking
+                # (finish_reason=length, empty content), not "nothing to say".
+                # Nothing has been spoken yet, so failing over is safe (2026-09-06
+                # audit, F02). The secondary is the last resort: if IT is empty
+                # too we end cleanly and the turn streamer speaks its recovery line.
+                if use_breaker and self._secondary is not None:
+                    raise _FirstTokenMiss("empty completion (no visible tokens)")
+                return
 
             # Committed: this provider owns the turn from here.
             yield token

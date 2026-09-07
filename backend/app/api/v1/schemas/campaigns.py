@@ -337,9 +337,9 @@ class CampaignPromptPreviewResponse(BaseModel):
     has_inbound_directive: bool = Field(
         ...,
         description=(
-            "True when the assembled prompt carries the canonical inbound "
-            "directive sentinel — i.e. the AI is shaped to behave as the "
-            "receiver, not the caller."
+            "Legacy field name: true when the prompt carries a true-inbound "
+            "or outbound callee-first opening directive. The direction field "
+            "identifies who originated the call."
         ),
     )
     prompt_chars: int = Field(

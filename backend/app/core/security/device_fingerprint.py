@@ -67,6 +67,9 @@ _OS_PATTERNS = [
 ]
 
 
+FINGERPRINT_VERSION_PREFIX = "v2:"
+
+
 def generate_device_fingerprint(
     request: Request,
     user_agent: Optional[str] = None,
@@ -103,31 +106,33 @@ def generate_device_fingerprint(
     ua = user_agent or request.headers.get("User-Agent", "")
     signals.append(ua)
 
-    # Secondary signals - header-based content negotiation
-    # These are stable per browser installation
-    signals.append(request.headers.get("Accept", ""))
+    # Locale preference — constant for a browser profile.
     signals.append(request.headers.get("Accept-Language", ""))
-    signals.append(request.headers.get("Accept-Encoding", ""))
 
-    # Client hints (Chromium-based browsers)
-    # Provides structured browser/OS info
+    # Client hints (Chromium-based browsers) — structured browser/OS identity.
     signals.append(request.headers.get("Sec-Ch-Ua", ""))
     signals.append(request.headers.get("Sec-Ch-Ua-Mobile", ""))
     signals.append(request.headers.get("Sec-Ch-Ua-Platform", ""))
-    signals.append(request.headers.get("Sec-Ch-Ua-Platform-Version", ""))
 
-    # Network/client hints
-    signals.append(request.headers.get("DNT", ""))  # Do Not Track
-    signals.append(request.headers.get("Sec-Fetch-Dest", ""))
-    signals.append(request.headers.get("Sec-Fetch-Mode", ""))
-
-    # Combine with delimiter and hash
-    # Using | as delimiter since it's unlikely to appear in headers
+    # DELIBERATELY EXCLUDED (2026-09-07): Accept, Accept-Encoding, DNT,
+    # Sec-Fetch-Dest, Sec-Fetch-Mode, Sec-Ch-Ua-Platform-Version. Those
+    # change between a page navigation, a fetch(), an <audio> element and an
+    # EventSource from the SAME browser tab, so one production session
+    # produced 1,082 "fingerprint_mismatch" warnings in a week. A fingerprint
+    # that flaps per request cannot detect hijacking, and with
+    # SESSION_STRICT_BINDING it would have logged every user out on their
+    # first audio play. The signals kept identify the browser install, not
+    # the request type.
     fingerprint_data = "|".join(signals)
 
-    # SHA-256 hash, truncated to 64 chars (256 bits in hex)
-    # Full hash provides collision resistance
-    return hashlib.sha256(fingerprint_data.encode("utf-8")).hexdigest()
+    # Versioned so the session validator can tell a legacy (v1) value apart
+    # and re-bind it once instead of flagging it on every request.
+    return FINGERPRINT_VERSION_PREFIX + hashlib.sha256(fingerprint_data.encode("utf-8")).hexdigest()
+
+
+def is_legacy_fingerprint(stored: Optional[str]) -> bool:
+    """True for fingerprints computed before the versioned, stable scheme."""
+    return bool(stored) and not str(stored).startswith(FINGERPRINT_VERSION_PREFIX)
 
 
 def parse_user_agent(user_agent: Optional[str]) -> dict:

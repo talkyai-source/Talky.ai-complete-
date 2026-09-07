@@ -298,7 +298,6 @@ async def save_config(
     }
     SLOW_MODELS: set[str] = set()
     PREVIEW_MODELS = {
-        "qwen/qwen3.6-27b",
         "openai/gpt-oss-120b",
         "openai/gpt-oss-20b",
         # Superseded by the GA "gemini-3.1-flash-lite"; still selectable so
@@ -319,13 +318,13 @@ async def save_config(
     if config.llm_model in SLOW_MODELS:
         latency_warnings.append(
             f"'{config.llm_model}' is a large reasoning model. "
-            "Expected TTFT: 300–600ms vs ~90ms for llama-3.1-8b-instant. "
+            "Expected TTFT: 300–600ms vs ~100ms for openai/gpt-oss-20b. "
             "Recommended for quality use cases, not real-time voice."
         )
     elif config.llm_model not in FAST_MODELS:
         latency_warnings.append(
             f"'{config.llm_model}' has moderate latency (~150–250ms TTFT). "
-            "For lowest latency, use llama-3.1-8b-instant (560 t/s on Groq)."
+            "For lowest latency, use openai/gpt-oss-20b on Groq or gpt-oss-120b on Cerebras."
         )
 
     if config.llm_model in PREVIEW_MODELS:

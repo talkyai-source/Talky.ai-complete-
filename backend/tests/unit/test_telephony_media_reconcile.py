@@ -85,6 +85,21 @@ def test_list_active_gateway_session_ids_returns_none_when_gateway_unreachable()
     assert asyncio.run(adapter.list_active_gateway_session_ids()) is None
 
 
+def test_persistent_callback_failure_is_not_healthy_media_even_with_active_rtp():
+    adapter = AsteriskAdapter()
+    adapter._session = object()
+
+    async def gateway(*args, **kwargs):
+        return {"sessions": [
+            {"session_id": "dead-stt", "state": "active", "callback_delivery_healthy": False},
+            {"session_id": "healthy", "state": "active", "callback_delivery_healthy": True},
+            {"session_id": "legacy", "state": "active"},
+        ]}
+
+    adapter._gateway = gateway
+    assert asyncio.run(adapter.list_active_gateway_session_ids()) == {"healthy", "legacy"}
+
+
 def test_list_active_gateway_session_ids_returns_none_when_not_connected():
     adapter = AsteriskAdapter()
     adapter._session = None

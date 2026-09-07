@@ -245,7 +245,8 @@ class TestBuildTelephonySessionConfigDirection:
         )
         assert cfg.direction == Direction.INBOUND
         # Inbound sentinel leads the prompt — the LLM weights this most.
-        assert cfg.system_prompt.startswith(INBOUND_DIRECTIVE_SENTINEL)
+        assert cfg.system_prompt.startswith("TRUE INBOUND CALL")
+        assert INBOUND_DIRECTIVE_SENTINEL not in cfg.system_prompt
         # Outbound persona markers are NOT in the inbound base prompt.
         assert "Business Development Specialist" not in cfg.system_prompt
         assert "GREETING RESPONSE" not in cfg.system_prompt
@@ -806,96 +807,34 @@ class TestTenantPromptCap:
             "telephony_tenant_prompt_capped" in r.message for r in caplog.records
         )
 
-    def test_oversized_prompt_is_capped_at_word_boundary_and_warns(
-        self, caplog, monkeypatch
-    ):
-        import logging
-        from app.domain.services.telephony_session_config import (
-            _cap_tenant_additional_instructions,
-        )
+    def test_oversized_prompt_is_rejected_with_budget_and_campaign_log(self, caplog, monkeypatch):
+        from app.domain.services.telephony_session_config import _cap_tenant_additional_instructions
+        from app.domain.services.campaign_prompt_service import CampaignPromptValidationError
         monkeypatch.setenv("TELEPHONY_TENANT_PROMPT_MAX_CHARS", "50")
-        text = "word " * 20  # 100 chars, well over the 50-char budget
-        caplog.set_level(logging.WARNING, logger=self._LOGGER_NAME)
-        result = _cap_tenant_additional_instructions(text, campaign_id="c2")
+        with pytest.raises(CampaignPromptValidationError, match="99 characters; the limit is 50"):
+            _cap_tenant_additional_instructions("word " * 20, campaign_id="c2")
+        assert any("campaign_guidance_rejected campaign=c2 chars=99 budget=50" in r.message for r in caplog.records)
 
-        assert len(result) <= 50
-        # Boundary-safe: the capped text must be a clean prefix ending on a
-        # whole word, never a word severed mid-token.
-        #
-        # 2026-08-13: a 50-char budget is BELOW the threshold at which the
-        # head-and-tail split is worth doing (the elision marker alone is
-        # ~50 chars), so this deliberately still exercises the plain
-        # head-truncation fallback — which is why `startswith` still holds.
-        # The head-and-tail behaviour at realistic budgets is covered by
-        # TestPromptCapKeepsTheEnding below.
-        assert text.startswith(result)
-        assert not result.endswith("wor")
-
-        warnings = [
-            r for r in caplog.records if "telephony_tenant_prompt_capped" in r.message
-        ]
-        assert len(warnings) == 1
-        assert "original_chars=100" in warnings[0].message
-        assert "campaign=c2" in warnings[0].message
-        assert "budget_chars=50" in warnings[0].message
-
-    def test_seven_thousand_token_prompt_is_capped_and_logged(self, caplog):
-        """~7000 tokens (~28,000 chars at ~4 chars/token) — the high end of
-        the measured production range — must be capped to the default
-        budget and logged with the original vs. capped size."""
-        import logging
-        from app.domain.services.telephony_session_config import (
-            _cap_tenant_additional_instructions,
-        )
+    def test_seven_thousand_token_prompt_is_rejected_without_losing_rules(self):
+        from app.domain.services.telephony_session_config import _cap_tenant_additional_instructions
+        from app.domain.services.campaign_prompt_service import CampaignPromptValidationError
         huge = "Please always mention our financing options and warranty terms. " * 400
-        assert len(huge) > 20000
-        caplog.set_level(logging.WARNING, logger=self._LOGGER_NAME)
-        result = _cap_tenant_additional_instructions(huge, campaign_id="runaway")
+        with pytest.raises(CampaignPromptValidationError, match="Nothing is trimmed automatically"):
+            _cap_tenant_additional_instructions(huge, campaign_id="runaway")
 
-        assert len(result) <= 12000
-        warnings = [
-            r for r in caplog.records if "telephony_tenant_prompt_capped" in r.message
-        ]
-        assert warnings
-        assert f"original_chars={len(huge)}" in warnings[0].message
-
-    # ── integration through build_telephony_session_config ────────────────
-
-    def test_oversized_campaign_prompt_capped_in_composed_system_prompt(
-        self, monkeypatch, caplog
-    ):
-        import logging
-        from app.domain.services.telephony_session_config import (
-            build_telephony_session_config,
-        )
+    def test_oversized_campaign_prompt_refuses_composition(self, monkeypatch):
+        from app.domain.services.telephony_session_config import build_telephony_session_config
+        from app.domain.services.campaign_prompt_service import CampaignPromptValidationError
         monkeypatch.setenv("TELEPHONY_TENANT_PROMPT_MAX_CHARS", "500")
-        huge = (
-            "Mention our roofing warranty and financing plan every single "
-            "time you speak. "
-        ) * 50
-        assert len(huge) > 500
-        campaign = {
-            "id": "cap-integration-campaign",
-            "script_config": {
-                "persona_type": "lead_gen",
-                "knowledge_driven": True,
-                "company_name": "Acme",
-                "agent_names": ["Alex"],
-                "additional_instructions": huge,
-            },
-        }
-        caplog.set_level(logging.WARNING, logger=self._LOGGER_NAME)
-        with patch(
-            "app.domain.services.telephony_session_config.get_global_config",
-            return_value=self._mock_global_config(),
-        ):
-            config = build_telephony_session_config(campaign=campaign)
-
-        assert huge not in config.system_prompt
-        warnings = [
-            r for r in caplog.records if "telephony_tenant_prompt_capped" in r.message
-        ]
-        assert warnings
+        campaign = {"id": "cap-integration-campaign", "script_config": {
+            "persona_type": "lead_gen", "knowledge_driven": True,
+            "company_name": "Acme", "agent_names": ["Alex"],
+            "additional_instructions": "Keep every warranty rule. " * 50,
+        }}
+        with patch("app.domain.services.telephony_session_config.get_global_config",
+                   return_value=self._mock_global_config()):
+            with pytest.raises(CampaignPromptValidationError, match="Nothing is trimmed automatically"):
+                build_telephony_session_config(campaign=campaign)
 
     def test_small_campaign_prompt_is_unaffected(self, monkeypatch, caplog):
         import logging
@@ -1019,70 +958,21 @@ class TestPipelineModeThreading:
         assert config.pipeline_mode == "cascaded"
 
 
-class TestPromptCapKeepsTheEnding:
-    """2026-08-13. Head-truncation reliably discarded the part of a script that
-    decides how a call ENDS.
+class TestPromptBudgetPreservesEveryInstruction:
+    @pytest.mark.parametrize("budget", [50, 500, 12000])
+    def test_over_budget_text_is_never_partially_returned(self, monkeypatch, budget):
+        from app.domain.services.telephony_session_config import _cap_tenant_additional_instructions
+        from app.domain.services.campaign_prompt_service import CampaignPromptValidationError
+        monkeypatch.setenv("TELEPHONY_TENANT_PROMPT_MAX_CHARS", str(budget))
+        text = "opening " * budget + "MIDDLE RULE" + " closing" * budget
+        with pytest.raises(CampaignPromptValidationError):
+            _cap_tenant_additional_instructions(text, campaign_id="c")
 
-    Raising the budget 6000 -> 12000 on 2026-08-12 fixed one campaign and the
-    very next day a longer one hit the new ceiling:
-
-        telephony_tenant_prompt_capped original_chars=14665 capped_chars=11998
-        budget_chars=12000 LOST_chars=2667 (18%)
-
-    Raising a ceiling moves a cliff; it does not remove one. Operators write
-    role and context first and objection handling, pricing and closing steps
-    LAST, so the tail is the worst possible thing to drop.
-    """
-
-    def _cap(self, text, **kw):
-        from app.domain.services.telephony_session_config import (
-            _cap_tenant_additional_instructions,
-        )
-        return _cap_tenant_additional_instructions(text, **kw)
-
-    def test_the_ending_survives_truncation(self):
-        """THE REGRESSION. The last line of a long script must still reach the
-        model."""
-        opening = "OPENING: introduce yourself warmly. " * 500
-        closing = "CLOSING RULE: always confirm the callback time before you hang up."
-        out = self._cap(opening + closing, campaign_id="c")
-
-        assert len(out) < len(opening + closing), "should have been capped"
-        assert "CLOSING RULE" in out, (
-            "the closing instructions were discarded — this is the defect"
-        )
-
-    def test_the_opening_also_survives(self):
-        opening = "OPENING RULE: you are a estimator for Acme."
-        filler = " Some middle guidance about tenders and takeoffs." * 400
-        out = self._cap(opening + filler + " CLOSING RULE: confirm the email.",
-                        campaign_id="c")
-        assert "OPENING RULE" in out
-        assert "CLOSING RULE" in out
-
-    def test_the_omission_is_visible_to_the_model(self):
-        """The model must know something was removed rather than believe the
-        script simply stops."""
-        out = self._cap("A" * 200 + " " + ("filler word " * 3000), campaign_id="c")
-        assert "omitted for length" in out
-
-    def test_still_within_budget(self):
-        from app.domain.services.telephony_session_config import (
-            _tenant_prompt_char_budget,
-        )
-        out = self._cap("word " * 20000, campaign_id="c")
-        assert len(out) <= _tenant_prompt_char_budget()
-
-    def test_short_scripts_are_untouched(self):
-        """Non-vacuity — a campaign under budget must pass through byte-identical."""
-        short = "You are an estimator for Acme. Confirm the callback time."
-        assert self._cap(short, campaign_id="c") == short
-
-    def test_no_word_is_severed_at_either_seam(self):
-        text = " ".join(f"token{i}" for i in range(6000))
-        out = self._cap(text, campaign_id="c")
-        head, _, tail = out.partition("[... middle of these instructions omitted")
-        # every whole token in the kept head/tail must be a real token
-        for piece in (head.split()[-3:], tail.split("]")[-1].split()[:3]):
-            for tok in piece:
-                assert tok.startswith("token") or tok in ("...", "]"), tok
+    @pytest.mark.parametrize("text", [
+        "Opening. Middle rule. Closing.",
+        "UnknownWordMustNotBeSplit",
+        "Preserve\n\nformatting and accents: café.",
+    ])
+    def test_under_budget_guidance_is_byte_identical(self, text):
+        from app.domain.services.telephony_session_config import _cap_tenant_additional_instructions
+        assert _cap_tenant_additional_instructions(text, campaign_id="c") == text

@@ -200,6 +200,11 @@ class VoiceSessionConfig:
 
     # STT settings
     stt_model: str = "flux-general-en"
+    # Saved in AI Options (AIProviderConfig.stt_language). Flux is English-only
+    # ("flux-general-en"), so a non-English language forces the Nova-3 primary
+    # and is passed to Deepgram on every stream (2026-09-06 audit, F09 — the
+    # setting was accepted, stored and then never sent anywhere).
+    stt_language: str = "en"
     stt_sample_rate: int = 16000
     stt_encoding: str = "linear16"
     stt_eot_threshold: float = 0.7
@@ -258,6 +263,9 @@ class VoiceSessionConfig:
     telephony_provider: str = "sip"  # "sip" | "vonage" | "twilio" | "browser"
     agent_config: Optional[AgentConfig] = None
     system_prompt: str = ""
+    # Validated tenant-authored guidance only, without cascaded voice tags or
+    # an outbound persona body. Shared with the realtime instruction builder.
+    campaign_guidance: str = ""
     # ── Prompt identity (goals.md §6) ────────────────────────────────────
     # Which instructions this call actually ran on. `prompt_version` is the
     # name a human rolls back to; `prompt_hash` is derived from the composed
@@ -633,6 +641,7 @@ class VoiceOrchestrator:
             llm_model=config.llm_model,
             llm_temperature=config.llm_temperature,
             llm_max_tokens=config.llm_max_tokens,
+            stt_language=config.stt_language or "en",
             voice_id=config.voice_id,
             contact_phone_region=config.contact_phone_region,
             started_at=datetime.utcnow(),
@@ -1081,6 +1090,10 @@ class VoiceOrchestrator:
                 await session.pipeline_task
             except asyncio.CancelledError:
                 pass
+            except Exception:
+                # A pipeline may fail in its own finally while being cancelled.
+                # Gateway/provider cleanup and active-session removal still apply.
+                logger.warning("voice_pipeline_cancel_failed call=%s", call_id[:8], exc_info=True)
 
         # Realtime teardown (idempotent): cancelling pipeline_task already runs
         # bridge.run()'s finally→stop(), which closes the speech-to-speech
@@ -1260,6 +1273,15 @@ class VoiceOrchestrator:
         # PRIMARY = the engine the tenant picked in AI Options (default Flux).
         engine = (config.stt_provider_type or "deepgram_flux").lower()
         is_nova_primary = engine in ("deepgram_nova", "deepgram-nova", "nova", "nova-3")
+        # Flux only ships an English model; a non-English tenant language can
+        # only be honoured by Nova-3. Switch here as well as in the session
+        # builder so non-telephony callers get the same rule.
+        _lang = (getattr(config, "stt_language", None) or "en").strip().lower()
+        if not is_nova_primary and _lang not in ("en", "en-us", "en-gb", "en-au", "en-in", "en-nz"):
+            logger.info(
+                "stt_language_forces_nova language=%s (Flux is English-only)", _lang,
+            )
+            is_nova_primary = True
         if is_nova_primary:
             primary, primary_init = _build_nova(config.stt_model or "nova-3")
         else:
@@ -1336,6 +1358,16 @@ class VoiceOrchestrator:
     # fastest Groq model — a clean low-latency fallback. Operators can point the
     # secondary at another vendor (LLM_SECONDARY_PROVIDER=gemini) for true vendor
     # isolation, or override the model with LLM_SECONDARY_MODEL.
+    # The two production models are each other's fallback. When the configured
+    # secondary (env) turns out to be the same provider+model as the tenant's
+    # primary — which is exactly what happens when a tenant picks Groq 20B while
+    # LLM_SECONDARY_* names Groq 20B — the counterpart is used instead of
+    # silently running with no failover at all (2026-09-06 audit, F06).
+    _LLM_PAIR_FALLBACK = {
+        ("groq", "openai/gpt-oss-20b"): ("cerebras", "gpt-oss-120b"),
+        ("cerebras", "gpt-oss-120b"): ("groq", "openai/gpt-oss-20b"),
+    }
+
     _LLM_DEFAULT_SECONDARY_MODEL = {
         # Was llama-3.1-8b-instant until 2026-08-17, by which point that model
         # 404'd on this account — so the default same-vendor fallback was a
@@ -1344,7 +1376,37 @@ class VoiceOrchestrator:
         # deployment without that env var had a silently dead safety net.
         # gpt-oss-20b is the fastest id this account can actually serve.
         "groq": "openai/gpt-oss-20b",
+        "cerebras": "gpt-oss-120b",
     }
+
+    @classmethod
+    def _pick_secondary_llm(
+        cls,
+        *,
+        primary_provider: str,
+        primary_model: Optional[str],
+        env_provider: Optional[str],
+        env_model: Optional[str],
+    ) -> Optional[tuple[str, str]]:
+        """Resolve the (provider, model) to fail over to, or None.
+
+        Env wins when it names something different from the primary. When it
+        names the primary itself (or is unset for a provider without a default
+        model), fall back to the production pair's counterpart so selecting
+        either target model keeps the other as its safety net.
+        """
+        primary_provider = (primary_provider or "").strip()
+        primary_model = (primary_model or "").strip()
+        sec_provider = (env_provider or primary_provider).strip()
+        sec_model = (env_model or cls._LLM_DEFAULT_SECONDARY_MODEL.get(sec_provider) or "").strip()
+        if sec_provider and sec_model and not (
+            sec_provider == primary_provider and sec_model == primary_model
+        ):
+            return sec_provider, sec_model
+        counterpart = cls._LLM_PAIR_FALLBACK.get((primary_provider, primary_model))
+        if counterpart and counterpart != (primary_provider, primary_model):
+            return counterpart
+        return None
 
     # Map TTS primary provider name → secondary provider config tuple
     # (provider_name, env_var). Used by T1.3 failover wiring. Keep small
@@ -1450,25 +1512,24 @@ class VoiceOrchestrator:
         Secondary selection: ``LLM_SECONDARY_PROVIDER`` (default = primary's
         provider) + ``LLM_SECONDARY_MODEL`` (default per ``_LLM_DEFAULT_SECONDARY_MODEL``).
         """
-        sec_provider = (
-            os.getenv("LLM_SECONDARY_PROVIDER") or primary_provider_type
-        ).strip()
-        sec_model = (
-            os.getenv("LLM_SECONDARY_MODEL")
-            or self._LLM_DEFAULT_SECONDARY_MODEL.get(sec_provider)
+        picked = self._pick_secondary_llm(
+            primary_provider=primary_provider_type,
+            primary_model=config.llm_model,
+            env_provider=os.getenv("LLM_SECONDARY_PROVIDER"),
+            env_model=os.getenv("LLM_SECONDARY_MODEL"),
         )
-        if not sec_model:
+        if picked is None:
             logger.warning(
-                "llm_secondary_no_model provider=%s — set LLM_SECONDARY_MODEL "
-                "to enable failover", sec_provider,
+                "llm_secondary_unavailable primary=%s/%s — env secondary is the "
+                "primary itself and no counterpart is known; failover disabled",
+                primary_provider_type, config.llm_model,
             )
             return None
-        if sec_provider == primary_provider_type and sec_model == config.llm_model:
-            logger.info(
-                "llm_secondary_same_as_primary model=%s — skipping (no benefit)",
-                sec_model,
-            )
-            return None
+        sec_provider, sec_model = picked
+        logger.info(
+            "llm_secondary_selected primary=%s/%s secondary=%s/%s",
+            primary_provider_type, config.llm_model, sec_provider, sec_model,
+        )
 
         try:
             from app.infrastructure.llm.factory import LLMFactory
@@ -1950,6 +2011,7 @@ class VoiceOrchestrator:
             role=str(role),
             goal=str(goal),
             extra_notes=extra_notes,
+            campaign_guidance=config.campaign_guidance,
             call_direction=direction_text,
             opening_greeting=getattr(
                 config, "realtime_opening_greeting", None

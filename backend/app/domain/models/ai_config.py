@@ -78,7 +78,6 @@ class GroqModel(str, Enum):
     # behaves strictly better, so we keep only that.
     # Qwen 3.6 27B — reasoning toggles between "default" and "none"; we run it
     # with thinking disabled (reasoning_effort="none") for low-latency voice.
-    QWEN_3_6_27B = "qwen/qwen3.6-27b"
     GPT_OSS_120B = "openai/gpt-oss-120b"
     GPT_OSS_20B = "openai/gpt-oss-20b"
 
@@ -301,7 +300,7 @@ class LatencyTestResult(BaseModel):
 
 class LLMTestRequest(BaseModel):
     """Request for LLM testing"""
-    model: str = GroqModel.QWEN_3_6_27B.value  # was LLAMA_3_3_70B — 404s here
+    model: str = GroqModel.GPT_OSS_20B.value
     message: str
     temperature: float = Field(default=0.6, ge=0.0, le=2.0)
     max_tokens: int = Field(default=150, ge=1, le=5000)
@@ -378,14 +377,14 @@ GROQ_MODELS = [
 # 400 a tenant on a value they never chose to have — locking them out of their
 # own settings page to enforce a menu change.
 #
-# `llama-3.1-8b-instant` is here despite 404ing on the account, for exactly
-# that reason: 5 tenants still store it, and blocking their save does not fix
-# them, it just traps them. Repairing those rows is a separate, deliberate job.
+# 2026-09-07: qwen/qwen3.6-27b and both llama ids were REMOVED from this list.
+# Every tenant row that stored them was migrated to cerebras/gpt-oss-120b on
+# production that day (backup: tenant_ai_configs_backup_20260907), so nothing
+# is left to hold open, and the Groq request builder no longer carries a Qwen
+# branch. The product runs exactly two models: Cerebras gpt-oss-120b (primary)
+# and Groq openai/gpt-oss-20b (fallback).
 GROQ_MODELS_HIDDEN = [
-    "qwen/qwen3.6-27b",       # 640ms p50, and never repeats a captured email back
     "openai/gpt-oss-120b",    # fast, but the SAME weights as the Cerebras primary
-    "llama-3.1-8b-instant",   # DEAD on this account (404). Held for 5 tenants.
-    "llama-3.3-70b-versatile",  # DEAD on this account (404).
 ]
 
 # =============================================================================

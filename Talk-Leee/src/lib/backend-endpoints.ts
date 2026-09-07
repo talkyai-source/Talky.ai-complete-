@@ -15,6 +15,12 @@ export const backendEndpoints = {
     connectorsStatus: { method: "GET", path: "/connectors/status", tags: ["Connectors"], summary: "List connector statuses" },
     connectorsAuthorize: { method: "GET", path: "/connectors/{type}/authorize", tags: ["Connectors"], summary: "Start OAuth authorization" },
     connectorsDisconnect: { method: "POST", path: "/connectors/{type}/disconnect", tags: ["Connectors"], summary: "Disconnect connector" },
+    salesforceSettings: { method: "GET", path: "/connectors/salesforce/settings", tags: ["Connectors"], summary: "Salesforce connection + sync settings" },
+    salesforceSettingsUpdate: { method: "PUT", path: "/connectors/salesforce/settings", tags: ["Connectors"], summary: "Update Salesforce sync settings" },
+    salesforceWebhookTokenReveal: { method: "GET", path: "/connectors/salesforce/webhook-token", tags: ["Connectors"], summary: "Reveal Salesforce webhook token" },
+    salesforceWebhookTokenRotate: { method: "POST", path: "/connectors/salesforce/webhook-token", tags: ["Connectors"], summary: "Rotate Salesforce webhook token" },
+    salesforceTest: { method: "POST", path: "/connectors/salesforce/test", tags: ["Connectors"], summary: "Test Salesforce connection" },
+    salesforceImport: { method: "POST", path: "/connectors/salesforce/import", tags: ["Connectors"], summary: "Import Salesforce Leads/Contacts into a campaign" },
 
     connectorAccountsList: {
         method: "GET",

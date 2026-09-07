@@ -272,3 +272,54 @@ def test_0041_installs_the_lead_and_job_ownership_chain(monkeypatch):
         "calls.dialer_job_ownership",
     ):
         assert relation in preflight
+
+
+def test_0041_adopts_the_legacy_contact_list_policy_that_allowed_null_tenants(monkeypatch):
+    """Production's hand-installed contact_lists policy carries an
+    ``OR (tenant_id IS NULL)`` escape in both USING and WITH CHECK. Live deploy
+    2026-09-05 failed on it: the create-if-absent branch skipped the existing
+    policy, then the postcondition raised
+    '0041 contact_lists RLS policy is missing or incompatible' and the whole
+    revision rolled back.
+
+    The escape is dead code once this revision runs (preflight proves no
+    NULL-tenant row exists and tenant_id becomes NOT NULL), so the migration
+    must recreate exactly that legacy variant canonically — and only that
+    variant; an unknown policy shape must still be refused.
+    """
+    migration = _migration()
+    statements: list[str] = []
+    monkeypatch.setattr(
+        migration.op,
+        "execute",
+        lambda value: statements.append(" ".join(str(value).split())),
+    )
+
+    migration.upgrade()
+
+    policy_block = next(
+        s for s in statements if "CREATE POLICY contact_lists_tenant_isolation" in s
+    )
+    # Detect the legacy escape precisely, then drop before the canonical create.
+    assert "tenant_id IS NULL" in policy_block
+    assert "DROP POLICY contact_lists_tenant_isolation ON public.contact_lists" in policy_block
+    assert policy_block.index("DROP POLICY contact_lists_tenant_isolation") < policy_block.index(
+        "CREATE POLICY contact_lists_tenant_isolation"
+    )
+    # Never a blind drop: the drop is conditional on the legacy shape.
+    assert "IF legacy_escape" in policy_block
+    # The postcondition that caught it in production stays strict.
+    assert any("RLS policy is missing or incompatible" in s for s in statements)
+
+
+def test_alembic_env_bypasses_rls_so_data_preflights_are_not_blind():
+    """Guard, not behaviour: env.py must set app.bypass_rls inside the migration
+    transaction. Without it, on FORCE-RLS tables and a NOBYPASSRLS role, every
+    preflight SELECT returns 0 rows and 'no violations' is meaningless
+    (production 2026-09-05: leads=0 vs 34133 with the GUC)."""
+    from pathlib import Path
+
+    env_src = (Path(__file__).resolve().parents[2] / "Alembic" / "env.py").read_text(encoding="utf-8")
+    body = env_src.split("def do_run_migrations", 1)[1].split("\ndef ", 1)[0]
+    assert "SET LOCAL app.bypass_rls = 'true'" in body
+    assert body.index("SET LOCAL app.bypass_rls") < body.index("context.run_migrations()")

@@ -301,6 +301,21 @@ class LLMTimeoutError(Exception):
     pass
 
 
+class LLMStreamStalled(LLMTimeoutError):
+    """The provider stopped sending tokens AFTER some were already yielded.
+
+    Until 2026-09-07 both timeout wrappers swallowed this and returned as if
+    the stream had ended normally, so a half sentence ("Your appointment is")
+    was indistinguishable from a complete answer and got spoken as one
+    (2026-09-06 audit, F03). It is a subclass of LLMTimeoutError on purpose:
+    the turn streamer's existing handler already does the right thing for a
+    timeout after partial speech — drop the unpunctuated tail, speak no
+    fallback — and for a stall before any sentence was spoken it replaces the
+    fragment with the repeat-request line instead of voicing the fragment.
+    """
+    pass
+
+
 class GroqLLMProvider(LLMProvider):
     """
     Groq LLM provider with ultra-fast inference
@@ -321,25 +336,18 @@ class GroqLLMProvider(LLMProvider):
         """GPT-OSS models on Groq use the reasoning-specific request contract."""
         return model.startswith("openai/gpt-oss-")
 
-    @staticmethod
-    def _is_qwen3_model(model: str) -> bool:
-        """Qwen 3 supports explicit thinking / non-thinking modes on Groq.
-
-        Matches the whole Qwen3 family — both ``qwen/qwen3-32b`` (dash) and
-        ``qwen/qwen3.6-27b`` (dot) — so reasoning is driven off by default for
-        all of them via reasoning_effort="none"."""
-        return model.startswith("qwen/qwen3")
-
     @classmethod
     def _default_top_p_for_model(cls, model: str) -> float:
-        """
-        Use Groq-documented defaults per model family instead of forcing one
-        sampling profile across all selectable AI Options models.
+        """Groq-documented default for the GPT-OSS family; 1.0 otherwise.
+
+        The Qwen3 branch (top_p 0.8, reasoning_effort="none",
+        reasoning_format="hidden") was removed 2026-09-07: no tenant runs a
+        Qwen model any more and the product's LLM menu is the gpt-oss pair
+        (Cerebras 120B primary, Groq 20B fallback). Any other model id gets a
+        plain request with no reasoning parameters.
         """
         if cls._is_gpt_oss_model(model):
             return 0.95
-        if cls._is_qwen3_model(model):
-            return 0.8
         return 1.0
 
     @staticmethod
@@ -464,7 +472,12 @@ class GroqLLMProvider(LLMProvider):
         """Return (and cache) an AsyncGroq client bound to the given key."""
         client = self._clients_by_key.get(api_key)
         if client is None:
-            client = AsyncGroq(api_key=api_key, timeout=self._http_timeout)
+            # max_retries=0: this provider owns retries (bounded attempt loop
+            # + circuit breaker + the voice first-token deadline). With the
+            # SDK's default of 2 the two layers multiplied — a mocked HTTP 500
+            # produced 9 requests per turn (2026-09-06 audit, F04). Cerebras
+            # already ran with SDK retries off.
+            client = AsyncGroq(api_key=api_key, timeout=self._http_timeout, max_retries=0)
             self._clients_by_key[api_key] = client
         return client
 
@@ -581,13 +594,17 @@ class GroqLLMProvider(LLMProvider):
                 remaining = timeout_seconds - groq_wait_accumulated
                 if remaining <= 0:
                     if tokens_received > 0:
-                        # Budget of actual Groq-wait time exhausted mid-stream —
-                        # content already yielded/TTS'd, treat as normal end.
+                        # Budget of actual Groq-wait time exhausted mid-stream.
+                        # Content already yielded/TTS'd; signal INCOMPLETE so the
+                        # turn streamer drops the unfinished tail instead of
+                        # speaking it as a complete answer.
                         logger.warning(
                             "LLM Groq-wait budget expired mid-stream (limit=%.1fs, tokens=%d) — "
-                            "treating as stream end", timeout_seconds, tokens_received
+                            "stream incomplete", timeout_seconds, tokens_received
                         )
-                        break
+                        raise LLMStreamStalled(
+                            f"Groq stream stalled after {tokens_received} token(s)"
+                        )
                     logger.error(
                         "LLM deadline exceeded before first token "
                         "(limit=%.1fs)", timeout_seconds
@@ -606,14 +623,16 @@ class GroqLLMProvider(LLMProvider):
                     # Only the Groq wait counts — a full `token_timeout` elapsed here.
                     groq_wait_accumulated += asyncio.get_event_loop().time() - _wait_t0
                     if tokens_received > 0:
-                        # Inter-token stall: Groq stopped sending tokens mid-stream silently.
-                        # Content already yielded and TTS'd — break cleanly, no fallback needed.
+                        # Inter-token stall: Groq stopped sending tokens mid-stream
+                        # silently. Signal INCOMPLETE (see LLMStreamStalled).
                         logger.warning(
                             "Groq inter-token stall (groq_wait=%.2fs, tokens=%d) — "
-                            "treating as stream end (Groq silent-stall bug)",
+                            "stream incomplete (Groq silent-stall bug)",
                             groq_wait_accumulated, tokens_received,
                         )
-                        break
+                        raise LLMStreamStalled(
+                            f"Groq stream stalled after {tokens_received} token(s)"
+                        )
                     logger.error(
                         "LLM timeout waiting for first token after %.2fs (limit=%.1fs): %s",
                         groq_wait_accumulated, timeout_seconds, "asyncio.TimeoutError",
@@ -910,24 +929,6 @@ class GroqLLMProvider(LLMProvider):
                 request_kwargs["reasoning_effort"] = reasoning_effort
                 # Floored, never off → always reserve answer headroom.
                 thinking_floored = True
-            elif self._is_qwen3_model(model):
-                # Groq recommends non-thinking mode for general dialogue — Qwen3
-                # CAN be turned fully off via reasoning_effort="none".
-                if reasoning_effort is None:
-                    reasoning_effort = "none"
-                if reasoning_format is None:
-                    reasoning_format = "hidden"
-                request_kwargs["reasoning_effort"] = reasoning_effort
-                request_kwargs["reasoning_format"] = reasoning_format
-                if include_reasoning is not None:
-                    logger.warning(
-                        "Ignoring include_reasoning=%s for Qwen model %s; "
-                        "Groq documents reasoning_format/reasoning_effort for this family.",
-                        include_reasoning,
-                        model,
-                    )
-                # Only reserve headroom if reasoning is actually left on.
-                thinking_floored = reasoning_effort != "none"
             elif reasoning_format is not None:
                 request_kwargs["reasoning_format"] = reasoning_format
                 if reasoning_effort is not None:
@@ -1114,11 +1115,27 @@ class GroqLLMProvider(LLMProvider):
             raise
     
     async def cleanup(self) -> None:
-        """Release resources"""
-        if self._client:
-            # Groq async client doesn't require explicit cleanup
-            # but we'll set it to None for garbage collection
-            self._client = None
+        """Release resources: close every SDK client this provider opened.
+
+        Dropping the reference left the httpx pools to the garbage collector;
+        under repeated barge-in/cancel the connections outlived the call
+        (2026-09-06 audit, F05). Close each key-bound client exactly once.
+        """
+        clients = list(self._clients_by_key.values())
+        if self._client is not None and self._client not in clients:
+            clients.append(self._client)
+        self._clients_by_key.clear()
+        self._client = None
+        for client in clients:
+            close = getattr(client, "close", None)
+            if close is None:
+                continue
+            try:
+                result = close()
+                if hasattr(result, "__await__"):
+                    await result
+            except Exception as exc:  # noqa: BLE001 — teardown must not raise
+                logger.debug("groq client close failed: %s", exc)
     
     @property
     def name(self) -> str:

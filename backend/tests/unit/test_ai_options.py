@@ -169,7 +169,7 @@ class TestRequestModels:
         request = LLMTestRequest(message="Hello")
         
         assert request.message == "Hello"
-        assert request.model == GroqModel.QWEN_3_6_27B.value
+        assert request.model == GroqModel.GPT_OSS_20B.value  # qwen retired 2026-09-07
         assert request.temperature == 0.6
         assert request.max_tokens == 150
     

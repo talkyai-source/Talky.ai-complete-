@@ -20,6 +20,7 @@ export const queryKeys = {
     health: () => ["health"] as const,
     connectors: () => ["connectors"] as const,
     connectorStatuses: () => ["connectorStatuses"] as const,
+    salesforceSettings: () => ["salesforceSettings"] as const,
     connectorAccounts: (connectorId?: string) => ["connectorAccounts", connectorId ?? "all"] as const,
     meetings: () => ["meetings"] as const,
     calendarEvents: () => ["calendarEvents"] as const,
@@ -75,6 +76,85 @@ export function useConnectorStatuses(options?: { enabled?: boolean }) {
         staleTime: 0,
         retry: 2,
         enabled: options?.enabled ?? true,
+    });
+}
+
+export function useSalesforceSettings(options?: { enabled?: boolean }) {
+    return useQuery({
+        queryKey: queryKeys.salesforceSettings(),
+        queryFn: ({ signal }) => backendApi.salesforce.settings(signal),
+        enabled: options?.enabled ?? true,
+        staleTime: 5_000,
+        retry: 1,
+    });
+}
+
+export function useUpdateSalesforceSettings() {
+    const qc = useQueryClient();
+    return useMutation({
+        mutationFn: backendApi.salesforce.updateSettings,
+        onSuccess: (data) => {
+            qc.setQueryData(queryKeys.salesforceSettings(), data);
+            notificationsStore.create({ type: "success", title: "Salesforce settings saved", message: "Sync and callback settings updated." });
+        },
+        onError: (err) => {
+            notificationsStore.create({ type: "error", title: "Could not save Salesforce settings", message: err instanceof Error ? err.message : "Request failed" });
+        },
+    });
+}
+
+export function useRevealSalesforceWebhookToken() {
+    const qc = useQueryClient();
+    return useMutation({
+        mutationFn: backendApi.salesforce.revealWebhookToken,
+        onSuccess: (data) => {
+            qc.setQueryData(queryKeys.salesforceSettings(), data);
+        },
+        onError: (err) => {
+            notificationsStore.create({ type: "error", title: "Could not reveal webhook token", message: err instanceof Error ? err.message : "Request failed" });
+        },
+    });
+}
+
+export function useRotateSalesforceWebhookToken() {
+    const qc = useQueryClient();
+    return useMutation({
+        mutationFn: backendApi.salesforce.rotateWebhookToken,
+        onSuccess: (data) => {
+            qc.setQueryData(queryKeys.salesforceSettings(), data);
+            notificationsStore.create({ type: "success", title: "Webhook token rotated", message: "Update the URL in your Salesforce Flow / Outbound Message." });
+        },
+        onError: (err) => {
+            notificationsStore.create({ type: "error", title: "Could not rotate webhook token", message: err instanceof Error ? err.message : "Request failed" });
+        },
+    });
+}
+
+export function useTestSalesforceConnection() {
+    return useMutation({
+        mutationFn: backendApi.salesforce.test,
+        onError: (err) => {
+            notificationsStore.create({ type: "error", title: "Salesforce test failed", message: err instanceof Error ? err.message : "Request failed" });
+        },
+    });
+}
+
+export function useImportSalesforcePeople() {
+    const qc = useQueryClient();
+    return useMutation({
+        mutationFn: backendApi.salesforce.importPeople,
+        onSuccess: (data) => {
+            void qc.invalidateQueries({ queryKey: queryKeys.campaigns() });
+            void qc.invalidateQueries({ queryKey: queryKeys.campaign(data.campaign_id) });
+            notificationsStore.create({
+                type: "success",
+                title: "Salesforce import finished",
+                message: `${data.imported} imported, ${data.revived} revived, ${data.duplicates_skipped} already present, ${data.invalid} invalid.`,
+            });
+        },
+        onError: (err) => {
+            notificationsStore.create({ type: "error", title: "Salesforce import failed", message: err instanceof Error ? err.message : "Request failed" });
+        },
     });
 }
 

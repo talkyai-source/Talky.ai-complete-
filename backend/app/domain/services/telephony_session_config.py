@@ -374,91 +374,19 @@ def campaign_guidance_char_budget() -> int:
     return _tenant_prompt_char_budget()
 
 
-def _cap_tenant_additional_instructions(text, *, campaign_id=None):
-    """Cap the tenant-authored ``additional_instructions`` (campaign Goal /
-    operator ROLE text) to an approximate token budget before it enters
-    prompt composition, so one runaway operator prompt can't bloat every
-    turn of every call on that campaign.
-
-    Truncation is boundary-safe — it cuts back to the last whitespace so a
-    word is never severed mid-token — and logs a WARNING with the original
-    vs. capped size whenever truncation actually happens. Text at or under
-    budget (the normal case) is returned completely untouched: no
-    truncation, no log line.
-    """
-    if not text:
-        return text
-    budget = _tenant_prompt_char_budget()
-    original_len = len(text)
-    if original_len <= budget:
-        return text
-
-    # KEEP THE END, NOT JUST THE BEGINNING (2026-08-13).
-    #
-    # This used to be a plain head-truncation: text[:budget]. Raising the
-    # budget 6000 -> 12000 on 2026-08-12 fixed the campaign in front of us and
-    # a longer one hit the new ceiling the very next day:
-    #
-    #   telephony_tenant_prompt_capped original_chars=14665 capped_chars=11998
-    #   budget_chars=12000 LOST_chars=2667 (18%)
-    #
-    # Raising a ceiling does not fix head-truncation, it moves the cliff. And
-    # the tail is the worst part to lose: operators write role and context
-    # first, then objection handling, pricing rules and closing steps LAST.
-    # Head-truncation reliably discards the part of the script that decides
-    # how a call ENDS.
-    #
-    # So: keep the first 60% of the budget and the last 40%, with an explicit
-    # elision marker between them. The model sees how to open AND how to
-    # close, and — because the marker is visible — it knows something was
-    # removed rather than silently believing the script simply stops.
-    _HEAD_SHARE = 0.60
-    _MARKER = "\n\n[... middle of these instructions omitted for length ...]\n\n"
-
-    usable = max(0, budget - len(_MARKER))
-    head_len = int(usable * _HEAD_SHARE)
-    tail_len = usable - head_len
-
-    # A budget too small to carry the marker AND a useful head and tail must
-    # fall back to plain head-truncation. Otherwise a tiny budget spends its
-    # whole allowance on the elision notice and ships a prompt that says only
-    # "some instructions were omitted" — strictly worse than the first
-    # sentence of the operator's script. The threshold is deliberately
-    # generous: below this the head/tail split is not buying anything.
-    if usable < 200 or tail_len < 60:
-        head = text[:budget]
-        capped = (head.rsplit(" ", 1)[0] if " " in head else head).rstrip()
-        lost = original_len - len(capped)
-        logger.warning(
-            "telephony_tenant_prompt_capped campaign=%s original_chars=%d "
-            "capped_chars=%d budget_chars=%d LOST_chars=%d (%.0f%%) — budget "
-            "too small to preserve the ending, so the TAIL was discarded.",
-            campaign_id, original_len, len(capped), budget,
-            lost, 100.0 * lost / max(original_len, 1),
-        )
-        return capped
-
-    head = text[:head_len]
-    head = head.rsplit(" ", 1)[0] if " " in head else head
-
-    tail = text[-tail_len:] if tail_len > 0 else ""
-    # Start the tail at a word boundary so it does not open mid-token.
-    if " " in tail:
-        tail = tail.split(" ", 1)[1]
-
-    capped = (head.rstrip() + _MARKER + tail.lstrip()).rstrip()
-    lost = original_len - len(capped)
-    logger.warning(
-        "telephony_tenant_prompt_capped campaign=%s original_chars=%d "
-        "capped_chars=%d budget_chars=%d LOST_chars=%d (%.0f%%) — the MIDDLE "
-        "of this campaign's instructions was omitted; the opening and the "
-        "closing/objection sections are both kept. Fix: shorten the script, "
-        "or move FACTS into the knowledge base so they are retrieved per turn "
-        "instead of competing for prompt budget.",
-        campaign_id, original_len, len(capped), budget,
-        lost, 100.0 * lost / max(original_len, 1),
+def _cap_tenant_additional_instructions(text, *, campaign_id=None, campaign_brief=None):
+    """Preserve guidance verbatim or refuse it; kept as a compatibility entry point."""
+    from app.domain.services.campaign_prompt_service import (
+        CampaignPromptValidationError,
+        guidance_budget_violation,
+        guidance_budget_error_message,
     )
-    return capped
+    violation = guidance_budget_violation(text, campaign_brief)
+    if violation:
+        chars, budget = violation
+        logger.warning("campaign_guidance_rejected campaign=%s chars=%d budget=%d", campaign_id, chars, budget)
+        raise CampaignPromptValidationError(guidance_budget_error_message(chars, budget))
+    return text
 
 
 def _telephony_mute_during_tts_default() -> bool:
@@ -1260,6 +1188,9 @@ def build_telephony_session_config(
             tts_model = ""
 
     script_config = _extract_script_config(campaign) or {}
+    _pipeline_mode = script_config.get("pipeline_mode") or getattr(source_config, "pipeline_mode", "cascaded") or "cascaded"
+    _realtime_voice = script_config.get("realtime_voice") or getattr(source_config, "realtime_voice", "marin")
+    _identity_voice = _realtime_voice if _pipeline_mode == "realtime" else tts_voice_id
     configured_persona = script_config.get("persona_type")
     # Single composition path. A campaign-less / persona-less call (a bare test
     # dial, or a pre-persona campaign) defaults to a knowledge-driven lead_gen
@@ -1289,13 +1220,9 @@ def build_telephony_session_config(
     if not isinstance(_agent_name_genders, dict):
         _agent_name_genders = None
 
-    # The agent NAME must match the gender of the voice the callee actually
-    # hears. `tts_voice_id` above is already the EFFECTIVE voice (campaign
-    # override applied, else the tenant/global default), so resolving gender
-    # from it here is correct for every path that reaches this builder —
-    # including the ones that pass no agent_name_override (inbound calls, the
-    # campaign "Test agent" WS, and campaigns with no durable job name).
-    _voice_gender = _resolve_voice_gender_safe(tts_voice_id)
+    # Name selection follows the active speech engine, including campaign
+    # realtime overrides. Unused cascaded TTS settings cannot change identity.
+    _voice_gender = _resolve_voice_gender_safe(_identity_voice)
 
     # Seed the substitution on the campaign so a retry, or a second call on the
     # same campaign, does not introduce itself with a different name than the
@@ -1331,14 +1258,14 @@ def build_telephony_session_config(
                 "overridden for this call",
                 _campaign_id(campaign), _substituted_from, agent_name,
                 "female" if _voice_gender == "male" else "male",
-                tts_voice_id, _voice_gender,
+                _identity_voice, _voice_gender,
             )
         else:
             # Still mismatched but deliberately kept (see resolve_name_against_
             # voice) — say so loudly; it is otherwise silent.
             _warn_on_agent_name_voice_mismatch(
                 agent_name, _agent_name_genders, _voice_gender,
-                campaign_id=_campaign_id(campaign), voice_id=tts_voice_id,
+                campaign_id=_campaign_id(campaign), voice_id=_identity_voice,
             )
     elif agent_names_pool:
         try:
@@ -1363,23 +1290,17 @@ def build_telephony_session_config(
                     "agent_name_substituted campaign=%s %r -> %r — no configured "
                     "name is usable with the %s voice %s",
                     _campaign_id(campaign), _substituted_from, agent_name,
-                    _voice_gender, tts_voice_id,
+                    _voice_gender, _identity_voice,
                 )
             else:
                 _warn_on_agent_name_voice_mismatch(
                     agent_name, _agent_name_genders, _voice_gender,
-                    campaign_id=_campaign_id(campaign), voice_id=tts_voice_id,
+                    campaign_id=_campaign_id(campaign), voice_id=_identity_voice,
                 )
     else:
         agent_name = _fallback_agent_name(_voice_gender, seed=_name_seed)
 
-    # Cap the tenant-authored ROLE/GOAL text once, up front, so both the
-    # primary compose attempt and the knowledge-driven retry below (see
-    # PromptCompositionError handling) use the same capped text.
-    _tenant_additional_instructions = _cap_tenant_additional_instructions(
-        script_config.get("additional_instructions"),
-        campaign_id=_campaign_id(campaign),
-    )
+    _tenant_additional_instructions = script_config.get("additional_instructions")
 
     # If the agent's name was substituted because the configured one could not
     # be spoken by this voice, rename it in the operator's own ROLE/GOAL text
@@ -1429,6 +1350,12 @@ def build_telephony_session_config(
     _campaign_brief = script_config.get("campaign_brief")
     if not isinstance(_campaign_brief, dict):
         _campaign_brief = None
+    # Validate the final guidance (including any name substitution and brief)
+    # against the same budget used at save/start/preview. Never elide instructions.
+    _tenant_additional_instructions = _cap_tenant_additional_instructions(
+        _tenant_additional_instructions, campaign_id=_campaign_id(campaign),
+        campaign_brief=_campaign_brief,
+    )
 
     def _compose(kd: bool) -> str:
         return compose_prompt(
@@ -1647,7 +1574,17 @@ def build_telephony_session_config(
     # (acoustic VAD/endpointing). The orchestrator builds the matching primary;
     # the failover secondary is wired separately. Default = Flux (prior behaviour).
     _stt_engine = (getattr(source_config, "stt_engine", None) or "deepgram_flux").lower()
+    # Saved STT language (F09). Flux is English-only, so anything else routes
+    # the primary to Nova-3 — the setting used to be stored and then ignored.
+    _stt_language = str(getattr(source_config, "stt_language", None) or "en").strip().lower() or "en"
+    _english = _stt_language in ("en", "en-us", "en-gb", "en-au", "en-in", "en-nz")
     if _stt_engine in ("deepgram_nova", "deepgram-nova", "nova", "nova-3"):
+        _stt_provider_type, _stt_model = "deepgram_nova", "nova-3"
+    elif not _english:
+        logger.info(
+            "stt_language_forces_nova campaign=%s language=%s (Flux is English-only)",
+            str(_campaign_id(campaign)) if campaign else "telephony", _stt_language,
+        )
         _stt_provider_type, _stt_model = "deepgram_nova", "nova-3"
     else:
         _stt_provider_type, _stt_model = "deepgram_flux", "flux-general-en"
@@ -1658,18 +1595,9 @@ def build_telephony_session_config(
     # override per-campaign via its script_config, so one tenant can run some
     # campaigns on the realtime speech-to-speech pipeline and others cascaded.
     # Default "cascaded" keeps every existing call byte-for-byte unchanged.
-    _pipeline_mode = (
-        script_config.get("pipeline_mode")
-        or getattr(source_config, "pipeline_mode", "cascaded")
-        or "cascaded"
-    )
     _realtime_model = (
         script_config.get("realtime_model")
         or getattr(source_config, "realtime_model", "gpt-realtime-2")
-    )
-    _realtime_voice = (
-        script_config.get("realtime_voice")
-        or getattr(source_config, "realtime_voice", "marin")
     )
     _realtime_settings = (
         script_config.get("realtime_settings")
@@ -1705,6 +1633,7 @@ def build_telephony_session_config(
         llm_provider_type=_llm_provider_type,
         tts_provider_type=tts_provider_type,
         stt_model=_stt_model,
+        stt_language=_stt_language,
         stt_sample_rate=16000,
         stt_encoding="linear16",
         # Conversational-rhythm tunables come from the tenant resolver.
@@ -1756,6 +1685,7 @@ def build_telephony_session_config(
         contact_phone_region=_contact_phone_region,
         agent_config=agent_config,
         system_prompt=system_prompt,
+        campaign_guidance=campaign_guidance_text(_tenant_additional_instructions, _campaign_brief),
         # Carried so the per-call log and the calls row can name the exact
         # instructions this call ran on (goals.md §6).
         prompt_template=prompt_identity.template,

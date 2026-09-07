@@ -73,6 +73,18 @@ def test_guidance_budget_violation_helper():
     assert v == (budget + 1, budget)
 
 
+@pytest.mark.parametrize("with_brief", [False, True])
+def test_runtime_rejects_legacy_guidance_over_combined_budget(monkeypatch, with_brief):
+    from app.domain.services.telephony_session_config import build_telephony_session_config
+    monkeypatch.setenv("TELEPHONY_TENANT_PROMPT_MAX_CHARS", "600")
+    script = {"company_name": "Acme", "agent_names": ["Alex"], "additional_instructions": "context " * 100}
+    if with_brief:
+        script["additional_instructions"] = "context " * 65
+        script["campaign_brief"] = {"brand_name": "b" * 150}
+    with pytest.raises(CampaignPromptValidationError, match="Nothing is trimmed automatically"):
+        build_telephony_session_config(campaign={"id": "legacy", "script_config": script})
+
+
 def test_budget_is_env_overridable(monkeypatch):
     monkeypatch.setenv("TELEPHONY_TENANT_PROMPT_MAX_CHARS", "500")
     assert campaign_guidance_char_budget() == 500

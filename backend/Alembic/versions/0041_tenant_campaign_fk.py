@@ -468,7 +468,34 @@ def _adopt_contact_list_schema() -> None:
         text(
             """
             DO $policy$
+            DECLARE legacy_escape boolean;
             BEGIN
+                -- Production's hand-installed policy (pre-Alembic) is the
+                -- canonical expression plus an "OR (tenant_id IS NULL)"
+                -- escape in USING and WITH CHECK. That branch is dead once
+                -- this revision runs: the preflight proves no NULL-tenant
+                -- row exists and tenant_id becomes NOT NULL below. Adopt
+                -- exactly that variant by recreating it canonically; any
+                -- other unexpected shape is left alone so the strict
+                -- postcondition still refuses it. (Live deploy 2026-09-05
+                -- rolled back here before this branch existed.)
+                SELECT bool_and(
+                           cmd = 'ALL'
+                           AND COALESCE(qual, '') LIKE '%app.bypass_rls%'
+                           AND COALESCE(qual, '') LIKE '%app.current_tenant_id%'
+                           AND (
+                               COALESCE(qual, '') LIKE '%tenant_id IS NULL%'
+                               OR COALESCE(with_check, '') LIKE '%tenant_id IS NULL%'
+                           )
+                       )
+                  INTO legacy_escape
+                  FROM pg_catalog.pg_policies
+                 WHERE schemaname = 'public'
+                   AND tablename = 'contact_lists'
+                   AND policyname = 'contact_lists_tenant_isolation';
+                IF legacy_escape IS TRUE THEN
+                    DROP POLICY contact_lists_tenant_isolation ON public.contact_lists;
+                END IF;
                 IF NOT EXISTS (
                     SELECT 1
                       FROM pg_catalog.pg_policy AS policy

@@ -223,6 +223,10 @@ def _adapter():
 
     async def _gateway(method, path, payload=None, ok=None):
         a._gateway_calls.append((path, payload))
+        if path == "/v1/sessions/tts/play":
+            import base64
+            return {"status": "queued", "session_id": payload["session_id"],
+                    "queued_frames": len(base64.b64decode(payload["pcmu_base64"])) // 160}
         return {"ok": True}
 
     a._gateway = _gateway

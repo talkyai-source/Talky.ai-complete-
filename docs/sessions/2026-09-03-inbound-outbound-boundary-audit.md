@@ -243,4 +243,27 @@ Installing them would abort the 0041 preflight, and since `talky-migrate` runs o
 
 **Excluded from the commit** (5 items): Codex's `.review_contacts_diff.txt` / `.review_trunks_diff.txt` scratch diffs, `.tmp-pg004x-rehearsal-20260903/`, a tracked `.pyc`, and `telephony/deploy/keepalived/notify.sh` — the last is a pure CRLF→LF rewrite, which this repo's line-ending rule says not to commit in a large tree. Codex's worktree was left untouched: the work was cherry-picked onto a clean tree rather than rebased in place, so nothing of theirs was stashed or discarded.
 
-**NOT deployed to production.** Pushing to GitHub does not run migrations. 0041–0043 must be rehearsed on a restored replica first (per the 2026-08-29 rehearsal process), and prod cannot `git fetch` at all until the private-repo credential is fixed.
+**NOT deployed to production.** Pushing to GitHub does not run migrations. 0041–0043 must be rehearsed on a restored replica first (per the 2026-08-29 rehearsal process), and prod cannot `git fetch` at all until the private-repo credential is fixed.n---
+
+## Phase 11 — Deployed to production (2026-09-05 ~21:30 UTC, prod HEAD `a0473522`)
+
+Two guarded attempts rolled back automatically before this one succeeded; each exposed a real defect, fixed in the repo rather than patched on the box.
+
+| Attempt | Tripped on | Root cause | Fix |
+|---|---|---|---|
+| 1 | `tree dirty after checkout` | `venv.old`/`venv-new` are not gitignored (only `venv/`, `venv.bak/`); and a *renamed* venv keeps shebangs pointing at its old path, which would have broken `uvicorn`/`alembic` next | park the old venv at `venv.bak`, rebuild in place from `requirements.txt` |
+| 2 | `0041 contact_lists RLS policy is missing or incompatible` | prod's hand-installed policy carries `OR (tenant_id IS NULL)`; 0041 only created-if-absent, then its strict postcondition refused | 0041 adopts exactly that legacy shape (drop + canonical recreate); other shapes still refused |
+
+**Why the code could not even import on prod:** the venv had drifted on 9 of 39 pins (fastapi 0.109.0 vs 0.139.0, starlette 0.35.1 vs 1.3.1, websockets 13.1 vs 15.0.1). Codex's `Depends(..., scope="function")` is load-bearing (commit-before-response) so the venv was rebuilt to the pin, not the code loosened.
+
+**Second defect found while reproducing:** `Alembic/env.py` never set `app.bypass_rls`; with a NOBYPASSRLS role on FORCE-RLS tables the migration connection read `leads=0, dialer_jobs=0` (34133 / 25510 real) — every data preflight had been vacuous. Fixed with `SET LOCAL app.bypass_rls='true'` in the migration transaction.
+
+**Proof before the live run:** backup `pre-0041.20260905T203346Z.sql.gz` (50M; row counts match live — the first two dumps were silently schema-only because `pg_dump` refuses under FORCE RLS; needs `--enable-row-security` + the bypass GUC). Full 0040→0043 SQL executed against production inside a rolled-back transaction: PASSED (version 0043, 5/5 FKs, escape gone, rolled back to 0040).
+
+**Live result:** alembic `0043_campaign_direction_lock`, head check passed; 8/8 new FKs present and `convalidated`; 4 `*_outbound_campaign_guard` triggers; direction-lock trigger on campaigns; `contact_lists.tenant_id` NOT NULL; legacy escape gone; leads 34133 / calls 1063 / dialer_jobs 25510 intact; running stack fastapi 0.139.0 / starlette 1.3.1 / websockets 15.0.1; four units active, `/health`, `/healthz/deep`, `/healthz/workers`, `/ai-options/providers` all 200; 0 tracebacks; voice gateway ready (`build_sha a4aa0c56` — unchanged, no gateway change in range).
+
+**Rollback:** `git checkout --detach d11a1667`, `mv venv venv-broken && mv venv.bak venv`, restart the four units. 0041–0043 are forward-only; the old code tolerates the new constraints.
+
+**Beyond brief:** the Postgres cluster has **no superuser** — `talkyai` is the only role and is `super=false bypassrls=false` (demoted 2026-08-30; no `postgres` role exists). Superuser-only maintenance now needs single-user mode. `webhook_deliveries` / `webhook_endpoints` policies still carry the `tenant_id IS NULL` escape (untouched by 0041).
+
+**Not yet verified:** a live PSTN call on the new starlette/websockets stack — the one thing the suite cannot prove.

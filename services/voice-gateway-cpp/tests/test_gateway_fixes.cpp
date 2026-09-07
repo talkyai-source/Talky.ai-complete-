@@ -201,6 +201,90 @@ void test_session_start_digest_is_idempotent_and_conflict_safe() {
     registry.stop_session(cfg.session_id, "test_done", already);
 }
 
+void test_media_totals_survive_stop_and_session_id_reuse() {
+    voice_gateway::SessionRegistry registry;
+    const int tx = make_udp_bound(43512);
+    sockaddr_in dst{};
+    dst.sin_family = AF_INET;
+    dst.sin_port = htons(43511);
+    inet_pton(AF_INET, "127.0.0.1", &dst.sin_addr);
+    for (int round = 0; round < 2; ++round) {
+        SessionConfig cfg = base_config("lifetime-stats", 43511, 43512);
+        std::string error;
+        std::promise<void> finishing;
+        auto finishing_future = finishing.get_future();
+        std::promise<void> release;
+        auto release_future = release.get_future().share();
+        check(registry.start_session(cfg, error, {}, [&]() {
+                  finishing.set_value();
+                  release_future.wait();
+              }) == voice_gateway::StartSessionResult::Started,
+              "lifetime_stats_session_start");
+        auto session = registry.get_session(cfg.session_id);
+        send_rtp(tx, dst, 10, 1600, 0x7777u, 0xFF);
+        for (int i = 0; i < 100 && session->snapshot().packets_in == 0; ++i) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        check(session->snapshot().packets_in == 1, "lifetime_stats_received_packet");
+        const auto before = registry.snapshot();
+        bool already = false;
+        auto stopped = std::async(std::launch::async, [&]() {
+            return registry.stop_session(cfg.session_id, "test_done", already);
+        });
+        check(finishing_future.wait_for(std::chrono::seconds(2)) == std::future_status::ready,
+              "lifetime_stats_teardown_entered");
+        check(registry.snapshot().packets_in == before.packets_in,
+              "lifetime_stats_visible_while_teardown_is_blocked");
+        release.set_value();
+        check(stopped.get(), "lifetime_stats_teardown_completed");
+        const auto after = registry.snapshot();
+        check(after.packets_in >= before.packets_in && after.packets_in == static_cast<uint64_t>(round + 1),
+              "lifetime_media_totals_do_not_reset_after_stop");
+        check(after.bytes_in > 0 && after.active_sessions == 0 && after.tts_queue_depth_frames == 0,
+              "lifetime_counters_retained_but_gauges_reset");
+        registry.stop_session(cfg.session_id, "duplicate_stop", already);
+        registry.reap_once();
+        check(registry.snapshot().packets_in == after.packets_in,
+              "lifetime_totals_duplicate_stop_does_not_double_count");
+    }
+    close(tx);
+}
+
+void test_media_totals_survive_reaper_retirement() {
+    voice_gateway::SessionRegistry registry;
+    auto cfg = base_config("reaped-stats", 43521, 43522);
+    std::string error;
+    check(registry.start_session(cfg, error) == voice_gateway::StartSessionResult::Started,
+          "reaped_stats_start");
+    auto session = registry.get_session(cfg.session_id);
+    const int tx = make_udp_bound(43522);
+    sockaddr_in dst{};
+    dst.sin_family = AF_INET;
+    dst.sin_port = htons(43521);
+    inet_pton(AF_INET, "127.0.0.1", &dst.sin_addr);
+    send_rtp(tx, dst, 10, 1600, 0x8888u);
+    for (int i = 0; i < 100 && session->snapshot().packets_in == 0; ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    check(session->snapshot().packets_in == 1, "reaped_stats_packet_received");
+    session->stop_async("test_self_stop");
+    registry.reap_once();
+    const auto before = registry.snapshot();
+    // Exercise the real production grace interval, without a test-only bypass.
+    std::this_thread::sleep_for(std::chrono::milliseconds(60050));
+    registry.reap_once();
+    const auto after = registry.snapshot();
+    check(!registry.get_session(cfg.session_id) && after.sessions_reaped_total == 1,
+          "reaped_stats_session_removed");
+    check(after.packets_in == 1 && after.bytes_in == before.bytes_in &&
+          after.tts_frames_dropped_total == before.tts_frames_dropped_total &&
+          after.timeout_events_total == before.timeout_events_total,
+          "reaped_stats_counters_preserved");
+    registry.reap_once();
+    check(registry.snapshot().sessions_reaped_total == 1, "reaped_stats_not_counted_twice");
+    close(tx);
+}
+
 void test_readiness_reflects_session_admission_capacity() {
     voice_gateway::SessionRegistry registry(1);
     voice_gateway::HttpServer server("127.0.0.1", 18093, registry);
@@ -219,8 +303,8 @@ void test_readiness_reflects_session_admission_capacity() {
     server.stop();
 }
 
-// VG-25: submitting more frames than the queue capacity must return the number
-// actually retained (the tail), never the raw submitted count.
+// Admission is all-or-nothing: rejected speech cannot evict accepted speech
+// or consume the chunk sequence needed for a safe explicit backpressure retry.
 void test_tts_overflow_accounting() {
     SessionConfig cfg = base_config("tts-of", 34101, 34102);
     cfg.tts_max_queue_frames = 10;
@@ -232,13 +316,49 @@ void test_tts_overflow_accounting() {
     std::vector<uint8_t> audio(25 * 160, 0xFF);  // 25 frames into a 10-frame queue
     std::size_t queued = 0;
     std::string e2;
-    const bool ok = session.enqueue_tts_ulaw(audio, false, queued, e2);
-    check(ok, "vg25_enqueue_ok");
-    check(queued == 10, "vg25_reports_retained_not_submitted (queued=" + std::to_string(queued) + ")");
+    const bool ok = session.enqueue_tts_ulaw(audio, false, queued, e2, "utterance", 0);
+    check(!ok && e2 == "tts_submission_exceeds_capacity", "tts_oversized_submission_rejected");
+    check(queued == 0 && session.snapshot().tts_frames_enqueued_total == 0,
+          "tts_rejected_submission_does_not_mutate_queue");
+    std::vector<uint8_t> valid_audio(2 * 160, 0xFF);
+    check(session.enqueue_tts_ulaw(valid_audio, false, queued, e2, "utterance", 0) && queued == 2,
+          "tts_rejection_does_not_consume_chunk_identity");
+    const auto before_stale_replace = session.snapshot();
+    check(!session.enqueue_tts_ulaw(valid_audio, true, queued, e2, "utterance", 0),
+          "tts_stale_replacement_rejected");
+    check(session.snapshot().tts_last_stop_reason != "clear_existing" &&
+          session.snapshot().tts_frames_dropped_total == before_stale_replace.tts_frames_dropped_total,
+          "tts_stale_replacement_preserves_accepted_speech");
+    const auto before_rejected_replace = session.snapshot();
+    check(!session.enqueue_tts_ulaw(audio, true, queued, e2, "replacement", 0),
+          "tts_invalid_replacement_rejected");
+    check(session.snapshot().tts_frames_dropped_total == before_rejected_replace.tts_frames_dropped_total,
+          "tts_invalid_replacement_does_not_discard_accepted_speech");
     // Depth is a live value the transmitter drains concurrently, so assert the
     // race-free invariant: it is capped and never exceeds tts_max_queue_frames.
     check(session.snapshot().tts_queue_depth_frames <= 10, "vg25_queue_depth_never_exceeds_cap");
 
+    session.stop("test_done");
+}
+
+void test_tts_queue_full_preserves_prior_acceptance() {
+    SessionConfig cfg = base_config("tts-full", 34111, 34112);
+    cfg.tts_max_queue_frames = 1000;
+    RtpSession session(cfg);
+    std::string error;
+    check(session.start(error), "tts_full_start");
+    // Twenty seconds of accepted speech keeps the capacity test independent
+    // of ordinary scheduler jitter while the sender drains concurrently.
+    std::vector<uint8_t> audio(1000 * 160, 0xFF);
+    std::size_t queued = 0;
+    check(session.enqueue_tts_ulaw(audio, false, queued, error, "long", 0),
+          "tts_full_initial_acceptance");
+    check(!session.enqueue_tts_ulaw(audio, false, queued, error, "long", 1) &&
+          error == "tts_queue_full" && queued == 0,
+          "tts_full_explicit_atomic_refusal");
+    const auto snapshot = session.snapshot();
+    check(snapshot.tts_frames_enqueued_total == 1000 && snapshot.tts_frames_dropped_total == 0,
+          "tts_full_does_not_evict_or_partially_accept");
     session.stop("test_done");
 }
 
@@ -1046,6 +1166,7 @@ public:
     }
     [[nodiscard]] int posts() const { return posts_.load(); }
     [[nodiscard]] int connections() const { return connections_.load(); }
+    void reject(bool value) { reject_.store(value); }
     // Raw bytes of the first/most recent POST (request line + headers + body),
     // so tests can assert on what the gateway actually put on the wire.
     [[nodiscard]] std::string first_request() const {
@@ -1103,9 +1224,10 @@ private:
                     }
                     last_request_ = raw;
                 }
-                const char resp[] =
-                    "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: keep-alive\r\n\r\nok";
-                if (send(c, resp, sizeof(resp) - 1, MSG_NOSIGNAL) <= 0) {
+                const std::string resp = reject_.load()
+                    ? "HTTP/1.1 503 Unavailable\r\nContent-Length: 2\r\nConnection: keep-alive\r\n\r\nno"
+                    : "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: keep-alive\r\n\r\nok";
+                if (send(c, resp.data(), resp.size(), MSG_NOSIGNAL) <= 0) {
                     break;
                 }
                 if (raw.find("Connection: close") != std::string::npos) {
@@ -1117,6 +1239,7 @@ private:
     }
 
     int fd_{-1};
+    std::atomic<bool> reject_{false};
     std::atomic<bool> running_{true};
     std::atomic<int> posts_{0};
     std::atomic<int> connections_{0};
@@ -1356,6 +1479,61 @@ void test_audio_callback_sends_internal_token() {
     server_thread.join();
 }
 
+void test_callback_failure_is_visible_and_recovers_without_stopping_rtp() {
+    MiniHttpSink sink(18089);
+    sink.reject(true);
+    voice_gateway::SessionRegistry registry;
+    voice_gateway::HttpServer server("127.0.0.1", 18097, registry);
+    std::string error;
+    check(server.start(error), "delivery_health_server_start");
+    std::thread serving([&server] { server.run(); });
+    const std::string body =
+        "{\"session_id\":\"delivery-health\",\"config_digest\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\","
+        "\"listen_ip\":\"127.0.0.1\",\"listen_port\":41730,\"remote_ip\":\"127.0.0.1\",\"remote_port\":41731,"
+        "\"codec\":\"pcmu\",\"ptime_ms\":20,"
+        "\"audio_callback_batch_frames\":2,\"audio_callback_url\":\"http://127.0.0.1:18089/api/v1/sip/telephony/audio/delivery-health\"}";
+    const auto started = http_roundtrip(18097, post_request("/v1/sessions/start", body));
+    check(started.find("\"status\":\"started\"") != std::string::npos,
+          "delivery_health_session_start " + started);
+    const auto stats = [&] {
+        return http_roundtrip(18097, std::string("GET /v1/sessions HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer ") +
+                              kControlToken + "\r\nConnection: close\r\n\r\n");
+    };
+    check(stats().find("\"callback_delivery_healthy\":true") != std::string::npos,
+          "delivery_health_no_audio_is_not_failure");
+    const int tx = socket(AF_INET, SOCK_DGRAM, 0);
+    sockaddr_in dst{};
+    dst.sin_family = AF_INET;
+    dst.sin_port = htons(41730);
+    inet_pton(AF_INET, "127.0.0.1", &dst.sin_addr);
+    uint16_t seq = 1;
+    for (; seq <= 220; ++seq) {
+        send_rtp(tx, dst, seq, seq * 160, 0x9898);
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+    const auto failed = stats();
+    check(failed.find("\"state\":\"Active\"") != std::string::npos ||
+          failed.find("\"state\":\"active\"") != std::string::npos, "delivery_health_rtp_stays_active");
+    check(failed.find("\"callback_delivery_healthy\":false") != std::string::npos,
+          "delivery_health_rejecting_backend_is_visible");
+    sink.reject(false);
+    bool recovered = false;
+    for (int i = 0; i < 100 && !recovered; ++i, ++seq) {
+        send_rtp(tx, dst, seq, seq * 160, 0x9898);
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        recovered = stats().find("\"callback_delivery_healthy\":true") != std::string::npos;
+    }
+    check(recovered, "delivery_health_success_resets_failure_streak");
+    (void)http_roundtrip(18097, post_request("/v1/sessions/stop", "{\"session_id\":\"delivery-health\"}"));
+    const auto totals = http_roundtrip(18097, "GET /stats HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n");
+    check(totals.find("\"callback_batches_failed_total\":") != std::string::npos &&
+          totals.find("\"callback_batches_failed_total\":0") == std::string::npos,
+          "delivery_health_failures_survive_session_retirement");
+    close(tx);
+    server.stop();
+    serving.join();
+}
+
 }  // namespace
 
 int main() {
@@ -1371,7 +1549,10 @@ int main() {
     test_failure_state_is_not_overwritten_by_stopped();
     test_session_start_digest_is_idempotent_and_conflict_safe();
     test_readiness_reflects_session_admission_capacity();
+    test_media_totals_survive_stop_and_session_id_reuse();
+    test_media_totals_survive_reaper_retirement();
     test_tts_overflow_accounting();
+    test_tts_queue_full_preserves_prior_acceptance();
     test_jitter_flood_no_deadlock();
     test_stt_reorder_ordering();
     test_stt_reorder_rejects_late_after_emit();
@@ -1390,6 +1571,7 @@ int main() {
     test_interrupt_send_barrier();
     test_sink_finish_flushes_tail();
     test_audio_callback_sends_internal_token();
+    test_callback_failure_is_visible_and_recovers_without_stopping_rtp();
     test_slowloris_header_deadline();
     std::cout << "passed=" << g_pass << " failed=" << g_fail << "\n";
     return g_fail == 0 ? 0 : 1;

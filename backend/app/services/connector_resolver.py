@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Any, Tuple
+from typing import Any, List, Optional, Tuple
 
 import httpx
 
@@ -97,6 +97,8 @@ async def _refresh_and_store(
     account_id: str,
     tenant_id: str,
     refresh_token: str,
+    *,
+    existing_config: Optional[dict] = None,
 ) -> str:
     """Refresh the OAuth token, persist the new tokens, return the access token."""
     enc = get_encryption_service()
@@ -108,6 +110,20 @@ async def _refresh_and_store(
             category="authentication",
             message="The provider returned no access token.",
         )
+    # Providers that return per-org state with the tokens (Salesforce's
+    # instance_url) may move; keep connectors.config current. Best-effort:
+    # a failed config write never invalidates a successful token refresh.
+    try:
+        extra = connector.config_from_tokens(new_tokens)
+        if isinstance(extra, dict) and extra:
+            base = dict(existing_config) if isinstance(existing_config, dict) else {}
+            if any(base.get(k) != v for k, v in extra.items()):
+                base.update(extra)
+                db_client.table("connectors").update({"config": base}).eq("id", connector_id).eq(
+                    "tenant_id", tenant_id
+                ).execute()
+    except Exception as exc:  # noqa: BLE001 - config write is auxiliary
+        logger.warning("connector_resolver: config write-back failed for %s: %s", connector_id, exc)
     try:
         write = db_client.table("connector_accounts").update({
             "access_token_encrypted": enc.encrypt(new_tokens.access_token),
@@ -127,28 +143,74 @@ async def _refresh_and_store(
     return new_tokens.access_token
 
 
-async def resolve_active_connector(
+def list_active_connector_providers(
     db_client: Any,
     tenant_id: str,
     connector_type: str,
-    *,
-    force_refresh: bool = False,
-) -> Tuple[BaseConnector, str, str]:
-    """Return ``(connector, connector_id, provider)`` for the tenant's active
-    connector of ``connector_type`` ("email" | "drive" | "calendar" | ...),
-    with a valid (refreshed if needed) access token installed.
-
-    Raises ``ConnectorNotConnectedError`` when nothing is connected/usable.
-    """
+) -> List[str]:
+    """Distinct providers with an active connector of ``connector_type``
+    (newest first). Used by the CRM sync so a tenant with BOTH HubSpot and
+    Salesforce connected gets the call logged in each."""
     resp = (
         db_client.table("connectors")
         .select("id, provider, status, created_at")
         .eq("tenant_id", tenant_id)
         .eq("type", connector_type)
         .eq("status", "active")
-        .order("created_at", desc=True)  # newest-first, matching the UI's choice
+        .order("created_at", desc=True)
         .execute()
     )
+    if getattr(resp, "error", None):
+        raise ConnectorLookupError(connector_type, str(resp.error))
+    seen: List[str] = []
+    for row in resp.data or []:
+        provider = str(row.get("provider") or "")
+        if provider and provider not in seen:
+            seen.append(provider)
+    return seen
+
+
+def _coerce_config(raw: Any) -> Optional[dict]:
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, str) and raw.strip():
+        try:
+            import json as _json
+            parsed = _json.loads(raw)
+            return parsed if isinstance(parsed, dict) else None
+        except ValueError:
+            return None
+    return None
+
+
+async def resolve_active_connector(
+    db_client: Any,
+    tenant_id: str,
+    connector_type: str,
+    *,
+    force_refresh: bool = False,
+    provider: Optional[str] = None,
+) -> Tuple[BaseConnector, str, str]:
+    """Return ``(connector, connector_id, provider)`` for the tenant's active
+    connector of ``connector_type`` ("email" | "drive" | "calendar" | ...),
+    with a valid (refreshed if needed) access token installed.
+
+    ``provider`` narrows the lookup to one provider (the CRM type can hold a
+    HubSpot AND a Salesforce connector at once). Any persisted
+    ``connectors.config`` is handed to the connector via ``apply_config``.
+
+    Raises ``ConnectorNotConnectedError`` when nothing is connected/usable.
+    """
+    query = (
+        db_client.table("connectors")
+        .select("id, provider, status, created_at, config")
+        .eq("tenant_id", tenant_id)
+        .eq("type", connector_type)
+        .eq("status", "active")
+    )
+    if provider:
+        query = query.eq("provider", provider)
+    resp = query.order("created_at", desc=True).execute()  # newest-first, matching the UI's choice
     # A DB/RLS/connectivity error must NOT masquerade as "not connected" — the
     # adapter swallows exceptions into resp.error with data=None (agent finding).
     if getattr(resp, "error", None):
@@ -257,6 +319,9 @@ async def resolve_active_connector(
         )
 
     connector = ConnectorFactory.create(provider=provider, tenant_id=tenant_id, connector_id=connector_id)
+    row_config = _coerce_config(rows[0].get("config") if isinstance(rows[0], dict) else None)
+    if row_config is not None:
+        connector.apply_config(row_config)
 
     # Refresh slightly before expiry so the token cannot die during a provider
     # round trip.  ``force_refresh`` is used for one bounded retry after a 401.
@@ -269,6 +334,7 @@ async def resolve_active_connector(
                 str(acc_data["id"]),
                 tenant_id,
                 refresh_token,
+                existing_config=row_config,
             )
         except _ConnectorTokenStoreError as exc:
             raise ConnectorLookupError(connector_type, str(exc)) from exc

@@ -1464,6 +1464,9 @@ async def _load_termination_pending_candidates() -> list[dict[str, Any]]:
         )
         return []
     async with acquire_with_tenant(db_pool, None, timeout=5.0) as conn:
+        from app.domain.services.telephony.legacy_pending_identity import reconcile_pending_identity
+
+        await reconcile_pending_identity(conn, adapter_provider)
         rows = list(
             await conn.fetch(
                 """
@@ -1769,6 +1772,15 @@ async def recover_orphaned_calls() -> int:
     if callable(ownership_check) and not ownership_check():
         logger.warning("orphan_recovery_skipped_nonowner")
         return 0
+    media_reconcile = getattr(active_adapter, "reconcile_orphaned_media", None)
+    if callable(ownership_check) and callable(media_reconcile):
+        try:
+            await media_reconcile(
+                owner_check=ownership_check,
+                exclusions=lambda: _current_recovery_exclusions(sb, active_adapter),
+            )
+        except Exception as exc:
+            logger.warning("orphan_media_reconciliation_deferred err=%s", exc)
     try:
         await _register_unknown_asterisk_cleanup_candidates(
             sb,
@@ -3432,18 +3444,7 @@ def _pinned_inbound_ai_config(
     return ai_config, voice_tuning
 
 
-_TRUE_INBOUND_DIRECTIVE = """\
-TRUE INBOUND CALL — THE CALLER CONTACTED THE COMPANY (this overrides any
-outbound/cold-call framing below):
-- The caller dialed this number. Never say or imply that you called them.
-- Answer their direct question first. Then ask at most one relevant question.
-- Be a concise, warm inbound representative: understand why they called,
-  collect only what is needed, and move to the appropriate approved next step.
-- Never claim that booking, transfer, callback, opt-out, or another external
-  action succeeded unless the corresponding runtime action confirms it.
-- Respect opt-out, safety, wrong-number, privacy, and human-transfer requests
-  before qualification or sales goals.
-"""
+from app.services.scripts.prompts.inbound import TRUE_INBOUND_DIRECTIVE as _TRUE_INBOUND_DIRECTIVE
 
 _AFTER_HOURS_VOICEMAIL_DIRECTIVE = """\
 AFTER-HOURS AI MESSAGE INTAKE (this overrides sales and qualification stages):
@@ -3480,18 +3481,22 @@ def _build_pinned_inbound_config(
         inbound_cfg.get("qualification_config") or {},
     )
     ai_config, voice_tuning = _pinned_inbound_ai_config(admission_payload)
+    first_speaker, pinned_greeting = _pinned_inbound_opening(admission_payload)
     config = _build_telephony_session_config(
         gateway_type=gateway_type,
         campaign=pinned_campaign,
         direction=Direction.INBOUND,
+        opening_mode="agent_first" if first_speaker == "agent" or selected_action == "voicemail" else "callee_first",
         voice_tuning_override=voice_tuning,
         ai_config_override=ai_config,
     )
-    base_prompt = str(getattr(config, "system_prompt", "") or "").strip()
-    directive = _TRUE_INBOUND_DIRECTIVE
     if selected_action == "voicemail":
-        directive += "\n" + _AFTER_HOURS_VOICEMAIL_DIRECTIVE
-    config.system_prompt = f"{directive}\n\n{base_prompt}" if base_prompt else directive
+        config.system_prompt = f"{config.system_prompt}\n\n{_AFTER_HOURS_VOICEMAIL_DIRECTIVE}"
+    # Direction is composed into the base itself, not prepended over a
+    # contradictory outbound playbook. Include the pinned after-hours behavior
+    # in the stable identity recorded for this call.
+    from app.services.scripts.prompts.versions import hash_prompt
+    config.prompt_hash = hash_prompt(config.system_prompt)
 
     # Realtime builds its session instructions before ``VoiceSession`` exists,
     # so its opening policy must travel on the config now.  Deriving this from
@@ -3499,7 +3504,6 @@ def _build_pinned_inbound_config(
     # realtime call to caller-first, leaving configured agent-first calls and
     # after-hours message intake silent.  Only the immutable admission snapshot
     # is consulted here.
-    first_speaker, pinned_greeting = _pinned_inbound_opening(admission_payload)
     if selected_action == "voicemail":
         first_speaker = "agent"
         raw_message = inbound_cfg.get("after_hours_message")
@@ -4781,10 +4785,15 @@ def _resolve_inbound_terminal_outcome(
 
         if selected_action == "voicemail":
             return "answered"
-        return resolve_call_outcome(
-            voice_session,
-            hangup_reason=hangup_reason,
-        ).value
+        # This session was created by the inbound answered lifecycle. Caller
+        # speech, session length and outbound AMD text heuristics cannot undo
+        # that answer. Keep business outcomes separate from pickup evidence.
+        context = getattr(call_session, "conversation_context", None)
+        if getattr(voice_session, "_goal_achieved", False) or getattr(context, "goal_achieved", False):
+            return "goal_achieved"
+        if getattr(voice_session, "_goal_failed", False):
+            return "goal_not_achieved"
+        return "answered"
 
     # Restart recovery may already have an outcome from a prior partial
     # projection. Preserve known canonical values; the finalizer uses COALESCE

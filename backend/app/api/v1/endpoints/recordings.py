@@ -21,6 +21,7 @@ from app.api.v1.dependencies import (
     get_current_user,
     get_db_client,
     get_db_pool,
+    require_admin_tenant,
 )
 from app.core.db_utils import acquire_with_tenant
 from app.core.security.rbac import (
@@ -138,6 +139,188 @@ async def _safe_audit(audit_logger: AuditLogger, **kwargs: Any) -> None:
         logger.warning("tenant recording audit failed: %s", type(exc).__name__)
 
 
+# ── Recording policy (tenant self-service) ──────────────────────────────────
+#
+# Since 2026-08-23 the recorder fails CLOSED when a tenant has no row in
+# tenant_recording_policy ("recording_policy_absent … recording disabled").
+# That is the right compliance default — but there was no way for a tenant to
+# create the row except a DBA, so every tenant onboarded after the change (and
+# the two live production tenants) silently stopped getting recordings. These
+# two endpoints are that missing surface.
+
+_CONSENT_MODES = ("disabled", "one_party", "two_party")
+# Column default on tenant_recording_policy.announcement_text (NOT NULL). Used
+# when a two-party policy is saved without custom wording.
+DEFAULT_ANNOUNCEMENT_TEXT = (
+    "This call may be recorded for quality and training purposes. "
+    "Press 9 at any time to opt out of recording."
+)
+_COUNTRY_CODE_RE = r"^[A-Z]{2}(-[A-Z0-9]{1,3})?$"
+
+
+class RecordingPolicyBody(BaseModel):
+    default_consent_mode: str = Field(..., description="disabled | one_party | two_party")
+    announcement_text: Optional[str] = Field(None, max_length=600)
+    opt_out_dtmf_digit: Optional[str] = Field(None, max_length=1)
+    two_party_country_codes: List[str] = Field(default_factory=list, max_length=300)
+    retention_days: int = Field(90, ge=1, le=3650)
+
+    @field_validator("default_consent_mode")
+    @classmethod
+    def _mode(cls, value: str) -> str:
+        v = (value or "").strip().lower()
+        if v not in _CONSENT_MODES:
+            raise ValueError("default_consent_mode must be disabled, one_party or two_party")
+        return v
+
+    @field_validator("opt_out_dtmf_digit")
+    @classmethod
+    def _digit(cls, value: Optional[str]) -> Optional[str]:
+        v = (value or "").strip()
+        if not v:
+            return None
+        if v not in "0123456789*#" or len(v) != 1:
+            raise ValueError("opt_out_dtmf_digit must be a single key 0-9, * or #")
+        return v
+
+    @field_validator("two_party_country_codes")
+    @classmethod
+    def _codes(cls, value: List[str]) -> List[str]:
+        import re as _re
+
+        out: List[str] = []
+        for raw in value or []:
+            code = str(raw or "").strip().upper()
+            if not code:
+                continue
+            if not _re.match(_COUNTRY_CODE_RE, code):
+                raise ValueError(f"invalid country code: {raw!r} (use ISO-3166 alpha-2, e.g. GB or US-CA)")
+            if code not in out:
+                out.append(code)
+        return out
+
+    @field_validator("announcement_text")
+    @classmethod
+    def _text(cls, value: Optional[str]) -> Optional[str]:
+        v = " ".join((value or "").split())
+        return v or None
+
+
+class RecordingPolicyResponse(BaseModel):
+    configured: bool
+    default_consent_mode: Optional[str] = None
+    announcement_text: Optional[str] = None
+    opt_out_dtmf_digit: Optional[str] = None
+    two_party_country_codes: List[str] = Field(default_factory=list)
+    retention_days: Optional[int] = None
+    updated_at: Optional[str] = None
+    effect: str
+
+
+def _policy_effect(mode: Optional[str]) -> str:
+    if mode == "one_party":
+        return "Calls are recorded without a spoken notice. You are asserting this is lawful where you call."
+    if mode == "two_party":
+        return "Calls are recorded; the agent speaks a recording notice first where the policy requires it."
+    if mode == "disabled":
+        return "Calls are not recorded."
+    return "No policy configured: calls are NOT recorded until one is saved."
+
+
+def _policy_response(row: Any) -> RecordingPolicyResponse:
+    if not row:
+        return RecordingPolicyResponse(configured=False, effect=_policy_effect(None))
+    updated = row.get("updated_at")
+    return RecordingPolicyResponse(
+        configured=True,
+        default_consent_mode=row.get("default_consent_mode"),
+        announcement_text=(row.get("announcement_text") or None),
+        opt_out_dtmf_digit=row.get("opt_out_dtmf_digit"),
+        two_party_country_codes=list(row.get("two_party_country_codes") or []),
+        retention_days=row.get("retention_days"),
+        updated_at=updated.isoformat() if hasattr(updated, "isoformat") else (str(updated) if updated else None),
+        effect=_policy_effect(row.get("default_consent_mode")),
+    )
+
+
+@router.get("/policy", response_model=RecordingPolicyResponse)
+async def get_recording_policy(
+    user: CurrentUser = Depends(get_current_user),
+    db_pool: asyncpg.Pool = Depends(get_db_pool),
+):
+    """The tenant's call-recording policy (absent = recording OFF)."""
+    tenant_id = _tenant_id(user)
+    async with acquire_with_tenant(db_pool, tenant_id) as conn:
+        row = await conn.fetchrow(
+            "SELECT * FROM tenant_recording_policy WHERE tenant_id = $1", UUID(tenant_id)
+        )
+    return _policy_response(dict(row) if row else None)
+
+
+@router.put("/policy", response_model=RecordingPolicyResponse)
+async def put_recording_policy(
+    body: RecordingPolicyBody,
+    user: CurrentUser = Depends(require_admin_tenant),
+    db_pool: asyncpg.Pool = Depends(get_db_pool),
+    audit_logger: AuditLogger = Depends(get_audit_logger),
+):
+    """Create or replace the tenant's recording policy (tenant admins only).
+
+    A consent mode is a legal assertion by the tenant, so it is audited.
+    """
+    tenant_id = _tenant_id(user)
+    # announcement_text and two_party_country_codes are NOT NULL columns; the
+    # existing rows use '' / '{}' for "none". A two-party policy saved without
+    # wording gets the platform default notice so the agent has something to say.
+    announcement = body.announcement_text or ""
+    if body.default_consent_mode == "two_party" and not announcement:
+        announcement = DEFAULT_ANNOUNCEMENT_TEXT
+    async with acquire_with_tenant(db_pool, tenant_id) as conn:
+        row = await conn.fetchrow(
+            """
+            INSERT INTO tenant_recording_policy (
+                tenant_id, default_consent_mode, announcement_text, opt_out_dtmf_digit,
+                two_party_country_codes, retention_days, created_at, updated_at
+            ) VALUES ($1, $2, $3, $4, $5::text[], $6, NOW(), NOW())
+            ON CONFLICT (tenant_id) DO UPDATE SET
+                default_consent_mode = EXCLUDED.default_consent_mode,
+                announcement_text = EXCLUDED.announcement_text,
+                opt_out_dtmf_digit = EXCLUDED.opt_out_dtmf_digit,
+                two_party_country_codes = EXCLUDED.two_party_country_codes,
+                retention_days = EXCLUDED.retention_days,
+                updated_at = NOW()
+            RETURNING *
+            """,
+            UUID(tenant_id),
+            body.default_consent_mode,
+            announcement,
+            body.opt_out_dtmf_digit,
+            body.two_party_country_codes,
+            body.retention_days,
+        )
+    logger.info(
+        "recording_policy_saved tenant=%s mode=%s retention_days=%s by user=%s",
+        tenant_id[:8], body.default_consent_mode, body.retention_days, user.id,
+    )
+    await _safe_audit(
+        audit_logger,
+        event=AuditEvent(
+            event_type="recording_policy_updated",
+            actor_id=str(user.id),
+            tenant_id=tenant_id,
+            resource_type="tenant_recording_policy",
+            resource_id=tenant_id,
+            details={
+                "default_consent_mode": body.default_consent_mode,
+                "retention_days": body.retention_days,
+                "announcement": bool(body.announcement_text),
+                "two_party_country_codes": body.two_party_country_codes,
+            },
+        ),
+    )
+    return _policy_response(dict(row) if row else None)
+
+
 @router.get("/", response_model=RecordingListResponse)
 async def list_recordings(
     call_id: Optional[str] = Query(None),
@@ -248,7 +431,7 @@ async def get_recording_url(
             url = await asyncio.to_thread(
                 s3.presigned_url,
                 str(row["s3_key"]),
-                f"recording-{recording_id}.wav",
+                f"recording-{recording_id}.{_download_extension(row['mime_type'])}",
                 str(row["s3_bucket"]),
             )
         except Exception as exc:
@@ -421,7 +604,7 @@ async def stream_recording(
             filepath,
             request,
             media_type=str(row["mime_type"] or "audio/wav"),
-            filename=f"recording-{recording_id}.wav",
+            filename=f"recording-{recording_id}.{_download_extension(row['mime_type'])}",
         )
 
     # S3 path: generate a short-lived URL from the already tenant-scoped row.
@@ -464,6 +647,13 @@ async def stream_recording(
     )
 
 
+_EXT_BY_MIME = {"audio/mpeg": "mp3", "audio/mp3": "mp3", "audio/ogg": "ogg", "audio/wav": "wav", "audio/x-wav": "wav"}
+
+
+def _download_extension(mime_type: Optional[str]) -> str:
+    return _EXT_BY_MIME.get(str(mime_type or "").split(";")[0].strip().lower(), "wav")
+
+
 @router.get("/{recording_id}/download")
 async def download_recording(
     recording_id: UUID,
@@ -479,7 +669,7 @@ async def download_recording(
     tenant_id = _tenant_id(current_user)
     row = await _recording_storage_row(db_client, recording_id, tenant_id)
     _assert_recording_playable(row)
-    filename = f"recording-{recording_id}.wav"
+    filename = f"recording-{recording_id}.{_download_extension(row['mime_type'])}"
 
     if row["s3_bucket"] == "local":
         filepath = _validated_recording_path(str(row["s3_key"]))

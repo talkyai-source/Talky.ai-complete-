@@ -84,6 +84,65 @@ export const ConnectorProviderStatusSchema = z.object({
 
 export type ConnectorProviderStatus = z.infer<typeof ConnectorProviderStatusSchema>;
 
+export const SalesforceSettingsSchema = z.object({
+    callback_campaign_id: z.string().nullable().optional(),
+    log_calls: z.boolean(),
+    create_leads: z.boolean(),
+    sync_inbound: z.boolean(),
+    callback_priority: z.number(),
+});
+
+export type SalesforceSettings = z.infer<typeof SalesforceSettingsSchema>;
+
+export const SalesforceWebhookInfoSchema = z.object({
+    callback_url: z.string().nullable().optional(),
+    outbound_message_url: z.string().nullable().optional(),
+    token_set: z.boolean(),
+    token_masked: z.string().nullable().optional(),
+    token: z.string().nullable().optional(),
+});
+
+export const SalesforceSettingsResponseSchema = z.object({
+    server_configured: z.boolean(),
+    connected: z.boolean(),
+    status: z.string(),
+    connector_id: z.string().nullable().optional(),
+    org_id: z.string().nullable().optional(),
+    username: z.string().nullable().optional(),
+    instance_url: z.string().nullable().optional(),
+    api_version: z.string(),
+    login_url: z.string(),
+    settings: SalesforceSettingsSchema,
+    webhook: SalesforceWebhookInfoSchema,
+    last_synced_call_at: z.string().nullable().optional(),
+});
+
+export type SalesforceSettingsResponse = z.infer<typeof SalesforceSettingsResponseSchema>;
+
+export const SalesforceProbeSchema = z.object({
+    ok: z.boolean(),
+    org_id: z.string().nullable().optional(),
+    username: z.string().nullable().optional(),
+    instance_url: z.string().nullable().optional(),
+    api_version: z.string().nullable().optional(),
+    error: z.string().nullable().optional(),
+});
+
+export type SalesforceProbe = z.infer<typeof SalesforceProbeSchema>;
+
+export const SalesforceImportResultSchema = z.object({
+    campaign_id: z.string(),
+    list_id: z.string().nullable().optional(),
+    fetched: z.number(),
+    imported: z.number(),
+    revived: z.number(),
+    duplicates_skipped: z.number(),
+    invalid: z.number(),
+    errors: z.array(z.record(z.unknown())).optional(),
+});
+
+export type SalesforceImportResult = z.infer<typeof SalesforceImportResultSchema>;
+
 export const EmailTemplateSchema = z.object({
     id: z.string(),
     name: z.string(),

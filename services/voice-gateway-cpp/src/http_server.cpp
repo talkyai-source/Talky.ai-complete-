@@ -497,6 +497,11 @@ std::string session_stats_json(const SessionStatsSnapshot& stats) {
         << "\"tts_frames_dropped_total\":" << stats.tts_frames_dropped_total << ','
         << "\"tts_queue_depth_frames\":" << stats.tts_queue_depth_frames << ','
         << "\"tts_last_stop_reason\":\"" << escape_json(stats.tts_last_stop_reason) << "\","
+        << "\"callback_delivery_healthy\":" << (stats.callback_delivery.healthy ? "true" : "false") << ','
+        << "\"callback_failure_streak_ms\":" << stats.callback_delivery.failure_streak_ms << ','
+        << "\"callback_batches_delivered_total\":" << stats.callback_delivery.delivered << ','
+        << "\"callback_batches_failed_total\":" << stats.callback_delivery.failed << ','
+        << "\"callback_batches_dropped_total\":" << stats.callback_delivery.dropped << ','
         << "\"stt_frames_emitted_total\":" << stats.stt_frames_emitted_total << ','
         << "\"stt_floor_dropped_total\":" << stats.stt_floor_dropped_total << ','
         << "\"stt_probation_dropped_total\":" << stats.stt_probation_dropped_total << ','
@@ -513,6 +518,9 @@ std::string process_stats_json(const ProcessStatsSnapshot& stats) {
         << "\"sessions_started_total\":" << stats.sessions_started_total << ','
         << "\"sessions_stopped_total\":" << stats.sessions_stopped_total << ','
         << "\"sessions_reaped_total\":" << stats.sessions_reaped_total << ','
+        << "\"callback_batches_delivered_total\":" << stats.callback_batches_delivered_total << ','
+        << "\"callback_batches_failed_total\":" << stats.callback_batches_failed_total << ','
+        << "\"callback_batches_dropped_total\":" << stats.callback_batches_dropped_total << ','
         << "\"active_sessions\":" << stats.active_sessions << ','
         << "\"stopped_sessions\":" << stats.stopped_sessions << ','
         << "\"packets_in\":" << stats.packets_in << ','
@@ -555,6 +563,8 @@ std::string sessions_list_json(const std::vector<SessionStatsSnapshot>& sessions
             << "\"config_digest\":\"" << escape_json(s.config_digest) << "\","
             << "\"state\":\"" << escape_json(s.state) << "\","
             << "\"stop_reason\":\"" << escape_json(s.stop_reason) << "\","
+            << "\"callback_delivery_healthy\":" << (s.callback_delivery.healthy ? "true" : "false") << ','
+            << "\"callback_failure_streak_ms\":" << s.callback_delivery.failure_streak_ms << ','
             << "\"tts_queue_depth_frames\":" << s.tts_queue_depth_frames
             << "}";
     }
@@ -1124,8 +1134,8 @@ public:
     // bytes of JSON is tens of KB, safely bounded per session.
     static constexpr std::size_t kMaxQueue = 256;
 
-    explicit AudioCallbackSender(std::string url)
-        : url_(std::move(url)), worker_([this] { run(); }) {}
+    AudioCallbackSender(std::string url, std::shared_ptr<CallbackDeliveryState> delivery)
+        : url_(std::move(url)), delivery_(std::move(delivery)), worker_([this] { run(); }) {}
 
     ~AudioCallbackSender() {
         {
@@ -1157,6 +1167,7 @@ public:
                 const uint64_t dropped_sequence = queue_.front().sequence;
                 queue_.pop_front();  // drop-oldest
                 ++overflow_drops_;
+                delivery_->drop(1);
                 if (overflow_drops_ == 1 || overflow_drops_ % 100 == 0) {
                     std::cerr << "event=stt_callback_queue_overflow url=" << url_
                               << " dropped_sequence=" << dropped_sequence
@@ -1185,6 +1196,17 @@ public:
         finishing_ = true;
         cv_.notify_all();
         drained_cv_.wait_for(lock, deadline, [this] { return queue_.empty() && !posting_; });
+        // Finalize counters before registry retirement snapshots them. The
+        // remaining FIFO is dropped explicitly; only one bounded in-flight
+        // request/retry sequence may still finish before this join returns.
+        stop_ = true;
+        delivery_->drop(queue_.size());
+        queue_.clear();
+        lock.unlock();
+        cv_.notify_all();
+        if (worker_.joinable()) {
+            worker_.join();
+        }
     }
 
 private:
@@ -1237,6 +1259,7 @@ private:
                         std::this_thread::sleep_for(std::chrono::milliseconds(10 * attempts));
                     }
                 }
+                delivery_->record(delivered);
                 if (delivered) {
                     consecutive_failures_ = 0;
                 } else {
@@ -1254,6 +1277,7 @@ private:
                     connection_fd_ = -1;
                 }
                 ++consecutive_failures_;
+                delivery_->record(false);
             }
             {
                 std::lock_guard<std::mutex> lock(mutex_);
@@ -1266,10 +1290,12 @@ private:
       } catch (...) {
         // Only reachable if the mutex/cv machinery itself throws — contain it so
         // it cannot reach the thread entry and std::terminate the gateway (#2).
+        delivery_->worker_failed();
       }
     }
 
     const std::string url_;
+    const std::shared_ptr<CallbackDeliveryState> delivery_;
     std::mutex mutex_;
     std::condition_variable cv_;
     std::condition_variable drained_cv_;
@@ -1914,7 +1940,8 @@ void HttpServer::handle_client(const int client_fd) {
             // audio_callback_ / audio_sink_finisher_, so the sender (and its
             // worker thread) is destroyed and JOINED when the session is
             // destroyed. No detached thread outlives the session.
-            auto sender = std::make_shared<AudioCallbackSender>(config.audio_callback_url);
+            config.callback_delivery = std::make_shared<CallbackDeliveryState>();
+            auto sender = std::make_shared<AudioCallbackSender>(config.audio_callback_url, config.callback_delivery);
 
             audio_cb = [cb_session_id, batch_frames, state, sender](
                            const std::string& /*sid*/, const std::vector<uint8_t>& pcmu) {
@@ -2058,7 +2085,9 @@ void HttpServer::handle_client(const int client_fd) {
             // distinguishable from malformed requests so the backend can treat
             // them as benign.
             const bool stale = (error == "utterance_interrupted" || error == "stale_or_duplicate_chunk");
-            write_response(client_fd, stale ? 409 : 400, stale ? "Conflict" : "Bad Request",
+            const bool backpressure = error == "tts_queue_full";
+            write_response(client_fd, backpressure ? 429 : (stale ? 409 : 400),
+                           backpressure ? "Too Many Requests" : (stale ? "Conflict" : "Bad Request"),
                            "{\"error\":\"" + escape_json(error) + "\"}");
             return;
         }
