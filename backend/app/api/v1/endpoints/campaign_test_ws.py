@@ -172,6 +172,15 @@ async def _check_login_session(websocket, pool, user_id, session_id) -> bool:
         await websocket.close(code=1011, reason="Authorization unavailable")
         return False
     if not active:
+        # Before 2026-09-08 this was the only refusal path with NO log line, so
+        # a fortnight of "sometimes the test agent says my session expired" had
+        # to be diagnosed from the absence of a "start" line. Name the reason.
+        logger.warning(
+            "campaign_test_ws auth refused: %s user=%s",
+            "token carries no sid (minted by a refresh before 0045 bound the family to its session)"
+            if not session_id else "login session revoked or expired",
+            user_id,
+        )
         await websocket.send_json({"type": "error", "code": "auth_required",
                                    "message": "Your session has expired. Reload the page and sign in again."})
         await websocket.close(code=1008, reason="Inactive login session")

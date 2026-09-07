@@ -217,6 +217,7 @@ async def issue_cookie_auth(
         tenant_id=tenant_id,
         ip=ip,
         user_agent=user_agent,
+        session_id=session_id,
     )
     set_access_cookie(response, access_jwt)
     set_refresh_cookie(response, raw_refresh)

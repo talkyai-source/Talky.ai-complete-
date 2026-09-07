@@ -45,8 +45,13 @@ async def issue_initial_refresh_token(
     tenant_id: Optional[str] = None,
     ip: Optional[str] = None,
     user_agent: Optional[str] = None,
+    session_id: Optional[str] = None,
 ) -> tuple[str, UUID, UUID]:
     """Issue the first refresh token in a new family. Called at login/signup.
+
+    ``session_id`` is the security_sessions row this login created. It is
+    carried through every rotation so a refreshed access JWT keeps its ``sid``
+    claim — without it the binding was lost 15 minutes after login (0045).
 
     Returns ``(raw_token, token_id, family_id)``. The raw token is returned
     to the caller exactly once and must be placed in the httpOnly refresh
@@ -61,8 +66,8 @@ async def issue_initial_refresh_token(
         """
         INSERT INTO refresh_tokens
             (family_id, user_id, tenant_id, token_hash, parent_id,
-             issued_at, expires_at, ip, user_agent)
-        VALUES (uuid_generate_v4(), $1, $2, $3, NULL, $4, $5, $6, $7)
+             issued_at, expires_at, ip, user_agent, session_id)
+        VALUES (uuid_generate_v4(), $1, $2, $3, NULL, $4, $5, $6, $7, $8)
         RETURNING id, family_id
         """,
         user_id,
@@ -72,6 +77,7 @@ async def issue_initial_refresh_token(
         expires_at,
         ip,
         user_agent,
+        session_id,
     )
     return raw, row["id"], row["family_id"]
 
@@ -94,7 +100,8 @@ async def rotate_refresh_token(
 
     row = await conn.fetchrow(
         """
-        SELECT id, family_id, user_id, tenant_id, expires_at, used_at, revoked_at
+        SELECT id, family_id, user_id, tenant_id, expires_at, used_at, revoked_at,
+               session_id
         FROM refresh_tokens
         WHERE token_hash = $1
         """,
@@ -179,8 +186,8 @@ async def rotate_refresh_token(
             """
             INSERT INTO refresh_tokens
                 (family_id, user_id, tenant_id, token_hash, parent_id,
-                 issued_at, expires_at, ip, user_agent)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                 issued_at, expires_at, ip, user_agent, session_id)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
             """,
             row["family_id"],
             row["user_id"],
@@ -191,12 +198,15 @@ async def rotate_refresh_token(
             expires_at,
             ip,
             user_agent,
+            row.get("session_id"),
         )
 
+    session_id = row.get("session_id")
     return new_raw, {
         "user_id": str(row["user_id"]),
         "tenant_id": str(row["tenant_id"]) if row["tenant_id"] else None,
         "family_id": str(row["family_id"]),
+        "session_id": str(session_id) if session_id else None,
     }
 
 

@@ -1,7 +1,9 @@
 """POST /auth/refresh — rotate the refresh token and issue a fresh access JWT."""
 from __future__ import annotations
 
-from datetime import timedelta
+import logging
+
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response, status
@@ -16,11 +18,48 @@ from app.core.security.cookies import (
     set_access_cookie,
     set_refresh_cookie,
 )
-from app.core.security.refresh_tokens import rotate_refresh_token
+from app.core.security.refresh_tokens import revoke_family_by_token, rotate_refresh_token
+from app.core.security.sessions import SESSION_LIFETIME_HOURS, get_session_by_id
 
 from ._shared import get_client_ip, get_user_agent, limiter
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(tags=["auth"])
+
+
+async def bind_refresh_to_session(conn, claims: dict) -> tuple[Optional[str], bool]:
+    """Return ``(session_id, alive)`` for the family's login session.
+
+    * No session on the family (issued before 0045 and unmatched by its
+      backfill) → ``(None, True)``: mint without ``sid`` exactly as before.
+    * Session revoked or expired → ``(sid, False)``: the login is over
+      everywhere, so the refresh must fail instead of quietly out-living it.
+    * Alive → slide ``last_active_at`` and extend ``expires_at`` so the login
+      session lives as long as the refresh family is actively used. Before
+      this the session died 24 h after login while REST kept working on the
+      7-day refresh token — one more way "the session" meant different
+      things on different pages.
+    """
+    session_id = claims.get("session_id")
+    if not session_id:
+        return None, True
+    session = await get_session_by_id(conn, session_id, user_id=claims["user_id"])
+    if session is None:
+        return session_id, False
+    now = datetime.now(timezone.utc)
+    await conn.execute(
+        """
+        UPDATE security_sessions
+        SET    last_active_at = $2,
+               expires_at = GREATEST(expires_at, $3)
+        WHERE  id = $1
+        """,
+        session_id,
+        now,
+        now + timedelta(hours=SESSION_LIFETIME_HOURS),
+    )
+    return session_id, True
 
 
 @router.post("/refresh", status_code=status.HTTP_204_NO_CONTENT)
@@ -65,6 +104,21 @@ async def refresh(
             )
         new_raw, claims = result
 
+        session_id, session_alive = await bind_refresh_to_session(conn, claims)
+        if not session_alive:
+            # The login session was revoked (logout everywhere, admin) or has
+            # expired: stop the family too, or the next tab would refresh
+            # straight past the revocation.
+            await revoke_family_by_token(conn, presented_token=new_raw, reason="logout")
+            clear_auth_cookies(response)
+            logger.info(
+                "refresh.session_ended user=%s session=%s", claims["user_id"], session_id
+            )
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Your login session has ended. Please sign in again.",
+            )
+
         user_row = await conn.fetchrow(
             "SELECT email, role FROM user_profiles WHERE id = $1",
             claims["user_id"],
@@ -81,6 +135,7 @@ async def refresh(
         email=user_row["email"],
         role=user_row["role"],
         tenant_id=claims["tenant_id"],
+        session_id=session_id,
         ttl=timedelta(minutes=ACCESS_TOKEN_TTL_MINUTES),
     )
     set_access_cookie(response, access_jwt)

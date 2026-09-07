@@ -85,13 +85,16 @@ class StubConn:
         raise AssertionError(f"unhandled execute: {sql_norm[:120]}")
 
     def _insert(self, args, *, returning):
-        if len(args) == 7:
-            user_id, tenant_id, token_hash, issued_at, expires_at, ip, user_agent = args
+        # 0045 added session_id as the LAST bind in both INSERT shapes.
+        if len(args) == 8:
+            user_id, tenant_id, token_hash, issued_at, expires_at, ip, user_agent, session_id = args
             family_id = uuid.uuid4()
             parent_id = None
-        else:
+        elif len(args) == 10:
             (family_id, user_id, tenant_id, token_hash, parent_id,
-             issued_at, expires_at, ip, user_agent) = args
+             issued_at, expires_at, ip, user_agent, session_id) = args
+        else:
+            raise AssertionError(f"unexpected INSERT arity {len(args)}: both shapes carry session_id since 0045")
         new_id = uuid.uuid4()
         self.rows[new_id] = {
             "id": new_id,
@@ -107,6 +110,7 @@ class StubConn:
             "revoked_reason": None,
             "ip": ip,
             "user_agent": user_agent,
+            "session_id": session_id,
         }
         if returning:
             return {k: self.rows[new_id][k] for k in returning}
@@ -204,3 +208,37 @@ async def test_revoke_family_by_token_clears_all_rows(conn, monkeypatch):
     family_rows = [r for r in conn.rows.values() if r["family_id"] == family_id]
     assert all(r["revoked_at"] is not None for r in family_rows)
     assert all(r["revoked_reason"] == "logout" for r in family_rows)
+
+
+@pytest.mark.asyncio
+async def test_family_is_bound_to_the_login_session_and_rotation_keeps_it(conn):
+    """0045: the refresh row knows its login session, and every rotation
+    carries it forward so /auth/refresh can re-mint the ``sid`` claim.
+    Before this, the claim was dropped 15 minutes after login and the
+    Test-agent WebSocket refused every later token as an expired session."""
+    user_id = str(uuid.uuid4())
+    session_id = str(uuid.uuid4())
+    raw, _tid, family_id = await rt.issue_initial_refresh_token(
+        conn, user_id=user_id, tenant_id=None, ip="1.2.3.4", user_agent="ua", session_id=session_id
+    )
+    assert [r for r in conn.rows.values() if r["family_id"] == family_id][0]["session_id"] == session_id
+
+    new_raw, claims = await rt.rotate_refresh_token(conn, presented_token=raw, ip="1.2.3.4", user_agent="ua")
+    assert claims["session_id"] == session_id
+    successor = [r for r in conn.rows.values() if r["token_hash"] == rt._hash_token(new_raw)][0]
+    assert successor["session_id"] == session_id
+
+    # And again: the binding survives a chain, not just one hop.
+    _raw3, claims3 = await rt.rotate_refresh_token(conn, presented_token=new_raw, ip="1.2.3.4", user_agent="ua")
+    assert claims3["session_id"] == session_id
+
+
+@pytest.mark.asyncio
+async def test_legacy_family_without_session_rotates_with_no_sid(conn):
+    """Rows issued before 0045 (and not matched by its backfill) carry NULL;
+    rotation must keep working and simply report no session."""
+    raw, _tid, _fid = await rt.issue_initial_refresh_token(
+        conn, user_id=str(uuid.uuid4()), tenant_id=None, ip=None, user_agent=None
+    )
+    _new_raw, claims = await rt.rotate_refresh_token(conn, presented_token=raw, ip=None, user_agent=None)
+    assert claims["session_id"] is None
