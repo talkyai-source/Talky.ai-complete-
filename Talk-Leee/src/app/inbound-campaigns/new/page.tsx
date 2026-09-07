@@ -1,6 +1,7 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import { Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 
 import { InboundCampaignForm } from "@/components/inbound/inbound-campaign-form";
 import { InboundErrorState, InboundLoadingState, InboundPermissionState } from "@/components/inbound/inbound-page-state";
@@ -9,8 +10,11 @@ import { useAuth } from "@/hooks/useAuth";
 import { getInboundCapabilities } from "@/lib/inbound-permissions";
 import { useCreateInboundCampaign, useEffectivePermissions } from "@/lib/queries/inbound-queries";
 
-export default function NewInboundCampaignPage() {
+function NewInboundCampaignPageInner() {
     const router = useRouter();
+    // Set when the user came back from "Create a new AI campaign" — the new
+    // draft is pre-selected so the round trip lands them exactly where they were.
+    const preselectedCampaignId = useSearchParams().get("campaign_id");
     const { user } = useAuth();
     const permissions = useEffectivePermissions();
     const create = useCreateInboundCampaign();
@@ -25,6 +29,7 @@ export default function NewInboundCampaignPage() {
             ) : (
                 <InboundCampaignForm
                     mode="create"
+                    initialCampaignId={preselectedCampaignId}
                     pending={create.isPending}
                     canAssignNumber={capabilities.canAssignNumber}
                     onSubmit={async (input) => {
@@ -34,5 +39,14 @@ export default function NewInboundCampaignPage() {
                 />
             )}
         </DashboardLayout>
+    );
+}
+
+export default function NewInboundCampaignPage() {
+    // useSearchParams needs a Suspense boundary for the static prerender.
+    return (
+        <Suspense fallback={null}>
+            <NewInboundCampaignPageInner />
+        </Suspense>
     );
 }

@@ -53,12 +53,17 @@ function browserTimezone(): string {
     }
 }
 
-export function initialInboundCampaignInput(value?: InboundCampaign): InboundCampaignInput {
+export function initialInboundCampaignInput(
+    value?: InboundCampaign,
+    preselect?: { campaignId?: string | null },
+): InboundCampaignInput {
     return {
         name: value?.name ?? "",
         did_number: value?.phone_number?.e164 ?? "",
         purpose: value?.purpose ?? "",
-        campaign_id: value?.campaign_id ?? "",
+        // A saved campaign always wins; the preselect only seeds a NEW form
+        // (the round trip back from "Create a new AI campaign").
+        campaign_id: value?.campaign_id ?? preselect?.campaignId ?? "",
         sip_trunk_id: value?.sip_trunk_id ?? "",
         agent_persona: value?.agent_persona ?? "",
         system_prompt: value?.system_prompt ?? "",

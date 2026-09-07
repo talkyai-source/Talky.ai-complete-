@@ -51,7 +51,7 @@ function fmtBytes(n: number): string {
     return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-export function CampaignWizard() {
+export function CampaignWizard({ afterCreateHref }: { afterCreateHref?: (campaignId: string) => string } = {}) {
     const router = useRouter();
 
     const [step, setStep] = useState(0);
@@ -199,7 +199,7 @@ export function CampaignWizard() {
                     return;
                 }
             }
-            router.push(`/campaigns/${campaignId}`);
+            router.push(afterCreateHref ? afterCreateHref(campaignId) : `/campaigns/${campaignId}`);
         } catch (err) {
             const detail = err instanceof Error ? err.message : "Failed to create campaign";
             setError(

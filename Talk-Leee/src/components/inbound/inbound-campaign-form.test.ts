@@ -5,6 +5,7 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { defaultInboundWeeklySchedule, inboundApi } from "@/lib/inbound-api";
+import { NEW_CAMPAIGN_FOR_INBOUND_HREF } from "@/lib/campaign-create-return";
 import {
     INBOUND_AFTER_HOURS_OPTIONS,
     initialInboundCampaignInput,
@@ -327,4 +328,20 @@ test("weekly_schedule day 0 is Monday on both the form and the backend scheduler
     assert.deepEqual(schedule.map((entry) => entry.day), [0, 1, 2, 3, 4, 5, 6]);
     const openDays = schedule.filter((entry) => entry.enabled).map((entry) => dayNames[entry.day]);
     assert.deepEqual(openDays, ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]);
+});
+
+test("a new inbound form can be seeded with the campaign just created for it", () => {
+    assert.equal(initialInboundCampaignInput(undefined, { campaignId: "draft-1" }).campaign_id, "draft-1");
+    assert.equal(initialInboundCampaignInput(undefined, { campaignId: null }).campaign_id, "");
+});
+
+test("a saved inbound campaign ignores a stray preselect", () => {
+    const saved = { campaign_id: "saved-9" } as unknown as Parameters<typeof initialInboundCampaignInput>[0];
+    assert.equal(initialInboundCampaignInput(saved, { campaignId: "draft-1" }).campaign_id, "saved-9");
+});
+
+test("the create form offers a way to make the AI campaign it requires", () => {
+    const source = readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "inbound-campaign-form.tsx"), "utf8");
+    assert.ok(source.includes("NEW_CAMPAIGN_FOR_INBOUND_HREF"), "create link missing from the inbound form");
+    assert.equal(NEW_CAMPAIGN_FOR_INBOUND_HREF, "/campaigns/new?for=inbound");
 });

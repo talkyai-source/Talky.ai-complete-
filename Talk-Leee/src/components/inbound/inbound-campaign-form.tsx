@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useCampaigns } from "@/lib/api-hooks";
+import { NEW_CAMPAIGN_FOR_INBOUND_HREF } from "@/lib/campaign-create-return";
 import { inboundErrorCode, inboundErrorStatus, type InboundCampaign, type InboundCampaignInput, type InboundPhoneNumber } from "@/lib/inbound-api";
 import { inboundStateForError } from "@/lib/inbound/inbound-types";
 import {
@@ -60,9 +61,11 @@ function browserTimezone(): string | null {
 }
 const DAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 
-export function InboundCampaignForm({ mode, initialValue, pending, canAssignNumber, onSubmit }: {
+export function InboundCampaignForm({ mode, initialValue, initialCampaignId, pending, canAssignNumber, onSubmit }: {
     mode: "create" | "edit";
     initialValue?: InboundCampaign;
+    /** Create mode only: the AI campaign to pre-select (round trip from /campaigns/new?for=inbound). */
+    initialCampaignId?: string | null;
     pending: boolean;
     canAssignNumber: boolean;
     onSubmit: (value: InboundCampaignInput) => Promise<void>;
@@ -72,7 +75,7 @@ export function InboundCampaignForm({ mode, initialValue, pending, canAssignNumb
     const numbersQuery = useInboundPhoneNumbers(canAssignNumber);
     const runtimeCapabilitiesQuery = useInboundRuntimeCapabilities(initialValue?.id);
     const voicesQuery = useVoicesQuery();
-    const [value, setValue] = useState<InboundCampaignInput>(() => initialInboundCampaignInput(initialValue));
+    const [value, setValue] = useState<InboundCampaignInput>(() => initialInboundCampaignInput(initialValue, { campaignId: initialCampaignId }));
     const [errors, setErrors] = useState<InboundFormErrors>({});
     const errorSummaryRef = useRef<HTMLDivElement | null>(null);
 
@@ -234,6 +237,21 @@ export function InboundCampaignForm({ mode, initialValue, pending, canAssignNumb
                         </select>
                     </Field>
                 </div>
+                {mode === "create" ? (
+                    <div className="rounded-xl border border-border bg-muted/30 p-3 text-sm text-muted-foreground" role="status" data-testid="inbound-new-campaign-cta">
+                        {!dependenciesLoading && eligibleCampaigns.length === 0 ? (
+                            <>
+                                <strong className="text-foreground">None of your existing campaigns can take this number.</strong>{" "}
+                                A campaign that has already dialled out keeps its outbound history, so it cannot be switched to answering calls.{" "}
+                            </>
+                        ) : null}
+                        Need a new agent for this line?{" "}
+                        <Link href={NEW_CAMPAIGN_FOR_INBOUND_HREF} className="font-medium text-primary underline underline-offset-4">
+                            Create a new AI campaign
+                        </Link>
+                        {" "}— it is saved as a draft and you come straight back here with it selected.
+                    </div>
+                ) : null}
 
                 <fieldset className="space-y-3" aria-describedby={errors.did_number ? "inbound-did-error" : "inbound-did-help"}>
                     <legend className="text-sm font-medium text-foreground">Verified public phone number</legend>
