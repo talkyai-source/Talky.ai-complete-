@@ -22,7 +22,6 @@ export interface InboundReadiness {
     ready: boolean;
     checks: InboundReadinessCheck[];
     blockers: InboundReadinessBlocker[];
-    checked_at?: string | null;
 }
 
 export interface InboundPhoneNumber {
@@ -64,9 +63,7 @@ export interface InboundCampaign {
     sip_trunk_name?: string | null;
     agent_persona?: string | null;
     system_prompt?: string | null;
-    knowledge_base_id?: string | null;
     voice_id?: string | null;
-    allowed_tools: string[];
     opening_mode: InboundOpeningMode;
     greeting: string;
     silence_timeout_seconds: number;
@@ -101,9 +98,7 @@ export interface InboundCampaignInput {
     sip_trunk_id: string;
     agent_persona?: string | null;
     system_prompt?: string | null;
-    knowledge_base_id?: string | null;
     voice_id?: string | null;
-    allowed_tools?: string[];
     opening_mode: InboundOpeningMode;
     greeting: string;
     silence_timeout_seconds: number;
@@ -216,7 +211,6 @@ function normalizeReadiness(value: unknown): InboundReadiness {
         ready: booleanValue(raw.ready ?? raw.is_ready, false),
         checks,
         blockers,
-        checked_at: nullableText(raw.checked_at),
     };
 }
 
@@ -313,9 +307,7 @@ export function parseInboundCampaign(value: unknown): InboundCampaign {
         sip_trunk_name: nullableText(raw.sip_trunk_name),
         agent_persona: nullableText(raw.agent_persona ?? ai.persona),
         system_prompt: nullableText(raw.system_prompt ?? ai.system_prompt),
-        knowledge_base_id: nullableText(raw.knowledge_base_id ?? ai.knowledge_base_id),
         voice_id: nullableText(raw.voice_id ?? ai.voice_id),
-        allowed_tools: stringList(raw.allowed_tools ?? ai.allowed_tools),
         opening_mode: textValue(raw.opening_mode ?? opening.mode) === "agent_first" ? "agent_first" : "caller_first",
         greeting: textValue(raw.greeting ?? opening.greeting),
         silence_timeout_seconds: numberValue(raw.silence_timeout_seconds ?? opening.silence_timeout_seconds ?? ai.silence_timeout_seconds, 8),
@@ -468,16 +460,21 @@ function cleanInput(input: InboundCampaignInput, includeAssignment = false) {
     };
 }
 
-export function inboundErrorKind(error: unknown): "forbidden" | "conflict" | "other" {
-    const status = (error as { status?: unknown } | null)?.status;
-    if (status === 403) return "forbidden";
-    if (status === 409 || status === 412) return "conflict";
-    return "other";
-}
-
 export function inboundErrorCode(error: unknown): string | null {
     const code = (error as { code?: unknown } | null)?.code;
     return typeof code === "string" && code.trim() ? code.trim() : null;
+}
+
+/**
+ * The HTTP status carried by a rejected inbound request, when there is one.
+ *
+ * Paired with `inboundErrorCode` and passed to `inboundStateForError`, which
+ * is the only place a failure becomes a named state. The status is the
+ * fallback: it decides the outcome only where the body carried no code.
+ */
+export function inboundErrorStatus(error: unknown): number | undefined {
+    const status = (error as { status?: unknown } | null)?.status;
+    return typeof status === "number" ? status : undefined;
 }
 
 class InboundApi {
@@ -640,12 +637,26 @@ class InboundApi {
         const verified = rows
             .map((entry) => {
                 const row = asRecord(entry);
-                return normalizePhoneNumber({
-                    ...row,
-                    verification_status: row.verification_status ?? row.status,
-                    assignment_status: "unknown",
-                    available: false,
-                });
+                return normalizePhoneNumber(
+                    {
+                        ...row,
+                        verification_status: row.verification_status ?? row.status,
+                        assignment_status: "unknown",
+                        available: false,
+                    },
+                    // GET /tenant-phone-numbers/ carries the number under
+                    // `e164` and under no other name — see
+                    // backend/app/domain/models/tenant_phone_number.py:38.
+                    // That key is absent from normalizePhoneNumber's own
+                    // source chain, which looks for the masked/display forms
+                    // a campaign response carries, so without this the whole
+                    // inventory masks to "Number not assigned" and the
+                    // picker is unreadable. Passing it as legacyNumber is
+                    // narrower than widening the shared chain: it cannot
+                    // affect the campaign-response path, which already
+                    // resolves through did_number.
+                    row.e164,
+                );
             })
             .filter((entry): entry is InboundPhoneNumber => entry !== null && entry.verification_status === "verified" && Boolean(entry.e164));
 

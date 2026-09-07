@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useState } from "react";
-import { Archive, ArrowLeft, Edit3, History, Pause, Play, RefreshCw, ShieldCheck } from "lucide-react";
+import { AlertTriangle, Archive, ArrowLeft, BookOpen, Edit3, History, Pause, Play, RefreshCw, ShieldCheck } from "lucide-react";
 
 import { CallIssuesPanel } from "@/components/campaigns/call-issues-panel";
 import { KnowledgePanel } from "@/components/campaigns/knowledge-panel";
@@ -15,7 +15,9 @@ import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { useAuth } from "@/hooks/useAuth";
-import { inboundErrorKind } from "@/lib/inbound-api";
+import { isMinutesExhausted } from "@/lib/dashboard-api";
+import { inboundErrorCode, inboundErrorStatus } from "@/lib/inbound-api";
+import { inboundStateForError } from "@/lib/inbound/inbound-types";
 import { getInboundCapabilities } from "@/lib/inbound-permissions";
 import {
     useActivateInboundCampaign,
@@ -23,6 +25,7 @@ import {
     useEffectivePermissions,
     useInboundCampaign,
     useInboundReadiness,
+    useMinutesStatus,
     usePauseInboundCampaign,
 } from "@/lib/queries/inbound-queries";
 
@@ -37,6 +40,8 @@ export default function InboundCampaignDetailPage() {
     const canLoadCampaign = permissions.isSuccess && capabilities.canView;
     const campaignQuery = useInboundCampaign(id, canLoadCampaign);
     const readinessQuery = useInboundReadiness(id, canLoadCampaign);
+    const minutesQuery = useMinutesStatus(canLoadCampaign);
+    const quotaExhausted = isMinutesExhausted(minutesQuery.data);
     const activate = useActivateInboundCampaign(id);
     const pause = usePauseInboundCampaign(id);
     const archive = useArchiveInboundCampaign(id);
@@ -53,9 +58,16 @@ export default function InboundCampaignDetailPage() {
         try {
             await mutation.mutateAsync(campaign.version);
         } catch (error) {
-            const kind = inboundErrorKind(error);
-            if (kind === "conflict") throw new Error("This campaign changed in another session. Refresh before changing live routing.");
-            if (kind === "forbidden") throw new Error("Your current permissions do not allow this lifecycle change.");
+            const state = inboundStateForError(inboundErrorStatus(error), inboundErrorCode(error));
+            if (state === "conflict") throw new Error("This campaign changed in another session. Refresh before changing live routing.");
+            if (state === "no-permission") throw new Error("Your current permissions do not allow this lifecycle change.");
+            // The permission LOOKUP failed; the user may well be allowed.
+            // Saying "not permitted" here would tell them something false
+            // about their own access.
+            if (state === "authorization-unavailable") throw new Error("Your permissions could not be confirmed, so live routing was not changed. Try again in a moment.");
+            // readiness.ready === false. Activation is gated, not failed —
+            // the checklist on this page names the blocker.
+            if (state === "activation-blocked") throw new Error("Server readiness checks are not satisfied yet. Review the readiness checklist below and resolve each blocker before activating.");
             throw error;
         }
     }
@@ -85,6 +97,24 @@ export default function InboundCampaignDetailPage() {
                         </div>
                     </div>
 
+                    {/* Out-of-minutes banner — the same tenant quota that
+                        blocks outbound Start also gates inbound admission
+                        before answer, so it is shown here even though the
+                        Activate button above does not disable on it (the
+                        server, not this figure, is authoritative for
+                        activation readiness). */}
+                    {quotaExhausted ? (
+                        <div className="content-card flex items-start gap-3 border-red-500/30 bg-red-500/5">
+                            <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-red-500" aria-hidden />
+                            <div className="text-sm">
+                                <p className="font-medium text-red-600 dark:text-red-400">Tenant is out of plan minutes</p>
+                                <p className="mt-0.5 text-muted-foreground">
+                                    {minutesQuery.data?.used_minutes} of {minutesQuery.data?.allocated} monthly minutes used across all calling. Inbound calls draw from the same quota until it is topped up or the plan is upgraded.
+                                </p>
+                            </div>
+                        </div>
+                    ) : null}
+
                     <section className="content-card" aria-labelledby="inbound-overview-heading">
                         <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                             <div className="min-w-0"><p className="font-mono text-sm text-muted-foreground">{campaign.phone_number?.masked_number ?? "No verified number"}</p><h2 id="inbound-overview-heading" className="mt-1 break-words text-2xl font-semibold text-foreground">{campaign.name}</h2>{campaign.purpose ? <p className="mt-1 text-sm text-muted-foreground">{campaign.purpose}</p> : null}</div>
@@ -100,6 +130,15 @@ export default function InboundCampaignDetailPage() {
                         </section>
                         <aside className="space-y-5">
                             <section className="content-card" aria-labelledby="safety-summary-heading"><h2 id="safety-summary-heading" className="text-lg font-semibold text-foreground">Safety policy</h2><dl className="mt-4 space-y-3"><Info label="After hours" value={afterHoursLabel(campaign.after_hours_action)} />{campaign.after_hours_action === "transfer" ? <Info label="Transfer destination" value={campaign.transfer_number ?? "Not configured"} /> : null}<Info label="Recording" value={campaign.recording_enabled ? "Enabled with disclosure" : "Disabled"} /></dl></section>
+                            {/* Read-only. Knowledge is owned by the base AI campaign and pinned
+                                at admission; it is not an inbound field, so this panel names the
+                                source and links to where it is edited rather than offering a
+                                control the runtime would reject. */}
+                            <section className="content-card" aria-labelledby="inbound-knowledge-heading">
+                                <div className="flex items-center gap-2"><BookOpen className="h-4 w-4 text-primary" aria-hidden /><h2 id="inbound-knowledge-heading" className="text-sm font-semibold text-foreground">Knowledge source</h2></div>
+                                <p className="mt-3 text-sm text-muted-foreground">This number answers from the knowledge of {campaign.campaign_name || "its base AI campaign"}. Knowledge and executable tools are configured there, not on this campaign.</p>
+                                {campaign.campaign_id ? <Button asChild variant="outline" size="sm" className="mt-3"><Link href={`/campaigns/${encodeURIComponent(campaign.campaign_id)}`}><BookOpen className="h-4 w-4" aria-hidden />Open campaign knowledge</Link></Button> : null}
+                            </section>
                             <section className="content-card" aria-labelledby="version-heading"><div className="flex items-center gap-2"><ShieldCheck className="h-4 w-4 text-primary" aria-hidden /><h2 id="version-heading" className="text-sm font-semibold text-foreground">Server state</h2></div><dl className="mt-4 space-y-3"><Info label="Updated" value={formatDate(campaign.updated_at)} /><Info label="Activated" value={formatDate(campaign.active_at)} /></dl></section>
                         </aside>
                     </div>

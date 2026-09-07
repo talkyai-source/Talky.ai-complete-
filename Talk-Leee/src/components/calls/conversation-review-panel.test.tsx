@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
-import { QueryClientProvider } from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import React from "react";
@@ -18,13 +18,32 @@ const originalMine = extendedApi.getMyReview;
 const originalList = extendedApi.listCallReviews;
 const originalSubmit = extendedApi.submitReview;
 
+// Each test builds its own QueryClient. Left uncleared, its default
+// ~5-minute gcTime keeps a timer alive past the test that created it. Track
+// every client this file creates and clear them all in afterEach.
+const activeQueryClients: QueryClient[] = [];
+
 afterEach(() => {
     cleanup();
     extendedApi.getReviewOptions = originalOptions;
     extendedApi.getMyReview = originalMine;
     extendedApi.listCallReviews = originalList;
     extendedApi.submitReview = originalSubmit;
+    for (const client of activeQueryClients.splice(0)) client.clear();
 });
+
+// Note on isolation: running only this file (`node --test .../conversation-
+// review-panel.test.tsx`) still leaves the process open after all tests
+// pass. Traced with net.Socket.prototype.connect instrumented to capture a
+// stack: the open handles are two named-pipe sockets the `tsx` loader itself
+// opens to its own transform server at process start (one CJS client, one
+// ESM client) — unrelated to this file, ConversationReviewPanel, or its
+// QueryClients, and not something a test file can close. It is also not
+// what breaks `npm test`: in the full multi-file run this file's tests all
+// report ✔ with no file-level failure — only billing-api.test.ts does — so
+// clearing this file's own QueryClients above is real cleanup for a real
+// leak, done for the same reason as billing-api.test.ts, but the process
+// hang for the aggregate suite is closed by that file's fix alone.
 
 function stubReads() {
     extendedApi.getReviewOptions = async () => ({
@@ -43,6 +62,7 @@ function stubReads() {
 
 function renderPanel(permissions: string[]) {
     const queryClient = createTestQueryClient();
+    activeQueryClients.push(queryClient);
     queryClient.setQueryData(inboundQueryKeys.permissions, { permissions });
     return render(
         <QueryClientProvider client={queryClient}>
@@ -88,6 +108,7 @@ test("a failed permission lookup is reported as unchecked, not as a refusal", as
 
     try {
         const queryClient = createTestQueryClient();
+        activeQueryClients.push(queryClient);
         // Nothing seeded, and the lookup fails → source "unavailable". The
         // wording has to distinguish this from a refusal: telling someone they
         // lack a permission they may well hold is its own kind of wrong answer.

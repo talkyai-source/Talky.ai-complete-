@@ -90,10 +90,18 @@ export function getInboundCapabilities(
     };
 }
 
-export function canManageInboundCampaigns(role: string | null | undefined): boolean {
-    return getInboundCapabilities(role).canChangeLifecycle;
-}
-
-export function isInboundCampaignActive(status: string): boolean {
-    return status.trim().toLowerCase() === "active";
-}
+/*
+ * Two helpers were removed here on 2026-09-01. Neither had a caller.
+ *
+ * A lifecycle-permission shorthand was a trap: it forwarded only the display
+ * role and no permission list, so `getInboundCapabilities` took its
+ * fail-closed branch and the helper returned `false` for every user,
+ * including a platform admin. A future caller would have read that as "not
+ * permitted" rather than "never asked the server". Call
+ * `getInboundCapabilities(role, permissions)` with the effective permission
+ * set from `fetchEffectivePermissions` instead.
+ *
+ * An active-status predicate compared a string the wire model already types
+ * as `InboundLifecycleStatus`, so `status === "active"` says the same thing
+ * without a helper.
+ */

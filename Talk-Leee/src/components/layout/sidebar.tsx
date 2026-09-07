@@ -7,6 +7,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
     LayoutDashboard,
     Phone,
+    PhoneIncoming,
     Users,
     Megaphone,
     Settings,
@@ -28,7 +29,6 @@ import {
     ChevronDown,
     Plug,
     MessageSquare,
-    PhoneIncoming,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ViewportDrawer } from "@/components/ui/viewport-drawer";
@@ -58,6 +58,12 @@ type NavItem = {
 const navigation: NavItem[] = [
     { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
     { name: "Campaigns", href: "/campaigns", icon: Megaphone },
+    // Exactly one Inbound entry. A second row pointing at /inbound was
+    // added by a parallel implementation and removed on 2026-09-01: both
+    // rows were named "Inbound", and this list renders with `key={item.name}`,
+    // so they collided as duplicate React keys. The duplicate `PhoneIncoming`
+    // import that came with it broke `tsc` and `next build` outright.
+    // Inbound call history is a direction filter on /calls, not a nav row.
     { name: "Inbound", href: "/inbound-campaigns", icon: PhoneIncoming },
     { name: "Call History", href: "/calls", icon: Phone },
     { name: "Contacts", href: "/contacts", icon: Users },
