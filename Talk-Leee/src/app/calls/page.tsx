@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
+import { CallTimestamp } from "@/components/calls/call-timestamp";
 import { Phone, PhoneOff, PhoneIncoming, PhoneOutgoing, Clock, ChevronRight, ChevronDown, FileText, Megaphone, Loader2, Sparkles, Play, Pause, Search, Mic, ThumbsUp } from "lucide-react";
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
@@ -50,35 +51,10 @@ function getStatusIcon(status: string) {
 
 // Column order (2026-09-07): Phone | Lead type | Outcome | Notes | Time | AI summary | AI script/Form | Actions.
 // The time column sits right before the AI summary so date, summary and form read left-to-right as one review flow.
+// 2026-09-08: the time cell is a clock icon only (details on hover), so its column is icon-width.
 const DESKTOP_CALL_GRID =
-    "grid-cols-[minmax(9rem,1.15fr)_minmax(7.5rem,0.75fr)_minmax(6rem,0.7fr)_minmax(9rem,1fr)_minmax(7.5rem,0.8fr)_4.75rem_5.5rem_auto]";
+    "grid-cols-[minmax(9rem,1.15fr)_minmax(7.5rem,0.75fr)_minmax(6rem,0.7fr)_minmax(9rem,1fr)_2.5rem_4.75rem_5.5rem_auto]";
 
-function CallTimestamp({ iso, durationSeconds }: { iso: string; durationSeconds?: number | null }) {
-    const when = new Date(iso);
-    return (
-        <TooltipProvider delayDuration={200}>
-            <Tooltip>
-                <TooltipTrigger asChild>
-                    <time
-                        dateTime={iso}
-                        tabIndex={0}
-                        aria-label={`Call time ${when.toLocaleString()}`}
-                        className="inline-block min-w-0 cursor-default rounded-md text-xs leading-relaxed text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                    >
-                        {when.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}
-                        <span className="block tabular-nums">{when.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}</span>
-                    </time>
-                </TooltipTrigger>
-                <TooltipContent side="top" align="start" sideOffset={8} className="p-3 text-xs shadow-xl">
-                    <div className="font-semibold">{when.toLocaleString(undefined, { dateStyle: "full", timeStyle: "medium" })}</div>
-                    <div className="mt-1 text-muted-foreground">
-                        Duration {formatDuration(durationSeconds ?? undefined)} · {Intl.DateTimeFormat().resolvedOptions().timeZone}
-                    </div>
-                </TooltipContent>
-            </Tooltip>
-        </TooltipProvider>
-    );
-}
 
 const FAILED_CALL_OUTCOMES = new Set([
     "busy",
@@ -407,7 +383,9 @@ function CallRow({
                     onChange={(notes) => onWorkflowChange(call, { notes })}
                     callLabel={callLabel}
                 />
-                <CallTimestamp iso={call.created_at} durationSeconds={call.duration_seconds} />
+                <div className="flex justify-center">
+                    <CallTimestamp iso={call.created_at} durationSeconds={call.duration_seconds} />
+                </div>
                 <div className="flex justify-center">
                     <TooltipProvider delayDuration={250}>
                         <Tooltip onOpenChange={setSummaryPreviewOpen}>
@@ -674,7 +652,7 @@ function CampaignSection({
                             <div>Lead type</div>
                             <div>Outcome</div>
                             <div>Notes</div>
-                            <div className="flex justify-start" title="Date and time">
+                            <div className="flex justify-center" title="Date and time (hover a row's clock)">
                                 <Clock className="h-4 w-4" role="img" aria-label="Date and time" />
                             </div>
                             <div className="text-center">AI Summary</div>
