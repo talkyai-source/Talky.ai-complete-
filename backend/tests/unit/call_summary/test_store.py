@@ -76,6 +76,37 @@ def _make_conn(row):
     return conn
 
 
+# A call with a real conversation: 4 caller turns, 90 s (2026-09-07 gate).
+_SUBSTANCE_OK = {
+    "duration_seconds": 90,
+    "transcript_json": [
+        {"role": "assistant", "content": "Hi, this is Sarah from Dojo."},
+        {"role": "user", "content": "Yes, who is this?"},
+        {"role": "assistant", "content": "We help restaurants with payments."},
+        {"role": "user", "content": "We take cards already, what are your rates?"},
+        {"role": "assistant", "content": "It depends on volume, can I send details?"},
+        {"role": "user", "content": "Sure, send them to me."},
+        {"role": "user", "content": "And call me back Tuesday."},
+    ],
+}
+# The complaint that prompted the gate: a 25 s call where the caller said one thing.
+_SUBSTANCE_THIN = {
+    "duration_seconds": 25,
+    "transcript_json": [
+        {"role": "assistant", "content": "Hi, this is Sarah from Dojo."},
+        {"role": "user", "content": "Hello?"},
+    ],
+}
+
+
+def _make_lead_conn(lead_row, substance=_SUBSTANCE_OK):
+    """mark_lead_from_summary reads the call (substance gate) then UPDATEs the lead."""
+    conn = MagicMock()
+    conn.fetchrow = AsyncMock(side_effect=[substance, lead_row])
+    conn.execute = AsyncMock(return_value=None)
+    return conn
+
+
 @asynccontextmanager
 async def _fake_acquire(conn):
     """Replacement for acquire_with_tenant that yields the given conn."""
@@ -319,7 +350,7 @@ class TestLeadMarking:
         from app.domain.services.call_summary.store import mark_lead_from_summary
         # The UPDATE now RETURNs the lead's identity so a real-time alert can be
         # raised with the name + number.
-        conn = _make_conn({
+        conn = _make_lead_conn({
             "lead_id": "L1",
             "first_name": "Jane",
             "last_name": "Doe",
@@ -342,11 +373,38 @@ class TestLeadMarking:
     async def test_mark_lead_no_alert_when_nothing_flagged(self):
         from app.domain.services.call_summary.store import mark_lead_from_summary
         # fetchrow -> None (lead already flagged / no matching row): no alert.
-        conn = _make_conn(None)
+        conn = _make_lead_conn(None)
         with _patch_acquire(conn):
             flagged = await mark_lead_from_summary(None, _TENANT_ID, _CALL_ID, _FAKE_SUMMARY)
         assert flagged is False
         conn.execute.assert_not_called()
+
+    async def test_thin_conversation_is_never_a_lead(self):
+        """The 2026-09-07 complaint: 'qualified lead' after barely talking."""
+        from app.domain.services.call_summary.store import mark_lead_from_summary
+        conn = _make_lead_conn({"lead_id": "L1"}, substance=_SUBSTANCE_THIN)
+        with _patch_acquire(conn):
+            flagged = await mark_lead_from_summary(None, _TENANT_ID, _CALL_ID, _FAKE_SUMMARY)
+        assert flagged is False
+        assert conn.fetchrow.await_count == 1          # never reached the UPDATE
+        conn.execute.assert_not_called()               # no alert emitted
+
+    async def test_summary_must_support_the_lead_label(self):
+        from app.domain.services.call_summary.store import _summary_supports_lead
+        ok, _ = _summary_supports_lead(_FAKE_SUMMARY)
+        assert ok
+        # Model said "qualified" in the outcome but its own status disagrees.
+        bad, why = _summary_supports_lead({**_FAKE_SUMMARY, "qualification_status": "unknown"})
+        assert not bad and "qualification_status=unknown" in why
+        # No commitment, action item or next step → nothing to follow up on.
+        empty, why = _summary_supports_lead({"outcome": "callback", "commitments": [], "action_items": [], "next_step": "none"})
+        assert not empty and why == "no_commitment_action_or_next_step"
+
+    def test_caller_turns_count_only_substantive_caller_lines(self):
+        from app.domain.services.call_summary.store import _caller_turns
+        assert _caller_turns(_SUBSTANCE_OK["transcript_json"]) == 4
+        assert _caller_turns(_SUBSTANCE_THIN["transcript_json"]) == 0   # "Hello?" is one word
+        assert _caller_turns(None) == 0 and _caller_turns("not json") == 0
 
     async def test_mark_lead_skips_when_not_a_lead(self):
         from app.domain.services.call_summary.store import mark_lead_from_summary
@@ -370,7 +428,7 @@ class TestLeadMarking:
         from app.domain.services.call_summary.store import mark_lead_from_summary
         # Qualify succeeds but the stream_events INSERT blows up — the lead must
         # STILL be flagged (alerting is best-effort by design).
-        conn = _make_conn({
+        conn = _make_lead_conn({
             "lead_id": "L1",
             "first_name": "Jane",
             "last_name": "Doe",

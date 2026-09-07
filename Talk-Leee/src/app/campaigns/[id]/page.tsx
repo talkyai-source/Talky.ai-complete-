@@ -5,8 +5,11 @@ import { useParams, useRouter } from "next/navigation";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 import { dashboardApi, campaignStartErrorMessage, Campaign, Contact, ContactList, MinutesStatus } from "@/lib/dashboard-api";
+import type { ContactMutation } from "@/lib/dashboard-api";
+import { OPTIONAL_CONTACT_FIELDS, contactPayload, type OptionalContactFieldKey } from "@/lib/contact-fields";
 import { SmartCsvImport } from "@/components/campaigns/smart-csv-import";
 import { ContactLists, ActiveContactsSummary } from "@/components/campaigns/contact-lists";
 import { ScriptCard } from "@/components/campaigns/script-card";
@@ -126,12 +129,15 @@ function CampaignDetailScope({ campaignId }: { campaignId: string }) {
 
     // Add contact form
     const [showAddContact, setShowAddContact] = useState(false);
-    const [contactForm, setContactForm] = useState({
+    const [contactForm, setContactForm] = useState<ContactMutation>({
         phone_number: "",
         first_name: "",
         last_name: "",
         email: "",
     });
+    // Optional contact details the user chooses to add from a dropdown (the
+    // backend already accepts every one of these on POST/PATCH contacts).
+    const [extraContactFields, setExtraContactFields] = useState<OptionalContactFieldKey[]>([]);
     const [addingContact, setAddingContact] = useState(false);
     const [deletingContactId, setDeletingContactId] = useState<string | null>(null);
     const [editingContact, setEditingContact] = useState<Contact | null>(null);
@@ -318,12 +324,14 @@ function CampaignDetailScope({ campaignId }: { campaignId: string }) {
         e.preventDefault();
         try {
             setAddingContact(true);
+            const payload = contactPayload(contactForm);
             if (editingContact) {
-                await dashboardApi.updateContact(campaignId, editingContact.id, contactForm);
+                await dashboardApi.updateContact(campaignId, editingContact.id, payload);
             } else {
-                await dashboardApi.addContact(campaignId, contactForm);
+                await dashboardApi.addContact(campaignId, payload);
             }
             setContactForm({ phone_number: "", first_name: "", last_name: "", email: "" });
+            setExtraContactFields([]);
             setShowAddContact(false);
             setEditingContact(null);
             await loadData();
@@ -340,11 +348,14 @@ function CampaignDetailScope({ campaignId }: { campaignId: string }) {
 
     function startEditContact(contact: Contact) {
         setEditingContact(contact);
+        const present = OPTIONAL_CONTACT_FIELDS.filter((f) => Boolean(contact[f.key])).map((f) => f.key);
+        setExtraContactFields(present);
         setContactForm({
             phone_number: contact.phone_number || "",
             first_name: contact.first_name || "",
             last_name: contact.last_name || "",
             email: contact.email || "",
+            ...Object.fromEntries(present.map((key) => [key, String(contact[key] ?? "")])),
         });
         setShowAddContact(true);
     }
@@ -678,11 +689,82 @@ function CampaignDetailScope({ campaignId }: { campaignId: string }) {
                                         />
                                     </div>
                                 </div>
+                                <div className="mb-4 rounded-lg border border-border/70 bg-background/60 p-3" data-testid="contact-more-details">
+                                    <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+                                        <div>
+                                            <div className="text-sm font-semibold text-foreground">More details</div>
+                                            <div className="text-xs text-muted-foreground">
+                                                Pick any extra field to store with this contact. The agent sees company, title and notes on the call.
+                                            </div>
+                                        </div>
+                                        <div className="w-full sm:w-64">
+                                            <Select
+                                                value=""
+                                                ariaLabel="Add a contact detail"
+                                                onChange={(key) => {
+                                                    const k = key as OptionalContactFieldKey;
+                                                    if (!k || extraContactFields.includes(k)) return;
+                                                    setExtraContactFields((prev) => [...prev, k]);
+                                                }}
+                                            >
+                                                <option value="">Add a detail…</option>
+                                                {OPTIONAL_CONTACT_FIELDS.filter((f) => !extraContactFields.includes(f.key)).map((f) => (
+                                                    <option key={f.key} value={f.key}>{f.label}</option>
+                                                ))}
+                                            </Select>
+                                        </div>
+                                    </div>
+                                    {extraContactFields.length > 0 ? (
+                                        <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
+                                            {extraContactFields.map((key) => {
+                                                const field = OPTIONAL_CONTACT_FIELDS.find((f) => f.key === key)!;
+                                                return (
+                                                    <div key={key}>
+                                                        <div className="flex items-center justify-between">
+                                                            <Label htmlFor={`contact-${key}`}>{field.label}</Label>
+                                                            <button
+                                                                type="button"
+                                                                className="text-xs text-muted-foreground hover:text-foreground"
+                                                                aria-label={`Remove ${field.label}`}
+                                                                onClick={() => {
+                                                                    setExtraContactFields((prev) => prev.filter((k) => k !== key));
+                                                                    setContactForm((prev) => ({ ...prev, [key]: "" }));
+                                                                }}
+                                                            >
+                                                                Remove
+                                                            </button>
+                                                        </div>
+                                                        {field.options ? (
+                                                            <Select
+                                                                value={String(contactForm[key] ?? "")}
+                                                                ariaLabel={field.label}
+                                                                onChange={(v) => setContactForm((prev) => ({ ...prev, [key]: v }))}
+                                                            >
+                                                                <option value="">Choose…</option>
+                                                                {field.options.map((o) => (
+                                                                    <option key={o} value={o}>{o}</option>
+                                                                ))}
+                                                            </Select>
+                                                        ) : (
+                                                            <Input
+                                                                id={`contact-${key}`}
+                                                                value={String(contactForm[key] ?? "")}
+                                                                onChange={(e) => setContactForm((prev) => ({ ...prev, [key]: e.target.value }))}
+                                                                placeholder={field.placeholder}
+                                                                maxLength={field.maxLength}
+                                                            />
+                                                        )}
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    ) : null}
+                                </div>
                                 <div className="flex gap-2">
                                     <Button type="submit" size="sm" disabled={addingContact}>
                                         {addingContact ? <Loader2 className="w-4 h-4 animate-spin" /> : (editingContact ? "Save changes" : "Add")}
                                     </Button>
-                                    <Button type="button" variant="outline" size="sm" onClick={() => { setShowAddContact(false); setEditingContact(null); }}>
+                                    <Button type="button" variant="outline" size="sm" onClick={() => { setShowAddContact(false); setEditingContact(null); setExtraContactFields([]); }}>
                                         Cancel
                                     </Button>
                                 </div>

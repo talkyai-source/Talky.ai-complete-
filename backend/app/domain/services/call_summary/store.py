@@ -11,7 +11,8 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Optional
+import os
+from typing import Any, Optional
 
 from app.core.db_utils import acquire_with_tenant
 from app.domain.services.call_summary.summarizer import (
@@ -136,6 +137,66 @@ async def generate_and_store(
     return summary
 
 
+# A "qualified lead" after a call the caller barely took part in is a false
+# positive that reaches the client as a real-time alert (2026-09-07: "Qualified
+# lead: … — how, we barely even talked"). Two independent gates below:
+#   1. the summary itself must SUPPORT the label (qualification_status agrees,
+#      and there is at least one concrete commitment / action / next step);
+#   2. the conversation must have had substance: enough caller turns and
+#      enough talk time. Thresholds are env-tunable but fail closed.
+LEAD_MIN_CALLER_TURNS = int(os.getenv("LEAD_MIN_CALLER_TURNS", "3"))
+LEAD_MIN_DURATION_S = int(os.getenv("LEAD_MIN_DURATION_S", "45"))
+
+
+def _summary_supports_lead(summary: dict) -> tuple[bool, str]:
+    """Gate 1 — does the summary's own evidence back the lead label?"""
+    outcome = str(summary.get("outcome") or "").strip().lower()
+    status = str(summary.get("qualification_status") or "").strip().lower()
+    if outcome.startswith("qualified") and status and status != "qualified":
+        return False, f"qualification_status={status}"
+    if status == "unqualified":
+        return False, "qualification_status=unqualified"
+    commitments = [c for c in (summary.get("commitments") or []) if str(c).strip() and str(c).strip().lower() != "none"]
+    actions = [a for a in (summary.get("action_items") or []) if a]
+    next_step = str(summary.get("next_step") or "").strip()
+    if not (commitments or actions or (next_step and next_step.lower() not in ("none", "unknown", "n/a"))):
+        return False, "no_commitment_action_or_next_step"
+    return True, "ok"
+
+
+def _caller_turns(transcript_json: Any) -> int:
+    turns = transcript_json
+    if isinstance(turns, str):
+        try:
+            turns = json.loads(turns)
+        except json.JSONDecodeError:
+            return 0
+    if not isinstance(turns, list):
+        return 0
+    count = 0
+    for turn in turns:
+        if not isinstance(turn, dict):
+            continue
+        role = str(turn.get("role") or turn.get("speaker") or "").lower()
+        text = str(turn.get("content") or turn.get("text") or "").strip()
+        if role in ("user", "caller", "customer") and len(text.split()) >= 2:
+            count += 1
+    return count
+
+
+def _conversation_has_substance(row: Optional[dict]) -> tuple[bool, str]:
+    """Gate 2 — was there enough of a conversation to qualify anyone?"""
+    if not row:
+        return False, "call_row_missing"
+    turns = _caller_turns(row.get("transcript_json"))
+    duration = row.get("duration_seconds")
+    if turns < LEAD_MIN_CALLER_TURNS:
+        return False, f"caller_turns={turns}<{LEAD_MIN_CALLER_TURNS}"
+    if duration is not None and int(duration) < LEAD_MIN_DURATION_S:
+        return False, f"duration_s={int(duration)}<{LEAD_MIN_DURATION_S}"
+    return True, "ok"
+
+
 def _outcome_is_lead(outcome: str) -> bool:
     """True when the AI's outcome label means "this is a lead / goal achieved".
 
@@ -202,6 +263,10 @@ async def mark_lead_from_summary(
     try:
         if not _outcome_is_lead(str(summary.get("outcome") or "")):
             return False
+        supported, why = _summary_supports_lead(summary)
+        if not supported:
+            logger.info("lead_not_marked call=%s reason=summary:%s", call_id, why)
+            return False
         # Prefer the first concrete follow-up tip; fall back to the next-step,
         # then the headline. follow_up_tips is a list (may be empty).
         tips = summary.get("follow_up_tips") or []
@@ -209,6 +274,16 @@ async def mark_lead_from_summary(
         note = (first_tip or summary.get("next_step") or summary.get("headline") or "").strip()
         note = note or "Lead — please follow up."
         async with acquire_with_tenant(pool, tenant_id) as conn:
+            call_row = await conn.fetchrow(
+                "SELECT duration_seconds, transcript_json FROM calls "
+                "WHERE id = $1 AND tenant_id = $2::uuid",
+                call_id,
+                tenant_id,
+            )
+            substance, why = _conversation_has_substance(dict(call_row) if call_row else None)
+            if not substance:
+                logger.info("lead_not_marked call=%s reason=conversation:%s", call_id, why)
+                return False
             # RETURNING gives us the lead's identity so we can raise a real-time
             # alert with the name + number, not just silently flip the flag.
             row = await conn.fetchrow(

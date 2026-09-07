@@ -12,6 +12,7 @@ import {
 
 import { QuickReviewButtons } from "@/components/calls/quick-review-buttons";
 import { Modal } from "@/components/ui/modal";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import type { Call } from "@/lib/dashboard-api";
 import type {
     CallHistoryFormData,
@@ -21,29 +22,62 @@ import { isCallHistoryFormComplete } from "@/lib/call-history-workflow";
 
 const LEAD_TYPE_STYLES: Record<
     CallHistoryLeadType,
-    { label: string; dot: string; control: string }
+    { label: string; dot: string; control: string; ring: string }
 > = {
     cold: {
         label: "Cold",
         dot: "bg-red-500",
         control: "border-red-500/35 bg-red-500/10 text-red-700 dark:text-red-300",
+        ring: "ring-red-500/60 bg-red-500/10",
     },
     warm: {
         label: "Warm",
         dot: "bg-orange-500",
         control: "border-orange-500/40 bg-orange-500/10 text-orange-700 dark:text-orange-300",
+        ring: "ring-orange-500/60 bg-orange-500/10",
     },
     hot: {
         label: "Hot",
         dot: "bg-emerald-500",
         control: "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
+        ring: "ring-emerald-500/60 bg-emerald-500/10",
     },
     follow_up: {
         label: "Follow-up",
         dot: "bg-sky-500",
         control: "border-sky-500/40 bg-sky-500/10 text-sky-700 dark:text-sky-300",
+        ring: "ring-sky-500/60 bg-sky-500/10",
     },
 };
+
+/** The lead type's colour tokens, so other columns (the phone icon) can carry
+ *  the same warm/cold/hot signal as the Lead type select. */
+export function leadTypeAccent(leadType: CallHistoryLeadType) {
+    return LEAD_TYPE_STYLES[leadType] ?? LEAD_TYPE_STYLES.cold;
+}
+
+/** Wraps a status icon in a ring coloured by the call's lead type. */
+export function LeadAccentIcon({ leadType, children }: { leadType: CallHistoryLeadType; children: React.ReactNode }) {
+    const accent = leadTypeAccent(leadType);
+    return (
+        <span
+            className={`inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full ring-2 ${accent.ring}`}
+            title={`${accent.label} lead`}
+            data-lead-type={leadType}
+        >
+            {children}
+        </span>
+    );
+}
+
+/** The post-call form's filled fields as label/value pairs (empty ones dropped). */
+export function formSummaryLines(form: CallHistoryFormData): Array<[string, string]> {
+    const lines: Array<[string, string]> = [];
+    if (form.contact.trim()) lines.push(["Contact", form.contact.trim()]);
+    if (form.interest.trim()) lines.push(["Need / interest", form.interest.trim()]);
+    if (form.nextStep.trim()) lines.push(["Next step", form.nextStep.trim()]);
+    return lines;
+}
 
 export function LeadTypeSelect({
     value,
@@ -150,21 +184,53 @@ export function CallHistoryFormButton({
         setJustCompleted(true);
     };
 
+    const summaryLines = formSummaryLines(value);
+
     return (
         <>
-            <button
-                type="button"
-                onClick={() => setOpenState(true)}
-                aria-label={value.completed ? `Completed form for ${callLabel}` : `Open form for ${callLabel}`}
-                title={value.completed ? "Form complete" : "Open post-call form"}
-                className={`inline-flex ${showLabel ? "h-11 px-3" : "h-8 w-8"} items-center justify-center gap-1.5 rounded-lg border text-xs font-semibold transition-[background-color,border-color,color,box-shadow] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ${value.completed
-                    ? "border-emerald-500/50 bg-emerald-500/12 text-emerald-700 shadow-sm dark:text-emerald-300"
-                    : "border-border bg-background text-muted-foreground hover:bg-accent hover:text-foreground"
-                    }`}
-            >
-                {value.completed ? <CheckCircle2 className="h-4 w-4" aria-hidden /> : <ClipboardCheck className="h-4 w-4" aria-hidden />}
-                {showLabel ? (value.completed ? "Form complete" : "Form") : null}
-            </button>
+            <TooltipProvider delayDuration={200}>
+                <Tooltip>
+                    <TooltipTrigger asChild>
+                        <button
+                            type="button"
+                            onClick={() => setOpenState(true)}
+                            aria-label={value.completed ? `Completed form for ${callLabel}` : `Open form for ${callLabel}`}
+                            className={`inline-flex ${showLabel ? "h-11 px-3" : "h-8 w-8"} items-center justify-center gap-1.5 rounded-lg border text-xs font-semibold transition-[background-color,border-color,color,box-shadow] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ${value.completed
+                                ? "border-emerald-500/50 bg-emerald-500/12 text-emerald-700 shadow-sm dark:text-emerald-300"
+                                : "border-border bg-background text-muted-foreground hover:bg-accent hover:text-foreground"
+                                }`}
+                        >
+                            {value.completed ? <CheckCircle2 className="h-4 w-4" aria-hidden /> : <ClipboardCheck className="h-4 w-4" aria-hidden />}
+                            {showLabel ? (value.completed ? "Form complete" : "Form") : null}
+                        </button>
+                    </TooltipTrigger>
+                    <TooltipContent
+                        side="top"
+                        align="end"
+                        sideOffset={8}
+                        className={`w-72 max-w-[calc(100vw-2rem)] p-3 shadow-xl ${summaryLines.length
+                            ? "border-emerald-500/50 bg-emerald-600 text-white dark:bg-emerald-700"
+                            : ""}`}
+                    >
+                        {summaryLines.length ? (
+                            <dl className="space-y-1.5 text-xs" data-testid="post-call-form-summary">
+                                <div className="flex items-center gap-1.5 font-semibold">
+                                    <CheckCircle2 className="h-3.5 w-3.5" aria-hidden />
+                                    {value.completed ? "Post-call form — complete" : "Post-call form — in progress"}
+                                </div>
+                                {summaryLines.map(([label, text]) => (
+                                    <div key={label}>
+                                        <dt className="text-[10px] font-semibold uppercase tracking-wide opacity-80">{label}</dt>
+                                        <dd className="whitespace-pre-wrap break-words">{text}</dd>
+                                    </div>
+                                ))}
+                            </dl>
+                        ) : (
+                            <p className="text-xs">No details captured yet. Click to fill the post-call form.</p>
+                        )}
+                    </TooltipContent>
+                </Tooltip>
+            </TooltipProvider>
 
             <Modal
                 open={open}

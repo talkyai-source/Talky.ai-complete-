@@ -17,6 +17,7 @@ import {
     CallHistoryNotesField,
     CallReviewModal,
     LeadTypeSelect,
+    LeadAccentIcon,
 } from "@/components/calls/call-history-workflow-controls";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { getRecordingCapabilities } from "@/lib/media-permissions";
@@ -47,8 +48,37 @@ function getStatusIcon(status: string) {
     }
 }
 
+// Column order (2026-09-07): Phone | Lead type | Outcome | Notes | Time | AI summary | AI script/Form | Actions.
+// The time column sits right before the AI summary so date, summary and form read left-to-right as one review flow.
 const DESKTOP_CALL_GRID =
-    "grid-cols-[minmax(9rem,1.15fr)_minmax(7.5rem,0.75fr)_minmax(6rem,0.7fr)_minmax(7.5rem,0.8fr)_minmax(9rem,1fr)_4.75rem_5.5rem_auto]";
+    "grid-cols-[minmax(9rem,1.15fr)_minmax(7.5rem,0.75fr)_minmax(6rem,0.7fr)_minmax(9rem,1fr)_minmax(7.5rem,0.8fr)_4.75rem_5.5rem_auto]";
+
+function CallTimestamp({ iso, durationSeconds }: { iso: string; durationSeconds?: number | null }) {
+    const when = new Date(iso);
+    return (
+        <TooltipProvider delayDuration={200}>
+            <Tooltip>
+                <TooltipTrigger asChild>
+                    <time
+                        dateTime={iso}
+                        tabIndex={0}
+                        aria-label={`Call time ${when.toLocaleString()}`}
+                        className="inline-block min-w-0 cursor-default rounded-md text-xs leading-relaxed text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    >
+                        {when.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}
+                        <span className="block tabular-nums">{when.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}</span>
+                    </time>
+                </TooltipTrigger>
+                <TooltipContent side="top" align="start" sideOffset={8} className="p-3 text-xs shadow-xl">
+                    <div className="font-semibold">{when.toLocaleString(undefined, { dateStyle: "full", timeStyle: "medium" })}</div>
+                    <div className="mt-1 text-muted-foreground">
+                        Duration {formatDuration(durationSeconds ?? undefined)} · {Intl.DateTimeFormat().resolvedOptions().timeZone}
+                    </div>
+                </TooltipContent>
+            </Tooltip>
+        </TooltipProvider>
+    );
+}
 
 const FAILED_CALL_OUTCOMES = new Set([
     "busy",
@@ -257,7 +287,7 @@ function CallRow({
             <div className="space-y-3 p-4 xl:hidden">
                 <div className="flex items-start justify-between gap-3">
                     <div className="flex min-w-0 items-start gap-2">
-                        {getStatusIcon(call.status)}
+                        <LeadAccentIcon leadType={workflow.leadType}>{getStatusIcon(call.status)}</LeadAccentIcon>
                         <div className="flex min-w-0 flex-col gap-1.5">
                             <CallParties call={call} />
                             <div className="flex flex-wrap items-center gap-2">
@@ -347,10 +377,10 @@ function CallRow({
             <div className={`hidden min-w-0 ${DESKTOP_CALL_GRID} items-center gap-3 px-4 py-3 xl:grid`}>
                 <div className="flex min-w-0 flex-col gap-1.5">
                     <div className="flex min-w-0 items-center gap-2">
-                        {getStatusIcon(call.status)}
+                        <LeadAccentIcon leadType={workflow.leadType}>{getStatusIcon(call.status)}</LeadAccentIcon>
                         <div className="flex min-w-0 flex-col"><CallParties call={call} /></div>
                     </div>
-                    <div className="flex min-w-0 flex-wrap items-center gap-2 pl-6">
+                    <div className="flex min-w-0 flex-wrap items-center gap-2 pl-9">
                         <DirectionBadge direction={call.direction} />
                         <span className="inline-flex items-center gap-1 text-xs text-muted-foreground tabular-nums" title="Call duration">
                             <Clock className="h-3.5 w-3.5" aria-hidden />
@@ -372,15 +402,12 @@ function CallRow({
                         <span className="text-sm text-muted-foreground">--</span>
                     )}
                 </div>
-                <time dateTime={call.created_at} title={new Date(call.created_at).toLocaleString()} className="min-w-0 text-xs leading-relaxed text-muted-foreground">
-                    {new Date(call.created_at).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}
-                    <span className="block tabular-nums">{new Date(call.created_at).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}</span>
-                </time>
                 <CallHistoryNotesField
                     value={workflow.notes}
                     onChange={(notes) => onWorkflowChange(call, { notes })}
                     callLabel={callLabel}
                 />
+                <CallTimestamp iso={call.created_at} durationSeconds={call.duration_seconds} />
                 <div className="flex justify-center">
                     <TooltipProvider delayDuration={250}>
                         <Tooltip onOpenChange={setSummaryPreviewOpen}>
@@ -646,10 +673,10 @@ function CampaignSection({
                             <div>Phone <span className="text-[10px] font-medium normal-case tracking-normal">/ Duration</span></div>
                             <div>Lead type</div>
                             <div>Outcome</div>
-                            <div className="flex justify-center" title="Date and time">
+                            <div>Notes</div>
+                            <div className="flex justify-start" title="Date and time">
                                 <Clock className="h-4 w-4" role="img" aria-label="Date and time" />
                             </div>
-                            <div>Notes</div>
                             <div className="text-center">AI Summary</div>
                             <div className="text-center">AI Script <span className="text-[10px] font-medium normal-case tracking-normal">/ Form</span></div>
                             <div className="text-right">Actions</div>
