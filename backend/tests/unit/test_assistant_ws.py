@@ -24,6 +24,14 @@ def _stub_auth_and_model(monkeypatch):
 
     monkeypatch.setattr(assistant_ws, "get_tenant_assistant_model", _fake_model)
 
+    # The tenant bootstrap goes through the pooled user-scoped path (see
+    # app.api.v1.ws_tenant), never the tenant-scoped .table() adapter — the
+    # fake table below raises on any user_profiles query to keep it that way.
+    async def _fake_resolve(_pool, _user_id):
+        return "tenant-1"
+
+    monkeypatch.setattr(assistant_ws, "resolve_user_tenant", _fake_resolve)
+
 
 def _stub_stream(events, captured=None):
     """Build a stand-in for stream_assistant_reply: an async generator that
@@ -78,8 +86,14 @@ class _FakeTable:
         return self
 
     def execute(self):
-        if self.table_name == "user_profiles" and self._mode == "select":
-            return _FakeResponse({"tenant_id": "tenant-1"})
+        if self.table_name == "user_profiles":
+            # Under forced RLS with no tenant context this query returns no
+            # row on prod; the endpoint must not depend on it at all.
+            raise AssertionError(
+                "assistant_ws must not resolve the tenant through the "
+                "tenant-scoped adapter (RLS hides user_profiles before a "
+                "tenant context exists)"
+            )
 
         if self.table_name == "assistant_conversations" and self._mode == "insert":
             row = {
@@ -102,6 +116,7 @@ class _FakeTable:
 class _FakeDbClient:
     def __init__(self):
         self.state: dict = {}
+        self.pool = object()  # handed to resolve_user_tenant; never queried here
         self.auth = SimpleNamespace(
             get_user=lambda _token: SimpleNamespace(user=SimpleNamespace(id="user-1"))
         )
@@ -133,6 +148,9 @@ class _FakeWebSocket:
 
     async def send_json(self, data: dict):
         self.sent_messages.append(data)
+
+    async def close(self, code: int = 1000, reason: str = ""):
+        self.closed = (code, reason)
 
 
 @pytest.mark.asyncio
@@ -250,3 +268,43 @@ async def test_assistant_chat_parses_stringified_history_for_existing_conversati
         and event["content"] == "All campaigns are idle."
         for event in fake_websocket.sent_messages
     )
+
+
+@pytest.mark.asyncio
+async def test_assistant_chat_closes_with_1008_when_user_has_no_tenant(monkeypatch):
+    """A subject without a tenant profile is told so and the socket is CLOSED
+    (previously the handler returned without closing and the miss was never
+    logged, so the client reconnected in a loop with no server-side trace)."""
+    fake_db = _FakeDbClient()
+    fake_websocket = _FakeWebSocket()
+
+    async def _no_tenant(_pool, _user_id):
+        return None
+
+    monkeypatch.setattr(assistant_ws, "resolve_user_tenant", _no_tenant)
+    monkeypatch.setattr(assistant_ws, "get_db_client", lambda: fake_db)
+
+    await assistant_ws.assistant_chat(fake_websocket, token="test-token", conversation_id=None)
+
+    assert fake_websocket.sent_messages == [
+        {"type": "error", "content": "User profile not found."}
+    ]
+    assert fake_websocket.closed[0] == 1008
+
+
+@pytest.mark.asyncio
+async def test_assistant_chat_distinguishes_lookup_failure_from_missing_profile(monkeypatch):
+    fake_db = _FakeDbClient()
+    fake_websocket = _FakeWebSocket()
+
+    async def _boom(_pool, _user_id):
+        raise RuntimeError("pool exhausted")
+
+    monkeypatch.setattr(assistant_ws, "resolve_user_tenant", _boom)
+    monkeypatch.setattr(assistant_ws, "get_db_client", lambda: fake_db)
+
+    await assistant_ws.assistant_chat(fake_websocket, token="test-token", conversation_id=None)
+
+    assert fake_websocket.sent_messages[0]["type"] == "error"
+    assert "temporarily unavailable" in fake_websocket.sent_messages[0]["content"]
+    assert fake_websocket.closed[0] == 1011

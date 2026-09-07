@@ -16,6 +16,7 @@ from fastapi.encoders import jsonable_encoder
 from app.core.postgres_adapter import Client
 
 from app.api.v1.dependencies import CurrentUser, get_current_user, get_db_client
+from app.api.v1.ws_tenant import resolve_user_tenant
 from app.core.config import get_settings
 from app.core.jwt_security import JWTValidationError, decode_and_validate_token
 from app.infrastructure.assistant.agent import assistant_graph, AgentState
@@ -273,26 +274,29 @@ async def assistant_chat(
             return
         user_id = str(user_id)
 
-        # STEP 4: Resolve tenant via DB lookup (same flow as before).
+        # STEP 4: Resolve the tenant. No tenant context exists yet on a WS, so
+        # this MUST NOT go through the tenant-scoped .table() adapter: under
+        # forced RLS that query runs as the nil tenant and the user's own
+        # profile is invisible (every socket closed here 2026-08-30 → 09-08).
         db_client = get_db_client()
         try:
-            profile = db_client.table("user_profiles").select(
-                "tenant_id"
-            ).eq("id", user_id).single().execute()
-            tenant_id = (
-                str(profile.data.get("tenant_id"))
-                if profile.data and profile.data.get("tenant_id")
-                else None
-            )
+            tenant_id = await resolve_user_tenant(db_client.pool, user_id)
         except Exception as profile_err:
             logger.error("assistant_ws: profile lookup failed: %s", profile_err)
-            tenant_id = None
+            await manager.send_json(connection_id, {
+                "type": "error",
+                "content": "The assistant is temporarily unavailable. Please try again."
+            })
+            await websocket.close(code=1011, reason="Profile lookup failed")
+            return
 
         if not tenant_id:
+            logger.warning("assistant_ws: no tenant profile for user %s", user_id)
             await manager.send_json(connection_id, {
                 "type": "error",
                 "content": "User profile not found."
             })
+            await websocket.close(code=1008, reason="No tenant")
             return
 
         # Set the RLS tenant context for this WS connection's task. The agent's

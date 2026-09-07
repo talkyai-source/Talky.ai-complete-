@@ -105,13 +105,17 @@ def _get_semaphore() -> asyncio.Semaphore:
 
 
 async def _resolve_tenant(user_id: str, db_client: Any) -> Optional[str]:
+    """Resolve the JWT subject's tenant before any tenant context exists.
+
+    Uses the pooled user-scoped path (see ``app.api.v1.ws_tenant``): the
+    tenant-scoped ``.table()`` adapter runs as the nil tenant here and, under
+    forced RLS, never finds the profile.
+    """
+    from app.api.v1.ws_tenant import resolve_user_tenant
+
     try:
-        profile = (
-            db_client.table("user_profiles").select("tenant_id").eq("id", user_id).single().execute()
-        )
-        if profile.data and profile.data.get("tenant_id"):
-            return str(profile.data["tenant_id"])
-    except Exception as exc:  # pragma: no cover - defensive
+        return await resolve_user_tenant(db_client.pool, user_id)
+    except Exception as exc:
         logger.error("assistant_voice: profile lookup failed: %s", exc)
     return None
 
@@ -156,6 +160,7 @@ async def assistant_voice(
     db_client = get_db_client()
     tenant_id = await _resolve_tenant(user_id, db_client)
     if not tenant_id:
+        logger.warning("assistant_voice: no tenant profile for user %s", user_id)
         await websocket.send_json({"type": "error", "content": "User profile not found."})
         await websocket.close(code=1008, reason="No tenant")
         return
