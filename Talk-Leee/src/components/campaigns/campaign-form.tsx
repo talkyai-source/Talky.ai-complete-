@@ -77,6 +77,10 @@ interface Props {
     campaignId?: string;
     /** Pre-fill values; defaults to an empty form when omitted. */
     initialData?: CampaignFormInitial;
+    /** Where to go after a successful CREATE; defaults to the campaign page. */
+    afterCreateHref?: (campaignId: string) => string;
+    /** 2026-09-09: create the campaign born inbound (same options, same form). */
+    direction?: "outbound" | "inbound";
 }
 
 const EMPTY_INITIAL: CampaignFormInitial = {
@@ -91,7 +95,7 @@ const EMPTY_INITIAL: CampaignFormInitial = {
     slots: {},
 };
 
-export function CampaignForm({ mode, campaignId, initialData }: Props) {
+export function CampaignForm({ mode, campaignId, initialData, afterCreateHref, direction = "outbound" }: Props) {
     const router = useRouter();
     const isEdit = mode === "edit";
     const seed = initialData ?? EMPTY_INITIAL;
@@ -458,6 +462,7 @@ export function CampaignForm({ mode, campaignId, initialData }: Props) {
             })(),
             campaign_slots: buildCampaignSlots(),
             campaign_brief: campaignBrief,
+            ...(!isEdit && direction === "inbound" ? { direction: "inbound" as const } : {}),
         };
 
         let targetCampaignId = isEdit ? campaignId : createdCampaignId ?? undefined;
@@ -475,7 +480,7 @@ export function CampaignForm({ mode, campaignId, initialData }: Props) {
             }
 
             await leadDetailsApi.setCampaignFields(targetCampaignId!, leadFields.fields);
-            router.push(`/campaigns/${targetCampaignId}`);
+            router.push(!isEdit && afterCreateHref ? afterCreateHref(targetCampaignId!) : `/campaigns/${targetCampaignId}`);
         } catch (err) {
             const detail = err instanceof Error ? err.message : "Failed to save campaign";
             setError(

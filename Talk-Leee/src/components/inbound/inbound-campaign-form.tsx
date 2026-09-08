@@ -8,7 +8,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useCampaigns } from "@/lib/api-hooks";
-import { InboundAgentSection, InboundKnowledgeUpload } from "@/components/inbound/inbound-agent-section";
 import { inboundErrorCode, inboundErrorStatus, type InboundCampaign, type InboundCampaignInput, type InboundPhoneNumber } from "@/lib/inbound-api";
 import { inboundStateForError } from "@/lib/inbound/inbound-types";
 import {
@@ -61,16 +60,16 @@ function browserTimezone(): string | null {
 }
 const DAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 
-export type InboundSubmitExtras = { knowledgeFile: File | null };
-
-export function InboundCampaignForm({ mode, initialValue, initialCampaignId, pending, canAssignNumber, onSubmit }: {
+export function InboundCampaignForm({ mode, initialValue, initialCampaignId, lockCampaign = false, pending, canAssignNumber, onSubmit }: {
     mode: "create" | "edit";
     initialValue?: InboundCampaign;
-    /** Legacy: pre-select an existing inbound-ready campaign instead of defining an agent. */
+    /** Create mode: the campaign created in step 1 (born inbound). */
     initialCampaignId?: string | null;
+    /** Create mode: show the step-1 campaign as a locked fact instead of a picker. */
+    lockCampaign?: boolean;
     pending: boolean;
     canAssignNumber: boolean;
-    onSubmit: (value: InboundCampaignInput, extras: InboundSubmitExtras) => Promise<void>;
+    onSubmit: (value: InboundCampaignInput) => Promise<void>;
 }) {
     const campaignsQuery = useCampaigns();
     const trunksQuery = useSipTrunks();
@@ -79,12 +78,7 @@ export function InboundCampaignForm({ mode, initialValue, initialCampaignId, pen
     const voicesQuery = useVoicesQuery();
     const [value, setValue] = useState<InboundCampaignInput>(() => initialInboundCampaignInput(initialValue, { campaignId: initialCampaignId }));
     const [errors, setErrors] = useState<InboundFormErrors>({});
-    const [knowledgeFile, setKnowledgeFile] = useState<File | null>(null);
-    const [knowledgeError, setKnowledgeError] = useState<string | null>(null);
     const errorSummaryRef = useRef<HTMLDivElement | null>(null);
-    // A new inbound campaign defines its own agent; the base-campaign select
-    // only remains for saved configs (edit) and the legacy preselect path.
-    const ownsAgent = mode === "create" && value.agent != null;
 
     const campaigns = useMemo(() => (campaignsQuery.data ?? []).filter((campaign) => campaign.status !== "deleted"), [campaignsQuery.data]);
     const eligibleCampaigns = useMemo(() => campaigns.filter(isEligibleInboundBaseCampaign), [campaigns]);
@@ -166,6 +160,7 @@ export function InboundCampaignForm({ mode, initialValue, initialCampaignId, pen
         });
         if (
             value.campaign_id
+            && !lockCampaign
             && !(mode === "edit" && value.campaign_id === initialValue?.campaign_id)
             && !eligibleCampaigns.some((campaign) => campaign.id === value.campaign_id)
         ) {
@@ -176,7 +171,7 @@ export function InboundCampaignForm({ mode, initialValue, initialCampaignId, pen
         }
         if (Object.keys(nextErrors).length > 0) return showErrors(nextErrors);
         try {
-            await onSubmit(value, { knowledgeFile });
+            await onSubmit(value);
         } catch (error) {
             const code = inboundErrorCode(error);
             const state = inboundStateForError(inboundErrorStatus(error), code);
@@ -235,8 +230,12 @@ export function InboundCampaignForm({ mode, initialValue, initialCampaignId, pen
                     <Field label="Campaign name" htmlFor="inbound-name" error={errors.name}>
                         <Input id="inbound-name" value={value.name} onChange={(event) => update("name", event.target.value)} placeholder="Main support line" autoComplete="off" aria-invalid={Boolean(errors.name)} />
                     </Field>
-                    {ownsAgent ? null : (
-                        <Field label="AI campaign" htmlFor="inbound-campaign_id" error={errors.campaign_id} hint={mode === "edit" ? "The base AI campaign is locked after creation so edits cannot bypass the audited inbound lifecycle." : "Only inbound-ready campaigns and unused outbound drafts are selectable; the server performs the final activity check."}>
+                    {lockCampaign ? (
+                        <Field label="Campaign" htmlFor="inbound-campaign_locked" hint="Created in step 1 with the same options as an outbound campaign. Its agent, knowledge and contact fields are edited from this inbound campaign's page." error={errors.campaign_id}>
+                            <Input id="inbound-campaign_locked" value={selectedCampaign?.name ?? (dependenciesLoading ? "Loading…" : value.campaign_id)} readOnly aria-readonly data-testid="inbound-locked-campaign" />
+                        </Field>
+                    ) : (
+                        <Field label="AI campaign" htmlFor="inbound-campaign_id" error={errors.campaign_id} hint={mode === "edit" ? "The base AI campaign is locked after creation so edits cannot bypass the audited inbound lifecycle." : "Only inbound campaigns and unused drafts are selectable; the server performs the final activity check."}>
                             <select id="inbound-campaign_id" value={value.campaign_id} onChange={(event) => update("campaign_id", event.target.value)} disabled={mode === "edit" || dependenciesLoading || eligibleCampaigns.length === 0} aria-invalid={Boolean(errors.campaign_id)} className={selectClass}>
                                 <option value="">Choose an AI campaign</option>{campaigns.map((campaign) => {
                                     const eligible = isEligibleInboundBaseCampaign(campaign);
@@ -270,26 +269,8 @@ export function InboundCampaignForm({ mode, initialValue, initialCampaignId, pen
                 </div>
             </section>
 
-            {ownsAgent && value.agent ? (
-                <>
-                    <section className="content-card space-y-6" aria-labelledby="inbound-own-agent-heading" data-testid="inbound-own-agent">
-                        <div className="flex items-start gap-3"><Bot className="mt-0.5 h-5 w-5 text-primary" aria-hidden /><div><h2 id="inbound-own-agent-heading" className="text-lg font-semibold text-foreground">AI agent</h2><p className="mt-1 text-sm text-muted-foreground">This inbound campaign has its own agent — persona, names, voice and guidance — exactly like an outbound campaign. Nothing is shared with outbound.</p></div></div>
-                        <InboundAgentSection
-                            value={value.agent}
-                            onChange={(agent) => update("agent", agent)}
-                            disabled={pending}
-                            errors={{ company_name: errors.agent_company_name, agent_names: errors.agent_names, voice_id: errors.agent_voice_id }}
-                        />
-                    </section>
-                    <section className="content-card space-y-6" aria-labelledby="inbound-knowledge-heading">
-                        <div className="flex items-start gap-3"><Bot className="mt-0.5 h-5 w-5 text-primary" aria-hidden /><div><h2 id="inbound-knowledge-heading" className="text-lg font-semibold text-foreground">Knowledge</h2><p className="mt-1 text-sm text-muted-foreground">What this agent knows. Uploaded to this inbound campaign only.</p></div></div>
-                        <InboundKnowledgeUpload file={knowledgeFile} disabled={pending} onChange={(file, error) => { setKnowledgeFile(file); setKnowledgeError(error ?? null); }} />
-                        {knowledgeError ? <p className="text-xs font-medium text-destructive">{knowledgeError}</p> : null}
-                    </section>
-                </>
-            ) : (
             <section className="content-card space-y-6" aria-labelledby="inbound-agent-heading">
-                <div className="flex items-start gap-3"><Bot className="mt-0.5 h-5 w-5 text-primary" aria-hidden /><div><h2 id="inbound-agent-heading" className="text-lg font-semibold text-foreground">AI behavior</h2><p className="mt-1 text-sm text-muted-foreground">Blank fields inherit the selected campaign. Inbound purpose, style, instructions, voice, and opening-silence settings are pinned before Answer.</p></div></div>
+                <div className="flex items-start gap-3"><Bot className="mt-0.5 h-5 w-5 text-primary" aria-hidden /><div><h2 id="inbound-agent-heading" className="text-lg font-semibold text-foreground">Inbound-only tweaks (optional)</h2><p className="mt-1 text-sm text-muted-foreground">Blank fields inherit the selected campaign. Inbound purpose, style, instructions, voice, and opening-silence settings are pinned before Answer.</p></div></div>
                 <InheritedKnowledge campaign={selectedCampaign} />
                 <div className="grid gap-5 md:grid-cols-2">
                     <Field label="Inbound call purpose" htmlFor="inbound-purpose" hint="Added to the base campaign goal for this number only."><Input id="inbound-purpose" value={value.purpose ?? ""} onChange={(event) => update("purpose", event.target.value)} maxLength={2000} placeholder="Handle new enquiries and arrange the right next step" /></Field>
@@ -310,7 +291,6 @@ export function InboundCampaignForm({ mode, initialValue, initialCampaignId, pen
                     </Field>
                 </div>
             </section>
-            )}
 
             <section className="content-card space-y-6" aria-labelledby="inbound-opening-heading">
                 <div className="flex items-start gap-3"><Mic2 className="mt-0.5 h-5 w-5 text-primary" aria-hidden /><div><h2 id="inbound-opening-heading" className="text-lg font-semibold text-foreground">Opening and turn-taking</h2><p className="mt-1 text-sm text-muted-foreground">Choose who speaks first and how long a caller-first line waits before checking in.</p></div></div>
@@ -386,7 +366,7 @@ export function InboundCampaignForm({ mode, initialValue, initialCampaignId, pen
 
             <div className="flex flex-col-reverse gap-3 rounded-xl border border-border bg-muted/20 p-4 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex items-start gap-2 text-sm text-muted-foreground"><ShieldCheck className="mt-0.5 h-4 w-4 shrink-0" aria-hidden /><span>Saving never activates the number. The server evaluates readiness again during confirmed activation.</span></div>
-                <Button type="submit" disabled={pending || dependenciesLoading || dependencyError || (!ownsAgent && eligibleCampaigns.length === 0) || eligibleInboundTrunks.length === 0 || availableNumbers.length === 0}>
+                <Button type="submit" disabled={pending || dependenciesLoading || dependencyError || (!lockCampaign && eligibleCampaigns.length === 0) || eligibleInboundTrunks.length === 0 || availableNumbers.length === 0}>
                     {pending ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Save className="h-4 w-4" aria-hidden />}{pending ? "Saving…" : mode === "create" ? "Create inactive campaign" : "Save changes"}
                 </Button>
             </div>

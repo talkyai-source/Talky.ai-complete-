@@ -6,6 +6,7 @@ import { useState } from "react";
 import { AlertTriangle, Archive, ArrowLeft, BookOpen, Edit3, History, Pause, Play, RefreshCw, ShieldCheck } from "lucide-react";
 
 import { CallIssuesPanel } from "@/components/campaigns/call-issues-panel";
+import { TestAgentButton } from "@/components/campaigns/test-agent-button";
 import { KnowledgePanel } from "@/components/campaigns/knowledge-panel";
 import { LiveCallsPanel } from "@/components/campaigns/live-calls-panel";
 import { RejectedInboundCallsPanel } from "@/components/campaigns/rejected-inbound-calls-panel";
@@ -89,7 +90,9 @@ export default function InboundCampaignDetailPage() {
                     <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                         <Button asChild variant="ghost" size="sm" className="self-start px-2"><Link href="/inbound-campaigns"><ArrowLeft className="h-4 w-4" aria-hidden />Back to inbound campaigns</Link></Button>
                         <div className="flex flex-wrap gap-2">
-                            {serverCampaignId && capabilities.canEdit && campaign.status !== "active" && campaign.status !== "archived" ? <Button asChild variant="outline" size="sm"><Link href={`/inbound-campaigns/${encodeURIComponent(serverCampaignId)}/edit`}><Edit3 className="h-4 w-4" aria-hidden />Edit configuration</Link></Button> : null}
+                            {capabilities.canEdit ? <Button asChild variant="outline" size="sm" data-testid="inbound-edit-campaign"><Link href={`/campaigns/${encodeURIComponent(campaign.campaign_id)}/edit`}><Edit3 className="h-4 w-4" aria-hidden />Edit campaign &amp; agent</Link></Button> : null}
+                            <TestAgentButton campaignId={campaign.campaign_id} />
+                            {serverCampaignId && capabilities.canEdit && campaign.status !== "active" && campaign.status !== "archived" ? <Button asChild variant="outline" size="sm"><Link href={`/inbound-campaigns/${encodeURIComponent(serverCampaignId)}/edit`}><Edit3 className="h-4 w-4" aria-hidden />Edit number &amp; routing</Link></Button> : null}
                             {serverCampaignId ? <Button asChild variant="outline" size="sm"><Link href={`/calls?direction=inbound&inbound_campaign_id=${encodeURIComponent(serverCampaignId)}`}><History className="h-4 w-4" aria-hidden />Call history</Link></Button> : null}
                             {capabilities.canChangeLifecycle && (campaign.status === "draft" || campaign.status === "paused") ? <Button size="sm" disabled={!canActivate} onClick={() => setAction("activate")}><Play className="h-4 w-4" aria-hidden />Activate</Button> : null}
                             {capabilities.canChangeLifecycle && campaign.status === "active" ? <Button size="sm" variant="outline" onClick={() => setAction("deactivate")}><Pause className="h-4 w-4" aria-hidden />Deactivate</Button> : null}

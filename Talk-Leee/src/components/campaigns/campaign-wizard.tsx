@@ -51,8 +51,20 @@ function fmtBytes(n: number): string {
     return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-export function CampaignWizard() {
+export type CampaignWizardProps = {
+    afterCreateHref?: (campaignId: string) => string;
+    /**
+     * 2026-09-09: an inbound campaign is created with this exact wizard — same
+     * persona, names, brief, guidance, voice, knowledge, contact fields and
+     * review. Only the outbound dialling schedule is omitted (inbound hours
+     * live on the number-and-routing step) and the row is born inbound.
+     */
+    direction?: "outbound" | "inbound";
+};
+
+export function CampaignWizard({ afterCreateHref, direction = "outbound" }: CampaignWizardProps = {}) {
     const router = useRouter();
+    const inbound = direction === "inbound";
 
     const [step, setStep] = useState(0);
     const [error, setError] = useState<string | null>(null);
@@ -185,7 +197,7 @@ export function CampaignWizard() {
                     campaign_slots: {},
                     campaign_brief: campaignBrief,
                     knowledge_driven: true,
-                    calling_schedule: schedule,
+                    ...(inbound ? { direction: "inbound" as const } : { calling_schedule: schedule }),
                 });
                 campaignId = campaign.id;
                 setCreatedCampaignId(campaign.id);
@@ -199,7 +211,7 @@ export function CampaignWizard() {
                     return;
                 }
             }
-            router.push(`/campaigns/${campaignId}`);
+            router.push(afterCreateHref ? afterCreateHref(campaignId) : `/campaigns/${campaignId}`);
         } catch (err) {
             const detail = err instanceof Error ? err.message : "Failed to create campaign";
             setError(
@@ -317,9 +329,11 @@ export function CampaignWizard() {
                             onVoiceGenderChange={setVoiceGender}
                         />
 
-                        <div className="rounded-lg border border-border bg-background/50 p-4">
-                            <CallingScheduleEditor value={schedule} onChange={setSchedule} />
-                        </div>
+                        {inbound ? null : (
+                            <div className="rounded-lg border border-border bg-background/50 p-4">
+                                <CallingScheduleEditor value={schedule} onChange={setSchedule} />
+                            </div>
+                        )}
 
                         <div className="flex justify-end pt-1">
                             <Button onClick={() => { setError(null); setStep(1); }} disabled={!basicsValid}>

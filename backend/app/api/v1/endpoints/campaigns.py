@@ -616,6 +616,7 @@ async def create_campaign(
             "tts_provider": (campaign_data.tts_provider or None),
             "goal": campaign_data.goal.strip() if campaign_data.goal else None,
             "script_config": script_config,
+            "direction": campaign_data.direction,
         }
         _sched = _calling_config_from_schedule(campaign_data.calling_schedule)
         if _sched is not None:

@@ -190,6 +190,14 @@ class CampaignCreateRequest(BaseModel):
         default=None,
         description="Per-campaign calling hours + timezone (overlays tenant defaults).",
     )
+    direction: Literal["outbound", "inbound"] = Field(
+        default="outbound",
+        description=(
+            "2026-09-09: an inbound campaign is created with the SAME creator and "
+            "options as an outbound one and is born inbound; the inbound number "
+            "and routing are attached afterwards. Nothing is converted."
+        ),
+    )
 
     @field_validator("agent_names")
     @classmethod

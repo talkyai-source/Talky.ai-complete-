@@ -129,76 +129,16 @@ async def create_inbound_campaign(
     idempotency_key: str = Depends(_key),
     db_pool: asyncpg.Pool = Depends(get_db_pool),
 ) -> dict:
-    body = payload.model_dump()
-    if payload.agent is not None:
-        body["agent_row"] = await prepare_inbound_agent_row(
-            db_pool, tenant_id=_tenant(user), name=payload.name, agent=payload.agent.model_dump()
-        )
-    body.pop("agent", None)
     try:
         return await InboundCampaignService(db_pool).create_campaign(
             tenant_id=_tenant(user),
             actor_id=user.id,
             actor_role=user.role,
-            payload=body,
+            payload=payload.model_dump(),
             idempotency_key=idempotency_key,
         )
     except InboundCampaignError as exc:
         _raise_service(exc)
-
-
-async def prepare_inbound_agent_row(db_pool, *, tenant_id: str, name: str, agent: dict) -> dict:
-    """Turn the inline agent definition into the ``campaigns`` row the inbound
-    service inserts — with the SAME validation the outbound creator applies:
-    the voice must exist for the effective TTS provider and the composed
-    prompt must pass the production prompt path. HTTP errors here mirror
-    ``POST /campaigns`` so the two creators fail the same way."""
-    from app.api.v1.endpoints.ai_options import _fetch_tenant_config
-    from app.api.v1.endpoints.campaigns import _valid_voice_ids_for_provider
-    from app.core.db_utils import acquire_with_tenant
-    from app.domain.models.ai_config import AIProviderConfig
-    from app.domain.services.campaign_prompt_service import (
-        CampaignPromptValidationError,
-        build_validated_script_config,
-    )
-
-    async with acquire_with_tenant(db_pool, tenant_id) as conn:
-        ai_config = await _fetch_tenant_config(conn, tenant_id)
-    if ai_config is None:
-        ai_config = AIProviderConfig()
-    effective_provider = (agent.get("tts_provider") or ai_config.tts_provider or "").strip()
-    voice_id = str(agent["voice_id"]).strip()
-    if voice_id not in await _valid_voice_ids_for_provider(effective_provider):
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                f"Voice '{voice_id}' is not available for TTS provider "
-                f"'{effective_provider}'. Pick a matching voice or change the provider."
-            ),
-        )
-    goal = (agent.get("goal") or "").strip()
-    try:
-        script_config = build_validated_script_config(
-            persona_type=agent["persona_type"],
-            company_name=agent["company_name"],
-            agent_names=list(agent["agent_names"]),
-            campaign_slots=dict(agent.get("campaign_slots") or {}),
-            additional_instructions=goal,
-            knowledge_driven=bool(agent.get("knowledge_driven", True)),
-            campaign_brief=agent.get("campaign_brief"),
-        )
-    except CampaignPromptValidationError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    if agent.get("agent_name_genders"):
-        script_config["agent_name_genders"] = agent["agent_name_genders"]
-    return {
-        "name": name.strip(),
-        "system_prompt": goal,
-        "voice_id": voice_id,
-        "tts_provider": agent.get("tts_provider") or None,
-        "goal": goal or None,
-        "script_config": script_config,
-    }
 
 
 # Literal paths must be registered before /{config_id}.

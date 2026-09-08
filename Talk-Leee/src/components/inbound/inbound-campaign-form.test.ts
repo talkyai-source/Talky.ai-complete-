@@ -31,20 +31,12 @@ const SUPPORTED_QUALIFICATION_KEYS = [
     "silence_timeout_seconds",
 ] as const;
 
-test("inbound form requires a verified DID, its own agent and an inbound trunk", () => {
+test("inbound form requires a verified DID, AI campaign and inbound trunk", () => {
     const errors = validateInboundCampaign(initialInboundCampaignInput());
     assert.equal(errors.name, "Enter a name for this inbound campaign.");
     assert.equal(errors.did_number, "Choose a verified phone number.");
-    // 2026-09-09: a new inbound campaign owns its agent — no base campaign is
-    // demanded; the agent's own fields are.
-    assert.equal(errors.campaign_id, undefined);
-    assert.equal(errors.agent_company_name, "Enter the brand or company name the agent speaks for.");
-    assert.equal(errors.sip_trunk_id, "Choose an inbound-capable SIP trunk.");
-});
-
-test("the legacy existing-campaign path still demands a campaign when no agent is defined", () => {
-    const errors = validateInboundCampaign({ ...initialInboundCampaignInput(), agent: null });
     assert.equal(errors.campaign_id, "Choose the AI campaign that should answer.");
+    assert.equal(errors.sip_trunk_id, "Choose an inbound-capable SIP trunk.");
 });
 
 test("inbound form enforces recording disclosure and E.164 transfer destinations", () => {
@@ -347,42 +339,9 @@ test("a saved inbound campaign ignores a stray preselect", () => {
     assert.equal(initialInboundCampaignInput(saved, { campaignId: "draft-1" }).campaign_id, "saved-9");
 });
 
-test("a new inbound campaign owns its agent by default and needs no existing campaign", () => {
-    const fresh = initialInboundCampaignInput();
-    assert.ok(fresh.agent, "a new form must start with its own agent");
-    assert.equal(fresh.campaign_id, "");
-    const errors = validateInboundCampaign({ ...fresh, name: "Main line", did_number: "+442046132300", sip_trunk_id: "t1" });
-    assert.equal(errors.campaign_id, undefined, "no base campaign is demanded when the agent is owned");
-    assert.equal(errors.agent_company_name, "Enter the brand or company name the agent speaks for.");
-    assert.equal(errors.agent_names, "Give the agent at least one name.");
-    assert.equal(errors.agent_voice_id, "Pick a voice for the agent.");
-});
-
-test("a complete owned agent validates and a saved config still has no agent block", () => {
-    const fresh = initialInboundCampaignInput();
-    const ok = validateInboundCampaign({
-        ...fresh,
-        name: "Main line",
-        did_number: "+442046132300",
-        sip_trunk_id: "t1",
-        agent: { ...fresh.agent!, company_name: "Dojo", agent_names: ["Sarah"], voice_id: "v1" },
-    });
-    assert.equal(ok.agent_company_name, undefined);
-    assert.equal(ok.agent_names, undefined);
-    assert.equal(ok.agent_voice_id, undefined);
-    const saved = { campaign_id: "saved-9" } as unknown as Parameters<typeof initialInboundCampaignInput>[0];
-    assert.equal(initialInboundCampaignInput(saved).agent, null);
-});
-
-test("the create payload sends the agent block instead of a campaign id", () => {
-    const fresh = initialInboundCampaignInput();
-    const body = inboundApi.__test_cleanInput({
-        ...fresh,
-        name: "Main line",
-        did_number: "+442046132300",
-        sip_trunk_id: "t1",
-        agent: { ...fresh.agent!, company_name: " Dojo ", agent_names: ["Sarah"], voice_id: "v1", goal: "Book callbacks" },
-    }, true) as Record<string, unknown>;
-    assert.equal("campaign_id" in body, false);
-    assert.deepEqual(body.agent, { company_name: "Dojo", agent_names: ["Sarah"], persona_type: "receptionist", voice_id: "v1", tts_provider: null, goal: "Book callbacks", knowledge_driven: true });
+test("step 2 of the inbound creator locks the step-1 campaign instead of offering a picker", () => {
+    const source = readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "inbound-campaign-form.tsx"), "utf8");
+    assert.ok(source.includes("lockCampaign"), "lockCampaign prop missing");
+    assert.ok(source.includes('data-testid="inbound-locked-campaign"'), "locked campaign field missing");
+    assert.ok(!source.includes("campaign-create-return"), "the inbound form must not link out to the outbound creator");
 });

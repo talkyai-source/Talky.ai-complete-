@@ -71,6 +71,7 @@ export default function EditCampaignPage() {
     const [knowledgeDriven, setKnowledgeDriven] = useState(false);
     const [ttsProvider, setTtsProvider] = useState<string | null>(null);
     const [callingSchedule, setCallingSchedule] = useState<CampaignCallingSchedule | null>(null);
+    const [backHref, setBackHref] = useState(`/campaigns/${campaignId}`);
 
     useEffect(() => {
         let cancelled = false;
@@ -80,13 +81,10 @@ export default function EditCampaignPage() {
                 const { campaign } = await dashboardApi.getCampaign(campaignId);
                 if (cancelled) return;
                 if (!isOutboundCampaign(campaign)) {
+                    // 2026-09-09: inbound campaigns are edited with this SAME form
+                    // (identical options); only the way back differs.
                     const inboundCampaigns = await inboundApi.list({ includeArchived: true });
-                    if (!cancelled) {
-                        router.replace(
-                            inboundCampaignHrefForBase(campaignId, inboundCampaigns),
-                        );
-                    }
-                    return;
+                    if (!cancelled) setBackHref(inboundCampaignHrefForBase(campaignId, inboundCampaigns));
                 }
 
                 const scriptConfig = campaign.script_config ?? {};
@@ -143,7 +141,7 @@ export default function EditCampaignPage() {
                 className="mb-6"
             >
                 <button
-                    onClick={() => router.push(`/campaigns/${campaignId}`)}
+                    onClick={() => router.push(backHref)}
                     className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
                 >
                     <ArrowLeft className="w-4 h-4" />

@@ -1,67 +1,59 @@
-# 2026-09-09 — An inbound campaign owns its own AI agent
+# 2026-09-09 — Inbound campaigns are created and edited with the outbound campaign options, identically
 
-Owner (verbatim intent): "it must be a separate entity, able to create separately and have
-everything of its own — the same behaviour and mechanism as outbound; keep the knowledge of
-each thing its own, don't mix."
+Owner, three messages in a row: "it must be a separate entity … everything of its own" →
+"the same behaviour and mechanism as outbound; keep the knowledge of each its own, don't mix"
+→ "its campaign options must mimic the outbound type of options, no differ".
 
-## Before
+## What was wrong
 
 An inbound campaign row (`inbound_campaign_configs`) held only number, trunk, hours and
-routing. The agent — persona, names, voice, guidance, knowledge, tools — lived on a
-`campaigns` row that the create form made the user **select**: an inbound campaign or an
-unused outbound draft (the service converted the draft). A tenant whose campaigns had all
-dialled out saw every option greyed out. Yesterday's "Create a new AI campaign" round trip
-still made the inbound campaign a pointer at something created elsewhere.
+routing; the agent lived on a `campaigns` row the create form made you **pick** (an inbound
+campaign or an unused outbound draft, converted on save). A tenant whose campaigns had all
+run saw every option greyed out. A first attempt (same day, commit `b2a84a69`) gave the inbound
+form its own reduced "AI agent" section — rejected: it *differed* from the outbound options.
 
-## Design (approved 2026-09-09)
+## Final design (built)
 
-The runtime already needs a `campaigns` row per agent (script_config, voice, knowledge keyed
-by campaign id, direction). So the change is ownership, not plumbing: **the inbound campaign
-creates and owns that row**, born `direction='inbound'`, inside its own transaction. The user
-defines the agent in the inbound form with the same fields and components the outbound wizard
-uses, uploads the agent's knowledge there, and edits it later on the inbound page. Nothing is
-selected from, converted from, or shared with outbound.
+**An inbound campaign is created with the very same creator as an outbound one and edited with
+the very same editor.** The campaign is born `direction='inbound'`; the inbound-only facts (number,
+trunk, opening, hours, safety routing) are a second step. Nothing is picked from, converted
+from, or shared with outbound campaigns; outbound lists already hide inbound rows.
 
 | Layer | Change | Where |
 |---|---|---|
-| Contract | `InboundCampaignCreateRequest.agent: InboundAgentDefinition` (company name, 1–3 agent names + genders, persona style, voice, TTS provider, guidance, slots, brief, knowledge_driven). `campaign_id` is now optional; **exactly one** of the two must be present. | `schemas/inbound_campaigns.py` |
-| Endpoint | `prepare_inbound_agent_row`: same voice-per-provider check and the same production prompt validation `POST /campaigns` applies, same 400s. Produces the row the service inserts. | `endpoints/inbound_campaigns.py` |
-| Service | `_create_owned_campaign` inserts `campaigns (…, status='draft', direction='inbound')` before the direction lock; the rest of `create_campaign` is unchanged and runs on the new id. Legacy `campaign_id` path kept for the existing configs. | `inbound_campaign_service.py` |
-| Form (create) | Sections: Number & routing → **AI agent** (brand, names + gender hints, style cards, voice picker, guidance) → **Knowledge** (.md/.txt up to 10 MB, uploaded to the owned campaign after create) → opening → hours → safety. The base-campaign select and the override fields appear only in edit mode / legacy path. Save no longer waits for an "eligible campaign". | `inbound-campaign-form.tsx`, new `inbound-agent-section.tsx` |
-| Payload | `agent` block is sent instead of `campaign_id` when the agent is owned | `inbound-api.ts::cleanInput` |
-| Detail page | The knowledge panel is embedded on the inbound page (read-only without edit permission); the "configured on the base campaign" link is gone | `inbound-campaigns/[id]/page.tsx` |
-| Removed | Yesterday's round trip (`/campaigns/new?for=inbound`, `campaign-create-return.ts`) — superseded | |
+| Backend | `CampaignCreateRequest.direction` (`outbound` default, `inbound` allowed); the insert writes it. The existing inbound create path then binds this already-inbound campaign — no conversion branch runs. | `schemas/campaigns.py`, `endpoints/campaigns.py` |
+| Create, step 1 | `/inbound-campaigns/new` hosts the **same** `CampaignWizard` (and the "Prefer the detailed form?" classic `CampaignForm`) with `direction="inbound"`: persona, agent names + gender hints, brief fields, guidance budget, voice/provider picker, knowledge upload, contact fields, review with prompt-layer preview. Only the outbound dialling schedule is omitted (inbound hours are step 2). On create it continues to step 2 with the new campaign. | `campaign-wizard.tsx`, `campaign-form.tsx`, `inbound-campaigns/new/page.tsx`, `campaign-create-return.ts` |
+| Create, step 2 | The inbound form with the step-1 campaign shown as a **locked** field (no picker); number, trunk, opening, hours, safety as before. The old override block is retitled "Inbound-only tweaks (optional)". | `inbound-campaign-form.tsx` (`lockCampaign`) |
+| Edit | The campaign editor (`/campaigns/{id}/edit`) now accepts inbound campaigns instead of redirecting away — identical options — and its back link returns to the inbound page. | `campaigns/[id]/edit/page.tsx` |
+| Inbound page | Header gains **Edit campaign & agent** (the shared editor) and **Test agent** (same button as outbound); **Knowledge** panel is embedded on the page; the number/routing editor is labelled as such. | `inbound-campaigns/[id]/page.tsx` |
+| Legacy | Existing inbound configs (AllState's two) and the picker path keep working. | |
 
-Existing inbound campaigns (AllState's two) keep their base campaign and behave exactly as
-before. Outbound lists already filter `direction='inbound'` rows out, so an owned agent never
-shows up as an outbound campaign.
+The `b2a84a69` "agent block" (schema/service/`inbound-agent-section.tsx`) is removed: one
+creator, not two.
 
 ## Premortem
 
-- **Is it a patch or the fix?** The fix: the dependency on a pre-existing campaign is gone
-  from the user's model; the row the runtime needs is created where it belongs.
-- **Two creators drifting.** The inbound path calls the *same* prompt builder and voice check
-  the outbound endpoint uses (imported, not copied), so validation cannot diverge silently.
-- **Idempotency.** The agent row is part of the claimed request payload; a replayed create
-  returns the original result and does not insert a second campaign.
-- **Knowledge upload after create.** Create commits first, then the upload; an upload failure
-  lands on the inbound page with `?knowledge_error=1` (same contract the outbound wizard uses)
-  and the file can be re-added from the embedded panel.
-- **Permissions.** Knowledge on an inbound campaign is already gated by `inbound:read` /
-  `inbound:manage` (`campaign_knowledge_access.py`), so embedding the panel adds no new access.
-- **Not done.** Editing the owned agent's persona/names/voice after creation still goes
-  through the existing override fields on the edit page; a full agent editor on the inbound
-  edit page is the natural next step if the owner wants it.
+- **Patch or fix?** Fix at the model level: the only difference between an inbound and an
+  outbound campaign is now the `direction` value and the routing step that follows.
+- **Two creators drifting** cannot happen — there is one.
+- **Detail page** for campaigns (`/campaigns/{id}`) still redirects inbound rows to the inbound
+  page on purpose: it carries outbound-only controls (start, contacts, dialler). The editor,
+  test agent and knowledge are reachable from the inbound page.
+- **Knowledge upload in step 1** goes to the inbound-born campaign; a failure lands on the
+  routing step's page via the wizard's existing `?knowledge_error=1` contract → then on the
+  inbound page's embedded panel.
+- **Not done:** the outbound wizard's "calling schedule" is intentionally absent for inbound;
+  inbound business hours live in step 2 as before.
 
 ## Verification
 
 ```text
-backend targeted: test_inbound_owned_agent (9) + test_inbound_campaign_service + test_inbound_conversion_boundaries → 79 passed
+backend targeted: test_campaign_create_direction (4) + assistant/test_campaign_create → 19 passed
 ruff check app/ --select F --extend-ignore F401,F841 → All checks passed!
-Talk-Leee: typecheck exit=0 · lint exit=0 · tests 467, pass 465, fail 0, skipped 2 · next build exit=0
+Talk-Leee: typecheck exit=0 · lint exit=0 · tests 466, pass 464, fail 0, skipped 2 · next build exit=0
 ```
 
 ```text
 backend/.venv/Scripts/python -m pytest tests/unit tests/security -q
-8912 passed, 8 skipped in 678.48s (0:11:18)
+8907 passed, 8 skipped in 394.75s (0:06:34)
 ```

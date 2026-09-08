@@ -92,6 +92,8 @@ export interface CampaignCallingSchedule {
 }
 
 export interface CampaignCreate {
+    /** 2026-09-09: inbound campaigns are created with the SAME creator; only this differs. Default outbound. */
+    direction?: "outbound" | "inbound";
     name: string;
     description?: string;
     // Freeform extra instructions. Backend always keeps this below the
