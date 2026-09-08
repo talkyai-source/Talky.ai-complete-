@@ -993,12 +993,38 @@ class AsteriskAdapter(CallControlAdapter):
                             payload = await resp.json(content_type=None)
                         except Exception:
                             return False
+                        self._note_gateway_build(payload)
                         return self._gateway_health_payload_is_compatible(payload)
 
                 ari_ok, gateway_ok = await asyncio.gather(_ari_ok(), _gateway_ok())
                 return bool(ari_ok and gateway_ok)
         except Exception:
             return False
+
+    _last_gateway_build_sha: Optional[str] = None
+
+    @classmethod
+    def _note_gateway_build(cls, payload: Any) -> None:
+        """Log the running gateway's build identity whenever it changes.
+
+        The compatibility gate below only proves protocol/codec agreement; it
+        said nothing about WHICH build was running. On 2026-09-09 prod was found
+        four tested gateway fixes behind source and nothing in the journal
+        showed it. One INFO line per distinct build_sha makes that visible.
+        """
+        if not isinstance(payload, dict):
+            return
+        build_sha = payload.get("build_sha")
+        if not isinstance(build_sha, str) or not build_sha:
+            return
+        if build_sha != cls._last_gateway_build_sha:
+            cls._last_gateway_build_sha = build_sha
+            logger.info(
+                "voice_gateway build_sha=%s protocol_version=%s codecs=%s",
+                build_sha,
+                payload.get("protocol_version"),
+                payload.get("codecs"),
+            )
 
     @staticmethod
     def _gateway_health_payload_is_compatible(payload: Any) -> bool:
@@ -1198,10 +1224,17 @@ class AsteriskAdapter(CallControlAdapter):
         # requires "Authorization: Bearer <token>" on session/control endpoints;
         # sending the same env var from here keeps the pair in lockstep. The
         # production startup gates on both sides reject an unset token.
-        headers: Optional[Dict[str, str]] = None
         token = os.getenv("VOICE_GATEWAY_AUTH_TOKEN", "").strip()
-        if token:
-            headers = {"Authorization": f"Bearer {token}"}
+        if not token:
+            # 2026-09-09: fail closed here too, not only in prod_gate. The audio
+            # ingress side already refuses everything without its token; the
+            # control plane used to send an unauthenticated request and let the
+            # gateway decide. One rule for both directions.
+            raise RuntimeError(
+                "VOICE_GATEWAY_AUTH_TOKEN is not set; refusing an unauthenticated "
+                f"gateway control call {method} {path}"
+            )
+        headers: Optional[Dict[str, str]] = {"Authorization": f"Bearer {token}"}
         # Must NOT reuse self._session: it was built with
         # auth=aiohttp.BasicAuth(...) for ARI, and aiohttp raises
         # "Cannot combine AUTHORIZATION header with AUTH argument or

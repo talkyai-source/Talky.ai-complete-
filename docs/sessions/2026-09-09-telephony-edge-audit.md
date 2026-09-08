@@ -88,3 +88,23 @@ sender · `session.h:70-75` codec/timeouts · `session.cpp:734-788` STT reorder 
 1. Build and deploy the gateway at HEAD (`deploy_to_server.sh` builds it when the source changed; the Python-only hotfix path does not). Restarting the gateway drops any live call — do it in a quiet window.
 2. `sudo`: add `/var/log/asterisk/messages.log` to `/etc/logrotate.d/asterisk`; add a fail2ban `asterisk` jail (or restrict UDP 5060 to the carrier's addresses).
 3. Code (small): fail-closed on a missing `VOICE_GATEWAY_AUTH_TOKEN`; log `build_sha` from the gateway health payload at startup.
+
+## Implementation (owner: "go ahead and implement them")
+
+| Item | How | Status |
+|---|---|---|
+| Fail-closed gateway control auth | `AsteriskAdapter._gateway` raises `RuntimeError` when `VOICE_GATEWAY_AUTH_TOKEN` is unset instead of sending an unauthenticated request (prod_gate already required the token at startup; now the call site agrees). | code, this commit |
+| Gateway build identity in the journal | `AsteriskAdapter._note_gateway_build` logs `voice_gateway build_sha=… protocol_version=… codecs=…` once per distinct build seen by `health_check`. | code, this commit |
+| Tests | `tests/unit/test_asterisk_gateway_control_auth.py` (3): no request without token; bearer carried when set; build line logged once per change and never raises. | this commit |
+| Gateway binary at HEAD | `ops_edge_0909.sh` step 4: worktree at the target commit → `build_voice_gateway_release.sh` (cmake, ctest, fail-closed startup proof) → refuse to swap if `active_sessions>0` → atomic install → restart → verify `/health` `build_sha` equals the target. | host script, owner runs |
+| `messages.log` rotation | `/etc/logrotate.d/asterisk-messages-log`: weekly or 200 MB, keep 4, compress, `logger-reload`. Historical 5.5 GB file left in place. | host script |
+| SIP jail | `/etc/fail2ban/jail.d/asterisk.local`: filter `asterisk` on `messages.log` (dry-run matched 193 952 of 199 981 scanner lines), 5 failures / 10 min → 1 h ban, `ignoreip` = localhost, this host, carrier `sip3.blazedigitel.com` (144.76.17.155). | host script |
+| Config drift review | step 5 dumps the live `pjsip.conf` / `rtp.conf` / `logger.conf` / `pjsip.d` / dialplan (passwords filtered) for comparison with `setup-asterisk.sh`. | host script output |
+
+Not done: the 2-hour session ceiling and 8-second stall watchdog are design choices, left as they
+are; the `lifecycle.py:941` inverse-zombie reconcile TODO is a separate piece of work.
+
+```text
+backend/.venv/Scripts/python -m pytest tests/unit tests/security -q → 8910 passed, 8 skipped in 601.16s
+ruff check app/ --select F --extend-ignore F401,F841 → All checks passed!
+```
