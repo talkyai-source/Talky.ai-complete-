@@ -1,27 +1,24 @@
 "use client";
 
-import { Suspense } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 
 import { InboundCampaignForm } from "@/components/inbound/inbound-campaign-form";
 import { InboundErrorState, InboundLoadingState, InboundPermissionState } from "@/components/inbound/inbound-page-state";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { useAuth } from "@/hooks/useAuth";
+import { api } from "@/lib/api";
 import { getInboundCapabilities } from "@/lib/inbound-permissions";
 import { useCreateInboundCampaign, useEffectivePermissions } from "@/lib/queries/inbound-queries";
 
-function NewInboundCampaignPageInner() {
+export default function NewInboundCampaignPage() {
     const router = useRouter();
-    // Set when the user came back from "Create a new AI campaign" — the new
-    // draft is pre-selected so the round trip lands them exactly where they were.
-    const preselectedCampaignId = useSearchParams().get("campaign_id");
     const { user } = useAuth();
     const permissions = useEffectivePermissions();
     const create = useCreateInboundCampaign();
     const capabilities = getInboundCapabilities(user?.role, permissions.isSuccess ? permissions.data.permissions : undefined);
 
     return (
-        <DashboardLayout title="New Inbound Campaign" description="Configure a verified number, AI agent, trunk, and safe fallback">
+        <DashboardLayout title="New Inbound Campaign" description="Its own AI agent, knowledge, number and routing — created in one place">
             {permissions.isLoading ? <InboundLoadingState label="Checking create and assignment permissions…" /> : permissions.isError ? (
                 <InboundErrorState title="Permissions could not be verified" message="Creating or assigning a public number is disabled until server permissions can be confirmed." onRetry={() => void permissions.refetch()} />
             ) : !capabilities.canCreate || !capabilities.canAssignNumber ? (
@@ -29,24 +26,24 @@ function NewInboundCampaignPageInner() {
             ) : (
                 <InboundCampaignForm
                     mode="create"
-                    initialCampaignId={preselectedCampaignId}
                     pending={create.isPending}
                     canAssignNumber={capabilities.canAssignNumber}
-                    onSubmit={async (input) => {
+                    onSubmit={async (input, { knowledgeFile }) => {
                         const created = await create.mutateAsync({ input, didNumber: input.did_number });
+                        if (knowledgeFile) {
+                            // The knowledge belongs to the campaign row this inbound
+                            // campaign owns — same endpoint the outbound wizard uses.
+                            try {
+                                await api.uploadCampaignKnowledge(created.campaign_id, knowledgeFile);
+                            } catch {
+                                router.push(`/inbound-campaigns/${created.id}?knowledge_error=1`);
+                                return;
+                            }
+                        }
                         router.push(`/inbound-campaigns/${created.id}`);
                     }}
                 />
             )}
         </DashboardLayout>
-    );
-}
-
-export default function NewInboundCampaignPage() {
-    // useSearchParams needs a Suspense boundary for the static prerender.
-    return (
-        <Suspense fallback={null}>
-            <NewInboundCampaignPageInner />
-        </Suspense>
     );
 }

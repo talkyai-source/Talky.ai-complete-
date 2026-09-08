@@ -1146,6 +1146,32 @@ class InboundCampaignService:
                 code="did_assignment_conflict",
             )
 
+    async def _create_owned_campaign(self, conn, *, tenant_id, agent_row: Mapping[str, Any]):
+        """Insert the campaigns row an inbound campaign owns.
+
+        Born ``direction='inbound'`` and ``status='draft'``; the script_config,
+        voice and provider were validated by the endpoint with the outbound
+        creator's rules. Knowledge for this agent is keyed by this id and is
+        edited from the inbound campaign page, never from an outbound one.
+        """
+        row = await conn.fetchrow(
+            """
+            INSERT INTO campaigns
+                (tenant_id, name, description, status, system_prompt, voice_id,
+                 tts_provider, goal, script_config, direction)
+            VALUES ($1, $2, NULL, 'draft', $3, $4, $5, $6, $7::jsonb, 'inbound')
+            RETURNING id
+            """,
+            tenant_id,
+            str(agent_row["name"]),
+            str(agent_row.get("system_prompt") or ""),
+            str(agent_row["voice_id"]),
+            agent_row.get("tts_provider"),
+            agent_row.get("goal"),
+            json.dumps(agent_row.get("script_config") or {}),
+        )
+        return row["id"]
+
     async def create_campaign(
         self,
         *,
@@ -1157,7 +1183,14 @@ class InboundCampaignService:
     ) -> dict[str, Any]:
         tenant_id = _uuid(tenant_id, "tenant_id")
         actor_id = _uuid(actor_id, "actor_id")
-        campaign_id = _uuid(str(payload.get("campaign_id")), "campaign_id")
+        agent_row = payload.get("agent_row")
+        if agent_row:
+            # The inbound campaign owns its agent: the campaigns row is created
+            # below, inside this same transaction, already inbound. No outbound
+            # campaign is selected, converted or shared.
+            campaign_id = None
+        else:
+            campaign_id = _uuid(str(payload.get("campaign_id")), "campaign_id")
         trunk_id = _uuid(str(payload.get("sip_trunk_id")), "sip_trunk_id")
         did = normalize_did(str(payload.get("did_number") or ""))
         if not did:
@@ -1211,6 +1244,11 @@ class InboundCampaignService:
                 config_id=None,
             )
 
+            if campaign_id is None:
+                campaign_id = await self._create_owned_campaign(
+                    conn, tenant_id=tenant_id, agent_row=agent_row
+                )
+                normalized["campaign_id"] = campaign_id
             # Knowledge mutations hold this same lock from direction-aware
             # authorization through their final write.  Taking it before the
             # campaign row lock prevents an outbound editor from crossing the

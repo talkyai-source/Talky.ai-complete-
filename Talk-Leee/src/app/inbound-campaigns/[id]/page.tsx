@@ -130,18 +130,17 @@ export default function InboundCampaignDetailPage() {
                         </section>
                         <aside className="space-y-5">
                             <section className="content-card" aria-labelledby="safety-summary-heading"><h2 id="safety-summary-heading" className="text-lg font-semibold text-foreground">Safety policy</h2><dl className="mt-4 space-y-3"><Info label="After hours" value={afterHoursLabel(campaign.after_hours_action)} />{campaign.after_hours_action === "transfer" ? <Info label="Transfer destination" value={campaign.transfer_number ?? "Not configured"} /> : null}<Info label="Recording" value={campaign.recording_enabled ? "Enabled with disclosure" : "Disabled"} /></dl></section>
-                            {/* Read-only. Knowledge is owned by the base AI campaign and pinned
-                                at admission; it is not an inbound field, so this panel names the
-                                source and links to where it is edited rather than offering a
-                                control the runtime would reject. */}
-                            <section className="content-card" aria-labelledby="inbound-knowledge-heading">
-                                <div className="flex items-center gap-2"><BookOpen className="h-4 w-4 text-primary" aria-hidden /><h2 id="inbound-knowledge-heading" className="text-sm font-semibold text-foreground">Knowledge source</h2></div>
-                                <p className="mt-3 text-sm text-muted-foreground">This number answers from the knowledge of {campaign.campaign_name || "its base AI campaign"}. Knowledge and executable tools are configured there, not on this campaign.</p>
-                                {campaign.campaign_id ? <Button asChild variant="outline" size="sm" className="mt-3"><Link href={`/campaigns/${encodeURIComponent(campaign.campaign_id)}`}><BookOpen className="h-4 w-4" aria-hidden />Open campaign knowledge</Link></Button> : null}
-                            </section>
                             <section className="content-card" aria-labelledby="version-heading"><div className="flex items-center gap-2"><ShieldCheck className="h-4 w-4 text-primary" aria-hidden /><h2 id="version-heading" className="text-sm font-semibold text-foreground">Server state</h2></div><dl className="mt-4 space-y-3"><Info label="Updated" value={formatDate(campaign.updated_at)} /><Info label="Activated" value={formatDate(campaign.active_at)} /></dl></section>
                         </aside>
                     </div>
+
+                    <section className="content-card" aria-labelledby="inbound-knowledge-heading" data-testid="inbound-knowledge">
+                        <div className="flex items-center gap-2"><BookOpen className="h-4 w-4 text-primary" aria-hidden /><h2 id="inbound-knowledge-heading" className="text-lg font-semibold text-foreground">Knowledge</h2></div>
+                        <p className="mt-1 text-sm text-muted-foreground">What this inbound agent knows. It belongs to this campaign alone — nothing here is shared with outbound campaigns.</p>
+                        <div className="mt-4">
+                            <KnowledgePanel campaignId={campaign.campaign_id} readOnly={!capabilities.canEdit} />
+                        </div>
+                    </section>
 
                     <div className="grid gap-5 xl:grid-cols-2">
                         <LiveCallsPanel

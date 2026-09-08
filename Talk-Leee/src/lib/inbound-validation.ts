@@ -1,8 +1,8 @@
-import { defaultInboundWeeklySchedule, type InboundCampaign, type InboundCampaignInput } from "@/lib/inbound-api";
+import { defaultInboundWeeklySchedule, type InboundCampaign, type InboundCampaignInput, type InboundAgentInput } from "@/lib/inbound-api";
 import type { Campaign } from "@/lib/dashboard-api";
 import type { SipTrunkRow } from "@/lib/telephony-api";
 
-export type InboundFormErrors = Partial<Record<keyof InboundCampaignInput | "form", string>>;
+export type InboundFormErrors = Partial<Record<keyof InboundCampaignInput | "form" | "agent_company_name" | "agent_names" | "agent_voice_id", string>>;
 
 export interface InboundValidationCapabilities {
     transferConfigurationAvailable?: boolean;
@@ -53,17 +53,30 @@ function browserTimezone(): string {
     }
 }
 
+export const EMPTY_INBOUND_AGENT: InboundAgentInput = {
+    company_name: "",
+    agent_names: [],
+    agent_names_raw: "",
+    agent_name_genders: {},
+    persona_type: "receptionist",
+    voice_id: "",
+    tts_provider: null,
+    goal: "",
+};
+
 export function initialInboundCampaignInput(
     value?: InboundCampaign,
     preselect?: { campaignId?: string | null },
 ): InboundCampaignInput {
+    // A NEW inbound campaign owns its agent (2026-09-09). A saved one keeps its
+    // existing base campaign; the legacy preselect is only honoured when given.
+    const legacyCampaignId = value?.campaign_id ?? preselect?.campaignId ?? "";
     return {
         name: value?.name ?? "",
         did_number: value?.phone_number?.e164 ?? "",
         purpose: value?.purpose ?? "",
-        // A saved campaign always wins; the preselect only seeds a NEW form
-        // (the round trip back from "Create a new AI campaign").
-        campaign_id: value?.campaign_id ?? preselect?.campaignId ?? "",
+        campaign_id: legacyCampaignId,
+        agent: value || legacyCampaignId ? null : { ...EMPTY_INBOUND_AGENT },
         sip_trunk_id: value?.sip_trunk_id ?? "",
         agent_persona: value?.agent_persona ?? "",
         system_prompt: value?.system_prompt ?? "",
@@ -95,8 +108,14 @@ export function validateInboundCampaign(
     const errors: InboundFormErrors = {};
     const transferConfigurationAvailable = capabilities.transferConfigurationAvailable === true;
     if (!value.name.trim()) errors.name = "Enter a name for this inbound campaign.";
+    if (value.agent) {
+        if (!value.agent.company_name.trim()) errors.agent_company_name = "Enter the brand or company name the agent speaks for.";
+        if (value.agent.agent_names.length === 0) errors.agent_names = "Give the agent at least one name.";
+        if (value.agent.agent_names.length > 3) errors.agent_names = "Use at most three agent names.";
+        if (!value.agent.voice_id.trim()) errors.agent_voice_id = "Pick a voice for the agent.";
+    }
     if (!isValidE164(value.did_number)) errors.did_number = "Choose a verified phone number.";
-    if (!value.campaign_id) errors.campaign_id = "Choose the AI campaign that should answer.";
+    if (!value.agent && !value.campaign_id) errors.campaign_id = "Choose the AI campaign that should answer.";
     if (!value.sip_trunk_id) errors.sip_trunk_id = "Choose an inbound-capable SIP trunk.";
     if (!value.timezone.trim()) errors.timezone = "Choose a timezone.";
     if (value.opening_mode === "agent_first" && !value.greeting.trim()) errors.greeting = "Add the greeting the agent should play.";

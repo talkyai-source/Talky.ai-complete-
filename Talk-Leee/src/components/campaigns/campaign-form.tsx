@@ -77,8 +77,6 @@ interface Props {
     campaignId?: string;
     /** Pre-fill values; defaults to an empty form when omitted. */
     initialData?: CampaignFormInitial;
-    /** Where to go after a successful CREATE; defaults to the campaign page. */
-    afterCreateHref?: (campaignId: string) => string;
 }
 
 const EMPTY_INITIAL: CampaignFormInitial = {
@@ -93,7 +91,7 @@ const EMPTY_INITIAL: CampaignFormInitial = {
     slots: {},
 };
 
-export function CampaignForm({ mode, campaignId, initialData, afterCreateHref }: Props) {
+export function CampaignForm({ mode, campaignId, initialData }: Props) {
     const router = useRouter();
     const isEdit = mode === "edit";
     const seed = initialData ?? EMPTY_INITIAL;
@@ -477,7 +475,7 @@ export function CampaignForm({ mode, campaignId, initialData, afterCreateHref }:
             }
 
             await leadDetailsApi.setCampaignFields(targetCampaignId!, leadFields.fields);
-            router.push(!isEdit && afterCreateHref ? afterCreateHref(targetCampaignId!) : `/campaigns/${targetCampaignId}`);
+            router.push(`/campaigns/${targetCampaignId}`);
         } catch (err) {
             const detail = err instanceof Error ? err.message : "Failed to save campaign";
             setError(

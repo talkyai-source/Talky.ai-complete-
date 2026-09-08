@@ -89,12 +89,31 @@ export interface InboundCampaign {
     updated_at: string;
 }
 
+/**
+ * The AI agent an inbound campaign owns (2026-09-09). Mirrors the outbound
+ * creator's fields; `agent_names_raw` and `voice_gender` are form-only.
+ */
+export interface InboundAgentInput {
+    company_name: string;
+    agent_names: string[];
+    agent_names_raw?: string;
+    agent_name_genders?: Record<string, string>;
+    persona_type: "lead_gen" | "customer_support" | "receptionist";
+    voice_id: string;
+    tts_provider?: string | null;
+    voice_gender?: string;
+    goal?: string | null;
+}
+
 export interface InboundCampaignInput {
     name: string;
     /** Selected from verified tenant inventory; never entered as free text. */
     did_number: string;
     purpose?: string | null;
+    /** Legacy: an existing inbound-ready campaign. Empty when `agent` is set. */
     campaign_id: string;
+    /** Create mode: the agent this inbound campaign owns. The server creates the campaign row. */
+    agent?: InboundAgentInput | null;
     sip_trunk_id: string;
     agent_persona?: string | null;
     system_prompt?: string | null;
@@ -425,13 +444,31 @@ function cleanInput(input: InboundCampaignInput, includeAssignment = false) {
     if (input.silence_timeout_seconds !== 8) {
         qualificationConfig.silence_timeout_seconds = input.silence_timeout_seconds;
     }
+    const ownAgent = includeAssignment && input.agent ? input.agent : null;
     return {
         name: input.name.trim(),
         ...(includeAssignment ? {
             did_number: input.did_number.trim(),
             sip_trunk_id: input.sip_trunk_id,
         } : {}),
-        campaign_id: input.campaign_id,
+        // Exactly one of the two: an owned agent (the server creates the
+        // campaign row, born inbound) or a legacy existing campaign id.
+        ...(ownAgent
+            ? {
+                agent: {
+                    company_name: ownAgent.company_name.trim(),
+                    agent_names: ownAgent.agent_names,
+                    ...(ownAgent.agent_name_genders && Object.keys(ownAgent.agent_name_genders).length > 0
+                        ? { agent_name_genders: ownAgent.agent_name_genders }
+                        : {}),
+                    persona_type: ownAgent.persona_type,
+                    voice_id: ownAgent.voice_id.trim(),
+                    tts_provider: cleanText(ownAgent.tts_provider),
+                    goal: cleanText(ownAgent.goal),
+                    knowledge_driven: true,
+                },
+            }
+            : { campaign_id: input.campaign_id }),
         timezone: input.timezone.trim(),
         opening_mode: input.opening_mode,
         greeting: cleanText(input.greeting),
@@ -539,6 +576,11 @@ class InboundApi {
     async get(id: string, signal?: AbortSignal): Promise<InboundCampaign> {
         const data = await this.client.request({ path: `/inbound-campaigns/${id}`, method: "GET", signal });
         return parseInboundCampaign(data);
+    }
+
+    /** Test seam: the exact body `create` sends. */
+    __test_cleanInput(input: InboundCampaignInput, includeAssignment = false) {
+        return cleanInput(input, includeAssignment);
     }
 
     async create(input: InboundCampaignInput, didNumber: string, idempotencyKey?: string): Promise<InboundCampaign> {

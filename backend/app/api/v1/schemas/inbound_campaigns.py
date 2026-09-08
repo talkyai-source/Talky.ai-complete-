@@ -24,10 +24,46 @@ def _normalize_e164(value: str) -> str:
     return cleaned
 
 
+class InboundAgentDefinition(_StrictModel):
+    """The AI agent an inbound campaign owns outright (2026-09-09).
+
+    Same fields the outbound campaign creator collects, so an inbound campaign
+    is a complete entity of its own — persona, names, voice, guidance,
+    knowledge — instead of a pointer at an outbound campaign.
+    """
+
+    company_name: str = Field(min_length=1, max_length=255)
+    agent_names: list[str] = Field(min_length=1, max_length=3)
+    agent_name_genders: Optional[dict[str, str]] = None
+    persona_type: Literal["lead_gen", "customer_support", "receptionist"] = "receptionist"
+    voice_id: str = Field(min_length=1, max_length=100)
+    tts_provider: Optional[str] = Field(default=None, max_length=32)
+    goal: Optional[str] = Field(default=None, max_length=20000)
+    campaign_slots: dict[str, Any] = Field(default_factory=dict)
+    campaign_brief: Optional[dict[str, Any]] = None
+    knowledge_driven: bool = True
+
+    @field_validator("company_name", "voice_id")
+    @classmethod
+    def _strip(cls, value: str) -> str:
+        return value.strip()
+
+    @field_validator("agent_names")
+    @classmethod
+    def _clean_names(cls, value: list[str]) -> list[str]:
+        cleaned = [v.strip() for v in value if v and v.strip()]
+        if not cleaned:
+            raise ValueError("at least one agent name is required")
+        return cleaned
+
+
 class InboundCampaignCreateRequest(_StrictModel):
     name: str = Field(min_length=1, max_length=255)
     did_number: str
-    campaign_id: str
+    #: Either bind an existing inbound-ready campaign (legacy path) or define
+    #: the agent inline and let the server create the campaign it owns.
+    campaign_id: Optional[str] = None
+    agent: Optional[InboundAgentDefinition] = None
     sip_trunk_id: str
     timezone: str = Field(default="UTC", min_length=1, max_length=64)
     after_hours_action: Literal["hangup", "voicemail", "transfer"] = "hangup"
@@ -61,6 +97,9 @@ class InboundCampaignCreateRequest(_StrictModel):
             raise ValueError("transfer_number is required for after-hours transfer")
         if self.recording_enabled and not (self.consent_message or "").strip():
             raise ValueError("consent_message is required when recording is enabled")
+        has_campaign = bool((self.campaign_id or "").strip())
+        if has_campaign == (self.agent is not None):
+            raise ValueError("provide exactly one of agent (own AI agent) or campaign_id (existing campaign)")
         return self
 
 
