@@ -26,7 +26,7 @@ That is the "different sessions per page".
 
 | Change | Where |
 |---|---|
-| **Migration 0045**: `refresh_tokens.session_id` + index; **backfill** binds every existing family to the `security_sessions` row created by the same login (nearest session of that user within 60 s of the family's first token). Families with no match stay NULL and behave as before. | `Alembic/versions/0045_refresh_token_session_binding.py` |
+| **Migration 0045**: `refresh_tokens.session_id` + index; **backfill** binds every existing family to the `security_sessions` row created by the same login (nearest session of that user within 60 s of the family's first token). Families with no match stay NULL and behave as before. | `Alembic/versions/0045_refresh_session_binding.py` |
 | Login/signup/MFA/passkey pass the new session into the refresh family; rotation carries it forward and returns it in the claims | `refresh_tokens.py`, `auth/_shared.py` |
 | `/auth/refresh` re-mints the JWT **with `sid`**, slides `last_active_at` and extends `expires_at` (sliding 24 h while the refresh family is used). If the login session is revoked or expired the refresh **fails** (401, cookies cleared, family revoked) — "logout everywhere" now ends refresh too instead of REST out-living it | `auth/refresh.py::bind_refresh_to_session` |
 | Test-agent socket logs **why** it refused (`no sid` vs `session revoked/expired`) | `campaign_test_ws.py::_check_login_session` |

@@ -1,6 +1,6 @@
 """Bind each refresh-token family to the login session it was issued for.
 
-Revision ID: 0045_refresh_token_session_binding
+Revision ID: 0045_refresh_session_binding  (<= 32 chars: alembic_version.version_num is varchar(32))
 Revises: 0044_webhook_null_tenant_rls
 
 Why: POST /auth/refresh re-minted the access JWT WITHOUT the ``sid`` claim,
@@ -20,7 +20,7 @@ before (no sid) until the user signs in again.
 from alembic import op
 from sqlalchemy import text
 
-revision = "0045_refresh_token_session_binding"
+revision = "0045_refresh_session_binding"
 down_revision = "0044_webhook_null_tenant_rls"
 branch_labels = None
 depends_on = None
