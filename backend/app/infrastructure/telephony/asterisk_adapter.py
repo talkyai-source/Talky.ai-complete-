@@ -1798,6 +1798,21 @@ class AsteriskAdapter(CallControlAdapter):
         """Hand a setup-only terminal event to setup's cleanup owner."""
 
         setup_task = self._inbound_setup_tasks.get(channel_id)
+        pending_handoff = self._inbound_handoff_tasks.get(channel_id)
+        # 2026-09-10: two prod inbound calls were fenced with
+        # "lifecycle_handoff_cancelled" and nothing said WHICH event arrived
+        # (parent hangup? ExternalMedia leg died? StasisEnd?) or with what
+        # cause. This line is the diagnosis the fence log could not give.
+        logger.warning(
+            "inbound_setup_terminal channel=%s event=%s cause=%s setup_inflight=%s "
+            "handoff_pending=%s active_session=%s",
+            channel_id[:12],
+            reason,
+            self._hangup_causes.get(channel_id),
+            bool(setup_task is not None and not setup_task.done()),
+            bool(pending_handoff is not None and not pending_handoff.done()),
+            channel_id in self._active_sessions,
+        )
         if setup_task is not None and not setup_task.done():
             setup_task.cancel()
             await asyncio.gather(setup_task, return_exceptions=True)
@@ -2770,7 +2785,7 @@ class AsteriskAdapter(CallControlAdapter):
                             parent,
                             lambda: self._cancel_inbound_setup_for_terminal(
                                 parent,
-                                reason=event_type,
+                                reason=f"{event_type}:external_media_leg",
                             ),
                             reason=event_type,
                         )
@@ -4038,9 +4053,10 @@ class AsteriskAdapter(CallControlAdapter):
             listen_port=listen_port,
         )
         logger.critical(
-            "inbound_handoff_fenced channel=%s reason=%s",
+            "inbound_handoff_fenced channel=%s reason=%s cause=%s",
             channel_id[:12],
             reason,
+            self._hangup_causes.get(channel_id),
         )
         return True
 

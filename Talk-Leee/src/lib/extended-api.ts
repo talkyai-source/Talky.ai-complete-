@@ -3,6 +3,9 @@ import { ApiClientError } from "@/lib/http-client";
 import { FEEDBACK_MAX_SECONDS, feedbackFileName } from "@/lib/audio-recording";
 
 /** A structured review of how the agent handled a call (goals.md §3). */
+/** How far back the Calls-page red banner looks for critical call failures. */
+export const RECENT_CALL_ISSUE_WINDOW_MS = 24 * 60 * 60 * 1000;
+
 export interface ConversationReview {
     id: string;
     call_id: string;
@@ -266,13 +269,22 @@ class ExtendedApi {
             title: string;
             description?: string | null;
             severity?: string | null;
+            created_at?: string | null;
             metadata?: Record<string, unknown> | null;
         }>;
     }> {
+        // 2026-09-10: without `since`, the newest critical event was shown as
+        // if current — a 20-day-old "Call could not start" sat on the Calls
+        // page as a red banner. Only the last day is "recent".
         return this.client.request({
             path: "/events",
             method: "GET",
-            params: { category: "call", severity: "critical", limit: "8" },
+            params: {
+                category: "call",
+                severity: "critical",
+                limit: "8",
+                since: new Date(Date.now() - RECENT_CALL_ISSUE_WINDOW_MS).toISOString(),
+            },
         });
     }
 

@@ -144,7 +144,7 @@ class BillingService:
         # Get plan's stripe_price_id
         plan = (
             self.db_client.table("plans")
-            .select("stripe_price_id, name")
+            .select("stripe_price_id, name, price, minutes")
             .eq("id", plan_id)
             .single()
             .execute()
@@ -154,6 +154,18 @@ class BillingService:
             raise ValueError(f"Plan not found: {plan_id}")
 
         stripe_price_id = plan.data.get("stripe_price_id")
+
+        if self._plan_is_free(plan.data):
+            # 2026-09-10: a plan that costs nothing needs no payment. Before
+            # this, every new tenant sat on the default subscription_status
+            # 'inactive' (11 of 12 tenants on prod) because the only activation
+            # path was a Stripe checkout that prod does not have — and inbound
+            # readiness ('tenant_active') requires an active subscription.
+            # Activate the free plan here, server-side, with the same tenant
+            # update the Stripe webhook performs for a paid one.
+            return await self.activate_free_plan(
+                tenant_id=tenant_id, plan_id=plan_id, plan=plan.data, success_url=success_url
+            )
 
         if self.mock_mode:
             # In mock mode, stripe_price_id may be NULL — we still return a
@@ -730,6 +742,47 @@ class BillingService:
                 "topup receipt failed (minutes ARE credited, this is cosmetic): %s",
                 e,
             )
+
+    @staticmethod
+    def _plan_is_free(plan: Dict[str, Any]) -> bool:
+        try:
+            return float(plan.get("price") or 0) <= 0
+        except (TypeError, ValueError):
+            return False
+
+    async def activate_free_plan(
+        self,
+        *,
+        tenant_id: str,
+        plan_id: str,
+        plan: Dict[str, Any],
+        success_url: str,
+    ) -> Dict[str, Any]:
+        """Put the tenant on a $0 plan immediately — no checkout, no webhook."""
+        self.db_client.table("tenants").update(
+            {
+                "subscription_status": SUBSCRIPTION_ACTIVE,
+                "plan_id": plan_id,
+            }
+        ).eq("id", tenant_id).execute()
+        await self._set_plan_allocation(tenant_id, int(plan.get("minutes", 0) or 0))
+        logger.info("free_plan_activated tenant=%s plan=%s", str(tenant_id)[:8], plan_id)
+        if self.audit_logger:
+            await self.audit_logger.log(
+                event_type=AuditEvent.BILLING_UPDATED,
+                tenant_id=tenant_id,
+                action="subscription_activated",
+                description=f"Free plan activated without payment: {plan_id}",
+                metadata={"plan_id": plan_id, "free_plan": True},
+                actor_type="system",
+            )
+        return {
+            "session_id": f"free_{str(tenant_id)[:8]}_{plan_id}",
+            "checkout_url": success_url,
+            "mock_mode": False,
+            "activated": True,
+            "message": f"{plan.get('name') or 'Free'} plan activated — no payment required.",
+        }
 
     async def _set_plan_allocation(self, tenant_id: str, plan_minutes: int) -> None:
         """Write the plan entitlement WITHOUT destroying purchased minutes.

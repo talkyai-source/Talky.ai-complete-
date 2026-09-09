@@ -153,7 +153,7 @@ export function CampaignWizard({ afterCreateHref, direction = "outbound" }: Camp
                 campaign_slots: {},
                 additional_instructions: goal.trim() || undefined,
                 campaign_brief: campaignBrief,
-                direction: "outbound",
+                direction: inbound ? "inbound" : "outbound",
                 knowledge_driven: true,
             });
             setPreview({
@@ -425,7 +425,12 @@ export function CampaignWizard({ afterCreateHref, direction = "outbound" }: Camp
                         </div>
 
                         <div>
-                            <Label>How the agent will open</Label>
+                            <Label>{inbound ? "How the agent will answer (default opening)" : "How the agent will open"}</Label>
+                            {inbound ? (
+                                <p className="mt-1 text-xs text-muted-foreground">
+                                    Your exact greeting for this line is set in step 2 (Number &amp; routing) and overrides this default.
+                                </p>
+                            ) : null}
                             <div className="mt-1 rounded-lg border border-gray-200 dark:border-white/10 bg-gray-50 dark:bg-white/5 px-3 py-2 text-sm italic text-gray-700 dark:text-zinc-300 min-h-[2.5rem]">
                                 {previewLoading ? <span className="inline-flex items-center gap-2 text-muted-foreground"><Loader2 className="h-3.5 w-3.5 animate-spin" /> building preview…</span>
                                     : preview?.greeting || "—"}

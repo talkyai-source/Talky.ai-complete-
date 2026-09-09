@@ -1146,6 +1146,39 @@ class InboundCampaignService:
                 code="did_assignment_conflict",
             )
 
+    DEFAULT_CONCURRENCY_POLICY_NAME = "inbound-default"
+
+    async def _ensure_default_concurrency_policy(self, conn, *, tenant_id, actor_id) -> bool:
+        """Give the tenant an active concurrency policy if it has none.
+
+        Readiness requires one ('concurrency_policy_configured') and admission
+        denies calls without it, yet nothing in the product created it — no
+        endpoint, no UI. Every tenant except the one hand-fixed on 2026-08-30
+        was blocked here (found 2026-09-10 by the frontend tester). The limit
+        is the plan's concurrent-call entitlement, or 1. Returns True when a
+        policy was created.
+        """
+        row = await conn.fetchrow(
+            """
+            INSERT INTO tenant_telephony_concurrency_policies
+                (tenant_id, policy_name, max_active_calls, is_active, created_by, updated_by)
+            SELECT $1, $2,
+                   GREATEST(1, COALESCE((SELECT p.concurrent_calls FROM tenants t
+                                          JOIN plans p ON p.id = t.plan_id
+                                         WHERE t.id = $1), 1)),
+                   TRUE, $3, $3
+            WHERE NOT EXISTS (
+                SELECT 1 FROM tenant_telephony_concurrency_policies
+                 WHERE tenant_id = $1 AND is_active = TRUE
+            )
+            RETURNING id
+            """,
+            tenant_id,
+            self.DEFAULT_CONCURRENCY_POLICY_NAME,
+            actor_id,
+        )
+        return row is not None
+
     async def create_campaign(
         self,
         *,
@@ -1375,6 +1408,7 @@ class InboundCampaignService:
                 tenant_id,
                 actor_id,
             )
+            await self._ensure_default_concurrency_policy(conn, tenant_id=tenant_id, actor_id=actor_id)
             result = self._serialize_bundle(
                 await self._load_bundle(conn, str(config["id"]), tenant_id=tenant_id)
             )

@@ -157,3 +157,8 @@ ruff -> All checks passed!
    `ERROR config.c … does not exist` on every dialplan reload — `setup-asterisk.sh` now installs
    `extensions.d/00-keep.conf` (as `pjsip.d` already had). Suite after: 8919 passed.
 
+
+7. **Deploy of items 4–6 still pending on 2026-09-10** (prod HEAD `283d21a6`; `4bcc2621` not yet
+   on prod). Folded into `/home/admins/probes/ops_inbound_0910.sh <sha> 283d21a6` together with
+   the inbound-report fixes (see `2026-09-10-inbound-live-test-report-fixes.md`): deploy →
+   00-keep.conf → reconcile → one-off policy seed → read-back of `blaze-pbx-940001/2`.
