@@ -76,3 +76,25 @@ ruff check app/ --select F --extend-ignore F401,F841                  -> All che
 Talk-Leee: npm run typecheck -> clean · npm run lint -> 0 errors · npm test -> tests 468, pass 466, fail 0
 Talk-Leee: npm run build -> exit 0, ✓ Compiled successfully in 62s, 69/69 static pages
 ```
+
+## Deploy run 1 (owner, `ops_inbound_0910.sh 585ec451 283d21a6`)
+
+- Backend deployed: prod HEAD `585ec451`, four units active, health/deep/workers 200, 0
+  tracebacks. Seed applied: `5e666d8a` policy `inbound-default max=1`, subscription
+  `inactive → active` (free plan). `inbound_enabled` still `false` — tester's button.
+- **Reconcile blocked at the check stage**, before any file was touched:
+  `trunk-44b41a0d… verified carrier route lacks a matching active assignment`.
+  Cause, from prod rows: the AllStateEstimation inbound campaign config `2ab6f5b3` went
+  `paused` (v9) at 2026-09-09 14:20:24, five minutes after its owner user logged in; pausing
+  moves assignment `88af692d` (+442046132300 on trunk 44b41a0d, account 150001) to `paused`.
+  The reconciler treated "verified carrier account with no active assignment" as a hard
+  block, so one tenant pausing its campaign froze the platform-wide Asterisk reconcile and
+  kept two other tenants' trunks (`blaze-pbx-940001/2`) at `missing_config`.
+- Fix (`backend/scripts/reconcile_pjsip_configs.py`): the account stays on the fail-closed
+  catch-all (admission denies the DID anyway without an active assignment) and is named in
+  `CandidateSet.unrouted_verified_trunks` and the CLI JSON (`unrouted_verified_trunks`). The
+  test that encoded the block now asserts the new invariant for both "no assignment" and
+  "paused assignment"; a routed account is asserted not to be reported. Module: 50 passed.
+- Second run script: `ops_reconcile_0910.sh <sha> 585ec451` (deploy + reconcile + read-back,
+  no seed). The paused campaign is the owner's to resume from the Inbound page; the DID
+  answers again the moment it is resumed and the reconcile has run.

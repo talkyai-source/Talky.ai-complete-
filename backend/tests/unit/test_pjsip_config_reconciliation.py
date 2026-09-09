@@ -297,16 +297,45 @@ def test_verified_carrier_map_conflicting_with_assignment_blocks_candidate(tmp_p
     )
 
 
-def test_verified_carrier_account_without_active_assignment_blocks_candidate(tmp_path):
-    row = _row(TRUNK_A, username="150001", inbound_did=None)
+@pytest.mark.parametrize(
+    "row",
+    [
+        _row(TRUNK_A, username="150001", inbound_did=None),
+        _assignment_row(status="paused"),
+    ],
+    ids=["no-assignment", "paused-assignment"],
+)
+def test_verified_carrier_account_without_active_assignment_is_named_not_blocked(
+    tmp_path, row
+):
+    """2026-09-10: this used to raise and block the whole candidate. A tenant paused
+    its inbound campaign, its assignment went 'paused', and the platform-wide
+    reconcile could no longer run — two other tenants' new trunks stayed unloaded.
+    The account now stays on the fail-closed catch-all and is named for the operator.
+    """
+    candidate = reconcile.build_candidate_set(
+        [row],
+        candidate_dir=tmp_path / "candidate",
+        decrypt_password=lambda _: "secret",
+        observed_at=NOW,
+    )
 
-    with pytest.raises(reconcile.UnsafeInboundMappingError, match="lacks"):
-        reconcile.build_candidate_set(
-            [row],
-            candidate_dir=tmp_path / "candidate",
-            decrypt_password=lambda _: "secret",
-            observed_at=NOW,
-        )
+    dialplan = candidate.files[reconcile.DIALPLAN_NAME].decode()
+    assert "exten => 150001,1," not in dialplan
+    assert "exten => _.,1," in dialplan
+    assert candidate.routes == ()
+    assert candidate.unrouted_verified_trunks == (f"trunk-{TRUNK_A}",)
+
+
+def test_routed_verified_account_is_not_reported_as_unrouted(tmp_path):
+    candidate = reconcile.build_candidate_set(
+        [_assignment_row()],
+        candidate_dir=tmp_path / "candidate",
+        decrypt_password=lambda _: "secret",
+        observed_at=NOW,
+    )
+    assert len(candidate.routes) == 1
+    assert candidate.unrouted_verified_trunks == ()
 
 
 def test_active_assignment_on_outbound_only_trunk_is_rejected(tmp_path):

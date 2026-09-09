@@ -185,6 +185,10 @@ class CandidateSet:
     files: Mapping[str, bytes]
     routes: tuple[InboundRoute, ...]
     digest: str
+    # Verified carrier accounts whose trunk has no current active assignment
+    # (campaign paused, assignment expired). Rendered fail-closed on the
+    # catch-all and NAMED here so an operator sees it — never a block.
+    unrouted_verified_trunks: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -724,6 +728,7 @@ def build_candidate_set(
         routes_by_did[route.did] = route
 
     verified_trunks_by_account: dict[str, str] = {}
+    unrouted_verified_trunks: list[str] = []
     for trunk_id, trunk in trunks.items():
         account = str(trunk.get("auth_username") or "").strip()
         if account not in verified_account_dids:
@@ -740,9 +745,14 @@ def build_candidate_set(
             )
         verified_trunks_by_account[account] = trunk_id
         if account not in routes_by_account:
-            raise UnsafeInboundMappingError(
-                f"trunk-{trunk_id} verified carrier route lacks a matching active assignment"
-            )
+            # 2026-09-10: this used to raise. A tenant paused its inbound
+            # campaign (assignment -> paused) and the reconciler then refused
+            # to build ANY candidate, so one tenant's pause froze the whole
+            # platform's Asterisk configuration and left two other tenants'
+            # new trunks unloaded. Without an active assignment admission
+            # denies the DID anyway, so the account stays on the fail-closed
+            # catch-all and the operator is told which trunk is unrouted.
+            unrouted_verified_trunks.append(f"trunk-{trunk_id}")
 
     files: dict[str, bytes] = {}
     for trunk_id in sorted(trunks):
@@ -785,6 +795,7 @@ def build_candidate_set(
         files=ordered_files,
         routes=routes,
         digest=digest,
+        unrouted_verified_trunks=tuple(sorted(unrouted_verified_trunks)),
     )
 
 
@@ -1423,6 +1434,7 @@ async def _execute(args: argparse.Namespace) -> int:
     output = {
         "mode": "apply" if args.apply else "check",
         "route_count": len(candidate.routes),
+        "unrouted_verified_trunks": list(candidate.unrouted_verified_trunks),
         **summary.to_safe_dict(),
     }
     print(json.dumps(output, sort_keys=True))
