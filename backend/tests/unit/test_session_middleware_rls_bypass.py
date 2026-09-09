@@ -114,3 +114,68 @@ def test_idle_timeout_is_env_overridable(monkeypatch):
     assert _shared._idle_timeout_minutes() == 120
     monkeypatch.setenv("SESSION_IDLE_TIMEOUT_MINUTES", "nonsense")
     assert _shared._idle_timeout_minutes() == 30
+
+
+@pytest.mark.asyncio
+async def test_the_request_runs_after_the_lookup_connection_is_released(monkeypatch):
+    """2026-09-10 prod: 8 identical 500s/day. The idle-timeout revoke is an
+    uncommitted UPDATE inside acquire_with_tenant's transaction; call_next ran
+    inside that block, the endpoint's get_current_user tried to revoke the same
+    row, waited on the lock and died on the asyncpg statement timeout. The
+    cookie-clearing header was lost with the 500, so the browser looped."""
+    events: list[str] = []
+
+    @asynccontextmanager
+    async def fake_acquire(pool, tenant_id, **kwargs):
+        events.append("acquire")
+        yield _Conn()
+        events.append("release")
+
+    async def fake_validate(c, raw, **kwargs):
+        events.append("validate")
+        return None  # idle timeout: revoked inside the (now closed) transaction
+
+    monkeypatch.setattr("app.core.db_utils.acquire_with_tenant", fake_acquire)
+    monkeypatch.setattr(mw, "get_db_pool_from_container", lambda: object())
+    monkeypatch.setattr(mw, "validate_session", fake_validate)
+    monkeypatch.setattr(mw, "generate_device_fingerprint", lambda r: "v2:fp")
+
+    async def call_next(req):
+        events.append("call_next")
+        return Response("ok")
+
+    response = await mw.SessionSecurityMiddleware(app=None).dispatch(_request(), call_next)
+
+    assert response.status_code == 200
+    assert events == ["acquire", "validate", "release", "call_next"], events
+    assert "talky_sid=" in response.headers.get("set-cookie", "")
+
+
+@pytest.mark.asyncio
+async def test_a_lookup_failure_runs_the_request_exactly_once(monkeypatch, caplog):
+    """Before: an exception raised while call_next ran inside the try block was
+    swallowed as a 'middleware error' and call_next was invoked AGAIN."""
+    count = {"call_next": 0}
+
+    @asynccontextmanager
+    async def fake_acquire(pool, tenant_id, **kwargs):
+        yield _Conn()
+
+    async def fake_validate(c, raw, **kwargs):
+        raise TimeoutError()
+
+    monkeypatch.setattr("app.core.db_utils.acquire_with_tenant", fake_acquire)
+    monkeypatch.setattr(mw, "get_db_pool_from_container", lambda: object())
+    monkeypatch.setattr(mw, "validate_session", fake_validate)
+    monkeypatch.setattr(mw, "generate_device_fingerprint", lambda r: "v2:fp")
+
+    async def call_next(req):
+        count["call_next"] += 1
+        return Response("ok")
+
+    with caplog.at_level("ERROR", logger="app.core.session_security_middleware"):
+        response = await mw.SessionSecurityMiddleware(app=None).dispatch(_request(), call_next)
+
+    assert response.status_code == 200
+    assert count == {"call_next": 1}
+    assert any("TimeoutError" in r.getMessage() for r in caplog.records), "the error is named, not blank"

@@ -1,0 +1,17 @@
+[Unit]
+Description=Talky.ai nightly Postgres backup (verified, RLS-bypassed pg_dump)
+After=docker.service
+Requires=docker.service
+# One-shot, triggered by talky-db-backup.timer. Do NOT add Restart= here —
+# a failed run exits non-zero and logs "DB-BACKUP CRITICAL" (see
+# deploy/db-backup.sh); the next timer tick retries.
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/talky/backend
+Environment=TALKY_BACKUP_DIR=/var/backups/talky
+Environment=TALKY_BACKUP_KEEP_DAYS=30
+ExecStart=/bin/bash /opt/talky/backend/deploy/db-backup.sh
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=talky-db-backup

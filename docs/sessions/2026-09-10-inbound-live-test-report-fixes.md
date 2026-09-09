@@ -121,3 +121,71 @@ Talk-Leee: npm run build -> exit 0, ✓ Compiled successfully in 62s, 69/69 stat
   number is "verified" for 11 tenants and its account is not in the carrier inventory, so
   inbound to it can never route. A real DID on a reviewed carrier account is needed before
   CodeAlpha can receive a test call.
+
+## Production-readiness audit (owner: "make sure incoming and outgoing … ready for production")
+
+Read-only probe of the live box (`/home/admins/probes/readiness_probe.sh`) + journal + DB, then code.
+
+### Healthy (evidence read this turn)
+- Units: api / dialer / voice / reminder / gateway / asterisk / nginx / fail2ban / docker all
+  `active`, 0 restarts. Workers heartbeat ≤ 21 s. `/health`, `/healthz/deep`, `/healthz/workers`
+  all 200 in < 5 ms. Gateway `/ready` = build `ca8a136a`, protocol 2, PCMU.
+- Alembic head on prod = code head (`0045_refresh_session_binding`). App role: not superuser,
+  no BYPASSRLS; 84 tables FORCE RLS; the 6 "tenant_id without policy" relations are 5 views +
+  one 3-row backup table (`tenant_ai_configs_backup_20260907`, no secrets).
+- RBAC seeded (156 role_permissions, 19 tenant_users, `inbound:controls` granted ×3).
+- Port 8000 is bound on 0.0.0.0 but filtered from the internet (connect timeout from outside);
+  public path is Cloudflare → nginx :443 → 127.0.0.1:8000. Frontend on Vercel answers 200.
+- Outbound: calls completed on Sep 7/8 (durations 15–212 s); one running campaign (`dojo`,
+  1845a165, the team's own numbers); dialer 0 stuck jobs, reaper working; `outbound_calls_paused`
+  false. Tenant rules honour DNC (`skip_dnc` = "skip leads on the DNC list").
+- Inbound: Sep 3–8 calls answered daily except the two Sep 8 fences (now diagnosable); routing
+  live via the managed dialplan; policies + controls in place for 790ca2db / 1845a165 / 5e666d8a.
+- Disk 60 % of 47 GB, RAM 2.5 GB available of 3.9 GB, NTP synced, 0 pending security updates,
+  Asterisk log rotating, fail2ban SIP jail active, TLS by Cloudflare + certbot timer.
+
+### Found and fixed (code)
+1. **8 identical 500s/day in talky-api** — `Session security middleware error:` +
+   `Unhandled exception` every minute for an idle user. Traceback: `validate_session` →
+   idle timeout → `_revoke_by_id` UPDATE → asyncpg `TimeoutError`. Cause: the middleware ran
+   `call_next` INSIDE `acquire_with_tenant`'s transaction, so its uncommitted revoke held the
+   row lock the endpoint's own `get_current_user` → `validate_session` then waited on. The 500
+   also dropped the cookie-clearing header, so the browser looped with the dead cookie. Fix:
+   validate, release the connection, then act; a lookup failure runs the request once and names
+   the exception. Tests: `test_session_middleware_rls_bypass.py` (+2, 5 passed).
+2. **No scheduled database backup.** Only hand-run pre-migration dumps existed, and the three
+   Aug 28–30 `.dump` files are schema-only (identical 22 MB, 0 TABLE DATA — pg_dump without the
+   RLS bypass). Added `deploy/db-backup.sh` + `systemd/talky-db-backup.{service,timer}`
+   (02:30 UTC nightly, bypass GUC on the dump connection, refuses < 50 TABLE DATA entries or a
+   dump under half the previous size, sha256, 30-day retention), enabled in
+   `install-services.sh`. Guard tests: `test_db_backup_unit.py` (3 passed).
+
+### Found, prepared as ops (owner runs `ops_prod_ready_0910.sh <sha> dca612a6`)
+- `avahi-daemon` (mDNS on 0.0.0.0:5353), `cups`, `cups-browsed` running on the production box
+  (desktop leftovers; `google-chrome` cron too) → stop + mask.
+- journald at 3.5 GB with no cap → `SystemMaxUse=1G`.
+- First verified backup run + timer enabled.
+
+### Found, owner decision (not done)
+- **Kernel reboot pending** (`/var/run/reboot-required`, running 6.17.0-20, two newer installed;
+  uptime 150 days). Needs a call-free window: Asterisk, gateway and workers all restart.
+- **No Stripe keys** → only the free plan can activate; paid plans are mock-mode.
+- **No alerting sink** (`SENTRY_DSN` unset). `talky-healthwatch` writes CRITICAL journal lines
+  every 2 min when workers are unhealthy, but nothing pages anyone.
+- `talky-inbound-synthetic.timer` deliberately off (each probe is a billed 15 s call).
+- Tenant 1845a165 rules: caller ID `+17789249977` (a placeholder), window 00:00–23:59 on
+  Mon–Fri. Its `dojo` campaign is running against the team's own numbers (fine); any real list
+  on this tenant would dial at any hour.
+- `ufw` inactive; the repo's `scripts/firewall-setup.sh` models the OpenSIPS port plan (5080),
+  not Asterisk (5060), so it must not be applied as-is. The external filter on :8000 exists
+  (Hetzner side); UDP 4569 (IAX2) is open and unused → `noload => chan_iax2.so`.
+- One order-dependent flaky test seen only under `-k` subsetting
+  (`test_postgres_adapter.py::test_auth_get_user_uses_local_jwt_secret`), passes alone and in
+  the full suite.
+
+### Verification
+```text
+backend/.venv/Scripts/python -m pytest tests/unit tests/security -q -> 8932 passed, 8 skipped in 594.72s
+ruff check app/ --select F --extend-ignore F401,F841 -> All checks passed!
+bash -n backend/deploy/db-backup.sh -> ok
+```
