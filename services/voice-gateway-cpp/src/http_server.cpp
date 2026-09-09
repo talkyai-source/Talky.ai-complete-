@@ -1585,55 +1585,38 @@ bool HttpServer::spawn_handler(const int client_fd) {
     // rolls the insertion and count back, and the (potentially allocating)
     // best-effort 503 happens only AFTER bookkeeping is consistent, inside its
     // own try so a second exception cannot leak the fd or wedge the count.
-    HandlerSlot* raw = nullptr;
+    const char* failure = "{\"error\":\"too_many_connections\"}";
     try {
         auto slot = std::make_unique<HandlerSlot>();
         slot->fd = client_fd;
-        raw = slot.get();
-        {
-            std::lock_guard<std::mutex> lk(handlers_mutex_);
-            if (draining_ || active_handler_count_ >= kMaxActiveHandlers) {
-                raw = nullptr;  // rejected: nothing tracked yet
-            } else {
-                handlers_.push_back(std::move(slot));
-                ++active_handler_count_;
+        auto* raw = slot.get();
+        std::lock_guard<std::mutex> lk(handlers_mutex_);
+        if (!draining_ && active_handler_count_ < kMaxActiveHandlers) {
+            handlers_.push_back(std::move(slot));
+            ++active_handler_count_;
+            // Publish the joinable thread under the SAME lock as its slot.
+            // Otherwise stop() can remove/free the slot before this assignment,
+            // returning without joining the child and leaving a dangling raw.
+            try {
+                raw->thread = std::thread([this, raw] { handler_main(raw); });
+                return true;
+            } catch (...) {
+                // Construction failed: no child owns the fd. The lock excludes
+                // both stop and reaping until ownership/count are rolled back.
+                handlers_.pop_back();
+                --active_handler_count_;
+                failure = "{\"error\":\"handler_spawn_failed\"}";
             }
         }
     } catch (...) {
-        raw = nullptr;  // allocation failed: nothing tracked
+        // Allocation failed before a child was created: nothing tracked.
     }
-
-    if (raw == nullptr) {
-        try {
-            write_response(client_fd, 503, "Service Unavailable", "{\"error\":\"too_many_connections\"}");
-        } catch (...) {
-        }
-        ::close(client_fd);
-        return false;
-    }
-
     try {
-        raw->thread = std::thread([this, raw] { handler_main(raw); });
-        return true;
+        write_response(client_fd, 503, "Service Unavailable", failure);
     } catch (...) {
-        // Thread construction failed: remove the slot, rebalance, respond, close.
-        {
-            std::lock_guard<std::mutex> lk(handlers_mutex_);
-            for (auto it = handlers_.begin(); it != handlers_.end(); ++it) {
-                if (it->get() == raw) {
-                    handlers_.erase(it);
-                    --active_handler_count_;
-                    break;
-                }
-            }
-        }
-        try {
-            write_response(client_fd, 503, "Service Unavailable", "{\"error\":\"handler_spawn_failed\"}");
-        } catch (...) {
-        }
-        ::close(client_fd);
-        return false;
     }
+    ::close(client_fd);
+    return false;
 }
 
 void HttpServer::handler_main(HandlerSlot* slot) {
