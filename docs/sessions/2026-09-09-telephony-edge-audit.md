@@ -108,3 +108,42 @@ are; the `lifecycle.py:941` inverse-zombie reconcile TODO is a separate piece of
 backend/.venv/Scripts/python -m pytest tests/unit tests/security -q → 8910 passed, 8 skipped in 601.16s
 ruff check app/ --select F --extend-ignore F401,F841 → All checks passed!
 ```
+
+## Follow-up (same day): two new carrier accounts, and the reconciler that could never apply
+
+Owner supplied two new PBX accounts on `sip3.blazedigitel.com` (users 940001 / 940002) for
+the AllStateEstimation tenant (`1845a165`), to be visible and manageable from Settings.
+
+1. **Trunks added through the API's own path** — `backend/scripts/add_sip_trunk.py` (new,
+   tested) validates with `SIPTrunkCreateRequest`, encrypts with the same service, runs the
+   endpoint's INSERT under the tenant RLS context and the endpoint's activate UPDATE. Rows
+   `blaze-pbx-940001` / `blaze-pbx-940002`: active, registration on, status `checking`.
+2. **First reconcile attempt blocked** ("Asterisk runtime verification failed; prior files were
+   restored"). Cause 1: prod's `extensions.conf` never had `#include "extensions.d/*.conf"`,
+   which `setup-asterisk.sh` requires and refuses to add. Added (backup kept:
+   `extensions.conf.bak-20260909T071807Z`).
+3. **Second attempt blocked identically — and left the runtime wrong.** On-disk `pjsip.conf`
+   was already restored to `context=from-blazedigitel`, yet `pjsip show endpoint` still said
+   `from-talky-inbound` five minutes later; a fresh `pjsip reload` fixed it (inbound context
+   intact, 2 Stasis lines, all registrations up). Root cause in the reconciler:
+   - `pjsip reload` returns before the reload completes; the proof ran in the same instant on
+     the old state and "failed";
+   - the rollback then issued a second `pjsip reload` while the first was still running;
+     Asterisk answers "A module reload request is already in progress; please be patient" and
+     drops it, and `_RELOAD_FAILURE_RE` (error/failed/unable/…) did not recognise that as a
+     failure — so the reconciler reported a rollback it had not achieved;
+   - the specific failing check was never surfaced (generic JSON).
+4. **Fix** (`reconcile_pjsip_configs.py`): busy reloads are retried until accepted; the runtime
+   proof is polled (up to `TALKY_ASTERISK_PROOF_TIMEOUT_S`, default 20 s) and the LAST failing
+   check is the error; a rollback is proven by polling the shared endpoint back to the
+   snapshot's prior context before "prior files were restored" may be claimed; the blocked JSON
+   carries `cause` (fixed content-free strings). Tests: a stateful fake Asterisk whose runtime
+   lags the CLI and drops busy reloads — proof waits, busy reload retried, rollback proven and
+   named, un-landed rollback reported as such. Module: 47 passed.
+5. Remaining for the owner: run `ops_reconcile_0909b.sh <sha> <prev>` (deploy + reconcile +
+   read-back); then one inbound test call to +442046132300.
+
+```text
+after the reconciler fix: backend/.venv/Scripts/python -m pytest tests/unit tests/security -q -> 8918 passed, 8 skipped in 333.47s
+ruff -> All checks passed!
+```

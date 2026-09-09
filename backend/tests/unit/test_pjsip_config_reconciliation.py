@@ -582,6 +582,12 @@ def test_safe_drift_summary_names_files_but_never_exposes_content(tmp_path):
     assert "+442046132300" not in safe_json
 
 
+@pytest.fixture(autouse=True)
+def _no_real_sleeps(monkeypatch):
+    """Runtime proof polls with real sleeps in production; never in tests."""
+    monkeypatch.setattr(reconcile, "_SLEEP", lambda _seconds: None)
+
+
 def _runner(
     candidate=None,
     *,
@@ -994,3 +1000,136 @@ def test_cli_can_be_executed_by_path_from_backend_directory():
 
     assert result.returncode == 0, result.stderr
     assert "--expected-digest" in result.stdout
+
+
+# -- 2026-09-09: reload is asynchronous and a busy reload is dropped ----------
+
+def _stateful_asterisk(candidate, *, prior_context="from-tenant-manual", reads_until_applied=2,
+                       busy_reloads=0, dialplan_ok=True):
+    """A fake Asterisk whose endpoint context changes `reads_until_applied` reads
+    AFTER a reload was accepted (the real one lags the CLI) and which drops
+    `busy_reloads` reloads with the "please be patient" answer."""
+    state = {"context": prior_context, "pending": None, "reads_left": 0,
+             "busy": busy_reloads, "commands": []}
+
+    def run(command: str) -> reconcile.CommandResult:
+        state["commands"].append(command)
+        if command == "core show channels count":
+            return reconcile.CommandResult(0, "0 active channels\n", "")
+        if command == "pjsip reload":
+            if state["busy"] > 0:
+                state["busy"] -= 1
+                return reconcile.CommandResult(
+                    0, "A module reload request is already in progress; please be patient.", ""
+                )
+            state["pending"] = (
+                "from-talky-inbound" if state["context"] == prior_context else prior_context
+            )
+            state["reads_left"] = reads_until_applied
+            return reconcile.CommandResult(0, "Module 'res_pjsip.so' reloaded successfully.", "")
+        if command == "dialplan reload":
+            return reconcile.CommandResult(0, "Dialplan reloaded.", "")
+        if command == "pjsip show endpoint blazedigitel-endpoint":
+            if state["pending"] is not None:
+                state["reads_left"] -= 1
+                if state["reads_left"] <= 0:
+                    state["context"], state["pending"] = state["pending"], None
+            return reconcile.CommandResult(
+                0, f"Endpoint: blazedigitel-endpoint Context: {state['context']}", ""
+            )
+        if command.startswith("pjsip show endpoint trunk-"):
+            endpoint = command.removeprefix("pjsip show endpoint ")
+            return reconcile.CommandResult(0, f"Endpoint: {endpoint} Context: from-talky-inbound", "")
+        if command == "dialplan show from-talky-inbound":
+            if not dialplan_ok:
+                return reconcile.CommandResult(
+                    0, "There is no existence of 'from-talky-inbound' context", ""
+                )
+            routes = " ".join(f"{r.account} {r.did}" for r in candidate.routes)
+            return reconcile.CommandResult(0, f"Context from-talky-inbound _. Stasis {routes}", "")
+        raise AssertionError(f"unexpected Asterisk command: {command}")
+
+    return run, state
+
+
+def _candidate_with_base(tmp_path):
+    base = tmp_path / "pjsip.conf"
+    original = _base_pjsip()
+    base.write_bytes(original)
+    candidate = reconcile.build_candidate_set(
+        [_row(TRUNK_A, direction="outbound")],
+        candidate_dir=tmp_path / "candidate",
+        decrypt_password=lambda _: "secret",
+        base_pjsip_source=base,
+    )
+    live = tmp_path / "pjsip.d"
+    live.mkdir()
+    return base, original, candidate, live
+
+
+def test_runtime_proof_waits_for_an_asynchronous_pjsip_reload(tmp_path):
+    base, _original, candidate, live = _candidate_with_base(tmp_path)
+    run, state = _stateful_asterisk(candidate, reads_until_applied=3)
+
+    reconcile.apply_candidate_set(
+        candidate, live_dir=live, base_pjsip_live_path=base, expected_digest=candidate.digest,
+        lock_path=tmp_path / "apply.lock", run_asterisk=run,
+    )
+
+    assert state["context"] == "from-talky-inbound"
+    # Three reads before the runtime reflected the reload; a single read (the
+    # old behaviour) would have declared failure and rolled back.
+    assert state["commands"].count("pjsip show endpoint blazedigitel-endpoint") == 3
+    assert base.read_bytes() == candidate.files[reconcile.BASE_PJSIP_NAME]
+
+
+def test_a_busy_reload_is_retried_not_treated_as_success(tmp_path):
+    base, _original, candidate, live = _candidate_with_base(tmp_path)
+    run, state = _stateful_asterisk(candidate, reads_until_applied=1, busy_reloads=2)
+
+    reconcile.apply_candidate_set(
+        candidate, live_dir=live, base_pjsip_live_path=base, expected_digest=candidate.digest,
+        lock_path=tmp_path / "apply.lock", run_asterisk=run,
+    )
+
+    assert state["commands"].count("pjsip reload") == 3  # 2 dropped + 1 accepted
+    assert state["context"] == "from-talky-inbound"
+
+
+def test_rollback_is_proven_and_the_failing_check_is_named(tmp_path):
+    base, original, candidate, live = _candidate_with_base(tmp_path)
+    run, state = _stateful_asterisk(candidate, reads_until_applied=2, dialplan_ok=False)
+
+    with pytest.raises(reconcile.PJSIPReloadFailed, match="prior files were restored") as excinfo:
+        reconcile.apply_candidate_set(
+            candidate, live_dir=live, base_pjsip_live_path=base, expected_digest=candidate.digest,
+            lock_path=tmp_path / "apply.lock", run_asterisk=run,
+        )
+
+    assert base.read_bytes() == original
+    assert state["context"] == "from-tenant-manual", "rollback must be proven at runtime, not assumed"
+    payload = reconcile.error_payload(excinfo.value, apply=True)
+    assert payload["status"] == "blocked"
+    assert payload["cause"] == ["the managed inbound dialplan is absent at runtime"]
+
+
+def test_rollback_that_never_lands_is_reported_as_such(tmp_path):
+    base, _original, candidate, live = _candidate_with_base(tmp_path)
+    run, state = _stateful_asterisk(candidate, reads_until_applied=1, dialplan_ok=False)
+
+    def run_with_dropped_rollback(command: str) -> reconcile.CommandResult:
+        # Once the candidate is live, every further reload is dropped by
+        # Asterisk, so the runtime keeps the candidate's context.
+        if command == "pjsip reload" and state["context"] == "from-talky-inbound":
+            state["commands"].append(command)
+            return reconcile.CommandResult(
+                0, "A module reload request is already in progress; please be patient.", ""
+            )
+        return run(command)
+
+    with pytest.raises(reconcile.PJSIPReloadFailed, match="rollback reload failed"):
+        reconcile.apply_candidate_set(
+            candidate, live_dir=live, base_pjsip_live_path=base, expected_digest=candidate.digest,
+            lock_path=tmp_path / "apply.lock", run_asterisk=run_with_dropped_rollback,
+        )
+

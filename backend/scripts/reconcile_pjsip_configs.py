@@ -36,6 +36,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import time
 import uuid
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from contextlib import contextmanager, suppress
@@ -109,6 +110,21 @@ _ACTIVE_CHANNELS_RE = re.compile(r"(?im)^\s*(\d+)\s+active channels?\b")
 _RELOAD_FAILURE_RE = re.compile(
     r"(?i)\b(?:error|failed|failure|unable|not found|no such command)\b"
 )
+# Asterisk answers a reload issued while a previous one is still running with
+# "A module reload request is already in progress; please be patient" and
+# DROPS the request (exit 0, no failure word). Prod 2026-09-09: the reconciler
+# reloaded, proved runtime in the same instant (still the old state -> "failed"),
+# restored the files and reloaded again; that second reload was the one
+# Asterisk dropped, so the runtime kept the candidate's endpoint context while
+# the files on disk were already rolled back. Both halves are fixed below: a
+# busy reload is retried until accepted, and runtime state is proven by polling.
+_RELOAD_BUSY_RE = re.compile(r"(?i)reload request is already in progress")
+_RELOAD_BUSY_ATTEMPTS = 40          # x 0.5 s = 20 s of "please be patient"
+_PROOF_INTERVAL_S = 0.5
+_PROOF_ATTEMPTS = max(
+    1, int(float(os.getenv("TALKY_ASTERISK_PROOF_TIMEOUT_S", "20")) / _PROOF_INTERVAL_S)
+)
+_SLEEP = time.sleep  # patched to a no-op by the unit tests
 _ROUTE_MARKER = "; TALKY_GENERATED_ACCOUNT_ROUTES"
 _SHARED_ENDPOINT_SECTION_RE = re.compile(
     rb"(?ms)^[ \t]*\[blazedigitel-endpoint\][ \t]*(?:\r?\n|\Z).*?"
@@ -912,21 +928,32 @@ def _command_succeeded(result: CommandResult) -> bool:
     return result.returncode == 0 and not _RELOAD_FAILURE_RE.search(output)
 
 
+def _reload_command(run_asterisk: Callable[[str], CommandResult], command: str) -> bool:
+    """Issue one reload; wait out "already in progress" instead of taking it as done."""
+    for attempt in range(_RELOAD_BUSY_ATTEMPTS):
+        result = run_asterisk(command)
+        output = f"{result.stdout}\n{result.stderr}"
+        if _RELOAD_BUSY_RE.search(output):
+            if attempt + 1 < _RELOAD_BUSY_ATTEMPTS:
+                _SLEEP(_PROOF_INTERVAL_S)
+            continue
+        return _command_succeeded(result)
+    return False
+
+
 def _reload_only(run_asterisk: Callable[[str], CommandResult]) -> bool:
     return all(
-        _command_succeeded(run_asterisk(command))
+        _reload_command(run_asterisk, command)
         for command in ("pjsip reload", "dialplan reload")
     )
 
 
-def _reload_and_prove_runtime(
+def _prove_runtime(
     candidate: CandidateSet,
     *,
     run_asterisk: Callable[[str], CommandResult],
-) -> None:
-    if not _reload_only(run_asterisk):
-        raise PJSIPReloadFailed("Asterisk rejected the generated configuration reload")
-
+) -> str | None:
+    """One pass of the runtime proof. Returns the failing check, or None."""
     shared = run_asterisk("pjsip show endpoint blazedigitel-endpoint")
     shared_output = f"{shared.stdout}\n{shared.stderr}"
     if (
@@ -934,10 +961,7 @@ def _reload_and_prove_runtime(
         or "blazedigitel-endpoint" not in shared_output
         or "from-talky-inbound" not in shared_output
     ):
-        raise PJSIPReloadFailed(
-            "the shared carrier endpoint is not bound to the managed inbound context"
-        )
-
+        return "the shared carrier endpoint is not bound to the managed inbound context"
     for name in sorted(candidate.files):
         if not name.startswith(PJSIP_PREFIX):
             continue
@@ -949,9 +973,7 @@ def _reload_and_prove_runtime(
             or endpoint_name not in output
             or "from-talky-inbound" not in output
         ):
-            raise PJSIPReloadFailed(
-                "a generated tenant endpoint is absent from the Asterisk runtime"
-            )
+            return "a generated tenant endpoint is absent from the Asterisk runtime"
 
     dialplan = run_asterisk("dialplan show from-talky-inbound")
     output = f"{dialplan.stdout}\n{dialplan.stderr}"
@@ -961,12 +983,72 @@ def _reload_and_prove_runtime(
         or "Stasis" not in output
         or "_." not in output
     ):
-        raise PJSIPReloadFailed("the managed inbound dialplan is absent at runtime")
+        return "the managed inbound dialplan is absent at runtime"
     for route in candidate.routes:
         if route.account not in output or route.did not in output:
-            raise PJSIPReloadFailed(
-                "a generated account route is absent from the Asterisk runtime"
-            )
+            return "a generated account route is absent from the Asterisk runtime"
+    return None
+
+
+def _reload_and_prove_runtime(
+    candidate: CandidateSet,
+    *,
+    run_asterisk: Callable[[str], CommandResult],
+) -> None:
+    if not _reload_only(run_asterisk):
+        raise PJSIPReloadFailed("Asterisk rejected the generated configuration reload")
+    # A PJSIP reload completes after the CLI returns; read the runtime until it
+    # reflects the candidate or the window closes. The LAST failing check is
+    # the diagnosis.
+    reason: str | None = None
+    for attempt in range(_PROOF_ATTEMPTS):
+        reason = _prove_runtime(candidate, run_asterisk=run_asterisk)
+        if reason is None:
+            return
+        if attempt + 1 < _PROOF_ATTEMPTS:
+            _SLEEP(_PROOF_INTERVAL_S)
+    raise PJSIPReloadFailed(reason or "Asterisk runtime proof did not complete")
+
+
+def _shared_endpoint_context(source: bytes) -> str | None:
+    """The shared carrier endpoint's ``context=`` value in a base pjsip.conf."""
+    sections = list(_SHARED_ENDPOINT_SECTION_RE.finditer(bytes(source)))
+    if len(sections) != 1:
+        return None
+    lines = list(_CONTEXT_LINE_RE.finditer(sections[0].group(0)))
+    if len(lines) != 1:
+        return None
+    _, _, value = lines[0].group(0).partition(b"=")
+    value = value.strip()
+    return value.decode("utf-8", "replace") if value else None
+
+
+def _prove_rollback_runtime(
+    snapshot: Mapping[str, "_FileSnapshot"],
+    *,
+    run_asterisk: Callable[[str], CommandResult],
+) -> bool:
+    """After restoring the files, prove Asterisk is back on the prior context.
+
+    Without this the reconciler reported "prior files were restored" while the
+    runtime still carried the candidate's context (prod 2026-09-09).
+    """
+    saved = snapshot.get(BASE_PJSIP_NAME)
+    if saved is None:
+        return True  # base pjsip.conf is not managed here; nothing to prove
+    prior = _shared_endpoint_context(saved.content)
+    if not prior:
+        return True
+    for attempt in range(_PROOF_ATTEMPTS):
+        shared = run_asterisk("pjsip show endpoint blazedigitel-endpoint")
+        output = f"{shared.stdout}\n{shared.stderr}"
+        if _command_succeeded(shared) and prior in output and (
+            prior == "from-talky-inbound" or "from-talky-inbound" not in output
+        ):
+            return True
+        if attempt + 1 < _PROOF_ATTEMPTS:
+            _SLEEP(_PROOF_INTERVAL_S)
+    return False
 
 
 def _target_for(
@@ -1219,7 +1301,9 @@ def _apply_candidate_set_locked(
             raise PJSIPReloadFailed(
                 "Asterisk runtime verification failed and file rollback failed"
             ) from rollback_exc
-        if _reload_only(run_asterisk):
+        if _reload_only(run_asterisk) and _prove_rollback_runtime(
+            snapshot, run_asterisk=run_asterisk
+        ):
             raise PJSIPReloadFailed(
                 "Asterisk runtime verification failed; prior files were restored"
             ) from exc
@@ -1343,18 +1427,32 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         return asyncio.run(_execute(args))
     except PJSIPReconciliationError as exc:
-        print(
-            json.dumps(
-                {
-                    "mode": "apply" if args.apply else "check",
-                    "status": "blocked",
-                    "error": str(exc),
-                },
-                sort_keys=True,
-            ),
-            file=sys.stderr,
-        )
+        print(json.dumps(error_payload(exc, apply=args.apply), sort_keys=True), file=sys.stderr)
         return 2
+
+
+def error_payload(exc: BaseException, *, apply: bool) -> dict[str, Any]:
+    """The blocked-status JSON, including WHICH check failed.
+
+    Every message in the chain is one of this module's fixed strings (no
+    password, ciphertext, account, DID or Asterisk output), so surfacing the
+    chain is safe; without it a blocked apply is undiagnosable from outside.
+    """
+    cause: list[str] = []
+    seen: set[int] = set()
+    node = exc.__cause__ or exc.__context__
+    while node is not None and id(node) not in seen and len(cause) < 8:
+        seen.add(id(node))
+        cause.append(str(node))
+        node = node.__cause__ or node.__context__
+    payload: dict[str, Any] = {
+        "mode": "apply" if apply else "check",
+        "status": "blocked",
+        "error": str(exc),
+    }
+    if cause:
+        payload["cause"] = cause
+    return payload
 
 
 if __name__ == "__main__":
