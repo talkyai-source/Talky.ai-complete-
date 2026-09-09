@@ -98,3 +98,26 @@ Talk-Leee: npm run build -> exit 0, ✓ Compiled successfully in 62s, 69/69 stat
 - Second run script: `ops_reconcile_0910.sh <sha> 585ec451` (deploy + reconcile + read-back,
   no seed). The paused campaign is the owner's to resume from the Inbound page; the DID
   answers again the moment it is resumed and the reconcile has run.
+
+## Deploy run 2 (owner, `ops_reconcile_0910.sh dca612a6 585ec451`) — converged
+
+- prod HEAD `dca612a6`; reconcile `mode=apply`, exit 0: 5 files changed (shared `pjsip.conf`
+  + 4 trunk files), 3 created (`extensions.d/talky-inbound.conf`, trunk files for
+  `blaze-pbx-940001/2`); `route_count: 0`, `unrouted_verified_trunks: [trunk-44b41a0d…]`.
+- Shared endpoint context is now `from-talky-inbound` on disk AND at runtime (first time the
+  managed dialplan is live; the hand-written 08-30 block in `from-blazedigitel` is no longer
+  what carrier calls hit). Managed context holds the fail-closed catch-all only.
+- All 7 registrations up; `blaze-pbx-940001` / `blaze-pbx-940002` = `registered` in the DB.
+- Consequence to know: the dialplan route `150001 → +442046132300` is rendered only while
+  the tenant's DID assignment is active, and nothing re-renders on pause/resume. After the
+  owner resumes campaign `2ab6f5b3`, `ops_reconcile_only.sh` must run once (uploaded; no
+  deploy, no restart). Until then calls to +442046132300 hit the catch-all and admission
+  denies them — the same outcome a paused campaign gives.
+- Design note (owner decision, not done): rendering account→DID routes from the reviewed
+  carrier inventory alone, and letting admission decide by assignment state, would make
+  pause/resume need no reconcile at all. The reconciler's own rationale ("the inventory is
+  the proof of the Request-URI") is compatible with that.
+- Tester tenant `5e666d8a`: its assignment is for `+17789249977` on trunk `2e8f65f7`; that
+  number is "verified" for 11 tenants and its account is not in the carrier inventory, so
+  inbound to it can never route. A real DID on a reviewed carrier account is needed before
+  CodeAlpha can receive a test call.
