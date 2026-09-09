@@ -34,7 +34,15 @@ import argparse
 import asyncio
 import os
 import sys
+from pathlib import Path
 from typing import Any, Dict, Optional
+
+# Run as `venv/bin/python scripts/add_sip_trunk.py` — Python puts scripts/ on
+# sys.path, not backend/, so make the app package importable (same as the
+# other backend/scripts entry points).
+_BACKEND_ROOT = Path(__file__).resolve().parents[1]
+if str(_BACKEND_ROOT) not in sys.path:
+    sys.path.insert(0, str(_BACKEND_ROOT))
 
 # The endpoint's INSERT, verbatim. Kept as a module constant so a unit test can
 # prove this script and the API write the same columns.
