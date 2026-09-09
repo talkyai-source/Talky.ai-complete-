@@ -206,7 +206,18 @@ echo "==> Provisioned /etc/asterisk/pjsip.d (asterisk:asterisk, 2770)"
 
 # 9) Provision only the managed include directory. The reconciler owns the
 # talky-inbound.conf file; extensions.conf remains byte-for-byte untouched.
+# A permanent placeholder keeps `#include "extensions.d/*.conf"` matching at
+# least one file: with the directory empty (before the first apply, or after a
+# rollback) Asterisk logs `ERROR config.c: The file 'extensions.d/*.conf' was
+# listed as a #include but it does not exist` on every dialplan reload
+# (observed 2026-09-09). pjsip.d has the same 00-keep.conf for the same reason.
 install -d -o root -g asterisk -m 0755 /etc/asterisk/extensions.d
+if [ ! -e /etc/asterisk/extensions.d/00-keep.conf ]; then
+    printf '%s\n' '; placeholder so the extensions.d include is never empty (managed dialplan is talky-inbound.conf)' \
+        > /etc/asterisk/extensions.d/00-keep.conf
+    chown root:asterisk /etc/asterisk/extensions.d/00-keep.conf
+    chmod 0644 /etc/asterisk/extensions.d/00-keep.conf
+fi
 
 echo "==> Wrote /etc/asterisk/{http,ari,rtp,pjsip}.conf and preserved extensions.conf"
 

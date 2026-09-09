@@ -1133,3 +1133,28 @@ def test_rollback_that_never_lands_is_reported_as_such(tmp_path):
             lock_path=tmp_path / "apply.lock", run_asterisk=run_with_dropped_rollback,
         )
 
+
+def test_reload_waits_out_a_long_pjsip_registration_pass(tmp_path):
+    """Prod 2026-09-09: the PJSIP reload re-registered 6 trunks for 19 s; the
+    follow-up dialplan reload was refused as "in progress" the whole time and a
+    20 s budget gave up. The budget must cover a realistic registration pass."""
+    base, _original, candidate, live = _candidate_with_base(tmp_path)
+    run, state = _stateful_asterisk(candidate, reads_until_applied=1)
+    busy_left = {"n": 60}  # 60 refusals = 30 s of "please be patient"
+
+    def slow_asterisk(command: str) -> reconcile.CommandResult:
+        if command == "dialplan reload" and busy_left["n"] > 0:
+            busy_left["n"] -= 1
+            state["commands"].append(command)
+            return reconcile.CommandResult(
+                0, "A module reload request is already in progress; please be patient.", ""
+            )
+        return run(command)
+
+    reconcile.apply_candidate_set(
+        candidate, live_dir=live, base_pjsip_live_path=base, expected_digest=candidate.digest,
+        lock_path=tmp_path / "apply.lock", run_asterisk=slow_asterisk,
+    )
+    assert busy_left["n"] == 0 and state["context"] == "from-talky-inbound"
+    assert reconcile._RELOAD_BUSY_ATTEMPTS * reconcile._PROOF_INTERVAL_S >= 60
+

@@ -119,8 +119,15 @@ _RELOAD_FAILURE_RE = re.compile(
 # the files on disk were already rolled back. Both halves are fixed below: a
 # busy reload is retried until accepted, and runtime state is proven by polling.
 _RELOAD_BUSY_RE = re.compile(r"(?i)reload request is already in progress")
-_RELOAD_BUSY_ATTEMPTS = 40          # x 0.5 s = 20 s of "please be patient"
 _PROOF_INTERVAL_S = 0.5
+# How long a follow-up reload may be told "please be patient". A PJSIP reload
+# re-registers every trunk; on prod 2026-09-09 that took 19 s with 6 trunks and
+# a 20 s budget gave up one second short ("Asterisk rejected the generated
+# configuration reload"). Budget grows with trunk count, so it is generous and
+# env-tunable.
+_RELOAD_BUSY_ATTEMPTS = max(
+    1, int(float(os.getenv("TALKY_ASTERISK_RELOAD_BUSY_TIMEOUT_S", "90")) / _PROOF_INTERVAL_S)
+)
 _PROOF_ATTEMPTS = max(
     1, int(float(os.getenv("TALKY_ASTERISK_PROOF_TIMEOUT_S", "20")) / _PROOF_INTERVAL_S)
 )

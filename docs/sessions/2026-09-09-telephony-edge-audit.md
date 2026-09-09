@@ -147,3 +147,13 @@ the AllStateEstimation tenant (`1845a165`), to be visible and manageable from Se
 after the reconciler fix: backend/.venv/Scripts/python -m pytest tests/unit tests/security -q -> 8918 passed, 8 skipped in 333.47s
 ruff -> All checks passed!
 ```
+
+6. **Third attempt, now diagnosable:** `cause: ["Asterisk rejected the generated configuration
+   reload"]` and the rollback proven (disk and runtime both prior). Asterisk log: the candidate
+   PJSIP reload ran 08:04:12 → 08:04:31 (19 s, re-registering 6 trunks); the follow-up
+   `dialplan reload` was refused as "in progress" for the whole of a 20 s budget, one second
+   short. Budget now 90 s (`TALKY_ASTERISK_RELOAD_BUSY_TIMEOUT_S`). Also seen: with the managed
+   file absent, `#include "extensions.d/*.conf"` matches nothing and Asterisk logs
+   `ERROR config.c … does not exist` on every dialplan reload — `setup-asterisk.sh` now installs
+   `extensions.d/00-keep.conf` (as `pjsip.d` already had). Suite after: 8919 passed.
+
