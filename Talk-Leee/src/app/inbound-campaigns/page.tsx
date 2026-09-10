@@ -61,17 +61,17 @@ export default function InboundCampaignsPage() {
                             <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                                 <div className="flex min-w-0 items-start gap-3">
                                     <span className={cn("mt-0.5 rounded-lg p-2", tenantControls.data?.inbound_enabled ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300" : "bg-amber-500/10 text-amber-700 dark:text-amber-300")}><ShieldAlert className="h-4 w-4" aria-hidden /></span>
-                                    <div>
+                                    <div className="min-w-0">
                                         <h2 id="tenant-inbound-control-heading" className="text-sm font-semibold text-foreground">Tenant inbound admission</h2>
                                         {tenantControls.isLoading ? <p className="mt-1 text-sm text-muted-foreground">Loading the authoritative switch…</p> : tenantControls.isError ? <p className="mt-1 text-sm text-destructive" role="alert">The switch could not be verified, so it cannot be changed.</p> : (
                                             <>
                                                 <p className="mt-1 text-sm text-muted-foreground">{tenantControls.data?.inbound_enabled ? "Enabled. Campaign readiness still applies to every new call." : "Disabled. New inbound calls fail closed before answer."}</p>
-                                                {tenantControls.data?.reason ? <p className="mt-1 text-xs text-muted-foreground">Last reason: {tenantControls.data.reason}</p> : null}
+                                                {tenantControls.data?.reason ? <p className="mt-1 text-xs text-muted-foreground [overflow-wrap:anywhere]">Last reason: {tenantControls.data.reason}</p> : null}
                                             </>
                                         )}
                                     </div>
                                 </div>
-                                <Button type="button" variant={tenantControls.data?.inbound_enabled ? "destructive" : "outline"} disabled={!tenantControls.data || setTenantControls.isPending} onClick={() => setControlDialogOpen(true)}>
+                                <Button type="button" className="shrink-0" variant={tenantControls.data?.inbound_enabled ? "destructive" : "outline"} disabled={!tenantControls.data || setTenantControls.isPending} onClick={() => setControlDialogOpen(true)}>
                                     {tenantControls.data?.inbound_enabled ? "Disable all inbound" : "Enable inbound"}
                                 </Button>
                             </div>
@@ -129,7 +129,7 @@ function CampaignCard({ campaign, canEdit }: { campaign: InboundCampaign; canEdi
             </div>
             <div className="flex flex-wrap items-center gap-2"><ReadinessBadge readiness={campaign.readiness} /><span className="rounded-full border border-border bg-muted/30 px-2.5 py-1 text-xs text-muted-foreground">Config v{campaign.config_version}</span></div>
             <dl className="grid gap-3 text-sm sm:grid-cols-2"><Info label="AI campaign" value={campaign.campaign_name || campaign.campaign_id || "Not selected"} /><Info label="Inbound trunk" value={campaign.sip_trunk_name || campaign.sip_trunk_id || "Not selected"} /><Info label="Timezone" value={campaign.timezone} /><Info label="Last call" value={formatDate(campaign.last_call_at)} /></dl>
-            {campaign.last_error ? <p className="rounded-lg border border-red-500/20 bg-red-500/5 px-3 py-2 text-xs text-destructive" role="status">{campaign.last_error}</p> : null}
+            {campaign.last_error ? <p className="rounded-lg border border-red-500/20 bg-red-500/5 px-3 py-2 text-xs text-destructive [overflow-wrap:anywhere]" role="status">{campaign.last_error}</p> : null}
             <div className="mt-auto flex flex-wrap items-center gap-2 border-t border-border pt-4">
                 <Button asChild size="sm" variant="outline"><Link href={`/inbound-campaigns/${campaign.id}`}>Open <ArrowRight className="h-4 w-4" aria-hidden /></Link></Button>
                 {canEdit && campaign.status !== "archived" ? <Button asChild size="sm" variant="ghost"><Link href={`/inbound-campaigns/${campaign.id}/edit`}>Edit</Link></Button> : null}
