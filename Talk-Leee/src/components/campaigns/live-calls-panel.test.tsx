@@ -105,6 +105,19 @@ function renderPanel(permissions: string[] = [], props: LiveCallsPanelProps = {}
     };
 }
 
+test("empty inbound panel asks for an incoming test call, never an outbound start", async () => {
+    api.listLiveCalls = async () => ({ items: [], server_time: "2026-09-11T00:00:00Z" });
+    renderPanel([], { campaignId: "inbound-campaign", direction: "inbound" });
+    await waitFor(() => assert.ok(screen.getByText(/Call the active inbound number from a separate phone/)));
+    assert.equal(screen.queryByText(/Start the campaign/), null);
+});
+
+test("empty outbound panel keeps its outbound start instruction", async () => {
+    api.listLiveCalls = async () => ({ items: [], server_time: "2026-09-11T00:00:00Z" });
+    renderPanel([], { campaignId: "outbound-campaign", direction: "outbound" });
+    await waitFor(() => assert.ok(screen.getByText(/Start the campaign/)));
+});
+
 test("hangup responses require the confirmation-aware contract", () => {
     assert.equal(HangupCallResponseSchema.parse(hangupResponse()).termination_status, "requested");
     assert.throws(

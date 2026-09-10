@@ -587,7 +587,9 @@ function LiveCallsPanelScope({ campaignId, direction, title = "Live calls" }: Li
 
             {items.length === 0 ? (
                 <div className="px-4 py-6 text-sm text-muted-foreground">
-                    No calls in flight. Start the campaign to see live status here.
+                    {direction === "inbound"
+                        ? "No inbound calls in flight. Call the active inbound number from a separate phone to see live status here."
+                        : "No calls in flight. Start the campaign to see live status here."}
                 </div>
             ) : (
                 <div className="overflow-x-auto">
