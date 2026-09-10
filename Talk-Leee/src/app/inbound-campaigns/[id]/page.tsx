@@ -121,10 +121,20 @@ export default function InboundCampaignDetailPage() {
 
                     <section className="content-card" aria-labelledby="inbound-overview-heading">
                         <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                            <div className="min-w-0"><p className="font-mono text-sm text-muted-foreground">{campaign.phone_number?.masked_number ?? "No verified number"}</p><h2 id="inbound-overview-heading" className="mt-1 break-words text-2xl font-semibold text-foreground">{campaign.name}</h2>{campaign.purpose ? <p className="mt-1 text-sm text-muted-foreground">{campaign.purpose}</p> : null}</div>
-                            <div className="flex flex-wrap gap-2"><InboundStatusBadge status={campaign.status} /><ReadinessBadge readiness={readiness ?? campaign.readiness} /></div>
+                            <div className="min-w-0 flex-1"><p className="font-mono text-sm text-muted-foreground">{campaign.phone_number?.masked_number ?? "No verified number"}</p><h2 id="inbound-overview-heading" className="mt-1 break-words text-2xl font-semibold text-foreground">{campaign.name}</h2>{campaign.purpose ? <p className="mt-1 text-sm text-muted-foreground [overflow-wrap:anywhere]">{campaign.purpose}</p> : null}</div>
+                            <div className="flex shrink-0 flex-wrap gap-2"><InboundStatusBadge status={campaign.status} /><ReadinessBadge readiness={readiness ?? campaign.readiness} /></div>
                         </div>
                         <dl className="mt-6 grid gap-4 border-t border-border pt-5 sm:grid-cols-2 lg:grid-cols-4"><Info label="AI campaign" value={campaign.campaign_name || campaign.campaign_id || "Not selected"} /><Info label="SIP trunk" value={campaign.sip_trunk_name || campaign.sip_trunk_id || "Not selected"} /><Info label="Opening" value={campaign.opening_mode === "agent_first" ? "Agent first" : "Caller first"} /><Info label="Timezone" value={campaign.timezone} /></dl>
+                    </section>
+
+                    <section className="content-card" aria-labelledby="inbound-test-heading">
+                        <h2 id="inbound-test-heading" className="text-lg font-semibold text-foreground">How to test inbound calling</h2>
+                        <p className="mt-1 text-sm text-muted-foreground">Activation and registration checks do not prove a successful telephone call.</p>
+                        <ol className="mt-3 list-decimal space-y-2 pl-5 text-sm text-foreground">
+                            <li>Once this campaign is active, call its assigned public number from a separate mobile or landline. A SIP account or extension is not the public number.</li>
+                            <li>Check the configured greeting and have a short two-way conversation. Note the time and what you hear if the call fails.</li>
+                            <li>Confirm the call appears below and ends in Call history. Check its transcript, summary, duration and recording where enabled.</li>
+                        </ol>
                     </section>
 
                     <div className="grid gap-5 lg:grid-cols-[minmax(0,1.45fr)_minmax(18rem,0.75fr)]">
@@ -142,7 +152,7 @@ export default function InboundCampaignDetailPage() {
                         <div className="flex items-center gap-2"><BookOpen className="h-4 w-4 text-primary" aria-hidden /><h2 id="inbound-knowledge-heading" className="text-lg font-semibold text-foreground">Knowledge</h2></div>
                         <p className="mt-1 text-sm text-muted-foreground">What this inbound agent knows. It belongs to this campaign alone — nothing here is shared with outbound campaigns.</p>
                         <div className="mt-4">
-                            <KnowledgePanel campaignId={campaign.campaign_id} readOnly={!capabilities.canEdit} />
+                            <KnowledgePanel campaignId={campaign.campaign_id} readOnly={!canManageKnowledge} />
                         </div>
                     </section>
 
@@ -159,7 +169,6 @@ export default function InboundCampaignDetailPage() {
                         direction="inbound"
                         title="Inbound call issues"
                     />
-                    <KnowledgePanel campaignId={campaign.campaign_id} readOnly={!canManageKnowledge} />
                 </div>
             )}
 
@@ -168,7 +177,7 @@ export default function InboundCampaignDetailPage() {
     );
 }
 
-function Info({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) { return <div className="min-w-0"><dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{label}</dt><dd className={`${mono ? "font-mono" : ""} mt-1 break-words text-sm font-medium capitalize text-foreground`}>{value}</dd></div>; }
+function Info({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) { return <div className="min-w-0"><dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{label}</dt><dd className={`${mono ? "font-mono" : ""} mt-1 break-words text-sm font-medium text-foreground`}>{value}</dd></div>; }
 function afterHoursLabel(action: string): string {
     if (action === "hangup") return "Reject before answer";
     if (action === "voicemail") return "AI message intake (normal call history; readiness required)";
