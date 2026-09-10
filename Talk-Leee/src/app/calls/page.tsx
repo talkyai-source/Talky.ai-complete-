@@ -49,12 +49,25 @@ function getStatusIcon(status: string) {
     }
 }
 
-// Column order (2026-09-07): Phone | Lead type | Outcome | Notes | Time | AI summary | AI script/Form | Actions.
+// Column order (2026-09-07): Phone/Duration | Lead type | Outcome | Notes | Time | AI Summary | AI Script/Form | Actions.
 // The time column sits right before the AI summary so date, summary and form read left-to-right as one review flow.
-// 2026-09-08: the time cell is a clock icon only (details on hover), so its column is icon-width.
+// 2026-09-08: the time cell is a clock icon only (details on hover), so its column is icon-width (2.5rem).
+// Fixed (non-fr) tracks keep the header and every row pixel-identical so cells never drift out from
+// under their heading; only Notes flexes to soak up extra width. Shared verbatim by the header row
+// and every `CallRow` grid cell (see `CampaignSection`), both floored at DESKTOP_CALL_MIN_WIDTH, so a
+// single `overflow-x-auto` ancestor scrolls them together with no JS involved.
 const DESKTOP_CALL_GRID =
-    "grid-cols-[minmax(9rem,1.15fr)_minmax(7.5rem,0.75fr)_minmax(6rem,0.7fr)_minmax(9rem,1fr)_2.5rem_4.75rem_5.5rem_auto]";
-
+    "grid-cols-[10rem_7.5rem_6rem_minmax(5.5rem,1fr)_2.5rem_5.5rem_6.5rem_8.75rem]";
+// The Actions track (8.75rem) holds all four 2rem action buttons at full size with their
+// three gap-1 (0.25rem) gutters: 4 × 2rem + 3 × 0.25rem = 8.75rem.
+// Column tracks (10 + 7.5 + 6 + 5.5 + 2.5 + 5.5 + 6.5 + 8.75 = 52.25rem) + 7 gap-2 gutters (3.5rem)
+// + the row's own px-3 inset (1.5rem) = 57.25rem exactly. Applying that as an explicit min-width
+// on both the header and every row (rather than relying on the grid's own implicit
+// shrink-resistance) is what makes them pixel-identical regardless of a given row's content.
+// At 1280px with the sidebar expanded (232px) the card's inner width is ~934px (58.4rem), so
+// 57.25rem (916px) renders the full 8-column grid with zero internal scroll — the tightest
+// supported desktop case.
+const DESKTOP_CALL_MIN_WIDTH = "min-w-[57.25rem]";
 
 const FAILED_CALL_OUTCOMES = new Set([
     "busy",
@@ -259,8 +272,10 @@ function CallRow({
     };
 
     return (
-        <div className="rounded-xl border border-border bg-background">
-            <div className="space-y-3 p-4 xl:hidden">
+        <div>
+            {/* Stacked card — below 768px. Own full bordered card, all fields
+                inline, no grid, no horizontal scroll. */}
+            <div className="space-y-3 rounded-xl border border-border bg-background p-4 md:hidden">
                 <div className="flex items-start justify-between gap-3">
                     <div className="flex min-w-0 items-start gap-2">
                         <LeadAccentIcon leadType={workflow.leadType}>{getStatusIcon(call.status)}</LeadAccentIcon>
@@ -350,7 +365,14 @@ function CallRow({
                 </div>
             </div>
 
-            <div className={`hidden min-w-0 ${DESKTOP_CALL_GRID} items-center gap-3 px-4 py-3 xl:grid`}>
+            {/* Grid row — 768px and up. Hidden entirely below 768px so it
+                never contributes to layout width there. Carries the same
+                fixed grid template and min-width as the header (see
+                DESKTOP_CALL_GRID / DESKTOP_CALL_MIN_WIDTH) so a shared
+                `overflow-x-auto` ancestor (in CampaignSection) scrolls the
+                header and every row together — no per-row scroll container,
+                no scroll-sync JS. */}
+            <div data-call-grid="row" className={`hidden ${DESKTOP_CALL_MIN_WIDTH} md:grid ${DESKTOP_CALL_GRID} items-center gap-2 rounded-xl border border-border bg-background px-3 py-3`}>
                 <div className="flex min-w-0 flex-col gap-1.5">
                     <div className="flex min-w-0 items-center gap-2">
                         <LeadAccentIcon leadType={workflow.leadType}>{getStatusIcon(call.status)}</LeadAccentIcon>
@@ -470,6 +492,11 @@ function CallRow({
                 onEnded={() => setPlaying(false)}
             />
 
+            {/* Expandable panels sit outside the min-width-floored grid row
+                above (they're siblings, not descendants of it), so they're
+                never part of the horizontally-scrollable region — they
+                simply take the visible card's normal width at every
+                breakpoint and never need horizontal scrolling to read. */}
             <AnimatePresence initial={false}>
                 {expanded && (
                     <motion.div
@@ -478,7 +505,7 @@ function CallRow({
                         animate={{ opacity: 1, height: "auto" }}
                         exit={{ opacity: 0, height: 0 }}
                         transition={{ duration: 0.18 }}
-                        className="overflow-hidden border-t border-border bg-muted/40"
+                        className="mt-2 overflow-hidden rounded-xl border border-border bg-muted/40"
                     >
                         <div className="px-4 py-3">
                             <div className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
@@ -505,7 +532,7 @@ function CallRow({
                         animate={{ opacity: 1, height: "auto" }}
                         exit={{ opacity: 0, height: 0 }}
                         transition={{ duration: 0.18 }}
-                        className="overflow-hidden border-t border-border bg-muted/40"
+                        className="mt-2 overflow-hidden rounded-xl border border-border bg-muted/40"
                     >
                         <div className="px-4 py-3">
                             <div className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
@@ -647,29 +674,39 @@ function CampaignSection({
                         transition={{ duration: 0.2 }}
                         className="overflow-hidden"
                     >
-                        <div className={`mt-4 hidden ${DESKTOP_CALL_GRID} gap-3 px-4 pb-2 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground xl:grid`}>
-                            <div>Phone <span className="text-[10px] font-medium normal-case tracking-normal">/ Duration</span></div>
-                            <div>Lead type</div>
-                            <div>Outcome</div>
-                            <div>Notes</div>
-                            <div className="flex justify-center" title="Date and time (hover a row's clock)">
-                                <Clock className="h-4 w-4" role="img" aria-label="Date and time" />
+                        {/* ONE shared overflow-x-auto: the header and every row's grid
+                            (see CallRow) live in here together, so a single scrollbar
+                            (when the floored min-width doesn't fit) moves both at once.
+                            No per-row scroll containers, no scroll-sync JS — the header
+                            and each row just render the same grid template at the same
+                            min-width. Below 768px both grids are `hidden`, so nothing
+                            here overflows and no scrollbar appears; CallRow renders its
+                            stacked card instead. */}
+                        <div className="mt-4 overflow-x-auto">
+                            <div data-call-grid="header" className={`hidden ${DESKTOP_CALL_MIN_WIDTH} md:grid ${DESKTOP_CALL_GRID} gap-2 px-3 pb-2 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground whitespace-nowrap`}>
+                                <div>Phone <span className="text-[10px] font-medium normal-case tracking-normal">/ Duration</span></div>
+                                <div>Lead type</div>
+                                <div>Outcome</div>
+                                <div>Notes</div>
+                                <div className="flex justify-center" title="Date and time (hover a row's clock)">
+                                    <Clock className="h-4 w-4" role="img" aria-label="Date and time" />
+                                </div>
+                                <div className="text-center">AI Summary</div>
+                                <div className="text-center">AI Script <span className="text-[10px] font-medium normal-case tracking-normal">/ Form</span></div>
+                                <div className="text-right">Actions</div>
                             </div>
-                            <div className="text-center">AI Summary</div>
-                            <div className="text-center">AI Script <span className="text-[10px] font-medium normal-case tracking-normal">/ Form</span></div>
-                            <div className="text-right">Actions</div>
-                        </div>
-                        <div className="space-y-2">
-                            {group.calls.map((call) => (
-                                <CallRow
-                                    key={call.id}
-                                    call={call}
-                                    canPlayMedia={canPlayMedia}
-                                    workflow={workflow[call.id] ?? defaultCallHistoryWorkflow(call)}
-                                    onWorkflowChange={onWorkflowChange}
-                                    onReview={onReview}
-                                />
-                            ))}
+                            <div className="space-y-2 md:mt-0">
+                                {group.calls.map((call) => (
+                                    <CallRow
+                                        key={call.id}
+                                        call={call}
+                                        canPlayMedia={canPlayMedia}
+                                        workflow={workflow[call.id] ?? defaultCallHistoryWorkflow(call)}
+                                        onWorkflowChange={onWorkflowChange}
+                                        onReview={onReview}
+                                    />
+                                ))}
+                            </div>
                         </div>
                     </motion.div>
                 )}

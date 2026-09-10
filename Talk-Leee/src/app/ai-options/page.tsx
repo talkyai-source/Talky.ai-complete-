@@ -26,6 +26,7 @@ import {
     Sparkles,
     SlidersHorizontal,
     AudioWaveform,
+    Eye,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -166,6 +167,9 @@ export default function AIOptionsPage() {
     const voicesQuery = useVoicesQuery();
     const configQuery = useConfigQuery();
     const [cloneOpen, setCloneOpen] = useState(false);
+    // Purely visual toggle for the creativity/max-length dials card — not
+    // persisted anywhere, resets to visible on reload.
+    const [llmDialsHidden, setLlmDialsHidden] = useState(false);
 
     const providers = providersQuery.data ?? null;
     const voices = useMemo(() => dedupeVoicesById(voicesQuery.data?.voices ?? []), [voicesQuery.data]);
@@ -662,45 +666,64 @@ export default function AIOptionsPage() {
                                     </div>
                                 )}
                             </div>
-                            <div className="grid w-full grid-cols-2 place-items-center gap-2 rounded-xl border border-border bg-muted/30 px-2 py-2 sm:w-[274px] sm:justify-self-center sm:gap-4 sm:px-4">
-                                <RadialKnob
-                                    label="Temp" value={config.llm_temperature}
-                                    min={0} max={2} step={0.1}
-                                    format={(v) => v.toFixed(1)} hint="creativity"
-                                    onChange={(v) => setConfig({ ...config, llm_temperature: v })}
-                                    tip={
-                                        <>
-                                            <strong>Creativity</strong> — how much the agent varies its wording.
-                                            <br />
-                                            <strong>Lower</strong> is more consistent and predictable: it says
-                                            nearly the same thing each time.
-                                            <br />
-                                            <strong>Higher</strong> is more varied, but more likely to
-                                            improvise something wrong.
-                                            <br />
-                                            For lead generation, around <strong>0.4–0.6</strong> works well.
-                                            Nothing is changed for you — the dial stays where you put it.
-                                        </>
-                                    }
-                                />
-                                <RadialKnob
-                                    label="Tokens" value={config.llm_max_tokens}
-                                    min={50} max={5000} step={50} hint="max length"
-                                    onChange={(v) => setConfig({ ...config, llm_max_tokens: v })}
-                                    tip={
-                                        <>
-                                            <strong>Tokens</strong> are pieces of text — roughly ¾ of a word
-                                            each — counted across what the agent reads and what it says.
-                                            <br />
-                                            A higher limit allows longer replies, but usually costs more and
-                                            can add latency before the caller hears anything.
-                                            <br />
-                                            On a phone call, replies should normally stay <strong>short</strong>;
-                                            a long monologue is worse than a brief answer even when it is
-                                            correct.
-                                        </>
-                                    }
-                                />
+                            <div
+                                role="button"
+                                tabIndex={0}
+                                aria-pressed={llmDialsHidden}
+                                aria-label={llmDialsHidden ? "Show creativity and max length dials" : "Hide creativity and max length dials"}
+                                onClick={() => setLlmDialsHidden((hidden) => !hidden)}
+                                onKeyDown={(e) => {
+                                    if (e.key !== "Enter" && e.key !== " ") return;
+                                    e.preventDefault();
+                                    setLlmDialsHidden((hidden) => !hidden);
+                                }}
+                                className="relative grid w-full cursor-pointer grid-cols-2 place-items-center gap-2 rounded-xl border border-border bg-muted/30 px-2 py-2 outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2 focus-visible:ring-offset-background sm:w-[274px] sm:justify-self-center sm:gap-4 sm:px-4"
+                            >
+                                <div className={llmDialsHidden ? "contents invisible" : "contents"} onClick={(e) => e.stopPropagation()}>
+                                    <RadialKnob
+                                        label="Temp" value={config.llm_temperature}
+                                        min={0} max={2} step={0.1}
+                                        format={(v) => v.toFixed(1)} hint="creativity"
+                                        onChange={(v) => setConfig({ ...config, llm_temperature: v })}
+                                        tip={
+                                            <>
+                                                <strong>Creativity</strong> — how much the agent varies its wording.
+                                                <br />
+                                                <strong>Lower</strong> is more consistent and predictable: it says
+                                                nearly the same thing each time.
+                                                <br />
+                                                <strong>Higher</strong> is more varied, but more likely to
+                                                improvise something wrong.
+                                                <br />
+                                                For lead generation, around <strong>0.4–0.6</strong> works well.
+                                                Nothing is changed for you — the dial stays where you put it.
+                                            </>
+                                        }
+                                    />
+                                    <RadialKnob
+                                        label="Tokens" value={config.llm_max_tokens}
+                                        min={50} max={5000} step={50} hint="max length"
+                                        onChange={(v) => setConfig({ ...config, llm_max_tokens: v })}
+                                        tip={
+                                            <>
+                                                <strong>Tokens</strong> are pieces of text — roughly ¾ of a word
+                                                each — counted across what the agent reads and what it says.
+                                                <br />
+                                                A higher limit allows longer replies, but usually costs more and
+                                                can add latency before the caller hears anything.
+                                                <br />
+                                                On a phone call, replies should normally stay <strong>short</strong>;
+                                                a long monologue is worse than a brief answer even when it is
+                                                correct.
+                                            </>
+                                        }
+                                    />
+                                </div>
+                                {llmDialsHidden && (
+                                    <div className="pointer-events-none absolute inset-0 flex items-center justify-center" aria-hidden>
+                                        <Eye className="h-6 w-6 text-muted-foreground" />
+                                    </div>
+                                )}
                             </div>
                             {(() => {
                                 const advice = temperatureAdvice(config.llm_temperature);
