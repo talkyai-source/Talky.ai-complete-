@@ -28,6 +28,7 @@ def test_backup_dumps_with_the_rls_bypass_and_refuses_a_schema_only_result():
     assert dump_cmd, "the dump must run through docker exec"
     assert "PGOPTIONS='-c app.bypass_rls=true'" in dump_cmd.group(1), "without the bypass the dump is schema-only"
     assert "--format=custom" in text, "custom format is what pg_restore --list can verify"
+    assert "--enable-row-security" in text, "row_security=off is refused on FORCE RLS tables (first prod run failed)"
     assert re.search(r"grep -c 'TABLE DATA'", text), "must count data entries"
     assert "schema-only dump" in text, "must name the failure when data is missing"
     assert "refusing to publish a shrunken backup" in text

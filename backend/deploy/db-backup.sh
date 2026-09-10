@@ -11,7 +11,11 @@
 #      identical 22 MB files, 0 "TABLE DATA" entries). The bypass GUC is set on
 #      the dump connection via PGOPTIONS and the result is verified: TABLE DATA
 #      entries must be present and the dump must not shrink below half of the
-#      previous good one.
+#      previous good one. pg_dump ALSO needs --enable-row-security: by default
+#      it sets row_security=off, which Postgres refuses on a FORCE RLS table
+#      ("query would be affected by row-level security policy" — the first
+#      prod run, 2026-09-10). With it the policies run, and the bypass GUC
+#      makes them return every row.
 #   2. Nothing scheduled these. Every backup so far was a hand-run
 #      pre-migration dump (Sep 6, Sep 8). A 2.3 GB database with no nightly
 #      backup is not production.
@@ -54,7 +58,7 @@ trap 'exit 143' TERM
 
 # --- dump (bypass RLS on the dump connection; see header) --------------------
 docker exec -e PGOPTIONS='-c app.bypass_rls=true' "$CONTAINER" \
-    pg_dump -U "$DB_USER" -d "$DB_NAME" --no-owner --format=custom --compress=6 \
+    pg_dump -U "$DB_USER" -d "$DB_NAME" --no-owner --format=custom --compress=6 --enable-row-security \
     > "${partial}"
 test -s "${partial}"
 
