@@ -207,3 +207,19 @@ SMTP: host/port/user/password/from address/from name all set on prod; no mail fa
 Still open: 1845a165 has no real inbound DID (its only verified number is the shared placeholder);
 the +442046132300 test call produced no SIP trace on the box — packet capture
 (`sip_capture_root.sh`) pending.
+
+## 2026-09-11 — inbound test to +442046132300: the carrier is not delivering it
+
+Packet captures on the box (tshark, root, `sip_capture_root.sh` 80 s + `sip_watch_root.sh` 240 s):
+- **No INVITE arrived** in either window while the owner called.
+- The carrier (144.76.17.155) pings our registered contacts with OPTIONS every ~60 s: in 4 min,
+  **4 pings each** for 17789249977, 940001, 940002, 150002, 150003, 150004 — **0 for 150001**,
+  the account the DID maps to. Asterisk shows 150001 `Registered` (carrier answered our
+  REGISTER 200), yet the carrier does not treat our contact as the live binding for it.
+- Our side is proven ready: route `'150001'` rendered, shared context managed, ARI app
+  `talky_ai` connected, every carrier ping answered 200.
+Conclusion: carrier-side — either +442046132300 is no longer routed to 150001 on the Blaze
+portal, or another device is registered as 150001 and holds the binding. Inbound worked
+Aug 30 – Sep 8, so this changed recently. Next probe: `sip_rereg_root.sh` forces a fresh
+REGISTER for 150001 and watches whether pings start (would confirm a competing registration).
+Owner actions: check the DID destination and other devices on account 150001 in the Blaze portal.
