@@ -189,3 +189,21 @@ backend/.venv/Scripts/python -m pytest tests/unit tests/security -q -> 8932 pass
 ruff check app/ --select F --extend-ignore F401,F841 -> All checks passed!
 bash -n backend/deploy/db-backup.sh -> ok
 ```
+
+## 2026-09-11 — both AllStateEstimation tenants provisioned (owner request)
+
+Owner: "check all state estimation … have all minutes needed … inbound outbound fully active".
+Read-back after `ops_allstate_0911.sh` (DB-only, no service touched):
+
+| tenant | subscription | minutes | inbound_enabled | policy | recording | trunks | verified numbers |
+|---|---|---|---|---|---|---|---|
+| 790ca2db AllStateEstimation.co | active / free | 5000 (28 used 30 d) | true | inbound-default/10 | two_party | 4/4 registered | +442046132300, +17789249977 |
+| 1845a165 AllStateEstimation (gmail) | **inactive → active** / free | **530 → 5000** (237 used 30 d) | true | **none → inbound-default/10** | one_party | 3/3 registered (incl. blaze-pbx-940001/2) | +17789249977 only |
+
+The change to 1845a165 was applied by SQL because the hash-chained `audit_logs`
+(`entry_hash` NOT NULL, chained) cannot be written by hand; this section is the record.
+Platform switches: `outbound_calls_paused=false`, `inbound_enabled=true`, `inbound_settlement=true`.
+SMTP: host/port/user/password/from address/from name all set on prod; no mail failures in 24 h.
+Still open: 1845a165 has no real inbound DID (its only verified number is the shared placeholder);
+the +442046132300 test call produced no SIP trace on the box — packet capture
+(`sip_capture_root.sh`) pending.
