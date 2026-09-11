@@ -494,23 +494,61 @@ export function SipTrunksList() {
                         No SIP trunks configured yet. Click <strong>Add trunk</strong> to connect your PBX.
                     </div>
                 ) : (
-                    <div className="rounded-xl border border-border bg-card/50">
-                        <table className="w-full text-sm">
+                    <div className="rounded-xl border border-border bg-card/50 overflow-x-auto">
+                        {/*
+                         * Fixed column widths (colgroup) except Endpoint, which is left
+                         * unset so table-layout:fixed hands it 100% of any width beyond
+                         * the min-width below (the card fills edge-to-edge on wide
+                         * screens instead of leaving a gap after Actions). The six fixed
+                         * widths are each sized to their column's real longest content at
+                         * their cell padding (px-2, except Direction/Auth/Active below),
+                         * verified against the rendered page (not just content-width
+                         * estimates): Trunk holds an 18-char hyphenated name like
+                         * "blaze-pool-150004" on one line, Direction/Auth/Active use
+                         * px-1.5 and are sized to "outbound"/"configured"/"Inactive"
+                         * (their real longest values), Live status is deliberately narrow
+                         * enough that its pill wraps to 2 lines instead of forcing the
+                         * table wider, and Actions
+                         * is wide enough for all 4 controls on one line. min-width is that
+                         * sum plus Endpoint's own floor (fits a domain the length of
+                         * "sip3.blazedigital.com" on one line); below it the wrapper above
+                         * scrolls horizontally instead of shrinking these. The settings
+                         * page wraps this whole tab section in its own outer Card, which
+                         * costs ~50px this table doesn't control, so the true available
+                         * width is 922px (not the card's own max-w-5xl) at every desktop
+                         * breakpoint from 1280px up with the sidebar collapsed, and at
+                         * every breakpoint >=1366px with the sidebar expanded too; only at
+                         * 1280px with the sidebar expanded it used to drop to 914px, a 5px
+                         * shortfall against a 919px min-width; Direction/Auth/Active use
+                         * px-1.5 instead of px-2 (4px narrower each) specifically to close
+                         * that 5px gap, bringing min-width down to 907px so it fits there
+                         * too.
+                         */}
+                        <table className="table-fixed w-full min-w-[907px] text-sm">
+                            <colgroup>
+                                <col style={{ width: 137 }} />
+                                <col />
+                                <col style={{ width: 69 }} />
+                                <col style={{ width: 81 }} />
+                                <col style={{ width: 125 }} />
+                                <col style={{ width: 65 }} />
+                                <col style={{ width: 247 }} />
+                            </colgroup>
                             <thead>
                                 <tr className="border-b border-border bg-muted/30 text-left text-xs font-semibold text-muted-foreground">
-                                    <th className="px-4 py-3">Trunk</th>
-                                    <th className="px-4 py-3">Endpoint</th>
-                                    <th className="px-4 py-3">Direction</th>
-                                    <th className="px-4 py-3">Auth</th>
-                                    <th className="px-4 py-3">Live status</th>
-                                    <th className="px-4 py-3">Active</th>
-                                    <th className="px-4 py-3 text-right">Actions</th>
+                                    <th className="px-2 py-3">Trunk</th>
+                                    <th className="px-2 py-3">Endpoint</th>
+                                    <th className="px-1.5 py-3">Direction</th>
+                                    <th className="px-1.5 py-3">Auth</th>
+                                    <th className="px-2 py-3">Live status</th>
+                                    <th className="px-1.5 py-3">Active</th>
+                                    <th className="px-2 py-3 text-right">Actions</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 {trunks.map((t) => (
                                     <tr key={t.id} className="border-b border-border last:border-b-0">
-                                        <td className="px-4 py-3 font-semibold text-foreground">
+                                        <td className="px-2 py-3 font-semibold text-foreground">
                                             {t.trunk_name}
                                             {typeof t.metadata?.caller_id === "string" && t.metadata.caller_id ? (
                                                 <div className="text-[10px] font-normal text-muted-foreground">
@@ -518,17 +556,17 @@ export function SipTrunksList() {
                                                 </div>
                                             ) : null}
                                         </td>
-                                        <td className="px-4 py-3 text-muted-foreground font-mono text-xs">
+                                        <td className="px-2 py-3 text-muted-foreground font-mono text-xs">
                                             {t.transport.toUpperCase()}://{t.sip_domain}:{t.port}
                                         </td>
-                                        <td className="px-4 py-3 capitalize text-muted-foreground">{t.direction}</td>
-                                        <td className="px-4 py-3 text-muted-foreground">
+                                        <td className="px-1.5 py-3 capitalize text-muted-foreground">{t.direction}</td>
+                                        <td className="px-1.5 py-3 text-muted-foreground">
                                             {t.auth_configured ? t.auth_username || "configured" : "—"}
                                         </td>
-                                        <td className="px-4 py-3">
+                                        <td className="px-2 py-3">
                                             <TestStatusBadge trunk={t} />
                                         </td>
-                                        <td className="px-4 py-3">
+                                        <td className="px-1.5 py-3">
                                             <span
                                                 className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-semibold ${t.is_active
                                                     ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
@@ -538,7 +576,7 @@ export function SipTrunksList() {
                                                 {t.is_active ? "Active" : "Inactive"}
                                             </span>
                                         </td>
-                                        <td className="px-4 py-3 text-right space-x-1 whitespace-nowrap">
+                                        <td className="px-2 py-3 text-right space-x-1 whitespace-nowrap">
                                             <Button
                                                 size="sm"
                                                 variant="outline"
