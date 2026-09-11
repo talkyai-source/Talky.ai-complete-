@@ -1,18 +1,15 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-import React from "react";
 
 export function Footer() {
   const currentYear = new Date().getFullYear();
-  const pathname = usePathname();
-  const isHome = pathname === "/";
 
   const navLinks = [
     { label: "Home", href: "/" },
     { label: "Products", href: "/ai-voice-dialer" },
-    { label: "Use Cases", href: isHome ? "#use-cases" : "/#use-cases" },
+    { label: "Use Cases", href: "/use-cases/customer-services-support" },
+    { label: "Industries", href: "/industries/healthcare" },
     { label: "Contact Us", href: "/contact" },
   ];
 
@@ -35,28 +32,14 @@ export function Footer() {
           <nav>
             <ul className="flex flex-wrap items-center justify-center gap-6 md:gap-8">
               {navLinks.map((link) => (
-                <React.Fragment key={link.label}>
-                  <li>
-                    <Link
-                      href={link.href}
-                      className="text-base font-medium text-gray-700 dark:text-muted-foreground hover:text-primary dark:hover:text-foreground transition-colors relative after:content-[''] after:absolute after:left-0 after:bottom-[-4px] after:w-0 after:h-0.5 after:bg-primary after:transition-all hover:after:w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background rounded-md"
-                    >
-                      {link.label}
-                    </Link>
-                  </li>
-                  {link.label === "Use Cases" ? (
-                    <li>
-                      <button
-                        type="button"
-                        className="text-base font-medium text-gray-700 dark:text-muted-foreground hover:text-primary dark:hover:text-foreground transition-colors relative after:content-[''] after:absolute after:left-0 after:bottom-[-4px] after:w-0 after:h-0.5 after:bg-primary after:transition-all hover:after:w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background rounded-md inline-flex items-center"
-                        aria-haspopup="menu"
-                        aria-expanded={false}
-                      >
-                        Industries
-                      </button>
-                    </li>
-                  ) : null}
-                </React.Fragment>
+                <li key={link.label}>
+                  <Link
+                    href={link.href}
+                    className="text-base font-medium text-gray-700 dark:text-muted-foreground hover:text-primary dark:hover:text-foreground transition-colors relative after:content-[''] after:absolute after:left-0 after:bottom-[-4px] after:w-0 after:h-0.5 after:bg-primary after:transition-all hover:after:w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background rounded-md"
+                  >
+                    {link.label}
+                  </Link>
+                </li>
               ))}
             </ul>
           </nav>
