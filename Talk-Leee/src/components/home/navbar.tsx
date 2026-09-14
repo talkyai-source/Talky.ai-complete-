@@ -37,7 +37,21 @@ export function Navbar() {
   const isCompact = true;
   const [isInHeroZone, setIsInHeroZone] = useState(true);
   const [suppressedDropdownLabel, setSuppressedDropdownLabel] = useState<string | null>(null);
+  const [pinnedLabel, setPinnedLabel] = useState<string | null>(null);
   const prefetchedRef = useRef<Set<string>>(new Set());
+  const desktopNavRef = useRef<HTMLUListElement | null>(null);
+  const dropdownTriggerRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
+
+  // The single place that clears a click-pinned panel. Blurring the trigger
+  // matters here: group-focus-within would otherwise re-open the panel the
+  // instant pinnedLabel goes back to null and the unpinned CSS path (which
+  // still honours hover/focus-within) takes over again.
+  const closePinnedDropdown = useCallback(() => {
+    setPinnedLabel((prev) => {
+      if (prev) dropdownTriggerRefs.current.get(prev)?.blur();
+      return null;
+    });
+  }, []);
 
   const menuItems = useMemo(() => {
     return [
@@ -161,7 +175,27 @@ export function Navbar() {
     // stale suppression doesn't linger on the new page.
     // eslint-disable-next-line react-hooks/set-state-in-effect -- clears dropdown suppression on navigation, not derivable during render
     setSuppressedDropdownLabel(null);
+    setPinnedLabel(null);
   }, [pathname]);
+
+  useEffect(() => {
+    // Listening on mousedown (not click) means a click that opens/switches a
+    // pinned panel via the trigger's own onClick is never also seen here as
+    // an "outside" click on the same gesture — the trigger is always inside
+    // desktopNavRef, so nav.contains(target) short-circuits before that.
+    if (!pinnedLabel) return;
+
+    const handlePointerDown = (event: MouseEvent) => {
+      const nav = desktopNavRef.current;
+      if (nav && event.target instanceof Node && nav.contains(event.target)) return;
+      closePinnedDropdown();
+    };
+
+    document.addEventListener("mousedown", handlePointerDown);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+    };
+  }, [pinnedLabel, closePinnedDropdown]);
 
   useEffect(() => {
     if (!mobileMenuOpen) return;
@@ -387,6 +421,7 @@ export function Navbar() {
           </div>
 
           <ul
+            ref={desktopNavRef}
             className="navbarDesktopNav hidden md:flex items-center justify-center gap-1.5 lg:gap-2.5"
             role="list"
           >
@@ -394,6 +429,22 @@ export function Navbar() {
               const isIndustriesDropdown = item.label === "Industries";
               const dropdownWidthClass = isIndustriesDropdown ? "w-[680px]" : item.label === "Products" || item.label === "Use Cases" ? "w-[345px]" : "w-[520px]";
               const dropdownGridClass = isIndustriesDropdown ? "grid-cols-2" : "grid-cols-1";
+              const isPinned = pinnedLabel === item.label;
+              const suppressedByOtherPin = pinnedLabel !== null && !isPinned;
+              const dropdownVisibilityClasses = isPinned
+                ? "visible opacity-100 pointer-events-auto translate-y-0 scale-100"
+                : suppressedByOtherPin
+                  ? "invisible opacity-0 pointer-events-none translate-y-2 scale-[0.98]"
+                  : [
+                      "invisible opacity-0 pointer-events-none translate-y-2 scale-[0.98]",
+                      "group-hover:visible group-hover:opacity-100 group-hover:pointer-events-auto group-hover:translate-y-0 group-hover:scale-100",
+                      "group-focus-within:visible group-focus-within:opacity-100 group-focus-within:pointer-events-auto group-focus-within:translate-y-0 group-focus-within:scale-100",
+                    ].join(" ");
+              const chevronRotationClass = isPinned
+                ? "rotate-180"
+                : suppressedByOtherPin
+                  ? ""
+                  : "group-hover:rotate-180 group-focus-within:rotate-180";
               return (
                 <li key={item.label} className="relative">
                   {isDropdownWithChildrenItem(item) ? (
@@ -407,6 +458,10 @@ export function Navbar() {
                       }}
                     >
                       <button
+                        ref={(el) => {
+                          if (el) dropdownTriggerRefs.current.set(item.label, el);
+                          else dropdownTriggerRefs.current.delete(item.label);
+                        }}
                         type="button"
                         className={[
                           "home-nav-link text-[13px] font-medium focus-visible:outline-none",
@@ -414,19 +469,25 @@ export function Navbar() {
                           "inline-flex items-center gap-1",
                         ].join(" ")}
                         aria-haspopup="menu"
+                        onClick={() => {
+                          if (isPinned) {
+                            closePinnedDropdown();
+                          } else {
+                            setPinnedLabel(item.label);
+                          }
+                        }}
                       >
                         {item.label}
                         <ChevronDown
-                          className="h-4 w-4 transition-transform duration-200 ease-out group-hover:rotate-180 group-focus-within:rotate-180"
+                          className={`h-4 w-4 transition-transform duration-200 ease-out ${chevronRotationClass}`}
                           aria-hidden
                         />
                       </button>
                       <div
                         className={[
                           `absolute left-1/2 top-full z-50 -translate-x-1/2 ${dropdownWidthClass} max-w-[92vw]`,
-                          "invisible opacity-0 pointer-events-none translate-y-2 scale-[0.98] transition-[opacity,transform] duration-200 ease-out",
-                          "group-hover:visible group-hover:opacity-100 group-hover:pointer-events-auto group-hover:translate-y-0 group-hover:scale-100",
-                          "group-focus-within:visible group-focus-within:opacity-100 group-focus-within:pointer-events-auto group-focus-within:translate-y-0 group-focus-within:scale-100",
+                          "transition-[opacity,transform] duration-200 ease-out",
+                          dropdownVisibilityClasses,
                           suppressedDropdownLabel === item.label
                             ? "invisible opacity-0 pointer-events-none translate-y-2 scale-[0.98] duration-100"
                             : "",
@@ -458,6 +519,7 @@ export function Navbar() {
                                   ].join(" ")}
                                   onClick={() => {
                                     setSuppressedDropdownLabel(item.label);
+                                    closePinnedDropdown();
                                     (document.activeElement as HTMLElement | null)?.blur?.();
                                   }}
                                   style={{
