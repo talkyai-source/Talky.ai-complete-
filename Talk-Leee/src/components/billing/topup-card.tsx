@@ -170,29 +170,31 @@ export function TopupCard() {
 
   return (
     <Card>
-      <CardHeader>
-        <div className="flex flex-wrap items-start justify-between gap-3">
+      <CardHeader className="space-y-1 p-4">
+        <div className="flex flex-wrap items-start justify-between gap-2">
           <div>
-            <CardTitle className="flex items-center gap-2">
-              <Zap className="h-5 w-5" aria-hidden /> Top up minutes
+            <CardTitle className="flex items-center gap-1.5 text-base">
+              <Zap className="h-4 w-4" aria-hidden /> Top up minutes
             </CardTitle>
-            <CardDescription>
+            <CardDescription className="text-xs">
               Add call minutes straight away, without changing your plan.
             </CardDescription>
           </div>
           {balance && !unlimited ? (
             <div className="text-right">
-              <div className="text-xs font-semibold text-muted-foreground">
-                Minutes remaining
+              <div className="flex items-baseline justify-end gap-1.5 whitespace-nowrap">
+                <span className="text-[11px] font-semibold text-muted-foreground">
+                  Minutes remaining
+                </span>
+                <span
+                  className={`text-base font-bold tabular-nums ${
+                    lowBalance ? "text-amber-600 dark:text-amber-400" : "text-foreground"
+                  }`}
+                >
+                  {balance.remaining_minutes.toLocaleString()}
+                </span>
               </div>
-              <div
-                className={`text-2xl font-bold tabular-nums ${
-                  lowBalance ? "text-amber-600 dark:text-amber-400" : "text-foreground"
-                }`}
-              >
-                {balance.remaining_minutes.toLocaleString()}
-              </div>
-              <div className="text-xs text-muted-foreground tabular-nums">
+              <div className="whitespace-nowrap text-[11px] text-muted-foreground tabular-nums">
                 {balance.used_minutes.toLocaleString()} of{" "}
                 {balance.allocated.toLocaleString()} used
                 {balance.purchased_minutes > 0 ? (
@@ -207,7 +209,7 @@ export function TopupCard() {
         </div>
       </CardHeader>
 
-      <CardContent className="space-y-4">
+      <CardContent className="space-y-3 p-4 pt-0">
         {/* ── returning from the payment page ── */}
         {confirming ? (
           <div
@@ -321,37 +323,38 @@ export function TopupCard() {
             support and we will sort it out.
           </p>
         ) : (
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
             {packages.map((pkg) => {
               const busy = pending && chosen === pkg.code;
               return (
                 <div
                   key={pkg.code}
-                  className="flex flex-col rounded-lg border border-border p-4 transition-colors hover:border-primary/50"
+                  className="flex flex-col rounded-lg border border-border p-3 transition-colors hover:border-primary/50"
                 >
-                  <div className="text-2xl font-bold tabular-nums text-foreground">
+                  <div className="text-lg font-bold tabular-nums text-foreground">
                     {pkg.minutes.toLocaleString()}
                   </div>
-                  <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
                     minutes
                   </div>
-                  <div className="mt-3 text-lg font-semibold text-foreground">
+                  <div className="mt-1.5 text-sm font-semibold text-foreground">
                     {formatMoney(pkg.price_cents, pkg.currency)}
                   </div>
-                  <div className="text-xs text-muted-foreground tabular-nums">
+                  <div className="text-[11px] text-muted-foreground tabular-nums">
                     {formatMoney(pkg.price_per_minute_cents, pkg.currency)} per minute
                   </div>
                   {pkg.expires_days ? (
-                    <div className="mt-1 text-xs text-muted-foreground">
+                    <div className="text-[11px] text-muted-foreground">
                       Valid for {pkg.expires_days} days
                     </div>
                   ) : (
-                    <div className="mt-1 text-xs text-muted-foreground">
+                    <div className="text-[11px] text-muted-foreground">
                       Never expires
                     </div>
                   )}
                   <Button
-                    className="mt-4 w-full"
+                    size="sm"
+                    className="mt-2 w-full"
                     onClick={() => buy(pkg)}
                     disabled={pending}
                     aria-label={`Buy ${pkg.minutes} minutes for ${formatMoney(pkg.price_cents, pkg.currency)}`}

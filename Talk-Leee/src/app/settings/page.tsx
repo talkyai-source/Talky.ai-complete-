@@ -12,7 +12,6 @@ import { useNotificationsActions, useNotificationsState } from "@/lib/notificati
 import type { NotificationPriority, NotificationRouting, NotificationType } from "@/lib/notifications";
 import { Lock } from "lucide-react";
 import DeviceList from "@/components/auth/device-list";
-import LogoutButton from "@/components/auth/logout-button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { TelephonyProvidersSection } from "@/components/settings/telephony-providers-section";
 import { RecordingPolicySection } from "@/components/settings/recording-policy-section";
@@ -242,7 +241,6 @@ export default function SettingsPage() {
                                 <TabsTrigger value="devices">Devices</TabsTrigger>
                                 <TabsTrigger value="telephony">Telephony</TabsTrigger>
                                 <TabsTrigger value="recording">Recording</TabsTrigger>
-                                <TabsTrigger value="logout">Logout</TabsTrigger>
                             </TabsList>
 
                             {/* Profile Tab */}
@@ -362,22 +360,6 @@ export default function SettingsPage() {
 
                             <TabsContent value="recording" className="space-y-4">
                                 <RecordingPolicySection canEdit={["tenant_admin", "platform_admin", "admin", "owner"].includes(String(user?.role ?? ""))} />
-                            </TabsContent>
-
-                            {/* Logout Tab */}
-                            <TabsContent value="logout" className="space-y-4">
-                                <div className="rounded-2xl border border-gray-200 bg-white p-4 space-y-4 shadow-sm transition-[transform,background-color,box-shadow,border-color] duration-150 ease-out hover:-translate-y-0.5 hover:bg-gray-50 hover:shadow-md dark:border-white/10 dark:bg-white/5 dark:hover:bg-white/10 dark:hover:shadow-[0_10px_30px_rgba(0,0,0,0.22)]">
-                                    <div>
-                                        <div className="text-sm font-semibold text-gray-900 dark:text-zinc-100">Sign out</div>
-                                        <div className="mt-1 text-sm text-muted-foreground">End your current session and return to the login page</div>
-                                    </div>
-                                    <LogoutButton
-                                        token={token}
-                                        variant="destructive"
-                                        size="default"
-                                        showLabel={true}
-                                    />
-                                </div>
                             </TabsContent>
                         </Tabs>
                     </CardContent>
