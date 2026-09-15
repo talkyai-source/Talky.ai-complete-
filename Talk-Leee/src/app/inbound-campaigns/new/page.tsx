@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
@@ -12,8 +12,70 @@ import { InboundErrorState, InboundLoadingState, InboundPermissionState } from "
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { useAuth } from "@/hooks/useAuth";
 import { afterCampaignCreateHref, INBOUND_RETURN } from "@/lib/campaign-create-return";
+import { DRAFT_POINTER_KEY } from "@/lib/inbound-campaign-draft";
 import { getInboundCapabilities } from "@/lib/inbound-permissions";
 import { useCreateInboundCampaign, useEffectivePermissions } from "@/lib/queries/inbound-queries";
+
+/**
+ * Draft-retention key scheme for this two-page flow, owned here.
+ *
+ * Step 1 (no `campaign_id`) is identified by a `draft` id — generated once
+ * per fresh visit and reflected into the URL so a real browser Back restores
+ * it, and also mirrored to the sessionStorage pointer (`DRAFT_POINTER_KEY`)
+ * so the "Back to campaign details" link (which deliberately omits
+ * `?draft=`, see `inbound-campaign-form.tsx`) still finds the same id, and
+ * so step 2 — whose URL never carries `draft` — can still name the right
+ * step-1 key to clear on final success. Step 2's own key is simply the
+ * campaign id (see `readStep2Draft`/`writeStep2Draft` in
+ * inbound-campaign-form.tsx, which this file's `step2DraftStorageKey` must
+ * keep matching).
+ */
+function createDraftId(): string {
+    return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function readDraftPointer(): string | null {
+    if (typeof window === "undefined") return null;
+    try {
+        return window.sessionStorage.getItem(DRAFT_POINTER_KEY);
+    } catch {
+        return null;
+    }
+}
+
+function writeDraftPointer(id: string): void {
+    if (typeof window === "undefined") return;
+    try {
+        window.sessionStorage.setItem(DRAFT_POINTER_KEY, id);
+    } catch {
+        // Storage unavailable — nothing to remember; behaves as before.
+    }
+}
+
+function step1DraftStorageKey(draftId: string): string {
+    return `talky:inbound-campaign-new:step1:${draftId}`;
+}
+
+function step2DraftStorageKey(campaignId: string): string {
+    return `talky:inbound-campaign-new:step2:${campaignId}`;
+}
+
+/**
+ * Clears both drafts. Called at the two points that end this flow: the
+ * whole two-step flow succeeding, or the user explicitly exiting to the
+ * inbound campaigns list instead of continuing it (`campaignId` is null in
+ * the latter case when exiting from step 1, before any campaign exists).
+ */
+function clearInboundCampaignDrafts(draftId: string, campaignId: string | null): void {
+    if (typeof window === "undefined") return;
+    try {
+        window.sessionStorage.removeItem(DRAFT_POINTER_KEY);
+        if (draftId) window.sessionStorage.removeItem(step1DraftStorageKey(draftId));
+        if (campaignId) window.sessionStorage.removeItem(step2DraftStorageKey(campaignId));
+    } catch {
+        // Storage unavailable — nothing to clear; behaves as before.
+    }
+}
 
 /**
  * Creating an inbound campaign (2026-09-09) is the SAME experience as creating
@@ -48,9 +110,27 @@ function NewInboundCampaignPageInner() {
     const permissions = useEffectivePermissions();
     const create = useCreateInboundCampaign();
     const capabilities = getInboundCapabilities(user?.role, permissions.isSuccess ? permissions.data.permissions : undefined);
+    const searchParams = useSearchParams();
     // Step 2 carries the campaign created in step 1.
-    const campaignId = useSearchParams().get("campaign_id");
+    const campaignId = searchParams.get("campaign_id");
+    const draftParam = searchParams.get("draft");
     const [classic, setClassic] = useState(false);
+
+    // Resolved once per mount: the URL wins (a fresh visit, or a browser Back
+    // that restored `?draft=`), then the sessionStorage pointer (a "Back to
+    // campaign details" round trip from step 2, whose URL never carries
+    // `draft`), then a freshly generated id for a genuinely new visit.
+    const [draftId] = useState<string>(() => draftParam ?? readDraftPointer() ?? createDraftId());
+
+    useEffect(() => {
+        if (campaignId) return; // step 2 doesn't own the draft URL param
+        writeDraftPointer(draftId);
+        if (!draftParam) {
+            router.replace(`/inbound-campaigns/new?draft=${encodeURIComponent(draftId)}`);
+        }
+    }, [campaignId, draftParam, draftId, router]);
+
+    const step1DraftKey = step1DraftStorageKey(draftId);
 
     return (
         <DashboardLayout
@@ -72,6 +152,7 @@ function NewInboundCampaignPageInner() {
                         canAssignNumber={capabilities.canAssignNumber}
                         onSubmit={async (input) => {
                             const created = await create.mutateAsync({ input, didNumber: input.did_number });
+                            clearInboundCampaignDrafts(draftId, campaignId);
                             router.push(`/inbound-campaigns/${created.id}`);
                         }}
                     />
@@ -80,7 +161,11 @@ function NewInboundCampaignPageInner() {
                 <>
                     <StepIndicator step={1} />
                     <div className="mb-6 flex items-center justify-between">
-                        <Link href="/inbound-campaigns" className="flex items-center gap-2 text-sm text-muted-foreground transition-colors hover:text-foreground">
+                        <Link
+                            href="/inbound-campaigns"
+                            onClick={() => clearInboundCampaignDrafts(draftId, campaignId)}
+                            className="flex items-center gap-2 text-sm text-muted-foreground transition-colors hover:text-foreground"
+                        >
                             <ArrowLeft className="h-4 w-4" aria-hidden />
                             Back to inbound campaigns
                         </Link>
@@ -89,8 +174,8 @@ function NewInboundCampaignPageInner() {
                         </button>
                     </div>
                     {classic
-                        ? <CampaignForm mode="create" direction="inbound" afterCreateHref={(id) => afterCampaignCreateHref(id, INBOUND_RETURN)} />
-                        : <CampaignWizard direction="inbound" afterCreateHref={(id) => afterCampaignCreateHref(id, INBOUND_RETURN)} />}
+                        ? <CampaignForm mode="create" direction="inbound" draftStorageKey={step1DraftKey} afterCreateHref={(id) => afterCampaignCreateHref(id, INBOUND_RETURN)} />
+                        : <CampaignWizard direction="inbound" draftStorageKey={step1DraftKey} afterCreateHref={(id) => afterCampaignCreateHref(id, INBOUND_RETURN)} />}
                 </>
             )}
         </DashboardLayout>

@@ -471,8 +471,15 @@ export function Navbar() {
                         aria-haspopup="menu"
                         onClick={() => {
                           if (isPinned) {
+                            // Closing via click must also override the CSS
+                            // hover fallback (group-hover), since the cursor
+                            // is still over the trigger after this click —
+                            // otherwise the panel stays visible until the
+                            // mouse actually leaves. Cleared on mouse-leave.
+                            setSuppressedDropdownLabel(item.label);
                             closePinnedDropdown();
                           } else {
+                            setSuppressedDropdownLabel(null);
                             setPinnedLabel(item.label);
                           }
                         }}

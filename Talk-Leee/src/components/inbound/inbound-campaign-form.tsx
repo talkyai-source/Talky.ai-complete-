@@ -1,13 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertCircle, ArrowLeft, Bot, CalendarClock, Loader2, LockKeyhole, Mic2, PhoneForwarded, Plus, Save, ShieldCheck, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useCampaigns } from "@/lib/api-hooks";
+import { DRAFT_POINTER_KEY } from "@/lib/inbound-campaign-draft";
 import { inboundErrorCode, inboundErrorStatus, type InboundCampaign, type InboundCampaignInput, type InboundPhoneNumber } from "@/lib/inbound-api";
 import { inboundStateForError } from "@/lib/inbound/inbound-types";
 import {
@@ -60,6 +61,67 @@ function browserTimezone(): string | null {
 }
 const DAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 
+/**
+ * Step-2 (number & routing) draft retention, `mode: "create"` only.
+ *
+ * Keyed by `initialCampaignId` so a real navigation away and back — not just
+ * an in-place retry, which already worked without this — restores it. This
+ * key format MUST match the one `app/inbound-campaigns/new/page.tsx` uses to
+ * clear the same entry once step 2 actually succeeds; the two can't share a
+ * constant because this feature is scoped to these two files plus the wizard
+ * pair, with no shared module.
+ */
+function step2DraftStorageKey(campaignId: string): string {
+    return `talky:inbound-campaign-new:step2:${campaignId}`;
+}
+
+function readStep2Draft(campaignId: string | null | undefined): Partial<InboundCampaignInput> | null {
+    if (!campaignId || typeof window === "undefined") return null;
+    try {
+        const raw = window.sessionStorage.getItem(step2DraftStorageKey(campaignId));
+        if (!raw) return null;
+        const parsed: unknown = JSON.parse(raw);
+        if (!parsed || typeof parsed !== "object") return null;
+        const restored = parsed as Partial<InboundCampaignInput>;
+        // Guard the two array fields the form iterates/maps directly — a
+        // wrong shape here (from a stale or hand-edited entry) must degrade
+        // to "not restored" for that field rather than throw at render time.
+        if (!Array.isArray(restored.weekly_schedule)) delete restored.weekly_schedule;
+        if (!Array.isArray(restored.transfer_destinations)) delete restored.transfer_destinations;
+        return restored;
+    } catch {
+        return null;
+    }
+}
+
+function writeStep2Draft(campaignId: string | null | undefined, value: InboundCampaignInput): void {
+    if (!campaignId || typeof window === "undefined") return;
+    try {
+        window.sessionStorage.setItem(step2DraftStorageKey(campaignId), JSON.stringify(value));
+    } catch {
+        // Storage unavailable or over quota — degrade to the pre-existing,
+        // non-persisted behaviour instead of failing the form.
+    }
+}
+
+/**
+ * Clears both drafts for this flow when the user explicitly exits to the
+ * inbound campaigns list from step 2, instead of continuing it — mirrors
+ * `clearInboundCampaignDrafts` in `new/page.tsx`, called there for the same
+ * exit from step 1. `mode: "create"` only; edit mode never wrote a draft.
+ */
+function clearInboundCampaignDraftsOnExit(campaignId: string | null | undefined): void {
+    if (typeof window === "undefined") return;
+    try {
+        const draftId = window.sessionStorage.getItem(DRAFT_POINTER_KEY);
+        window.sessionStorage.removeItem(DRAFT_POINTER_KEY);
+        if (draftId) window.sessionStorage.removeItem(`talky:inbound-campaign-new:step1:${draftId}`);
+        if (campaignId) window.sessionStorage.removeItem(step2DraftStorageKey(campaignId));
+    } catch {
+        // Storage unavailable — nothing to clear; behaves as before.
+    }
+}
+
 export function InboundCampaignForm({ mode, initialValue, initialCampaignId, lockCampaign = false, pending, canAssignNumber, onSubmit }: {
     mode: "create" | "edit";
     initialValue?: InboundCampaign;
@@ -76,9 +138,21 @@ export function InboundCampaignForm({ mode, initialValue, initialCampaignId, loc
     const numbersQuery = useInboundPhoneNumbers(canAssignNumber);
     const runtimeCapabilitiesQuery = useInboundRuntimeCapabilities(initialValue?.id);
     const voicesQuery = useVoicesQuery();
-    const [value, setValue] = useState<InboundCampaignInput>(() => initialInboundCampaignInput(initialValue, { campaignId: initialCampaignId }));
+    const [value, setValue] = useState<InboundCampaignInput>(() => {
+        const base = initialInboundCampaignInput(initialValue, { campaignId: initialCampaignId });
+        if (mode !== "create") return base; // edit mode always seeds from the server record
+        const restored = readStep2Draft(initialCampaignId);
+        return restored ? { ...base, ...restored } : base;
+    });
     const [errors, setErrors] = useState<InboundFormErrors>({});
     const errorSummaryRef = useRef<HTMLDivElement | null>(null);
+
+    // Mirrors the current draft to sessionStorage on every change so a real
+    // navigation away and back (not just an in-place retry, which already
+    // preserved `value` on its own) does not lose it. No-op in edit mode.
+    useEffect(() => {
+        if (mode === "create") writeStep2Draft(initialCampaignId, value);
+    }, [mode, initialCampaignId, value]);
 
     const campaigns = useMemo(() => (campaignsQuery.data ?? []).filter((campaign) => campaign.status !== "deleted"), [campaignsQuery.data]);
     const eligibleCampaigns = useMemo(() => campaigns.filter(isEligibleInboundBaseCampaign), [campaigns]);
@@ -199,11 +273,23 @@ export function InboundCampaignForm({ mode, initialValue, initialCampaignId, loc
     return (
         <form onSubmit={save} className="space-y-6" noValidate>
             <div className="flex flex-wrap items-center justify-between gap-3">
-                <Button asChild variant="ghost" size="sm" className="px-2">
-                    <Link href={mode === "edit" && initialValue ? `/inbound-campaigns/${initialValue.id}` : "/inbound-campaigns"}>
-                        <ArrowLeft className="h-4 w-4" aria-hidden />Back to inbound campaigns
-                    </Link>
-                </Button>
+                <div className="flex flex-wrap items-center gap-3">
+                    <Button asChild variant="ghost" size="sm" className="px-2">
+                        <Link
+                            href={mode === "edit" && initialValue ? `/inbound-campaigns/${initialValue.id}` : "/inbound-campaigns"}
+                            onClick={() => { if (mode === "create") clearInboundCampaignDraftsOnExit(initialCampaignId); }}
+                        >
+                            <ArrowLeft className="h-4 w-4" aria-hidden />Back to inbound campaigns
+                        </Link>
+                    </Button>
+                    {mode === "create" ? (
+                        <Button asChild variant="ghost" size="sm" className="px-2">
+                            <Link href="/inbound-campaigns/new">
+                                <ArrowLeft className="h-4 w-4" aria-hidden />Back to campaign details
+                            </Link>
+                        </Button>
+                    ) : null}
+                </div>
                 <div className="inline-flex items-center gap-2 rounded-full border border-border bg-muted/40 px-3 py-1.5 text-xs font-medium text-muted-foreground">
                     <LockKeyhole className="h-3.5 w-3.5" aria-hidden />Save is separate from activation
                 </div>

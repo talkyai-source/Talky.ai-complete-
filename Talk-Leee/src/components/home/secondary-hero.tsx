@@ -130,6 +130,14 @@ function SecondaryHeroVideoPlayer({ className }: { className?: string }) {
           src="/images/ai-voice-section..jpg"
           alt=""
           fill
+          aria-hidden="true"
+          sizes="(max-width: 768px) 100vw, 600px"
+          className="secondaryHeroBackdrop"
+        />
+        <Image
+          src="/images/ai-voice-section..jpg"
+          alt=""
+          fill
           sizes="(max-width: 768px) 100vw, 600px"
           className="secondaryHeroPoster"
         />
@@ -143,6 +151,14 @@ function SecondaryHeroVideoPlayer({ className }: { className?: string }) {
       className={`secondaryHeroPlayer ${className ?? ""}`}
       onContextMenu={blockContext}
     >
+      <Image
+        src="/images/ai-voice-section..jpg"
+        alt=""
+        fill
+        aria-hidden="true"
+        sizes="(max-width: 768px) 100vw, 600px"
+        className="secondaryHeroBackdrop"
+      />
       <video
         ref={videoARef}
         className="secondaryHeroVideo"
