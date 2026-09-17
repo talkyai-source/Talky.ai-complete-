@@ -11,6 +11,11 @@ function formatTimestamp(ms: number) {
     return new Date(ms).toLocaleString();
 }
 
+// Popup mode (listFill) caps the scrollable list at exactly 5 rows
+// (h-[72px] rows + space-y-2 gaps below), so a 6th+ notification
+// scrolls instead of growing the list past 5 visible items.
+const LIST_FILL_MAX_HEIGHT = "max-h-[392px]";
+
 const TYPE_COLOR: Record<NotificationType, string> = {
     success: "text-emerald-500",
     warning: "text-amber-500",
@@ -128,7 +133,7 @@ export function NotificationCenter({
                     <div
                         className={cn(
                             "min-h-0 overflow-y-auto overscroll-contain",
-                            listFill ? "flex-1" : maxHeightClassName
+                            listFill ? cn("flex-1", LIST_FILL_MAX_HEIGHT) : maxHeightClassName
                         )}
                         aria-label="Notification list"
                     >

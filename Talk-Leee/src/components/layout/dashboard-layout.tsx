@@ -162,7 +162,7 @@ export function DashboardLayout({ children, title, description, requireAuth = tr
             >
                 {/* Header */}
                 <header className="bg-background/80 backdrop-blur-sm border-b border-border/60 px-4 md:px-8 py-4 md:py-6 transition-colors duration-300">
-                    <div className="grid grid-cols-1 items-start gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
+                    <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
                         <div className="flex items-start gap-3">
                             {!isDesktop && (
                                 <Button
