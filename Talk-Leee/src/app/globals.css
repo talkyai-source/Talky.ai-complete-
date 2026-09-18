@@ -885,6 +885,22 @@ details > summary.home-menu-toggle {
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.22);
 }
 
+/* Event Stream / Error & Alert Timeline cards (Campaign window): the shared
+   .content-card hover grows the box via scale/translateY and casts a wide
+   30px-blur shadow, which spills onto the campaign table row and neighboring
+   card above/below when these cards are stacked with a small gap. Scope a
+   contained hover here instead of touching .content-card (used in 32 files). */
+.event-stream-card:hover,
+.alert-timeline-card:hover {
+  transform: none;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.10);
+}
+
+.dark .event-stream-card:hover,
+.dark .alert-timeline-card:hover {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.20);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .content-card,
   .content-card:hover {

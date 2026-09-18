@@ -69,13 +69,16 @@ export function EventStream({
 }: {
     campaigns: Campaign[];
 }) {
-    const TODAY_VISIBLE = 3;
-    const todayFirstItemRef = useRef<HTMLButtonElement | null>(null);
+    const ROWS_VISIBLE_DESKTOP = 6;
+    const ROWS_VISIBLE_MOBILE = 4;
+    const MOBILE_BREAKPOINT_PX = 768;
+    const firstItemRef = useRef<HTMLButtonElement | null>(null);
     const [quick, setQuick] = useState<EventQuickFilter>("All");
     const [sound, setSound] = useState(false);
     const [desktop, setDesktop] = useState(false);
+    const [hidden, setHidden] = useState(false);
     const [detailsId, setDetailsId] = useState<string | null>(null);
-    const [todayMaxHeightPx, setTodayMaxHeightPx] = useState<number | null>(null);
+    const [listMaxHeightPx, setListMaxHeightPx] = useState<number | null>(null);
 
     // Real events polled from /api/v1/events every 10s (paused when tab is
     // hidden). Replaces the prior client-side mock generator. The filter
@@ -105,6 +108,17 @@ export function EventStream({
     useEffect(() => {
         toLocalStorage("campaigns.performance.eventPrefs", { sound, desktop, quick });
     }, [desktop, quick, sound]);
+
+    useEffect(() => {
+        const raf = window.requestAnimationFrame(() => {
+            setHidden(fromLocalStorage<boolean>("campaigns.performance.eventStreamHidden", false));
+        });
+        return () => window.cancelAnimationFrame(raf);
+    }, []);
+
+    useEffect(() => {
+        toLocalStorage("campaigns.performance.eventStreamHidden", hidden);
+    }, [hidden]);
 
     useEffect(() => {
         if (!desktop) return;
@@ -143,7 +157,10 @@ export function EventStream({
 
     const filtered = useMemo(() => filterEvents(events, quick), [events, quick]);
     const grouped = useMemo(() => group(filtered), [filtered]);
-    const todayCount = grouped.Today.length;
+    const firstNonEmptyGroup = useMemo(
+        () => (Object.entries(grouped) as [TimeGroup, StreamEvent[]][]).find(([, items]) => items.length > 0)?.[0] ?? null,
+        [grouped],
+    );
     const details = useMemo(() => events.find((e) => e.id === detailsId) || null, [detailsId, events]);
     const relatedCampaigns = useMemo(() => {
         if (!details?.relatedCampaignIds || details.relatedCampaignIds.length === 0) return [];
@@ -151,20 +168,25 @@ export function EventStream({
         return campaigns.filter((c) => set.has(c.id));
     }, [campaigns, details]);
 
+    // One scroll area around the whole grouped list (not just "Today"), capped
+    // to ~6 rows on md+ and ~4 rows below md. Height is measured from the
+    // first rendered row so the cap always lands on a row boundary instead of
+    // cutting a row in half.
     useEffect(() => {
         const gapPx = 8;
 
         const measure = () => {
-            const el = todayFirstItemRef.current;
+            if (hidden) return;
+            const el = firstItemRef.current;
             if (!el) {
-                setTodayMaxHeightPx(null);
+                setListMaxHeightPx(null);
                 return;
             }
             const h = el.getBoundingClientRect().height;
             if (!Number.isFinite(h) || h <= 0) return;
-            const visible = Math.max(1, TODAY_VISIBLE);
-            const maxHeight = Math.round(h * visible + gapPx * (visible - 1));
-            setTodayMaxHeightPx(maxHeight);
+            const rows = window.innerWidth >= MOBILE_BREAKPOINT_PX ? ROWS_VISIBLE_DESKTOP : ROWS_VISIBLE_MOBILE;
+            const maxHeight = Math.round(h * rows + gapPx * (rows - 1));
+            setListMaxHeightPx(maxHeight);
         };
 
         const raf = window.requestAnimationFrame(measure);
@@ -173,10 +195,10 @@ export function EventStream({
             window.cancelAnimationFrame(raf);
             window.removeEventListener("resize", measure);
         };
-    }, [TODAY_VISIBLE, todayCount]);
+    }, [firstNonEmptyGroup, filtered.length, hidden]);
 
     return (
-        <div className="content-card">
+        <div className="content-card event-stream-card">
             <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                 <div>
                     <div className="text-sm font-semibold text-foreground">Event Stream</div>
@@ -194,91 +216,106 @@ export function EventStream({
                             {k}
                         </Button>
                     ))}
+                    <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setHidden((prev) => !prev)}
+                        aria-expanded={!hidden}
+                        aria-controls="event-stream-body"
+                        data-testid="event-stream-hide-toggle"
+                    >
+                        {hidden ? "Show" : "Hide"}
+                    </Button>
                 </div>
             </div>
 
-            <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
-                <label className="flex items-center justify-between rounded-lg border border-border bg-background px-3 py-2 transition-shadow duration-150 ease-out hover:shadow-sm">
-                    <div className="text-sm font-semibold text-foreground">Sound notifications</div>
-                    <input
-                        type="checkbox"
-                        checked={sound}
-                        onChange={(e) => setSound(e.target.checked)}
-                        className="h-4 w-4 rounded border-input bg-background accent-primary"
-                    />
-                </label>
-                <label className="flex items-center justify-between rounded-lg border border-border bg-background px-3 py-2 transition-shadow duration-150 ease-out hover:shadow-sm">
-                    <div className="text-sm font-semibold text-foreground">Desktop notifications</div>
-                    <input
-                        type="checkbox"
-                        checked={desktop}
-                        onChange={(e) => setDesktop(e.target.checked)}
-                        className="h-4 w-4 rounded border-input bg-background accent-primary"
-                    />
-                </label>
-            </div>
+            {!hidden ? (
+                <div id="event-stream-body">
+                    <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
+                        <label className="flex items-center justify-between rounded-lg border border-border bg-background px-3 py-2 transition-shadow duration-150 ease-out hover:shadow-sm">
+                            <div className="text-sm font-semibold text-foreground">Sound notifications</div>
+                            <input
+                                type="checkbox"
+                                checked={sound}
+                                onChange={(e) => setSound(e.target.checked)}
+                                className="h-4 w-4 rounded border-input bg-background accent-primary"
+                            />
+                        </label>
+                        <label className="flex items-center justify-between rounded-lg border border-border bg-background px-3 py-2 transition-shadow duration-150 ease-out hover:shadow-sm">
+                            <div className="text-sm font-semibold text-foreground">Desktop notifications</div>
+                            <input
+                                type="checkbox"
+                                checked={desktop}
+                                onChange={(e) => setDesktop(e.target.checked)}
+                                className="h-4 w-4 rounded border-input bg-background accent-primary"
+                            />
+                        </label>
+                    </div>
 
-            <div className="mt-4 space-y-6">
-                <AnimatePresence initial={false}>
-                    {Object.entries(grouped).map(([grp, items]) => (
-                        <div key={grp} className="space-y-2">
-                            {grp === "Today" || grp === "Yesterday" || grp === "Last 7 Days" ? (
-                                <div className="flex items-center justify-between gap-3">
-                                    <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">{grp}</div>
-                                    <div className="inline-flex items-center rounded-lg border border-border bg-background px-2 py-0.5 text-[11px] font-semibold text-muted-foreground tabular-nums">
-                                        {items.length}
+                    <div
+                        className="mt-4 space-y-6 overflow-y-auto overscroll-contain pr-1"
+                        style={listMaxHeightPx ? { maxHeight: listMaxHeightPx } : undefined}
+                    >
+                        <AnimatePresence initial={false}>
+                            {Object.entries(grouped).map(([grp, items]) => (
+                                <div key={grp} className="space-y-2">
+                                    {grp === "Today" || grp === "Yesterday" || grp === "Last 7 Days" ? (
+                                        <div className="flex items-center justify-between gap-3">
+                                            <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">{grp}</div>
+                                            <div className="inline-flex items-center rounded-lg border border-border bg-background px-2 py-0.5 text-[11px] font-semibold text-muted-foreground tabular-nums">
+                                                {items.length}
+                                            </div>
+                                        </div>
+                                    ) : (
+                                        <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">{grp}</div>
+                                    )}
+                                    <div className="space-y-2">
+                                        {items.map((e, idx) => {
+                                            const icon = eventCategoryIcon(e.category);
+                                            return (
+                                                <motion.button
+                                                    key={e.id}
+                                                    layout
+                                                    initial={{ opacity: 0, x: -10 }}
+                                                    animate={{ opacity: 1, x: 0 }}
+                                                    exit={{ opacity: 0, x: 10 }}
+                                                    type="button"
+                                                    ref={grp === firstNonEmptyGroup && idx === 0 ? firstItemRef : undefined}
+                                                    className="group flex w-full items-start gap-3 rounded-xl border border-border bg-background px-3 py-3 text-left transition-shadow duration-150 ease-out hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                                                    onClick={() => setDetailsId(e.id)}
+                                                >
+                                                    <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground dark:text-white">
+                                                        <span className="text-base leading-none" aria-hidden>
+                                                            {icon}
+                                                        </span>
+                                                    </div>
+                                                    <div className="min-w-0 flex-1">
+                                                        <div className="flex items-center justify-between gap-2">
+                                                            <div className="truncate text-sm font-semibold text-foreground">{e.title}</div>
+                                                            <div className="text-xs text-muted-foreground tabular-nums">
+                                                                {new Date(e.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                                                            </div>
+                                                        </div>
+                                                        <div className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">
+                                                            {e.description}
+                                                        </div>
+                                                    </div>
+                                                </motion.button>
+                                            );
+                                        })}
                                     </div>
                                 </div>
-                            ) : (
-                                <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">{grp}</div>
-                            )}
-                            <div
-                                className={grp === "Today" ? "space-y-2 overflow-y-auto overscroll-contain pr-1" : "space-y-2"}
-                                style={grp === "Today" && todayMaxHeightPx ? { maxHeight: todayMaxHeightPx } : undefined}
-                            >
-                                {items.map((e, idx) => {
-                                    const icon = eventCategoryIcon(e.category);
-                                    return (
-                                        <motion.button
-                                            key={e.id}
-                                            layout
-                                            initial={{ opacity: 0, x: -10 }}
-                                            animate={{ opacity: 1, x: 0 }}
-                                            exit={{ opacity: 0, x: 10 }}
-                                            type="button"
-                                            ref={grp === "Today" && idx === 0 ? todayFirstItemRef : undefined}
-                                            className="group flex w-full items-start gap-3 rounded-xl border border-border bg-background px-3 py-3 text-left transition-shadow duration-150 ease-out hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                                            onClick={() => setDetailsId(e.id)}
-                                        >
-                                            <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground dark:text-white">
-                                                <span className="text-base leading-none" aria-hidden>
-                                                    {icon}
-                                                </span>
-                                            </div>
-                                            <div className="min-w-0 flex-1">
-                                                <div className="flex items-center justify-between gap-2">
-                                                    <div className="truncate text-sm font-semibold text-foreground">{e.title}</div>
-                                                    <div className="text-xs text-muted-foreground tabular-nums">
-                                                        {new Date(e.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                                                    </div>
-                                                </div>
-                                                <div className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">
-                                                    {e.description}
-                                                </div>
-                                            </div>
-                                        </motion.button>
-                                    );
-                                })}
+                            ))}
+                        </AnimatePresence>
+                        {filtered.length === 0 ? (
+                            <div className="py-8 text-center">
+                                <div className="text-sm font-semibold text-muted-foreground">No events</div>
                             </div>
-                        </div>
-                    ))}
-                </AnimatePresence>
-                {filtered.length === 0 ? (
-                    <div className="py-8 text-center">
-                        <div className="text-sm font-semibold text-muted-foreground">No events</div>
+                        ) : null}
                     </div>
-                ) : null}
-            </div>
+                </div>
+            ) : null}
 
             <Modal
                 open={detailsId !== null}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Campaign } from "@/lib/dashboard-api";
 import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
@@ -62,12 +62,18 @@ function statusBadgeClass(status: AlertStatus) {
 }
 
 export function AlertTimeline({ campaigns }: { campaigns: Campaign[] }) {
+    const ROWS_VISIBLE_DESKTOP = 6;
+    const ROWS_VISIBLE_MOBILE = 4;
+    const MOBILE_BREAKPOINT_PX = 768;
+    const firstItemRef = useRef<HTMLButtonElement | null>(null);
     const [sev, setSev] = useState<Set<AlertSeverity>>(new Set());
     const [type, setType] = useState<Set<AlertType>>(new Set());
     const [status, setStatus] = useState<Set<AlertStatus>>(new Set());
+    const [hidden, setHidden] = useState(false);
     const [detailsId, setDetailsId] = useState<string | null>(null);
     const [ruleOpen, setRuleOpen] = useState(false);
     const [tab, setTab] = useState<AlertTab>("Impact Analysis");
+    const [listMaxHeightPx, setListMaxHeightPx] = useState<number | null>(null);
 
     // Real alerts from /api/v1/alerts. Backend filters by the same sev/type/status
     // we display, so we don't over-fetch. Polls every 10s.
@@ -104,6 +110,17 @@ export function AlertTimeline({ campaigns }: { campaigns: Campaign[] }) {
         toLocalStorage("campaigns.performance.alertPrefs", { sev: Array.from(sev), type: Array.from(type), status: Array.from(status) });
     }, [sev, status, type]);
 
+    useEffect(() => {
+        const raf = window.requestAnimationFrame(() => {
+            setHidden(fromLocalStorage<boolean>("campaigns.performance.alertTimelineHidden", false));
+        });
+        return () => window.cancelAnimationFrame(raf);
+    }, []);
+
+    useEffect(() => {
+        toLocalStorage("campaigns.performance.alertTimelineHidden", hidden);
+    }, [hidden]);
+
     const filtered = useMemo(() => {
         const now = new Date();
         return alerts.filter((a) => {
@@ -116,6 +133,34 @@ export function AlertTimeline({ campaigns }: { campaigns: Campaign[] }) {
     }, [alerts, sev, status, type]);
 
     const details = useMemo(() => alerts.find((a) => a.id === detailsId) || null, [alerts, detailsId]);
+
+    // One scroll area around the alert list, capped to ~6 rows on md+ and ~4
+    // rows below md. Height is measured from the first rendered row so the
+    // cap always lands on a row boundary instead of cutting a row in half.
+    useEffect(() => {
+        const gapPx = 8;
+
+        const measure = () => {
+            if (hidden) return;
+            const el = firstItemRef.current;
+            if (!el) {
+                setListMaxHeightPx(null);
+                return;
+            }
+            const h = el.getBoundingClientRect().height;
+            if (!Number.isFinite(h) || h <= 0) return;
+            const rows = window.innerWidth >= MOBILE_BREAKPOINT_PX ? ROWS_VISIBLE_DESKTOP : ROWS_VISIBLE_MOBILE;
+            const maxHeight = Math.round(h * rows + gapPx * (rows - 1));
+            setListMaxHeightPx(maxHeight);
+        };
+
+        const raf = window.requestAnimationFrame(measure);
+        window.addEventListener("resize", measure, { passive: true });
+        return () => {
+            window.cancelAnimationFrame(raf);
+            window.removeEventListener("resize", measure);
+        };
+    }, [filtered.length, hidden]);
 
     const mutationsBusy = ackMutation.isPending || resolveMutation.isPending;
 
@@ -185,81 +230,102 @@ export function AlertTimeline({ campaigns }: { campaigns: Campaign[] }) {
     ) : null;
 
     return (
-        <div className="content-card">
+        <div className="content-card alert-timeline-card">
             <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                 <div>
                     <div className="text-sm font-semibold text-foreground">Error & Alert Timeline</div>
                     <div className="mt-1 text-sm text-muted-foreground">Track, triage, and resolve incidents.</div>
                 </div>
-                <div className="text-sm font-semibold text-muted-foreground">{filtered.length} alerts</div>
-            </div>
-
-            <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
-                <FilterPills
-                    label="Severity"
-                    options={["Critical", "Warning", "Info"] as AlertSeverity[]}
-                    value={sev}
-                    onChange={(next) => setSev(next)}
-                    classFor={(v) => severityBadgeClass(v)}
-                />
-                <FilterPills
-                    label="Type"
-                    options={["Network", "API", "Campaign", "System"] as AlertType[]}
-                    value={type}
-                    onChange={(next) => setType(next)}
-                    classFor={(v) => typeBadgeClass(v)}
-                />
-                <FilterPills
-                    label="Status"
-                    options={["Active", "Resolved", "Investigating"] as AlertStatus[]}
-                    value={status}
-                    onChange={(next) => setStatus(next)}
-                    classFor={(v) => statusBadgeClass(v)}
-                />
-            </div>
-
-            <div className="mt-4 space-y-2">
-                {filtered.map((a) => (
-                    <button
-                        key={a.id}
+                <div className="flex items-center gap-2">
+                    <div className="text-sm font-semibold text-muted-foreground">{filtered.length} alerts</div>
+                    <Button
                         type="button"
-                        className="flex w-full items-start justify-between gap-3 rounded-xl border border-border bg-card/50 px-3 py-3 text-left transition-[background-color,border-color,box-shadow,color] duration-150 ease-out hover:bg-accent hover:text-accent-foreground hover:border-border/80 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                        onClick={() => {
-                            setTab("Impact Analysis");
-                            setDetailsId(a.id);
-                        }}
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setHidden((prev) => !prev)}
+                        aria-expanded={!hidden}
+                        aria-controls="alert-timeline-body"
+                        data-testid="alert-timeline-hide-toggle"
                     >
-                        <div className="min-w-0">
-                            <div className="flex items-center gap-2">
-                                <span className={cn("inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold", severityBadgeClass(a.severity))}>
-                                    {a.severity}
-                                </span>
-                                <span className={cn("inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold", typeBadgeClass(a.type))}>
-                                    {a.type}
-                                </span>
-                                <span className={cn("inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold", statusBadgeClass(a.status))}>
-                                    {a.status}
-                                </span>
-                                {!a.acknowledged ? (
-                                    <span className="inline-flex items-center rounded-full bg-background border border-indigo-700/50 px-2 py-0.5 text-xs font-semibold text-indigo-800 dark:border-indigo-400/50 dark:text-indigo-300">
-                                        New
-                                    </span>
-                                ) : (
-                                    <span className="inline-flex items-center rounded-full bg-background border border-slate-400/70 px-2 py-0.5 text-xs font-semibold text-slate-700 dark:border-slate-500/70 dark:text-slate-200">
-                                        Ack
-                                    </span>
-                                )}
-                            </div>
-                            <div className="mt-2 text-sm font-semibold text-foreground">{a.title}</div>
-                            <div className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{a.description}</div>
-                        </div>
-                        <div className="shrink-0 text-right text-xs font-semibold text-muted-foreground">
-                            <div>{new Date(a.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</div>
-                            <div className="mt-1">{new Date(a.createdAt).toLocaleDateString()}</div>
-                        </div>
-                    </button>
-                ))}
+                        {hidden ? "Show" : "Hide"}
+                    </Button>
+                </div>
             </div>
+
+            {!hidden ? (
+                <div id="alert-timeline-body">
+                    <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
+                        <FilterPills
+                            label="Severity"
+                            options={["Critical", "Warning", "Info"] as AlertSeverity[]}
+                            value={sev}
+                            onChange={(next) => setSev(next)}
+                            classFor={(v) => severityBadgeClass(v)}
+                        />
+                        <FilterPills
+                            label="Type"
+                            options={["Network", "API", "Campaign", "System"] as AlertType[]}
+                            value={type}
+                            onChange={(next) => setType(next)}
+                            classFor={(v) => typeBadgeClass(v)}
+                        />
+                        <FilterPills
+                            label="Status"
+                            options={["Active", "Resolved", "Investigating"] as AlertStatus[]}
+                            value={status}
+                            onChange={(next) => setStatus(next)}
+                            classFor={(v) => statusBadgeClass(v)}
+                        />
+                    </div>
+
+                    <div
+                        className="mt-4 space-y-2 overflow-y-auto overscroll-contain pr-1"
+                        style={listMaxHeightPx ? { maxHeight: listMaxHeightPx } : undefined}
+                    >
+                        {filtered.map((a, idx) => (
+                            <button
+                                key={a.id}
+                                ref={idx === 0 ? firstItemRef : undefined}
+                                type="button"
+                                className="flex w-full items-start justify-between gap-3 rounded-xl border border-border bg-card/50 px-3 py-3 text-left transition-[background-color,border-color,box-shadow,color] duration-150 ease-out hover:bg-accent hover:text-accent-foreground hover:border-border/80 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                                onClick={() => {
+                                    setTab("Impact Analysis");
+                                    setDetailsId(a.id);
+                                }}
+                            >
+                                <div className="min-w-0">
+                                    <div className="flex items-center gap-2">
+                                        <span className={cn("inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold", severityBadgeClass(a.severity))}>
+                                            {a.severity}
+                                        </span>
+                                        <span className={cn("inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold", typeBadgeClass(a.type))}>
+                                            {a.type}
+                                        </span>
+                                        <span className={cn("inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold", statusBadgeClass(a.status))}>
+                                            {a.status}
+                                        </span>
+                                        {!a.acknowledged ? (
+                                            <span className="inline-flex items-center rounded-full bg-background border border-indigo-700/50 px-2 py-0.5 text-xs font-semibold text-indigo-800 dark:border-indigo-400/50 dark:text-indigo-300">
+                                                New
+                                            </span>
+                                        ) : (
+                                            <span className="inline-flex items-center rounded-full bg-background border border-slate-400/70 px-2 py-0.5 text-xs font-semibold text-slate-700 dark:border-slate-500/70 dark:text-slate-200">
+                                                Ack
+                                            </span>
+                                        )}
+                                    </div>
+                                    <div className="mt-2 text-sm font-semibold text-foreground">{a.title}</div>
+                                    <div className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{a.description}</div>
+                                </div>
+                                <div className="shrink-0 text-right text-xs font-semibold text-muted-foreground">
+                                    <div>{new Date(a.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</div>
+                                    <div className="mt-1">{new Date(a.createdAt).toLocaleDateString()}</div>
+                                </div>
+                            </button>
+                        ))}
+                    </div>
+                </div>
+            ) : null}
 
             <Modal
                 open={detailsId !== null}
