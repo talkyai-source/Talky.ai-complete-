@@ -138,7 +138,7 @@ export default function InboundCampaignDetailPage() {
                     </section>
 
                     <div className="grid gap-5 lg:grid-cols-[minmax(0,1.45fr)_minmax(18rem,0.75fr)]">
-                        <section className="content-card" aria-labelledby="readiness-heading">
+                        <section className="content-card server-readiness-card" aria-labelledby="readiness-heading">
                             <div className="mb-4 flex items-start justify-between gap-3"><div><h2 id="readiness-heading" className="text-lg font-semibold text-foreground">Server readiness</h2><p className="mt-1 text-sm text-muted-foreground">The server re-evaluates ownership, trunk health, policies, and configuration version at activation.</p></div><Button type="button" variant="ghost" size="icon" onClick={() => void readinessQuery.refetch()} disabled={readinessQuery.isFetching} aria-label="Refresh readiness"><RefreshCw className={readinessQuery.isFetching ? "h-4 w-4 animate-spin" : "h-4 w-4"} aria-hidden /></Button></div>
                             {readinessQuery.isError ? <InboundErrorState title="Readiness could not be refreshed" message={readinessQuery.error instanceof Error ? readinessQuery.error.message : "Try again."} onRetry={() => void readinessQuery.refetch()} /> : readiness ? <InboundReadinessChecklist readiness={readiness} /> : <InboundLoadingState label="Checking activation readiness…" />}
                         </section>

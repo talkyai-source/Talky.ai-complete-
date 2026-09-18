@@ -901,6 +901,18 @@ details > summary.home-menu-toggle {
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.20);
 }
 
+/* Server Readiness card (Inbound campaign detail): same shared .content-card
+   hover overlap as above, now that this card also scrolls internally. Scoped
+   the same way instead of touching .content-card. */
+.server-readiness-card:hover {
+  transform: none;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.10);
+}
+
+.dark .server-readiness-card:hover {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.20);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .content-card,
   .content-card:hover {

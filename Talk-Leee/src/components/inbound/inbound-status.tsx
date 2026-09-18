@@ -1,3 +1,6 @@
+"use client";
+
+import { useEffect, useRef, useState } from "react";
 import { AlertTriangle, CheckCircle2, CircleDashed, ShieldCheck, XCircle } from "lucide-react";
 
 import type { InboundReadiness } from "@/lib/inbound-api";
@@ -50,6 +53,39 @@ export function ReadinessBadge({ readiness }: { readiness: InboundReadiness }) {
 }
 
 export function InboundReadinessChecklist({ readiness }: { readiness: InboundReadiness }) {
+    // Six checks are shown at a time; the rest scroll inside the card. The
+    // cap is derived from the first rendered row's real height rather than a
+    // hardcoded pixel guess, matching the Event Stream / Alert Timeline cards
+    // (components/campaigns/event-stream.tsx, alert-timeline.tsx).
+    const ROWS_VISIBLE = 6;
+    const firstItemRef = useRef<HTMLLIElement | null>(null);
+    const [listMaxHeightPx, setListMaxHeightPx] = useState<number | null>(null);
+
+    useEffect(() => {
+        const gapPx = 8;
+
+        const measure = () => {
+            const el = firstItemRef.current;
+            if (!el) {
+                setListMaxHeightPx(null);
+                return;
+            }
+            const h = el.getBoundingClientRect().height;
+            if (!Number.isFinite(h) || h <= 0) {
+                setListMaxHeightPx(null);
+                return;
+            }
+            setListMaxHeightPx(Math.round(h * ROWS_VISIBLE + gapPx * (ROWS_VISIBLE - 1)));
+        };
+
+        const raf = window.requestAnimationFrame(measure);
+        window.addEventListener("resize", measure, { passive: true });
+        return () => {
+            window.cancelAnimationFrame(raf);
+            window.removeEventListener("resize", measure);
+        };
+    }, [readiness.checks.length]);
+
     return (
         <div className="space-y-3" aria-label="Server readiness checks">
             <div
@@ -86,21 +122,30 @@ export function InboundReadinessChecklist({ readiness }: { readiness: InboundRea
                     </div>
                 </div>
             ) : readiness.checks.length > 0 ? (
-                <ul className="space-y-2">
-                    {readiness.checks.map((check) => (
-                        <li key={check.key} className="flex items-start gap-3 rounded-xl border border-border bg-background p-3">
-                            {check.passed ? (
-                                <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600 dark:text-emerald-400" aria-hidden />
-                            ) : (
-                                <XCircle className="mt-0.5 h-5 w-5 shrink-0 text-red-600 dark:text-red-400" aria-hidden />
-                            )}
-                            <div className="min-w-0">
-                                <p className="text-sm font-semibold text-foreground">{check.label}</p>
-                                <p className="mt-0.5 text-sm text-muted-foreground">{check.detail}</p>
-                            </div>
-                        </li>
-                    ))}
-                </ul>
+                <div
+                    className="overflow-y-auto overscroll-contain pr-1"
+                    style={listMaxHeightPx ? { maxHeight: listMaxHeightPx } : undefined}
+                >
+                    <ul className="space-y-2">
+                        {readiness.checks.map((check, index) => (
+                            <li
+                                key={check.key}
+                                ref={index === 0 ? firstItemRef : undefined}
+                                className="flex items-start gap-3 rounded-xl border border-border bg-background p-3"
+                            >
+                                {check.passed ? (
+                                    <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600 dark:text-emerald-400" aria-hidden />
+                                ) : (
+                                    <XCircle className="mt-0.5 h-5 w-5 shrink-0 text-red-600 dark:text-red-400" aria-hidden />
+                                )}
+                                <div className="min-w-0">
+                                    <p className="text-sm font-semibold text-foreground">{check.label}</p>
+                                    <p className="mt-0.5 line-clamp-2 min-h-10 text-sm leading-5 text-muted-foreground">{check.detail}</p>
+                                </div>
+                            </li>
+                        ))}
+                    </ul>
+                </div>
             ) : null}
 
             {readiness.blockers.length > 0 ? (
