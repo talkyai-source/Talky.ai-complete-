@@ -340,7 +340,7 @@ function KnowledgePanelScope({ campaignId, readOnly = false }: KnowledgePanelPro
 
     return (
         <div className="rounded-2xl border border-gray-200 dark:border-white/10 bg-white dark:bg-white/5 shadow-sm overflow-hidden">
-            <div className="flex items-center justify-between gap-2 px-4 py-3 border-b border-gray-200 dark:border-white/10">
+            <div className="flex flex-col gap-2 px-4 py-3 border-b border-gray-200 dark:border-white/10 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex items-center gap-2 min-w-0">
                     <BookOpen className="h-4 w-4 text-emerald-500 shrink-0" />
                     <h3 className="text-sm font-semibold text-gray-900 dark:text-zinc-100">Knowledge base</h3>
@@ -352,7 +352,7 @@ function KnowledgePanelScope({ campaignId, readOnly = false }: KnowledgePanelPro
                     {!readOnly && (
                         <>
                             <input ref={fileRef} type="file" accept=".md,.txt,text/markdown,text/plain" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) void onUpload(f); }} />
-                            <Button size="sm" variant="outline" onClick={() => fileRef.current?.click()} disabled={uploading} className="h-8 px-2.5 text-xs">
+                            <Button size="sm" variant="outline" onClick={() => fileRef.current?.click()} disabled={uploading} className="h-8 w-full shrink-0 px-2.5 text-xs sm:w-auto">
                                 {uploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
                                 {uploading ? "Processing…" : "Upload .md / .txt"}
                             </Button>
@@ -367,7 +367,7 @@ function KnowledgePanelScope({ campaignId, readOnly = false }: KnowledgePanelPro
                 <div className="px-4 py-8 text-center">
                     <BookOpen className="mx-auto h-8 w-8 text-muted-foreground/40" />
                     <p className="mt-2 text-sm font-medium text-gray-900 dark:text-zinc-100">No knowledge yet</p>
-                    <p className="mt-1 text-xs text-muted-foreground max-w-md mx-auto">{readOnly ? "No knowledge has been added to this campaign." : "Upload a Markdown or text doc — pricing, FAQs, services. We&apos;ll parse it into sections, write a spoken answer for each, and the agent will use it on calls."}</p>
+                    <p className="mt-1 text-xs text-muted-foreground max-w-md mx-auto">{readOnly ? "No knowledge has been added to this campaign." : "Upload a Markdown or text doc — pricing, FAQs, services. We'll parse it into sections, write a spoken answer for each, and the agent will use it on calls."}</p>
                 </div>
             ) : (
                 <div className="divide-y divide-gray-200 dark:divide-white/10">
