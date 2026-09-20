@@ -424,6 +424,24 @@ def test_create_accepts_an_extension_while_the_other_did_paths_still_refuse():
     )
 
 
+def test_an_extension_config_can_still_be_edited():
+    """update_campaign fell back to before["did_number"], which is NULL for an
+    extension-addressed config, so an ordinary content edit (greeting, hours)
+    resolved to no address and was rejected as "Invalid DID" -- making such a
+    config uneditable from the app as well as from a script."""
+    import inspect
+
+    from app.domain.services import inbound_campaign_service as svc
+
+    body = inspect.getsource(svc.InboundCampaignService.update_campaign)
+    assert 'current_address = before.get("address") or before.get("did_number")' in body
+    assert 'payload.get("did_number") or current_address' in body
+    # the refusal now fires only on a CHANGE onto an extension, not on editing one
+    assert "requested_did != current_address and is_extension_address(requested_did)" in body
+    normalised = " ".join(body.split())
+    assert "assignment_changed = ( requested_did != current_address" in normalised
+
+
 def test_an_extension_is_owned_by_the_trunk_that_registers_it():
     """The ownership gate, and the same predicate the router enforces at call
     time. Without it a binding could be created that could never route."""

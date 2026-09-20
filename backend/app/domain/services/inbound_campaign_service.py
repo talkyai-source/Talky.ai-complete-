@@ -1643,11 +1643,21 @@ class InboundCampaignService:
             before = self._serialize_bundle(
                 await self._load_bundle(conn, config_id, tenant_id=tenant_id)
             )
-            requested_did = normalize_did(str(payload.get("did_number") or before["did_number"]))
-            if requested_did and is_extension_address(requested_did):
-                # See create_campaign: this config is DID-only, so an internal PBX
-                # extension must be refused here rather than failing on the
-                # inbound_did_assignments CHECK further down.
+            # A config's address may be a public DID or an internal extension.
+            # Falling back to before["did_number"] alone made every edit of an
+            # extension-addressed config impossible -- that column is NULL for
+            # one, so an ordinary content edit (greeting, hours) resolved to no
+            # address and was rejected as "Invalid DID".
+            current_address = before.get("address") or before.get("did_number")
+            requested_did = normalize_did(
+                str(payload.get("did_number") or current_address or "")
+            )
+            if not requested_did:
+                raise InboundCampaignError("Invalid DID", code="invalid_did", status_code=422)
+            if requested_did != current_address and is_extension_address(requested_did):
+                # Editing an extension config is fine; MOVING a config onto an
+                # extension is not, because there is no extension equivalent of
+                # the DID reassignment workflow yet.
                 raise InboundCampaignError(
                     "An internal PBX extension cannot be used as this campaign's "
                     "number. Create the routing config on a public DID, then bind "
@@ -1655,14 +1665,12 @@ class InboundCampaignService:
                     code="extension_not_a_did",
                     status_code=422,
                 )
-            if not requested_did:
-                raise InboundCampaignError("Invalid DID", code="invalid_did", status_code=422)
             requested_trunk_id = _uuid(
                 str(payload.get("sip_trunk_id") or before["sip_trunk_id"]),
                 "sip_trunk_id",
             )
             assignment_changed = (
-                requested_did != before["did_number"]
+                requested_did != current_address
                 or requested_trunk_id != before["sip_trunk_id"]
             )
             if assignment_changed and not assignment_workflow:
