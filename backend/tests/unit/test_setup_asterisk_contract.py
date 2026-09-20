@@ -47,6 +47,12 @@ DIALPLAN_VARS = {
     "${CALLERID(number)}": CALLER_ANI,
     "${CONTEXT}": INBOUND_CONTEXT,
     "${TALKY_ROUTE_DID}": DIALLED_DID,
+    # FILTER keeps only the listed characters. A dialled DID is already digits
+    # and '+', so it passes through unchanged. The filter exists to strip a
+    # colon a caller escaped into the Request-URI user part
+    # (sip:ext%3A940003@...), which would otherwise let untrusted input reach
+    # Stasis already tagged as the internal-extension address "ext:940003".
+    "${FILTER(0-9+,${EXTEN})}": DIALLED_DID,
 }
 
 

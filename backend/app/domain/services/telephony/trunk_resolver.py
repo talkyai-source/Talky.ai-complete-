@@ -91,6 +91,11 @@ class TrunkRow:
     trunk ``metadata.caller_id`` JSON — the "basic Caller ID" the trunk form
     writes), used as the caller-ID fallback when the tenant has no verified
     DID on file.
+
+    ``is_internal_extension`` marks a trunk that registers an internal PBX
+    extension (``metadata.role == "extension"``) rather than a PSTN route. Such
+    a trunk is never auto-selected for outbound — see
+    :func:`choose_outbound_route`.
     """
     id: str
     trunk_name: str
@@ -98,6 +103,7 @@ class TrunkRow:
     updated_at: Optional[datetime] = None
     caller_id: Optional[str] = None
     runtime_ready: bool = True
+    is_internal_extension: bool = False
 
 
 @dataclass(frozen=True)
@@ -192,9 +198,18 @@ def choose_outbound_route(
     """
     actives = [t for t in active_trunks if t.is_active and t.runtime_ready]
 
+    # An internal PBX extension trunk is an ADDRESS, not a PSTN route: it can
+    # be rung, but it cannot carry an outbound call to a real number and has no
+    # presentable caller-ID. Before this filter, merely activating one made it
+    # the tenant's "own trunk" and it won the precedence below — so provisioning
+    # extension 940003 on a tenant would have silently re-routed that tenant's
+    # already-running outbound campaign onto a PBX extension. Dialling an
+    # extension on purpose still works: it goes through the explicit
+    # campaign-level assignment (_resolve_campaign_trunk), which outranks this.
     own_trunks = [
         t for t in actives
         if not _is_platform_default(t, platform_default_trunk_name)
+        and not t.is_internal_extension
     ]
 
     if own_trunks:
@@ -281,6 +296,27 @@ def _fallback_route(reason: str, *, shared_default_enabled: bool) -> OutboundTru
         reason=reason,
         refused=True,
     )
+
+
+def _coerce_metadata(metadata) -> dict:
+    """Best-effort dict view of a trunk ``metadata`` column (jsonb or text)."""
+    if isinstance(metadata, str):
+        import json as _json
+        try:
+            metadata = _json.loads(metadata)
+        except (ValueError, TypeError):
+            return {}
+    return metadata if isinstance(metadata, dict) else {}
+
+
+def _is_internal_extension(metadata) -> bool:
+    """True when this trunk registers an internal PBX extension, not a PSTN route.
+
+    Set by provisioning as ``metadata.role = "extension"``. Absent on every
+    existing row, so the default is False and no current trunk changes
+    behaviour when this ships.
+    """
+    return str(_coerce_metadata(metadata).get("role") or "").strip().lower() == "extension"
 
 
 def _extract_trunk_caller_id(metadata) -> Optional[str]:
@@ -549,6 +585,7 @@ async def resolve_outbound_trunk(
                 evaluate_trunk_runtime(dict(r), require_inbound=False).ready
                 and r["direction"] in {"outbound", "both"}
             ),
+            is_internal_extension=_is_internal_extension(r["metadata"]),
         )
         for r in trunk_rows
     ]

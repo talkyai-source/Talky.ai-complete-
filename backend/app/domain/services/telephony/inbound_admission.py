@@ -546,6 +546,39 @@ class InboundAdmissionService:
                 bindings = list(
                     await conn.fetch(
                         """
+                        WITH addr AS (
+                            -- A public DID: proven by its verified
+                            -- tenant_phone_numbers row, exactly as before.
+                            SELECT
+                                a.id, a.tenant_id, a.phone_number_id,
+                                a.campaign_id, a.config_id, a.sip_trunk_id,
+                                a.canonical_did, a.version, a.status,
+                                a.valid_from, a.valid_to,
+                                pn.status AS phone_status
+                            FROM inbound_did_assignments a
+                            JOIN tenant_phone_numbers pn
+                              ON pn.id = a.phone_number_id
+                             AND pn.tenant_id = a.tenant_id
+                            WHERE a.canonical_did = $1
+                            UNION ALL
+                            -- An internal PBX extension: it has no phone-number
+                            -- row, so ownership is proven by the trunk that
+                            -- registers it (est.auth_username = e.extension).
+                            -- That join IS the verification, hence 'verified'.
+                            SELECT
+                                e.id, e.tenant_id, NULL::uuid AS phone_number_id,
+                                e.campaign_id, e.config_id, e.sip_trunk_id,
+                                'ext:' || e.extension AS canonical_did,
+                                e.version, e.status,
+                                e.valid_from, e.valid_to,
+                                'verified'::text AS phone_status
+                            FROM inbound_extension_assignments e
+                            JOIN tenant_sip_trunks est
+                              ON est.id = e.sip_trunk_id
+                             AND est.tenant_id = e.tenant_id
+                             AND est.auth_username = e.extension
+                            WHERE 'ext:' || e.extension = $1
+                        )
                         SELECT
                             a.id AS assignment_id,
                             a.tenant_id,
@@ -585,7 +618,7 @@ class InboundAdmissionService:
                             c.prompt_version_pin,
                             c.knowledge_mode,
                             c.knowledge_model,
-                            pn.status AS phone_status,
+                            a.phone_status,
                             st.is_active AS trunk_active,
                             st.direction AS trunk_direction,
                             st.metadata AS trunk_metadata,
@@ -620,20 +653,17 @@ class InboundAdmissionService:
                             ai.realtime_model AS tenant_realtime_model,
                             ai.realtime_voice AS tenant_realtime_voice,
                             ai.realtime_settings AS tenant_realtime_settings
-                        FROM inbound_did_assignments a
+                        FROM addr a
                         JOIN inbound_campaign_configs cfg
                           ON cfg.id=a.config_id AND cfg.tenant_id=a.tenant_id
                         JOIN campaigns c
                           ON c.id=a.campaign_id AND c.tenant_id=a.tenant_id
-                        JOIN tenant_phone_numbers pn
-                          ON pn.id=a.phone_number_id AND pn.tenant_id=a.tenant_id
                         JOIN tenant_sip_trunks st
                           ON st.id=a.sip_trunk_id AND st.tenant_id=a.tenant_id
                         JOIN tenants t ON t.id=a.tenant_id
                         LEFT JOIN tenant_inbound_controls tic ON tic.tenant_id=a.tenant_id
                         LEFT JOIN tenant_ai_configs ai ON ai.tenant_id=a.tenant_id
-                        WHERE a.canonical_did=$1
-                          AND a.status='active'
+                        WHERE a.status='active'
                           AND a.valid_from <= NOW()
                           AND (a.valid_to IS NULL OR a.valid_to > NOW())
                         ORDER BY a.id

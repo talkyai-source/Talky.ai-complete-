@@ -56,6 +56,9 @@ from app.core.db_utils import acquire_with_tenant  # noqa: E402
 from app.domain.services.phone_number_normalizer import (  # noqa: E402
     validate_e164_strict,
 )
+from app.domain.services.telephony.inbound_address import (  # noqa: E402
+    EXTENSION_PREFIX as _EXTENSION_ADDRESS_PREFIX,
+)
 from app.domain.services.telephony.trunk_resolver import (  # noqa: E402
     platform_default_trunk_name,
 )
@@ -343,6 +346,88 @@ def _route_from_row(
     )
 
 
+_EXTENSION_DIGITS_RE = re.compile(r"^[0-9]{3,8}$")
+
+
+def _extension_route_from_row(
+    row: Mapping[str, Any],
+    *,
+    trunk_id: str,
+    tenant_id: str,
+    observed_at: datetime,
+) -> InboundRoute | None:
+    """Derive the route for an internal PBX extension, or ``None``.
+
+    A DID route needs the reviewed ``verified-carrier-account-dids.json`` to
+    agree with an active assignment, because the carrier alone decides which
+    DID lands on which account. An extension has nothing to map: the account
+    *is* the address. So the two facts that must independently agree are
+
+    1. the trunk declares itself an extension (``metadata.role == "extension"``,
+       the same flag that keeps it out of outbound trunk selection), and
+    2. an active same-tenant binding names exactly the trunk's own
+       ``auth_username`` (pinned again in SQL by the join predicate).
+
+    Anything short of that returns ``None`` and the account stays on the
+    fail-closed catch-all, exactly as an unmapped DID does.
+    """
+
+    assignment_id_raw = row.get("ext_assignment_id")
+    if assignment_id_raw is None:
+        return None
+    assignment_id = _canonical_uuid(
+        assignment_id_raw, label="inbound extension assignment"
+    )
+
+    valid_from = _as_utc(row.get("ext_valid_from"), label="extension assignment")
+    if valid_from > observed_at:
+        return None
+    valid_to = row.get("ext_valid_to")
+    if valid_to is not None and _as_utc(
+        valid_to, label="extension assignment"
+    ) <= observed_at:
+        return None
+
+    ext_tenant_id = _canonical_uuid(
+        row.get("ext_tenant_id"), label="inbound extension tenant"
+    )
+    ext_trunk_id = _canonical_trunk_id(row.get("ext_trunk_id"))
+    if ext_tenant_id != tenant_id or ext_trunk_id != trunk_id:
+        raise UnsafeInboundMappingError(
+            f"{_safe_trunk_label(row)} has an inbound extension tenant conflict"
+        )
+    if str(row.get("direction") or "").strip().lower() not in {"inbound", "both"}:
+        raise UnsafeInboundMappingError(
+            f"{_safe_trunk_label(row)} has an extension binding on a non-inbound trunk"
+        )
+
+    metadata = _metadata(row)
+    if str(metadata.get("role") or "").strip().lower() != "extension":
+        raise UnsafeInboundMappingError(
+            f"{_safe_trunk_label(row)} is bound as an extension but is not "
+            "declared one"
+        )
+
+    account = str(row.get("auth_username") or "").strip()
+    extension = str(row.get("ext_extension") or "").strip()
+    if not _EXTENSION_DIGITS_RE.fullmatch(extension):
+        raise UnsafeInboundMappingError(
+            f"{_safe_trunk_label(row)} has an unroutable extension"
+        )
+    if account != extension:
+        raise UnsafeInboundMappingError(
+            f"{_safe_trunk_label(row)} extension does not match its carrier account"
+        )
+
+    return InboundRoute(
+        account=account,
+        did=f"{_EXTENSION_ADDRESS_PREFIX}{extension}",
+        tenant_id=tenant_id,
+        trunk_id=trunk_id,
+        assignment_id=assignment_id,
+    )
+
+
 async def fetch_reconciliation_rows(
     pool: asyncpg.Pool,
     *,
@@ -372,6 +457,22 @@ async def fetch_reconciliation_rows(
                 WHERE a.status = 'active'
                   AND a.valid_from <= CURRENT_TIMESTAMP
                   AND (a.valid_to IS NULL OR a.valid_to > CURRENT_TIMESTAMP)
+            ),
+            current_extension_assignments AS (
+                -- An internal PBX extension has no tenant_phone_numbers row.
+                -- Its proof of ownership is the trunk that registers it, which
+                -- the join below pins with e.ext_extension = st.auth_username.
+                SELECT
+                    e.id AS ext_assignment_id,
+                    e.tenant_id AS ext_tenant_id,
+                    e.sip_trunk_id AS ext_trunk_id,
+                    e.extension AS ext_extension,
+                    e.valid_from AS ext_valid_from,
+                    e.valid_to AS ext_valid_to
+                FROM inbound_extension_assignments e
+                WHERE e.status = 'active'
+                  AND e.valid_from <= CURRENT_TIMESTAMP
+                  AND (e.valid_to IS NULL OR e.valid_to > CURRENT_TIMESTAMP)
             )
             SELECT
                 st.id,
@@ -393,14 +494,24 @@ async def fetch_reconciliation_rows(
                 a.assignment_valid_to,
                 a.phone_status,
                 a.verified_did,
+                e.ext_assignment_id,
+                e.ext_tenant_id,
+                e.ext_trunk_id,
+                e.ext_extension,
+                e.ext_valid_from,
+                e.ext_valid_to,
                 CURRENT_TIMESTAMP AS observed_at
             FROM tenant_sip_trunks st
             LEFT JOIN current_verified_assignments a
               ON a.assignment_trunk_id = st.id
              AND a.assignment_tenant_id = st.tenant_id
+            LEFT JOIN current_extension_assignments e
+              ON e.ext_trunk_id = st.id
+             AND e.ext_tenant_id = st.tenant_id
+             AND e.ext_extension = st.auth_username
             WHERE st.is_active = TRUE
               AND lower(btrim(st.trunk_name)) <> lower($1)
-            ORDER BY st.id, a.assignment_id
+            ORDER BY st.id, a.assignment_id, e.ext_assignment_id
             """,
             platform_trunk_name,
         )
@@ -695,6 +806,31 @@ def build_candidate_set(
                 raise PJSIPReconciliationError(
                     f"trunk-{trunk_id} has conflicting source rows"
                 )
+
+        extension_route = _extension_route_from_row(
+            row,
+            trunk_id=trunk_id,
+            tenant_id=tenant_id,
+            observed_at=observed_at,
+        )
+        if extension_route is not None:
+            # An extension is its own account, so it never consults the
+            # reviewed DID inventory. It still has to pass the same two
+            # ambiguity guards a DID does, on the same dicts, so a duplicate
+            # can never be silently resolved by row order.
+            prior_ext_account = routes_by_account.get(extension_route.account)
+            if prior_ext_account is not None and prior_ext_account != extension_route:
+                raise UnsafeInboundMappingError(
+                    "active inbound assignments contain a duplicate account conflict"
+                )
+            prior_ext_did = routes_by_did.get(extension_route.did)
+            if prior_ext_did is not None and prior_ext_did != extension_route:
+                raise UnsafeInboundMappingError(
+                    "active inbound assignments contain a duplicate extension conflict"
+                )
+            routes_by_account[extension_route.account] = extension_route
+            routes_by_did[extension_route.did] = extension_route
+            continue
 
         route = _route_from_row(
             row,

@@ -17,6 +17,11 @@ import hashlib
 from dataclasses import dataclass
 from typing import Optional
 
+from app.domain.services.telephony.inbound_address import (
+    canonical_extension,
+    parse_extension,
+)
+
 logger = logging.getLogger(__name__)
 
 INBOUND_CONTEXT_PREFIX = "from-tenant-"
@@ -67,10 +72,24 @@ _DID_STRIP_RE = re.compile(r"[\s().\-]")
 
 
 def normalize_did(raw: Optional[str]) -> Optional[str]:
-    """Normalize a carrier presentation to E.164-compatible digits."""
+    """Normalize a carrier presentation to a canonical inbound address.
+
+    Returns either a canonical DID (``+<7-15 digits>``, exactly as before) or a
+    canonical internal extension (``ext:<3-8 digits>``).  The extension branch
+    is a pass-through of an already-tagged address: the tag is only ever minted
+    by the reconciler's generated dialplan for a reviewed, bound extension, and
+    the catch-all strips colons so a caller cannot forge it.  See
+    :mod:`app.domain.services.telephony.inbound_address`.
+
+    Widening the digit range instead would be wrong — ``9400031`` would become
+    the phone number ``+9400031``.
+    """
 
     if not raw:
         return None
+    extension_digits = parse_extension(raw)
+    if extension_digits is not None:
+        return canonical_extension(extension_digits)
     value = str(raw).strip()
     for scheme in ("sip:", "sips:", "tel:"):
         if value.lower().startswith(scheme):
@@ -158,13 +177,85 @@ def is_active_inbound_campaign_status(status: object) -> bool:
     return str(status or "").strip().lower() in ACTIVE_INBOUND_CAMPAIGN_STATUSES
 
 
+async def _lookup_active_extension_bindings(conn, extension_digits: str):
+    """Return every currently valid active binding for an internal extension.
+
+    Mirrors the DID lookup gate for gate, with two differences that matter:
+
+    * The address is proven by the **trunk that registers it** rather than by a
+      ``tenant_phone_numbers`` row — hence ``st.auth_username = $1``.  That
+      predicate is the ownership tie: a tenant cannot bind an extension it does
+      not actually hold a trunk for, and two tenants cannot answer the same
+      extension because ``uq_inbound_active_extension`` is global (the carrier
+      account namespace is global, unlike a per-tenant DID list).
+    * ``tenant_id`` is still compared on every join, never inferred. RLS alone
+      has been decorative on this database before.
+
+    Bounded at two rows for the same reason as the DID lookup: ambiguity must
+    be rejected, never resolved by row order.
+    """
+
+    return await conn.fetch(
+        """
+        SELECT
+            a.id AS inbound_campaign_id,
+            a.tenant_id,
+            a.campaign_id,
+            a.sip_trunk_id,
+            NULL::uuid AS called_did_id,
+            a.config_id,
+            a.version AS route_version,
+            cfg.version AS config_version
+        FROM inbound_extension_assignments a
+        JOIN campaigns c
+          ON c.id = a.campaign_id
+         AND c.tenant_id = a.tenant_id
+         AND c.direction = 'inbound'
+         AND c.status = ANY($2::text[])
+        JOIN inbound_campaign_configs cfg
+          ON cfg.id = a.config_id
+         AND cfg.tenant_id = a.tenant_id
+         AND cfg.campaign_id = a.campaign_id
+         AND cfg.status = 'active'
+        JOIN tenant_sip_trunks st
+          ON st.id = a.sip_trunk_id
+         AND st.tenant_id = a.tenant_id
+         AND st.is_active = TRUE
+         AND st.direction IN ('inbound', 'both')
+         AND st.auth_username = $1
+        JOIN tenants t
+          ON t.id = a.tenant_id
+         AND t.status = 'active'
+         AND t.subscription_status IN ('active', 'trialing')
+        LEFT JOIN tenant_inbound_controls tic
+          ON tic.tenant_id = a.tenant_id
+        WHERE a.extension = $1
+          AND a.status = 'active'
+          AND a.valid_from <= NOW()
+          AND (a.valid_to IS NULL OR a.valid_to > NOW())
+          AND COALESCE(tic.inbound_enabled, FALSE) = TRUE
+        ORDER BY a.id
+        LIMIT 2
+        """,
+        extension_digits,
+        list(ACTIVE_INBOUND_CAMPAIGN_STATUSES),
+    )
+
+
 async def _lookup_active_bindings(conn, did_norm: str):
-    """Return every currently valid active binding for a canonical DID.
+    """Return every currently valid active binding for a canonical address.
+
+    Dispatches on address kind: a tagged extension resolves through its trunk,
+    a DID through its verified phone-number row.
 
     Fetching all matches (bounded at two) is deliberate. A database missing
     the unique constraint must reject ambiguity instead of letting ``LIMIT 1``
     make tenant selection depend on row order.
     """
+
+    extension_digits = parse_extension(did_norm)
+    if extension_digits is not None:
+        return await _lookup_active_extension_bindings(conn, extension_digits)
 
     return await conn.fetch(
         """
@@ -295,7 +386,8 @@ async def resolve_inbound_route(
         sip_trunk_id=str(row["sip_trunk_id"]),
         inbound_campaign_id=str(row["inbound_campaign_id"]),
         config_id=str(row["config_id"]),
-        called_did_id=str(row["called_did_id"]),
+        # NULL for an internal extension: it has no tenant_phone_numbers row.
+        called_did_id=str(row["called_did_id"]) if row["called_did_id"] else None,
         route_version=int(row["route_version"]),
         config_version=int(row["config_version"]),
     )
