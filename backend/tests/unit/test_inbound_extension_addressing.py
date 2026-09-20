@@ -565,3 +565,36 @@ def test_the_response_can_describe_an_extension_addressed_config():
     assert fields["did_number"].is_required() is False
     for extra in ("address", "address_kind", "extension"):
         assert extra in fields, extra
+
+
+def test_editing_an_extension_config_uses_trunk_ownership_not_a_phone_row():
+    """update_campaign called _verified_phone unconditionally, so every edit of
+    an extension config was refused with did_not_verified -- a phone row it can
+    never have. Ownership comes from the trunk, exactly as in create_campaign."""
+    import inspect
+
+    from app.domain.services import inbound_campaign_service as svc
+
+    body = inspect.getsource(svc.InboundCampaignService.update_campaign)
+    assert "update_extension = parse_extension(did)" in body
+    assert "_assert_extension_owned_by_trunk" in body
+    assert "_assert_extension_free" in body
+    # the DID branch is preserved verbatim
+    assert "phone = await self._verified_phone(" in body
+
+
+def test_an_extension_edit_is_not_mistaken_for_an_address_change():
+    """The assignment rewrite was guarded on before["did_number"], which is NULL
+    for an extension config, so every content edit looked like an address change
+    and tried to write 'ext:940003' into canonical_did -- violating its E.164
+    CHECK. It is guarded on the real comparison now."""
+    import inspect
+
+    from app.domain.services import inbound_campaign_service as svc
+
+    body = " ".join(inspect.getsource(svc.InboundCampaignService.update_campaign).split())
+    assert "if assignment_changed: try:" in body
+    assert 'if did != before["did_number"] or trunk_id' not in body
+    # and it writes whichever address column applies
+    assert "canonical_did=$4, extension=$5" in body
+    assert "None if update_extension else did" in body

@@ -1729,11 +1729,27 @@ class InboundCampaignService:
 
             did = requested_did
             trunk_id = requested_trunk_id
-            phone = await self._verified_phone(conn, tenant_id=tenant_id, did=did)
-            await self._active_trunk(conn, tenant_id=tenant_id, trunk_id=trunk_id)
-            await self._assert_did_free(
-                conn, did=did, exclude_assignment_id=before["assignment_id"]
-            )
+            trunk = await self._active_trunk(conn, tenant_id=tenant_id, trunk_id=trunk_id)
+            # Same split as create_campaign: a DID proves ownership with a
+            # verified tenant_phone_numbers row, an extension with the trunk
+            # that registers it. Calling _verified_phone unconditionally
+            # refused every edit of an extension config with did_not_verified.
+            update_extension = parse_extension(did)
+            if update_extension is not None:
+                phone = None
+                await self._assert_extension_owned_by_trunk(
+                    trunk, extension=update_extension
+                )
+                await self._assert_extension_free(
+                    conn,
+                    extension=update_extension,
+                    exclude_assignment_id=before["assignment_id"],
+                )
+            else:
+                phone = await self._verified_phone(conn, tenant_id=tenant_id, did=did)
+                await self._assert_did_free(
+                    conn, did=did, exclude_assignment_id=before["assignment_id"]
+                )
             checksum = _config_checksum(final)
             updated_config = await conn.fetchrow(
                 """
@@ -1771,21 +1787,28 @@ class InboundCampaignService:
                     "Inbound campaign changed during update",
                     code="version_conflict",
                 )
-            if did != before["did_number"] or trunk_id != before["sip_trunk_id"]:
+            # `assignment_changed` was computed against the config's real
+            # current address. Re-deriving it from before["did_number"] here
+            # made every extension edit look like an address change (that
+            # column is NULL for one), which then tried to write 'ext:940003'
+            # into canonical_did and violated its E.164 CHECK.
+            if assignment_changed:
                 try:
                     updated_assignment = await conn.fetchrow(
                         """
                         UPDATE inbound_did_assignments
-                        SET phone_number_id=$3, canonical_did=$4, sip_trunk_id=$5,
-                            version=version+1, updated_by=$6, updated_at=NOW()
-                        WHERE id=$1 AND tenant_id=$2 AND version=$7
+                        SET phone_number_id=$3, canonical_did=$4, extension=$5,
+                            sip_trunk_id=$6,
+                            version=version+1, updated_by=$7, updated_at=NOW()
+                        WHERE id=$1 AND tenant_id=$2 AND version=$8
                           AND status='paused'
                         RETURNING id, version
                         """,
                         before["assignment_id"],
                         tenant_id,
-                        phone["id"],
-                        did,
+                        phone["id"] if phone else None,
+                        None if update_extension else did,
+                        update_extension,
                         trunk_id,
                         actor_id,
                         int(assignment["version"]),
