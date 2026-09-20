@@ -89,9 +89,11 @@ def _patch_acquire(monkeypatch, conn):
 
     @asynccontextmanager
     async def fake_acquire(pool, tenant_id, **_kw):
+        fake_acquire.tenants.append(tenant_id)
         fake_acquire.tenant_id = tenant_id
         yield conn
 
+    fake_acquire.tenants = []
     monkeypatch.setattr("app.core.db_utils.acquire_with_tenant", fake_acquire)
     return fake_acquire
 
@@ -343,3 +345,29 @@ def test_an_unreadable_carrier_inventory_refuses_rather_than_permits(tmp_path, m
     monkeypatch.setattr(binder, "_BACKEND_ROOT", tmp_path / "nope" / "backend")
     with pytest.raises(SystemExit, match="cannot read the reviewed carrier inventory"):
         binder._reviewed_public_accounts()
+
+
+@pytest.mark.asyncio
+async def test_the_cross_tenant_check_never_leaves_rls_bypassed_for_the_writes(monkeypatch):
+    """`SET LOCAL app.bypass_rls` persists for the whole transaction.
+
+    Running the cross-tenant lookup inside the tenant transaction would leave
+    the trunk UPDATE and the binding INSERT executing with RLS bypassed -- the
+    exact isolation this script advertises. The check must therefore happen on
+    its own connection, before the tenant transaction opens.
+    """
+    conn = _Conn(_trunk_row(), _campaign_row(), foreign=None)
+    acquire = _patch_acquire(monkeypatch, conn)
+    _no_public_accounts(monkeypatch)
+
+    await binder.bind_extension(
+        object(), tenant_id=TENANT, actor_user_id=ACTOR,
+        extension="940003", campaign_id=CAMPAIGN, activate=True,
+    )
+
+    # First acquire is the bypass read (None), second is the tenant's own.
+    assert acquire.tenants == [None, TENANT], acquire.tenants
+    # Nothing may have turned the bypass GUC on inside the writing transaction.
+    assert not any(
+        c[0] == "EXEC" and "bypass_rls" in str(c[1]) for c in conn.calls
+    ), conn.calls

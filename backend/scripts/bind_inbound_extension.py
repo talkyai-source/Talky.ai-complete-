@@ -163,6 +163,15 @@ async def bind_extension(
     if not mark_only and not campaign_id:
         _fail("--campaign-id is required unless --mark-only is given")
 
+    # Cross-tenant check runs on its OWN bypass connection, before the tenant
+    # transaction opens. `SET LOCAL app.bypass_rls` persists for the rest of a
+    # transaction, so doing it inline would leave every following write — the
+    # trunk UPDATE and the binding INSERT — running with RLS bypassed, which is
+    # exactly the isolation this script claims to keep.
+    async with acquire_with_tenant(pool, None) as bypass_conn:
+        foreign = await bypass_conn.fetchrow(FOREIGN_TRUNK_SQL, digits, tenant_id)
+    foreign_holder = foreign["tenant_id"] if foreign is not None else None
+
     async with acquire_with_tenant(pool, str(tenant_id)) as conn:
         async with conn.transaction():
             trunk = await conn.fetchrow(TRUNK_SQL, tenant_id, digits)
@@ -196,12 +205,10 @@ async def bind_extension(
                     "verified-carrier-account-dids.json. Binding it as an internal "
                     "extension would take a real DID out of service."
                 )
-            await conn.execute("SET LOCAL app.bypass_rls = 'on'")
-            foreign = await conn.fetchrow(FOREIGN_TRUNK_SQL, digits, tenant_id)
-            if foreign is not None:
+            if foreign_holder is not None:
                 _fail(
                     f"carrier account {digits} is also held by an active trunk on "
-                    f"tenant {str(foreign['tenant_id'])[:8]}. Extension digits are "
+                    f"tenant {str(foreign_holder)[:8]}. Extension digits are "
                     "unique across the whole carrier namespace, so exactly one "
                     "tenant may answer them."
                 )
