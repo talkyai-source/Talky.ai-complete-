@@ -389,3 +389,26 @@ def test_junk_ani_is_still_treated_as_no_identity():
 
     value, private = _private_ani("not-a-number")
     assert value is None and private is True
+
+
+# ── the DID-only routing config must refuse an extension explicitly ──────────
+
+def test_the_inbound_routing_config_refuses_an_extension_with_a_usable_reason():
+    """normalize_did now canonicalises "ext:940003" too, so an extension can
+    reach the inbound config service. That service writes a tenant_phone_numbers
+    row and an inbound_did_assignments row whose CHECK requires E.164, so it
+    must refuse up front — not fail on a constraint three layers down where the
+    operator sees a database error instead of an instruction.
+    """
+    import inspect
+
+    from app.domain.services import inbound_campaign_service as svc
+
+    source = inspect.getsource(svc)
+    assert source.count('code="extension_not_a_did"') == 3, (
+        "all three DID entry points (create, update, availability) must refuse "
+        "an extension address"
+    )
+    for fn in ("create_campaign", "did_availability"):
+        body = inspect.getsource(getattr(svc.InboundCampaignService, fn))
+        assert "is_extension_address" in body, fn

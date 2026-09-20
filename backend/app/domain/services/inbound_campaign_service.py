@@ -26,6 +26,7 @@ from app.domain.services.campaign_direction_guard import (
 )
 from app.domain.services.telephony.business_hours import evaluate_business_hours
 from app.domain.services.telephony.inbound_overrides import validate_qualification_overrides
+from app.domain.services.telephony.inbound_address import is_extension_address
 from app.domain.services.telephony.inbound_router import (
     is_active_inbound_campaign_status,
     normalize_did,
@@ -1193,6 +1194,20 @@ class InboundCampaignService:
         campaign_id = _uuid(str(payload.get("campaign_id")), "campaign_id")
         trunk_id = _uuid(str(payload.get("sip_trunk_id")), "sip_trunk_id")
         did = normalize_did(str(payload.get("did_number") or ""))
+        if did and is_extension_address(did):
+            # normalize_did also canonicalises internal PBX extensions
+            # ("ext:940003") now. This routing config is DID-only: it writes a
+            # tenant_phone_numbers row and an inbound_did_assignments row whose
+            # CHECK requires E.164. Reject with a reason an operator can act on
+            # rather than failing on a constraint three layers down. Extensions
+            # are bound through inbound_extension_assignments instead.
+            raise InboundCampaignError(
+                "An internal PBX extension cannot be used as this campaign's "
+                "number. Create the routing config on a public DID, then bind "
+                "the extension to it.",
+                code="extension_not_a_did",
+                status_code=422,
+            )
         if not did:
             raise InboundCampaignError("Invalid DID", code="invalid_did", status_code=422)
         timezone = _timezone(str(payload.get("timezone") or "UTC"))
@@ -1517,6 +1532,17 @@ class InboundCampaignService:
                 await self._load_bundle(conn, config_id, tenant_id=tenant_id)
             )
             requested_did = normalize_did(str(payload.get("did_number") or before["did_number"]))
+            if requested_did and is_extension_address(requested_did):
+                # See create_campaign: this config is DID-only, so an internal PBX
+                # extension must be refused here rather than failing on the
+                # inbound_did_assignments CHECK further down.
+                raise InboundCampaignError(
+                    "An internal PBX extension cannot be used as this campaign's "
+                    "number. Create the routing config on a public DID, then bind "
+                    "the extension to it.",
+                    code="extension_not_a_did",
+                    status_code=422,
+                )
             if not requested_did:
                 raise InboundCampaignError("Invalid DID", code="invalid_did", status_code=422)
             requested_trunk_id = _uuid(
@@ -1931,6 +1957,17 @@ class InboundCampaignService:
     async def did_availability(self, *, tenant_id: str, did_number: str) -> dict[str, Any]:
         tenant_id = _uuid(tenant_id, "tenant_id")
         did = normalize_did(did_number)
+        if did and is_extension_address(did):
+            # See create_campaign: this config is DID-only, so an internal PBX
+            # extension must be refused here rather than failing on the
+            # inbound_did_assignments CHECK further down.
+            raise InboundCampaignError(
+                "An internal PBX extension cannot be used as this campaign's "
+                "number. Create the routing config on a public DID, then bind "
+                "the extension to it.",
+                code="extension_not_a_did",
+                status_code=422,
+            )
         if not did:
             raise InboundCampaignError("Invalid DID", code="invalid_did", status_code=422)
         async with acquire_with_tenant(self._pool, None) as conn:
