@@ -37,6 +37,23 @@ _EMAIL_ASK = re.compile(
     re.IGNORECASE | re.VERBOSE,
 )
 
+# The agent READING an address back ("...that's j dot smith at gmail dot com,
+# did I get that right?"). The caller's next turn is either a one-word "yes" or
+# a slow, pause-heavy correction -- the very spell-out capture mode exists for.
+# Arming only on the ASK missed every correction turn, so a corrected address
+# was endpointed mid-spell and the caller's fix was lost (live call 2026-09-21).
+#
+# Both halves are required: an address AND a confirmation cue. Lookaheads, so
+# the two may appear in either order. Requiring the cue keeps a plain statement
+# ("I will send it to john at gmail dot com") from arming.
+_EMAIL_READBACK = re.compile(
+    r"""(?=.*(?:\bat\b[^.?!]{0,40}\bdot\s+[a-z]{2,}|@[a-z0-9.-]+\.[a-z]{2,}))
+        (?=.*(?:did\s+i\s+(?:get|say|hear)|is\s+(?:that|this|it)\s+(?:right|correct)
+              |that\s+right|got\s+(?:that|it)\s+right|is\s+that\s+ok(?:ay)?
+              |correct\?))""",
+    re.IGNORECASE | re.VERBOSE | re.DOTALL,
+)
+
 # Calls currently in capture mode (single process / single worker).
 _active_calls: set[str] = set()
 
@@ -44,6 +61,17 @@ _active_calls: set[str] = set()
 def detect_email_ask(text: Optional[str]) -> bool:
     """True if the agent line is asking the caller for an email / to spell."""
     return bool(text and _EMAIL_ASK.search(text))
+
+
+def detect_email_readback(text: Optional[str]) -> bool:
+    """True if the agent line is reading an address back for confirmation."""
+    return bool(text and _EMAIL_READBACK.search(text))
+
+
+def detect_capture_trigger(text: Optional[str]) -> bool:
+    """True if the caller's NEXT turn is likely a pause-heavy spell-out: either
+    the agent just asked for an address, or it read one back to be corrected."""
+    return detect_email_ask(text) or detect_email_readback(text)
 
 
 def _flux(provider: Any) -> Any:
@@ -68,7 +96,7 @@ def maybe_enter(provider: Any, call_id: str, agent_text: str) -> None:
     """Enter capture mode if the agent just asked for an email/spelling."""
     if not call_id or call_id in _active_calls:
         return
-    if not detect_email_ask(agent_text):
+    if not detect_capture_trigger(agent_text):
         return
     target = _flux(provider)
     if target is None:

@@ -80,6 +80,79 @@ def test_recording_emergency_stop_clears_only_live_inbound_sessions(monkeypatch)
     assert outbound._recording_allowed is True
 
 
+def test_recording_emergency_stop_only_reports_a_real_transition(monkeypatch):
+    """Recording is OFF platform-wide, so the 30-second admission heartbeat
+    re-enters this function for the whole life of every inbound call. Counting
+    an already-closed buffer as a fresh stop made it log an EMERGENCY warning
+    every 30 seconds, so one ordinary call read back as a recurring incident
+    (2026-09-21). Enforcement must still run on each sweep; only the count --
+    and therefore the warning -- is latched to an actual state change.
+    """
+    calls: list[tuple[str, bool]] = []
+
+    class _Gateway:
+        def set_recording_enabled(self, call_id: str, enabled: bool) -> bool:
+            calls.append((call_id, enabled))
+            return True
+
+    inbound = SimpleNamespace(
+        call_id="voice-inbound",
+        media_gateway=_Gateway(),
+        _recording_allowed=True,
+    )
+    sessions = {"pbx-inbound": inbound}
+    monkeypatch.setattr(
+        lifecycle,
+        "_inbound_admissions_in_flight",
+        {"pbx-inbound": {"call_id": "durable-inbound"}},
+    )
+    monkeypatch.setattr(
+        lifecycle,
+        "_state",
+        lambda: SimpleNamespace(get_voice_session=lambda call_id: sessions.get(call_id)),
+    )
+
+    assert lifecycle.disable_live_inbound_recordings() == 1
+    # Every later sweep: still enforced on the gateway, no longer reported.
+    assert lifecycle.disable_live_inbound_recordings() == 0
+    assert lifecycle.disable_live_inbound_recordings() == 0
+    assert calls == [("voice-inbound", False)] * 3
+    assert inbound._recording_allowed is False
+
+
+def test_recording_emergency_stop_reports_again_if_recording_is_re_enabled(
+    monkeypatch,
+):
+    """The latch is the session flag, not a one-shot: a call that starts
+    recording again must be reported the next time it is stopped."""
+    class _Gateway:
+        def set_recording_enabled(self, call_id: str, enabled: bool) -> bool:
+            return True
+
+    inbound = SimpleNamespace(
+        call_id="voice-inbound",
+        media_gateway=_Gateway(),
+        _recording_allowed=True,
+    )
+    monkeypatch.setattr(
+        lifecycle,
+        "_inbound_admissions_in_flight",
+        {"pbx-inbound": {"call_id": "durable-inbound"}},
+    )
+    monkeypatch.setattr(
+        lifecycle,
+        "_state",
+        lambda: SimpleNamespace(
+            get_voice_session=lambda call_id: {"pbx-inbound": inbound}.get(call_id)
+        ),
+    )
+
+    assert lifecycle.disable_live_inbound_recordings() == 1
+    assert lifecycle.disable_live_inbound_recordings() == 0
+    inbound._recording_allowed = True
+    assert lifecycle.disable_live_inbound_recordings() == 1
+
+
 # ---------------------------------------------------------------------------
 # FIX #11 — _collect_expired_sessions
 # ---------------------------------------------------------------------------

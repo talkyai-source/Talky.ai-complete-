@@ -45,10 +45,58 @@ from app.domain.services.voice_pipeline.identity_disposition import (
 
 logger = logging.getLogger(__name__)
 
-# Spoken when a phantom end-session is suppressed: the model tried to hang up
-# but the caller never signalled they were done. Keeps the call alive with a
-# short, neutral re-engagement instead of dead air or an unwanted goodbye.
-_PHANTOM_GOODBYE_RECOVERY = "Sorry, I'm still here — what else can I help you with?"
+# Last resort when a phantom end-session is suppressed AND the model left the
+# turn with nothing to speak: it tried to hang up, the caller never signalled
+# they were done, and it emitted only the internal envelope. Keeps the call
+# alive instead of leaving dead air or an unwanted goodbye.
+#
+# A TUPLE, not one string, because the guard can fire repeatedly on one call and
+# the same canned sentence twice running is what a caller hears as the agent
+# looping. Indexed by how often it has already fired, so it stays deterministic.
+_PHANTOM_GOODBYE_RECOVERIES = (
+    "Sorry, I'm still here — what else can I help you with?",
+    "I'm still on the line. What else can I do for you?",
+    "Still with you — was there anything else?",
+)
+# The canonical first line, kept under its old name for callers and log reading.
+_PHANTOM_GOODBYE_RECOVERY = _PHANTOM_GOODBYE_RECOVERIES[0]
+
+# Appended for ONE retry when a suppressed end-session left nothing to say. The
+# canned line above answers no question the caller actually asked, so before
+# falling back to it we tell the model the call is continuing and let it reply
+# properly. Removed again immediately: it is scaffolding for this turn only.
+_PHANTOM_RETRY_INSTRUCTION = (
+    "SYSTEM: Your previous reply tried to end the call, but the caller has not "
+    "finished and the call is continuing. Do not end the session and do not "
+    "emit any JSON. Answer the caller's last message now, in one or two short "
+    "spoken sentences."
+)
+
+
+def _spoken_remainder(response_text) -> str:
+    """The part of a turn the caller actually HEARD.
+
+    The streamer speaks prose up to the internal action envelope and swallows
+    everything from that opening brace on (see
+    ``turn_streamer._find_action_envelope_start``), so an EMPTY remainder means
+    the model emitted only the envelope and the turn was silent. What to do
+    about a suppressed hangup depends entirely on which of those two happened.
+    """
+    from app.domain.services.voice_pipeline.turn_streamer import (
+        _find_action_envelope_start,
+    )
+
+    text = str(response_text or "")
+    idx = _find_action_envelope_start(text)
+    return (text if idx < 0 else text[:idx]).strip()
+
+
+def _drop_last_message(history, content) -> None:
+    """Remove the most recent message whose content is exactly ``content``."""
+    for i in range(len(history) - 1, -1, -1):
+        if getattr(history[i], "content", None) == content:
+            del history[i]
+            return
 
 
 def _note_unheard_greeting_bargein(session) -> None:
@@ -79,6 +127,41 @@ _SILENCE_CHECK_RE = re.compile(
     r"you\s+on\s+the\s+line)\b",
     re.IGNORECASE,
 )
+
+
+def _last_agent_turn(history) -> str:
+    """The most recent assistant line, interstitials included. Empty if none."""
+    for m in reversed(history or []):
+        if getattr(m, "role", None) == MessageRole.ASSISTANT:
+            return str(getattr(m, "content", "") or "")
+    return ""
+
+
+def _same_utterance(a, b) -> bool:
+    """True if two agent lines are the same sentence bar spacing, case and
+    trailing punctuation -- i.e. the caller heard the identical thing twice."""
+    def norm(t):
+        t = re.sub(r"[^a-z0-9 ]+", " ", str(t or "").lower())
+        return " ".join(t.split())
+
+    na, nb = norm(a), norm(b)
+    return bool(na) and na == nb
+
+
+def _is_interstitial_agent_turn(text) -> bool:
+    """True for an agent line the PIPELINE injected rather than the model wrote.
+
+    Silence checks and the phantom-goodbye recovery lines are both spoken to keep
+    a call alive; neither is a reply and neither is a read-back. Treating one as
+    "the agent's most recent real turn" masks the read-back the caller is
+    actually answering, so a correction or a "yes" lands against the wrong turn.
+    Observed live on 2026-09-21: the recovery line hid an email read-back and the
+    caller's corrected address was discarded.
+    """
+    c = str(text or "").lower()
+    if _SILENCE_CHECK_RE.search(c):
+        return True
+    return any(line.lower() in c for line in _PHANTOM_GOODBYE_RECOVERIES)
 
 
 def _is_email_correction(utterance, current_email) -> bool:
@@ -124,7 +207,7 @@ def _email_from_recent_agent_readback(history):
         if getattr(m, "role", None) != MessageRole.ASSISTANT:
             continue
         c = m.content or ""
-        if _SILENCE_CHECK_RE.search(c.lower()):
+        if _is_interstitial_agent_turn(c):
             continue
         return extract_email_from_agent_readback(c)
     return None
@@ -174,8 +257,8 @@ def _agent_read_back_email(history, email) -> bool:
         if getattr(m, "role", None) != MessageRole.ASSISTANT:
             continue
         c = (m.content or "").lower()
-        if _SILENCE_CHECK_RE.search(c):
-            continue  # a silence-check is not a read-back — keep scanning back
+        if _is_interstitial_agent_turn(c):
+            continue  # not a real turn — keep scanning back for the read-back
         confirm_question = bool(_CONFIRM_QUESTION_RE.search(c))
         normalized_content = _normalize_readback_words(c)
         full_value = (
@@ -202,7 +285,7 @@ def _agent_read_back_phone(history, phone) -> bool:
         if getattr(m, "role", None) != MessageRole.ASSISTANT:
             continue
         c = (m.content or "").lower()
-        if _SILENCE_CHECK_RE.search(c):
+        if _is_interstitial_agent_turn(c):
             continue
         c_digits = re.sub(r"\D", "", c)
         full_value = (digits in c_digits) or (bool(spoken) and spoken in c)
@@ -235,6 +318,85 @@ class TurnRunner:
 
     def __init__(self, pipeline) -> None:
         self._p = pipeline
+
+    async def _recover_suppressed_turn(
+        self,
+        session: CallSession,
+        websocket: Optional[WebSocket],
+        response_text: str,
+    ) -> str:
+        """Return what the caller should end up having heard on a turn whose
+        end-session action was suppressed.
+
+        Three cases, in order of preference:
+
+        1. The model wrote prose AND the envelope. The prose was already
+           streamed to the caller, so the turn is complete — only the hangup
+           needed suppressing. Speaking a canned line on top would talk over a
+           finished answer with a non-sequitur.
+        2. The model emitted ONLY the envelope, so the caller heard nothing at
+           all. Ask once more, telling it the call is continuing. This is the
+           case that cost a live caller their answer on 2026-09-21: the guard
+           replaced the whole turn with a fixed sentence, so the question went
+           unanswered and the correction it contained was lost.
+        3. The retry also produced nothing. Fall back to the canned line, which
+           at least keeps the call alive — varied per firing so a repeat guard
+           does not read the identical sentence twice.
+        """
+        call_id = session.call_id
+
+        spoken = _spoken_remainder(response_text)
+        if spoken:
+            logger.info(
+                "phantom_goodbye_kept_prose call_id=%s chars=%d — answer already spoken",
+                call_id, len(spoken),
+            )
+            return spoken
+
+        retry_text = ""
+        try:
+            session.conversation_history.append(
+                Message(role=MessageRole.SYSTEM, content=_PHANTOM_RETRY_INSTRUCTION)
+            )
+            try:
+                retry_text, _, _ = await self._p._stream_llm_and_tts(session, websocket)
+            finally:
+                # Drop the nudge whether or not it worked — it is scaffolding
+                # for this turn, not conversation the model should keep seeing.
+                _drop_last_message(
+                    session.conversation_history, _PHANTOM_RETRY_INSTRUCTION
+                )
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # pragma: no cover - defensive
+            logger.warning(
+                "phantom_goodbye_retry_failed call_id=%s", call_id, exc_info=True
+            )
+
+        retry_spoken = _spoken_remainder(retry_text)
+        if retry_spoken:
+            logger.info(
+                "phantom_goodbye_retry_spoke call_id=%s chars=%d", call_id, len(retry_spoken)
+            )
+            return retry_spoken
+
+        fired = int(getattr(session, "_phantom_recovery_count", 0) or 0)
+        line = _PHANTOM_GOODBYE_RECOVERIES[
+            min(fired, len(_PHANTOM_GOODBYE_RECOVERIES) - 1)
+        ]
+        try:
+            session._phantom_recovery_count = fired + 1
+        except Exception:  # pragma: no cover - defensive
+            pass
+        logger.info(
+            "phantom_goodbye_recovery_line call_id=%s fired=%d — retry produced nothing",
+            call_id, fired + 1,
+        )
+        session.tts_active = True
+        await self._p.synthesize_and_send_audio(
+            session, line, websocket, track_latency=False,
+        )
+        return line
 
     async def run(
         self,
@@ -433,27 +595,18 @@ class TurnRunner:
                         call_id, ask_ai_end_action.get("reason"), user_turns,
                         _wrong_person_block, len(full_transcript or ""),
                     )
-                    session.tts_active = True
-                    await self._p.synthesize_and_send_audio(
-                        session, _PHANTOM_GOODBYE_RECOVERY, websocket, track_latency=False,
+                    # From here this is an ORDINARY turn. Dropping the action
+                    # skips the shutdown path below and lets the shared
+                    # post-turn block run, which is the point: the old early
+                    # return hand-rolled its own history append and transcript
+                    # write and therefore skipped update_state_from_agent_turn,
+                    # _has_introduced AND capture_mode.maybe_enter. A suppressed
+                    # turn that asked for an email never relaxed endpointing, so
+                    # the caller's spell-out was cut off mid-address.
+                    ask_ai_end_action = None
+                    response_text = await self._recover_suppressed_turn(
+                        session, websocket, response_text
                     )
-                    session.conversation_history.append(
-                        Message(role=MessageRole.ASSISTANT, content=_PHANTOM_GOODBYE_RECOVERY)
-                    )
-                    # Persist the spoken recovery line too, so the transcript
-                    # matches what the caller heard (re-audit flow #3).
-                    try:
-                        self._p.transcript_service.accumulate_turn(
-                            call_id=call_id, role="assistant",
-                            content=_PHANTOM_GOODBYE_RECOVERY,
-                            talklee_call_id=session.talklee_call_id,
-                            turn_index=session.turn_id,
-                            event_type="assistant_response", is_final=True,
-                            include_in_plaintext=True,
-                        )
-                    except Exception:  # pragma: no cover - defensive
-                        pass
-                    return _PHANTOM_GOODBYE_RECOVERY, llm_latency_ms, tts_latency_ms
 
             if ask_ai_end_action:
                 # Compliance: caller asked never to be contacted again. Flag
@@ -478,6 +631,18 @@ class TurnRunner:
                 return "", llm_latency_ms, tts_latency_ms
 
             if response_text and response_text.strip():
+                # The caller hearing the identical sentence twice running is the
+                # single most obvious way the agent sounds broken. It cannot be
+                # unspoken here -- the streamer already sent it -- so record it
+                # where it can be counted per call rather than only heard.
+                if _same_utterance(
+                    _last_agent_turn(session.conversation_history), response_text
+                ):
+                    logger.warning(
+                        "agent_repeated_turn call_id=%s turn=%s chars=%d — "
+                        "identical to the previous agent line",
+                        call_id, getattr(session, "turn_id", "?"), len(response_text),
+                    )
                 session.conversation_history.append(
                     Message(role=MessageRole.ASSISTANT, content=response_text)
                 )

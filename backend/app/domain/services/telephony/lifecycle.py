@@ -3116,6 +3116,16 @@ def disable_live_inbound_recordings(pbx_call_id: Optional[str] = None) -> int:
     The admin control endpoint invokes this immediately on its worker. Other
     media-owner workers converge through the 30-second admission heartbeat;
     the persistence path independently rechecks the switch before storage.
+
+    Returns the number of calls this invocation actually TRANSITIONED from
+    recording to not-recording, which is not the same as the number it enforced
+    the switch on. Enforcement still runs on every sweep -- the gate is re-set
+    unconditionally, because nothing else guarantees a buffer stays closed --
+    but with recording globally off the heartbeat re-entered here every 30
+    seconds for the life of each call and re-logged an EMERGENCY warning each
+    time, so one ordinary call filled the log with what reads as a recurring
+    incident (observed 2026-09-21). A warning about a state change is only
+    truthful on the sweep that changed the state.
     """
 
     call_ids = (
@@ -3131,15 +3141,19 @@ def disable_live_inbound_recordings(pbx_call_id: Optional[str] = None) -> int:
             continue
         gateway = getattr(session, "media_gateway", None)
         session_call_id = str(getattr(session, "call_id", "") or call_id)
+        # Was this call still recording as far as the session is concerned? Read
+        # it BEFORE the gate call, since that is what the flag below overwrites.
+        was_allowed = getattr(session, "_recording_allowed", True) is not False
         set_gate = getattr(gateway, "set_recording_enabled", None)
         if callable(set_gate):
-            if set_gate(session_call_id, False):
+            if set_gate(session_call_id, False) and was_allowed:
                 disabled += 1
         else:
             clear = getattr(gateway, "clear_recording_buffer", None)
             if callable(clear):
                 clear(session_call_id)
-                disabled += 1
+                if was_allowed:
+                    disabled += 1
         session._recording_allowed = False
     if disabled:
         logger.warning(
