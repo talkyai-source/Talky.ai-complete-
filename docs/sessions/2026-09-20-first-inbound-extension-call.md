@@ -91,3 +91,39 @@ how the caller caught it. The failure was everything after the correction.
 `turn_runner.py:427-456`: re-prompt the model instead of substituting a fixed
 line, and add the phantom line to `_SILENCE_CHECK_RE` so it can never masquerade
 as a read-back.
+
+---
+
+## Fixed — commit 60512dd1 (2026-09-21)
+
+The root cause was one thing, not four: the guard **returned early** with a
+hand-rolled, partial copy of the post-turn bookkeeping. It now clears the action
+and falls through to the shared block, which is what closes defects 1 and 2
+together.
+
+| Defect | Change | Where |
+| --- | --- | --- |
+| 1. Whole turn replaced by a fixed line | Keep prose the streamer already spoke; on a silent turn re-prompt ONCE with a transient system nudge; canned line only if both are empty | `turn_runner._recover_suppressed_turn` |
+| 1b. Canned line masked the read-back | Silence checks *and* every recovery line go through one predicate | `turn_runner._is_interstitial_agent_turn` |
+| 2. Capture mode never armed | Falling through reaches `capture_mode.maybe_enter`; arming now also triggers on a read-back, not only on the ask | `capture_mode.detect_email_readback` |
+| 3. Repetition | The fallback line is a tuple indexed by firings, so a repeat guard cannot read the same sentence twice; consecutive identical replies log `agent_repeated_turn` | `turn_runner` |
+| 4. Emergency stop re-firing | Count real transitions only; the gate is still enforced on every 30 s sweep | `lifecycle.disable_live_inbound_recordings` |
+
+Proven failing on the pre-fix code before the fix, end to end: with the model
+emitting `"What's your email address? {envelope}"`, history recorded only the
+canned line and capture mode never armed. After: history records the question
+the caller actually heard, and capture mode arms.
+
+28 new tests. Canonical suite 9088 passed / 8 skipped; Ruff clean.
+
+### Still open
+
+* **Contact capture on inbound** — no inbound call has ever produced a lead
+  (34 calls, 0 `lead_id`). A missing feature, not a regression.
+* **Defect 3, the truncated reply** — `'Thing—what do you need help with today?'`
+  is an engine-side fragment. Not diagnosed; no fix attempted.
+* **Audio jitter** — 35 × `telephony_audio_gap`. Arrival timing, not loss.
+  Whether the caller heard it is still unconfirmed.
+* **Prompt-level anti-repetition** — what shipped detects and logs a repeat; it
+  cannot unspeak one. Preventing the model from repeating itself is prompt work
+  and was not done.
