@@ -22,6 +22,7 @@ import asyncpg
 from app.core.db_utils import acquire_with_tenant
 from app.domain.services.call_status import TERMINAL_CALL_STATUSES
 from app.domain.services.telephony.business_hours import evaluate_business_hours
+from app.domain.services.telephony.inbound_address import canonical_extension
 from app.domain.services.telephony.inbound_router import (
     is_active_inbound_campaign_status,
     normalize_did,
@@ -233,6 +234,9 @@ def _call_id(value: str) -> Optional[str]:
     return normalized if 1 <= len(normalized) <= 255 else None
 
 
+_INTERNAL_ANI_RE = re.compile(r"^[0-9]{3,8}$")
+
+
 def _private_ani(raw: Optional[str]) -> tuple[Optional[str], bool]:
     if not raw:
         return None, True
@@ -240,6 +244,13 @@ def _private_ani(raw: Optional[str]) -> tuple[Optional[str], bool]:
     if marker in {"anonymous", "private", "restricted", "unknown", "unavailable"}:
         return None, True
     normalized = normalize_did(raw)
+    if normalized is None and _INTERNAL_ANI_RE.match(marker):
+        # A call from another extension on the same PBX presents its extension,
+        # not an E.164 number. normalize_did rightly refuses it as a phone
+        # number, but returning None records a caller who DID identify
+        # themselves as "withheld". Keep the identity, in canonical tagged form
+        # so it can never be mistaken for a dialable public number.
+        return canonical_extension(marker), False
     return (normalized, normalized is None)
 
 

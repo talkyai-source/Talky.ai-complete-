@@ -352,3 +352,40 @@ def test_extension_flag_defaults_off_so_no_existing_trunk_changes():
 def test_the_prefix_constant_is_the_single_source_of_truth():
     assert EXTENSION_PREFIX == "ext:"
     assert canonical_extension("940007").startswith(EXTENSION_PREFIX)
+
+
+# ── caller identity from another extension ───────────────────────────────────
+
+def test_a_caller_on_another_extension_is_not_recorded_as_withheld():
+    """A MicroSIP caller presents "940007", not an E.164 number.
+
+    normalize_did rightly refuses that as a phone number, but returning None
+    made _private_ani mark the call caller-withheld — recording that the caller
+    hid their identity when they did not.
+    """
+    from app.domain.services.telephony.inbound_admission import _private_ani
+
+    value, private = _private_ani("940007")
+    assert value == "ext:940007"
+    assert private is False
+
+
+@pytest.mark.parametrize("raw", ["anonymous", "private", "restricted", "unknown", "unavailable", "", None])
+def test_a_genuinely_withheld_caller_is_still_withheld(raw):
+    from app.domain.services.telephony.inbound_admission import _private_ani
+
+    assert _private_ani(raw) == (None, True)
+
+
+def test_a_public_caller_number_is_unchanged():
+    from app.domain.services.telephony.inbound_admission import _private_ani
+
+    assert _private_ani("+447700900123") == ("+447700900123", False)
+    assert _private_ani("sip:+44 7700 900123@carrier.example") == ("+447700900123", False)
+
+
+def test_junk_ani_is_still_treated_as_no_identity():
+    from app.domain.services.telephony.inbound_admission import _private_ani
+
+    value, private = _private_ani("not-a-number")
+    assert value is None and private is True

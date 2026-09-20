@@ -192,6 +192,11 @@ class CandidateSet:
     # (campaign paused, assignment expired). Rendered fail-closed on the
     # catch-all and NAMED here so an operator sees it — never a block.
     unrouted_verified_trunks: tuple[str, ...] = ()
+    # Extension trunks refused for a NAMED, tenant-fixable reason (registration
+    # off, role cleared, a reserved public account, a second carrier host).
+    # Named rather than raised: these are reachable through the ordinary trunk
+    # API, and raising would let one tenant freeze every deploy.
+    unrouted_extension_trunks: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -355,7 +360,7 @@ def _extension_route_from_row(
     trunk_id: str,
     tenant_id: str,
     observed_at: datetime,
-) -> InboundRoute | None:
+) -> tuple[InboundRoute | None, str | None]:
     """Derive the route for an internal PBX extension, or ``None``.
 
     A DID route needs the reviewed ``verified-carrier-account-dids.json`` to
@@ -368,45 +373,58 @@ def _extension_route_from_row(
     2. an active same-tenant binding names exactly the trunk's own
        ``auth_username`` (pinned again in SQL by the join predicate).
 
-    Anything short of that returns ``None`` and the account stays on the
-    fail-closed catch-all, exactly as an unmapped DID does.
+    Returns ``(route, skip_reason)``. A skip_reason is a *named* refusal: the
+    account stays on the fail-closed catch-all and the operator is told which
+    trunk went unrouted — it never raises. That distinction matters because
+    several of these conditions are tenant-controllable through the ordinary
+    trunk API (``PATCH /telephony/sip/trunks/{id}`` replaces ``metadata``
+    wholesale and can change ``direction``). Raising would let any tenant
+    freeze the platform-wide reconcile — and therefore every deploy, since
+    deploy_to_server.sh runs ``--check-only`` as a preflight — by editing their
+    own trunk. Only genuine database-integrity violations still raise.
     """
 
     assignment_id_raw = row.get("ext_assignment_id")
     if assignment_id_raw is None:
-        return None
+        return None, None
     assignment_id = _canonical_uuid(
         assignment_id_raw, label="inbound extension assignment"
     )
 
     valid_from = _as_utc(row.get("ext_valid_from"), label="extension assignment")
     if valid_from > observed_at:
-        return None
+        return None, None
     valid_to = row.get("ext_valid_to")
     if valid_to is not None and _as_utc(
         valid_to, label="extension assignment"
     ) <= observed_at:
-        return None
+        return None, None
 
     ext_tenant_id = _canonical_uuid(
         row.get("ext_tenant_id"), label="inbound extension tenant"
     )
     ext_trunk_id = _canonical_trunk_id(row.get("ext_trunk_id"))
     if ext_tenant_id != tenant_id or ext_trunk_id != trunk_id:
+        # Not reachable through any API: the composite FK and the SQL join both
+        # pin tenant and trunk. If it happens the database has drifted.
         raise UnsafeInboundMappingError(
             f"{_safe_trunk_label(row)} has an inbound extension tenant conflict"
         )
+
+    # --- tenant-controllable from here down: name it, never raise ------------
     if str(row.get("direction") or "").strip().lower() not in {"inbound", "both"}:
-        raise UnsafeInboundMappingError(
-            f"{_safe_trunk_label(row)} has an extension binding on a non-inbound trunk"
-        )
+        return None, f"{_safe_trunk_label(row)}:not_inbound"
 
     metadata = _metadata(row)
     if str(metadata.get("role") or "").strip().lower() != "extension":
-        raise UnsafeInboundMappingError(
-            f"{_safe_trunk_label(row)} is bound as an extension but is not "
-            "declared one"
-        )
+        return None, f"{_safe_trunk_label(row)}:role_not_extension"
+    if not bool(metadata.get("register")):
+        # Without metadata.register the generator emits no [trunk-<id>-reg]
+        # section, Asterisk never REGISTERs, and the carrier holds no contact
+        # to deliver an INVITE to — while trunk_runtime still reports the trunk
+        # ready. Rendering a route for an account that can never receive a call
+        # would be a lie in the dialplan.
+        return None, f"{_safe_trunk_label(row)}:registration_disabled"
 
     account = str(row.get("auth_username") or "").strip()
     extension = str(row.get("ext_extension") or "").strip()
@@ -415,16 +433,21 @@ def _extension_route_from_row(
             f"{_safe_trunk_label(row)} has an unroutable extension"
         )
     if account != extension:
+        # The SQL join pins these equal; a mismatch means the row changed under
+        # us, which is an integrity problem rather than a configuration one.
         raise UnsafeInboundMappingError(
             f"{_safe_trunk_label(row)} extension does not match its carrier account"
         )
 
-    return InboundRoute(
-        account=account,
-        did=f"{_EXTENSION_ADDRESS_PREFIX}{extension}",
-        tenant_id=tenant_id,
-        trunk_id=trunk_id,
-        assignment_id=assignment_id,
+    return (
+        InboundRoute(
+            account=account,
+            did=f"{_EXTENSION_ADDRESS_PREFIX}{extension}",
+            tenant_id=tenant_id,
+            trunk_id=trunk_id,
+            assignment_id=assignment_id,
+        ),
+        None,
     )
 
 
@@ -775,6 +798,15 @@ def build_candidate_set(
     trunks: dict[str, dict[str, Any]] = {}
     routes_by_account: dict[str, InboundRoute] = {}
     routes_by_did: dict[str, InboundRoute] = {}
+    unrouted_extension_trunks: list[str] = []
+    # Extension digits are unique only inside one carrier's account namespace.
+    # Count the distinct hosts up front so the loop can refuse to render any
+    # extension route once a second carrier appears.
+    extension_carrier_hosts = {
+        str(r.get("sip_domain") or "").strip().lower()
+        for r in source_rows
+        if r.get("ext_assignment_id") is not None
+    } - {""}
     for row in source_rows:
         trunk_id = _canonical_trunk_id(row.get("id"))
         tenant_id = _canonical_uuid(row.get("tenant_id"), label="SIP trunk tenant")
@@ -807,12 +839,39 @@ def build_candidate_set(
                     f"trunk-{trunk_id} has conflicting source rows"
                 )
 
-        extension_route = _extension_route_from_row(
+        extension_route, extension_skip = _extension_route_from_row(
             row,
             trunk_id=trunk_id,
             tenant_id=tenant_id,
             observed_at=observed_at,
         )
+        if extension_skip is not None:
+            unrouted_extension_trunks.append(extension_skip)
+            continue
+        if extension_route is not None and extension_route.account in verified_account_dids:
+            # These digits are a reviewed PUBLIC carrier account belonging to a
+            # DID mapping. tenant_sip_trunks has no unique index on
+            # auth_username, so any tenant can create a trunk claiming '150001'
+            # and bind it as an "extension". Rendering it would take another
+            # tenant's real DID out of service; raising would freeze every
+            # deploy. Refuse this one route and name it.
+            unrouted_extension_trunks.append(
+                f"trunk-{extension_route.trunk_id}:reserved_public_account"
+            )
+            continue
+        if extension_route is not None and len(extension_carrier_hosts) > 1:
+            # Extension digits are only unique inside ONE carrier's namespace.
+            # Every inbound endpoint deliberately enters the same
+            # [from-talky-inbound] context (pjsip_config_generator: a shared
+            # source IP cannot identify a unique endpoint), so with two carrier
+            # hosts in play a second carrier's caller dialling 940005 would
+            # match the first tenant's route. Until routes are separated per
+            # carrier, refuse to render any extension route rather than
+            # cross-route a call.
+            unrouted_extension_trunks.append(
+                f"trunk-{extension_route.trunk_id}:multiple_carrier_hosts"
+            )
+            continue
         if extension_route is not None:
             # An extension is its own account, so it never consults the
             # reviewed DID inventory. It still has to pass the same two
@@ -932,6 +991,7 @@ def build_candidate_set(
         routes=routes,
         digest=digest,
         unrouted_verified_trunks=tuple(sorted(unrouted_verified_trunks)),
+        unrouted_extension_trunks=tuple(sorted(set(unrouted_extension_trunks))),
     )
 
 
@@ -1571,6 +1631,7 @@ async def _execute(args: argparse.Namespace) -> int:
         "mode": "apply" if args.apply else "check",
         "route_count": len(candidate.routes),
         "unrouted_verified_trunks": list(candidate.unrouted_verified_trunks),
+        "unrouted_extension_trunks": list(candidate.unrouted_extension_trunks),
         **summary.to_safe_dict(),
     }
     print(json.dumps(output, sort_keys=True))

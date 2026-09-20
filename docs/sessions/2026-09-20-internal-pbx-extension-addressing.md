@@ -22,9 +22,17 @@ deployed backend matched the code under review. Alembic head `0045`.
 ## The four blockers, verified
 
 1. **`invalid_did`** — `inbound_router.normalize_did` requires 7–15 digits, so
-   `940003` returns `None`. Both `inbound_router.resolve_inbound_route` and
-   `inbound_admission.admit` call that one function, so there is a single
-   chokepoint, not two. Confirmed.
+   `940003` returns `None`. Confirmed.
+
+   **Correction (found by the adversarial trace, after the first commit):** the
+   live Asterisk path never reaches `resolve_inbound_route`. It is
+   StasisStart → `asterisk_adapter._extract_inbound_meta` → `_on_stasis_start`
+   → `lifecycle._admit_inbound_call` → `InboundAdmissionService.admit`, which
+   denies at its own `normalize_did` call before any query. `resolve_inbound_route`
+   is reached only from `tenant_ai_config_resolver.resolve_ai_config_for_did`,
+   whose sole callers are the Twilio and Vonage bridges. Both paths are fixed
+   here, but admission — not the router — is the one that matters for a call
+   arriving on the PBX.
 2. **Outbound rejects six digits** — the same 7–15 rule via `is_strict_e164`,
    reached through `normalize_phone_number`. Confirmed.
 3. **No dialplan mapping** — `render_inbound_dialplan` emits a line only for an
@@ -104,6 +112,55 @@ defaults to `paused` so the rendered dialplan can be reviewed before going live.
 | `scripts/bind_inbound_extension.py` | new — provisioning |
 | 3 new test files | 57 tests |
 
+## Second pass: an adversarial review of the committed design
+
+A four-lens adversarial critique ran against the design after it landed as
+`12db6420` and found five real defects. Four are fixed here; the two verdicts
+that mattered were `needs-change`, not `sound`.
+
+1. **A tenant could freeze every deploy** (major, fixed). The extension branch
+   raised `UnsafeInboundMappingError` for conditions reachable through the
+   ordinary trunk API — `PATCH /telephony/sip/trunks/{id}` replaces `metadata`
+   wholesale and can change `direction`. Since `deploy_to_server.sh` runs the
+   reconciler's `--check-only` as a preflight, any tenant clearing
+   `metadata.role` by saving a form would have aborted the platform-wide
+   candidate build and blocked every deploy. Those conditions are now **named,
+   not raised**: `CandidateSet.unrouted_extension_trunks` reports them and the
+   account stays on the fail-closed catch-all. Only genuine database-integrity
+   violations still raise. This is the same lesson as 2026-09-10, when a paused
+   campaign raising instead of being named froze the reconcile.
+
+2. **A trunk that can never register would still have rendered a route**
+   (blocker, fixed). `metadata.register` defaults **False**, and without it
+   `pjsip_config_generator` emits no `[trunk-<id>-reg]` section, so Asterisk
+   never REGISTERs and the carrier holds no contact to deliver an INVITE to —
+   while `trunk_runtime` still reports the trunk ready. Both the reconciler and
+   the binding script now refuse. (The existing 940001-940003 rows already have
+   `register=true`, so this was latent, not live.)
+
+3. **An extension could hijack a reviewed public carrier account** (major,
+   fixed). `tenant_sip_trunks` has no unique index on `auth_username` and the
+   extension CHECK `^[0-9]{3,8}$` admits `150001`, so any tenant could claim
+   another tenant's real DID account. The binding script now refuses digits
+   listed in `verified-carrier-account-dids.json` or already held by another
+   tenant's active trunk, and the reconciler refuses to render one.
+
+4. **Cross-carrier extension collision** (blocker, contained). Extension digits
+   are unique only inside one carrier's namespace, and every inbound endpoint
+   deliberately enters the same `[from-talky-inbound]` context because a shared
+   source IP cannot identify a unique endpoint. With two carrier hosts in play,
+   a second carrier's caller dialling 940003 would match the first tenant's
+   route. Containment: the reconciler renders **no** extension route once more
+   than one carrier host has an extension binding, and names why. Verified
+   latent today — every trunk in the fleet is on `sip3.blazedigitel.com`. The
+   structural fix (per-carrier dialplan contexts) is follow-up work.
+
+5. **An extension caller was recorded as withheld** (major, fixed). A MicroSIP
+   caller presents `940007`; `normalize_did` refuses it as a phone number and
+   `_private_ani` therefore returned `None`, marking the call caller-withheld —
+   recording that the caller hid their identity when they had not. It now keeps
+   the identity in canonical tagged form.
+
 ## Not done, and why
 
 - **940004, 940005, 940006, 940007 cannot be created.** Their SIP passwords were
@@ -127,8 +184,13 @@ defaults to `paused` so the rendered dialplan can be reviewed before going live.
 
 ```text
 backend/.venv/Scripts/python -m pytest tests/unit tests/security -q
-  -> 8994 passed, 8 skipped in 434.02s   (0 failed)
-ruff check app/ scripts/ --select F --extend-ignore F401,F841 -> All checks passed!
+  -> 9013 passed, 8 skipped in 610.33s   (0 failed)   [after the hardening pass]
+ruff check app/ --select F --extend-ignore F401,F841                  -> All checks passed!
+ruff check scripts/reconcile_pjsip_configs.py scripts/bind_inbound_extension.py -> All checks passed!
+
+Beyond brief, not fixed: scripts/check_groq_api.py has 3 pre-existing F541
+(f-string without placeholders). Untouched by this work; the canonical gate is
+app/ only, so it is not a new failure.
 
 Rolled-back rehearsal against the LIVE production database (BEGIN ... ROLLBACK),
 the same pattern used for migration 0041. Proves what fake-connection unit tests

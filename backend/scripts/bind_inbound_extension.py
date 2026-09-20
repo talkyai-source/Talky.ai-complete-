@@ -96,6 +96,16 @@ VALUES ($1::uuid, $2, $3::uuid, $4::uuid, $5::uuid, $6, $7::uuid, $7::uuid)
 RETURNING id, status, version
 """
 
+# Cross-tenant check. tenant_sip_trunks has NO unique index on auth_username,
+# so another tenant can hold a trunk claiming the same carrier account. Needs a
+# bypass read: the point is to see rows this tenant must not see.
+FOREIGN_TRUNK_SQL = """
+SELECT tenant_id, trunk_name
+FROM tenant_sip_trunks
+WHERE auth_username = $1 AND tenant_id <> $2::uuid AND is_active
+LIMIT 1
+"""
+
 ARCHIVE_PRIOR_SQL = """
 UPDATE inbound_extension_assignments
 SET status = 'archived', updated_by = $3::uuid, updated_at = NOW()
@@ -106,6 +116,20 @@ RETURNING id
 
 def _fail(message: str) -> None:
     raise SystemExit(f"refused: {message}")
+
+
+def _reviewed_public_accounts() -> set:
+    """Carrier accounts the operator reviewed as PUBLIC DID mappings.
+
+    Same file the reconciler reads. An account listed there belongs to a real
+    phone number and must never be re-used as an internal extension.
+    """
+    path = _BACKEND_ROOT.parent / "telephony" / "asterisk" / "conf" / "verified-carrier-account-dids.json"
+    try:
+        return set(json.loads(path.read_text(encoding="utf-8")).keys())
+    except (OSError, ValueError):
+        # Unreadable inventory must not silently permit the collision.
+        _fail(f"cannot read the reviewed carrier inventory at {path}")
 
 
 async def bind_extension(
@@ -151,6 +175,35 @@ async def bind_extension(
                 _fail(
                     f"trunk {trunk['trunk_name']} is direction={trunk['direction']}; "
                     "an extension that answers calls must be inbound or both"
+                )
+            meta = trunk["metadata"]
+            if isinstance(meta, str):
+                try:
+                    meta = json.loads(meta)
+                except ValueError:
+                    meta = {}
+            if not bool((meta or {}).get("register")):
+                _fail(
+                    f"trunk {trunk['trunk_name']} has registration disabled "
+                    "(metadata.register is not true). Asterisk would emit no "
+                    "registration section, never REGISTER, and the carrier would "
+                    "hold no contact to deliver a call to — while the trunk still "
+                    "reports healthy. Enable registration on the trunk first."
+                )
+            if digits in _reviewed_public_accounts():
+                _fail(
+                    f"{digits} is a reviewed PUBLIC carrier account in "
+                    "verified-carrier-account-dids.json. Binding it as an internal "
+                    "extension would take a real DID out of service."
+                )
+            await conn.execute("SET LOCAL app.bypass_rls = 'on'")
+            foreign = await conn.fetchrow(FOREIGN_TRUNK_SQL, digits, tenant_id)
+            if foreign is not None:
+                _fail(
+                    f"carrier account {digits} is also held by an active trunk on "
+                    f"tenant {str(foreign['tenant_id'])[:8]}. Extension digits are "
+                    "unique across the whole carrier namespace, so exactly one "
+                    "tenant may answer them."
                 )
 
             if mark_only:

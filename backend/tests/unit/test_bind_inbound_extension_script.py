@@ -52,13 +52,18 @@ class _Txn:
 
 
 class _Conn:
-    def __init__(self, trunk=None, campaign=None):
+    def __init__(self, trunk=None, campaign=None, foreign=None):
         self._trunk = trunk
         self._campaign = campaign
+        self._foreign = foreign
         self.calls: list[tuple[str, tuple]] = []
 
     def transaction(self):
         return _Txn()
+
+    async def execute(self, *args):
+        self.calls.append(("EXEC", args))
+        return "SET"
 
     async def fetchrow(self, sql, *args):
         self.calls.append((sql, args))
@@ -66,6 +71,8 @@ class _Conn:
             return self._trunk
         if sql is binder.CAMPAIGN_SQL:
             return self._campaign
+        if sql is binder.FOREIGN_TRUNK_SQL:
+            return self._foreign
         if sql is binder.MARK_TRUNK_SQL:
             return {"id": TRUNK, "is_active": True, "metadata": {"role": "extension"}}
         if sql is binder.UPSERT_BINDING_SQL:
@@ -89,14 +96,14 @@ def _patch_acquire(monkeypatch, conn):
     return fake_acquire
 
 
-def _trunk_row(direction="both"):
+def _trunk_row(direction="both", register=True):
     return {
         "id": TRUNK,
         "trunk_name": "blaze-pbx-940003",
         "auth_username": "940003",
         "direction": direction,
         "is_active": False,
-        "metadata": {},
+        "metadata": {"register": register},
         "live_registration_status": "inactive",
     }
 
@@ -286,3 +293,53 @@ async def test_a_binding_without_a_campaign_is_refused(monkeypatch):
             campaign_id=None,
             activate=True,
         )
+
+
+def _no_public_accounts(monkeypatch):
+    monkeypatch.setattr(binder, "_reviewed_public_accounts", lambda: set())
+
+
+@pytest.mark.asyncio
+async def test_a_trunk_with_registration_disabled_is_refused(monkeypatch):
+    """Without metadata.register the account can never receive a call, but every
+    readiness signal would still report the trunk healthy."""
+    conn = _Conn(_trunk_row(register=False), _campaign_row())
+    _patch_acquire(monkeypatch, conn)
+    _no_public_accounts(monkeypatch)
+    with pytest.raises(SystemExit, match="registration disabled"):
+        await binder.bind_extension(
+            object(), tenant_id=TENANT, actor_user_id=ACTOR,
+            extension="940003", campaign_id=CAMPAIGN, activate=True,
+        )
+
+
+@pytest.mark.asyncio
+async def test_a_reviewed_public_carrier_account_cannot_be_bound_as_an_extension(monkeypatch):
+    conn = _Conn(_trunk_row(), _campaign_row())
+    _patch_acquire(monkeypatch, conn)
+    monkeypatch.setattr(binder, "_reviewed_public_accounts", lambda: {"940003"})
+    with pytest.raises(SystemExit, match="reviewed PUBLIC carrier account"):
+        await binder.bind_extension(
+            object(), tenant_id=TENANT, actor_user_id=ACTOR,
+            extension="940003", campaign_id=CAMPAIGN, activate=True,
+        )
+
+
+@pytest.mark.asyncio
+async def test_digits_already_held_by_another_tenant_are_refused(monkeypatch):
+    """tenant_sip_trunks has no unique index on auth_username, so this is the
+    only thing standing between two tenants and the same carrier account."""
+    conn = _Conn(_trunk_row(), _campaign_row(), foreign={"tenant_id": OTHER_TENANT, "trunk_name": "theirs"})
+    _patch_acquire(monkeypatch, conn)
+    _no_public_accounts(monkeypatch)
+    with pytest.raises(SystemExit, match="also held by an active trunk"):
+        await binder.bind_extension(
+            object(), tenant_id=TENANT, actor_user_id=ACTOR,
+            extension="940003", campaign_id=CAMPAIGN, activate=True,
+        )
+
+
+def test_an_unreadable_carrier_inventory_refuses_rather_than_permits(tmp_path, monkeypatch):
+    monkeypatch.setattr(binder, "_BACKEND_ROOT", tmp_path / "nope" / "backend")
+    with pytest.raises(SystemExit, match="cannot read the reviewed carrier inventory"):
+        binder._reviewed_public_accounts()

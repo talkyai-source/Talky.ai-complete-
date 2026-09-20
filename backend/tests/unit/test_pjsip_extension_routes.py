@@ -33,6 +33,7 @@ def _extension_row(
     extension: str = "940003",
     account: str | None = None,
     role: str | None = "extension",
+    register: bool = True,
     direction: str = "both",
     trunk_tenant_id: str = TENANT_A,
     assignment_tenant_id: str = TENANT_A,
@@ -40,7 +41,7 @@ def _extension_row(
     valid_from: datetime | None = None,
     valid_to: datetime | None = None,
 ) -> dict:
-    metadata: dict[str, object] = {"register": True}
+    metadata: dict[str, object] = {"register": register}
     if role is not None:
         metadata["role"] = role
     return {
@@ -105,31 +106,101 @@ def test_an_extension_never_consults_the_public_did_inventory(tmp_path):
     assert "+442046132300" not in dialplan
 
 
-def test_a_trunk_not_declared_an_extension_is_refused(tmp_path):
-    """metadata.role is the same flag that keeps it out of outbound selection.
+@pytest.mark.parametrize(
+    "kwargs,expected_reason",
+    [
+        ({"role": None}, "role_not_extension"),
+        ({"direction": "outbound"}, "not_inbound"),
+        ({"register": False}, "registration_disabled"),
+    ],
+    ids=["role-cleared", "outbound-only", "registration-off"],
+)
+def test_a_tenant_fixable_problem_is_NAMED_never_raised(tmp_path, kwargs, expected_reason):
+    """These conditions are reachable from the ordinary trunk API.
 
-    If a binding could point at a trunk that never declared itself an
-    extension, the outbound guard and the inbound route would disagree about
-    what the trunk is.
+    PATCH /telephony/sip/trunks/{id} replaces `metadata` wholesale and can
+    change `direction`, so a tenant editing their own trunk can produce all
+    three. Raising would abort the platform-wide candidate build — and with it
+    every deploy, since deploy_to_server.sh runs --check-only as a preflight.
+    One tenant must not be able to freeze the platform by saving a form.
     """
-    with pytest.raises(reconcile.UnsafeInboundMappingError, match="not .*declared"):
-        _build([_extension_row(role=None)], tmp_path)
+    candidate = _build([_extension_row(**kwargs)], tmp_path)
+
+    dialplan = candidate.files[reconcile.DIALPLAN_NAME].decode()
+    assert "exten => 940003,1," not in dialplan
+    assert "exten => _.,1," in dialplan, "still fail-closed on the catch-all"
+    assert candidate.routes == ()
+    assert any(
+        expected_reason in entry for entry in candidate.unrouted_extension_trunks
+    ), candidate.unrouted_extension_trunks
 
 
-def test_a_binding_whose_digits_are_not_the_carrier_account_is_refused(tmp_path):
+def test_registration_off_is_refused_because_the_account_can_never_be_reached(tmp_path):
+    """Without metadata.register the generator emits no [trunk-<id>-reg]
+    section, so Asterisk never REGISTERs and the carrier holds no contact to
+    deliver an INVITE to — while trunk_runtime still reports the trunk ready.
+    A rendered route would be a lie in the dialplan."""
+    candidate = _build([_extension_row(register=False)], tmp_path)
+    assert candidate.routes == ()
+    rendered = candidate.files[f"pjsip.d/trunk-{TRUNK_A}.conf"].decode()
+    assert "-reg]" not in rendered, "precondition: no registration section is emitted"
+
+
+def test_an_extension_may_not_hijack_a_reviewed_public_carrier_account(tmp_path):
+    """tenant_sip_trunks has no unique index on auth_username, so any tenant can
+    create a trunk claiming '150001' — another tenant's real DID account. That
+    must not render, and must not abort the build either."""
+    candidate = _build(
+        [_extension_row(extension="150001")],
+        tmp_path,
+        verified_account_dids={"150001": "+442046132300"},
+    )
+    dialplan = candidate.files[reconcile.DIALPLAN_NAME].decode()
+    assert "Stasis(talky_ai,inbound,ext:150001" not in dialplan
+    assert any("reserved_public_account" in e for e in candidate.unrouted_extension_trunks)
+
+
+def test_no_extension_renders_once_a_second_carrier_host_appears(tmp_path):
+    """Extension digits are unique only inside ONE carrier's namespace, and every
+    inbound endpoint deliberately enters the same context. With two carrier
+    hosts, a second carrier's caller dialling 940003 would match the first
+    tenant's route, so nothing renders until routes are separated per carrier."""
+    other = _extension_row(TRUNK_B, extension="940004", trunk_tenant_id=TENANT_B,
+                           assignment_tenant_id=TENANT_B)
+    other["sip_domain"] = "pbx.othertenant.invalid"
+    candidate = _build([_extension_row(), other], tmp_path)
+
+    dialplan = candidate.files[reconcile.DIALPLAN_NAME].decode()
+    assert "exten => 940003,1," not in dialplan
+    assert "exten => 940004,1," not in dialplan
+    assert candidate.routes == ()
+    assert sum(
+        "multiple_carrier_hosts" in e for e in candidate.unrouted_extension_trunks
+    ) == 2
+
+
+def test_one_carrier_host_still_renders(tmp_path):
+    """The containment above must not break the normal single-carrier case."""
+    second = _extension_row(TRUNK_B, extension="940004", trunk_tenant_id=TENANT_B,
+                            assignment_tenant_id=TENANT_B)
+    candidate = _build([_extension_row(), second], tmp_path)
+    dialplan = candidate.files[reconcile.DIALPLAN_NAME].decode()
+    assert "exten => 940003,1," in dialplan
+    assert "exten => 940004,1," in dialplan
+    assert candidate.unrouted_extension_trunks == ()
+
+
+def test_a_binding_whose_digits_are_not_the_carrier_account_still_raises(tmp_path):
+    """Unreachable through any API — the SQL join pins these equal — so a
+    mismatch is database drift, which must stop the build."""
     with pytest.raises(reconcile.UnsafeInboundMappingError, match="does not match"):
         _build([_extension_row(extension="940003", account="940009")], tmp_path)
 
 
-def test_a_cross_tenant_extension_binding_is_refused(tmp_path):
+def test_a_cross_tenant_extension_binding_still_raises(tmp_path):
     """Belt and braces for a database whose composite FK drifted."""
     with pytest.raises(reconcile.UnsafeInboundMappingError, match="tenant conflict"):
         _build([_extension_row(assignment_tenant_id=TENANT_B)], tmp_path)
-
-
-def test_an_extension_binding_on_an_outbound_only_trunk_is_refused(tmp_path):
-    with pytest.raises(reconcile.UnsafeInboundMappingError, match="non-inbound"):
-        _build([_extension_row(direction="outbound")], tmp_path)
 
 
 @pytest.mark.parametrize("bad", ["94", "9400031234", "94000a", ""])
