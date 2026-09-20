@@ -216,3 +216,65 @@ End-to-end chain verified by reading, not assumed:
   -> asterisk_adapter args[1] -> called_did
   -> normalize_did -> "ext:940003" -> extension branch -> binding
 ```
+
+
+## Third pass: one assignment table, not two (2026-09-21)
+
+Building the next increment surfaced a defect in the shipped design that no test
+could have caught, because it lives in a foreign key rather than in code.
+
+**Three tables reference `inbound_did_assignments`:** `calls.assignment_id`
+(composite, tenant-paired), `inbound_rejections.assignment_id`, and
+`inbound_reassignment_requests`. Admission writes `assignment_id` on the `calls`
+row for every admitted inbound call. An extension-addressed call would have been
+routed, admitted, **answered**, and then failed the foreign key on INSERT,
+because its assignment id lives in a different table. The caller would hear the
+agent pick up and the call would die.
+
+Patching around it meant a parallel nullable column plus a branch on every one of
+those integrations, permanently. Folding the two kinds into one table instead
+removes the problem and removes branching:
+
+* `inbound_did_assignments` gains an `extension` column; `canonical_did` and
+  `phone_number_id` become NULL-able.
+* `inbound_assignment_address_kind_exactly_one` makes the discrimination
+  structural — exactly one address column is set, and a DID row must still carry
+  its verified phone-number row.
+* The E.164 CHECK is **not** weakened. It becomes NULL-tolerant so an extension
+  row can leave the column empty; a non-NULL value must still match
+  `^\+[1-9][0-9]{6,14}$`.
+* No `ext:` value goes anywhere near `tenant_phone_numbers`, so the outbound
+  caller-ID path is untouched — the original reason for a separate table.
+* `uq_inbound_active_extension` / `uq_inbound_live_extension` mirror the DID
+  uniqueness rules and are global, because a carrier account namespace is global.
+
+The router's extension lookup, the admission query and the reconciler all
+collapse back to one table. The admission CTE is gone entirely.
+
+Because the revision had never been applied to any database (production is on
+`0045`), the correction was folded into `0046` rather than left as a
+create-then-drop in the migration chain.
+
+### Rehearsed against production data, rolled back
+
+```text
+existing rows the new CHECK must accept   -> 3 total, 3 with_did, 3 with_phone
+ALTER TABLE x7, CREATE INDEX x2           -> applied
+EXPLAIN router extension lookup           -> Limit (cost=30.81..30.82)
+EXPLAIN admission, EXTENSION address      -> Limit (cost=22.96..31.16)
+EXPLAIN admission, DID address            -> Limit (cost=22.96..31.16)   (unchanged)
+INSERT both address columns set           -> ERROR: violates
+                                             inbound_assignment_address_kind_exactly_one
+INSERT extension-only row                 -> accepted
+INSERT canonical_did = '940003'           -> ERROR: violates
+                                             inbound_did_assignments_canonical_did_check
+ROLLBACK
+```
+
+### Still not built
+
+The inbound routing config itself is still DID-only: `create_campaign` requires
+`did_number` and writes a `tenant_phone_numbers` row. Giving a config its own
+extension address — so a tenant with no public number can have an inbound
+campaign at all — is the next increment. This pass made that possible by fixing
+the storage model underneath it; it did not deliver it.

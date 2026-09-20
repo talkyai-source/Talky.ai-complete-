@@ -180,19 +180,16 @@ def is_active_inbound_campaign_status(status: object) -> bool:
 async def _lookup_active_extension_bindings(conn, extension_digits: str):
     """Return every currently valid active binding for an internal extension.
 
-    Mirrors the DID lookup gate for gate, with two differences that matter:
+    Same table and same gates as a DID, because an assignment is "this address
+    routes here" and only the address column differs. The one difference that
+    matters: a DID proves ownership with a verified ``tenant_phone_numbers``
+    row, while an extension proves it with the trunk that registers it -- hence
+    ``st.auth_username = $1``. That predicate is the ownership tie: a tenant
+    cannot answer an extension it holds no trunk for, and
+    ``uq_inbound_active_extension`` is global, so no two tenants can claim one.
 
-    * The address is proven by the **trunk that registers it** rather than by a
-      ``tenant_phone_numbers`` row — hence ``st.auth_username = $1``.  That
-      predicate is the ownership tie: a tenant cannot bind an extension it does
-      not actually hold a trunk for, and two tenants cannot answer the same
-      extension because ``uq_inbound_active_extension`` is global (the carrier
-      account namespace is global, unlike a per-tenant DID list).
-    * ``tenant_id`` is still compared on every join, never inferred. RLS alone
-      has been decorative on this database before.
-
-    Bounded at two rows for the same reason as the DID lookup: ambiguity must
-    be rejected, never resolved by row order.
+    Bounded at two rows for the same reason as the DID lookup: ambiguity must be
+    rejected, never resolved by row order.
     """
 
     return await conn.fetch(
@@ -202,11 +199,11 @@ async def _lookup_active_extension_bindings(conn, extension_digits: str):
             a.tenant_id,
             a.campaign_id,
             a.sip_trunk_id,
-            NULL::uuid AS called_did_id,
+            a.phone_number_id AS called_did_id,
             a.config_id,
             a.version AS route_version,
             cfg.version AS config_version
-        FROM inbound_extension_assignments a
+        FROM inbound_did_assignments a
         JOIN campaigns c
           ON c.id = a.campaign_id
          AND c.tenant_id = a.tenant_id

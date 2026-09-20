@@ -31,6 +31,10 @@ def test_every_statement_carries_an_explicit_tenant_predicate():
         sql = getattr(binder, name)
         assert re.search(r"tenant_id\s*=\s*\$\d", sql), name
     assert "tenant_id" in binder.UPSERT_BINDING_SQL
+    assert "inbound_did_assignments" in binder.UPSERT_BINDING_SQL, (
+        "one assignment table holds both address kinds; a separate table would "
+        "break the composite FK calls.assignment_id carries"
+    )
 
 
 def test_the_trunk_is_marked_with_the_same_flag_outbound_selection_reads():

@@ -477,7 +477,8 @@ async def fetch_reconciliation_rows(
                  AND pn.tenant_id = a.tenant_id
                  AND pn.e164 = a.canonical_did
                  AND pn.status = 'verified'
-                WHERE a.status = 'active'
+                WHERE a.canonical_did IS NOT NULL
+                  AND a.status = 'active'
                   AND a.valid_from <= CURRENT_TIMESTAMP
                   AND (a.valid_to IS NULL OR a.valid_to > CURRENT_TIMESTAMP)
             ),
@@ -485,6 +486,7 @@ async def fetch_reconciliation_rows(
                 -- An internal PBX extension has no tenant_phone_numbers row.
                 -- Its proof of ownership is the trunk that registers it, which
                 -- the join below pins with e.ext_extension = st.auth_username.
+                -- Same table as a DID assignment: only the address differs.
                 SELECT
                     e.id AS ext_assignment_id,
                     e.tenant_id AS ext_tenant_id,
@@ -492,8 +494,9 @@ async def fetch_reconciliation_rows(
                     e.extension AS ext_extension,
                     e.valid_from AS ext_valid_from,
                     e.valid_to AS ext_valid_to
-                FROM inbound_extension_assignments e
-                WHERE e.status = 'active'
+                FROM inbound_did_assignments e
+                WHERE e.extension IS NOT NULL
+                  AND e.status = 'active'
                   AND e.valid_from <= CURRENT_TIMESTAMP
                   AND (e.valid_to IS NULL OR e.valid_to > CURRENT_TIMESTAMP)
             )

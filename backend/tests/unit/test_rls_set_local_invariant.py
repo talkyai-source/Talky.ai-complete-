@@ -238,7 +238,6 @@ _RLS_TABLES = (
     "inbound_billing_hold_finalize_approvals",
     "inbound_campaign_configs",
     "inbound_did_assignments",
-    "inbound_extension_assignments",
     "inbound_operation_idempotency",
     "inbound_reassignment_requests",
     "inbound_rejections",

@@ -8,7 +8,8 @@ call to that extension can be answered, and both are tenant-scoped:
    (``metadata.role = "extension"``) — the same flag that keeps it out of
    outbound trunk selection, so provisioning one can never re-route a running
    outbound campaign; and
-2. an active ``inbound_extension_assignments`` row must name the campaign and
+2. an active ``inbound_did_assignments`` row (addressed by ``extension``
+   rather than ``canonical_did``) must name the campaign and
    inbound config that should answer it.
 
 This script writes both, in one transaction, under the tenant's own RLS context
@@ -88,11 +89,12 @@ RETURNING id, is_active, metadata
 """
 
 UPSERT_BINDING_SQL = """
-INSERT INTO inbound_extension_assignments (
-    tenant_id, extension, sip_trunk_id, campaign_id, config_id,
+INSERT INTO inbound_did_assignments (
+    tenant_id, extension, canonical_did, phone_number_id,
+    sip_trunk_id, campaign_id, config_id,
     status, created_by, updated_by
 )
-VALUES ($1::uuid, $2, $3::uuid, $4::uuid, $5::uuid, $6, $7::uuid, $7::uuid)
+VALUES ($1::uuid, $2, NULL, NULL, $3::uuid, $4::uuid, $5::uuid, $6, $7::uuid, $7::uuid)
 RETURNING id, status, version
 """
 
@@ -107,7 +109,7 @@ LIMIT 1
 """
 
 ARCHIVE_PRIOR_SQL = """
-UPDATE inbound_extension_assignments
+UPDATE inbound_did_assignments
 SET status = 'archived', updated_by = $3::uuid, updated_at = NOW()
 WHERE tenant_id = $1::uuid AND extension = $2 AND status <> 'archived'
 RETURNING id

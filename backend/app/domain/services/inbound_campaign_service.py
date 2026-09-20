@@ -1200,7 +1200,7 @@ class InboundCampaignService:
             # tenant_phone_numbers row and an inbound_did_assignments row whose
             # CHECK requires E.164. Reject with a reason an operator can act on
             # rather than failing on a constraint three layers down. Extensions
-            # are bound through inbound_extension_assignments instead.
+            # are bound on the same table through its `extension` column instead.
             raise InboundCampaignError(
                 "An internal PBX extension cannot be used as this campaign's "
                 "number. Create the routing config on a public DID, then bind "

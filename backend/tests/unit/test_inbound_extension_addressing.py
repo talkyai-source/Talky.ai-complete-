@@ -172,7 +172,7 @@ def _extension_binding(tenant_id=TENANT_A):
 
 
 @pytest.mark.asyncio
-async def test_extension_resolves_through_the_extension_table_with_every_guard():
+async def test_extension_resolves_through_the_assignment_table_with_every_guard():
     conn = _FakeConn([_extension_binding()])
     route = await resolve_inbound_route(
         _Pool(conn),
@@ -186,10 +186,15 @@ async def test_extension_resolves_through_the_extension_table_with_every_guard()
     assert route.campaign_id == CAMPAIGN
     assert route.called_did_id is None, "must not stringify NULL into 'None'"
 
-    # It queried the extension table, not the DID table.
-    assert "FROM inbound_extension_assignments" in conn.query
-    assert "FROM inbound_did_assignments" not in conn.query
-    # Ownership is proven by the trunk that registers the extension.
+    # One assignment table holds both kinds of address: only the predicate
+    # differs. A separate table would have broken the composite foreign key
+    # calls.assignment_id carries, so an extension call would have been
+    # answered and then failed to persist.
+    assert "FROM inbound_did_assignments" in conn.query
+    assert "WHERE a.extension = $1" in conn.query
+    assert "inbound_extension_assignments" not in conn.query
+    # Ownership is proven by the trunk that registers the extension, since an
+    # extension has no verified tenant_phone_numbers row.
     assert "st.auth_username = $1" in conn.query
     # Every isolation/readiness gate the DID path has.
     assert "AND st.tenant_id = a.tenant_id" in conn.query
@@ -275,7 +280,7 @@ async def test_a_public_did_still_uses_the_did_table():
     assert route.resolved is True
     assert "FROM inbound_did_assignments" in conn.query
     assert "JOIN tenant_phone_numbers" in conn.query
-    assert "inbound_extension_assignments" not in conn.query
+    assert "a.extension" not in conn.query, "the DID path is untouched"
 
 
 # ── outbound: an extension trunk must never hijack a tenant's routing ────────
