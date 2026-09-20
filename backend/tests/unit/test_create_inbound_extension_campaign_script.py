@@ -66,10 +66,22 @@ def test_it_goes_through_the_service_not_the_database():
         assert forbidden not in source, forbidden
 
 
-def test_activation_refuses_while_readiness_blockers_remain():
+def test_it_reads_the_config_id_under_the_key_the_service_actually_returns():
+    """_serialize_bundle keys the config as "id". Reading "config_id" raised
+    KeyError AFTER create_campaign had already written the config and its
+    assignment, leaving both stranded unactivated on production."""
     source = inspect.getsource(maker._run)
-    assert "not activating: readiness blockers" in source
-    assert "if blockers:" in source
+    assert 'created["id"]' in source
+    assert 'created["config_id"]' not in source
+
+
+def test_readiness_blockers_are_read_from_the_blockers_list():
+    readiness_keys = inspect.getsource(maker._run)
+    assert 'readiness.get("blockers")' in readiness_keys
+
+
+def test_an_idempotent_replay_is_reported_rather_than_looking_like_a_fresh_create():
+    assert "idempotent_replay" in inspect.getsource(maker._run)
 
 
 def test_the_idempotency_key_is_deterministic_per_tenant_and_extension():

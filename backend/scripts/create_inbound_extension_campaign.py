@@ -112,22 +112,25 @@ async def _run(args: argparse.Namespace) -> int:
         except InboundCampaignError as exc:
             _fail(f"{exc} [{getattr(exc, 'code', 'inbound_error')}]")
 
-        config_id = created["config_id"]
+        # _serialize_bundle keys the config as "id", not "config_id".
+        config_id = created["id"]
         print(f"config_id={config_id}")
         print(f"address={created.get('address')} kind={created.get('address_kind')}")
         print(f"status={created.get('status')} version={created.get('version')}")
+        print(f"assignment_status={created.get('assignment_status')}")
+        if created.get("idempotent_replay"):
+            print("idempotent_replay=True (config already existed; not recreated)")
 
-        blockers = [
-            c["key"]
-            for c in (created.get("readiness") or {}).get("checks", [])
-            if not c.get("passed")
-        ]
+        readiness = created.get("readiness") or {}
+        blockers = list(readiness.get("blockers") or [])
         print(f"readiness_blockers={','.join(blockers) if blockers else 'none'}")
 
         if args.activate:
             if blockers:
-                print("not activating: readiness blockers above must clear first")
-                return 1
+                # set_lifecycle re-reads readiness inside its own transaction
+                # after driving the base campaign to running, so some of these
+                # clear on the way. Report them and let it decide.
+                print(f"attempting activation despite: {','.join(blockers)}")
             try:
                 await service.set_lifecycle(
                     tenant_id=args.tenant_id,
