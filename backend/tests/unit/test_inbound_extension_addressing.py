@@ -398,22 +398,152 @@ def test_junk_ani_is_still_treated_as_no_identity():
 
 # ── the DID-only routing config must refuse an extension explicitly ──────────
 
-def test_the_inbound_routing_config_refuses_an_extension_with_a_usable_reason():
-    """normalize_did now canonicalises "ext:940003" too, so an extension can
-    reach the inbound config service. That service writes a tenant_phone_numbers
-    row and an inbound_did_assignments row whose CHECK requires E.164, so it
-    must refuse up front — not fail on a constraint three layers down where the
-    operator sees a database error instead of an instruction.
+def test_create_accepts_an_extension_while_the_other_did_paths_still_refuse():
+    """A routing config may now be ADDRESSED by an extension.
+
+    create_campaign branches on address kind. The two paths that remain
+    DID-only -- changing an existing config's number, and the DID availability
+    check -- still refuse, because neither has an extension equivalent yet.
     """
     import inspect
 
     from app.domain.services import inbound_campaign_service as svc
 
     source = inspect.getsource(svc)
-    assert source.count('code="extension_not_a_did"') == 3, (
-        "all three DID entry points (create, update, availability) must refuse "
-        "an extension address"
+    assert source.count('code="extension_not_a_did"') == 2, (
+        "create_campaign now accepts an extension; update and did_availability "
+        "must still refuse one"
     )
-    for fn in ("create_campaign", "did_availability"):
-        body = inspect.getsource(getattr(svc.InboundCampaignService, fn))
-        assert "is_extension_address" in body, fn
+    create = inspect.getsource(svc.InboundCampaignService.create_campaign)
+    assert "extension_not_a_did" not in create
+    assert "parse_extension(did)" in create
+    assert "_assert_extension_owned_by_trunk" in create
+    assert "_assert_extension_free" in create
+    assert "extension_not_a_did" in inspect.getsource(
+        svc.InboundCampaignService.did_availability
+    )
+
+
+def test_an_extension_is_owned_by_the_trunk_that_registers_it():
+    """The ownership gate, and the same predicate the router enforces at call
+    time. Without it a binding could be created that could never route."""
+    import asyncio
+
+    from app.domain.services.inbound_campaign_service import (
+        InboundCampaignService,
+        InboundConflictError,
+    )
+
+    ok = {"auth_username": "940003", "metadata": {"register": True}}
+    asyncio.run(
+        InboundCampaignService._assert_extension_owned_by_trunk(ok, extension="940003")
+    )
+
+    wrong_account = {"auth_username": "940009", "metadata": {"register": True}}
+    with pytest.raises(InboundConflictError) as err:
+        asyncio.run(
+            InboundCampaignService._assert_extension_owned_by_trunk(
+                wrong_account, extension="940003"
+            )
+        )
+    assert err.value.code == "extension_not_on_trunk"
+
+    not_registering = {"auth_username": "940003", "metadata": {}}
+    with pytest.raises(InboundConflictError) as err:
+        asyncio.run(
+            InboundCampaignService._assert_extension_owned_by_trunk(
+                not_registering, extension="940003"
+            )
+        )
+    assert err.value.code == "extension_trunk_not_registering"
+
+
+def test_extension_uniqueness_is_global_like_the_carrier_namespace():
+    """_assert_extension_free must have NO tenant predicate, exactly like
+    _assert_did_free. A carrier account is one login: exactly one tenant may
+    answer it, and tenant_sip_trunks has no unique index on auth_username."""
+    import inspect
+
+    from app.domain.services.inbound_campaign_service import InboundCampaignService
+
+    body = inspect.getsource(InboundCampaignService._assert_extension_free)
+    assert "WHERE extension = $1" in body
+    assert "status <> 'archived'" in body
+    assert "tenant_id = $" not in body, "global by design"
+
+
+def test_the_bundle_makes_an_extension_config_visible_and_unambiguous():
+    """An extension config has no tenant_phone_numbers row. With an INNER JOIN
+    it returned zero rows, so get/list/readiness all reported it missing."""
+    import inspect
+
+    from app.domain.services import inbound_campaign_service as svc
+
+    sql = svc._BUNDLE_SQL
+    assert "LEFT JOIN tenant_phone_numbers pn" in sql
+    assert "COALESCE('ext:' || a.extension, a.canonical_did) AS address" in sql
+    assert "AS address_kind" in sql
+    assert "st.auth_username AS trunk_auth_username" in sql
+    # ambiguity is measured against the same KIND of address
+    assert "conflict.extension = a.extension" in sql
+    assert "conflict.canonical_did = a.canonical_did" in sql
+
+    readiness = inspect.getsource(svc.InboundCampaignService._readiness)
+    assert 'bundle.get("address_kind") == "extension"' in readiness
+    assert "trunk_auth_username" in readiness
+
+
+# ── the API boundary ─────────────────────────────────────────────────────────
+
+def test_campaign_creation_accepts_either_address_kind():
+    from app.api.v1.schemas.inbound_campaigns import _normalize_inbound_address
+
+    assert _normalize_inbound_address("+442046132300") == "+442046132300"
+    assert _normalize_inbound_address("ext:940003") == "ext:940003"
+    assert _normalize_inbound_address(" EXT:940003 ") == "ext:940003"
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        "940003",        # untagged: the tag is what makes it an extension
+        "ext:94",        # too short
+        "ext:940003111",  # that length is a phone number, not an extension
+        "+94",           # too short for E.164
+        "ext:",
+        "nonsense",
+    ],
+)
+def test_campaign_creation_still_refuses_everything_else(bad):
+    import pytest as _pytest
+
+    from app.api.v1.schemas.inbound_campaigns import _normalize_inbound_address
+
+    with _pytest.raises(ValueError):
+        _normalize_inbound_address(bad)
+
+
+def test_the_paths_with_no_extension_equivalent_stay_strict_e164():
+    """Changing an existing config's number and the DID availability check have
+    no extension equivalent yet, so they must not quietly start accepting one."""
+    from app.api.v1.schemas.inbound_campaigns import InboundDidAssignmentRequest
+
+    with pytest.raises(Exception):
+        InboundDidAssignmentRequest(
+            did_number="ext:940003", sip_trunk_id="x", expected_version=1
+        )
+    ok = InboundDidAssignmentRequest(
+        did_number="+442046132300", sip_trunk_id="x", expected_version=1
+    )
+    assert ok.did_number == "+442046132300"
+
+
+def test_the_response_can_describe_an_extension_addressed_config():
+    """did_number is NULL for an extension, so the model must allow it or every
+    read of such a config fails response validation."""
+    from app.api.v1.schemas.inbound_campaigns import InboundCampaignResponse
+
+    fields = InboundCampaignResponse.model_fields
+    assert fields["did_number"].is_required() is False
+    for extra in ("address", "address_kind", "extension"):
+        assert extra in fields, extra

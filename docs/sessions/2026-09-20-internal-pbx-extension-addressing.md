@@ -278,3 +278,45 @@ The inbound routing config itself is still DID-only: `create_campaign` requires
 extension address — so a tenant with no public number can have an inbound
 campaign at all — is the next increment. This pass made that possible by fixing
 the storage model underneath it; it did not deliver it.
+
+## Fourth pass: the routing config carries its own extension address (2026-09-21)
+
+The gap this closes: a tenant with no public phone number could not have an
+inbound campaign at all, because a routing config was keyed to a DID.
+
+**The blocker was invisible, not hard.** `_BUNDLE_SQL` INNER JOINed
+`tenant_phone_numbers` on `a.phone_number_id`. An extension assignment has none,
+so the lateral found the row and the join then threw it away — `_load_bundle`
+raised `InboundNotFoundError`, and `get_campaign`, `readiness` and
+`list_campaigns` all reported a config that plainly existed as missing. One
+outer join fixes it; with the two-table design it would have been a rewrite.
+
+**Changes**
+
+| Where | Change |
+|---|---|
+| `_BUNDLE_SQL` | `LEFT JOIN tenant_phone_numbers`; exposes `address`, `address_kind`, `extension`, `trunk_auth_username`; ambiguity measured against the same address kind |
+| `_readiness` | the ownership gate branches: a DID proves ownership with a verified phone row, an extension with the trunk that registers it. Never made to pass unconditionally |
+| `create_campaign` | branches on address kind; everything address-agnostic (idempotency, direction lock, checksum, versioning, audit) stays on one path |
+| `_assert_extension_owned_by_trunk` | new — `st.auth_username` must equal the digits AND registration must be enabled. Same predicate the router enforces at call time, so a binding that could never route cannot be created |
+| `_assert_extension_free` | new — friendly mirror of `uq_inbound_live_extension`. Deliberately NO tenant predicate, exactly like `_assert_did_free`: a carrier account is one login |
+| `_serialize_bundle` | adds `address` / `address_kind` / `extension`; `did_number` stays the public number and is NULL for an extension |
+| API schema | creation accepts either canonical form; the response's `did_number` becomes nullable |
+
+**What deliberately did NOT change.** Changing an existing config's number and
+the DID availability check still refuse an extension with
+`code="extension_not_a_did"` — neither has an extension equivalent yet, and
+`InboundDidAssignmentRequest` still validates strict E.164. Proven directly,
+not assumed.
+
+**A test was rewritten, not deleted.** It asserted three code paths refuse an
+extension. Creation now accepts one, so it asserts the current invariant:
+creation accepts, the other two refuse, and the new ownership and uniqueness
+guards exist.
+
+```text
+backend/.venv/Scripts/python -m pytest tests/unit tests/security -q
+  -> 9018 passed, 8 skipped   (service layer)
+  -> 9027 passed, 8 skipped in 337.22s   (with the API boundary)
+ruff check app/ --select F --extend-ignore F401,F841 -> All checks passed!
+```

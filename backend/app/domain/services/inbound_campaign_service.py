@@ -26,7 +26,10 @@ from app.domain.services.campaign_direction_guard import (
 )
 from app.domain.services.telephony.business_hours import evaluate_business_hours
 from app.domain.services.telephony.inbound_overrides import validate_qualification_overrides
-from app.domain.services.telephony.inbound_address import is_extension_address
+from app.domain.services.telephony.inbound_address import (
+    is_extension_address,
+    parse_extension,
+)
 from app.domain.services.telephony.inbound_router import (
     is_active_inbound_campaign_status,
     normalize_did,
@@ -271,6 +274,10 @@ _BUNDLE_SQL = """
         a.phone_number_id,
         a.sip_trunk_id,
         a.canonical_did,
+        a.extension,
+        CASE WHEN a.extension IS NOT NULL THEN 'extension' ELSE 'did' END
+            AS address_kind,
+        COALESCE('ext:' || a.extension, a.canonical_did) AS address,
         a.status AS assignment_status,
         a.version AS assignment_version,
         a.status_before_quarantine,
@@ -279,6 +286,7 @@ _BUNDLE_SQL = """
         pn.status AS phone_status,
         pn.verified_at,
         st.trunk_name AS sip_trunk_name,
+        st.auth_username AS trunk_auth_username,
         st.direction AS trunk_direction,
         st.is_active AS trunk_active,
         st.metadata AS trunk_metadata,
@@ -288,9 +296,14 @@ _BUNDLE_SQL = """
         EXISTS (
             SELECT 1
             FROM inbound_did_assignments conflict
-            WHERE conflict.canonical_did = a.canonical_did
-              AND conflict.status = 'active'
+            WHERE conflict.status = 'active'
               AND conflict.id <> a.id
+              AND (
+                    (a.canonical_did IS NOT NULL
+                     AND conflict.canonical_did = a.canonical_did)
+                 OR (a.extension IS NOT NULL
+                     AND conflict.extension = a.extension)
+              )
         ) AS active_did_conflict,
         (
             SELECT MAX(call_row.created_at)
@@ -309,7 +322,7 @@ _BUNDLE_SQL = """
                  candidate.created_at DESC
         LIMIT 1
     ) a ON TRUE
-    JOIN tenant_phone_numbers pn
+    LEFT JOIN tenant_phone_numbers pn
       ON pn.id = a.phone_number_id AND pn.tenant_id = a.tenant_id
     JOIN tenant_sip_trunks st
       ON st.id = a.sip_trunk_id AND st.tenant_id = a.tenant_id
@@ -646,16 +659,36 @@ class InboundCampaignService:
                 else "Choose the cascaded or realtime voice pipeline."
             ),
         )
-        add(
-            "did_verified",
-            "DID ownership verified",
-            bundle.get("phone_status") == "verified",
-            (
-                "DID is verified."
-                if bundle.get("phone_status") == "verified"
-                else "DID is not verified."
-            ),
-        )
+        # The ownership gate. A public DID proves ownership with a verified
+        # tenant_phone_numbers row. An internal extension has none: it is proven
+        # by the trunk that registers it, which is exactly the predicate the
+        # router and the reconciler use (st.auth_username = the digits). This
+        # must never be made to pass unconditionally for extensions.
+        if bundle.get("address_kind") == "extension":
+            extension = str(bundle.get("extension") or "")
+            trunk_account = str(bundle.get("trunk_auth_username") or "")
+            owns_address = bool(extension) and trunk_account == extension
+            add(
+                "did_verified",
+                "Address ownership verified",
+                owns_address,
+                (
+                    f"Extension {extension} is registered by this tenant's trunk."
+                    if owns_address
+                    else "The bound trunk does not register this extension."
+                ),
+            )
+        else:
+            add(
+                "did_verified",
+                "DID ownership verified",
+                bundle.get("phone_status") == "verified",
+                (
+                    "DID is verified."
+                    if bundle.get("phone_status") == "verified"
+                    else "DID is not verified."
+                ),
+            )
         trunk_runtime = evaluate_trunk_runtime(bundle)
         add(
             "trunk_ready",
@@ -998,7 +1031,13 @@ class InboundCampaignService:
             "version": int(bundle["config_version"]),
             "config_version": int(bundle["config_version"]),
             "config_checksum": bundle["config_checksum"],
+            # did_number stays the public number and is NULL for an extension,
+            # so no client mistakes an extension for a dialable phone number.
+            # address/address_kind are the address-agnostic pair.
             "did_number": bundle["canonical_did"],
+            "address": bundle.get("address"),
+            "address_kind": bundle.get("address_kind"),
+            "extension": bundle.get("extension"),
             "assignment_id": str(bundle["assignment_id"]),
             "assignment_status": bundle["assignment_status"],
             "assignment_version": int(bundle["assignment_version"]),
@@ -1078,7 +1117,7 @@ class InboundCampaignService:
     async def _active_trunk(self, conn, *, tenant_id: str, trunk_id: str) -> Mapping[str, Any]:
         row = await conn.fetchrow(
             """
-            SELECT id, trunk_name, direction, is_active
+            SELECT id, trunk_name, direction, is_active, auth_username, metadata
             FROM tenant_sip_trunks
             WHERE tenant_id = $1 AND id = $2
             """,
@@ -1147,6 +1186,74 @@ class InboundCampaignService:
                 code="did_assignment_conflict",
             )
 
+    @staticmethod
+    async def _assert_extension_owned_by_trunk(
+        trunk: Mapping[str, Any], *, extension: str
+    ) -> None:
+        """An extension is owned by the trunk that registers it, nothing else.
+
+        A DID proves ownership with a verified ``tenant_phone_numbers`` row. An
+        extension has none, so the proof is that this tenant's chosen trunk
+        logs in to the carrier AS those digits. This is the same predicate the
+        router and the reconciler enforce at call time
+        (``st.auth_username = <digits>``); checking it here means a binding
+        cannot be created that could never route.
+        """
+        account = str(trunk.get("auth_username") or "").strip()
+        if account != extension:
+            raise InboundConflictError(
+                (
+                    f"The selected trunk registers carrier account "
+                    f"{account or '(none)'}, not extension {extension}. Choose "
+                    "the trunk for this extension."
+                ),
+                code="extension_not_on_trunk",
+            )
+        metadata = _json_obj(trunk.get("metadata"))
+        if not bool(metadata.get("register")):
+            raise InboundConflictError(
+                (
+                    "That trunk has registration disabled, so the carrier holds "
+                    "no contact for this extension and could never deliver a "
+                    "call to it."
+                ),
+                code="extension_trunk_not_registering",
+            )
+
+    async def _assert_extension_free(
+        self,
+        conn,
+        *,
+        extension: str,
+        exclude_assignment_id: Optional[str] = None,
+    ) -> None:
+        """Friendly mirror of ``uq_inbound_live_extension``.
+
+        Deliberately has NO tenant predicate, exactly like ``_assert_did_free``.
+        A carrier account namespace is global: ``940005`` is one login on the
+        carrier, so exactly one tenant may answer it. ``tenant_sip_trunks`` has
+        no unique index on ``auth_username``, so this and the partial unique
+        index are the only things standing between two tenants and one account.
+        """
+        row = await conn.fetchrow(
+            """
+            SELECT id, tenant_id, status
+            FROM inbound_did_assignments
+            WHERE extension = $1
+              AND status <> 'archived'
+              AND ($2::uuid IS NULL OR id <> $2::uuid)
+            ORDER BY created_at
+            LIMIT 1
+            """,
+            extension,
+            exclude_assignment_id,
+        )
+        if row:
+            raise InboundConflictError(
+                "Extension already has a live assignment",
+                code="did_assignment_conflict",
+            )
+
     DEFAULT_CONCURRENCY_POLICY_NAME = "inbound-default"
 
     async def _ensure_default_concurrency_policy(self, conn, *, tenant_id, actor_id) -> bool:
@@ -1194,22 +1301,14 @@ class InboundCampaignService:
         campaign_id = _uuid(str(payload.get("campaign_id")), "campaign_id")
         trunk_id = _uuid(str(payload.get("sip_trunk_id")), "sip_trunk_id")
         did = normalize_did(str(payload.get("did_number") or ""))
-        if did and is_extension_address(did):
-            # normalize_did also canonicalises internal PBX extensions
-            # ("ext:940003") now. This routing config is DID-only: it writes a
-            # tenant_phone_numbers row and an inbound_did_assignments row whose
-            # CHECK requires E.164. Reject with a reason an operator can act on
-            # rather than failing on a constraint three layers down. Extensions
-            # are bound on the same table through its `extension` column instead.
-            raise InboundCampaignError(
-                "An internal PBX extension cannot be used as this campaign's "
-                "number. Create the routing config on a public DID, then bind "
-                "the extension to it.",
-                code="extension_not_a_did",
-                status_code=422,
-            )
         if not did:
             raise InboundCampaignError("Invalid DID", code="invalid_did", status_code=422)
+        # One config, two kinds of address. A public DID proves ownership with a
+        # verified tenant_phone_numbers row; an internal PBX extension has none
+        # and is proven by the trunk that registers it. Everything else on this
+        # path -- idempotency, the direction lock, the checksum, versioning,
+        # audit -- is address-agnostic and is NOT duplicated.
+        extension_digits = parse_extension(did)
         timezone = _timezone(str(payload.get("timezone") or "UTC"))
         normalized = dict(payload)
         normalized.update(
@@ -1354,9 +1453,16 @@ class InboundCampaignService:
                     "Campaign already has an inbound configuration",
                     code="config_already_exists",
                 )
-            phone = await self._verified_phone(conn, tenant_id=tenant_id, did=did)
-            await self._active_trunk(conn, tenant_id=tenant_id, trunk_id=trunk_id)
-            await self._assert_did_free(conn, did=did)
+            trunk = await self._active_trunk(conn, tenant_id=tenant_id, trunk_id=trunk_id)
+            if extension_digits is not None:
+                phone = None
+                await self._assert_extension_owned_by_trunk(
+                    trunk, extension=extension_digits
+                )
+                await self._assert_extension_free(conn, extension=extension_digits)
+            else:
+                phone = await self._verified_phone(conn, tenant_id=tenant_id, did=did)
+                await self._assert_did_free(conn, did=did)
 
             checksum = _config_checksum(normalized)
             config = await conn.fetchrow(
@@ -1396,22 +1502,28 @@ class InboundCampaignService:
                     """
                     INSERT INTO inbound_did_assignments (
                         tenant_id, phone_number_id, campaign_id, config_id,
-                        sip_trunk_id, canonical_did, status, created_by, updated_by
+                        sip_trunk_id, canonical_did, extension,
+                        status, created_by, updated_by
                     )
-                    VALUES ($1, $2, $3, $4, $5, $6, 'paused', $7, $7)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, 'paused', $8, $8)
                     RETURNING id
                     """,
                     tenant_id,
-                    phone["id"],
+                    phone["id"] if phone else None,
                     campaign_id,
                     config["id"],
                     trunk_id,
-                    did,
+                    None if extension_digits else did,
+                    extension_digits,
                     actor_id,
                 )
             except asyncpg.UniqueViolationError as exc:
                 raise InboundConflictError(
-                    "DID already has a live assignment; use the reassignment workflow",
+                    (
+                        "Extension already has a live assignment"
+                        if extension_digits
+                        else "DID already has a live assignment; use the reassignment workflow"
+                    ),
                     code="did_assignment_conflict",
                 ) from exc
             await conn.execute(

@@ -9,6 +9,11 @@ from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from app.domain.services.telephony.inbound_address import (
+    canonical_extension,
+    parse_extension,
+)
+
 
 _E164_RE = re.compile(r"^\+[1-9]\d{6,14}$")
 
@@ -22,6 +27,32 @@ def _normalize_e164(value: str) -> str:
     if not _E164_RE.fullmatch(cleaned):
         raise ValueError("DID must be strict E.164 (+ followed by 7-15 digits)")
     return cleaned
+
+
+def _normalize_inbound_address(value: str) -> str:
+    """Accept either kind of address a routing config can be reached on.
+
+    A public DID stays strict E.164 -- that rule is not relaxed, it simply is
+    not the only option now. An internal PBX extension arrives as the tagged
+    canonical form ``ext:940003``. It is tagged so it can never be mistaken for
+    a dialable public number, and the tag is what tells the service which
+    ownership proof to demand: a verified phone-number row for a DID, or the
+    trunk that registers the account for an extension.
+
+    Only campaign CREATION takes an address. Changing an existing config's
+    number and the DID availability check stay strict E.164, because neither
+    has an extension equivalent yet.
+    """
+    cleaned = value.strip()
+    if _E164_RE.fullmatch(cleaned):
+        return cleaned
+    digits = parse_extension(cleaned)
+    if digits is not None:
+        return canonical_extension(digits)
+    raise ValueError(
+        "Address must be strict E.164 (+ followed by 7-15 digits) or an "
+        "internal extension (ext: followed by 3-8 digits)"
+    )
 
 
 class InboundCampaignCreateRequest(_StrictModel):
@@ -41,7 +72,7 @@ class InboundCampaignCreateRequest(_StrictModel):
     transfer_policy: dict[str, Any] = Field(default_factory=dict)
     qualification_config: dict[str, Any] = Field(default_factory=dict)
 
-    _did = field_validator("did_number")(_normalize_e164)
+    _did = field_validator("did_number")(_normalize_inbound_address)
 
     @field_validator("transfer_number")
     @classmethod
@@ -148,7 +179,12 @@ class InboundCampaignResponse(BaseModel):
     version: int
     config_version: int
     config_checksum: str
-    did_number: str
+    # NULL for an extension-addressed config: it has no public phone number.
+    # Read `address` / `address_kind` instead when the kind matters.
+    did_number: Optional[str] = None
+    address: Optional[str] = None
+    address_kind: Optional[Literal["did", "extension"]] = None
+    extension: Optional[str] = None
     assignment_id: str
     assignment_status: str
     assignment_version: int
