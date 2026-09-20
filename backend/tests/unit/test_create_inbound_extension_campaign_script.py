@@ -100,3 +100,13 @@ def test_script_is_executable_by_path_from_backend_directory():
     )
     assert result.returncode == 0, result.stderr
     assert "--extension" in result.stdout
+
+
+def test_the_after_hours_default_needs_no_extra_content():
+    """Defaulting to "voicemail" produced configs that could never activate: it
+    requires a non-empty business_hours.after_hours_message, and provisioning
+    supplied empty business hours. "hangup" is the API schema's own default and
+    requires nothing."""
+    source = inspect.getsource(maker)
+    assert 'default="hangup"' in source
+    assert 'default="voicemail"' not in source

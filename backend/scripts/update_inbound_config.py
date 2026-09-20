@@ -64,10 +64,15 @@ async def _run(args: argparse.Namespace) -> int:
             payload["greeting"] = args.greeting
         if args.after_hours_action is not None:
             payload["after_hours_action"] = args.after_hours_action
+        if args.business_hours_json is not None:
+            # Wholesale replacement, so a malformed schedule can be reset. An
+            # EMPTY object is explicitly 24/7; a non-empty one without
+            # weekly_schedule is malformed (business_hours._weekly_windows).
+            payload["business_hours"] = json.loads(args.business_hours_json)
         if args.after_hours_message is not None:
             # after_hours_message lives INSIDE business_hours, so the existing
             # object must be carried forward rather than replaced.
-            hours = dict(before.get("business_hours") or {})
+            hours = dict(payload.get("business_hours", before.get("business_hours") or {}))
             hours["after_hours_message"] = args.after_hours_message
             payload["business_hours"] = hours
         if args.transfer_number is not None:
@@ -118,6 +123,11 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument("--greeting", default=None)
     parser.add_argument("--after-hours-action", default=None)
     parser.add_argument("--after-hours-message", default=None)
+    parser.add_argument(
+        "--business-hours-json",
+        default=None,
+        help='replace business_hours wholesale; "{}" means 24/7',
+    )
     parser.add_argument("--transfer-number", default=None)
     parser.add_argument(
         "--expected-version",

@@ -173,7 +173,12 @@ def main(argv: Optional[list[str]] = None) -> int:
     )
     parser.add_argument("--business-hours", default=None, help="JSON object")
     parser.add_argument(
-        "--after-hours-action", default="voicemail",
+        # Matches InboundCampaignCreateRequest's own default. "voicemail"
+        # additionally requires a non-empty business_hours.after_hours_message,
+        # and defaulting to it produced configs that could never activate.
+        "--after-hours-action",
+        default="hangup",
+        choices=("hangup", "voicemail", "transfer"),
     )
     parser.add_argument("--transfer-number", default=None)
     parser.add_argument("--activate", action="store_true")

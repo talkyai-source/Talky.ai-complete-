@@ -19,7 +19,7 @@ def test_after_hours_message_is_merged_into_business_hours_not_replacing_it():
     """after_hours_message lives inside the business_hours object. Replacing
     that object wholesale would silently wipe the configured opening times."""
     source = inspect.getsource(editor._run)
-    assert 'hours = dict(before.get("business_hours") or {})' in source
+    assert 'payload.get("business_hours", before.get("business_hours") or {})' in source
     assert 'hours["after_hours_message"] = args.after_hours_message' in source
 
 
@@ -67,3 +67,29 @@ def test_the_expected_version_is_always_sent():
 def test_the_version_can_be_pinned_explicitly():
     source = inspect.getsource(editor.main)
     assert "--expected-version" in source
+
+
+def test_business_hours_can_be_replaced_wholesale_to_recover_a_malformed_one():
+    """An EMPTY business_hours object is explicitly 24/7 and valid. A non-empty
+    one without weekly_schedule is malformed -- which is what writing only an
+    after_hours_message into an empty object produced, blocking activation with
+    business_hours_valid. Replacement is how that is recovered."""
+    source = inspect.getsource(editor._run)
+    assert 'payload["business_hours"] = json.loads(args.business_hours_json)' in source
+    # and the message merge must build on the replacement, not the stale value
+    assert 'payload.get("business_hours", before.get("business_hours") or {})' in source
+
+
+def test_the_business_hours_contract_is_what_the_validator_actually_enforces():
+    from app.domain.services.telephony.business_hours import evaluate_business_hours
+
+    assert evaluate_business_hours("Europe/London", {}).valid is True
+    assert evaluate_business_hours("Europe/London", {"after_hours_message": "x"}).valid is False
+    full = {
+        "weekly_schedule": [
+            {"day": d, "enabled": True, "windows": [{"start": "00:00", "end": "23:59"}]}
+            for d in range(7)
+        ],
+        "after_hours_message": "x",
+    }
+    assert evaluate_business_hours("Europe/London", full).valid is True
