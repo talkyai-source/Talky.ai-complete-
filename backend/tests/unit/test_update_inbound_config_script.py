@@ -54,3 +54,16 @@ def test_script_is_executable_by_path_from_backend_directory():
     )
     assert result.returncode == 0, result.stderr
     assert "--after-hours-message" in result.stdout
+
+
+def test_the_expected_version_is_always_sent():
+    """update_campaign is optimistically concurrent and refuses without it, so
+    omitting it made every edit fail with expected_version_required."""
+    source = inspect.getsource(editor._run)
+    assert 'payload["expected_version"]' in source
+    assert 'before.get("version")' in source
+
+
+def test_the_version_can_be_pinned_explicitly():
+    source = inspect.getsource(editor.main)
+    assert "--expected-version" in source

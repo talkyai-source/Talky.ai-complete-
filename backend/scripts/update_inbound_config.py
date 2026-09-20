@@ -75,6 +75,12 @@ async def _run(args: argparse.Namespace) -> int:
         if not payload:
             raise SystemExit("nothing to change: pass at least one field")
         print(f"changing: {', '.join(sorted(payload))}")
+        # update_campaign is optimistically concurrent: it refuses without the
+        # version the caller believes it is editing, so a concurrent edit cannot
+        # be silently overwritten. Default to the version just read.
+        payload["expected_version"] = int(
+            args.expected_version or before.get("version") or 0
+        )
 
         try:
             after = await service.update_campaign(
@@ -113,6 +119,12 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument("--after-hours-action", default=None)
     parser.add_argument("--after-hours-message", default=None)
     parser.add_argument("--transfer-number", default=None)
+    parser.add_argument(
+        "--expected-version",
+        type=int,
+        default=None,
+        help="optimistic concurrency; defaults to the version just read",
+    )
     args = parser.parse_args(argv)
     return asyncio.run(_run(args))
 
