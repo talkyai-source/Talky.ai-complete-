@@ -320,3 +320,63 @@ backend/.venv/Scripts/python -m pytest tests/unit tests/security -q
   -> 9027 passed, 8 skipped in 337.22s   (with the API boundary)
 ruff check app/ --select F --extend-ignore F401,F841 -> All checks passed!
 ```
+
+## Provisioning run (2026-09-21) — what worked, and two bugs of mine
+
+Deployed `d32e0303`; migration 0046 applied (251 MB backup taken first). Verified
+on the live database: all three constraints, both extension indexes, `extension`
+column added, `canonical_did`/`phone_number_id` now nullable, 3 existing rows
+untouched and still addressed by DID.
+
+**All four extensions are live on the carrier.** 940003–940006 created, marked
+`metadata.role=extension`, activated and REGISTERED (expiry counting down from
+3600 s). The owner's password pattern is confirmed correct — every new account
+authenticated first time. Outbound routing was byte-identical before and after:
+each tenant still has its shared trunk active and the one running campaign never
+moved. That is the `is_internal_extension` guard doing exactly its job.
+
+### Two bugs in my own ops scripts
+
+1. **`psqlb() { ... </dev/null; }` silently ate a heredoc.** The step that opens
+   the readiness gates on the two blocked tenants produced no output and no
+   error, and both tenants still fail every gate. Redirecting stdin from
+   /dev/null is right for `-c` invocations and fatal for heredoc input.
+2. **Stale table references survived the two-table → one-table redesign.** The
+   precondition in three ops scripts still probed for
+   `inbound_extension_assignments`, so provisioning refused to start. It failed
+   closed, which is the correct direction, but I had not re-read those scripts
+   after changing the design. Fixed on the server, with backups kept.
+
+A third, earlier: I reported `deploy_0046.sh` as updated when the replacement had
+silently failed to match, because I asserted nothing. Cosmetic (a post-migration
+read-back), but it is the same class of mistake — trusting a script's own success
+message instead of verifying the artefact.
+
+### The binding rule I had wrong
+
+`uq_inbound_live_config_assignment` allows ONE live assignment per config. The
+AllStateEstimation.co config already answers `+442046132300`, so an extension
+cannot share it. One config carries one address — which also matches the owner's
+approved table, where each account gets its own campaign. So each extension needs
+its own config, which is exactly what `create_campaign` can now build.
+
+### New entry point
+
+`scripts/create_inbound_extension_campaign.py` creates an extension-addressed
+config through `InboundCampaignService.create_campaign` — the same path the API
+uses — so it inherits idempotency (deterministic key per tenant+extension), the
+direction lock, checksum, versioning, audit, the trunk-ownership check and global
+uniqueness. It refuses to invent a base campaign: a campaign carries the agent's
+prompt, voice and goal, which are product decisions, not provisioning defaults.
+
+### Blocked on the owner
+
+AllState COnstructions.us and Blaze DigiTel have **no base inbound campaign at
+all**, so there is nothing to attach a config to. They need one created in the app
+(wizard step 1 only — prompt and voice; stop before the number step).
+
+```text
+backend/.venv/Scripts/python -m pytest tests/unit tests/security -q
+  -> 9038 passed, 8 skipped in 500.84s
+ruff check app/ scripts/create_inbound_extension_campaign.py -> All checks passed!
+```
