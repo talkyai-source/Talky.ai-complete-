@@ -61,6 +61,17 @@ _BATCH_SIZE = int(os.getenv("KNOWLEDGE_ENRICH_BATCH", "8"))
 _TOKENS_PER_NODE = int(os.getenv("KNOWLEDGE_ENRICH_TOKENS_PER_NODE", "200"))
 _TOKENS_FLOOR = 1024
 _TOKENS_CEILING = 8192
+# A heading with no body under it -- a parent in the tree, or a one-line source
+# line -- has nothing to summarise. Sending it anyway spends a request, returns
+# nothing usable, and on a strict json_object endpoint often fails outright,
+# which then looks in the log exactly like a real enrichment failure. On a
+# 27-section document that was 7 wasted calls and 7 misleading warnings.
+_MIN_CONTENT_CHARS = int(os.getenv("KNOWLEDGE_ENRICH_MIN_CONTENT_CHARS", "40"))
+
+
+def _worth_enriching(node) -> bool:
+    """True if the node has enough body for a summary to mean anything."""
+    return len((getattr(node, "content", "") or "").strip()) >= _MIN_CONTENT_CHARS
 
 
 def _max_tokens_for(batch_size: int) -> int:
@@ -120,11 +131,25 @@ async def enrich_nodes(nodes: List[ParsedNode]) -> List[NodeEnrichment]:
         return out
     client = AsyncGroq(api_key=keys[0])
 
-    for start in range(0, len(nodes), _BATCH_SIZE):
-        batch = nodes[start:start + _BATCH_SIZE]
+    # Index the nodes worth sending, keeping their ORIGINAL positions so each
+    # enrichment still lands on the right node. Headings with no body keep the
+    # empty enrichment they were initialised with.
+    candidates = [(i, n) for i, n in enumerate(nodes) if _worth_enriching(n)]
+    skipped = len(nodes) - len(candidates)
+    if skipped:
+        logger.info(
+            "knowledge enrich: %d of %d section(s) have no body to summarise — "
+            "skipped, not failed", skipped, len(nodes),
+        )
+    if not candidates:
+        return out
+
+    for start in range(0, len(candidates), _BATCH_SIZE):
+        chunk = candidates[start:start + _BATCH_SIZE]
+        batch = [n for _, n in chunk]
         payload = [
-            {"i": start + j, "heading": n.heading, "content": n.content[:_CONTENT_CLIP]}
-            for j, n in enumerate(batch)
+            {"i": i, "heading": n.heading, "content": n.content[:_CONTENT_CLIP]}
+            for i, n in chunk
         ]
         try:
             resp = await client.chat.completions.create(
@@ -152,14 +177,14 @@ async def enrich_nodes(nodes: List[ParsedNode]) -> List[NodeEnrichment]:
             logger.warning(
                 "knowledge enrich batch [%d:%d] failed (%s) — retrying one node "
                 "at a time so a single bad response does not lose the batch",
-                start, start + len(batch), exc,
+                start, start + len(chunk), exc,
             )
             # A batch failure is usually ONE malformed section dragging the
             # whole response down. Retrying singly recovers the rest instead of
             # discarding every node in the batch.
-            for j, node in enumerate(batch):
+            for node_index, node in chunk:
                 single = [{
-                    "i": start + j,
+                    "i": node_index,
                     "heading": node.heading,
                     "content": node.content[:_CONTENT_CLIP],
                 }]

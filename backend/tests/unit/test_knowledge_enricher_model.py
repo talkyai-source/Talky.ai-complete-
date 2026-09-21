@@ -99,4 +99,58 @@ def test_a_failed_batch_is_retried_one_node_at_a_time():
         Path(enricher.__file__).resolve()
     ).read_text(encoding="utf-8")
     assert "retrying one node" in source
-    assert "for j, node in enumerate(batch):" in source
+    assert "for node_index, node in chunk:" in source
+
+
+# --------------------------------------------------------------------------
+# Body-less sections
+# --------------------------------------------------------------------------
+
+
+class _Node:
+    def __init__(self, heading, content):
+        self.heading = heading
+        self.content = content
+
+
+def test_a_heading_with_no_body_is_not_worth_enriching():
+    assert not enricher._worth_enriching(_Node("SECTION 1: COMPANY PROFILE", ""))
+    assert not enricher._worth_enriching(_Node("Source: example.co.uk", "n/a"))
+    assert not enricher._worth_enriching(_Node("Parent", "   \n  "))
+
+
+def test_a_section_with_real_content_is_worth_enriching():
+    body = "We cover residential, commercial and industrial estimating across the UK."
+    assert enricher._worth_enriching(_Node("Project Types", body))
+
+
+def test_the_threshold_is_tunable(monkeypatch):
+    import importlib
+
+    monkeypatch.setenv("KNOWLEDGE_ENRICH_MIN_CONTENT_CHARS", "1")
+    reloaded = importlib.reload(enricher)
+    try:
+        assert reloaded._worth_enriching(_Node("x", "ab"))
+    finally:
+        monkeypatch.delenv("KNOWLEDGE_ENRICH_MIN_CONTENT_CHARS", raising=False)
+        importlib.reload(enricher)
+
+
+def test_nothing_worth_enriching_makes_no_api_call():
+    import asyncio
+
+    nodes = [_Node("A", ""), _Node("B", "  ")]
+    out = asyncio.run(enricher.enrich_nodes(nodes))
+    # One empty enrichment per node, and it returned before touching the SDK.
+    assert len(out) == len(nodes)
+    assert all(e.summary == "" and not e.keywords for e in out)
+
+
+def test_enrichments_land_on_the_right_node_when_some_are_skipped():
+    # The trap in skipping: indexes shift. Enrichment i must still map to
+    # nodes[i], not to the i-th SENT node.
+    from pathlib import Path
+
+    source = Path(enricher.__file__).read_text(encoding="utf-8")
+    assert "keeping their ORIGINAL positions" in source
+    assert "for node_index, node in chunk:" in source
