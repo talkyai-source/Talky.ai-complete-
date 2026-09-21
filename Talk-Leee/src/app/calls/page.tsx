@@ -69,6 +69,13 @@ const DESKTOP_CALL_GRID =
 // supported desktop case.
 const DESKTOP_CALL_MIN_WIDTH = "min-w-[57.25rem]";
 
+// In-card scroll cap for a campaign's row list (CampaignSection): with 10+
+// calls, only the first 9 stay fully visible and the rest scroll inside the
+// card. Height is the SUM of the first 9 rows' real rendered heights (not
+// firstRowHeight × 9) because inbound/outbound rows differ in height.
+const CALL_HISTORY_ROWS_VISIBLE = 9;
+const CALL_HISTORY_ROW_GAP_PX = 8; // matches the rows list's `space-y-2` (0.5rem)
+
 const FAILED_CALL_OUTCOMES = new Set([
     "busy",
     "failed",
@@ -630,11 +637,57 @@ function CampaignSection({
 }) {
     const [open, setOpen] = useState(defaultOpen);
 
+    // Measure the first 9 rows' real rendered heights (inbound/outbound rows
+    // differ in height, so firstRowHeight × 9 would risk a half-cut row) and
+    // cap the rows list to that sum once there are 10+ calls in this card.
+    const rowRefs = useRef<(HTMLDivElement | null)[]>([]);
+    const scrollRef = useRef<HTMLDivElement | null>(null);
+    const [rowsMaxHeightPx, setRowsMaxHeightPx] = useState<number | null>(null);
+    const callsFingerprint = useMemo(() => group.calls.map((call) => call.id).join(","), [group.calls]);
+
+    useEffect(() => {
+        // Below 10 calls no cap applies (rowsScrollCapped below already
+        // gates on group.calls.length), so there's nothing to measure — skip
+        // without a synchronous setState here (a stale rowsMaxHeightPx value
+        // is harmless since rowsScrollCapped's length check ignores it).
+        if (group.calls.length < 10) return;
+        const measure = () => {
+            const visibleCount = Math.min(CALL_HISTORY_ROWS_VISIBLE, group.calls.length);
+            let sum = 0;
+            for (let i = 0; i < visibleCount; i += 1) {
+                const h = rowRefs.current[i]?.getBoundingClientRect().height;
+                if (!h || !Number.isFinite(h) || h <= 0) {
+                    // A row couldn't be measured — fall back to no cap rather
+                    // than clamp to a broken height.
+                    setRowsMaxHeightPx(null);
+                    return;
+                }
+                sum += h;
+            }
+            setRowsMaxHeightPx(Math.round(sum + CALL_HISTORY_ROW_GAP_PX * (visibleCount - 1)));
+        };
+        const raf = window.requestAnimationFrame(measure);
+        window.addEventListener("resize", measure, { passive: true });
+        return () => {
+            window.cancelAnimationFrame(raf);
+            window.removeEventListener("resize", measure);
+        };
+    }, [group.calls.length, callsFingerprint, open]);
+
+    // Reset scroll to the top when this card's own calls change underneath it
+    // (filter, search, direction, DID, campaign, or page) so a stale scroll
+    // offset never shows the wrong slice of the new list.
+    useEffect(() => {
+        if (scrollRef.current) scrollRef.current.scrollTop = 0;
+    }, [callsFingerprint]);
+
+    const rowsScrollCapped = group.calls.length >= 10 && rowsMaxHeightPx !== null;
+
     return (
         <motion.section
             initial={{ opacity: 0, y: 12 }}
             animate={{ opacity: 1, y: 0 }}
-            className="content-card overflow-hidden"
+            className="content-card call-history-card overflow-hidden"
         >
             <button
                 type="button"
@@ -681,7 +734,11 @@ function CampaignSection({
                             and each row just render the same grid template at the same
                             min-width. Below 768px both grids are `hidden`, so nothing
                             here overflows and no scrollbar appears; CallRow renders its
-                            stacked card instead. */}
+                            stacked card instead. The header stays a sibling of the rows
+                            list below (not nested inside it), so it never enters the
+                            rows list's own vertical scroll and needs no `position:
+                            sticky` to stay visible — it only ever scrolls horizontally,
+                            together with the rows, via this shared ancestor. */}
                         <div className="mt-4 overflow-x-auto">
                             <div data-call-grid="header" className={`hidden ${DESKTOP_CALL_MIN_WIDTH} md:grid ${DESKTOP_CALL_GRID} gap-2 px-3 pb-2 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground whitespace-nowrap`}>
                                 <div>Phone <span className="text-[10px] font-medium normal-case tracking-normal">/ Duration</span></div>
@@ -695,16 +752,26 @@ function CampaignSection({
                                 <div className="text-center">AI Script <span className="text-[10px] font-medium normal-case tracking-normal">/ Form</span></div>
                                 <div className="text-right">Actions</div>
                             </div>
-                            <div className="space-y-2 md:mt-0">
-                                {group.calls.map((call) => (
-                                    <CallRow
+                            <div
+                                ref={scrollRef}
+                                data-call-grid="rows-scroll"
+                                className={`space-y-2 md:mt-0 ${rowsScrollCapped ? "overflow-y-auto overscroll-contain pr-1" : ""}`}
+                                style={rowsScrollCapped ? { maxHeight: rowsMaxHeightPx ?? undefined } : undefined}
+                            >
+                                {group.calls.map((call, index) => (
+                                    <div
                                         key={call.id}
-                                        call={call}
-                                        canPlayMedia={canPlayMedia}
-                                        workflow={workflow[call.id] ?? defaultCallHistoryWorkflow(call)}
-                                        onWorkflowChange={onWorkflowChange}
-                                        onReview={onReview}
-                                    />
+                                        data-call-row={call.id}
+                                        ref={index < CALL_HISTORY_ROWS_VISIBLE ? (el: HTMLDivElement | null) => { rowRefs.current[index] = el; } : undefined}
+                                    >
+                                        <CallRow
+                                            call={call}
+                                            canPlayMedia={canPlayMedia}
+                                            workflow={workflow[call.id] ?? defaultCallHistoryWorkflow(call)}
+                                            onWorkflowChange={onWorkflowChange}
+                                            onReview={onReview}
+                                        />
+                                    </div>
                                 ))}
                             </div>
                         </div>
