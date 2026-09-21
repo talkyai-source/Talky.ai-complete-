@@ -466,19 +466,27 @@ export function SipTrunksList() {
     return (
         <Card>
             <CardHeader>
-                <div className="flex items-center justify-between">
-                    <div>
-                        <CardTitle className="flex items-center gap-2">
-                            <ServerCog className="h-5 w-5" aria-hidden /> Local PBX / SIP Trunks
-                        </CardTitle>
-                        <CardDescription>
-                            Point Talk-Lee at your own Asterisk / FreeSWITCH / Kamailio trunk. Set a caller ID and tune
-                            DTMF, registration, proxy and SRTP under <strong>Advanced options</strong>. <strong>Test</strong>{" "}
-                            is an optional reachability probe; inbound service remains blocked until fresh live Asterisk
-                            endpoint or registration evidence appears.
-                        </CardDescription>
-                    </div>
-                    <Button onClick={openCreate} size="sm">
+                {/*
+                  * Below lg: stacked (title, full-width description, button bottom-right).
+                  * lg and up: button sits top-right on the title's row; description
+                  * spans the full width on the row below. DOM order is title,
+                  * description, button in both.
+                  */}
+                <div className="grid grid-cols-1 gap-y-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:gap-x-4 lg:gap-y-1.5">
+                    <CardTitle className="flex min-w-0 items-center gap-2 whitespace-nowrap text-[14px] sm:text-xl sm:leading-none lg:col-start-1 lg:row-start-1 lg:self-center">
+                        <ServerCog className="h-4 w-4 sm:h-5 sm:w-5" aria-hidden /> Local PBX / SIP Trunks
+                    </CardTitle>
+                    <CardDescription className="lg:col-span-2 lg:row-start-2">
+                        Point Talk-Lee at your own Asterisk / FreeSWITCH / Kamailio trunk. Set a caller ID and tune
+                        DTMF, registration, proxy and SRTP under <strong>Advanced options</strong>. <strong>Test</strong>{" "}
+                        is an optional reachability probe; inbound service remains blocked until fresh live Asterisk
+                        endpoint or registration evidence appears.
+                    </CardDescription>
+                    <Button
+                        onClick={openCreate}
+                        size="sm"
+                        className="h-8 justify-self-end lg:col-start-2 lg:row-start-1 lg:h-7 lg:gap-1.5 lg:self-center lg:px-2.5 lg:[&_svg]:size-3.5"
+                    >
                         <Plus className="mr-1 h-4 w-4" aria-hidden /> Add trunk
                     </Button>
                 </div>
