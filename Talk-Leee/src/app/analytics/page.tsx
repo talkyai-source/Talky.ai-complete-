@@ -393,10 +393,12 @@ export default function AnalyticsPage() {
                         initial={{ opacity: 0, y: 20 }}
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ delay: 0.6 }}
-                        className="rounded-2xl border border-border bg-muted/60 backdrop-blur-sm p-4 shadow-sm transition-[box-shadow] duration-150 ease-out hover:shadow-md"
+                        className="mb-16 rounded-2xl border border-border bg-muted/60 backdrop-blur-sm p-4 shadow-sm transition-[box-shadow] duration-150 ease-out hover:shadow-md"
                     >
                         <h3 className="text-lg font-semibold text-foreground mb-4">Breakdown</h3>
-                        <div className="overflow-x-hidden overflow-y-visible">
+                        {/* Table — 768px and up. Below 768px the stacked cards after it
+                            replace it; five columns cannot fit a phone-width card. */}
+                        <div className="hidden md:block overflow-x-hidden overflow-y-visible">
                             <table className="w-full table-fixed">
                                 <thead className="border-b border-border/60">
                                     <tr>
@@ -445,6 +447,45 @@ export default function AnalyticsPage() {
                                     ))}
                                 </tbody>
                             </table>
+                        </div>
+
+                        {/* Stacked cards — below 768px. One card per date; no hover or
+                            scale animation. The bottom margin on the card above keeps
+                            the last card clear of the fixed chat button. */}
+                        <div className="md:hidden">
+                            {data.length === 0 ? (
+                                <p className="py-8 text-center text-sm text-muted-foreground">No data for the selected period</p>
+                            ) : (
+                                <ul className="space-y-3" aria-label="Breakdown by date">
+                                    {data.map((item, index) => (
+                                        <li key={index} className="rounded-xl border border-border/60 bg-muted/40 p-3">
+                                            <div className="flex items-baseline justify-between gap-3">
+                                                <span className="min-w-0 break-words text-sm font-medium text-muted-foreground">{item.date}</span>
+                                                <span className="shrink-0 text-sm font-semibold text-foreground tabular-nums">
+                                                    <span className="mr-1.5 text-xs font-normal text-muted-foreground">Rate</span>
+                                                    {item.total_calls > 0
+                                                        ? `${Math.round((item.answered / item.total_calls) * 100)}%`
+                                                        : "--"}
+                                                </span>
+                                            </div>
+                                            <dl className="mt-3 grid grid-cols-3 gap-2 border-t border-border/60 pt-3">
+                                                <div className="min-w-0">
+                                                    <dt className="text-xs text-muted-foreground">Total</dt>
+                                                    <dd className="break-all text-sm font-semibold text-foreground tabular-nums">{item.total_calls}</dd>
+                                                </div>
+                                                <div className="min-w-0">
+                                                    <dt className="text-xs text-muted-foreground">Answered</dt>
+                                                    <dd className="break-all text-sm text-emerald-600 tabular-nums">{item.answered}</dd>
+                                                </div>
+                                                <div className="min-w-0">
+                                                    <dt className="text-xs text-muted-foreground">Failed</dt>
+                                                    <dd className="break-all text-sm text-red-600 tabular-nums">{item.failed}</dd>
+                                                </div>
+                                            </dl>
+                                        </li>
+                                    ))}
+                                </ul>
+                            )}
                         </div>
                     </motion.div>
                 </div>
