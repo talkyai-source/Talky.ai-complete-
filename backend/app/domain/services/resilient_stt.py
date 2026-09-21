@@ -78,7 +78,15 @@ class ReconnectPolicy:
     for voice (sub-second budgets)."""
     reconnect_timeout_seconds: float = 0.5
     max_reconnect_attempts: int = 1
-    audio_buffer_ms: int = 500
+    # Audio replayed into the fallback provider when the active one is
+    # declared dead. This MUST cover the watchdog window below, or the very
+    # speech that proved the stream was dead is the speech that gets thrown
+    # away: at 500ms against a 6s window, a caller who spoke for six seconds
+    # had 5.5s of it dropped and had to say everything again. 8s of 16kHz
+    # mono PCM is ~256KB per call, which is affordable.
+    audio_buffer_ms: int = int(
+        os.getenv("STT_REPLAY_BUFFER_MS", "8000")
+    )
     failure_threshold: int = 3
     recovery_timeout_seconds: float = 30.0
     # Seconds of VOICED caller audio with zero transcript events before the
@@ -89,7 +97,18 @@ class ReconnectPolicy:
     # audio) and against the re-greet ladder, which starts at 2.5s and is spent
     # by ~15s: firing at 6s salvages the call while the caller is still on the
     # line. Set to 0 to disable the watchdog entirely.
-    silent_stream_voiced_seconds: float = 6.0
+    #
+    # NOT wall-clock, but read the caveat above carefully: "a quiet caller
+    # never accumulates any of it" is true of a SILENT room, not a noisy one.
+    # The counter only ever adds, and steady room noise above the RMS gate
+    # never dips below it, so a fan or street noise walks the counter to 6s
+    # with nobody speaking and declares a perfectly healthy provider dead.
+    # That is what happened on 4 of 17 production sessions in the week to
+    # 2026-09-22. The gate below is the defence; this window is env-tunable so
+    # it can be widened without a deploy if that is ever not enough.
+    silent_stream_voiced_seconds: float = float(
+        os.getenv("STT_SILENT_VOICED_SECONDS", "6.0")
+    )
 
 
 @dataclass
@@ -131,7 +150,30 @@ def _chunk_duration_ms(chunk: AudioChunk) -> float:
 # line it emits: ">500=speech-likely, <100=silence-likely". Deliberately the
 # same number so the log a human reads while debugging and the number the code
 # acts on cannot drift apart.
+# What counts as "voiced" for the DESCRIPTIVE audio-level log: a low bar on
+# purpose, because that log is for humans reading a call afterwards.
 _SPEECH_RMS_THRESHOLD = 500.0
+
+# What counts as "voiced" for the WATCHDOG, which is load-bearing: crossing it
+# for long enough tears down a working provider mid-call.
+#
+# DELIBERATELY THE SAME VALUE, as a knob rather than a change. Raising it is
+# the obvious response to a false trip on room noise, and it is the wrong one:
+# on the 2026-09-22 session the caller really was saying "hello" into a stream
+# that answered nothing, and a higher gate would have delayed that rescue for
+# any softly-spoken caller. The fix for a false trip is to make failing over
+# cheap (see audio_buffer_ms), not to make the watchdog blind. Exposed as an
+# env knob so a specific noisy deployment can be handled without a deploy, and
+# so the next person reads this before reaching for it.
+_WATCHDOG_RMS_THRESHOLD = float(
+    os.getenv("STT_WATCHDOG_RMS_THRESHOLD", str(_SPEECH_RMS_THRESHOLD))
+)
+
+# How fast the voiced counter drains while the line is quiet, as a multiple of
+# real time. 1.0 means a second of quiet cancels a second of voice, so the
+# watchdog needs speech that is more than half voiced to make progress. 0.0
+# restores the old monotonic behaviour if a deployment ever needs it back.
+_WATCHDOG_DECAY_RATIO = float(os.getenv("STT_WATCHDOG_DECAY_RATIO", "1.0"))
 
 # Stride for the RMS estimate. A 40ms/16kHz frame is 640 samples; every 8th
 # sample is 80 multiply-adds per frame, ~2k/second per call. Speech energy is
@@ -229,11 +271,13 @@ class _SilentStreamWatchdog:
         self,
         *,
         voiced_seconds: float,
-        rms_threshold: float = _SPEECH_RMS_THRESHOLD,
+        rms_threshold: float = _WATCHDOG_RMS_THRESHOLD,
+        decay_ratio: float = _WATCHDOG_DECAY_RATIO,
         echo_tail_seconds: float = _ECHO_TAIL_S,
     ) -> None:
         self._voiced_needed_ms = max(0.0, voiced_seconds) * 1000.0
         self._rms_threshold = rms_threshold
+        self._decay_ratio = max(0.0, float(decay_ratio))
         self._enabled = voiced_seconds > 0
         self._echo_tail_ms = max(0.0, echo_tail_seconds) * 1000.0
         self.voiced_ms = 0.0
@@ -277,6 +321,20 @@ class _SilentStreamWatchdog:
 
         unattributable = muted or agent_speaking or self._tail_remaining_ms > 0.0
         if _chunk_rms(chunk) < self._rms_threshold:
+            # DECAY, not just "ignore". The counter used to be a monotonic sum
+            # reset only by a transcript, so it measured the total quiet-line
+            # energy a call had EVER contained: six seconds accumulated a
+            # hundred milliseconds at a time across several minutes tripped it
+            # exactly like six seconds of someone talking into a dead stream.
+            # On a line with a little constant hum that is a matter of when,
+            # not if, and it tears down a provider that was working.
+            #
+            # Draining on quiet makes the window mean what its name says:
+            # SUSTAINED voiced audio that got no answer. Real speech keeps the
+            # counter climbing, because an utterance is voiced far more often
+            # than not; an intermittently noisy line drains back to zero
+            # between bursts and never arrives.
+            self.voiced_ms = max(0.0, self.voiced_ms - duration_ms * self._decay_ratio)
             return False
         if unattributable:
             self.suppressed_ms += duration_ms
@@ -591,8 +649,16 @@ class ResilientSTTProvider(STTProvider):
                 yield past
             async for chunk in audio_stream:
                 if (
+                    # agent_speaking is NOT optional here. Without it this
+                    # counts our own TTS echo as caller speech -- the exact
+                    # 2026-08-18 false positive the primary path was fixed for
+                    # -- and since this signal is what tells us whether the
+                    # FALLBACK is also deaf, an echo-blind version quietly
+                    # lies in the one diagnostic used to judge the provider.
                     secondary_watchdog.observe_audio(
-                        chunk, muted=_provider_muted(self._secondary)
+                        chunk,
+                        muted=_provider_muted(self._secondary),
+                        agent_speaking=_agent_speaking(),
                     )
                     and not secondary_reported
                 ):

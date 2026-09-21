@@ -42,10 +42,16 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-# Longest we will hold a ready answer waiting for the caller to stop. Chosen
-# above a normal sentence but below the point where the caller thinks the line
-# has gone dead. On timeout we speak — see module docstring.
-_MAX_HOLD_S = 2.5
+# Longest we will hold a ready answer waiting for the caller to stop.
+#
+# Was a flat 2.5s. The acoustic release needs a quiet run to fire, and in a
+# room with continuous noise there is never a quiet run, so the hold ALWAYS ran
+# to the cap: a reply the model had ready in 393ms was sat on for 2.51s, and
+# the caller heard a 3-second gap (production, 2026-09-22). The cap is the
+# failure mode, not the release. 0.8s still covers a caller finishing a short
+# word over the top of us, while cutting the worst case by 1.7s. Env-tunable so
+# it can be moved without a deploy.
+_MAX_HOLD_S = float(os.getenv("VOICE_PRE_TTS_MAX_HOLD_S", "0.8"))
 
 # How often the hold re-checks. 20ms = one PCMU frame, so the hold cannot add
 # more than a single frame of latency beyond the caller actually stopping.
