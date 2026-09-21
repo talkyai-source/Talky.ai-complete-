@@ -352,6 +352,36 @@ def _fallback_agent_name(
 _DEFAULT_TENANT_PROMPT_MAX_CHARS = 12000  # ~3000 tokens at ~4 chars/token
 
 
+# A square-bracket slot left unfilled in campaign guidance. An author writing
+# a script naturally reaches for one ("Hi there — is that [name]?"), nothing
+# ever substitutes it, and the model does the obedient thing: it reads the line
+# with the slot empty. A real caller heard "Hi there — is that ?" as the very
+# first words of a call on 2026-09-22.
+#
+# Deliberately NARROW. It matches a short lower-case slot that reads like a
+# FIELD, which is the shape that gets spoken as a blank. It must not match a
+# stage direction like "[repeat email slowly]", which is an instruction to the
+# model and works fine, so multi-word slots containing a verb are left alone by
+# requiring at most two words.
+_UNFILLED_SLOT_RE = re.compile(r"\[[a-z][a-z_]{1,18}(?:[ _][a-z][a-z_]{1,18})?\]")
+
+# Slots that are unmistakably a value the agent would try to SAY.
+_SPOKEN_SLOT_HINTS = (
+    "name", "company", "first", "last", "email", "phone", "number",
+    "town", "city", "address", "date", "time", "price", "product",
+)
+
+
+def find_unfilled_slots(guidance: str) -> list:
+    """Square-bracket slots in campaign guidance that would be spoken blank."""
+    out = []
+    for match in _UNFILLED_SLOT_RE.findall(str(guidance or "")):
+        inner = match[1:-1].replace("_", " ")
+        if any(hint in inner for hint in _SPOKEN_SLOT_HINTS):
+            out.append(match)
+    return sorted(set(out))
+
+
 def _tenant_prompt_char_budget() -> int:
     raw = os.getenv("TELEPHONY_TENANT_PROMPT_MAX_CHARS")
     if not raw:
@@ -1401,6 +1431,18 @@ def build_telephony_session_config(
             - len(campaign_guidance_text(_tenant_additional_instructions, _campaign_brief)),
             len(system_prompt or ""),
         )
+        _slots = find_unfilled_slots(
+            campaign_guidance_text(_tenant_additional_instructions, _campaign_brief)
+        )
+        if _slots:
+            # WARNING, not a refusal: the call still works and the operator's
+            # own words are not ours to rewrite mid-call. But this is the only
+            # place it is visible before a caller hears the gap.
+            logger.warning(
+                "telephony_prompt_unfilled_slot campaign=%s slots=%s — the agent "
+                "will read these aloud as blanks; fill or remove them",
+                _campaign_id(campaign), ",".join(_slots),
+            )
     except PromptCompositionError as exc:
         # A slot-based persona with incomplete campaign_slots. Strict mode (the
         # default) fails loud so we never ship a half-filled prompt. Otherwise
