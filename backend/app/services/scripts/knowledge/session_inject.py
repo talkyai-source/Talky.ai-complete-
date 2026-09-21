@@ -45,6 +45,29 @@ def _row_get(row: Any, key: str) -> Optional[Any]:
     return getattr(row, key, None)
 
 
+def _log_setup(call_session, state: str, **fields: Any) -> None:
+    """One line per call saying whether the knowledge layer is wired, and why not.
+
+    Every refusal below used to be a silent ``return``, and a campaign in plain
+    ``retrieve`` mode logs nothing until a caller happens to ask a matching
+    question. So "is knowledge even switched on for this call?" could not be
+    answered from the logs at all -- only by reading the database. That gap is
+    what made a live knowledge complaint undiagnosable on 2026-09-22.
+
+    Greppable as ``KB_SETUP``. Never raises: this is diagnostics, not logic.
+    """
+    try:
+        detail = " ".join(f"{k}={v}" for k, v in fields.items() if v is not None)
+        logger.info(
+            "KB_SETUP call=%s %s %s",
+            str(getattr(call_session, "call_id", "?") or "?")[:8],
+            state,
+            detail,
+        )
+    except Exception:  # pragma: no cover - defensive
+        pass
+
+
 def apply_pinned_campaign_knowledge(call_session, snapshot: Any) -> None:
     """Apply the immutable knowledge captured by inbound admission.
 
@@ -52,24 +75,45 @@ def apply_pinned_campaign_knowledge(call_session, snapshot: Any) -> None:
     environment read.  ``enabled``, mode, metadata, and every retrievable node
     are all taken from the durable route snapshot created before Answer.
     """
-    if call_session is None or not isinstance(snapshot, dict):
+    if call_session is None:
+        return
+    if not isinstance(snapshot, dict):
+        _log_setup(call_session, "OFF", reason="no_snapshot", path="inbound")
         return
     if snapshot.get("enabled") is not True:
+        # pinned at admission from knowledge_enabled(), i.e. the env flag.
+        _log_setup(call_session, "OFF", reason="feature_flag_off", path="inbound")
         return
     mode = str(snapshot.get("mode") or "none").strip().lower()
     if mode not in ("inline", "map_retrieve", "retrieve"):
+        _log_setup(
+            call_session, "OFF", reason="knowledge_mode_none",
+            mode=mode, path="inbound",
+        )
         return
     nodes = [dict(node) for node in (snapshot.get("nodes") or []) if isinstance(node, dict)]
     tenant_id = str(snapshot.get("tenant_id") or "").strip()
     campaign_id = str(snapshot.get("campaign_id") or "").strip()
     if not tenant_id or not campaign_id:
+        _log_setup(
+            call_session, "OFF", reason="snapshot_incomplete", path="inbound",
+        )
         return
+    if not nodes:
+        _log_setup(
+            call_session, "WARN", reason="no_nodes_pinned",
+            configured=mode, campaign=campaign_id[:8], path="inbound",
+        )
 
     call_session.tenant_id = call_session.tenant_id or tenant_id
     call_session._knowledge_snapshot_nodes = nodes
     call_session._knowledge_snapshot_checksum = snapshot.get("checksum")
     call_session.knowledge_mode = "retrieve"
     if mode == "retrieve":
+        _log_setup(
+            call_session, "ON", effective="retrieve", configured=mode,
+            nodes=len(nodes), campaign=campaign_id[:8], path="inbound",
+        )
         return
 
     from app.services.scripts.knowledge.retrieval import compact_tree_from_nodes
@@ -82,6 +126,14 @@ def apply_pinned_campaign_knowledge(call_session, snapshot: Any) -> None:
     header = _MAP_HEADER if mode == "map_retrieve" else _INLINE_HEADER
     if _bake_inline_knowledge(call_session, tree, header, campaign_id, mode):
         call_session.knowledge_mode = mode
+    # Report what the call will ACTUALLY run, not what was configured. A bake
+    # that renders nothing leaves the session in retrieve, and a line claiming
+    # inline would send the next investigation the wrong way.
+    _log_setup(
+        call_session, "ON", effective=call_session.knowledge_mode,
+        configured=mode, nodes=len(nodes), campaign=campaign_id[:8],
+        path="inbound",
+    )
 
 
 async def apply_campaign_knowledge(call_session, campaign_row: Any, *, pool) -> None:
@@ -90,16 +142,29 @@ async def apply_campaign_knowledge(call_session, campaign_row: Any, *, pool) -> 
     No-op (leaves ``knowledge_mode`` None) when the feature flag is off, the
     campaign has no knowledge, or anything goes wrong. Never raises.
     """
-    if call_session is None or not knowledge_enabled():
+    if call_session is None:
+        return
+    if not knowledge_enabled():
+        _log_setup(
+            call_session, "OFF", reason="feature_flag_off", path="outbound",
+        )
         return
     try:
         mode = (_row_get(campaign_row, "knowledge_mode") or "none").strip().lower()
         if mode not in ("inline", "map_retrieve", "retrieve"):
-            return  # 'none' or unknown → no knowledge layer for this call
+            # 'none' or unknown → no knowledge layer for this call
+            _log_setup(
+                call_session, "OFF", reason="knowledge_mode_none",
+                mode=mode, path="outbound",
+            )
+            return
 
         tenant_id = _row_get(campaign_row, "tenant_id")
         campaign_id = _row_get(campaign_row, "id") or call_session.campaign_id
         if not (tenant_id and campaign_id and pool is not None):
+            _log_setup(
+                call_session, "OFF", reason="no_tenant_or_pool", path="outbound",
+            )
             return
         tenant_id, campaign_id = str(tenant_id), str(campaign_id)
 
@@ -116,6 +181,10 @@ async def apply_campaign_knowledge(call_session, campaign_row: Any, *, pool) -> 
 
         # retrieve → nothing to bake here (served per-turn, too large to inline).
         if mode == "retrieve":
+            _log_setup(
+                call_session, "ON", effective="retrieve", configured=mode,
+                campaign=campaign_id[:8], path="outbound",
+            )
             return
 
         # inline → whole tree; map_retrieve → skeleton (TOC).
@@ -137,6 +206,10 @@ async def apply_campaign_knowledge(call_session, campaign_row: Any, *, pool) -> 
                 "FALLING BACK to per-turn retrieve so the call still has knowledge: %s",
                 campaign_id[:12], mode, exc, exc_info=True,
             )
+            _log_setup(
+                call_session, "ON", effective="retrieve", configured=mode,
+                reason="bake_failed", campaign=campaign_id[:8], path="outbound",
+            )
             return
 
         if baked:
@@ -147,6 +220,14 @@ async def apply_campaign_knowledge(call_session, campaign_row: Any, *, pool) -> 
                 "campaign=%s — using per-turn retrieve instead (KB not lost)",
                 mode, campaign_id[:12],
             )
+        # Report the mode the call will ACTUALLY run in. Claiming the
+        # CONFIGURED mode here is how a bake that rendered nothing looked
+        # healthy in the log while the call ran on per-turn retrieval.
+        _log_setup(
+            call_session, "ON", effective=call_session.knowledge_mode,
+            configured=mode, baked=bool(baked), campaign=campaign_id[:8],
+            path="outbound",
+        )
     except Exception as exc:
         logger.warning("apply_campaign_knowledge failed (continuing without KB): %s", exc)
 

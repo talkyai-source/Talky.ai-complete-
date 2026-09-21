@@ -566,6 +566,15 @@ CEREBRAS_MODELS = [
         ),
         speed="269 ms p50 / 566 ms p95 (measured 2026-08-24)",
         price="~$0.35 in / $0.75 out per 1M tokens",
+        # Verified 2026-09-22 against the source the note above was waiting for:
+        # inference-docs.cerebras.ai/models/openai-oss and /models/overview give
+        # gpt-oss-120b as 65k context on the free tier and 131k on paid. The
+        # WEIGHTS carry 131,072 either way (OpenAI gpt-oss model card,
+        # arXiv:2508.10925; config.json max_position_embeddings=131072, the same
+        # for the 20b). We declare the FREE-TIER floor because this value must
+        # hold whatever billing state the key is in, and nothing in the product
+        # needs more: the live voice prompt is ~9.5k tokens.
+        context_window=65536,
         is_preview=False,
         provider="cerebras",
     ),

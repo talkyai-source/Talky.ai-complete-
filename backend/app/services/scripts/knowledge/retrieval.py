@@ -21,6 +21,7 @@ from difflib import SequenceMatcher
 from typing import List, Optional
 
 from app.core.db_utils import acquire_with_tenant
+from app.services.scripts.knowledge.budget import INLINE_BAKE_MAX_CHARS
 
 logger = logging.getLogger(__name__)
 _TOKEN_RE = re.compile(r"[a-z0-9]+")
@@ -283,7 +284,7 @@ async def compact_tree(
     campaign_id: str,
     *,
     skeleton_only: bool = False,
-    max_chars: int = 12000,
+    max_chars: int = INLINE_BAKE_MAX_CHARS,
 ) -> str:
     """Render enabled nodes as an indented outline for inline injection.
 
@@ -325,7 +326,7 @@ def compact_tree_from_nodes(
     rows: List[dict],
     *,
     skeleton_only: bool = False,
-    max_chars: int = 12000,
+    max_chars: int = INLINE_BAKE_MAX_CHARS,
     campaign_id: str = "pinned",
 ) -> str:
     """Render already-pinned rows without consulting mutable storage."""

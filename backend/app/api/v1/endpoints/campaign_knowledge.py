@@ -2,6 +2,14 @@
 
 Upload a .md/.txt knowledge doc for a campaign, view the parsed+enriched tree,
 edit/disable nodes, and remove a source. Behind CAMPAIGN_KNOWLEDGE_ENABLED.
+
+The model that ``choose_mode`` budgets against is resolved by ONE statement,
+``_KNOWLEDGE_BUDGET_MODEL_SQL``, shared by the two places that write
+``campaigns.knowledge_mode`` (publishing an upload and deleting a source).
+``campaigns.knowledge_model`` is an optional per-campaign override and is null
+for every campaign nothing has explicitly set it on, so reading it alone handed
+the budget no model at all and every decision fell back to an 8192-token
+window. The tenant's configured LLM is the fallback.
 All tenant-scoped: a campaign is only touchable by its owning tenant.
 """
 from __future__ import annotations
@@ -42,6 +50,18 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/campaigns", tags=["campaign-knowledge"])
 
 _MAX_UPLOAD_BYTES = int(os.getenv("KNOWLEDGE_MAX_UPLOAD_BYTES", str(10 * 1024 * 1024)))  # 10 MB
+
+# The model choose_mode() budgets against, resolved identically wherever
+# campaigns.knowledge_mode is written. See the module docstring for why the
+# per-campaign override alone is not enough.
+_KNOWLEDGE_BUDGET_MODEL_SQL = """
+SELECT COALESCE(
+    (SELECT c.knowledge_model FROM campaigns c
+      WHERE c.id = $1 AND c.tenant_id = $2),
+    (SELECT a.llm_model FROM tenant_ai_configs a
+      WHERE a.tenant_id = $2)
+)
+"""
 
 
 def _require_enabled() -> None:
@@ -261,8 +281,7 @@ async def upload_knowledge(
             mutate=True,
         ) as publish_lease:
             model = await publish_lease.conn.fetchval(
-                "SELECT knowledge_model FROM campaigns "
-                "WHERE id = $1 AND tenant_id = $2",
+                _KNOWLEDGE_BUDGET_MODEL_SQL,
                 campaign_id,
                 tenant_id,
             )
@@ -536,9 +555,12 @@ async def delete_source(
     )
     if not deleted:
         raise HTTPException(status_code=404, detail="Source not found")
+    # Same resolution as the upload path. These are the only two writers of
+    # campaigns.knowledge_mode, so if they budget against different models they
+    # disagree: deleting one source could demote a campaign the upload path had
+    # just promoted, with no source change to explain it.
     model = await conn.fetchval(
-        "SELECT knowledge_model FROM campaigns "
-        "WHERE id = $1 AND tenant_id = $2",
+        _KNOWLEDGE_BUDGET_MODEL_SQL,
         campaign_id,
         tenant_id,
     )
