@@ -21,7 +21,33 @@ from app.services.scripts.knowledge.md_tree import ParsedNode
 
 logger = logging.getLogger(__name__)
 
-_ENRICH_MODEL = os.getenv("KNOWLEDGE_ENRICH_MODEL", "llama-3.1-8b-instant")
+def _default_enrich_model() -> str:
+    """The Groq model to enrich with, taken from the canonical model menu.
+
+    This was hardcoded to ``llama-3.1-8b-instant``. That id started returning
+    404 on this account around 2026-08-17 and the voice path was moved off it
+    the same day, but the enricher was missed. Every upload since then had its
+    summaries, spoken answers, keywords and example questions silently dropped:
+    enrichment is fail-soft, so each batch logged a warning and the nodes were
+    published bare. Observed again on 2026-09-22.
+
+    Reading the menu means a model the product retires cannot leave this
+    pointing at something that no longer exists. Falls back to the id the
+    product runs today only if the menu cannot be read at all.
+    """
+    try:
+        from app.domain.models.ai_config import GROQ_MODELS
+
+        for entry in GROQ_MODELS:
+            model_id = str(getattr(entry, "id", "") or "").strip()
+            if model_id:
+                return model_id
+    except Exception:  # pragma: no cover - defensive
+        pass
+    return "openai/gpt-oss-20b"
+
+
+_ENRICH_MODEL = os.getenv("KNOWLEDGE_ENRICH_MODEL", "").strip() or _default_enrich_model()
 _BATCH_SIZE = int(os.getenv("KNOWLEDGE_ENRICH_BATCH", "25"))
 # Chars of node content sent to the enricher. This was 600, which truncated
 # every node to just the TOP of the section, so keywords/voice_answer NEVER
