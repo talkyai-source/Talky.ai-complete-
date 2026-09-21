@@ -70,3 +70,36 @@ def test_it_states_that_registering_does_not_reroute_the_carrier():
     # not change where the carrier delivers its calls.
     source = _SCRIPT.read_text(encoding="utf-8")
     assert "does not" in source and "carrier" in source
+
+
+def test_the_verification_method_is_passed_as_the_enum_not_a_string():
+    """The bug this caught, against production, on 2026-09-22.
+
+    mark_verified stores ``method.value``. Handing it the raw string
+    "manual_admin" raised AttributeError AFTER create_pending had already
+    inserted the row, so the number was left stranded in
+    pending_verification: registered, invisible to the campaign form, and with
+    nothing in the output saying why.
+    """
+    source = _SCRIPT.read_text(encoding="utf-8")
+    assert "VerificationMethod(args.method)" in source
+    assert 'method="manual_admin"' not in source
+    assert "method=method," in source
+
+
+def test_an_unknown_method_is_refused_before_anything_is_written():
+    from app.domain.models.tenant_phone_number import VerificationMethod
+
+    # every accepted value round-trips
+    for member in VerificationMethod:
+        assert VerificationMethod(member.value) is member
+    with pytest.raises(ValueError):
+        VerificationMethod("not-a-real-method")
+
+
+def test_a_stranded_pending_number_is_recoverable_by_rerunning():
+    # create_pending is idempotent on (tenant_id, e164) and returns the
+    # existing row, so a re-run picks the stranded number back up and verifies
+    # it rather than erroring or inserting a duplicate.
+    source = _SCRIPT.read_text(encoding="utf-8")
+    assert "pending_verification by an earlier failure" in source

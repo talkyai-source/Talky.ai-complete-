@@ -52,10 +52,23 @@ async def _run(args: argparse.Namespace) -> int:
         raise SystemExit("DATABASE_URL is not set (load backend/.env first)")
 
     from app.core.db import _register_jsonb_codecs
+    from app.domain.models.tenant_phone_number import VerificationMethod
     from app.domain.services.tenant_phone_number_service import (
         TenantPhoneNumberError,
         TenantPhoneNumberService,
     )
+
+    # mark_verified stores ``method.value``, so it needs the ENUM, not the raw
+    # string. Passing the string crashed with AttributeError after the number
+    # had already been registered, leaving it stranded in
+    # pending_verification (observed against production 2026-09-22).
+    try:
+        method = VerificationMethod(args.method)
+    except ValueError:
+        raise SystemExit(
+            "unknown --method %r; expected one of: %s"
+            % (args.method, ", ".join(m.value for m in VerificationMethod))
+        )
 
     pool = await asyncpg.create_pool(
         dsn, min_size=1, max_size=2, init=_register_jsonb_codecs
@@ -87,11 +100,14 @@ async def _run(args: argparse.Namespace) -> int:
         elif str(created.status) == "verified":
             print("already verified — nothing to do")
         else:
+            # Reached both on a first run and on a re-run for a number left in
+            # pending_verification by an earlier failure, which is why
+            # create_pending returning the existing row matters.
             try:
                 verified = await svc.mark_verified(
                     tenant_id=args.tenant_id,
                     did_id=str(created.id),
-                    method="manual_admin",
+                    method=method,
                     verified_by=args.verified_by,
                     proof_reference=args.proof_reference,
                     stir_shaken_token=args.stir_shaken_token,
@@ -131,6 +147,11 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument("--actor-user-id", required=True)
     parser.add_argument("--actor-role", default="platform_admin")
     parser.add_argument("--verified-by", default="ops-admin")
+    parser.add_argument(
+        "--method",
+        default="manual_admin",
+        help="sms_code | carrier_api | manual_admin | letter_of_authorization",
+    )
     parser.add_argument(
         "--proof-reference",
         default=None,
