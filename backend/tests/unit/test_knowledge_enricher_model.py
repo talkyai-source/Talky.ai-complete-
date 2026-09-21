@@ -59,3 +59,44 @@ def test_a_blank_override_falls_back_rather_than_sending_an_empty_model(
     finally:
         monkeypatch.delenv("KNOWLEDGE_ENRICH_MODEL", raising=False)
         importlib.reload(enricher)
+
+
+# --------------------------------------------------------------------------
+# Batch size and output budget
+# --------------------------------------------------------------------------
+
+
+def test_the_output_budget_scales_with_the_batch():
+    # A flat 2048 for the whole request meant a full batch was truncated
+    # mid-array and, because a parse failure drops the batch, every node in it
+    # was lost.
+    assert enricher._max_tokens_for(1) < enricher._max_tokens_for(8)
+    assert enricher._max_tokens_for(8) < enricher._max_tokens_for(25)
+
+
+def test_the_budget_is_bounded_at_both_ends():
+    assert enricher._max_tokens_for(0) == enricher._TOKENS_FLOOR
+    assert enricher._max_tokens_for(10_000) == enricher._TOKENS_CEILING
+    assert enricher._max_tokens_for(-5) == enricher._TOKENS_FLOOR
+
+
+def test_a_full_batch_gets_more_than_the_old_flat_budget():
+    # The old value, for comparison: 2048 for up to 25 nodes.
+    assert enricher._max_tokens_for(25) > 2048
+
+
+def test_the_batch_is_small_enough_for_the_model_to_stay_valid():
+    # gpt-oss-20b returned structurally invalid JSON at 25 nodes per request.
+    assert enricher._BATCH_SIZE <= 10
+
+
+def test_a_failed_batch_is_retried_one_node_at_a_time():
+    # Guard: a batch failure is usually one bad section. Without the per-node
+    # retry, it discards every node in the batch.
+    from pathlib import Path
+
+    source = (
+        Path(enricher.__file__).resolve()
+    ).read_text(encoding="utf-8")
+    assert "retrying one node" in source
+    assert "for j, node in enumerate(batch):" in source

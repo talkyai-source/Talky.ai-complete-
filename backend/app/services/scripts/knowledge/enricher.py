@@ -48,7 +48,25 @@ def _default_enrich_model() -> str:
 
 
 _ENRICH_MODEL = os.getenv("KNOWLEDGE_ENRICH_MODEL", "").strip() or _default_enrich_model()
-_BATCH_SIZE = int(os.getenv("KNOWLEDGE_ENRICH_BATCH", "25"))
+# Nodes per request. Was 25. A batch that large asks the model for roughly
+# 25 x (summary + spoken answer + up to 12 keywords + up to 5 questions) inside
+# ONE json_object response, and gpt-oss-20b returns structurally invalid JSON
+# at that size -- the whole batch is then lost, because enrichment is fail-soft
+# and a parse failure drops every node in it. Smaller requests are far more
+# reliable and cost the same in total tokens (observed 2026-09-22).
+_BATCH_SIZE = int(os.getenv("KNOWLEDGE_ENRICH_BATCH", "8"))
+# Output budget per node: a summary, a spoken answer, keywords and example
+# questions. Was a flat 2048 for the whole request regardless of batch size, so
+# a full batch was truncated mid-array and, again, lost entirely.
+_TOKENS_PER_NODE = int(os.getenv("KNOWLEDGE_ENRICH_TOKENS_PER_NODE", "200"))
+_TOKENS_FLOOR = 1024
+_TOKENS_CEILING = 8192
+
+
+def _max_tokens_for(batch_size: int) -> int:
+    """Output budget scaled to how many nodes the request must describe."""
+    wanted = 256 + _TOKENS_PER_NODE * max(1, int(batch_size))
+    return max(_TOKENS_FLOOR, min(_TOKENS_CEILING, wanted))
 # Chars of node content sent to the enricher. This was 600, which truncated
 # every node to just the TOP of the section, so keywords/voice_answer NEVER
 # saw any fact below ~600 chars — the enrichment silently summarised only the
@@ -117,7 +135,7 @@ async def enrich_nodes(nodes: List[ParsedNode]) -> List[NodeEnrichment]:
                 ],
                 response_format={"type": "json_object"},
                 temperature=0.2,
-                max_tokens=2048,
+                max_tokens=_max_tokens_for(len(batch)),
             )
             data = json.loads(resp.choices[0].message.content or "{}")
             for item in data.get("nodes", []):
@@ -132,8 +150,43 @@ async def enrich_nodes(nodes: List[ParsedNode]) -> List[NodeEnrichment]:
                 )
         except Exception as exc:
             logger.warning(
-                "knowledge enrich batch [%d:%d] failed (%s) — leaving those nodes unenriched",
+                "knowledge enrich batch [%d:%d] failed (%s) — retrying one node "
+                "at a time so a single bad response does not lose the batch",
                 start, start + len(batch), exc,
             )
-            # leave this batch as empty enrichments; continue with the rest
+            # A batch failure is usually ONE malformed section dragging the
+            # whole response down. Retrying singly recovers the rest instead of
+            # discarding every node in the batch.
+            for j, node in enumerate(batch):
+                single = [{
+                    "i": start + j,
+                    "heading": node.heading,
+                    "content": node.content[:_CONTENT_CLIP],
+                }]
+                try:
+                    resp = await client.chat.completions.create(
+                        model=_ENRICH_MODEL,
+                        messages=[
+                            {"role": "system", "content": _SYSTEM},
+                            {"role": "user", "content": json.dumps({"sections": single})},
+                        ],
+                        response_format={"type": "json_object"},
+                        temperature=0.2,
+                        max_tokens=_max_tokens_for(1),
+                    )
+                    data = json.loads(resp.choices[0].message.content or "{}")
+                except Exception:
+                    continue
+                for item in data.get("nodes", []):
+                    i = item.get("i")
+                    if not isinstance(i, int) or not (0 <= i < len(out)):
+                        continue
+                    out[i] = NodeEnrichment(
+                        summary=str(item.get("summary", "") or "")[:300],
+                        voice_answer=str(item.get("voice_answer", "") or "")[:400],
+                        keywords=[str(k)[:40] for k in (item.get("keywords") or [])][:12],
+                        example_questions=[
+                            str(q)[:160] for q in (item.get("example_questions") or [])
+                        ][:5],
+                    )
     return out

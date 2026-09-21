@@ -61,13 +61,17 @@ async def _run(args: argparse.Namespace) -> int:
 
     from app.core.db import _register_jsonb_codecs
 
-    pool = await asyncpg.create_pool(
-        dsn, min_size=1, max_size=3, init=_register_jsonb_codecs
-    )
+    async def _init(conn) -> None:
+        # EVERY connection, not just the ones this script remembers to set it
+        # on. The tenant-model lookup below ran on a fresh pooled connection
+        # with no GUC and was silently hidden by the row-level policy, so the
+        # ingest budgeted against no model at all and said so (2026-09-22).
+        await _register_jsonb_codecs(conn)
+        await conn.execute("SET app.bypass_rls = 'true'")
+
+    pool = await asyncpg.create_pool(dsn, min_size=1, max_size=3, init=_init)
     try:
         async with pool.acquire() as conn:
-            await conn.execute("SET app.bypass_rls = 'true'")
-
             source = await conn.fetchrow(
                 "SELECT id, name, status, direction, voice_id, knowledge_mode, "
                 "       COALESCE(length(system_prompt), 0) AS prompt_chars "
@@ -155,6 +159,11 @@ async def _run(args: argparse.Namespace) -> int:
                 "SELECT llm_model FROM tenant_ai_configs WHERE tenant_id = $1::uuid",
                 args.tenant_id,
             )
+            if not model:
+                print(
+                    "  !! no llm_model on this tenant's AI config — the budget "
+                    "will fall back to the conservative default window"
+                )
             print(f"publishing knowledge (budget model: {model or '(none)'}) …")
             result = await ingest_markdown(
                 pool,
@@ -170,7 +179,6 @@ async def _run(args: argparse.Namespace) -> int:
             )
 
         async with pool.acquire() as conn:
-            await conn.execute("SET app.bypass_rls = 'true'")
             row = await conn.fetchrow(
                 "SELECT name, status, direction, voice_id, knowledge_mode, "
                 "  (SELECT count(*) FROM campaign_knowledge_nodes n "
