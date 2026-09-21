@@ -235,12 +235,12 @@ export default function SettingsPage() {
                     </CardHeader>
                     <CardContent>
                         <Tabs defaultValue="profile" className="w-full">
-                            <TabsList className="grid w-full grid-cols-5">
-                                <TabsTrigger value="profile">Profile</TabsTrigger>
-                                <TabsTrigger value="security">Security</TabsTrigger>
-                                <TabsTrigger value="devices">Devices</TabsTrigger>
-                                <TabsTrigger value="telephony">Telephony</TabsTrigger>
-                                <TabsTrigger value="recording">Recording</TabsTrigger>
+                            <TabsList className="grid w-full h-auto grid-cols-6 gap-1 lg:h-10 lg:grid-cols-5 lg:gap-0">
+                                <TabsTrigger value="profile" className="col-span-2 px-1 sm:px-3 py-2.5 lg:col-span-1 lg:py-1.5">Profile</TabsTrigger>
+                                <TabsTrigger value="security" className="col-span-2 px-1 sm:px-3 py-2.5 lg:col-span-1 lg:py-1.5">Security</TabsTrigger>
+                                <TabsTrigger value="devices" className="col-span-2 px-1 sm:px-3 py-2.5 lg:col-span-1 lg:py-1.5">Devices</TabsTrigger>
+                                <TabsTrigger value="telephony" className="col-span-2 col-start-2 px-1 sm:px-3 py-2.5 lg:col-span-1 lg:col-start-auto lg:py-1.5">Telephony</TabsTrigger>
+                                <TabsTrigger value="recording" className="col-span-2 col-start-4 px-1 sm:px-3 py-2.5 lg:col-span-1 lg:col-start-auto lg:py-1.5">Recording</TabsTrigger>
                             </TabsList>
 
                             {/* Profile Tab */}
