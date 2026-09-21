@@ -108,7 +108,7 @@ function AdminLinkCard({
             <Icon className="h-4 w-4 shrink-0 text-muted-foreground" />
             <span className="min-w-0 flex-1">
                 <span className="block text-sm font-medium text-foreground">{title}</span>
-                <span className="block truncate text-xs text-muted-foreground">{description}</span>
+                <span className="block break-words text-xs text-muted-foreground">{description}</span>
             </span>
             <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
         </Link>
@@ -521,7 +521,7 @@ export default function SecurityPage() {
                         title="Tenant-wide security"
                         description="Keys and activity for the whole account. Visible because you are an administrator."
                     >
-                        <div className="grid gap-3 sm:grid-cols-2">
+                        <div className="grid grid-cols-1 auto-rows-fr gap-3 sm:grid-cols-2">
                             {/* Two of these four destinations work and two do
                                 not, and the difference is stated here rather
                                 than discovered after the click. Both broken
