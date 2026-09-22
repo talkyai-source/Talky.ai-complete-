@@ -21,6 +21,7 @@ import pytest
 
 from app.domain.services.call_summary.summarizer import (
     EMPTY_SUMMARY,
+    _OBJECT_LIST_ITEMS,
     _SUMMARY_SCHEMA_PROPERTIES,
 )
 from app.infrastructure.llm.structured_output import (
@@ -86,14 +87,37 @@ def test_schema_meets_groqs_strict_requirements():
 
 def test_schema_types_match_the_python_defaults():
     """Derived from EMPTY_SUMMARY so the schema cannot drift from the shape the
-    rest of the pipeline coerces to."""
+    rest of the pipeline coerces to.
+
+    Until 2026-09-23 this asserted that EVERY list key is an array of strings.
+    That was the rule the schema was built on, and it is exactly what
+    production rejected: _SYSTEM_PROMPT asks for ``action_items`` and
+    ``objections`` as arrays of OBJECTS, so the model obeyed the prompt and the
+    strict decoder threw the whole summary away with
+
+        400 json_validate_failed - '/action_items/0' does not validate with
+        /properties/action_items/items/type: expected string, but got object
+
+    Only ~26 of 84 calls in 30 days kept a summary, and because lead
+    qualification reads the summary, those calls never got a lead decision
+    either. The blanket assertion was encoding the defect.
+
+    What the schema must agree with is the PROMPT, and
+    test_call_summary_schema.py reads _SYSTEM_PROMPT and checks that directly.
+    This test keeps the structural claim the defaults can actually support --
+    list means array, scalar means string -- and pins the item type per key so
+    a silent flip back to strings still fails here.
+    """
+    object_item_keys = set(_OBJECT_LIST_ITEMS)
+    assert object_item_keys, "the object-valued list keys must be declared"
     for key, default in EMPTY_SUMMARY.items():
         prop = _SUMMARY_SCHEMA_PROPERTIES[key]
-        if isinstance(default, list):
-            assert prop["type"] == "array"
-            assert prop["items"]["type"] == "string"
-        else:
-            assert prop["type"] == "string"
+        if not isinstance(default, list):
+            assert prop["type"] == "string", key
+            continue
+        assert prop["type"] == "array", key
+        expected = "object" if key in object_item_keys else "string"
+        assert prop["items"]["type"] == expected, key
 
 
 def test_strict_mode_active_matches_capability():
