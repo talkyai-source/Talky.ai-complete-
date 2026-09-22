@@ -8,6 +8,17 @@ import { useTheme } from "@/components/providers/theme-provider";
 import { useAuth } from "@/lib/auth-context";
 import { industryNavItems } from "@/Industries/industries";
 
+// Mirrors the w-[680px]/w-[345px]/w-[520px] widths on `dropdownWidthClass` below exactly —
+// used only to compute the edge-clamp offset, never applied as an actual width itself.
+function getDropdownPanelWidthPx(label: string): number {
+  if (label === "Industries") return 680;
+  if (label === "Products" || label === "Use Cases") return 345;
+  return 520;
+}
+
+// Minimum gap the dropdown panel must keep from either screen edge.
+const DROPDOWN_EDGE_MARGIN_PX = 16;
+
 export function Navbar() {
   const pathname = usePathname();
   const router = useRouter();
@@ -41,6 +52,62 @@ export function Navbar() {
   const prefetchedRef = useRef<Set<string>>(new Set());
   const desktopNavRef = useRef<HTMLUListElement | null>(null);
   const dropdownTriggerRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
+  // Per-label horizontal translateX override (px), only populated when the panel's default
+  // centred position would come within DROPDOWN_EDGE_MARGIN_PX of a screen edge. Empty on
+  // the server/first render so hydration always matches (see the effect below).
+  const [dropdownTranslateX, setDropdownTranslateX] = useState<Record<string, number>>({});
+
+  // Recomputes the clamp for the given labels (all dropdown triggers if omitted) from each
+  // trigger's real on-screen position and the current viewport width. Only ever called from
+  // effects/event handlers below — never during render — so it does not run on every render.
+  const recomputeDropdownClamp = useCallback((labels?: string[]) => {
+    if (typeof window === "undefined") return;
+    const viewportWidth = window.innerWidth;
+    const targets = labels ?? Array.from(dropdownTriggerRefs.current.keys());
+    setDropdownTranslateX((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const label of targets) {
+        const trigger = dropdownTriggerRefs.current.get(label);
+        if (!trigger) continue; // guard: trigger not yet rendered (or unmounted)
+        const rect = trigger.getBoundingClientRect();
+        const triggerCenter = rect.left + rect.width / 2;
+        const panelWidth = getDropdownPanelWidthPx(label);
+        // Default position: panel centred under its trigger (left-1/2 -translate-x-1/2).
+        const defaultLeft = triggerCenter - panelWidth / 2;
+        const minLeft = DROPDOWN_EDGE_MARGIN_PX;
+        const maxLeft = Math.max(minLeft, viewportWidth - panelWidth - DROPDOWN_EDGE_MARGIN_PX);
+        const clampedLeft = Math.min(Math.max(defaultLeft, minLeft), maxLeft);
+        const needsOverride = Math.abs(clampedLeft - defaultLeft) > 0.5;
+        if (needsOverride) {
+          const translateXPx = clampedLeft - triggerCenter;
+          if (next[label] !== translateXPx) {
+            next[label] = translateXPx;
+            changed = true;
+          }
+        } else if (label in next) {
+          delete next[label];
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, []);
+
+  // Mount + resize: keep every dropdown's clamp current. Ref callbacks (which populate
+  // dropdownTriggerRefs) run during commit, before this effect, so refs are already
+  // populated by the time it fires.
+  useEffect(() => {
+    recomputeDropdownClamp();
+    const handleResize = () => recomputeDropdownClamp();
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, [recomputeDropdownClamp]);
+
+  // Click-to-pin open: recompute the position of whichever panel just got pinned open.
+  useEffect(() => {
+    if (pinnedLabel) recomputeDropdownClamp([pinnedLabel]);
+  }, [pinnedLabel, recomputeDropdownClamp]);
 
   // The single place that clears a click-pinned panel. Blurring the trigger
   // matters here: group-focus-within would otherwise re-open the panel the
@@ -455,6 +522,7 @@ export function Navbar() {
                       }}
                       onMouseEnter={() => {
                         for (const child of item.items) prefetchHref(child.href);
+                        recomputeDropdownClamp([item.label]);
                       }}
                     >
                       <button
@@ -469,6 +537,7 @@ export function Navbar() {
                           "inline-flex items-center gap-1",
                         ].join(" ")}
                         aria-haspopup="menu"
+                        onFocus={() => recomputeDropdownClamp([item.label])}
                         onClick={() => {
                           if (isPinned) {
                             // Closing via click must also override the CSS
@@ -502,10 +571,21 @@ export function Navbar() {
                         role="menu"
                         aria-label={item.label}
                         style={
-                          suppressedDropdownLabel === item.label
+                          dropdownTranslateX[item.label] !== undefined || suppressedDropdownLabel === item.label
                             ? {
-                                opacity: 0,
-                                pointerEvents: "none",
+                                // Edge-clamp override (see recomputeDropdownClamp): overrides only the
+                                // --tw-translate-x custom property that `-translate-x-1/2` sets, so the
+                                // vertical slide (--tw-translate-y) and scale animation, driven by their
+                                // own separate classes/custom properties, are left completely untouched.
+                                ...(dropdownTranslateX[item.label] !== undefined
+                                  ? ({ "--tw-translate-x": `${dropdownTranslateX[item.label]}px` } as React.CSSProperties)
+                                  : null),
+                                ...(suppressedDropdownLabel === item.label
+                                  ? {
+                                      opacity: 0,
+                                      pointerEvents: "none",
+                                    }
+                                  : null),
                               }
                             : undefined
                         }
