@@ -54,6 +54,9 @@ from app.domain.services.voice_pipeline.sentence_cap import (
     cap_allows_another,
     truncate_to_cap,
 )
+from app.domain.services.voice_pipeline.sentence_segmentation import (
+    _is_missing_space_boundary,
+)
 from app.services.scripts.prompts.live_state import build_live_state_block
 from app.domain.services.voice_pipeline.knowledge_tool import (
     KB_TOOL_NAME,
@@ -633,6 +636,9 @@ class TurnStreamer:
         tts_was_interrupted = False
         suppressed_for_action = False
         guardrail_block_reason: Optional[str] = None
+        # Set when the model stopped writing its own turn and started writing
+        # the caller's. See the flush loop below.
+        model_wrote_caller_turn = False
         guardrail_blocked_response: Optional[str] = None
 
         # P3: track sentences ACTUALLY delivered to TTS, so on a barge-in we
@@ -825,8 +831,21 @@ class TurnStreamer:
                     if idx < 0:
                         break
 
+                    # A terminator with no space after it is where the model
+                    # stopped writing its own turn and started writing the
+                    # caller's ("...best option?Yes.Could I confirm..."). Speak
+                    # this sentence; everything after it is dialogue we made up.
+                    # Measured across 306 real agent turns (30 days, two
+                    # tenants, ten campaigns) this fires 8 times and every one
+                    # is the defect -- no false positives. Call c01404ba.
+                    turn_boundary = _is_missing_space_boundary(buf, idx)
+
                     raw_sentence = buf[:idx + 1].strip()
-                    buf = buf[idx + 2:] if idx + 2 <= len(buf) else ""
+                    # Skip the separator only when there IS one: at a
+                    # missing-space boundary, idx + 2 swallows the first letter
+                    # of whatever follows.
+                    _skip = 2 if (idx + 1 < len(buf) and buf[idx + 1].isspace()) else 1
+                    buf = buf[idx + _skip:] if idx + _skip <= len(buf) else ""
 
                     # Extract-first (root cause, not a regex patch): pull the
                     # END_CALL sentinel out of the RAW model text before
@@ -899,6 +918,17 @@ class TurnStreamer:
                         buf = ""
                         break
 
+                    if turn_boundary:
+                        model_wrote_caller_turn = True
+                        logger.warning(
+                            "model_wrote_caller_turn call=%s — turn cut at the "
+                            "boundary; %d char(s) of invented dialogue dropped",
+                            call_id[:12],
+                            len(buf),
+                        )
+                        buf = ""
+                        break
+
                 if tts_was_interrupted or guardrail_block_reason:
                     break
 
@@ -942,6 +972,19 @@ class TurnStreamer:
             if self._p._supports_llm_end_session_action(session)
             else None
         )
+        if model_wrote_caller_turn and ask_ai_end_action:
+            # The end-call arrived in the same completion as the invented
+            # dialogue, so it is a decision the model reached by reading its own
+            # fabricated "Yes." -- not something the caller asked for. Dropping
+            # the text while honouring the hangup would leave the caller with a
+            # question and then a dead line, which is worse than today.
+            logger.warning(
+                "model_wrote_caller_turn call=%s — ignoring the end-call action "
+                "from the same completion",
+                call_id[:12],
+            )
+            ask_ai_end_action = None
+
         if ask_ai_end_action:
             buf = ""
         elif suppressed_for_action:
@@ -1035,6 +1078,12 @@ class TurnStreamer:
                 raw_response_text, tts_model_id=_tts_model_id,
                 protected_values=_protected_readback,
             )
+
+        if model_wrote_caller_turn:
+            # History must hold what was spoken. Keeping the fabricated caller
+            # line would feed the model its own invention as established fact
+            # on every later turn.
+            full_text = " ".join(session._spoken_sentences).strip() or full_text
 
         if not ask_ai_end_action and max_sentences and full_text:
             # Same rule as the spoken path: the cap never falls between a

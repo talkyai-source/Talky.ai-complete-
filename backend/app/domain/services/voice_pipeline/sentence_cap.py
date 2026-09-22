@@ -17,7 +17,28 @@ from __future__ import annotations
 import re
 from typing import Optional
 
+from app.domain.services.voice_pipeline.sentence_segmentation import (
+    find_sentence_end,
+)
+
+# Kept for callers/tests that import it. The cap itself now walks the text with
+# find_sentence_end so the ceiling counts the SAME boundaries the streamer
+# speaks at -- two different notions of "sentence" is how a fabricated
+# five-turn exchange counted as one (call c01404ba, 2026-09-22).
 _SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+")
+
+
+def _sentence_spans(text: str) -> list:
+    """Offsets at which each sentence ends, using the streamer's own rule."""
+    spans, pos = [], 0
+    while pos < len(text):
+        idx = find_sentence_end(text[pos:])
+        if idx < 0:
+            spans.append(len(text))
+            break
+        pos += idx + 1
+        spans.append(pos)
+    return spans
 
 
 def _next_sentence_is_question(buf: str) -> bool:
@@ -56,11 +77,21 @@ def cap_allows_another(
 
 
 def truncate_to_cap(full_text: str, max_sentences: Optional[int]) -> str:
-    """Apply the same rule to the assembled reply text kept in history."""
+    """Apply the same rule to the assembled reply text kept in history.
+
+    Slices the original string rather than splitting and rejoining, so text
+    that is kept is returned byte for byte -- the old " ".join collapsed
+    newlines and runs of spaces inside a reply it was not truncating at all.
+    """
     if not max_sentences or not full_text:
         return full_text
-    parts = _SENTENCE_SPLIT.split(full_text.strip())
-    keep = parts[:max_sentences]
-    if len(parts) > max_sentences and parts[max_sentences].rstrip().endswith("?"):
-        keep = parts[: max_sentences + 1]
-    return " ".join(keep)
+    text = full_text.strip()
+    spans = _sentence_spans(text)
+    if len(spans) <= max_sentences:
+        return text
+    cut = spans[max_sentences - 1]
+    tail = text[cut:].lstrip()
+    nxt = spans[max_sentences] - cut - (len(text[cut:]) - len(tail))
+    if tail[:nxt].rstrip().endswith("?"):
+        cut = spans[max_sentences]
+    return text[:cut].rstrip()

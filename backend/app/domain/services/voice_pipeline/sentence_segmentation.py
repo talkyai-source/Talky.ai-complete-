@@ -45,6 +45,33 @@ def is_terminal_period_boundary(text: str, index: int) -> bool:
     return True
 
 
+def _is_missing_space_boundary(text: str, index: int) -> bool:
+    """True when the terminator at ``index`` ends a sentence with no space after.
+
+    The model writes turn boundaries with no separator - "...best option?Yes."
+    - and every splitter here required whitespace after the terminator, so a
+    whole fabricated exchange counted as one sentence and neither the stream
+    nor the cap could break it (call c01404ba, 2026-09-22).
+
+    '?' and '!' are unambiguous: no English construction puts a letter hard
+    against them mid-sentence. A '.' is a boundary only before an UPPERCASE
+    letter, and only when the abbreviation guard agrees, so "Mr.Smith",
+    "e.g.Something", initials and decimals are left alone.
+    """
+    nxt = text[index + 1] if index + 1 < len(text) else ""
+    if not nxt.isalpha():
+        return False
+    if text[index] in "!?":
+        return True
+    if not nxt.isupper():
+        return False
+    if not is_terminal_period_boundary(text, index):
+        return False
+    prefix = text[:index].rstrip()
+    token = prefix.rsplit(maxsplit=1)[-1] if prefix else ""
+    return "." not in token
+
+
 def find_sentence_end(text: str, allow_clause: bool = False) -> int:
     """
     Return the index of the first sentence-ending character.
@@ -73,6 +100,8 @@ def find_sentence_end(text: str, allow_clause: bool = False) -> int:
         if ch in "!?":
             if i + 1 == len(text) or (i + 1 < len(text) and text[i + 1] == " "):
                 return i
+            if _is_missing_space_boundary(text, i):
+                return i
         elif ch == ".":
             # Skip ellipsis: advance past ALL consecutive dots so the last
             # dot of "..." is not mistaken for a sentence terminator.
@@ -83,6 +112,8 @@ def find_sentence_end(text: str, allow_clause: bool = False) -> int:
             elif i + 1 < len(text) and text[i + 1] == " ":
                 return i
             elif i + 1 == len(text) and is_terminal_period_boundary(text, i):
+                return i
+            elif _is_missing_space_boundary(text, i):
                 return i
         elif (
             allow_clause
