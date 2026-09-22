@@ -21,6 +21,34 @@ from __future__ import annotations
 import re
 from typing import Optional
 
+# Speech-to-text routinely splits a mail provider's name into two words:
+# "john co at g mail dot com" (call 2427af7e, 2026-09-22). The email-cue
+# detector below already treats `g\s*mail` as Gmail, but the domain parser did
+# not, so the address could never resolve -- even an unambiguous local such as
+# "johnco at g mail dot com" returned None and the model was left to guess.
+#
+# Joined only in DOMAIN position (the next word is "dot"/"period" or a literal
+# "."), and only for these named providers, so ordinary speech is never glued.
+SPLIT_PROVIDERS: tuple[tuple[str, str], ...] = (
+    (r"\bg\s+mail", "gmail"),
+    (r"\bgoogle\s+mail", "googlemail"),
+    (r"\bhot\s+mail", "hotmail"),
+    (r"\bout\s+look", "outlook"),
+    (r"\bya\s+hoo", "yahoo"),
+    (r"\bi\s+cloud", "icloud"),
+    (r"\bproton\s+mail", "protonmail"),
+)
+_DOMAIN_FOLLOWS = r"(?=\s*(?:\.|\bdot\b|\bperiod\b))"
+
+
+def join_split_providers(text: str) -> str:
+    """Rejoin a mail provider name that speech-to-text split in two."""
+    out = str(text or "")
+    for pattern, joined in SPLIT_PROVIDERS:
+        out = re.sub(pattern + _DOMAIN_FOLLOWS, joined, out, flags=re.IGNORECASE)
+    return out
+
+
 # Spoken -> written substitutions, applied in order. Longer phrases first
 # so "at the rate" wins over "at".
 _SUBSTITUTIONS: list[tuple[str, str]] = [
@@ -65,7 +93,7 @@ def extract_email_from_speech(utterance: str) -> Optional[str]:
         return None
 
     original_had_at = "@" in utterance
-    s = f" {utterance.lower().strip()} "
+    s = f" {join_split_providers(utterance.lower().strip())} "
     for pattern, repl in _SUBSTITUTIONS:
         s = re.sub(pattern, repl, s)
 
@@ -172,7 +200,7 @@ def extract_email_from_agent_readback(text: str) -> Optional[str]:
     if not _READBACK_CONFIRM_RE.search(low):
         return None
 
-    s = f" {low} "
+    s = f" {join_split_providers(low)} "
     for pattern, repl in _SUBSTITUTIONS:
         s = re.sub(pattern, repl, s)
     s = re.sub(r"\s*@\s*", "@", s)

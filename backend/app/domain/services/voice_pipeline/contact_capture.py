@@ -205,8 +205,85 @@ def _validated_email(value: str) -> Optional[str]:
         return None
 
 
+# Words that routinely precede a spoken address and are not part of it.
+_LOCAL_LEAD_IN = {
+    "yeah", "yes", "yep", "ok", "okay", "so", "um", "uh", "er", "well",
+    "it", "its", "it's", "is", "my", "the", "email", "e-mail", "mail",
+    "address", "sure", "right", "and", "that", "this", "a", "an", "to",
+    "send", "you", "can", "please", "im", "i'm",
+}
+
+
+def _spoken_local_candidates(text: str) -> tuple[Optional[str], Optional[str]]:
+    """The two readings of a two-word spoken local part, or (None, None).
+
+    A caller who says "john co at gmail dot com" has told us the WORDS but not
+    the separator, so the address is either ``johnco@`` or ``john.co@``. The
+    deterministic normaliser correctly refuses to choose -- extract_email_from_
+    speech returns None -- but nothing said so out loud, and on call 2427af7e
+    the model filled the silence: it read back "j o h n dot c o at g m a i l
+    dot c o m", inserting a dot the caller never spoke, and then could not be
+    talked out of it.
+
+    Naming both readings turns an open-ended "please spell it" into a question
+    the caller can answer in one word. Only the two-word case is handled -- past
+    that the number of readings grows and spelling really is the right ask.
+    """
+    body = str(text or "").lower()
+    separators = list(re.finditer(r"\b(?:at\s+the\s+rate|at\s+sign|at)\b", body))
+    for separator in reversed(separators):
+        domain = _clean_domain(body[separator.end():])
+        if not domain:
+            continue
+        head = body[: separator.start()]
+        head = re.sub(r"[^a-z0-9\s'-]", " ", head)
+        words = [w for w in head.split() if w and w not in _LOCAL_LEAD_IN]
+        # Letter-by-letter spelling is a different shape, handled elsewhere.
+        if len(words) != 2 or any(len(w) < 2 for w in words):
+            continue
+        if not all(re.fullmatch(r"[a-z0-9-]+", w) for w in words):
+            continue
+        joined = _validated_email(f"{words[0]}{words[1]}@{domain}")
+        dotted = _validated_email(f"{words[0]}.{words[1]}@{domain}")
+        if joined and dotted:
+            return joined, dotted
+    return None, None
+
+
+def _extract_lead_in_email(text: str) -> Optional[str]:
+    """Resolve "my email is bob at gmail dot com" to bob@gmail.com.
+
+    The normaliser pins a spoken address only when the words before "at" are a
+    single token, so ANY lead-in -- "my email is", "yeah it is" -- made a clear
+    address unresolvable. The capture machine then marked it INVALID and told
+    the agent to have the caller spell "bob" one letter at a time: the exact
+    spell-it-out reflex the caller on 2427af7e objected to.
+
+    Only whole LEADING tokens from a fixed set of function words are removed,
+    and only when exactly one token is left. The set deliberately excludes
+    words that are real local parts ("me", "info", "sales"); the normaliser's
+    own notes record a carrier-word list that mangled "me@" and "yes2024@".
+    """
+    body = str(text or "").lower()
+    separators = list(re.finditer(r"\b(?:at\s+the\s+rate|at\s+sign|at)\b", body))
+    if len(separators) != 1:
+        return None
+    separator = separators[0]
+    domain = _clean_domain(body[separator.end():])
+    if not domain:
+        return None
+    head = re.sub(r"[^a-z0-9\s'._+-]", " ", body[: separator.start()]).split()
+    while head and head[0] in _LOCAL_LEAD_IN:
+        head.pop(0)
+    if len(head) != 1:
+        return None
+    return _validated_email(f"{head[0]}@{domain}")
+
+
 def _clean_domain(spoken: str) -> Optional[str]:
-    text = str(spoken or "").lower().strip(" .?!,;:")
+    from app.services.scripts.spoken_email_normalizer import join_split_providers
+
+    text = join_split_providers(str(spoken or "").lower().strip(" .?!,;:"))
     text = re.sub(r"\b(?:dot|period)\b", " . ", text)
     text = re.sub(r"\b(?:dash|hyphen)\b", " - ", text)
     text = re.sub(r"\s*\.\s*", ".", text)
@@ -447,8 +524,10 @@ def _extract_normalized(
     )
 
     if kind == "email":
-        email = extract_email_from_speech(utterance) or _extract_spelled_email(
-            utterance
+        email = (
+            extract_email_from_speech(utterance)
+            or _extract_spelled_email(utterance)
+            or _extract_lead_in_email(utterance)
         )
         if email and _EMAIL_VALID_RE.fullmatch(email):
             return email, _validated_email(email)
@@ -767,15 +846,34 @@ def advance_capture(
                 if kind == "email" and ("email" in text.lower() or "@" in text)
                 else CaptureStatus.NEEDS_CLARIFICATION
             )
+            prompt = (
+                "Please spell the email one letter at a time, then say at and the domain."
+                if kind == "email"
+                else "Please repeat the phone number one digit at a time."
+            )
+            if kind == "email":
+                joined, dotted = _spoken_local_candidates(text)
+                if joined and dotted:
+                    # We have the words; only the separator is open. Ask the
+                    # one question that settles it instead of restarting.
+                    prompt = (
+                        f"You heard two words before the at. Ask which is right: "
+                        f"{joined} or {dotted}. Say both aloud, plainly, as whole "
+                        f"addresses. If neither, ask them to spell it one letter "
+                        f"at a time."
+                    )
+                # The caller has given nothing we could resolve, so there is no
+                # address to repeat. Saying one anyway is what call 2427af7e
+                # did, and the caller spent four turns failing to correct it.
+                prompt += (
+                    " Never say an email address back to the caller that they "
+                    "have not actually given you."
+                )
             return _state(
                 kind,
                 status,
                 raw=text,
-                prompt=(
-                    "Please spell the email one letter at a time, then say at and the domain."
-                    if kind == "email"
-                    else "Please repeat the phone number one digit at a time."
-                ),
+                prompt=prompt,
             )
         return None
 
