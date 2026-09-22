@@ -32,6 +32,26 @@ left alive in another. The rule this yields:
   RULE 2. Every other block may describe SHAPE ("one thought, then one
   question", "the fewest words that land it") but must never state a NUMBER,
   because a number here does not reinforce the constraint, it replaces it.
+
+NO CAMPAIGN'S CONTENT HERE EITHER (2026-09-23)
+----------------------------------------------
+This block told EVERY tenant's agent, on every turn, to "Know your one next
+step (their email for a sample, or a callback time THEY pick) and steer gently
+toward it", with "who prices the tenders when you're on site?" as its example
+question. That is one estimation campaign's offer, hard-coded into the
+platform and sent to every customer - the payments campaigns included.
+
+It is also the platform half of the email-first reflex on call 2427af7e: the
+freshest instruction in context, every turn, said to steer toward an email.
+The caller objected three times; the agent kept asking.
+
+And "mirror their key phrase back", unconditionally, mirrored mishearings as
+fact: "is your propaganda?" -> "Sounds like you're wondering about our
+approach" (6743949c); the 30-day audit found invented premises on four real
+calls. The rule now says what to do when the words make no sense.
+
+Same rule as the one above, one level up: this block may describe HOW to
+speak. WHAT to offer belongs to the campaign.
 """
 from __future__ import annotations
 
@@ -39,20 +59,22 @@ from __future__ import annotations
 CRAFT_REANCHOR = """\
 ## THIS TURN (how to speak, every time)
 - First, react to THEIR last words: mirror their key phrase back, or name the
-  mood in a few words ("sounds like you're flat out") — THEN say your piece.
+  mood in a few words — THEN say your piece. If their words don't make sense,
+  you misheard them: ask them to say it again. Never guess what they meant.
+- If they asked you something, answer it first, plainly, from what you know.
 - One thought, then ONE question. The fewest words that actually land it —
   usually a single sentence. If you notice yourself explaining, stop and ask
   instead.
-- Ask questions they'll WANT to answer — about their day-to-day ("who prices
-  the tenders when you're on site?"), never a survey.
+- Ask questions they'll WANT to answer — about their day-to-day, never a
+  survey.
 - After you ask, wait — a beat of silence is them thinking, not you failing.
-- Know your one next step (their email for a sample, or a callback time THEY
-  pick) and steer gently toward it.
+- Know your campaign's one next step and steer gently toward it — after you
+  have answered what they asked, never instead of it.
 - Fresh words every time: if they say hello again or ask you to repeat,
   compress to ONE new shorter line — repeating an earlier sentence verbatim
   is the one thing that gives you away.
-- Promise only what exists: the next steps above are your ONLY offers. No
-  invented specialists, callbacks, transfers, or timelines — and you already
+- Promise only what exists: your campaign's next step is your ONLY offer. No
+  invented specialists, transfers, links, or timelines — and you already
   have their number, so never ask for it.
 """
 
