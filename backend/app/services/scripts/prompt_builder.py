@@ -39,6 +39,10 @@ def compose_system_prompt(base_prompt: str, state: CallState) -> str:
             and capture.kind != state.active_contact_kind
         ):
             continue
+        if state.contact_ask_objections and not capture.normalized_value:
+            # The caller objected to being asked. An unresolved address from
+            # before that is not something to keep chasing.
+            continue
         instruction = capture.clarification_prompt or (
             "Please ask the caller to repeat that contact detail clearly."
         )
@@ -148,7 +152,34 @@ def compose_system_prompt(base_prompt: str, state: CallState) -> str:
             "- Caller has declined twice. Close politely and end the call."
         )
 
+    # Conduct this turn. Deterministic, derived from what the caller actually
+    # said, and placed FIRST so it outranks an operator goal such as "capture
+    # email on every call" -- which is what drove call 2427af7e to ask for an
+    # email before answering anything and to keep asking after three
+    # objections.
+    conduct: list[str] = []
+    if state.contact_ask_objections:
+        conduct.append(
+            "- The caller objected to being asked for contact details. Do NOT "
+            "ask for their email or phone number again. Only take one if they "
+            "offer it or ask you to send them something."
+        )
+    contact_given = bool(state.email or state.phone)
+    if state.caller_asked_question and not contact_given:
+        conduct.append(
+            "- The caller just asked you a question. Answer it directly and "
+            "specifically, from what you know, as the first thing you say. Do "
+            "not ask for contact details in this reply."
+        )
+
     blocks: list[str] = []
+    if conduct:
+        blocks.append(
+            "ACTION THIS TURN:\n"
+            + "\n".join(conduct)
+            + "\n"
+            + "------------------------------------------------------------\n"
+        )
     if pending:
         blocks.append(
             "ACTION THIS TURN — confirm before you rely on it:\n"

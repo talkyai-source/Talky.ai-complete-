@@ -87,6 +87,41 @@ _DECLINE_RE = re.compile(
     re.IGNORECASE,
 )
 
+# A caller objecting to being ASKED for a contact detail -- which is not the
+# same thing as declining the call. Call 2427af7e (2026-09-22): the agent asked
+# for an email before answering a single question, and the caller said
+#   "Why you are asking my email?"
+#   "I haven't asked for that. Why you asking?"
+#   "That I haven't asked for that, why you directly ask me that."
+# and it asked again after every one. Nothing recognised the objection, so
+# nothing told the agent to stop.
+_CONTACT_OBJECTION_RE = re.compile(
+    r"\bwhy\b[^.?!]{0,30}\bask(?:ing)?\b[^.?!]{0,30}"
+    r"\b(?:e-?mail|number|details?|contact|phone)\b"
+    r"|\b(?:haven'?t|have\s+not|didn'?t|did\s+not|never)\s+ask(?:ed)?\s+"
+    r"(?:you\s+)?for\s+(?:that|it|this|any)"
+    r"|\bnot\s+interested\s+in\s+(?:sharing|giving)\b"
+    r"|\b(?:not|won'?t\s+be)\s+(?:giving|sharing)\b[^.?!]{0,20}"
+    r"\b(?:e-?mail|number|details?)\b"
+    r"|\b(?:don'?t|do\s+not)\s+want\s+to\s+(?:give|share)\b",
+    re.IGNORECASE,
+)
+# "Why are you asking?" with no object only counts straight after a contact ask.
+_GENERIC_WHY_ASK_RE = re.compile(r"\bwhy\b[^.?!]{0,25}\bask(?:ing)?\b", re.IGNORECASE)
+# The caller asked us something. STT routinely drops the question mark, so a
+# leading interrogative counts too.
+_QUESTION_RE = re.compile(
+    r"\?\s*$|^\s*(?:(?:ok(?:ay)?|so|and|but|well|yeah)[,.]?\s+)?"
+    r"(?:what|how|can|could|would|will|do|does|did|is|are|why|where|when|which|"
+    r"who|whats|what's|tell\s+me)\b",
+    re.IGNORECASE,
+)
+# ...unless what they asked is for us to send something, which needs an address.
+_SEND_REQUEST_RE = re.compile(
+    r"\b(?:send|e-?mail|text|forward)\b[^.?!]{0,30}\b(?:me|it|that|this|over)\b",
+    re.IGNORECASE,
+)
+
 # STRICT confirmation classifier for a CORE field (email/number). A wrong verdict
 # here CORRUPTS data (wipes a good value or commits a mis-heard one), so — unlike
 # the general classify_confirmation — only an UNAMBIGUOUS, focused yes/no counts;
@@ -199,6 +234,11 @@ class CallState:
     project_type: Optional[str] = None
     bidding_active: Optional[bool] = None
     declined_count: int = 0
+    # The caller has objected to being asked for contact details. Sticky until
+    # they invite the ask themselves (a send request resets it).
+    contact_ask_objections: int = 0
+    # Per turn: the caller just asked us a question.
+    caller_asked_question: bool = False
 
     def __post_init__(self) -> None:
         # Calls/tests created before C3 may restore the scalar slots directly.
@@ -398,9 +438,33 @@ def update_state_from_user_turn(
         elif _BIDDING_YES_RE.search(utterance):
             bidding_active = True
 
+    contact_ask_objections = state.contact_ask_objections
+    objected = bool(_CONTACT_OBJECTION_RE.search(utterance)) or (
+        state.active_contact_kind is not None
+        and bool(_GENERIC_WHY_ASK_RE.search(utterance))
+    )
+    if objected:
+        contact_ask_objections += 1
+        # They are not in the middle of giving us an address any more, so the
+        # next turn must not parse their words as one.
+        active_kind = None
+    elif _SEND_REQUEST_RE.search(utterance):
+        # "Can you send that to my email?" -- the caller has now invited the
+        # ask (they did exactly this on 2427af7e after three objections), so
+        # the objection lifts and the address they give next is handled
+        # normally.
+        contact_ask_objections = 0
+
     declined_count = state.declined_count
-    if _DECLINE_RE.search(utterance):
+    # "not interested in sharing my number" objects to the ASK, not the call.
+    # Counting it as a decline meant two of them told the agent to close the
+    # call on someone who only wanted to keep their number private (cf6bfed1).
+    if _DECLINE_RE.search(utterance) and not objected:
         declined_count += 1
+
+    caller_asked_question = bool(_QUESTION_RE.search(utterance.strip())) and not (
+        _SEND_REQUEST_RE.search(utterance)
+    )
 
     return replace(
         state,
@@ -416,6 +480,8 @@ def update_state_from_user_turn(
         follow_up=follow_up,
         bidding_active=bidding_active,
         declined_count=declined_count,
+        contact_ask_objections=contact_ask_objections,
+        caller_asked_question=caller_asked_question,
     )
 
 
