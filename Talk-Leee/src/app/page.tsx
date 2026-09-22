@@ -32,7 +32,6 @@ export const metadata: Metadata = {
 export default function Home() {
   return (
     <>
-      <link rel="preload" as="video" href="/images/ai-voice-section..mp4" />
       <main id="home" className={`home-navbar-offset homepage-bg ${satoshi.className} ${manrope.variable} ${orbitron.variable}`}>
         <Navbar />
         <HomeLazySections />

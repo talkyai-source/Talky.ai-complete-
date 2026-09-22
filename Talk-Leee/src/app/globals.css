@@ -1070,56 +1070,6 @@ details > summary.home-menu-toggle {
 }
 
 /* ── SecondaryHero styles (moved from style jsx) ── */
-.secondaryHeroPlayer {
-  position: relative;
-  width: 100%;
-  height: 100%;
-  max-width: 600px;
-  margin-left: auto;
-  margin-right: auto;
-  overflow: hidden;
-  border-radius: 14px;
-}
-
-.secondaryHeroPoster {
-  z-index: 1;
-  object-fit: contain;
-  border-radius: 14px;
-}
-
-.secondaryHeroBackdrop {
-  z-index: 0;
-  object-fit: cover;
-  filter: blur(48px);
-  transform: scale(1.12);
-  opacity: 0.55;
-  border-radius: 14px;
-  pointer-events: none;
-}
-
-.secondaryHeroVideoLayer {
-  position: absolute;
-  inset: 0;
-  opacity: 0;
-  transition: opacity 320ms ease-in-out;
-}
-
-.secondaryHeroVideoLayer.active {
-  opacity: 1;
-}
-
-.secondaryHeroVideo {
-  position: absolute;
-  inset: 0;
-  z-index: 1;
-  display: block;
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-  border-radius: 14px;
-  background: transparent;
-}
-
 .secondaryHeroSection {
   box-sizing: border-box;
 }
@@ -1131,138 +1081,21 @@ details > summary.home-menu-toggle {
   }
 }
 
+/* .secondaryHeroCtas has no current markup hook (no CTA buttons render in this
+   section today); its rules are kept, untouched, per task instructions. */
 @media (width: 768px) and (height: 1024px) and (orientation: portrait),
        (width: 820px) and (height: 1180px) and (orientation: portrait),
        (width: 834px) and (height: 1194px) and (orientation: portrait),
        (width: 1024px) and (height: 1366px) and (orientation: portrait),
        (width: 912px) and (height: 1368px) and (orientation: portrait),
        (min-width: 1064px) and (max-width: 1069px) and (min-height: 1598px) and (max-height: 1602px) and (orientation: portrait) {
-  .secondaryHeroGrid {
-    grid-template-columns: 1fr !important;
-  }
-  .secondaryHeroPlayer {
-    max-width: 100% !important;
-  }
-  .secondaryHeroImageWrap {
-    max-width: 100% !important;
-    border-right: 0 !important;
-    border-bottom: 1px solid rgba(0, 0, 0, 0.12);
-  }
-  .dark .secondaryHeroImageWrap {
-    border-bottom: 1px solid rgba(255, 255, 255, 0.12);
-  }
-  .secondaryHeroContent {
-    text-align: center !important;
-  }
-  .secondaryHeroFeatures {
-    margin-left: auto !important;
-    margin-right: auto !important;
-  }
   .secondaryHeroCtas {
     justify-content: center !important;
     align-items: center !important;
   }
 }
 
-@media (width: 768px) and (height: 1024px) and (orientation: portrait) {
-  .secondaryHeroImageWrap { min-height: 380px !important; }
-  .secondaryHeroContent { padding-left: 20px !important; padding-right: 20px !important; }
-  .secondaryHeroFeatures { max-width: 42rem !important; }
-}
-
-@media (width: 820px) and (height: 1180px) and (orientation: portrait),
-       (width: 834px) and (height: 1194px) and (orientation: portrait) {
-  .secondaryHeroImageWrap { min-height: 420px !important; }
-  .secondaryHeroContent { padding-left: 24px !important; padding-right: 24px !important; }
-  .secondaryHeroFeatures { max-width: 46rem !important; }
-}
-
-@media (width: 1024px) and (height: 1366px) and (orientation: portrait) {
-  .secondaryHeroImageWrap { min-height: 520px !important; }
-  .secondaryHeroContent { padding-left: 28px !important; padding-right: 28px !important; }
-  .secondaryHeroFeatures { max-width: 50rem !important; }
-}
-
-@media (width: 912px) and (height: 1368px) and (orientation: portrait) {
-  .secondaryHeroImageWrap { min-height: 500px !important; }
-  .secondaryHeroContent { padding-left: 26px !important; padding-right: 26px !important; }
-  .secondaryHeroFeatures { max-width: 48rem !important; }
-}
-
-@media (min-width: 1064px) and (max-width: 1069px) and (min-height: 1598px) and (max-height: 1602px) and (orientation: portrait) {
-  .secondaryHeroImageWrap { min-height: 520px !important; }
-  .secondaryHeroContent { padding-left: 28px !important; padding-right: 28px !important; }
-  .secondaryHeroFeatures { max-width: 50rem !important; }
-}
-
-@media (width: 1024px) and (height: 600px) and (orientation: landscape) {
-  .secondaryHeroGrid { grid-template-columns: minmax(0, 380px) minmax(0, 1fr) !important; }
-  .secondaryHeroImageWrap { min-height: 300px !important; }
-  .secondaryHeroContent { padding-left: 24px !important; padding-right: 24px !important; }
-  .secondaryHeroFeatures { max-width: 46rem !important; }
-}
-
-/* Laptop 1024px – keep side-by-side layout, tighten cards & spacing */
 @media (min-width: 1020px) and (max-width: 1028px) and (min-height: 700px) and (max-height: 900px) {
-  .secondaryHeroSection {
-    padding-top: 6px !important;
-    padding-bottom: 6px !important;
-  }
-  .secondaryHeroGrid {
-    grid-template-columns: minmax(0, 420px) minmax(0, 1fr) !important;
-    align-items: stretch !important;
-  }
-  .secondaryHeroImageWrap {
-    min-height: 380px !important;
-    max-width: none !important;
-    border-right: 1px solid rgba(0, 0, 0, 0.12) !important;
-    border-bottom: 0 !important;
-  }
-  .dark .secondaryHeroImageWrap {
-    border-right: 1px solid rgba(255, 255, 255, 0.12) !important;
-    border-bottom: 0 !important;
-  }
-  .secondaryHeroContent {
-    padding: 1rem 1.25rem !important;
-    text-align: left !important;
-    justify-content: center !important;
-  }
-  .secondaryHeroContent h2 {
-    font-size: 1.5rem !important;
-    line-height: 1.1 !important;
-  }
-  .secondaryHeroContent p {
-    margin-top: 0.4rem !important;
-    font-size: 0.85rem !important;
-    line-height: 1.45 !important;
-  }
-  .secondaryHeroFeatures {
-    margin-top: 0.6rem !important;
-    gap: 0.4rem !important;
-    grid-template-columns: repeat(2, 1fr) !important;
-    max-width: none !important;
-    margin-left: 0 !important;
-    margin-right: 0 !important;
-  }
-  .secondaryHeroFeatures > div {
-    padding: 0.5rem 0.6rem !important;
-  }
-  .secondaryHeroFeatures .flex.items-start {
-    gap: 0.5rem !important;
-  }
-  .secondaryHeroFeatures .flex h-9 {
-    height: 1.75rem !important;
-    width: 1.75rem !important;
-  }
-  .secondaryHeroFeatures .text-sm.font-semibold {
-    font-size: 0.8rem !important;
-    line-height: 1.2 !important;
-  }
-  .secondaryHeroFeatures .mt-1.text-sm {
-    font-size: 0.75rem !important;
-    line-height: 1.35 !important;
-    margin-top: 2px !important;
-  }
   .secondaryHeroCtas {
     margin-top: 0.5rem !important;
     justify-content: flex-start !important;
@@ -1289,19 +1122,7 @@ details > summary.home-menu-toggle {
   }
 }
 
-.secondaryHeroImageWrap {
-  z-index: 0;
-  transform-style: preserve-3d;
-  transition: box-shadow 300ms ease-in-out, transform 300ms ease-in-out;
-  transform-origin: center;
-}
-
-@media (min-width: 768px) {
-  .secondaryHeroImageWrap {
-    transform-origin: right center;
-  }
-}
-
+/* .secondaryHeroImage has no current markup hook; kept, untouched, per task instructions. */
 .secondaryHeroImage {
   z-index: 0;
   backface-visibility: hidden;
@@ -1311,43 +1132,14 @@ details > summary.home-menu-toggle {
   filter: saturate(1.06) contrast(1.03);
 }
 
-@media (hover: hover) and (pointer: fine) {
-  .secondaryHeroImageWrap:hover {
-    z-index: 2;
-    box-shadow: 0 18px 56px rgba(0, 0, 0, 0.14);
-    transform: scale(1.06);
-  }
-  .secondaryHeroImageWrap:hover .secondaryHeroImage {
-    transform: perspective(1000px) rotateY(0deg) scale(1.06);
-    filter: saturate(1.12) contrast(1.06);
-  }
-}
-
-.secondaryHeroImageWrap:focus-visible .secondaryHeroImage {
-  transform: perspective(1000px) rotateY(0deg) scale(1.06);
-  filter: saturate(1.12) contrast(1.06);
-}
-
 .secondaryHeroContent {
   transition: transform 300ms ease-in-out;
   transform-origin: center;
 }
 
-@media (min-width: 768px) {
-  .secondaryHeroContent {
-    transform-origin: left center;
-  }
-}
-
 @media (hover: hover) and (pointer: fine) {
   .secondaryHeroContent:hover {
     transform: none;
-  }
-}
-
-@media (hover: none) and (pointer: coarse) {
-  .secondaryHeroImageWrap:active .secondaryHeroImage {
-    transform: perspective(1000px) rotateY(0deg) scale(1.03);
   }
 }
 
@@ -1575,31 +1367,6 @@ details > summary.home-menu-toggle {
   }
 
   /* Secondary hero — match Nest Hub layout */
-  .secondaryHeroGrid {
-    grid-template-columns: 1fr !important;
-  }
-  .secondaryHeroPlayer {
-    max-width: 100% !important;
-  }
-  .secondaryHeroImageWrap {
-    max-width: 100% !important;
-    min-height: 380px !important;
-    border-right: 0 !important;
-    border-bottom: 1px solid rgba(0, 0, 0, 0.12) !important;
-  }
-  .dark .secondaryHeroImageWrap {
-    border-bottom: 1px solid rgba(255, 255, 255, 0.12) !important;
-  }
-  .secondaryHeroContent {
-    text-align: center !important;
-    padding-left: 24px !important;
-    padding-right: 24px !important;
-  }
-  .secondaryHeroFeatures {
-    margin-left: auto !important;
-    margin-right: auto !important;
-    max-width: 42rem !important;
-  }
   .secondaryHeroCtas {
     justify-content: center !important;
     align-items: center !important;
