@@ -92,11 +92,53 @@ EMPTY_SUMMARY: dict = {
 
 _SCHEMA_KEYS = set(EMPTY_SUMMARY.keys())
 
+# Two of the list keys are asked for in _SYSTEM_PROMPT as arrays of OBJECTS,
+# not strings. Deriving every list key as an array of strings contradicted the
+# prompt, so the model obeyed the prompt and the provider's structured-output
+# validator rejected the entire summary:
+#
+#   400 json_validate_failed — '/action_items/0' does not validate with
+#   /properties/action_items/items/type: expected string, but got object
+#
+# Nothing was stored on those calls. Worse, lead qualification reads the
+# summary (store._summary_supports_lead), so a rejected summary also meant no
+# lead decision was ever made. 6 failures in 7 days; only ~26 of 84 calls in
+# 30 days had a summary at all (2026-09-22).
+#
+# The shapes below are the prompt's, spelled out. test_call_summary_schema.py
+# asserts the two stay in step, which is what "cannot drift" needed to mean.
+_OBJECT_LIST_ITEMS = {
+    "objections": {
+        "type": "object",
+        "properties": {
+            "objection": {"type": "string"},
+            "handled": {"type": "string"},
+        },
+        "required": ["objection", "handled"],
+        "additionalProperties": False,
+    },
+    "action_items": {
+        "type": "object",
+        "properties": {
+            "item": {"type": "string"},
+            "owner": {"type": "string"},
+        },
+        "required": ["item", "owner"],
+        "additionalProperties": False,
+    },
+}
+
 # JSON-Schema property types, derived from EMPTY_SUMMARY so the two cannot
-# drift: a list default means an array of strings, anything else a string.
+# drift: a list default means an array (of objects where the prompt asks for
+# objects, of strings otherwise), anything else a string.
 _SUMMARY_SCHEMA_PROPERTIES = {
-    key: ({"type": "array", "items": {"type": "string"}}
-          if isinstance(default, list) else {"type": "string"})
+    key: (
+        {"type": "array", "items": _OBJECT_LIST_ITEMS[key]}
+        if key in _OBJECT_LIST_ITEMS
+        else {"type": "array", "items": {"type": "string"}}
+        if isinstance(default, list)
+        else {"type": "string"}
+    )
     for key, default in EMPTY_SUMMARY.items()
 }
 
