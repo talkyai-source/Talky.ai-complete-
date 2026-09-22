@@ -893,7 +893,18 @@ async def campaign_test_websocket(
                     )
                     from app.domain.models.conversation import Message, MessageRole
 
-                    greeting = _build_outbound_greeting(voice_session)
+                    # The CallSession, exactly as the phone path does
+                    # (lifecycle.py). The VoiceSession wrapper carries no
+                    # agent_config, persona_type or call_reason, so the Test
+                    # agent resolved its opener from different inputs than a
+                    # live call -- the one thing it exists not to do -- and
+                    # logged company_name_fallback on every test call (every
+                    # such warning in the 30 days to 2026-09-23 came from
+                    # here). Today's outbound openers are bare hellos, so the
+                    # difference was not audible; the inputs must still match.
+                    greeting = _build_outbound_greeting(
+                        getattr(voice_session, "call_session", None) or voice_session
+                    )
                     await orchestrator.send_greeting(voice_session, greeting, websocket)
                     # Seed history so the LLM doesn't re-greet on the first turn.
                     try:
