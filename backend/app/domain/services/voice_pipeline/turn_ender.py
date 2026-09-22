@@ -32,6 +32,7 @@ from app.domain.services.voice_pipeline.identity_disposition import (
 from app.domain.services.voice_pipeline.lead_slot_capture import (
     capture_turn_slots,
 )
+from app.domain.services.end_session_action import agent_left_a_question_open
 from app.domain.services.voice_pipeline.turn_helpers import (
     _first_speaker_label,
     _persona_label,
@@ -891,6 +892,26 @@ class TurnEnder:
                         logger.info(
                             "end_call_stripped_wrong_person call_id=%s — "
                             "model asked to hang up but disposition=wrong_person; keeping call alive",
+                            call_id[:12],
+                        )
+                        try:
+                            session._end_call_requested = False
+                        except Exception:
+                            pass
+                    elif (
+                        agent_left_a_question_open(response_text)
+                        and not contains_dnc(full_transcript)
+                        and not contains_explicit_goodbye(full_transcript)
+                    ):
+                        # The agent just asked the caller something. Hanging
+                        # up now would leave the question unanswerable -- which
+                        # the sentinel path did on 35d3fd2f ("Mike at example
+                        # dot com - right?"), 3aae86c6 and 77531765. A request
+                        # to be removed, or a real goodbye, still ends the call.
+                        logger.info(
+                            "end_call_stripped_question_open call_id=%s — "
+                            "model asked a question and a hangup in the same "
+                            "turn; keeping call alive for the answer",
                             call_id[:12],
                         )
                         try:

@@ -35,6 +35,33 @@ _CALLER_END_INTENT = re.compile(
 )
 
 
+_SENTINEL_RE = re.compile(r"\[\[?\s*END_CALL\s*\]?\]", re.IGNORECASE)
+
+
+def agent_left_a_question_open(agent_text: Optional[str]) -> bool:
+    """True when the agent's own last sentence this turn was a question.
+
+    Asking a question and hanging up in the same breath is never a close. The
+    [[END_CALL]] sentinel path honoured the model's hangup unconditionally
+    (only a wrong-person turn was exempt), while the JSON end-session path
+    already required the caller to have finished. In the 30 days to
+    2026-09-23 the sentinel hung up on callers straight after:
+
+        "Mike at example dot com - right?"              (35d3fd2f)
+        "Does that process ever hold you up?"           (3aae86c6)
+        "When's a good time to call back?"               (77531765) - the
+                                   caller had just said "Can you hold for a
+                                   second?"
+
+    Every legitimate close in that window ended in a statement ("Thanks for
+    your time - have a good day."), which is why this looks only at the final
+    sentence's punctuation rather than at anything the caller said.
+    """
+    text = _SENTINEL_RE.sub("", str(agent_text or "")).strip()
+    text = text.rstrip(" \"'”’)]")
+    return text.endswith("?")
+
+
 def caller_signaled_end(text: Optional[str]) -> bool:
     """True if the caller's own words clearly signal ending the call."""
     return bool(text and _CALLER_END_INTENT.search(text))
