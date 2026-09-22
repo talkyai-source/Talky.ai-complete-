@@ -57,6 +57,7 @@ from app.domain.services.voice_pipeline.sentence_cap import (
 from app.domain.services.voice_pipeline.sentence_segmentation import (
     _is_missing_space_boundary,
 )
+from app.domain.services.voice_pipeline.grounded_links import ground_spoken_links
 from app.services.scripts.prompts.live_state import build_live_state_block
 from app.domain.services.voice_pipeline.knowledge_tool import (
     KB_TOOL_NAME,
@@ -639,6 +640,10 @@ class TurnStreamer:
         # Set when the model stopped writing its own turn and started writing
         # the caller's. See the flush loop below.
         model_wrote_caller_turn = False
+        # Everything the model was GIVEN this turn -- the assembled prompt plus
+        # any knowledge the tool returned. A web address the agent speaks must
+        # appear here or it is rewritten (see grounded_links.py).
+        turn_grounding: list[str] = []
         guardrail_blocked_response: Optional[str] = None
 
         # P3: track sentences ACTUALLY delivered to TTS, so on a barge-in we
@@ -664,6 +669,13 @@ class TurnStreamer:
 
         def _validate_for_tts(text: str) -> tuple[str, Optional[str]]:
             """Validate cleaned model text before any byte reaches TTS."""
+            text, _links = ground_spoken_links(text, [system_prompt, *turn_grounding])
+            if _links:
+                logger.warning(
+                    "ungrounded_link_rewritten call=%s links=%s",
+                    call_id[:12],
+                    _links,
+                )
             results = action_results_for_session(session)
             valid, reason = guardrails.validate_response(
                 text,
@@ -703,6 +715,8 @@ class TurnStreamer:
                 if _name == KB_TOOL_NAME:
                     q = (_args or {}).get("query") or last_user_text_for_limit
                     result = await run_knowledge_lookup(session, q)
+                    if result and result != NO_KB_FACTS:
+                        turn_grounding.append(str(result))
                     current = getattr(session, "_live_structured_state", _structured)
                     session._live_structured_state = reduce_live_state(
                         current,
@@ -1077,6 +1091,9 @@ class TurnStreamer:
             full_text = guardrails.clean_response(
                 raw_response_text, tts_model_id=_tts_model_id,
                 protected_values=_protected_readback,
+            )
+            full_text, _ = ground_spoken_links(
+                full_text, [system_prompt, *turn_grounding]
             )
 
         if model_wrote_caller_turn:
