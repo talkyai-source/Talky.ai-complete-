@@ -145,6 +145,33 @@ _SUMMARY_SCHEMA_PROPERTIES = {
 # Keys whose values must be lists (coerce scalars → single-element list)
 _LIST_KEYS = {"key_points", "objections", "commitments", "action_items", "follow_up_tips", "notable_quotes"}
 
+# Output budget. This was a flat 1500 tokens however long the call was, and on
+# a 243-second call with 353 transcript rows the model ran out mid-document:
+#
+#   400 json_validate_failed - 'max completion tokens reached before
+#   generating a valid document'
+#
+# Under constrained decoding that is a hard error rather than a short answer:
+# the whole summary is discarded, and because lead qualification reads the
+# summary the call gets no lead decision either (call 2427af7e, 2026-09-22).
+#
+# The summary is a fixed-shape document whose six list fields grow with how
+# much HAPPENED on a call rather than linearly with its length, so the budget
+# grows sub-linearly and is capped. The ceiling is what a retry uses.
+_SUMMARY_MIN_TOKENS = 2400
+_SUMMARY_MAX_TOKENS = 8000
+
+# Groq reports an exhausted output budget in the message rather than through a
+# distinct error code, so the retry has to match on it.
+_TOKENS_EXHAUSTED = "max completion tokens reached"
+
+
+def _summary_token_budget(transcript_text: str) -> int:
+    """Output tokens to allow for a transcript of this size."""
+    transcript_tokens = (len(transcript_text or "") + 3) // 4
+    budget = _SUMMARY_MIN_TOKENS + transcript_tokens // 4
+    return max(_SUMMARY_MIN_TOKENS, min(_SUMMARY_MAX_TOKENS, budget))
+
 # Keys whose values must be strings
 _STR_KEYS = {
     "headline",
@@ -220,7 +247,7 @@ async def summarize_transcript(transcript_text: str) -> dict:
         )
         _strict = strict_mode_active(_model)
 
-        async def _call(user_content: str) -> str:
+        async def _call(user_content: str, max_tokens: int) -> str:
             resp = await client.chat.completions.create(
                 model=_model,
                 messages=[
@@ -228,12 +255,28 @@ async def summarize_transcript(transcript_text: str) -> dict:
                     {"role": "user", "content": user_content},
                 ],
                 temperature=0.3,
-                max_tokens=1500,
+                max_tokens=max_tokens,
                 response_format=_response_format,
             )
             return resp.choices[0].message.content or ""
 
-        raw_content = await _call(transcript_text)
+        _budget = _summary_token_budget(transcript_text)
+        try:
+            raw_content = await _call(transcript_text, _budget)
+        except Exception as exc:  # noqa: BLE001 - re-raised below unless it is the budget
+            if _TOKENS_EXHAUSTED not in str(exc) or _budget >= _SUMMARY_MAX_TOKENS:
+                raise
+            # Losing an entire summary because the estimate was low is not worth
+            # it; one retry at the ceiling costs a few seconds after the call
+            # has already ended.
+            logger.warning(
+                "call_summarizer: %d output tokens were not enough for a "
+                "%d-char transcript — retrying at %d",
+                _budget,
+                len(transcript_text),
+                _SUMMARY_MAX_TOKENS,
+            )
+            raw_content = await _call(transcript_text, _SUMMARY_MAX_TOKENS)
 
         try:
             parsed = json.loads(raw_content)
@@ -258,7 +301,7 @@ async def summarize_transcript(transcript_text: str) -> dict:
                 transcript_text
                 + "\n\nReturn ONLY valid JSON matching the schema. No prose, no markdown."
             )
-            raw_content2 = await _call(retry_content)
+            raw_content2 = await _call(retry_content, _SUMMARY_MAX_TOKENS)
             try:
                 parsed = json.loads(raw_content2)
             except json.JSONDecodeError:
