@@ -72,6 +72,13 @@ def _make_session(first_speaker: str) -> CallSession:
     # Set the same way production code does (telephony/lifecycle.py,
     # telephony/prewarm.py both assign directly onto the CallSession).
     session._first_speaker = first_speaker
+    # A silent caller on a live line still sends audio frames -- line noise,
+    # room tone. The harness's fake STT never reads the stream, so the ingest
+    # loop that stamps first audio never runs; state that precondition here.
+    # Since 2026-09-23 the nudge clock counts from first caller audio (see
+    # test_opening_nudge_waits_for_caller_audio below): with NO audio at all we
+    # could not hear an answer to "Hello?" anyway.
+    session._caller_audio_started_at = time.monotonic()
     return session
 
 
@@ -290,3 +297,61 @@ async def test_agent_first_after_a_BARE_HELLO_does_get_re_greeted():
     assert "still here" not in spoken[0].lower(), (
         "the MID re-offer must never be the first thing a prospect hears"
     )
+
+
+@pytest.mark.asyncio
+async def test_opening_nudge_waits_for_caller_audio():
+    """The nudge clock measures the CALLER's silence; before their audio
+    reaches us there is no silence to measure.
+
+    Call cf6bfed1 (2026-09-22): the clock started when the monitor did, before
+    the STT socket was open. The handshake and first audio took ~1.3s, so the
+    2.5s opening timer fired after ~1.2s of real listening and its "Hello?"
+    landed on the caller's own first "Hello":
+
+        18.98  first caller audio
+        20.71  caller rising  (rms 402, peak 1938)
+        20.80  [SilenceMonitor] silence (opening), nudging: 'Hello?'
+        21.00  caller's "Hello" transcribed
+    """
+    session = _make_session("user")
+    del session._caller_audio_started_at   # audio has not started flowing
+    pipeline = _make_pipeline()
+
+    await _run_until_silence_tick(session, pipeline)
+
+    spoken = [c.args[1] for c in pipeline.synthesize_and_send_audio.await_args_list]
+    assert "Hello?" not in spoken, (
+        "nudged a caller whose audio had not reached us yet"
+    )
+
+
+@pytest.mark.asyncio
+async def test_opening_clock_counts_from_first_audio_not_from_monitor_start():
+    """Audio that began just now must not inherit silence from before it."""
+    session = _make_session("user")
+    # First audio is stamped well in the FUTURE relative to the harness's
+    # 1.5s window, so no nudge may fire even though the monitor has been
+    # running the whole time.
+    session._caller_audio_started_at = time.monotonic() + 60
+    pipeline = _make_pipeline()
+
+    await _run_until_silence_tick(session, pipeline)
+
+    spoken = [c.args[1] for c in pipeline.synthesize_and_send_audio.await_args_list]
+    assert "Hello?" not in spoken
+
+
+def test_first_audio_is_stamped_in_the_one_ingest_path_every_call_uses():
+    """Real outbound, real inbound and browser tests were all verified to log
+    audio_stream_first_chunk from audio_ingest on 2026-09-22; the stamp must
+    sit beside that log line or telephony would never nudge at all."""
+    from pathlib import Path
+
+    src = (
+        Path(__file__).resolve().parents[2]
+        / "app" / "domain" / "services" / "voice_pipeline" / "audio_ingest.py"
+    ).read_text(encoding="utf-8")
+    first = src.index("if not _first_chunk_logged:")
+    block = src[first : src.index("audio_stream_first_chunk call_id", first)]
+    assert "session._caller_audio_started_at = time.monotonic()" in block

@@ -336,6 +336,13 @@ class AudioIngest:
                         raw_bytes = chunk if isinstance(chunk, bytes) else getattr(chunk, "data", b"")
                         if not _first_chunk_logged:
                             _first_chunk_logged = True
+                            # The silence monitor measures the CALLER's silence,
+                            # and nothing the caller says can be heard before
+                            # this moment. See _silence_monitor.
+                            try:
+                                session._caller_audio_started_at = time.monotonic()
+                            except Exception:
+                                pass
                             logger.info(
                                 "audio_stream_first_chunk call_id=%s "
                                 "chunk_len=%d — audio now flowing to STT",
@@ -688,6 +695,23 @@ class AudioIngest:
                             _silence_since = _tts_ended_at
                             _was_active = False
                             continue
+
+                        # The nudge clock measures the CALLER's silence, and a
+                        # caller cannot be heard before their audio reaches us.
+                        # It used to start when this monitor started -- before
+                        # the STT socket was even open. On call cf6bfed1 the
+                        # handshake and first audio took ~1.3s, so the 2.5s
+                        # opening timer fired after ~1.2s of real listening and
+                        # its "Hello?" landed on the caller's own first "Hello"
+                        # (audio 18.98, caller rising 20.71, nudge 20.80,
+                        # caller's transcript 21.00). Only the NUDGE clock
+                        # waits; the 60s hangup clock is untouched, so a call
+                        # whose audio never arrives still ends.
+                        _audio_from = getattr(session, "_caller_audio_started_at", None)
+                        if not isinstance(_audio_from, (int, float)):
+                            _silence_since = _now()
+                        elif _silence_since < _audio_from:
+                            _silence_since = _audio_from
 
                         # Caller mid-utterance (StartOfTurn before the transcript).
                         _barge = self._p._barge_in_events.get(call_id)
