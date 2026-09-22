@@ -279,6 +279,8 @@ async def validate_session(
                 await _revoke_by_id(conn, session["id"], reason="ip_binding_violation")
                 return None
             else:
+                if not session.get("is_suspicious"):
+                    session["became_suspicious"] = True
                 await _mark_session_suspicious(
                     conn, session["id"], f"ip_mismatch:{ip_check['reason']}"
                 )
@@ -305,7 +307,11 @@ async def validate_session(
         )
 
         if not fp_check["match"]:
-            logger.warning(
+            # Once per session at WARNING. A session already flagged used to
+            # log this on every request: 1,442 lines in the week to 2026-09-23
+            # from two legitimate users on one IP, burying the one line that
+            # would matter. Repeats stay visible at DEBUG.
+            (logger.debug if session.get("is_suspicious") else logger.warning)(
                 "Session fingerprint mismatch: user=%s session=%s",
                 session["user_id"],
                 session["id"],
@@ -322,6 +328,7 @@ async def validate_session(
                 )
                 session["is_suspicious"] = True
                 session["suspicious_reason"] = "fingerprint_mismatch"
+                session["became_suspicious"] = True
 
     # --- slide the idle window -----------------------------------------------
     await conn.execute(

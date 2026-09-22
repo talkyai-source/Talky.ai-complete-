@@ -159,8 +159,14 @@ class SessionSecurityMiddleware(BaseHTTPMiddleware):
             return response
 
         if validated and session is not None:
-            # Check for suspicious activity
-            if session.get("is_suspicious"):
+            # Report the moment a session BECOMES suspicious, not every request
+            # it stays that way. The flag is sticky, so this used to fire on
+            # every call a flagged session made: 2,994 warnings in the week to
+            # 2026-09-23, one session alone 1,197, all from two legitimate
+            # users on one IP. A real hijack would have been one line among
+            # thousands. The state itself is unchanged and still exposed on
+            # request.state below.
+            if session.get("became_suspicious"):
                 await self._handle_suspicious_session(
                     request, session, ip_address, fingerprint
                 )
