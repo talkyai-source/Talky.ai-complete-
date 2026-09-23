@@ -348,6 +348,33 @@ async def _speak_recording_disclosure(voice_session) -> None:
             )
         except Exception:
             pass
+        # 2026-09-24 (call 6e0e221b): conversation_history is process-memory
+        # only. TranscriptService.accumulate_turn is the ONLY writer that
+        # reaches calls.transcript_json, so a notice recorded above but not
+        # here is spoken on the call yet absent from the stored transcript —
+        # 6e0e221b's saved transcript had 3 words even though a 60-character
+        # disclosure was spoken. Mirrors audio_ingest._record_silence_check's
+        # same-pattern fix for the silence-check phrase. Fail-soft: transcript
+        # bookkeeping must never break the call.
+        try:
+            pipeline = getattr(voice_session, "pipeline", None)
+            ts = getattr(pipeline, "transcript_service", None)
+            if ts is not None:
+                ts.accumulate_turn(
+                    call_id=call_id,
+                    role="assistant",
+                    content=text,
+                    talklee_call_id=getattr(session, "talklee_call_id", None),
+                    turn_index=getattr(session, "turn_id", 0),
+                    event_type="assistant_response",
+                    is_final=True,
+                    include_in_plaintext=True,
+                )
+        except Exception as exc:
+            logger.debug(
+                "recording_disclosure_transcript_accumulate_failed call_id=%s err=%s",
+                call_id[:12], exc,
+            )
         logger.info("recording_disclosure_spoken call_id=%s", call_id[:12])
     except Exception as exc:
         record_disclosure_state(DISCLOSURE_FAILED, *call_ids)
@@ -602,6 +629,34 @@ async def _send_outbound_greeting(voice_session) -> None:
         session.conversation_history.append(
             Message(role=MessageRole.ASSISTANT, content=_spoken_text)
         )
+        # 2026-09-24 (call 53d16d3e/6e0e221b): conversation_history alone
+        # never reaches calls.transcript_json — only
+        # TranscriptService.accumulate_turn does — so the spoken opener was
+        # missing from every saved transcript ("Thanks for calling. How can
+        # I help?" was spoken but 53d16d3e.transcript.txt starts with the
+        # caller). Same fix as the disclosure append above, and the same
+        # audio_ingest._record_silence_check pattern. _spoken_text is
+        # already trimmed to what actually played on a barge-in. Fail-soft:
+        # transcript bookkeeping must never break the call.
+        try:
+            pipeline = getattr(voice_session, "pipeline", None)
+            ts = getattr(pipeline, "transcript_service", None)
+            if ts is not None:
+                ts.accumulate_turn(
+                    call_id=call_id,
+                    role="assistant",
+                    content=_spoken_text,
+                    talklee_call_id=getattr(session, "talklee_call_id", None),
+                    turn_index=getattr(session, "turn_id", 0),
+                    event_type="assistant_response",
+                    is_final=True,
+                    include_in_plaintext=True,
+                )
+        except Exception as exc:
+            logger.debug(
+                "outbound_greeting_transcript_accumulate_failed call_id=%s err=%s",
+                call_id[:12], exc,
+            )
         # Flip the same flag turn_runner sets after the first LLM-generated
         # reply (see turn_runner.py) so live_state.py's per-turn LIVE STATE
         # block reflects reality — but ONLY when what was actually spoken
