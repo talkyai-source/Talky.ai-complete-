@@ -2823,7 +2823,16 @@ class AsteriskAdapter(CallControlAdapter):
             elif (
                 event_type == "ChannelDestroyed"
                 and channel_id not in self._end_dispatched
-                and channel_id.startswith("talky-out")
+                # "talky-out-" (with the trailing hyphen) matches only the real
+                # outbound leg id shape telephony_bridge.py generates,
+                # f"talky-out-{call_id}". Bare "talky-out" also matched the
+                # bridge/media ids this adapter itself creates for an ANSWERED
+                # call ("talky-outbound-bridge-...", "talky-outbound-media-...")
+                # and fired this same branch a second time for them, dispatching
+                # a mislabelled duplicate call-end (8b3176ca, 6e0e221b,
+                # 943702f0 — "pre-answer terminal channel=talky-outbou"
+                # immediately before the real "session ended channel=talky-out-…").
+                and channel_id.startswith("talky-out-")
                 and self._on_any_call_end is not None
             ):
                 # PRE-STASIS terminal: a channel WE originated died without
