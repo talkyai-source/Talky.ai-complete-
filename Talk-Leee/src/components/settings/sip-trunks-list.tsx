@@ -136,12 +136,12 @@ function TestStatusBadge({ trunk }: { trunk: SipTrunkRow }) {
     if (live) {
         const cls =
             trunk.runtime_ready
-                ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+                ? "text-emerald-700 dark:text-emerald-400"
                 : live === "rejected" || live === "failed" || live === "missing_config"
-                    ? "border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-400"
+                    ? "text-red-700 dark:text-red-400"
                     : live === "unregistered" || live === "registering" || live === "checking"
-                        ? "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400"
-                        : "border-gray-500/30 bg-gray-500/10 text-gray-700 dark:text-gray-400";
+                        ? "text-amber-700 dark:text-amber-400"
+                        : "text-gray-700 dark:text-gray-400";
         const label = live.charAt(0).toUpperCase() + live.slice(1);
         // Show the REAL backend reason (e.g. "403 Forbidden") right in the badge.
         const detail = trunk.runtime_status_detail ? ` · ${trunk.runtime_status_detail}` : "";
@@ -151,16 +151,16 @@ function TestStatusBadge({ trunk }: { trunk: SipTrunkRow }) {
         return (
             <span
                 title={`Live Asterisk registration: ${live}${detail}${checked}`}
-                className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-semibold ${cls}`}
+                className={`inline-flex items-start gap-1 text-xs font-bold ${cls}`}
             >
                 {live === "registered" ? (
-                    <CheckCircle2 className="h-3 w-3" aria-hidden />
+                    <CheckCircle2 className="mt-0.5 h-3 w-3 shrink-0" aria-hidden />
                 ) : live === "rejected" ? (
-                    <XCircle className="h-3 w-3" aria-hidden />
+                    <XCircle className="mt-0.5 h-3 w-3 shrink-0" aria-hidden />
                 ) : (
-                    <AlertCircle className="h-3 w-3" aria-hidden />
+                    <AlertCircle className="mt-0.5 h-3 w-3 shrink-0" aria-hidden />
                 )}
-                {label}{detail}
+                <span>{label}{detail}</span>
             </span>
         );
     }
@@ -168,9 +168,9 @@ function TestStatusBadge({ trunk }: { trunk: SipTrunkRow }) {
         return (
             <span
                 title="Live status pending — the updater refreshes every ~15s"
-                className="inline-flex items-center gap-1 rounded-full border border-gray-500/30 bg-gray-500/10 px-2 py-0.5 text-xs font-semibold text-gray-700 dark:text-gray-400"
+                className="inline-flex items-center gap-1 text-xs font-bold text-gray-700 dark:text-gray-400"
             >
-                <AlertCircle className="h-3 w-3" aria-hidden /> Checking…
+                <AlertCircle className="h-3 w-3 shrink-0" aria-hidden /> Checking…
             </span>
         );
     }
@@ -178,15 +178,15 @@ function TestStatusBadge({ trunk }: { trunk: SipTrunkRow }) {
     return (
         <span
             title={`${ok ? "OK" : trunk.last_test_result.error || "Failed"} · ${new Date(trunk.last_tested_at).toLocaleString()}`}
-            className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-semibold ${ok
-                ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
-                : "border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-400"
+            className={`inline-flex items-center gap-1 text-xs font-bold ${ok
+                ? "text-emerald-700 dark:text-emerald-400"
+                : "text-red-700 dark:text-red-400"
                 }`}
         >
             {ok ? (
-                <><CheckCircle2 className="h-3 w-3" aria-hidden /> Reachable</>
+                <><CheckCircle2 className="h-3 w-3 shrink-0" aria-hidden /> Reachable</>
             ) : (
-                <><XCircle className="h-3 w-3" aria-hidden /> Unreachable</>
+                <><XCircle className="h-3 w-3 shrink-0" aria-hidden /> Unreachable</>
             )}
         </span>
     );
@@ -507,38 +507,44 @@ export function SipTrunksList() {
                          * Fixed column widths (colgroup) except Endpoint, which is left
                          * unset so table-layout:fixed hands it 100% of any width beyond
                          * the min-width below (the card fills edge-to-edge on wide
-                         * screens instead of leaving a gap after Actions). The six fixed
-                         * widths are each sized to their column's real longest content at
-                         * their cell padding (px-2, except Direction/Auth/Active below),
-                         * verified against the rendered page (not just content-width
-                         * estimates): Trunk holds an 18-char hyphenated name like
-                         * "blaze-pool-150004" on one line, Direction/Auth/Active use
-                         * px-1.5 and are sized to "outbound"/"configured"/"Inactive"
-                         * (their real longest values), Live status is deliberately narrow
-                         * enough that its pill wraps to 2 lines instead of forcing the
-                         * table wider, and Actions
-                         * is wide enough for all 4 controls on one line. min-width is that
-                         * sum plus Endpoint's own floor (fits a domain the length of
+                         * screens instead of leaving a gap after Actions). Every column
+                         * uses the same px-2 horizontal cell padding, header and body.
+                         * The six fixed widths are each sized to their column's real
+                         * longest content at that padding, verified against the rendered
+                         * page (not just content-width estimates): Trunk holds an 18-char
+                         * hyphenated name like "blaze-pool-150004" on one line,
+                         * Direction/Auth/Active fit their real longest values
+                         * ("outbound"/"configured"/"Inactive") on one line, Actions is
+                         * wide enough for all 4 controls on one line, and Live status (no
+                         * pill, bold plain text — see TestStatusBadge) is sized so the
+                         * common "Registered · Asterisk reports a healthy registration"
+                         * text wraps to at most 2 lines and the longest real failure
+                         * detail (missing_config's fixed reason string) wraps to at most
+                         * 3, measured directly in a browser rather than estimated. Detail
+                         * text ultimately comes from an Asterisk log line and has no hard
+                         * length cap, so wrapping — not a single-line guarantee — is the
+                         * contract here. min-width is the fixed-column sum plus Endpoint's
+                         * own floor (fits a domain the length of
                          * "sip3.blazedigital.com" on one line); below it the wrapper above
                          * scrolls horizontally instead of shrinking these. The settings
                          * page wraps this whole tab section in its own outer Card, which
                          * costs ~50px this table doesn't control, so the true available
-                         * width is 922px (not the card's own max-w-5xl) at every desktop
-                         * breakpoint from 1280px up with the sidebar collapsed, and at
-                         * every breakpoint >=1366px with the sidebar expanded too; only at
-                         * 1280px with the sidebar expanded it used to drop to 914px, a 5px
-                         * shortfall against a 919px min-width; Direction/Auth/Active use
-                         * px-1.5 instead of px-2 (4px narrower each) specifically to close
-                         * that 5px gap, bringing min-width down to 907px so it fits there
-                         * too.
+                         * width is 922px (not the card's own max-w-5xl) at desktop
+                         * breakpoints from 1280px up with the sidebar collapsed, and at
+                         * every breakpoint >=1366px with the sidebar expanded too. Widening
+                         * Live status for readability pushed min-width past that 922px
+                         * ceiling, so the table now also scrolls at 1280px with the
+                         * sidebar expanded (and at any width below ~1070px) — accepted
+                         * tradeoff; the wrapper's horizontal scroll still reaches every
+                         * column.
                          */}
-                        <table className="table-fixed w-full min-w-[907px] text-sm">
+                        <table className="table-fixed w-full min-w-[1070px] text-sm">
                             <colgroup>
                                 <col style={{ width: 137 }} />
                                 <col />
                                 <col style={{ width: 69 }} />
                                 <col style={{ width: 81 }} />
-                                <col style={{ width: 125 }} />
+                                <col style={{ width: 288 }} />
                                 <col style={{ width: 65 }} />
                                 <col style={{ width: 247 }} />
                             </colgroup>
@@ -546,10 +552,10 @@ export function SipTrunksList() {
                                 <tr className="border-b border-border bg-muted/30 text-left text-xs font-semibold text-muted-foreground">
                                     <th className="px-2 py-3">Trunk</th>
                                     <th className="px-2 py-3">Endpoint</th>
-                                    <th className="px-1.5 py-3">Direction</th>
-                                    <th className="px-1.5 py-3">Auth</th>
+                                    <th className="px-2 py-3">Direction</th>
+                                    <th className="px-2 py-3">Auth</th>
                                     <th className="px-2 py-3">Live status</th>
-                                    <th className="px-1.5 py-3">Active</th>
+                                    <th className="px-2 py-3">Active</th>
                                     <th className="px-2 py-3 text-right">Actions</th>
                                 </tr>
                             </thead>
@@ -567,14 +573,14 @@ export function SipTrunksList() {
                                         <td className="px-2 py-3 text-muted-foreground font-mono text-xs">
                                             {t.transport.toUpperCase()}://{t.sip_domain}:{t.port}
                                         </td>
-                                        <td className="px-1.5 py-3 capitalize text-muted-foreground">{t.direction}</td>
-                                        <td className="px-1.5 py-3 text-muted-foreground">
+                                        <td className="px-2 py-3 capitalize text-muted-foreground">{t.direction}</td>
+                                        <td className="px-2 py-3 text-muted-foreground">
                                             {t.auth_configured ? t.auth_username || "configured" : "—"}
                                         </td>
                                         <td className="px-2 py-3">
                                             <TestStatusBadge trunk={t} />
                                         </td>
-                                        <td className="px-1.5 py-3">
+                                        <td className="px-2 py-3">
                                             <span
                                                 className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-semibold ${t.is_active
                                                     ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
