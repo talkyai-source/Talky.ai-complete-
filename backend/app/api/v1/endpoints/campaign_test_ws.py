@@ -758,6 +758,13 @@ async def campaign_test_websocket(
                 if _cs is not None:
                     _cs._first_speaker = fs
                     _cs._enable_silence_monitor = True
+                    # test-agent-mute-only-on-greeting (2026-09-23):
+                    # tts_playback.synthesize_and_send reads this off the
+                    # CallSession (the object it actually receives) to mute
+                    # STT for every agent utterance, not just the greeting.
+                    # Real phone calls never set this, so it defaults False
+                    # there — telephony keeps mute_during_tts False by design.
+                    _cs._mute_during_tts = bool(config.mute_during_tts)
             except Exception:  # noqa: BLE001
                 pass
 
@@ -913,6 +920,30 @@ async def campaign_test_websocket(
                         )
                     except Exception:  # noqa: BLE001
                         pass
+                    # BUG (greeting-and-disclosure-not-persisted, 2026-09-23):
+                    # the append above only feeds the LLM's own in-memory
+                    # context. transcript_json (and the summary/UI transcript)
+                    # is filled exclusively by TranscriptService.accumulate_turn
+                    # — nothing on this path ever called it, so a Test-agent
+                    # call's opener was spoken (verified live on adf41aa1) but
+                    # never appeared in the saved transcript. Accumulate it
+                    # too, same as a live call's first assistant turn.
+                    try:
+                        _pipeline = getattr(voice_session, "pipeline", None)
+                        _transcript_service = getattr(_pipeline, "transcript_service", None)
+                        if _transcript_service is not None:
+                            _transcript_service.accumulate_turn(
+                                call_id=voice_session.call_id,
+                                role="assistant",
+                                content=greeting,
+                                talklee_call_id=getattr(voice_session, "talklee_call_id", None),
+                                turn_index=0,
+                                event_type="assistant_response",
+                                is_final=True,
+                                include_in_plaintext=True,
+                            )
+                    except Exception:  # noqa: BLE001
+                        pass
                 # caller-first: send nothing; the pipeline reacts to the first turn.
 
             auth_task = asyncio.create_task(_watch_login_session(
@@ -959,6 +990,25 @@ async def campaign_test_websocket(
             # Nested finally preserves caller cancellation after cleanup.
             try:
                 if voice_session and test_call_id:
+                    # BUG (adf41aa1, hangup-vs-inflight-reply, 2026-09-23): the
+                    # tester's "Hi" got a reply that finished generating 10ms
+                    # AFTER end_call, but _persist_test_transcript below used
+                    # to run before anything cancelled/awaited that in-flight
+                    # turn, so the persist read the buffer 2ms too early and
+                    # the reply was lost. end_session() further down does
+                    # cancel the turn, but only AFTER persist — too late.
+                    # Cancel (and await settling of) it here first, with the
+                    # session's own call_id (what _pending_llm_tasks is keyed
+                    # by — see lifecycle.py's teardown for the same id rule).
+                    try:
+                        _pipeline = getattr(voice_session, "pipeline", None)
+                        if _pipeline is not None:
+                            await asyncio.wait_for(
+                                _pipeline.cancel_active_turn(voice_session.call_id),
+                                timeout=_CLEANUP_TIMEOUT_SECONDS,
+                            )
+                    except Exception:
+                        logger.warning("campaign_test_pre_persist_cancel_failed", exc_info=True)
                     try:
                         await asyncio.wait_for(_persist_test_transcript(
                             voice_session, tenant_id, test_call_id, container,
