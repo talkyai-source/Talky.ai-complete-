@@ -58,6 +58,7 @@ from app.domain.services.voice_pipeline.sentence_segmentation import (
     _is_missing_space_boundary,
 )
 from app.domain.services.voice_pipeline.grounded_links import ground_spoken_links
+from app.domain.services.voice_pipeline.readback_guard import phone_readback_guard
 from app.services.scripts.prompts.live_state import build_live_state_block
 from app.domain.services.voice_pipeline.knowledge_tool import (
     KB_TOOL_NAME,
@@ -683,6 +684,19 @@ class TurnStreamer:
                     call_id[:12],
                     _links,
                 )
+            # Deterministic backstop: the capture state machine's "please
+            # repeat" for a NEEDS_CLARIFICATION/INVALID phone is advisory-only
+            # prompt text, and the model can (and on 6aaeb4dd did) ignore it
+            # and fabricate a confirmed-sounding read-back anyway. See
+            # readback_guard.py.
+            _rb_text, _rb_blocked = phone_readback_guard(session, text)
+            if _rb_blocked:
+                logger.warning(
+                    "phone_readback_blocked call=%s — unconfirmed number read "
+                    "back as if confirmed; substituting the re-ask",
+                    call_id[:12],
+                )
+                return _rb_text, "unconfirmed_phone_readback"
             results = action_results_for_session(session)
             valid, reason = guardrails.validate_response(
                 text,
