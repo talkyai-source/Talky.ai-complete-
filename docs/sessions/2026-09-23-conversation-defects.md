@@ -7,9 +7,9 @@ conversation, say what was already fixed and what was not, plan the fixes,
 premortem the plan, fix everything broken, make it live, give the second login
 the same access, place a live test call, and check the voice again.
 
-Production went from `edee6fe8` to **`924b7743`** in six deploys. No migration.
-Canonical suite **9,181 → 9,362 passed / 8 skipped / 0 failed**; every one of the
-181 new tests is accounted for by test ID against a pristine checkout. Ruff clean
+Production went from `edee6fe8` to **`76426ed6`** in seven deploys. No migration.
+Canonical suite **9,181 → 9,381 passed / 8 skipped / 0 failed**; every one of the
+200 new tests is accounted for by test ID against a pristine checkout. Ruff clean
 on `app/`.
 
 ## The headline
@@ -28,8 +28,9 @@ block of platform text that sent **one campaign's offer to every tenant on
 every turn**.
 
 Twelve root causes were fixed and deployed. The live test at the end of the day
-then found that the most important fix has a gap in production that no offline
-test could see — recorded below, and open at the time of writing.
+then found that the most important fix had a gap in production that no offline
+test could see, plus a phone number the agent got wrong; both, and the
+10-second drop, were then fixed and deployed (§14, §15).
 
 ## How the conversations were analysed
 
@@ -160,7 +161,7 @@ days, two accounts and ten campaigns, so the turn is now cut there outright.
 re-joining with a space, which had been silently collapsing newlines and runs of
 spaces in replies it was not truncating at all.
 
-**Status:** deployed in `9e7f9c65`. **Gap found on the live test — see §14.**
+**Status:** deployed in `9e7f9c65`; the gap found on the live test is fixed too (§14).
 
 ## 2. Call summaries were thrown away — twice
 
@@ -561,10 +562,14 @@ The agent hung up, not the line. Call `7a690f74` (dojo, 22 Sep 18:51):
 18:51:15  agent_end_call — model requested hangup
 ```
 
-The hangup came on the agent's **first reply**. §8 holds a hangup after a
-question or during a capture; a plain statement on turn 0 is not covered. A
-first reply should never end a call unless the caller said goodbye, asked to be
-removed, or it was a wrong number or voicemail. Open.
+The hangup came on the agent's **first reply**. §8 held a hangup after a
+question or during a capture, but not a plain statement. Over 30 days the model
+hung up on turn 0 twice, and both were wrong ("Sarah here from Dojo." and
+"Sarah here from Dojo — got a minute?"); every legitimate close came on turn 3 or
+later. A model hangup on turn 0 is now held; a do-not-call request, an explicit
+goodbye, or a voicemail or screening machine still ends the call.
+
+**Status:** fixed and deployed in `76426ed6`.
 
 A separate call to **+1 778 924 9977** at 21:18 was refused at admission as
 `unknown_did`: that number's only inbound route belongs to another customer and
@@ -649,9 +654,26 @@ capture only arms on particular wordings of the agent's question:
 With capture unarmed, the correct value never reached the prompt and the model
 wrote the digits out itself.
 
-Both §14 and §15 are fixable in the parsing layer and were not fixed at the time
-of writing, because a second live call (`a5e033c7`) was in progress and a deploy
-restarts the call services.
+### Fixes for §14 and §15
+
+Both were fixed and deployed in `76426ed6`, after the second test call
+(`a5e033c7`) had ended — 0 active channels and 0 gateway sessions were confirmed
+before the restart.
+
+* **§14** (`92aac6aa`): the streamer remembers when a flushed sentence ended on
+  the last character received, and applies the same rule to the next token — a
+  letter with no leading space after `?`/`!`, or a capital after `.`, ends the
+  turn. Tested through the real streamer with production's exact split; the
+  two boundary tests fail on the old code. Normal tokens carry their own leading
+  space and are untouched; a decimal split across tokens is not a boundary.
+* **§15** (`86836ec8`): a question naming a phone-type number (phone, mobile,
+  cell, contact, callback or telephone number, or "the best number to/where")
+  now arms phone capture. Every unarmed ask in the 30-day corpus is covered;
+  "Would you like us to remove your number…" and statements do not arm. Once
+  armed, the live-call number is handled correctly: 312 075 0496 is not a valid
+  number in North America (the middle group cannot start with 0) or the UK, so
+  the capture asks for a repeat instead of the model guessing; a valid number is
+  captured exactly for the read-back. 8 of the 12 new tests fail on the old code.
 
 ---
 
@@ -665,6 +687,7 @@ restarts the call services.
 | 23 Sep 00:03 | `8f7096fb` | §7, §8 (questions), §12 |
 | 23 Sep 00:19 | `334d806d` | §8 (captures), §13 |
 | 23 Sep 00:41 | `924b7743` | §11 |
+| 23 Sep 08:12 | `76426ed6` | §14, §15, first-reply hangup |
 
 Every deploy: refused while a call was in flight; import smoke before touching
 the running service; restart of the four Python units; health, deep-health and
@@ -694,6 +717,9 @@ parsing; the code already in production failed identically under that shell.
 | `d54c151e` | set the RLS bypass on every pooled acquire in the knowledge scripts |
 | `3aa7cc7e` | don't hang up while an email or phone number is mid-capture |
 | `924b7743` | fail over to the secondary model after 1.5 s, not 2.5 s |
+| `92aac6aa` | catch the invented caller turn when the boundary falls between tokens |
+| `86836ec8` | arm phone capture on the way the agent actually asks |
+| `76426ed6` | never let the agent hang up on its first reply |
 
 ## Not verified on live traffic
 
@@ -707,9 +733,7 @@ worth watching: `model_wrote_caller_turn`, `ungrounded_link_rewritten`,
 
 **Engineering, next:**
 
-* §14 — catch the missing space across a token boundary.
-* §15 — arm phone capture on the agent's natural wordings.
-* The first-reply hangup (the 10-second drop).
+* Prove §14, §15 and the first-reply hold on a live call.
 * Hangups after a statement while the caller is engaged and nothing is being
   captured (`e3427ee2`) — needs the caller's intent.
 
