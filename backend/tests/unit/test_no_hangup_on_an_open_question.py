@@ -120,3 +120,37 @@ def test_the_gate_holds_the_call_while_a_capture_is_open():
     gate = gate[: gate.index("end_call_stripped_question_open")]
     assert "contact_capture_open(" in gate
     assert "not contains_dnc(full_transcript)" in gate
+
+
+# --- the agent's first reply is never a close --------------------------------
+
+def _turn_ender_src():
+    return (
+        Path(__file__).resolve().parents[2]
+        / "app" / "domain" / "services" / "voice_pipeline" / "turn_ender.py"
+    ).read_text(encoding="utf-8")
+
+
+def test_a_first_reply_hangup_is_held():
+    """7a690f74, the 10-second drop: caller "Who's this?" -> agent "Sarah here
+    from Dojo." -> hangup on turn 0. Both turn-0 model hangups in 30 days were
+    wrong; every legitimate close was turn 3 or later."""
+    src = _turn_ender_src()
+    gate = src[src.index("agent_left_a_question_open(response_text)") - 120 :]
+    gate = gate[: gate.index("end_call_stripped_question_open")]
+    assert 'getattr(session, "turn_id", None) == 0' in gate
+
+
+def test_a_machine_still_ends_on_the_first_reply():
+    src = _turn_ender_src()
+    gate = src[src.index('getattr(session, "turn_id", None) == 0') :][:400]
+    assert '"_amd_voicemail"' in gate
+    assert '"_machine_screening"' in gate
+
+
+def test_turn_id_is_read_before_it_is_incremented():
+    """The first reply must still be turn 0 when the gate runs."""
+    src = _turn_ender_src()
+    assert src.index('getattr(session, "turn_id", None) == 0') < src.index(
+        "session.increment_turn()"
+    )

@@ -907,6 +907,18 @@ class TurnEnder:
                             or contact_capture_open(
                                 getattr(session, "captured_slots", None)
                             )
+                            # The agent's FIRST reply is never a close. In the
+                            # 30 days to 2026-09-23 the model hung up on turn 0
+                            # twice, both wrong: "Sarah here from Dojo." after
+                            # the caller asked "Who's this?" (7a690f74, the
+                            # 10-second drop) and "Sarah here from Dojo — got a
+                            # minute?". Every legitimate close was turn 3 or
+                            # later. A machine still ends the call.
+                            or (
+                                getattr(session, "turn_id", None) == 0
+                                and not getattr(session, "_amd_voicemail", False)
+                                and not getattr(session, "_machine_screening", False)
+                            )
                         )
                         and not contains_dnc(full_transcript)
                         and not contains_explicit_goodbye(full_transcript)
@@ -920,10 +932,12 @@ class TurnEnder:
                         # through capture: 2427af7e hung up on a caller who
                         # was mid-correction of their email.
                         logger.info(
-                            "end_call_stripped_question_open call_id=%s — "
-                            "model asked for a hangup with a question or a "
-                            "contact capture still open; keeping call alive",
+                            "end_call_stripped_question_open call_id=%s turn=%s — "
+                            "model asked for a hangup on its first reply, with a "
+                            "question, or with a contact capture still open; "
+                            "keeping call alive",
                             call_id[:12],
+                            getattr(session, "turn_id", None),
                         )
                         try:
                             session._end_call_requested = False
