@@ -513,7 +513,8 @@ class DialerWorker:
                     # also fired on a genuine cooldown: 2026-09-23, +16478471491 was
                     # answered at 18:05:45 (job 4cc194a0/call 8b3176ca) and this branch
                     # cleared the cooldown and redialled it again 3.6 minutes later
-                    # (job 620d9ac5/call 6e0e221b) while the first call was still live.
+                    # (job 620d9ac5/call 6e0e221b), well inside the 2h window even
+                    # though the first call had already ended (8b3176ca ended 18:06:00).
                     # attempt_number was also bumped only in memory, never persisted to
                     # dialer_jobs, which desynced the column
                     # `_record_ambiguous_attempt_state` guards its UPDATE on
@@ -2522,7 +2523,13 @@ class DialerWorker:
                     SELECT 1 FROM calls
                      WHERE tenant_id = $1::uuid
                        AND lead_id = $2::uuid
-                       AND created_at > now() - make_interval(hours => $3::float8)
+                       -- make_interval()'s `hours` param is int; float8->int
+                       -- is only an assignment cast, so `make_interval(hours
+                       -- => $3::float8)` throws UndefinedFunctionError on
+                       -- every lead_cooldown hit (review of e8e93870,
+                       -- verified against PG 16.1). Multiply an interval
+                       -- literal instead, which accepts a float8 factor.
+                       AND created_at > now() - ($3::float8 * interval '1 hour')
                        AND (
                              answered_at IS NOT NULL
                           OR NOT (status = ANY($4::text[]))
