@@ -62,14 +62,22 @@ async def _run(args: argparse.Namespace) -> int:
     from app.core.db import _register_jsonb_codecs
 
     async def _init(conn) -> None:
-        # EVERY connection, not just the ones this script remembers to set it
-        # on. The tenant-model lookup below ran on a fresh pooled connection
-        # with no GUC and was silently hidden by the row-level policy, so the
-        # ingest budgeted against no model at all and said so (2026-09-22).
+        # Codecs belong to the connection and survive a reset.
         await _register_jsonb_codecs(conn)
+
+    async def _setup(conn) -> None:
+        # On EVERY acquire, not once per connection. asyncpg issues RESET ALL
+        # when a connection is released, so a GUC set in init= survives only
+        # until the first release. This script originally set it in init= to
+        # fix a lookup hidden by RLS (2026-09-22) - which only worked because
+        # ingest_markdown manages its own tenant context. The sibling
+        # re-enrichment script hit the same trap for real on 2026-09-23: it
+        # reported 34 writes and wrote none.
         await conn.execute("SET app.bypass_rls = 'true'")
 
-    pool = await asyncpg.create_pool(dsn, min_size=1, max_size=3, init=_init)
+    pool = await asyncpg.create_pool(
+        dsn, min_size=1, max_size=3, init=_init, setup=_setup
+    )
     try:
         async with pool.acquire() as conn:
             source = await conn.fetchrow(

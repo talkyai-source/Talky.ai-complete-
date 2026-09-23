@@ -139,10 +139,18 @@ async def _run(args: argparse.Namespace) -> int:
         #     OR tenant_id = NULLIF(current_setting('app.current_tenant_id', TRUE),'')::uuid
         # With neither GUC set, a role without BYPASSRLS sees no rows at all --
         # and an empty read here is indistinguishable from "nothing to do".
+        #
+        # setup=, not init=: asyncpg issues RESET ALL when a connection is
+        # released, so an init= SET is gone after the first release. The plan
+        # read below and the --apply writes are separate acquires, so under
+        # init= the writes ran with RLS in force (found 2026-09-23; this
+        # script had only ever been run in plan mode, and it counts writes
+        # from the database's own status, so it could not have reported a
+        # false success).
         await conn.execute("SET app.bypass_rls = 'true'")
 
     pool = await asyncpg.create_pool(
-        dsn, min_size=1, max_size=2, init=_bypass_rls
+        dsn, min_size=1, max_size=2, setup=_bypass_rls
     )
     try:
         rows = await pool.fetch(_PLAN_SQL, args.tenant_id)
