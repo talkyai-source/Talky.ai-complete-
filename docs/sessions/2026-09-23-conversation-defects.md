@@ -4,9 +4,9 @@ Owner report: a Test-agent transcript in which the agent answered its own
 questions, invented an email address, confirmed it, and hung up. Then: analyse
 every conversation, plan the fixes, premortem the plan, fix everything broken.
 
-Production went from `edee6fe8` to **`3aa7cc7e`** in five deploys. No migration.
-Canonical suite **9,181 → 9,358 passed / 8 skipped / 0 failed** on the final
-tree (every one of the 177 new tests reconciled by test ID). Ruff clean on `app/`.
+Production went from `edee6fe8` to **`924b7743`** in six deploys. No migration.
+Canonical suite **9,181 → 9,362 passed / 8 skipped / 0 failed** on the final
+tree (every one of the 181 new tests reconciled). Ruff clean on `app/`.
 
 ## How the work was found
 
@@ -41,6 +41,7 @@ Two methodological rules came out of the day and are worth keeping:
 | `90f76f79` `3aa7cc7e` | Agent asked a question and hung up | `[[END_CALL]]` honoured unconditionally. Now held when the agent's last sentence is a question or a contact capture is open |
 | `8f7096fb` | 4,436 suspicious-session warnings a week | Sticky flag re-logged every request. Now once per session. Nobody was logged out |
 | `d54c151e` | RLS bypass lost after first pooled release | Two sibling scripts had the trap; a repo-wide guard now fails on it |
+| `924b7743` | Slow tail was the primary LLM timing out | Failover waited 2.5 s in silence; 8 of 194 turns hit it at 3.3–3.8 s. At 1.5 s they get ~1 s faster and **none** gets slower (0 turns landed in 1.5–2.0 s) |
 
 ## Corrections to things I said during the day
 
@@ -104,4 +105,10 @@ on a real call. Log lines to watch: `model_wrote_caller_turn`,
   call get an invented reason; no answering-machine detection on inbound.
 * "Misheard, ask again" (in the craft block) did not measurably change the one
   case tested. Unproven.
-* Persona base still ~14k characters per turn — the largest latency lever left.
+* Latency: with failovers cut to 1.5 s, the remaining slow turns are the
+  primary answering slowly *inside* its deadline (p50 415 ms, p95 1.35 s).
+  Prompt size (~28k characters on the Estimation test campaign, ~42k on
+  Dojo-PC) is the lever for that; not attempted.
+* AI disclosure differs call to call because the platform's telephony rules
+  say "never mention AI" while some operators' copy discloses it. Whether to
+  disclose is a compliance decision for you, not a code fix.
