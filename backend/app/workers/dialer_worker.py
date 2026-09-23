@@ -508,19 +508,41 @@ class DialerWorker:
                     )
                 elif "lead_cooldown" in reason:
                     # The cooldown timestamp was set at call *origination* (not at answer)
-                    # due to a now-fixed bug.  Clear it and re-enqueue immediately (bypassing
-                    # the scheduled-set → 60-second wait round-trip).
-                    logger.info(
-                        f"Clearing stale last_called_at for lead {job.lead_id} "
-                        f"(was set at origination, not at answer)"
-                    )
-                    await self._clear_lead_last_called(job)
-                    # Re-enqueue directly into the tenant queue for immediate pickup
-                    job.attempt_number += 1
-                    await self.queue_service.enqueue_job(job)
-                    await self._publish_reason(job, blocked)
-                    await self._update_job_status(job, JobStatus.SKIPPED, reason=reason)
-                    return
+                    # due to a now-fixed bug, which can leave a stale last_called_at with
+                    # no real call behind it. That workaround was UNCONDITIONAL, so it
+                    # also fired on a genuine cooldown: 2026-09-23, +16478471491 was
+                    # answered at 18:05:45 (job 4cc194a0/call 8b3176ca) and this branch
+                    # cleared the cooldown and redialled it again 3.6 minutes later
+                    # (job 620d9ac5/call 6e0e221b) while the first call was still live.
+                    # attempt_number was also bumped only in memory, never persisted to
+                    # dialer_jobs, which desynced the column
+                    # `_record_ambiguous_attempt_state` guards its UPDATE on
+                    # (dialer_jobs.attempt_number = job.attempt_number) — leaving
+                    # dialer_jobs.call_id NULL for an answered call. Only treat this as
+                    # the stale-timestamp case when no call for this lead in the
+                    # cooldown window was ever answered or is still in flight;
+                    # otherwise respect the cooldown like any other blocked reason.
+                    cooldown_hours = getattr(rules, "min_hours_between_calls", 0) or 0
+                    if not await self._lead_has_live_or_answered_call(
+                        job, cooldown_hours
+                    ):
+                        logger.info(
+                            f"Clearing stale last_called_at for lead {job.lead_id} "
+                            f"(was set at origination, not at answer)"
+                        )
+                        await self._clear_lead_last_called(job)
+                        # Re-enqueue directly into the tenant queue for immediate pickup
+                        job.attempt_number += 1
+                        # Persist the bump BEFORE re-enqueuing — see the desync above.
+                        await self._persist_job_attempt_number(job)
+                        await self.queue_service.enqueue_job(job)
+                        await self._publish_reason(job, blocked)
+                        await self._update_job_status(job, JobStatus.SKIPPED, reason=reason)
+                        return
+                    # Genuine cooldown: a real call for this lead was answered, or is
+                    # still live, inside the window. Respect it like any other
+                    # blocked reason instead of clearing it out from under a live call.
+                    delay = 300
                 elif "daily_lead_cap" in reason:
                     # The per-day ceiling resets at UTC midnight. Reschedule
                     # the lead for just after the day rolls over; the
@@ -2472,6 +2494,77 @@ class DialerWorker:
             if updated != "UPDATE 1":
                 raise RuntimeError(
                     f"lead cooldown ownership update affected {updated} "
+                    f"for job {job.job_id}"
+                )
+
+    async def _lead_has_live_or_answered_call(
+        self, job: DialerJob, window_hours: float
+    ) -> bool:
+        """Tenant-scoped: was a call for this lead, inside the cooldown
+        window, ever answered or is it still in flight (non-terminal)?
+
+        Distinguishes a genuinely stale `last_called_at` (set at
+        origination by a call that never actually connected — the case
+        the caller's clear+redial workaround is for) from an active
+        cooldown that must be respected. See the 2026-09-23 orphaning
+        this backs: +16478471491 was answered 3.6 minutes earlier and got
+        cleared and redialled anyway (job 620d9ac5/call 6e0e221b).
+        window_hours<=0 means no cooldown is configured — nothing to check.
+        """
+        if window_hours <= 0:
+            return False
+        from app.domain.services.call_status import TERMINAL_CALL_STATUSES
+
+        async with self._acquire_db() as conn:
+            row = await conn.fetchval(
+                """
+                SELECT EXISTS (
+                    SELECT 1 FROM calls
+                     WHERE tenant_id = $1::uuid
+                       AND lead_id = $2::uuid
+                       AND created_at > now() - make_interval(hours => $3::float8)
+                       AND (
+                             answered_at IS NOT NULL
+                          OR NOT (status = ANY($4::text[]))
+                           )
+                )
+                """,
+                str(job.tenant_id),
+                str(job.lead_id),
+                float(window_hours),
+                list(TERMINAL_CALL_STATUSES),
+            )
+        return bool(row)
+
+    async def _persist_job_attempt_number(self, job: DialerJob) -> None:
+        """Persist an in-memory attempt_number bump to dialer_jobs.
+
+        Without this, `_record_ambiguous_attempt_state`'s guarded UPDATE
+        (which matches on `dialer_jobs.attempt_number = job.attempt_number`)
+        can never match once a cooldown-triggered redial bumps the
+        in-memory copy but leaves the DB row behind — the exact desync
+        that left dialer_jobs.call_id NULL for jobs 620d9ac5/60ecd24e on
+        2026-09-23 (state_recorded=False).
+        """
+        async with self._acquire_db() as conn:
+            updated = await conn.execute(
+                """
+                UPDATE dialer_jobs
+                   SET attempt_number = $1, updated_at = NOW()
+                 WHERE id = $2::uuid
+                   AND tenant_id = $3::uuid
+                   AND campaign_id = $4::uuid
+                   AND lead_id = $5::uuid
+                """,
+                int(job.attempt_number),
+                str(job.job_id),
+                str(job.tenant_id),
+                str(job.campaign_id),
+                str(job.lead_id),
+            )
+            if updated != "UPDATE 1":
+                raise RuntimeError(
+                    f"dialer job attempt_number persist affected {updated} "
                     f"for job {job.job_id}"
                 )
 
