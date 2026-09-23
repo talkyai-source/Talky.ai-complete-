@@ -277,6 +277,35 @@ async def _speak_recording_disclosure(voice_session) -> None:
             )
             return
 
+        # OUTBOUND RETENTION WINDOW (2026-09-24, call 6e0e221b): a telephony
+        # session's recording gate defaults OPEN at media start (only a
+        # TRUE-inbound session starts closed — see prepare_inbound_recording
+        # in modes/caller_first.py). On a callee-first (first_speaker="user")
+        # outbound call this function does not run until the callee's own
+        # pickup has been transcribed, which can be several seconds after
+        # answer — 6e0e221b answered at 18:09:18.094 but this notice did not
+        # start until 18:09:26.575, and every one of those 8.5s of the
+        # callee's "Hello?" plus two agent re-greet nudges was retained
+        # because the gate had been open the whole time. Reset the gate here,
+        # in the same synchronous stretch as the `await` below (no audio can
+        # be appended between these two calls), so the retained timeline
+        # starts exactly at the first byte of the notice: nothing from before
+        # it, and the notice itself survives as proof the disclosure was
+        # given. Skipped for true-inbound sessions, whose gate is already
+        # managed by prepare_inbound_recording and must not be double-driven
+        # here. Agent-first calls reach this same point ~21ms after session
+        # start (8b3176ca), so the reset costs them nothing observable.
+        from app.domain.services.telephony.recording import (
+            _is_true_inbound_session,
+        )
+
+        if not _is_true_inbound_session(voice_session):
+            gateway = getattr(voice_session, "media_gateway", None)
+            set_gate = getattr(gateway, "set_recording_enabled", None)
+            if callable(set_gate):
+                set_gate(call_id, False)
+                set_gate(call_id, True)
+
         logger.info(
             "recording_disclosure_speaking call_id=%s reason=%s text=%r",
             call_id[:12], getattr(decision, "reason", "-"), text[:80],
