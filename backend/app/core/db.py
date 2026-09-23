@@ -12,6 +12,7 @@ import os
 import json
 import logging
 import asyncio
+import re
 import uuid
 import asyncpg
 from typing import Optional, Any, List, Dict
@@ -418,10 +419,22 @@ class Database:
             values.append(v)
         # Shift where-clause arg indices
         offset = len(values)
-        # Replace $1, $2... in where clause with offset indices
-        shifted_where = where
-        for j in range(len(args), 0, -1):
-            shifted_where = shifted_where.replace(f"${j}", f"${j + offset}")
+        # Renumber $1, $2... in the where clause in a SINGLE regex pass.
+        # A previous version did sequential `str.replace($N, $(N+offset))`
+        # calls in descending N order; once offset+len(args) reached two
+        # digits, an earlier step's freshly-written "$10" got its leading
+        # "$1" corrupted by the later "$1"->"$7" step (str.replace matches
+        # substrings), producing "$70" and leaving the real $10 unbound —
+        # asyncpg then raised "could not determine data type of parameter
+        # $10" on every answered outbound dial (DialerWorker's call_id
+        # branch: 6 SET keys + a 4-arg ownership WHERE = 10 total params).
+        # 2026-09-22/23, dialer-job-update-placeholder-corruption. `\d+` in
+        # a single pass always consumes the whole number before the offset
+        # is applied, so it can't self-collide the way sequential
+        # substring replacement did.
+        shifted_where = re.sub(
+            r"\$(\d+)", lambda m: f"${int(m.group(1)) + offset}", where
+        )
         values.extend(args)
         set_str = ", ".join(set_parts)
         query = f"UPDATE {table} SET {set_str} WHERE {shifted_where} RETURNING {returning}"
