@@ -32,7 +32,7 @@ from app.domain.services.phone_number_normalizer import (
     normalize_phone_number,
     normalize_phone_number_lenient,
 )
-from app.domain.services.event_emitter import emit_event
+from app.domain.services.event_emitter import emit_event_via_pool
 from app.api.v1.dependencies import (
     get_db_client,
     get_db_read_client,
@@ -1002,17 +1002,21 @@ async def start_campaign(
             await store_idempotent_response(request, 200, json.dumps(response_data))
 
         if tenant_id:
-            async with db_client.pool.acquire() as conn:
-                await emit_event(
-                    conn,
-                    tenant_id=tenant_id,
-                    category="campaign",
-                    title="Campaign started",
-                    description=f"Campaign began processing — {result.jobs_enqueued} jobs queued.",
-                    related_campaign_id=str(result.campaign_id),
-                    actor_user_id=current_user.id,
-                    metadata={"jobs_enqueued": result.jobs_enqueued},
-                )
+            # stream_events is under FORCE ROW LEVEL SECURITY (migration 0013);
+            # a bare pool acquisition never sets app.current_tenant_id, so every
+            # insert here was rejected (day0923/DAY.talky-api.errorish.log,
+            # 7x "Campaign started" 09-22/23) and the activity feed stayed
+            # empty. emit_event_via_pool sets the GUC via acquire_with_tenant.
+            await emit_event_via_pool(
+                db_client.pool,
+                tenant_id=tenant_id,
+                category="campaign",
+                title="Campaign started",
+                description=f"Campaign began processing — {result.jobs_enqueued} jobs queued.",
+                related_campaign_id=str(result.campaign_id),
+                actor_user_id=current_user.id,
+                metadata={"jobs_enqueued": result.jobs_enqueued},
+            )
 
         return response_data
     except CampaignNotFoundError:
@@ -1102,17 +1106,18 @@ async def pause_campaign(
             )
 
         if current_user.tenant_id:
-            async with db_client.pool.acquire() as conn:
-                await emit_event(
-                    conn,
-                    tenant_id=current_user.tenant_id,
-                    category="user_action",
-                    title="Campaign paused",
-                    description=message,
-                    related_campaign_id=str(campaign_id),
-                    actor_user_id=current_user.id,
-                    metadata={"termination_summary": termination},
-                )
+            # See start_campaign's comment: a bare pool acquisition has no
+            # tenant GUC and FORCE RLS rejects the insert.
+            await emit_event_via_pool(
+                db_client.pool,
+                tenant_id=current_user.tenant_id,
+                category="user_action",
+                title="Campaign paused",
+                description=message,
+                related_campaign_id=str(campaign_id),
+                actor_user_id=current_user.id,
+                metadata={"termination_summary": termination},
+            )
 
         return {
             "message": message,
@@ -1194,21 +1199,22 @@ async def stop_campaign(
             )
 
         if current_user.tenant_id:
-            async with db_client.pool.acquire() as conn:
-                await emit_event(
-                    conn,
-                    tenant_id=current_user.tenant_id,
-                    category="user_action",
-                    title="Campaign stopped",
-                    description=message
-                                + (" Pending jobs cleared." if clear_queue else ""),
-                    related_campaign_id=str(campaign_id),
-                    actor_user_id=current_user.id,
-                    metadata={
-                        "clear_queue": clear_queue,
-                        "termination_summary": termination,
-                    },
-                )
+            # See start_campaign's comment: a bare pool acquisition has no
+            # tenant GUC and FORCE RLS rejects the insert.
+            await emit_event_via_pool(
+                db_client.pool,
+                tenant_id=current_user.tenant_id,
+                category="user_action",
+                title="Campaign stopped",
+                description=message
+                            + (" Pending jobs cleared." if clear_queue else ""),
+                related_campaign_id=str(campaign_id),
+                actor_user_id=current_user.id,
+                metadata={
+                    "clear_queue": clear_queue,
+                    "termination_summary": termination,
+                },
+            )
 
         return {
             "message": message,
@@ -1305,16 +1311,17 @@ async def delete_campaign(
         )
 
         if current_user.tenant_id:
-            async with db_client.pool.acquire() as conn:
-                await emit_event(
-                    conn,
-                    tenant_id=current_user.tenant_id,
-                    category="user_action",
-                    title="Campaign deleted",
-                    description="Operator deleted the campaign.",
-                    related_campaign_id=str(campaign_id),
-                    actor_user_id=current_user.id,
-                )
+            # See start_campaign's comment: a bare pool acquisition has no
+            # tenant GUC and FORCE RLS rejects the insert.
+            await emit_event_via_pool(
+                db_client.pool,
+                tenant_id=current_user.tenant_id,
+                category="user_action",
+                title="Campaign deleted",
+                description="Operator deleted the campaign.",
+                related_campaign_id=str(campaign_id),
+                actor_user_id=current_user.id,
+            )
 
         logger.info(f"Campaign {campaign_id} soft-deleted by {current_user.id}")
         return {"message": f"Campaign {campaign_id} deleted"}
