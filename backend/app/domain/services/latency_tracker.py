@@ -87,9 +87,16 @@ class LatencyMetrics:
         """
         Time from speech end to audio start (total round-trip).
         This is the key metric for user experience.
+
+        Clamped to None rather than a negative value (2026-09-23) — the same
+        reasoning as tts_first_chunk_ms below: a negative here means
+        audio_start_time was stamped by something that predates this turn's
+        own speech_end_time (a nudge — see mark_audio_start's staleness
+        guard), which is unmeasurable, not fast, and poisoned the P95 alerter.
         """
         if self.speech_end_time is not None and self.audio_start_time is not None:
-            return (self.audio_start_time - self.speech_end_time) * 1000
+            ms = (self.audio_start_time - self.speech_end_time) * 1000
+            return ms if ms >= 0 else None
         return None
 
     @property
@@ -115,9 +122,14 @@ class LatencyMetrics:
 
     @property
     def tts_latency_ms(self) -> Optional[float]:
-        """Time spent in TTS synthesis."""
+        """Time spent in TTS synthesis.
+
+        Clamped to None rather than a negative value (2026-09-23), same
+        reasoning as total_latency_ms and tts_first_chunk_ms.
+        """
         if self.tts_start_time is not None and self.tts_end_time is not None:
-            return (self.tts_end_time - self.tts_start_time) * 1000
+            ms = (self.tts_end_time - self.tts_start_time) * 1000
+            return ms if ms >= 0 else None
         return None
 
     @property
@@ -312,14 +324,47 @@ class LatencyTracker:
             self._metrics[call_id].tts_first_chunk_time = time.monotonic()
 
     def mark_tts_end(self, call_id: str) -> None:
-        """Mark when TTS synthesis completes."""
-        if call_id in self._metrics and self._metrics[call_id].tts_end_time is None:
-            self._metrics[call_id].tts_end_time = time.monotonic()
+        """Mark when TTS synthesis completes.
+
+        Same staleness guard as mark_tts_start's tts_first_chunk_time fix
+        (2026-08-12): a silence-monitor nudge stamps tts_end_time through the
+        same synthesize path before this turn's real reply, and being
+        first-write-wins that early stamp survived into the turn, going
+        negative against the real (later) tts_start_time
+        ("TTS-total: -4132ms", day0923/3a17c06c.talky-api.log).
+        """
+        metrics = self._metrics.get(call_id)
+        if metrics is None:
+            return
+        if (
+            metrics.tts_end_time is not None
+            and metrics.llm_start_time is not None
+            and metrics.tts_end_time < metrics.llm_start_time
+        ):
+            metrics.tts_end_time = None
+        if metrics.tts_end_time is None:
+            metrics.tts_end_time = time.monotonic()
 
     def mark_audio_start(self, call_id: str) -> None:
-        """Mark when first audio chunk is sent to caller."""
-        if call_id in self._metrics and self._metrics[call_id].audio_start_time is None:
-            self._metrics[call_id].audio_start_time = time.monotonic()
+        """Mark when first audio chunk is sent to caller.
+
+        Same staleness guard as mark_tts_start/mark_tts_end: a pre-turn
+        nudge stamps audio_start_time too, and first-write-wins let that
+        early stamp survive into the real turn, going negative against the
+        real (later) speech_end_time ("Turn 0 latency: -3795ms",
+        day0923/3a17c06c.talky-api.log).
+        """
+        metrics = self._metrics.get(call_id)
+        if metrics is None:
+            return
+        if (
+            metrics.audio_start_time is not None
+            and metrics.llm_start_time is not None
+            and metrics.audio_start_time < metrics.llm_start_time
+        ):
+            metrics.audio_start_time = None
+        if metrics.audio_start_time is None:
+            metrics.audio_start_time = time.monotonic()
 
     def mark_response_start(self, call_id: str) -> None:
         """
