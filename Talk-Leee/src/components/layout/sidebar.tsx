@@ -531,7 +531,7 @@ export function Sidebar({ className }: { className?: string }) {
                 hideScrollbar
                 ariaLabel="Sidebar"
                 className="lg:hidden"
-                panelClassName={cn(isDark ? "dark" : undefined, "group/sidebar border-sidebar-border/60 bg-sidebar/85 overflow-hidden")}
+                panelClassName={cn(isDark ? "dark" : undefined, "group/sidebar border-sidebar-border/60 bg-(image:--home-card-gradient) bg-cover bg-no-repeat overflow-hidden")}
             >
                 {NavContent}
             </ViewportDrawer>
