@@ -266,7 +266,12 @@ async def validate_session(
         )
 
         if ip_check["significant"]:
-            logger.warning(
+            # Once per session at WARNING, same as the fingerprint branch
+            # below (fixed in 8f7096fb). That fix never covered this branch,
+            # so it kept logging (and re-marking suspicious) on every request
+            # of an already-flagged session: 52 lines on 2026-09-23 for two
+            # sessions (82cfcdcc, f13d4a24). Repeats stay visible at DEBUG.
+            (logger.debug if session.get("is_suspicious") else logger.warning)(
                 "Session IP mismatch detected: user=%s session=%s original=%s current=%s reason=%s",
                 session["user_id"],
                 session["id"],
@@ -278,9 +283,8 @@ async def validate_session(
             if strict_binding:
                 await _revoke_by_id(conn, session["id"], reason="ip_binding_violation")
                 return None
-            else:
-                if not session.get("is_suspicious"):
-                    session["became_suspicious"] = True
+            elif not session.get("is_suspicious"):
+                session["became_suspicious"] = True
                 await _mark_session_suspicious(
                     conn, session["id"], f"ip_mismatch:{ip_check['reason']}"
                 )
