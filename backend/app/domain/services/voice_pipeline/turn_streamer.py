@@ -640,6 +640,13 @@ class TurnStreamer:
         # Set when the model stopped writing its own turn and started writing
         # the caller's. See the flush loop below.
         model_wrote_caller_turn = False
+        # The terminator that ended the last flushed sentence, when it was the
+        # LAST character received so far. The model streams in tokens, and on
+        # the live test of 2026-09-23 (call 51450718) a token ended exactly on
+        # the '?' of "...correct?" and the next token was "Yes". The missing
+        # space fell BETWEEN tokens, so the whole-buffer check below never saw
+        # it and the agent confirmed the caller's number for them.
+        terminator_at_edge: Optional[str] = None
         # Everything the model was GIVEN this turn -- the assembled prompt plus
         # any knowledge the tool returned. A web address the agent speaks must
         # appear here or it is rewritten (see grounded_links.py).
@@ -797,6 +804,26 @@ class TurnStreamer:
                 all_tokens.append(token)
                 buf += token
 
+                if terminator_at_edge is not None and buf:
+                    _first = buf[0]
+                    _crossed = _first.isalpha() and (
+                        terminator_at_edge in "?!" or _first.isupper()
+                    )
+                    terminator_at_edge = None
+                    if _crossed:
+                        # Same rule as _is_missing_space_boundary, applied
+                        # across the token edge: the sentence before it was
+                        # already spoken; everything from here is the
+                        # caller's turn, written by the model.
+                        model_wrote_caller_turn = True
+                        logger.warning(
+                            "model_wrote_caller_turn call=%s \u2014 turn cut at a "
+                            "boundary split across tokens",
+                            call_id[:12],
+                        )
+                        buf = ""
+                        break
+
                 # Strict action turns arrive as one buffered provider chunk.
                 # Validate the whole post-tool reply before sentence pacing so
                 # a two-sentence completion claim cannot leak its first half.
@@ -854,6 +881,9 @@ class TurnStreamer:
                     # is the defect -- no false positives. Call c01404ba.
                     turn_boundary = _is_missing_space_boundary(buf, idx)
 
+                    terminator_at_edge = (
+                        buf[idx] if idx + 1 == len(buf) and buf[idx] in "?!." else None
+                    )
                     raw_sentence = buf[:idx + 1].strip()
                     # Skip the separator only when there IS one: at a
                     # missing-space boundary, idx + 2 swallows the first letter
