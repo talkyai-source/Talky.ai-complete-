@@ -55,6 +55,18 @@ Two methodological rules came out of the day and are worth keeping:
   sharing one wrong assumption, plus a buffer bug my own fix would have caused.
 * "20 tests unaccounted for" — I had compared a run from one moment with a
   collection from a later one.
+* "16% of audio frames never arrived, a 15-second hole" on the real call of
+  22 Sep — it was not audio dropping mid-conversation. Caller audio stopped
+  arriving at 19:17:18 and never resumed; the channel stayed up but carried
+  nothing, and the telephony watchdog ended it 16 s later. The call ran 97 s,
+  so 15 s of silence is 15.5% missing against 15.8% logged: every second of
+  conversation arrived. Gateway counters since 10 Sep: 24 sessions, 0 dropped
+  packets, 0 jitter drops, one timeout event (this call). Likeliest cause is a
+  far-end drop with no hangup reaching us; unprovable, since Asterisk logs
+  nothing at this verbosity. The 57 smaller gaps are arrival jitter.
+* `ARI GET /applications/talky_ai → 404` — benign. It fires once per restart,
+  before the Stasis app registers, and the periodic watchdog retries
+  successfully; it never repeats.
 
 ## Checks that passed while the thing was broken
 
@@ -88,9 +100,6 @@ on a real call. Log lines to watch: `model_wrote_caller_turn`,
   open (`e3427ee2`) — needs the caller's intent.
 * The v2 device fingerprint still varies between requests from one browser;
   finding which signal needs per-signal comparison that is not logged.
-* Audio gaps — 15 s hole and 16% frame loss on a real call on 22 Sep. Needs
-  packet-level diagnosis at the gateway.
-* `ARI GET /applications/talky_ai → 404` (15 times).
 * Inbound contact capture has never existed; inbound callers returning a missed
   call get an invented reason; no answering-machine detection on inbound.
 * "Misheard, ask again" (in the craft block) did not measurably change the one
