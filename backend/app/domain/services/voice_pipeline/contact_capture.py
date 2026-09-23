@@ -29,6 +29,12 @@ class CaptureStatus(str, Enum):
 
 
 MAX_CONFIRMATION_ATTEMPTS = 3
+# The pre-parse "I couldn't understand your spelling" loop had no counter at
+# all (call 6aaeb4dd, 2026-09-23: asked to spell the email 4 times over
+# 13:09:02-13:10:06, 55% of the call, because every unparseable turn either
+# returned the identical state object or replaced it without ever touching
+# `attempts`). Bound it the same way AWAITING_CONFIRMATION already is.
+MAX_CLARIFICATION_ATTEMPTS = 3
 _LOW_CONFIDENCE = 0.50
 
 
@@ -184,6 +190,44 @@ def _state(
         segments=segments,
         clarification_prompt=prompt,
     )
+
+
+def _clarification_attempts(previous: Optional[ContactCaptureState]) -> int:
+    """How many times we've already asked to clarify/re-spell this field."""
+    if previous is not None and previous.status in {
+        CaptureStatus.NEEDS_CLARIFICATION,
+        CaptureStatus.INVALID,
+    }:
+        return previous.attempts
+    return 0
+
+
+def _clarification_progress(
+    kind: CaptureKind,
+    previous: Optional[ContactCaptureState],
+    default_prompt: str,
+) -> tuple[int, str]:
+    """Bump the re-ask counter; past the cap, stop asking to spell/repeat.
+
+    Every NEEDS_CLARIFICATION/INVALID branch used to hand the caller the
+    identical "please spell/repeat it" instruction forever. Once we've
+    already asked MAX_CLARIFICATION_ATTEMPTS times, tell the model to read
+    back its best understanding once for a yes/no, or say the team will
+    confirm and move on -- never issue another spelling/repeat request.
+    """
+    attempts = _clarification_attempts(previous) + 1
+    if attempts > MAX_CLARIFICATION_ATTEMPTS:
+        field = "email address" if kind == "email" else "phone number"
+        return attempts, (
+            f"You have already asked for the {field} "
+            f"{MAX_CLARIFICATION_ATTEMPTS} times without success; do not ask "
+            "them to say it again in any form. If you have formed any "
+            "understanding of it, read back your best understanding once, "
+            "plainly, and ask for a clear yes or no. Otherwise say the team "
+            "will follow up to confirm it, and move on with the rest of the "
+            "call."
+        )
+    return attempts, default_prompt
 
 
 def _email_segments(value: str) -> tuple[str, str]:
@@ -821,6 +865,13 @@ def advance_capture(
     # incomplete, not invalid. Ask for country context instead of guessing US.
     if kind == "phone" and raw_candidate and normalized is None:
         missing_region = not raw_candidate.strip().startswith("+") and not phone_region
+        attempts, prompt = _clarification_progress(
+            kind,
+            previous,
+            "Please repeat the complete phone number beginning with + and its country code."
+            if missing_region
+            else "That does not appear to be a valid phone number; please repeat it.",
+        )
         return _state(
             kind,
             (
@@ -829,11 +880,8 @@ def advance_capture(
                 else CaptureStatus.INVALID
             ),
             raw=audit_raw,
-            prompt=(
-                "Please repeat the complete phone number beginning with + and its country code."
-                if missing_region
-                else "That does not appear to be a valid phone number; please repeat it."
-            ),
+            attempts=attempts,
+            prompt=prompt,
         )
 
     if previous is None:
@@ -873,6 +921,7 @@ def advance_capture(
                 kind,
                 status,
                 raw=text,
+                attempts=1,
                 prompt=prompt,
             )
         return None
@@ -930,16 +979,40 @@ def advance_capture(
         CaptureStatus.CONFIRMED,
         CaptureStatus.AWAITING_CONFIRMATION,
     }:
+        attempts, prompt = _clarification_progress(
+            kind,
+            previous,
+            "Please spell the email one letter at a time, then say at and the domain."
+            if kind == "email"
+            else "Please repeat the phone number one digit at a time.",
+        )
         return replace(
             previous,
             status=CaptureStatus.NEEDS_CLARIFICATION,
             validation_status=CaptureStatus.NEEDS_CLARIFICATION.value,
             confirmed_at=None,
-            clarification_prompt=(
+            attempts=attempts,
+            clarification_prompt=prompt,
+        )
+
+    # Still nothing usable this turn (e.g. caller's utterance had no contact
+    # cue at all, like "Did you get" / "I get it?"). This used to `return
+    # previous` unchanged, which is why call 6aaeb4dd's attempts counter
+    # stayed at 0 through every failed re-spell: identical turns never
+    # advanced it. Every such turn while we're still clarifying/rejecting IS
+    # a failed attempt even though nothing about the raw/normalized value
+    # changes.
+    if previous.status in {CaptureStatus.NEEDS_CLARIFICATION, CaptureStatus.INVALID}:
+        attempts, prompt = _clarification_progress(
+            kind,
+            previous,
+            previous.clarification_prompt
+            or (
                 "Please spell the email one letter at a time, then say at and the domain."
                 if kind == "email"
                 else "Please repeat the phone number one digit at a time."
             ),
         )
+        return replace(previous, attempts=attempts, clarification_prompt=prompt)
 
     return previous
