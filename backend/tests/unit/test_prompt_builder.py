@@ -8,7 +8,28 @@ BASE = "You are Alex. Be brief."
 
 
 def test_compose_without_slots_returns_base_unchanged():
+    # has_callback_executor=True isolates the ORIGINAL invariant this test
+    # checks (no captured/conduct block for an empty state) from the new
+    # CALLBACK POLICY line below, which is independent of any slot.
+    out = compose_system_prompt(BASE, CallState(), has_callback_executor=True)
+    assert out == BASE
+
+
+def test_compose_defaults_to_no_callback_executor_and_adds_the_policy_line():
+    """Every campaign today: action_tools.py has no live schedule_callback
+    executor (issue: 'inbound-callback-promises-no-record' / a5e033c7's
+    guardrail-forced mid-call retraction). The default must reflect that."""
     out = compose_system_prompt(BASE, CallState())
+    assert "never promise, schedule, or confirm a callback" in out.lower()
+    assert "pass the caller's details to the team" in out.lower()
+    assert BASE in out
+
+
+def test_has_callback_executor_true_omits_the_policy_line():
+    """Once a real executor exists, the line becomes irrelevant and drops out
+    -- no campaign-side change required."""
+    out = compose_system_prompt(BASE, CallState(), has_callback_executor=True)
+    assert "callback policy" not in out.lower()
     assert out == BASE
 
 

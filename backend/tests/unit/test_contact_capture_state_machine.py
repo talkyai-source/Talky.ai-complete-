@@ -557,7 +557,13 @@ def test_both_live_pipelines_consume_agent_contact_mode_signal():
 def test_cancelled_capture_is_not_reasked_or_rendered_as_a_fact():
     state = update_state_from_user_turn(CallState(), "bob at acme dot com")
     state = update_state_from_user_turn(state, "never mind, don't save that")
-    assert compose_system_prompt("BASE", state) == "BASE"
+    # has_callback_executor=True isolates this from the unrelated, always-on
+    # CALLBACK POLICY line (prompt_builder.py) so this keeps testing exactly
+    # what its name says: no captured/conduct block for a cancelled value.
+    assert (
+        compose_system_prompt("BASE", state, has_callback_executor=True)
+        == "BASE"
+    )
 
 
 def test_cancel_applies_only_to_the_active_contact_mode():

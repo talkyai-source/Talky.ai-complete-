@@ -15,13 +15,44 @@ from app.services.scripts.spoken_email_normalizer import (
     natural_phone_readback,
 )
 
+# A receptionist-style campaign prompt can script "I'll arrange a callback"
+# or "I'll book that" as its fallback line -- but no campaign has a live
+# schedule_callback/booking executor (action_tools.py fails every one of
+# them closed). Once the caller agrees, llm_guardrails.py correctly blocks
+# the completion claim, forcing an audible mid-call retraction (call
+# a5e033c7, 2026-09-23: "I'll arrange a callback to confirm the appointment
+# -- is that okay?" / caller "Okay." / then "I can't schedule a callback
+# from this call, but I can take the details for the team."). The retraction
+# is a symptom; the fix belongs upstream of it, so the model never makes an
+# unfulfillable promise in the first place. Campaign-neutral: this names no
+# campaign or field and does not touch campaign data.
+_NO_CALLBACK_EXECUTOR_POLICY = (
+    "CALLBACK POLICY: No callback or booking can actually be scheduled from "
+    "this call. Never promise, schedule, or confirm a callback or booking "
+    "yourself. Instead, offer to pass the caller's details to the team so "
+    "they can call back.\n"
+    "------------------------------------------------------------\n"
+)
 
-def compose_system_prompt(base_prompt: str, state: CallState) -> str:
+
+def compose_system_prompt(
+    base_prompt: str,
+    state: CallState,
+    *,
+    has_callback_executor: bool = False,
+) -> str:
     """Return base_prompt with a CAPTURED-slots header prepended when state
     has any filled slot; otherwise return base_prompt unchanged.
 
     The header is deterministic and short (<= 120 tokens) so it never
     crowds out the persona rules.
+
+    ``has_callback_executor`` defaults to False because that is the current
+    truth for every campaign in this codebase (action_tools.py has no live
+    executor for schedule_callback). When False, the CALLBACK POLICY line is
+    always appended (after any CAPTURED block, so CAPTURED still leads);
+    pass True once a real executor exists so the now-irrelevant line drops
+    out on its own, with no campaign-side change required.
     """
     # Confirm-before-commit (issue #1): only a CONFIRMED email is a settled
     # "do not re-ask" CAPTURED fact. An unconfirmed email is surfaced as an
@@ -197,6 +228,12 @@ def compose_system_prompt(base_prompt: str, state: CallState) -> str:
               "ask the same question again.\n"
             + "------------------------------------------------------------\n"
         )
+
+    # Standing constraint, not tied to any captured slot -- see the constant's
+    # own comment. Appended after CAPTURED so that block still leads the
+    # message when both are present.
+    if not has_callback_executor:
+        blocks.append(_NO_CALLBACK_EXECUTOR_POLICY)
 
     if not blocks:
         return base_prompt
