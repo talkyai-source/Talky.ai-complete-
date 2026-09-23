@@ -1472,7 +1472,21 @@ class VoiceOrchestrator:
             LLMFailoverPolicy,
             ResilientLLMProvider,
         )
-        deadline_ms = float(os.getenv("LLM_FIRST_TOKEN_DEADLINE_MS", "2500"))
+        # 2500 -> 1500 on 2026-09-23, from 194 production turns over 14 days
+        # (primary Cerebras gpt-oss-120b, secondary Groq gpt-oss-20b):
+        #
+        #   primary first token   <=1.0s 180 | 1.0-1.5s 4 | 1.5-2.0s 0
+        #                         2.0-2.5s 2 | >2.5s (failed over) 8
+        #   secondary first token when it served: 0.8-1.2s
+        #
+        # Every failover turn paid the full deadline in silence before the
+        # secondary even started - the 3.3-3.8s turns that were most of the
+        # slow tail. At 1.5s those eight turns get ~1s faster, the two
+        # 2.0-2.5s turns come out about even, and none gets slower because
+        # nothing landed between 1.5s and 2.0s. Going lower would start
+        # failing over the four 1.0-1.5s turns and make them slower. Re-check
+        # the distribution if the primary model or provider changes.
+        deadline_ms = float(os.getenv("LLM_FIRST_TOKEN_DEADLINE_MS", "1500"))
 
         # Controlled fault injection, off unless a campaign is named AND the
         # window is open. Applied to the PRIMARY here, inside the wrapper, so
