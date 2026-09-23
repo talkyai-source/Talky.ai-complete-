@@ -696,6 +696,15 @@ class TurnStreamer:
                     "back as if confirmed; substituting the re-ask",
                     call_id[:12],
                 )
+                # The substitution is TTS-bound text, not raw model output, but
+                # route it through the same cleaner as everything else that
+                # reaches TTS -- a review of e07a953a caught this guard's
+                # earlier substitution (capture.clarification_prompt) skipping
+                # it entirely.
+                _rb_text = guardrails.clean_response(
+                    _rb_text, tts_model_id=_tts_model_id,
+                    protected_values=_protected_readback,
+                )
                 return _rb_text, "unconfirmed_phone_readback"
             results = action_results_for_session(session)
             valid, reason = guardrails.validate_response(

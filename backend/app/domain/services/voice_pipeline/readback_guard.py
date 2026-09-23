@@ -20,13 +20,34 @@ let a NEEDS_CLARIFICATION/INVALID phone value reach TTS dressed up as a
 confirmed read-back. A validated AWAITING_CONFIRMATION/CONFIRMED read-back
 (the normal, working path -- call b97ce4c5 the same day) must pass through
 untouched, so this only ever looks at the two "not yet valid" statuses.
+
+A code review of the first cut of this guard caught a second defect: it
+spoke `capture.clarification_prompt` verbatim as the re-ask. That field is
+written to be injected into the MODEL's system prompt, not to be read aloud
+to the caller -- see capture_mode_directive() and prompt_builder.py's
+"BACKEND CONTACT MODE: ..." wrapping in the modules that own that state.
+In the MAX_CONFIRMATION_ATTEMPTS branch it is literally a third-person
+instruction to the agent ("Please ask for the complete plus-prefixed phone
+number digit by digit, or ask them to say 'the first three digits are' or
+'the last three digits are'."). Speaking that to a live caller just swaps
+one fabrication (a confirmed-sounding read-back) for another (the backend's
+own internal instruction). So this guard never speaks clarification_prompt;
+it always substitutes its own fixed, caller-facing re-ask.
 """
 from __future__ import annotations
 
 import re
-from typing import Optional
 
 from app.domain.services.voice_pipeline.contact_capture import CaptureStatus
+
+# The caller-facing re-ask this guard always substitutes. Deliberately NOT
+# capture.clarification_prompt (see module docstring) -- that field is
+# written for the model, and some of its branches are literal third-person
+# instructions to the agent, not lines a human should ever hear spoken back.
+_CALLER_REASK = (
+    "Sorry, could you say the complete phone number again, one digit at a "
+    "time, including the country code?"
+)
 
 # One spoken digit word. "Oh" is included -- callers routinely say "oh" for
 # zero when reading a number aloud.
@@ -61,9 +82,10 @@ def phone_readback_guard(session, sentence: str) -> tuple[str, bool]:
 
     Returns ``(sentence, False)`` unchanged unless this call's phone capture is
     NEEDS_CLARIFICATION or INVALID *and* `sentence` looks like a read-back
-    confirmation ask -- in which case it returns the capture's own
-    clarification prompt and ``True``, so the caller hears a real re-ask
-    instead of a confirmed-sounding fabrication.
+    confirmation ask -- in which case it returns this guard's own fixed,
+    caller-facing re-ask (never capture.clarification_prompt -- see module
+    docstring) and ``True``, so the caller hears a real re-ask instead of a
+    confirmed-sounding fabrication.
     """
     capture = getattr(getattr(session, "captured_slots", None), "phone_capture", None)
     if capture is None or capture.status not in (
@@ -73,8 +95,4 @@ def phone_readback_guard(session, sentence: str) -> tuple[str, bool]:
         return sentence, False
     if not is_unconfirmed_phone_readback(sentence):
         return sentence, False
-    prompt: Optional[str] = capture.clarification_prompt or (
-        "Sorry, could you say the complete phone number again, one digit at a "
-        "time, including the country code?"
-    )
-    return prompt, True
+    return _CALLER_REASK, True

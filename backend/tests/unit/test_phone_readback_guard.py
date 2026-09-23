@@ -28,6 +28,21 @@ Both states below are built with the real state machine
 REAL VoicePipelineService._stream_llm_and_tts -- same harness as
 test_caller_turn_across_token_edge.py -- to prove what the caller actually
 hears, not just what the state machine computed.
+
+A code review of the first cut of this guard (fix e07a953a) caught a second
+defect before it shipped further: the guard spoke `capture.clarification_
+prompt` verbatim as the re-ask. That field is written to be injected into
+the MODEL's system prompt (see capture_mode_directive / prompt_builder.py's
+"BACKEND CONTACT MODE: ..." wrapping), not a line for the CALLER. In the
+MAX_CONFIRMATION_ATTEMPTS branch (contact_capture.py ~905-918) it reads
+"Please ask for the complete plus-prefixed phone number digit by digit, or
+ask them to say 'the first three digits are' or 'the last three digits
+are'." -- a third-person instruction addressed to the agent. The guard would
+have spoken that backend instruction to a live caller verbatim, trading one
+fabrication (a confirmed-sounding read-back) for another (the internal
+prompt text). See test_the_models_own_instruction_is_never_spoken_to_the_caller
+below, reproduced with the real state machine (three "unclear" verdicts on a
+valid number).
 """
 from __future__ import annotations
 
@@ -104,6 +119,30 @@ def _awaiting_confirmation_state() -> CallState:
     return state
 
 
+def _max_attempts_state() -> CallState:
+    """A valid number that never gets a clear yes/no across
+    MAX_CONFIRMATION_ATTEMPTS (3) read-backs. contact_capture.py then moves
+    it to NEEDS_CLARIFICATION with a clarification_prompt written FOR THE
+    MODEL ("Please ask for the complete plus-prefixed phone number digit by
+    digit, or ask them to say ...") -- reviewer's repro for the blocking
+    finding on e07a953a.
+    """
+    state = update_state_from_user_turn(CallState(), "my number is +1 415 555 2671")
+    for _ in range(3):
+        state = update_state_from_user_turn(
+            state,
+            "hmm",
+            phone_readback_issued=True,
+            phone_confirmation_verdict="unclear",
+        )
+    assert state.phone_capture is not None
+    assert state.phone_capture.status is CaptureStatus.NEEDS_CLARIFICATION
+    assert state.phone_capture.attempts == 3
+    # Confirm this is really the model-directed branch the review flagged.
+    assert "ask them" in (state.phone_capture.clarification_prompt or "")
+    return state
+
+
 @pytest.mark.asyncio
 async def test_an_unvalidated_number_is_not_read_back_as_confirmed(monkeypatch):
     state = _needs_clarification_state()
@@ -134,3 +173,29 @@ async def test_a_valid_pending_readback_is_spoken_untouched(monkeypatch):
     joined = " ".join(spoken)
     assert "415 555 2671" in joined, spoken
     assert "is that right?" in joined, spoken
+
+
+@pytest.mark.asyncio
+async def test_the_models_own_instruction_is_never_spoken_to_the_caller(monkeypatch):
+    """Review finding on e07a953a: capture.clarification_prompt is written
+    FOR THE MODEL (prompt_builder's "BACKEND CONTACT MODE: ..." wrapping),
+    not for the caller. The MAX_CONFIRMATION_ATTEMPTS branch's prompt --
+    "Please ask for the complete plus-prefixed phone number digit by digit,
+    or ask them to say 'the first three digits are' ..." -- must never reach
+    TTS verbatim; the caller must hear this guard's own fixed re-ask.
+    """
+    state = _max_attempts_state()
+    spoken = await _spoken(
+        ["Just to double check, that's 415 555 2671, is that right?"],
+        state,
+        monkeypatch,
+    )
+    joined = " ".join(spoken)
+    # The fabricated confirmation, and the model's own internal instruction
+    # text, must never reach the caller.
+    assert "415" not in joined, spoken
+    assert "ask them" not in joined, spoken
+    assert "Please ask for" not in joined, spoken
+    # The turn still ends on the substituted re-ask, same as the other guard
+    # branch.
+    assert len(spoken) == 1, spoken
