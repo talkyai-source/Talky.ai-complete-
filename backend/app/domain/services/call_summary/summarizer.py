@@ -11,6 +11,7 @@ import json
 import logging
 import os
 from copy import deepcopy
+from typing import Mapping, Optional, Sequence
 
 from app.infrastructure.llm.structured_output import (
     response_format_for,
@@ -63,6 +64,7 @@ Rules:
 - next_step is the ONE immediate action; follow_up_tips are 2-4 concrete, practical suggestions for how to actually win the follow-up (timing, what to send, which concern to lead with). Make them specific to THIS call, not generic.
 - qualification_status is qualified only when a relevant need/fit and a concrete next step are supported by the transcript; nurture means possible need but later timing, missing information, or another decision-maker; unqualified means a clearly unsuitable fit or no relevant need; otherwise use unknown.
 - Never infer authority, need, timing, or budget from tone, politeness, industry stereotypes, or the agent's pitch. Use unknown when the prospect did not reliably confirm it.
+- A FACTS block precedes the transcript. Treat it as ground truth, not the transcript's own wording: only say an action was booked, scheduled, confirmed, or sent if the FACTS block lists it as executed — otherwise say it was requested or discussed, never that it is done. Only state a phone number or email address as a plain fact if the FACTS block lists it as caller-confirmed; any other contact detail mentioned in the transcript must be written with "(unconfirmed)" after it.
 - Keep each string tight (no waffle, no filler).
 - owner in action_items must be one of: agent, caller, user.
 - Respond ONLY with the JSON object. Any extra text will break parsing."""
@@ -213,10 +215,51 @@ def _coerce(raw: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Ground-truth facts
+# ---------------------------------------------------------------------------
+#
+# The transcript alone was not enough: call 6aaeb4dd's summary stated an
+# invalid, never-confirmed phone number and email as plain fact ("Phone:
+# 92301625319", "Email: hishamkhan62@gmail.com"), and a5e033c7's headline
+# claimed "scheduled root canal appointment" while action_results was `{}` —
+# nothing had actually booked anything. A model reading only the caller's and
+# agent's words has no way to tell an agreed-upon read-back from an executed
+# booking. These facts, computed the same way the live call gates them
+# (contact_capture.py's CONFIRMED status; an action's own success flag), are
+# handed to the model as ground truth it may not contradict.
+
+
+def _facts_block(
+    confirmed_contacts: Optional[Mapping[str, str]],
+    executed_actions: Optional[Sequence[str]],
+) -> str:
+    """A short ground-truth preamble prepended to the transcript."""
+    contacts = dict(confirmed_contacts or {})
+    actions = [str(a) for a in (executed_actions or []) if str(a).strip()]
+    lines = ["FACTS (ground truth for this call — do not contradict these):"]
+    if contacts:
+        for field, value in contacts.items():
+            lines.append(f"- Caller-confirmed {field}: {value}")
+    else:
+        lines.append("- No contact detail on this call was confirmed by the caller.")
+    if actions:
+        for action in actions:
+            lines.append(f"- Executed successfully: {action}")
+    else:
+        lines.append("- No booking, callback, or send action executed on this call.")
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
 # Main entry point
 # ---------------------------------------------------------------------------
 
-async def summarize_transcript(transcript_text: str) -> dict:
+async def summarize_transcript(
+    transcript_text: str,
+    *,
+    confirmed_contacts: Optional[Mapping[str, str]] = None,
+    executed_actions: Optional[Sequence[str]] = None,
+) -> dict:
     """Summarize *transcript_text* into a structured dict.
 
     Always returns a dict with all schema keys. Never raises.
@@ -232,6 +275,10 @@ async def summarize_transcript(transcript_text: str) -> dict:
         result = deepcopy(EMPTY_SUMMARY)
         result["headline"] = "No conversation recorded"
         return result
+
+    # The facts precede the transcript in the same user message so the model
+    # reads them before it forms an opinion, not as an afterthought.
+    document = f"{_facts_block(confirmed_contacts, executed_actions)}\n\n{transcript_text}"
 
     try:
         client = AsyncGroq(api_key=os.getenv("GROQ_API_KEY"))
@@ -262,7 +309,7 @@ async def summarize_transcript(transcript_text: str) -> dict:
 
         _budget = _summary_token_budget(transcript_text)
         try:
-            raw_content = await _call(transcript_text, _budget)
+            raw_content = await _call(document, _budget)
         except Exception as exc:  # noqa: BLE001 - re-raised below unless it is the budget
             if _TOKENS_EXHAUSTED not in str(exc) or _budget >= _SUMMARY_MAX_TOKENS:
                 raise
@@ -276,7 +323,7 @@ async def summarize_transcript(transcript_text: str) -> dict:
                 len(transcript_text),
                 _SUMMARY_MAX_TOKENS,
             )
-            raw_content = await _call(transcript_text, _SUMMARY_MAX_TOKENS)
+            raw_content = await _call(document, _SUMMARY_MAX_TOKENS)
 
         try:
             parsed = json.loads(raw_content)
@@ -298,7 +345,7 @@ async def summarize_transcript(transcript_text: str) -> dict:
                 "call_summarizer: first JSON parse failed — retrying with explicit instruction"
             )
             retry_content = (
-                transcript_text
+                document
                 + "\n\nReturn ONLY valid JSON matching the schema. No prose, no markdown."
             )
             raw_content2 = await _call(retry_content, _SUMMARY_MAX_TOKENS)

@@ -203,7 +203,18 @@ class TestGenerateAndStore:
                 result = await generate_and_store(None, _TENANT_ID, _CALL_ID)
 
         assert result == _FAKE_SUMMARY
-        mock_summarize.assert_awaited_once_with("Agent: Hello there!\nCaller: Hi, I'm interested.")
+        # Current invariant (2026-09-24, issue "summary states unconfirmed data
+        # as fact"): generate_and_store also hands the summarizer this call's
+        # ground truth — which contacts were actually confirmed and which
+        # actions actually executed — not just the transcript text. Both come
+        # back empty here since pool=None makes the confirmed-contact lookup
+        # fail closed (logged, not raised) and this fake row has no
+        # action_results.
+        mock_summarize.assert_awaited_once_with(
+            "Agent: Hello there!\nCaller: Hi, I'm interested.",
+            confirmed_contacts={},
+            executed_actions=[],
+        )
         # The summary UPDATE is one of the execute calls (lead-marking may add a
         # second UPDATE leads). Find the summary write specifically.
         summary_call = next(

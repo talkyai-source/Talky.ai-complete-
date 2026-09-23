@@ -23,6 +23,52 @@ from app.domain.services.call_summary.summarizer import (
 logger = logging.getLogger(__name__)
 
 
+async def _confirmed_contacts_for_call(pool, tenant_id: str, call_id: str) -> dict[str, str]:
+    """Caller-confirmed email/phone for this call, straight from ``call_lead_details``.
+
+    ``lead_slot_capture.snapshot_slots`` only ever writes an email/phone row
+    once ``ContactCaptureState`` reaches CONFIRMED (contact_capture.py) — a
+    row existing here IS confirmed by construction, and its absence means the
+    field was never confirmed. That is exactly the distinction call 6aaeb4dd's
+    summary lost: it stated an unconfirmed, invalid phone number and email as
+    plain fact. Best-effort: a failed lookup must not block the summary.
+    """
+    try:
+        from app.domain.services.lead_capture_service import LeadCaptureService
+
+        rows = await LeadCaptureService(pool).details_for_call(tenant_id, call_id)
+    except Exception as exc:  # noqa: BLE001 - a summary must never be blocked by this
+        logger.warning(
+            "call_summary store: confirmed-contact lookup failed for call %s: %s",
+            call_id,
+            exc,
+        )
+        return {}
+    return {
+        row["field_key"]: row["value"]
+        for row in rows
+        if row.get("field_key") in {"email", "phone"}
+        and row.get("confirmed")
+        and row.get("value")
+    }
+
+
+def _executed_actions_from_results(action_results: Any) -> list[str]:
+    """Action names ``calls.action_results`` marks as actually succeeded."""
+    if isinstance(action_results, str):
+        try:
+            action_results = json.loads(action_results)
+        except json.JSONDecodeError:
+            return []
+    if not isinstance(action_results, dict):
+        return []
+    return [
+        name
+        for name, result in action_results.items()
+        if isinstance(result, dict) and result.get("success")
+    ]
+
+
 async def generate_and_store(
     pool,
     tenant_id: str,
@@ -53,8 +99,11 @@ async def generate_and_store(
         # Defense-in-depth: `acquire_with_tenant` already sets the RLS GUC and
         # `calls` has a tenant-isolation policy, but pin the predicate here too
         # so object-level scoping holds even if RLS were ever disabled/misset.
+        # action_results feeds the summarizer's ground-truth facts below (a5e033c7,
+        # 2026-09-23: headline claimed "scheduled root canal appointment" while
+        # action_results was `{}` — nothing had actually executed).
         row = await conn.fetchrow(
-            "SELECT transcript, summary_json FROM calls "
+            "SELECT transcript, summary_json, action_results FROM calls "
             "WHERE id = $1 AND tenant_id = $2::uuid",
             call_id,
             tenant_id,
@@ -97,7 +146,15 @@ async def generate_and_store(
         return None
 
     # --- Generate ---
-    summary = await summarize_transcript(transcript_text)
+    # Ground the model in what this call actually established/executed so it
+    # cannot state an unconfirmed contact or an unexecuted action as fact.
+    confirmed_contacts = await _confirmed_contacts_for_call(pool, tenant_id, call_id)
+    executed_actions = _executed_actions_from_results(row.get("action_results"))
+    summary = await summarize_transcript(
+        transcript_text,
+        confirmed_contacts=confirmed_contacts,
+        executed_actions=executed_actions,
+    )
 
     # A fail-soft summarizer error (network/SDK/429, or output that won't parse
     # as JSON) returns the "Summary unavailable" sentinel. Persisting it would
