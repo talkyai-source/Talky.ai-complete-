@@ -973,7 +973,17 @@ class TurnStreamer:
                         buf = ""
                         break
 
-                if tts_was_interrupted or guardrail_block_reason:
+                # model_wrote_caller_turn must ALSO stop the outer stream, not
+                # just the inner sentence-flush while-loop above (whose own
+                # `break` only exits that loop). Without it the for-loop kept
+                # pulling tokens from the LLM after the cut, and whatever came
+                # next -- if normally spaced -- was flushed as a "new" sentence
+                # and spoken: call 3a17c06c said "...each month? few." because
+                # the in-buffer cut (turn_boundary, ~9e7f9c65) fired here but
+                # this condition never checked it, and the second, cross-token
+                # guard (92aac6aa, lines 807-825) didn't catch the leak until
+                # one fragment had already reached TTS.
+                if tts_was_interrupted or guardrail_block_reason or model_wrote_caller_turn:
                     break
 
         except LLMTimeoutError:
