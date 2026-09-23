@@ -62,6 +62,29 @@ def agent_left_a_question_open(agent_text: Optional[str]) -> bool:
     return text.endswith("?")
 
 
+def contact_capture_open(call_state) -> bool:
+    """True while an email or phone number is part-way through capture.
+
+    A value read back but not yet confirmed, or one the agent is still
+    clarifying, is the lead the call exists to produce. Hanging up then throws
+    it away: on call 2427af7e the caller was mid-correction of their email
+    ("I'm not asking for the spelling...") when the agent said "got it" and
+    ended the call. Unlike a question, this needs nothing inferred from the
+    caller's words - the capture state machine already knows.
+    """
+    from app.domain.services.voice_pipeline.contact_capture import CaptureStatus
+
+    open_states = {
+        CaptureStatus.NEEDS_CLARIFICATION,
+        CaptureStatus.AWAITING_CONFIRMATION,
+    }
+    for name in ("email_capture", "phone_capture"):
+        capture = getattr(call_state, name, None)
+        if capture is not None and getattr(capture, "status", None) in open_states:
+            return True
+    return False
+
+
 def caller_signaled_end(text: Optional[str]) -> bool:
     """True if the caller's own words clearly signal ending the call."""
     return bool(text and _CALLER_END_INTENT.search(text))

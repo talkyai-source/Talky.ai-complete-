@@ -32,7 +32,10 @@ from app.domain.services.voice_pipeline.identity_disposition import (
 from app.domain.services.voice_pipeline.lead_slot_capture import (
     capture_turn_slots,
 )
-from app.domain.services.end_session_action import agent_left_a_question_open
+from app.domain.services.end_session_action import (
+    agent_left_a_question_open,
+    contact_capture_open,
+)
 from app.domain.services.voice_pipeline.turn_helpers import (
     _first_speaker_label,
     _persona_label,
@@ -899,7 +902,12 @@ class TurnEnder:
                         except Exception:
                             pass
                     elif (
-                        agent_left_a_question_open(response_text)
+                        (
+                            agent_left_a_question_open(response_text)
+                            or contact_capture_open(
+                                getattr(session, "captured_slots", None)
+                            )
+                        )
                         and not contains_dnc(full_transcript)
                         and not contains_explicit_goodbye(full_transcript)
                     ):
@@ -908,10 +916,13 @@ class TurnEnder:
                         # the sentinel path did on 35d3fd2f ("Mike at example
                         # dot com - right?"), 3aae86c6 and 77531765. A request
                         # to be removed, or a real goodbye, still ends the call.
+                        # Also while an email or phone number is part-way
+                        # through capture: 2427af7e hung up on a caller who
+                        # was mid-correction of their email.
                         logger.info(
                             "end_call_stripped_question_open call_id=%s — "
-                            "model asked a question and a hangup in the same "
-                            "turn; keeping call alive for the answer",
+                            "model asked for a hangup with a question or a "
+                            "contact capture still open; keeping call alive",
                             call_id[:12],
                         )
                         try:

@@ -58,3 +58,65 @@ def test_the_sentinel_gate_uses_it_and_dnc_and_goodbye_still_win():
     assert src.index("end_call_stripped_question_open") < src.index(
         '"agent_end_call call_id=%s — model requested hangup"'
     )
+
+
+# --- a contact detail part-way through capture -----------------------------
+
+def _state_after(*turns):
+    from app.services.scripts.call_state_tracker import (
+        CallState,
+        update_state_from_agent_turn,
+        update_state_from_user_turn,
+    )
+
+    s = CallState()
+    for who, text in turns:
+        s = update_state_from_agent_turn(s, text) if who == "agent" else update_state_from_user_turn(s, text)
+    return s
+
+
+def test_an_email_being_clarified_is_an_open_capture():
+    """2427af7e: caller mid-correction; the agent said 'got it' and hung up."""
+    from app.domain.services.end_session_action import contact_capture_open
+
+    state = _state_after(
+        ("agent", "Could you share the email address to send the sample to?"),
+        ("user", "Yeah. It is, uh, john co at g mail dot com."),
+    )
+    assert contact_capture_open(state)
+
+
+def test_an_email_read_back_but_unconfirmed_is_an_open_capture():
+    from app.domain.services.end_session_action import contact_capture_open
+
+    state = _state_after(("user", "my email is bob at gmail dot com"))
+    assert contact_capture_open(state)
+
+
+def test_no_capture_and_a_confirmed_capture_are_both_closed():
+    from app.domain.services.end_session_action import contact_capture_open
+    from app.services.scripts.call_state_tracker import CallState
+
+    assert not contact_capture_open(CallState())
+    assert not contact_capture_open(None)
+    state = _state_after(("user", "my email is bob at gmail dot com"))
+    from dataclasses import replace
+
+    from app.domain.services.voice_pipeline.contact_capture import CaptureStatus
+
+    confirmed = replace(
+        state,
+        email_capture=replace(state.email_capture, status=CaptureStatus.CONFIRMED),
+    )
+    assert not contact_capture_open(confirmed)
+
+
+def test_the_gate_holds_the_call_while_a_capture_is_open():
+    src = (
+        Path(__file__).resolve().parents[2]
+        / "app" / "domain" / "services" / "voice_pipeline" / "turn_ender.py"
+    ).read_text(encoding="utf-8")
+    gate = src[src.index("agent_left_a_question_open(response_text)") - 120 :]
+    gate = gate[: gate.index("end_call_stripped_question_open")]
+    assert "contact_capture_open(" in gate
+    assert "not contains_dnc(full_transcript)" in gate
