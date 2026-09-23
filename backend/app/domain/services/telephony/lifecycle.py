@@ -4608,10 +4608,23 @@ async def _on_transfer_connected(call_id: str, target_call_id: str) -> None:
     voice_session._hangup_reason = "transferred"
     pipeline = getattr(voice_session, "pipeline", None)
     if pipeline is not None:
+        # Same PBX-id vs. pipeline-call_id mismatch as _on_call_ended's
+        # teardown cancel below — see that comment for the full mechanism.
+        _pipeline_call_id = getattr(
+            getattr(voice_session, "call_session", None), "call_id", None
+        ) or call_id
         try:
-            await pipeline.cancel_active_turn(call_id)
+            await pipeline.cancel_active_turn(_pipeline_call_id)
         except Exception as exc:
             logger.debug("transfer cancel_active_turn failed call=%s err=%s", call_id[:12], exc)
+        if _pipeline_call_id != call_id:
+            try:
+                await pipeline.cancel_active_turn(call_id)
+            except Exception as exc:
+                logger.debug(
+                    "transfer cancel_active_turn fallback failed call=%s err=%s",
+                    call_id[:12], exc,
+                )
 
     # Persist both artifacts before end_session clears the media gateway's
     # recording buffers and closes provider connections.
@@ -5116,10 +5129,30 @@ async def _on_call_ended(
         # idempotent, so the duplicate is a cheap no-op.
         _pipeline = getattr(voice_session, "pipeline", None)
         if _pipeline is not None:
+            # BUG (calls 8b3176ca / 6aaeb4dd, 2026-09-23): this used to pass
+            # `call_id`, which on the Asterisk path is the ARI/PBX channel id
+            # (e.g. "1790168826.2670"), not the id VoicePipelineService.
+            # _pending_llm_tasks is keyed under (session.call_id — see
+            # transcript_handler.py's `call_id = session.call_id`). Popping
+            # under the wrong id is a silent no-op (dict.pop(id, None)), so
+            # the in-flight turn is never actually cancelled: its reply can
+            # land in the transcript AFTER the persist below already read the
+            # buffer, or a send_tts_audio failure post-hangup still gets
+            # recorded as a normally-spoken line. Cancel under the pipeline's
+            # own id; also try the original id as a harmless fallback in case
+            # anything is ever registered under it instead.
+            _pipeline_call_id = getattr(
+                getattr(voice_session, "call_session", None), "call_id", None
+            ) or call_id
             try:
-                await _pipeline.cancel_active_turn(call_id)
+                await _pipeline.cancel_active_turn(_pipeline_call_id)
             except Exception as exc:  # noqa: BLE001 — teardown must not fail
                 logger.debug("teardown cancel_active_turn failed: %s", exc)
+            if _pipeline_call_id != call_id:
+                try:
+                    await _pipeline.cancel_active_turn(call_id)
+                except Exception as exc:  # noqa: BLE001 — teardown must not fail
+                    logger.debug("teardown cancel_active_turn fallback failed: %s", exc)
 
         for _attr in (
             "_greeting_task",
