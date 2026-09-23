@@ -109,6 +109,9 @@ on a real call. Log lines to watch: `model_wrote_caller_turn`,
   primary answering slowly *inside* its deadline (p50 415 ms, p95 1.35 s).
   Prompt size (~28k characters on the Estimation test campaign, ~42k on
   Dojo-PC) is the lever for that; not attempted.
-* AI disclosure differs call to call because the platform's telephony rules
-  say "never mention AI" while some operators' copy discloses it. Whether to
-  disclose is a compliance decision for you, not a code fix.
+* AI disclosure differs call to call, and that is the policy working, not a
+  conflict: the compliance floor (which no campaign script can override) says
+  disclose when asked and never claim to be human, so the agent says "I'm an
+  AI assistant for …" when a caller asks who or what it is, and not
+  otherwise. Whether to disclose *proactively* on every call is a compliance
+  decision for you.
