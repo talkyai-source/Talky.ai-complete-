@@ -59,6 +59,21 @@ _AGENT_PHONE_REQUEST_RE = re.compile(
     r")\b",
     re.I,
 )
+# The verb-form patterns above miss how the agent actually asks. On the live
+# test of 2026-09-23 (call 51450718) it said "And a phone number where we can
+# reach you?", phone mode never armed, the caller's digits were never captured,
+# and the model transcribed them itself - reading back 312-207-504-96 for
+# "three one two zero seven five zero four nine six" and confirming it. Other
+# unarmed wordings from the 30-day corpus: "Could I confirm the best phone
+# number to reach you?", "Could you share a contact phone number, please?",
+# "May I have your name and a contact number or email...". A QUESTION that
+# names a phone-type number arms phone mode. Arming only lets the caller's
+# next digits be parsed as a number; it never supplies one.
+_AGENT_PHONE_NOUN_RE = re.compile(
+    r"\b(?:phone|mobile|cell|callback|contact|telephone)\s+number\b"
+    r"|\b(?:best|good|a|the|another)\s+number\s+(?:to|where|for|on|we|i)\b",
+    re.I,
+)
 _AGENT_REASK_RE = re.compile(
     r"\b(?:"
     r"(?:(?:can|could|would)\s+you(?:\s+please)?|please)\s+"
@@ -499,7 +514,9 @@ def update_state_from_agent_turn(state: CallState, utterance: str) -> CallState:
     kind: Optional[CaptureKind] = None
     if _AGENT_EMAIL_REQUEST_RE.search(text):
         kind = "email"
-    elif _AGENT_PHONE_REQUEST_RE.search(text):
+    elif _AGENT_PHONE_REQUEST_RE.search(text) or (
+        "?" in text and _AGENT_PHONE_NOUN_RE.search(text)
+    ):
         kind = "phone"
     elif reask:
         kind = state.active_contact_kind
