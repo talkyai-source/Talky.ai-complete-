@@ -87,6 +87,64 @@ on a real call. Log lines to watch: `model_wrote_caller_turn`,
 `ungrounded_link_rewritten`, `end_call_stripped_question_open`,
 `end_call_stripped_wrong_person`, and the absence of `json_validate_failed`.
 
+## Later the same day
+
+### Account access and minutes
+
+`info@allstateestimation.co.uk` had no access to the AllStateEstimation (gmail)
+account. It now has `tenant_admin` there, the same role the gmail login already
+had on `.co`. Both logins now have tenant_admin on both accounts, 32 effective
+permissions each (the permission tables are views over `tenant_users`, so one
+row did it). No platform-wide role was granted to either.
+
+Minutes needed no change: both accounts have the same 5,000-minute monthly
+allowance. Enforced usage (this month's non-test call time, which is what the
+call guard reads; `tenants.minutes_used` is never written) is 13.5 minutes on
+`.co` and 28.4 on AllStateEstimation.
+
+### The call that "dropped after 10 seconds"
+
+The agent hung up, not the line. Call `7a690f74` (dojo, 22 Sep 18:51):
+caller "Who's this?" -> agent "Sarah here from Dojo." -> `agent_end_call` on its
+**first reply**. The day's hangup fixes hold a hangup after a question or while
+a contact is mid-capture; a plain statement on turn 0 is not yet covered.
+
+A separate call to +1 778 924 9977 at 21:18 was refused at admission as
+`unknown_did`: that number's only inbound route belongs to another customer and
+is paused.
+
+### Live test from the softphone (940007 -> 940003), 07:42 UTC
+
+Outbound origination to an extension is deliberately impossible in the app
+(direct origination retired, extension trunks barred from outbound, "940007" is
+not E.164), so Asterisk rang 940007 through the 940003 registration and handed
+the answered call to the same `from-talky-inbound` dialplan a real call to
+940003 uses. Logged as an inbound call, `51450718`, 183 s.
+
+What held: admission, knowledge (map_retrieve, 33 sections), AI disclosure on
+"What is your name?", reply start 0.48-1.0 s for most turns, rising to 1.4-1.8 s
+late in the call. One voice throughout (`aura-2-amalthea-en`, the campaign's;
+the account's `aura-2-hera-en` is an unused fallback) - no mid-call voice switch.
+
+What failed, and it is my own fix's gap:
+
+    AGENT: "So that's 312-207-504-96, correct?Yes, that's correct. What date..."
+
+* **Self-confirmation survived the 9e7f9c65 fix.** The fix was tested on whole
+  strings; in production the model streams tokens, and when a token ends on the
+  "?" the splitter sees end-of-buffer, flushes a normal sentence, and the next
+  token "Yes" starts a fresh one. The missing space falls BETWEEN tokens, so
+  `model_wrote_caller_turn` fired 0 times on a call where it should have fired.
+* **The number was wrong.** The caller said 312 075 0496 (10 digits); the agent
+  read 312-207-504-96 (11). The platform's own parser gets it right
+  (`3120750496`), but phone capture only arms on certain wordings of the ask -
+  "What is your phone number?" arms it, "And a phone number where we can reach
+  you?" (what the agent said) does not - so the correct value never reached the
+  prompt and the model transcribed the digits itself.
+
+Both are fixable in the parsing layer; not fixed at the time of writing because
+a second live call was in progress and a deploy restarts the services.
+
 ## Still open
 
 **Your decision, not engineering:**
