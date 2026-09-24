@@ -850,7 +850,7 @@ function CampaignSection({
                                 </div>
                                 <div className="text-center">AI Summary</div>
                                 <div className="text-center">AI Script <span className="text-[10px] font-medium normal-case tracking-normal">/ Form</span></div>
-                                <div className="text-right">Actions</div>
+                                <div className="text-center">Actions</div>
                             </div>
                             <div
                                 ref={scrollRef}
