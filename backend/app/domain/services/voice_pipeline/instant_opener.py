@@ -9,12 +9,21 @@ phase (``_presynth_greeting_audio``) and sat unused in caller-first mode.
 This module answers the first bare "Hello?" by pumping that pre-synthesized
 audio straight to the gateway (~0.3s to first sound) via the existing,
 battle-tested ``_send_outbound_greeting`` — barge-in handling and the
-history append come with it. The LLM path is skipped for that one turn; every
-later turn runs normally with the greeting correctly in history.
+history append come with it.
+
+2026-09-24: the pre-synth greeting has been content-free since the 2026-08-11
+opener redesign ("Hi, hello."/"Hey there." — no name, no reason for the
+call), so skipping the LLM entirely for that turn left the caller with
+nothing once it played (6e0e221b: 15.7s of silence, then the callee hung
+up). The LLM path is no longer skipped — turn_ender.py continues into the
+normal LLM turn for the SAME utterance right after this plays, so the
+identity/permission line follows immediately. The fast first sound is kept
+either way; only "skip the LLM" changed.
 
 Safety: only fires when the first user utterance is a BARE greeting (a real
 opening question like "who is this?" deserves the LLM's specific answer),
-only once per call, and any failure falls through to the normal LLM turn.
+only once per call, and any failure falls through to the normal LLM turn
+exactly as before.
 """
 from __future__ import annotations
 
@@ -191,8 +200,18 @@ def is_opener_echo(session, text) -> bool:
 
 
 async def try_instant_opener(session, transcript: str) -> bool:
-    """Play the ringing-phase pre-synth greeting as the reply to the caller's
-    first bare greeting. Returns True when it played (skip the LLM turn).
+    """Play the ringing-phase pre-synth greeting as the fast first sound for
+    the caller's first bare greeting. Returns True when it played.
+
+    2026-09-24: no longer terminal for the turn — the caller here (turn_ender)
+    continues into the normal LLM turn for this SAME ``transcript``
+    afterwards, so this function must NOT append the caller's utterance to
+    history itself (the normal turn's own history management does that,
+    immediately after the greeting this function just appended — see
+    ``_send_outbound_greeting``). Appending it here too would both duplicate
+    the entry and put it BEFORE the greeting, breaking the strict
+    assistant/user alternation the normal turn relies on.
+
     Fail-soft: any problem returns False and the normal turn proceeds."""
     try:
         if getattr(session, "_instant_opener_done", False):
@@ -200,17 +219,6 @@ async def try_instant_opener(session, transcript: str) -> bool:
         vs = getattr(session, "_voice_session_ref", None)
         if vs is None or not getattr(vs, "_presynth_greeting_audio", None):
             return False
-
-        # The caller's greeting belongs in history BEFORE the agent's opener
-        # so the next LLM turn sees the true exchange order.
-        try:
-            from app.domain.models.conversation import Message, MessageRole
-            session.conversation_history.append(
-                Message(role=MessageRole.USER, content=transcript)
-            )
-            session.current_user_input = ""
-        except Exception:
-            pass
 
         logger.info(
             "instant_opener call_id=%s — pre-synth greeting answers %r",

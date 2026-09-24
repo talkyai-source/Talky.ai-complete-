@@ -219,14 +219,28 @@ class TurnEnder:
         # LLM+TTS round trip (3-14s+ — two of eight live calls lost the human
         # to that silence, 2026-07-08). Only the FIRST turn, only a bare
         # greeting; a real question still gets the LLM. Fail-soft.
+        #
+        # Since the 2026-08-11 opener redesign the pre-synth greeting is
+        # content-free ("Hi, hello."/"Hey there." — no name, no reason for the
+        # call), so STOPPING here after it played left the caller with
+        # nothing: call 6e0e221b (2026-09-23) got the instant greeting after
+        # its own "Hello?", then 15.7s of silence until the callee hung up.
+        # Continue into the normal LLM turn for this SAME utterance instead of
+        # returning, so the identity/permission line follows immediately —
+        # the fast first sound is kept either way. The greeting is already in
+        # conversation_history (appended by _send_outbound_greeting BEFORE
+        # this call returns), so the turn below sees it as the most recent
+        # ASSISTANT message and, via the same has_introduced=False -> "give
+        # your opening" prompt path already proven on agent-first calls' own
+        # bare-pickup turn 1, must not greet again. A failed/no-op instant
+        # opener (is_bare_greeting False, no pre-synth audio, etc.) already
+        # falls through identically, so there is nothing special to branch on.
         if not _has_prior_user_turn_for_floor and _first_speaker_label(session) == "user":
             from app.domain.services.voice_pipeline.instant_opener import (
                 is_bare_greeting, try_instant_opener,
             )
-            if is_bare_greeting(full_transcript) and await try_instant_opener(
-                session, full_transcript
-            ):
-                return
+            if is_bare_greeting(full_transcript):
+                await try_instant_opener(session, full_transcript)
 
         # Guard against the confirmed Deepgram Flux hallucination bug (GitHub #1524)
         # where the STT model outputs repetitive nonsense text ("blah blah blah…").
