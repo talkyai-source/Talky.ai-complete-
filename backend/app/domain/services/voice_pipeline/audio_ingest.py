@@ -993,7 +993,17 @@ class AudioIngest:
                             call_id[:12], "opening" if _opening else "mid", _phrase,
                         )
                         try:
-                            await self._p.synthesize_and_send_audio(session, _phrase, websocket)
+                            # track_latency=False: a nudge is not a turn. Without
+                            # this the nudge's TTS first-chunk/end stamps land on
+                            # the turn's LatencyMetrics object (mark_audio_start
+                            # / mark_tts_end are first-write-wins with no
+                            # staleness check), and the REAL reply's later,
+                            # LEGITIMATE stamps are then refused — producing
+                            # "Turn N latency: -3795ms" 4 times on 2026-09-23
+                            # (3a17c06c turn 0, 6aaeb4dd turn 17, etc.).
+                            await self._p.synthesize_and_send_audio(
+                                session, _phrase, websocket, track_latency=False,
+                            )
                             _record_silence_check(self._p, session, _phrase)
                         except Exception as _sm_exc:
                             logger.debug("[SilenceMonitor] TTS failed: %s", _sm_exc)
