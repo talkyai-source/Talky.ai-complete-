@@ -702,7 +702,21 @@ class TurnRunner:
                 # so it does NOT roll it back or double-annotate.
                 session._speculative_history_len = None
             else:
-                session.conversation_history = session.conversation_history[:history_snapshot]
+                # KEEP the user message (at history_snapshot) — dropping it
+                # discarded the caller's own words permanently. Each Flux
+                # EndOfTurn dispatches only its own segment (turn_ender.py
+                # builds full_transcript fresh per turn from just that
+                # segment), so nothing downstream ever re-queues or merges a
+                # rolled-back fragment into a later turn: once dropped here it
+                # was gone for the rest of the call. On a caller who speaks in
+                # fragments this produced half-heard TTS AND an agent that
+                # answers as though the caller never spoke (51450718: "I want
+                # full body checkup" never engaged with, "which day" asked 3x;
+                # b97ce4c5: 8 replies cancelled, agent later said "I'm sorry I
+                # missed that" to a caller who explained their problem twice).
+                # Only discard what THIS cancelled task appended after the
+                # user's own message.
+                session.conversation_history = session.conversation_history[:history_snapshot + 1]
                 # Nothing was heard. If this keeps happening on the opening, stop
                 # looping the intro (issue #23).
                 _note_unheard_greeting_bargein(session)
