@@ -995,11 +995,27 @@ async def campaign_test_websocket(
                     # AFTER end_call, but _persist_test_transcript below used
                     # to run before anything cancelled/awaited that in-flight
                     # turn, so the persist read the buffer 2ms too early and
-                    # the reply was lost. end_session() further down does
-                    # cancel the turn, but only AFTER persist — too late.
+                    # raced a task that could otherwise still be writing to
+                    # it. end_session() further down does cancel the turn,
+                    # but only AFTER persist — too late for that race.
                     # Cancel (and await settling of) it here first, with the
                     # session's own call_id (what _pending_llm_tasks is keyed
                     # by — see lifecycle.py's teardown for the same id rule).
+                    #
+                    # SCOPE / KNOWN GAP (review 2026-09-24 — NOT fixed, needs
+                    # a file outside this fix's fence): this ordering change
+                    # closes the RACE, but it cannot by itself bring back
+                    # adf41aa1's specific lost reply, because a genuinely
+                    # CANCELLED turn's spoken partial is committed only to
+                    # session.conversation_history (the LLM's own context —
+                    # turn_runner.py's `except asyncio.CancelledError` branch,
+                    # ~line 690-697) and never reaches
+                    # transcript_service.accumulate_turn. So no ordering of
+                    # cancel-vs-persist can recover it into transcript_json;
+                    # that needs a change inside turn_runner.py, which the
+                    # brief marks read-only for this fix. See
+                    # tests/unit/test_turn_runner_cancelled_reply_missing_
+                    # from_transcript.py for the reproduction.
                     try:
                         _pipeline = getattr(voice_session, "pipeline", None)
                         if _pipeline is not None:
