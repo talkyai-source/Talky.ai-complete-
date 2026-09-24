@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import time
 from datetime import datetime
 from typing import Any, Optional
@@ -298,12 +299,25 @@ class TurnEnder:
         # agent asked "is that Sam?", caller said "Yep", it was dropped and
         # the agent never replied). A question ends with "?" — when it does,
         # let the affirmative through to the LLM.
+        #
+        # Checking only whether the WHOLE message ends in "?" missed an
+        # embedded permission question followed by a declarative clause
+        # (Dojo-PC opener: "Alex here from Dojo — got a minute? We're
+        # checking in on your payment setup." — ends in "."). The caller's
+        # "Yes." was dropped as a backchannel and the agent sat mute for
+        # 9.3s until the tester hung up (call 36357ad0, 2026-09-23 18:14:49;
+        # also 2b36df30, 2026-09-22). A question anywhere in the agent's
+        # last turn — i.e. ANY of its sentences ending in "?" — counts.
         _agent_last_msg = next(
             (m.content for m in reversed(session.conversation_history)
              if m.role == MessageRole.ASSISTANT),
             "",
         )
-        _agent_asked_question = _agent_last_msg.rstrip().endswith("?")
+        _agent_asked_question = any(
+            _sentence.strip().endswith("?")
+            for _sentence in re.split(r"(?<=[.!?])\s+", _agent_last_msg.strip())
+            if _sentence.strip()
+        )
 
         if (
             _is_backchannel(full_transcript)
