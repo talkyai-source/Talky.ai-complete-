@@ -20,7 +20,10 @@ def test_compose_defaults_to_no_callback_executor_and_adds_the_policy_line():
     executor (issue: 'inbound-callback-promises-no-record' / a5e033c7's
     guardrail-forced mid-call retraction). The default must reflect that."""
     out = compose_system_prompt(BASE, CallState())
-    assert "never promise, schedule, or confirm a callback" in out.lower()
+    # Round-2 reword (2026-09-24): asserts the invariant (never claim a
+    # callback/booking is done), not the pre-reword bytes -- see
+    # test_callback_promise_prompt_policy.py for the full finding.
+    assert "never say a callback or booking has been scheduled, booked, or confirmed" in out.lower()
     assert "pass the caller's details to the team" in out.lower()
     assert BASE in out
 

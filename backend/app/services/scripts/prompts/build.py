@@ -182,8 +182,12 @@ def build_turn_prompt(
         # compose_system_prompt PREPENDS the CAPTURED header to whatever it is
         # given. Handing it the tail (rather than the whole prompt, as the
         # legacy path does) is what moves CAPTURED out of the cached prefix
-        # while keeping it above the blocks it qualifies. Returns its input
-        # unchanged when no slot is filled, so an empty tail stays empty.
+        # while keeping it above the blocks it qualifies. Since the
+        # CALLBACK POLICY fix (prompt_builder.py, 2026-09-23/24) it no longer
+        # returns its input unchanged when no slot is filled -- the policy
+        # line is appended unconditionally (has_callback_executor defaults to
+        # False) -- so an empty tail now always comes back carrying at least
+        # that line.
         tail = compose_system_prompt(tail, captured_slots)
     if live_state_block:
         tail = f"{tail}\n\n{live_state_block}" if tail else live_state_block

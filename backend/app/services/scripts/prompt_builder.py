@@ -26,11 +26,23 @@ from app.services.scripts.spoken_email_normalizer import (
 # is a symptom; the fix belongs upstream of it, so the model never makes an
 # unfulfillable promise in the first place. Campaign-neutral: this names no
 # campaign or field and does not touch campaign data.
+#
+# 2026-09-24 review (round 2): the first wording above ("Never promise,
+# schedule, or confirm a callback or booking yourself") read as banning the
+# agent from even ASKING for or noting a preferred callback day/time -- but
+# inbound campaign 6cc54935's approved_next_actions includes
+# schedule_callback, and the CAPTURED block below prints "Follow-up time
+# (already agreed): X" once one is taken. Also, "so they can call back" is
+# itself an unfulfillable promise (a callback IS coming), the exact class of
+# claim this policy exists to prevent. Reworded so asking for/noting a
+# preferred time is explicitly allowed, only ever STATING the callback/
+# booking as done is banned, and the fallback promises follow-up, not a call.
 _NO_CALLBACK_EXECUTOR_POLICY = (
     "CALLBACK POLICY: No callback or booking can actually be scheduled from "
-    "this call. Never promise, schedule, or confirm a callback or booking "
-    "yourself. Instead, offer to pass the caller's details to the team so "
-    "they can call back.\n"
+    "this call. You may ask for and note the caller's preferred callback day "
+    "or time; just never say a callback or booking has been scheduled, "
+    "booked, or confirmed. Instead, offer to pass the caller's details to "
+    "the team so the team can follow up.\n"
     "------------------------------------------------------------\n"
 )
 

@@ -43,7 +43,7 @@ def test_prompt_tells_the_model_not_to_promise_a_callback_by_default():
     present, campaign-neutral, no campaign data touched."""
     out = compose_system_prompt(BASE, CallState())
     lowered = out.lower()
-    assert "never promise, schedule, or confirm a callback" in lowered
+    assert "never say a callback or booking has been scheduled, booked, or confirmed" in lowered
     assert "pass the caller's details to the team" in lowered
 
 
@@ -58,7 +58,35 @@ def test_prompt_rule_survives_alongside_a_realistic_call_state():
         confirmation_verdict="affirm",
     )
     out = compose_system_prompt(BASE, state)
-    assert "never promise, schedule, or confirm a callback" in out.lower()
+    assert "never say a callback or booking has been scheduled, booked, or confirmed" in out.lower()
+
+
+def test_policy_still_allows_asking_for_and_noting_a_preferred_callback_time():
+    """Round-2 reviewer finding (2026-09-24): the round-1 wording ('Never
+    promise, schedule, or confirm a callback or booking yourself') reads as
+    banning the agent from even asking for or noting a preferred callback
+    day/time -- but inbound campaign 6cc54935's approved_next_actions
+    includes schedule_callback, and prompt_builder's own CAPTURED block
+    prints 'Follow-up time (already agreed): X' once one is captured. The
+    policy must not contradict either: the agent may still ask for and note
+    a preferred day/time, it just may never say a callback/booking is
+    actually scheduled, booked, or confirmed."""
+    out = compose_system_prompt(BASE, CallState())
+    lowered = out.lower()
+    assert "ask for and note" in lowered
+    assert "callback day or time" in lowered
+
+
+def test_policy_wording_does_not_itself_promise_a_call_back():
+    """Round-2 reviewer finding (2026-09-24): 'so they can call back' is
+    itself a promise that someone will call the caller back -- the same
+    class of unfulfillable claim this whole policy exists to prevent. The
+    honest framing is that the team will follow up, not that a call back is
+    coming."""
+    out = compose_system_prompt(BASE, CallState())
+    lowered = out.lower()
+    assert "so they can call back" not in lowered
+    assert "so the team can follow up" in lowered
 
 
 def test_policy_line_is_irrelevant_once_a_real_executor_exists():
