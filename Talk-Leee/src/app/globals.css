@@ -706,37 +706,54 @@ details > summary.home-menu-toggle {
 }
 
 .home-navbar-menu-open[data-theme="light"] details[open] > .home-mobile-panel {
-  background: #000;
-  color: #fff;
+  /* Light --home-card-gradient copied verbatim from :root. The navbar always carries
+     `.dark`, so var(--home-card-gradient) would resolve to the dark gradient here.
+     Guarded by src/lib/theme-implementation.test.ts. */
+  background-image: linear-gradient(120deg, #fff3a3 0%, #b7f6d1 40%, #6ee7ff 100%);
+  background-size: cover;
+  background-repeat: no-repeat;
+  color: #171717;
   border-right: 1px solid rgba(255, 255, 255, 0.1);
   box-shadow: 4px 0 24px rgba(0, 0, 0, 0.3), 1px 0 3px rgba(0, 0, 0, 0.15);
 }
 
 .home-navbar-menu-open[data-theme="light"] details[open] > .home-mobile-panel a,
-.home-navbar-menu-open[data-theme="light"] details[open] > .home-mobile-panel button {
+.home-navbar-menu-open[data-theme="light"] details[open] > .home-mobile-panel button,
+.home-navbar-menu-open[data-theme="light"] details[open] > .home-mobile-panel summary {
   color: inherit !important;
 }
 
+.home-navbar-menu-open[data-theme="light"] details[open] > .home-mobile-panel .border-t {
+  border-color: rgba(0, 0, 0, 0.12);
+}
+
 .home-navbar-menu-open[data-theme="dark"] details[open] > .home-mobile-panel {
-  background: #fff;
-  color: #000;
+  background-image: var(--home-card-gradient);
+  background-size: cover;
+  background-repeat: no-repeat;
+  color: #ededed;
   border-right: 1px solid rgba(0, 0, 0, 0.08);
   box-shadow: 4px 0 24px rgba(0, 0, 0, 0.1), 1px 0 3px rgba(0, 0, 0, 0.04);
 }
 
+.home-navbar-menu-open[data-theme="dark"] details[open] > .home-mobile-panel .border-t {
+  border-color: rgba(255, 255, 255, 0.18);
+}
+
 .home-navbar-menu-open[data-theme="dark"] details[open] > .home-mobile-panel a,
-.home-navbar-menu-open[data-theme="dark"] details[open] > .home-mobile-panel button {
+.home-navbar-menu-open[data-theme="dark"] details[open] > .home-mobile-panel button,
+.home-navbar-menu-open[data-theme="dark"] details[open] > .home-mobile-panel summary {
   color: inherit !important;
 }
 
 .home-navbar-menu-open[data-theme="light"] details[open] > .home-mobile-panel .home-mobile-link:hover {
-  background-color: rgba(255, 255, 255, 0.1);
-  border-color: rgba(255, 255, 255, 0.08);
+  background-color: rgba(0, 0, 0, 0.06);
+  border-color: rgba(0, 0, 0, 0.06);
 }
 
 .home-navbar-menu-open[data-theme="dark"] details[open] > .home-mobile-panel .home-mobile-link:hover {
-  background-color: rgba(0, 0, 0, 0.06);
-  border-color: rgba(0, 0, 0, 0.06);
+  background-color: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.08);
 }
 
 .home-mobile-link {
