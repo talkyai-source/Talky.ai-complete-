@@ -134,7 +134,6 @@ export function Sidebar({ className }: { className?: string }) {
     const isDark = theme === "dark";
 
     const measureRef = useRef<HTMLDivElement | null>(null);
-    const [isShortViewport, setIsShortViewport] = useState(false);
     const [openDropdowns, setOpenDropdowns] = useState<Set<string>>(new Set());
 
     const toggleDropdown = (name: string) => {
@@ -203,18 +202,46 @@ export function Sidebar({ className }: { className?: string }) {
         [brandName, visibleNavigation]
     );
 
-    useEffect(() => {
-        if (typeof window === "undefined") return;
-        const mql = window.matchMedia("(max-height: 760px)");
-        const update = () => setIsShortViewport(mql.matches);
-        update();
-        if (typeof mql.addEventListener === "function") {
-            mql.addEventListener("change", update);
-            return () => mql.removeEventListener("change", update);
-        }
-        (mql as unknown as { addListener?: (cb: () => void) => void }).addListener?.(update);
-        return () => (mql as unknown as { removeListener?: (cb: () => void) => void }).removeListener?.(update);
-    }, []);
+    // Vertical sizing. Every height in the sidebar is one point on a line
+    // between a compact size (min) and today's size (max), picked by how much
+    // height the sidebar has (`--sb-e`, in px, 0..sizeRange). Above
+    // sizeMinTotal + sizeRange the sizes are exactly today's; below
+    // sizeMinTotal they sit at the compact minimum and the whole sidebar
+    // scrolls (scroll bar hidden). The two totals are the sidebar's height at
+    // the compact / full sizes, so the content exactly fills the available
+    // height in between and there is no dead zone. Row counts (nav + Settings
+    // + Logout) and open dropdown groups feed the totals.
+    const rowCount = visibleNavigation.length + bottomNavigation.length + 1;
+    const openGroupsExtra = collapsed
+        ? 0
+        : visibleNavigation.reduce(
+              // group child block: mt-1 (4) + n * 30.25 (13px link) + (n-1) * 2 gaps
+              (sum, item) => (item.children && openDropdowns.has(item.name) ? sum + 2 + 32.25 * item.children.length : sum),
+              0
+          );
+    // header 48 + nav padding 16 + bottom-group chrome 21 + tenant 58 + rows 32 each + 2px gaps between rows
+    const sizeMinTotal = 139 + 34 * rowCount + openGroupsExtra;
+    // header +16, nav padding +8, bottom-group chrome +12, tenant +28, rows +6 each, gaps +4 each
+    const sizeRange = 56 + 10 * rowCount;
+    const grow = (min: number, extra: number) => `calc(${min}px + ${extra} * var(--sb-e) / ${sizeRange})`;
+    const sizeVars = {
+        containerType: "size",
+        "--sb-e": `clamp(0px, calc(100cqh - ${sizeMinTotal}px), ${sizeRange}px)`,
+        "--sb-header": grow(48, 16),
+        "--sb-row": grow(32, 6),
+        "--sb-gap": grow(2, 4),
+        "--sb-navpad": grow(8, 4),
+        "--sb-mt": grow(4, 4),
+        "--sb-bpad": grow(8, 4),
+        "--sb-font": grow(13, 1),
+        "--sb-icon": grow(18, 2),
+        "--sb-avatar": grow(32, 8),
+        "--sb-cardpy": grow(8, 8),
+        "--sb-tpb": grow(8, 4),
+        "--sb-name-fs": grow(14, 2),
+        "--sb-name-lh": grow(16, 8),
+    } as React.CSSProperties;
+    const rowSizeClass = "h-[var(--sb-row)] text-[length:var(--sb-font)] [&>svg:first-child]:size-[var(--sb-icon)]";
 
     useEffect(() => {
         if (typeof document === "undefined") return;
@@ -261,11 +288,10 @@ export function Sidebar({ className }: { className?: string }) {
     };
 
     const NavContent = (
-        <div className="flex flex-col h-full overflow-y-auto">
+        <div className="flex flex-col h-full overflow-y-auto hide-scrollbar" style={sizeVars}>
             <div
                 className={cn(
-                    "relative flex items-center border-b border-sidebar-border/60",
-                    isShortViewport ? "h-14" : "h-16",
+                    "relative flex items-center shrink-0 h-[var(--sb-header)] border-b border-sidebar-border/60",
                     collapsed ? "justify-center px-2" : "justify-between px-3"
                 )}
             >
@@ -336,7 +362,7 @@ export function Sidebar({ className }: { className?: string }) {
                 </div>
             </div>
 
-            <nav className={cn("flex-1 px-2 space-y-1.5", isShortViewport ? "py-2" : "py-3")}>
+            <nav className="grow shrink-0 px-2 py-[var(--sb-navpad)] [&>*+*]:mt-[var(--sb-gap)]">
                 {visibleNavigation.map((item) => {
                     const isActive = pathname === item.href || pathname.startsWith(item.href + "/");
 
@@ -355,9 +381,9 @@ export function Sidebar({ className }: { className?: string }) {
                                     onMouseMove={(e) => maybeShowTooltip(e, item.name)}
                                     onMouseLeave={() => tooltip.hide()}
                                     className={cn(
-                                        "w-full group flex min-w-0 items-center gap-2 rounded-xl text-sm font-semibold transition-colors border",
+                                        "w-full group flex min-w-0 items-center gap-2 rounded-xl font-semibold transition-colors border",
+                                        rowSizeClass,
                                         desktopNavItemClass,
-                                        isShortViewport ? "py-1.5" : "py-2",
                                         hasActiveChild
                                             ? "bg-sidebar-accent border-sidebar-border/60 text-sidebar-accent-foreground"
                                             : "bg-transparent border-transparent text-sidebar-foreground/70 hover:bg-sidebar-accent hover:border-sidebar-border/60 hover:text-sidebar-foreground"
@@ -390,7 +416,7 @@ export function Sidebar({ className }: { className?: string }) {
                                                         onClick={onClose}
                                                         className={cn(
                                                             "group flex min-w-0 items-center gap-2 rounded-lg text-[13px] font-medium transition-colors border px-2",
-                                                            isShortViewport ? "py-1" : "py-1.5",
+                                                            "py-1.5",
                                                             isChildActive
                                                                 ? "bg-sidebar-accent/70 border-sidebar-border/40 text-sidebar-accent-foreground"
                                                                 : "bg-transparent border-transparent text-sidebar-foreground/60 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
@@ -418,9 +444,9 @@ export function Sidebar({ className }: { className?: string }) {
                             onMouseMove={(e) => maybeShowTooltip(e, item.name)}
                             onMouseLeave={() => tooltip.hide()}
                             className={cn(
-                                "group flex min-w-0 items-center gap-2 rounded-xl text-sm font-semibold transition-colors border",
+                                "group flex min-w-0 items-center gap-2 rounded-xl font-semibold transition-colors border",
+                                rowSizeClass,
                                 desktopNavItemClass,
-                                isShortViewport ? "py-1.5" : "py-2",
                                 isActive
                                     ? "bg-sidebar-accent border-sidebar-border/60 text-sidebar-accent-foreground"
                                     : "bg-transparent border-transparent text-sidebar-foreground/70 hover:bg-sidebar-accent hover:border-sidebar-border/60 hover:text-sidebar-foreground"
@@ -435,10 +461,7 @@ export function Sidebar({ className }: { className?: string }) {
             </nav>
 
             <div
-                className={cn(
-                    "px-2 border-t border-sidebar-border/60 space-y-1.5",
-                    isShortViewport ? "mt-1 pt-2 pb-2" : "mt-2 pt-3 pb-3"
-                )}
+                className="shrink-0 px-2 mt-[var(--sb-mt)] pt-[var(--sb-bpad)] pb-[var(--sb-bpad)] border-t border-sidebar-border/60 [&>*+*]:mt-[var(--sb-gap)]"
             >
                 {bottomNavigation.map((item) => {
                     const isActive = pathname === item.href || pathname.startsWith(item.href + "/");
@@ -451,9 +474,9 @@ export function Sidebar({ className }: { className?: string }) {
                             onMouseMove={(e) => maybeShowTooltip(e, item.name)}
                             onMouseLeave={() => tooltip.hide()}
                             className={cn(
-                                "group flex min-w-0 items-center gap-2 rounded-xl text-sm font-semibold transition-colors border",
+                                "group flex min-w-0 items-center gap-2 rounded-xl font-semibold transition-colors border",
+                                rowSizeClass,
                                 desktopNavItemClass,
-                                isShortViewport ? "py-1.5" : "py-2",
                                 isActive
                                     ? "bg-sidebar-accent border-sidebar-border/60 text-sidebar-accent-foreground"
                                     : "bg-transparent border-transparent text-sidebar-foreground/70 hover:bg-sidebar-accent hover:border-sidebar-border/60 hover:text-sidebar-foreground"
@@ -470,8 +493,8 @@ export function Sidebar({ className }: { className?: string }) {
                     type="button"
                     onClick={handleLogout}
                     className={cn(
-                        "w-full group flex min-w-0 items-center gap-2 rounded-xl text-sm font-semibold text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground transition-colors border border-transparent hover:border-sidebar-border/60",
-                        isShortViewport ? "py-1.5" : "py-2",
+                        "w-full group flex min-w-0 items-center gap-2 rounded-xl font-semibold text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground transition-colors border border-transparent hover:border-sidebar-border/60",
+                        rowSizeClass,
                         desktopNavItemClass
                     )}
                     onMouseEnter={(e) => maybeShowTooltip(e, "Logout")}
@@ -484,14 +507,20 @@ export function Sidebar({ className }: { className?: string }) {
                 </button>
             </div>
 
-            <div className={cn("px-2 pb-3", isShortViewport ? "hidden" : "block")}>
-                <div className="rounded-2xl border border-sidebar-border/60 bg-sidebar-accent/60 px-3 py-4 backdrop-blur-sm shadow-sm transition-colors duration-300">
-                    <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-full bg-sidebar-primary/15 border border-sidebar-border/60 flex items-center justify-center shadow-sm">
+            <div className="shrink-0 px-2 pb-[var(--sb-tpb)]">
+                <div
+                    className={cn(
+                        "rounded-2xl border border-sidebar-border/60 bg-sidebar-accent/60 py-[var(--sb-cardpy)] backdrop-blur-sm shadow-sm transition-colors duration-300",
+                        collapsed ? "px-0" : "px-3"
+                    )}
+                    title={collapsed ? `${profileUser.name ?? profileUser.email} · ${roleLabel(profileUser.role)}` : undefined}
+                >
+                    <div className={cn("flex items-center", collapsed ? "justify-center" : "gap-3")}>
+                        <div className="w-[var(--sb-avatar)] h-[var(--sb-avatar)] shrink-0 rounded-full bg-sidebar-primary/15 border border-sidebar-border/60 flex items-center justify-center shadow-sm">
                             <span className="text-sm font-black text-sidebar-foreground">{profileUser.email?.charAt(0).toUpperCase()}</span>
                         </div>
-                        <div className="flex-1 min-w-0">
-                            <p className="font-bold text-sidebar-foreground truncate">{profileUser.name ?? profileUser.email}</p>
+                        <div className={collapsed ? "sr-only" : "flex-1 min-w-0"}>
+                            <p className="font-bold text-[length:var(--sb-name-fs)] leading-[var(--sb-name-lh)] text-sidebar-foreground truncate">{profileUser.name ?? profileUser.email}</p>
                             <p className="text-xs text-sidebar-foreground/60 font-semibold truncate">{roleLabel(profileUser.role)}</p>
                         </div>
                     </div>
