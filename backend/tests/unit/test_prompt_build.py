@@ -35,10 +35,31 @@ def test_no_blocks_no_slots_returns_base_unchanged():
 
 
 def test_empty_state_adds_no_captured_header():
+    """An empty CallState has no CAPTURED facts and no pending contact item --
+    but compose_system_prompt (prompt_builder.py) unconditionally appends the
+    CALLBACK POLICY line whenever it runs at all (issue
+    inbound-callback-promises-no-record / call a5e033c7), so passing
+    ``captured_slots=CallState()`` is no longer a no-op the way an omitted
+    ``captured_slots=None`` still is (see test_no_blocks_no_slots_returns_
+    base_unchanged above, which never calls compose_system_prompt at all).
+
+    A reviewer (2026-09-24) caught this test still asserting the pre-policy
+    byte-for-byte invariant and flagged it as a new, unreported failure
+    against ``out == "BASE"``. The invariant this test actually owns -- no
+    CAPTURED header for an empty state -- still holds under both orders; it
+    is asserted here instead of the now-incorrect full-string equality. The
+    stable/cache-friendly property (BASE leads the cached order; the legacy
+    order still runs everything through one compose_system_prompt call) is
+    unaffected and reasserted explicitly.
+    """
     for order in (_LEGACY, _CACHED):
         out = build_turn_prompt("BASE", captured_slots=CallState(), **order)
-        assert out == "BASE"
         assert "CAPTURED" not in out
+        assert "callback policy" in out.lower()
+    legacy_out = build_turn_prompt("BASE", captured_slots=CallState(), **_LEGACY)
+    assert legacy_out.rstrip().endswith("BASE")
+    cached_out = build_turn_prompt("BASE", captured_slots=CallState(), **_CACHED)
+    assert cached_out.startswith("BASE")
 
 
 def test_no_live_state_block_leaves_output_unchanged():
