@@ -155,3 +155,29 @@ All four items below were started in the second round but not finished before th
 - **Full backend suite (`tests/unit tests/security`, final tree):** 9,481 passed, 0 failed, 16 skipped. An earlier full run had one failure, the order-dependent timing test `test_opening_nudge_waits_for_caller_audio`. It passes 8 of 8 on its own, and a reviewer saw the same failure on the untouched base, so it is not caused by these changes.
 - **Ruff gate:** clean.
 - **Deployed:** production moved from `76426ed6` to `864325f7` (talky-api restarted Thu 2026-09-24 07:38:13 UTC). All five services are active, and the health, deep-health and workers endpoints all return 200. All 21 checks run on the server against the deployed code passed, and there were 0 errors after the restart. Rollback: `git checkout --detach 76426ed6`, then restart the four Python services. No migration was run.
+
+## First live call on the new build, and the fix it led to
+
+**Call c54579ea** was made at 07:51 UTC on 24 September, from softphone 940007 to extension 940003, and lasted 59 s.
+
+**Confirmed live:**
+- The agent's opening line, "Thanks for calling. How can I help?", is now the first row of the stored transcript (#11).
+- There were 0 errors and 0 service restarts after the deploy.
+
+**New problem found.**
+
+1. At 07:51:27 Deepgram Flux stopped returning transcripts for 6 s of speech. The watchdog switched the call to Nova, as designed.
+2. At 07:51:45.8, Nova's acoustic "speech started" event cancelled the reply to "I'm the existing patient." 0.5 s into playback. No words followed that event.
+3. Nothing re-issued the cancelled reply, so the agent was silent for 14 s until the caller hung up.
+4. The same word-less events also kept re-stamping the new "caller turn open" flag from #5. That would hold off the "Still there?" recovery indefinitely.
+
+**Fix, commit `252887fa`, deployed at 08:19 UTC:**
+- A barge-in with no caller words within 2 s (`VOICE_FALSE_BARGE_IN_WINDOW_S`) now re-issues the cancelled reply. It does not if a new turn is already running, or if the call has ended.
+- When a barge-in cancels a reply, the caller's own message is now kept in history. This closes the round-two #7 gap.
+- A "turn open" stamp with no caller words behind it counts for at most 3 s (`VOICE_CALLER_TURN_NO_TEXT_S`).
+
+**Tests:**
+- New tests in `test_false_barge_in_resume.py` (4) and `test_regreet_ladder_over_open_caller_turn.py` (1) fail on the previous code and pass on the new.
+- Full suite: 9,485 passed, 16 skipped, and 1 failure: the known intermittent timing test, which passes 8 of 8 on its own.
+- Ruff: clean.
+- All 23 checks on the deployed code passed, with 0 errors after the restart.
