@@ -205,20 +205,40 @@ def _clarification_attempts(previous: Optional[ContactCaptureState]) -> int:
 def _clarification_progress(
     kind: CaptureKind,
     previous: Optional[ContactCaptureState],
+    fallback_status: CaptureStatus,
     default_prompt: str,
-) -> tuple[int, str]:
-    """Bump the re-ask counter; past the cap, stop asking to spell/repeat.
+) -> tuple[CaptureStatus, int, Optional[str]]:
+    """Bump the re-ask counter; escalate once, then give up for good.
 
     Every NEEDS_CLARIFICATION/INVALID branch used to hand the caller the
-    identical "please spell/repeat it" instruction forever. Once we've
-    already asked MAX_CLARIFICATION_ATTEMPTS times, tell the model to read
-    back its best understanding once for a yes/no, or say the team will
-    confirm and move on -- never issue another spelling/repeat request.
+    identical "please spell/repeat it" instruction forever (call 6aaeb4dd,
+    2026-09-23: asked to spell the email 4 times). The (MAX+1)th failed
+    attempt now escalates to a single read-back-once-or-move-on instruction
+    instead of another spelling request.
+
+    A reviewer of that first fix (2026-09-24) found the escalation itself was
+    unbounded: nothing ever left NEEDS_CLARIFICATION/INVALID, so the SAME
+    escalation text was re-sent as "ACTION THIS TURN" on every later turn --
+    including turns with no contact content at all -- and, on the realtime
+    path, the ever-incrementing ``attempts`` field kept the per-turn state
+    signature different call over call, re-triggering a provider interrupt on
+    every one of those unrelated turns. So: once the escalation has already
+    been delivered (``previous`` already carries more than
+    MAX_CLARIFICATION_ATTEMPTS), stop counting and stop asking -- give up on
+    this field (CANCELLED) instead of escalating again. CANCELLED already
+    drops out of prompt_builder's pending block and out of the two re-open
+    branches below it in ``advance_capture``, so the state then stays
+    byte-for-byte stable turn over turn until the caller supplies an actual,
+    fully-formed value (which can still reopen it -- see the AWAITING_
+    CONFIRMATION branch above, unconditioned on prior status).
     """
-    attempts = _clarification_attempts(previous) + 1
+    prior = _clarification_attempts(previous)
+    if prior > MAX_CLARIFICATION_ATTEMPTS:
+        return CaptureStatus.CANCELLED, prior, None
+    attempts = prior + 1
     if attempts > MAX_CLARIFICATION_ATTEMPTS:
         field = "email address" if kind == "email" else "phone number"
-        return attempts, (
+        return fallback_status, attempts, (
             f"You have already asked for the {field} "
             f"{MAX_CLARIFICATION_ATTEMPTS} times without success; do not ask "
             "them to say it again in any form. If you have formed any "
@@ -227,7 +247,7 @@ def _clarification_progress(
             "will follow up to confirm it, and move on with the rest of the "
             "call."
         )
-    return attempts, default_prompt
+    return fallback_status, attempts, default_prompt
 
 
 def _email_segments(value: str) -> tuple[str, str]:
@@ -865,20 +885,21 @@ def advance_capture(
     # incomplete, not invalid. Ask for country context instead of guessing US.
     if kind == "phone" and raw_candidate and normalized is None:
         missing_region = not raw_candidate.strip().startswith("+") and not phone_region
-        attempts, prompt = _clarification_progress(
+        status, attempts, prompt = _clarification_progress(
             kind,
             previous,
+            (
+                CaptureStatus.NEEDS_CLARIFICATION
+                if missing_region
+                else CaptureStatus.INVALID
+            ),
             "Please repeat the complete phone number beginning with + and its country code."
             if missing_region
             else "That does not appear to be a valid phone number; please repeat it.",
         )
         return _state(
             kind,
-            (
-                CaptureStatus.NEEDS_CLARIFICATION
-                if missing_region
-                else CaptureStatus.INVALID
-            ),
+            status,
             raw=audit_raw,
             attempts=attempts,
             prompt=prompt,
@@ -974,22 +995,31 @@ def advance_capture(
     # otherwise ambiguous reply. Once the read-back gate above has had first
     # refusal, do not erase that candidate merely because no new full address
     # could be parsed. For an already confirmed value, an unparseable mention
-    # is likewise not evidence of a correction.
+    # is likewise not evidence of a correction. CANCELLED is excluded too --
+    # after a give-up-for-good escalation (_clarification_progress) this same
+    # branch used to reopen a brand-new spell-it-out cycle from a bare mention
+    # (call 6aaeb4dd's own 7th turn, "...at gmail dot com.", does exactly
+    # this), which is the never-ask-again invariant failing one turn later.
+    # An EXPLICIT "never mind" cancellation is unaffected in practice: it is
+    # only ever revived by an actual, fully-formed new value, which is the
+    # unconditional AWAITING_CONFIRMATION branch above, not this one.
     if has_intent and previous.status not in {
         CaptureStatus.CONFIRMED,
         CaptureStatus.AWAITING_CONFIRMATION,
+        CaptureStatus.CANCELLED,
     }:
-        attempts, prompt = _clarification_progress(
+        status, attempts, prompt = _clarification_progress(
             kind,
             previous,
+            CaptureStatus.NEEDS_CLARIFICATION,
             "Please spell the email one letter at a time, then say at and the domain."
             if kind == "email"
             else "Please repeat the phone number one digit at a time.",
         )
         return replace(
             previous,
-            status=CaptureStatus.NEEDS_CLARIFICATION,
-            validation_status=CaptureStatus.NEEDS_CLARIFICATION.value,
+            status=status,
+            validation_status=status.value,
             confirmed_at=None,
             attempts=attempts,
             clarification_prompt=prompt,
@@ -1003,9 +1033,10 @@ def advance_capture(
     # a failed attempt even though nothing about the raw/normalized value
     # changes.
     if previous.status in {CaptureStatus.NEEDS_CLARIFICATION, CaptureStatus.INVALID}:
-        attempts, prompt = _clarification_progress(
+        status, attempts, prompt = _clarification_progress(
             kind,
             previous,
+            previous.status,
             previous.clarification_prompt
             or (
                 "Please spell the email one letter at a time, then say at and the domain."
@@ -1013,6 +1044,13 @@ def advance_capture(
                 else "Please repeat the phone number one digit at a time."
             ),
         )
-        return replace(previous, attempts=attempts, clarification_prompt=prompt)
+        return replace(
+            previous,
+            status=status,
+            validation_status=status.value,
+            confirmed_at=None,
+            attempts=attempts,
+            clarification_prompt=prompt,
+        )
 
     return previous

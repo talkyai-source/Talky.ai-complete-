@@ -10,6 +10,16 @@ the identical state object (`new_state is state`) or replaced it without
 ever touching `attempts`, so the loop could run forever. See
 issues_all.txt: email-respell-unbounded.
 
+The first fix for this (commit 319cc598) escalated once past
+MAX_CLARIFICATION_ATTEMPTS but never left NEEDS_CLARIFICATION/INVALID, so a
+reviewer (2026-09-24) proved the escalation itself repeated forever -- on
+every later turn, including turns with no contact content at all -- which is
+the same "ask again forever" defect one step later. The fix now moves the
+field to a terminal CANCELLED ("gave up for good") state the turn after the
+escalation is delivered, so the state -- and the directive built from it --
+stops changing. See contact_capture.py's `_clarification_progress` for the
+two-phase design and issues_all.txt for the reviewer's proof.
+
 The seven utterances below are the real final-transcript turns from
 6aaeb4dd.transcript.txt (13:08:56.979518 - 13:10:18.220835).
 """
@@ -42,12 +52,19 @@ def test_email_clarification_loop_never_advances_attempts_before_the_fix():
     unbounded loop. This assertion is the "reproduce before reasoning" step:
     it must fail on the unmodified module (attempts stayed 0 forever) and
     pass once advance_capture actually counts failed clarification turns.
+
+    Status is NEEDS_CLARIFICATION only through the escalation turn (index 3);
+    from there the field is terminal (CANCELLED -- give up for good), which
+    is the reviewer-required fix for the escalation itself repeating forever.
     """
     state = None
-    for utterance in _CALL_6AAEB4DD_EMAIL_TURNS:
+    for index, utterance in enumerate(_CALL_6AAEB4DD_EMAIL_TURNS):
         state = advance_capture(state, kind="email", utterance=utterance, mode_active=True)
         assert state is not None
-        assert state.status is CaptureStatus.NEEDS_CLARIFICATION
+        if index <= 3:
+            assert state.status is CaptureStatus.NEEDS_CLARIFICATION
+        else:
+            assert state.status is CaptureStatus.CANCELLED
 
     # Seven failed turns were fed in; on the unmodified code `state.attempts`
     # is 0 here (never incremented). The fix must make real progress.
@@ -90,9 +107,16 @@ def test_phone_clarification_stops_asking_after_three_asks():
     CLARIFICATION) used to ask "repeat the complete phone number" forever,
     identically to the email defect, because the same unbounded branch fed
     it.
+
+    Turn index 3 is the one-time escalation (still NEEDS_CLARIFICATION, with
+    the read-back-or-move-on prompt); turn 4 is the terminal give-up state
+    (CANCELLED, no clarification_prompt -- capture_mode_directive supplies
+    its own "stop asking, acknowledge, move on" line for that status instead
+    of repeating the escalation text turn after turn).
     """
     state = None
     prompts: list[str] = []
+    statuses: list[CaptureStatus] = []
     for _ in range(5):
         state = advance_capture(
             state,
@@ -101,7 +125,11 @@ def test_phone_clarification_stops_asking_after_three_asks():
             mode_active=True,
         )
         prompts.append(state.clarification_prompt or "")
+        statuses.append(state.status)
 
     repeat_asks = [p for p in prompts if "repeat" in p.lower() and "team" not in p.lower()]
     assert len(repeat_asks) <= MAX_CLARIFICATION_ATTEMPTS
-    assert "team" in prompts[-1].lower() or "yes or no" in prompts[-1].lower()
+    escalated_prompt = prompts[3]
+    assert "team" in escalated_prompt.lower() or "yes or no" in escalated_prompt.lower()
+    assert statuses[4] is CaptureStatus.CANCELLED
+    assert prompts[4] == ""
