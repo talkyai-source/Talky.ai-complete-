@@ -154,3 +154,4 @@ All four items below were started in the second round but not finished before th
 
 - **Full backend suite (`tests/unit tests/security`, final tree):** 9,481 passed, 0 failed, 16 skipped. An earlier full run had one failure, the order-dependent timing test `test_opening_nudge_waits_for_caller_audio`. It passes 8 of 8 on its own, and a reviewer saw the same failure on the untouched base, so it is not caused by these changes.
 - **Ruff gate:** clean.
+- **Deployed:** production moved from `76426ed6` to `864325f7` (talky-api restarted Thu 2026-09-24 07:38:13 UTC). All five services are active, and the health, deep-health and workers endpoints all return 200. All 21 checks run on the server against the deployed code passed, and there were 0 errors after the restart. Rollback: `git checkout --detach 76426ed6`, then restart the four Python services. No migration was run.
