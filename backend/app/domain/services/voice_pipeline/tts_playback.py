@@ -194,6 +194,11 @@ class TtsPlayback:
         first_chunk = True
         first_chunk_sent = False  # track whether any audio reached the gateway
         _stt_muted = False  # test-agent-mute-only-on-greeting (2026-09-23)
+        # Set once the gateway has CONFIRMED the browser actually finished
+        # playing this utterance (see the wait block below) — as opposed to
+        # a guessed fixed tail. Review of 91b61694 (2026-09-24): the fixed
+        # tail unmuted well before the browser-paced playback really ended.
+        _waited_for_browser_playback = False
         try:
             # If user spoke during the LLM call, the barge-in event is already set.
             # Don't start TTS — send the stop signal immediately and return.
@@ -246,6 +251,21 @@ class TtsPlayback:
                     logger.debug(
                         "tts_playback_mute_failed call_id=%s: %s", call_id[:8], _mute_exc
                     )
+                # BUG (4a9dd845, 7dbf415f, review of 91b61694 on 2026-09-24):
+                # muting only covered the seconds THIS LOOP spends PUSHING
+                # audio to the gateway, not the seconds the BROWSER spends
+                # actually PLAYING it — the Test-agent client queues chunks
+                # and paces playback itself (test-agent-button.tsx's
+                # nextPlayTimeRef), so a fixed post-send tail unmuted STT
+                # while a reply was still audibly playing through a live
+                # mic. send_greeting never had this bug: it waits on the
+                # gateway's own playback-complete signal
+                # (voice_orchestrator.py:1029-1036). Do the same here,
+                # keyed on the browser gateway actually supporting it.
+                if _stt_muted and hasattr(
+                    self._p.media_gateway, "start_playback_tracking"
+                ):
+                    self._p.media_gateway.start_playback_tracking(call_id)
 
             # TTS hard inter-chunk timeout — protects against silent WS hangs
             # mid-sentence. Pattern adapted from Pipecat
@@ -538,6 +558,30 @@ class TtsPlayback:
                     except Exception as _exc:
                         logger.debug("flush buffer failed: %s", _exc)
                 completed = True
+
+                # Wait for the browser's OWN playback-complete confirmation
+                # before the finally block below unmutes — same pattern as
+                # voice_orchestrator.send_greeting's post-flush wait. Gated on
+                # `_stt_muted` (only the Test-agent allow_barge_in=false path
+                # mutes here) and on the gateway actually supporting playback
+                # tracking (telephony gateways don't, so this is a no-op
+                # there — see test_telephony_style_gateway_without_playback_
+                # tracking_is_unaffected).
+                if (
+                    _stt_muted
+                    and first_chunk_sent
+                    and websocket
+                    and hasattr(self._p.media_gateway, "wait_for_playback_complete")
+                ):
+                    try:
+                        await websocket.send_json({"type": "tts_audio_complete"})
+                        await self._p.media_gateway.wait_for_playback_complete(call_id)
+                        _waited_for_browser_playback = True
+                    except Exception as _wait_exc:
+                        logger.debug(
+                            "tts_playback_wait_for_playback_failed call_id=%s: %s",
+                            call_id[:8], _wait_exc,
+                        )
         except SessionGoneError:
             # Browser WebSocket was torn down while TTS was streaming.
             # Exit the loop silently — this is normal teardown, not an error.
@@ -551,12 +595,28 @@ class TtsPlayback:
             # session._spoken_sentences.append(sentence)`) recorded this
             # sentence as spoken even though delivery to the channel had
             # failed partway (or entirely) through. Returning
-            # interrupted=True stops the rest of this turn's sentences AND
-            # keeps this one out of the persisted "what was actually spoken"
-            # transcript, the same way a real barge-in does. The recovery
-            # attempt below is unchanged from the generic-exception path —
-            # not every TtsDeliveryError means the channel is dead (a couple
-            # of the raise sites are frame/ack validation, not "no session").
+            # interrupted=True stops the rest of THIS TURN's sentences from
+            # being attempted, and keeps this one OUT of
+            # session._spoken_sentences (turn_streamer.py:952) — the same
+            # signal a real barge-in sets.
+            #
+            # SCOPE / KNOWN GAP (review of 91b61694, 2026-09-24 — NOT fixed,
+            # needs a file outside this fix's fence): turn_streamer.py only
+            # substitutes _spoken_sentences into the PERSISTED full_text when
+            # `_barged()` is ALSO true (turn_streamer.py:1147). A
+            # TtsDeliveryError with no real barge-in event leaves `_barged()`
+            # False, so full_text still comes from the LLM's raw
+            # all_tokens/raw_response_text — the undelivered sentence is
+            # STILL what turn_runner.py commits via accumulate_turn on
+            # 6aaeb4dd's exact call path. This except clause only stops the
+            # turn from continuing to speak past a dead/erroring channel; it
+            # does NOT by itself fix what gets persisted. See
+            # tests/unit/test_turn_streamer_tts_delivery_error_transcript_gap.py
+            # for the reproduction and the exact turn_streamer.py change
+            # still needed. The recovery attempt below is unchanged from the
+            # generic-exception path — not every TtsDeliveryError means the
+            # channel is dead (a couple of the raise sites are frame/ack
+            # validation, not "no session").
             interrupted = True
             silent_reason = "tts_delivery_error"
             logger.error(f"TTS delivery failed for call {call_id}: {e}")
@@ -612,9 +672,15 @@ class TtsPlayback:
                         pass
         finally:
             if _stt_muted and hasattr(self._p.stt_provider, "unmute"):
-                # Same post-TTS tail voice_orchestrator.send_greeting uses
-                # before unmuting (network jitter / echo-tail decay).
-                await asyncio.sleep(_STT_UNMUTE_TAIL_S)
+                # Same asymmetric tail voice_orchestrator.send_greeting uses:
+                # 0.05s once the browser has actually CONFIRMED playback is
+                # done (the remaining risk is just AEC/network echo decay),
+                # else the full STT_UNMUTE_TAIL_S guess for a gateway that
+                # cannot confirm real playback (network jitter / echo-tail
+                # decay with no better signal available).
+                await asyncio.sleep(
+                    0.05 if _waited_for_browser_playback else _STT_UNMUTE_TAIL_S
+                )
                 try:
                     await self._p.stt_provider.unmute(call_id)
                 except Exception as _unmute_exc:
