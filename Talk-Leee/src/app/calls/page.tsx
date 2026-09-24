@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { CallTimestamp } from "@/components/calls/call-timestamp";
-import { Phone, PhoneOff, PhoneIncoming, PhoneOutgoing, Clock, ChevronRight, ChevronDown, FileText, Megaphone, Loader2, Sparkles, Play, Pause, Search, Mic, ThumbsUp } from "lucide-react";
+import { Phone, PhoneOff, PhoneIncoming, PhoneOutgoing, Clock, CalendarClock, ChevronRight, ChevronDown, FileText, Megaphone, Loader2, Sparkles, Play, Pause, Search, Mic, ThumbsUp } from "lucide-react";
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
 import { useCalls, useCallTranscript, useCallSummary } from "@/lib/api-hooks";
@@ -74,6 +74,8 @@ const DESKTOP_CALL_MIN_WIDTH = "min-w-[57.25rem]";
 // card. Height is the SUM of the first 9 rows' real rendered heights (not
 // firstRowHeight × 9) because inbound/outbound rows differ in height.
 const CALL_HISTORY_ROWS_VISIBLE = 9;
+// Header/row cell indexes of the fixed-width columns right of Notes: time, AI Summary, AI Script / Form, Actions.
+const FIXED_TRACK_HEADINGS = [4, 5, 6, 7];
 const CALL_HISTORY_ROW_GAP_PX = 8; // matches the rows list's `space-y-2` (0.5rem)
 
 const FAILED_CALL_OUTCOMES = new Set([
@@ -202,6 +204,16 @@ function SummaryPreview({
 
 type CallWorkflowPatch = Partial<Omit<CallHistoryWorkflowEntry, "updatedAt">>;
 
+// The per-call "best time to call" the panel shows. The `Call` type and the
+// list mapper do not carry this field yet, so today it is always null and the
+// panel shows its empty state. Once the backend sends `best_time_to_call` on
+// the call and `Call` / `listCalls` (dashboard-api.ts) carry it through, this
+// reader is the only place that needs to change (drop the cast).
+function callBestTimeToCall(call: Call): string | null {
+    const value = (call as Call & { best_time_to_call?: string | null }).best_time_to_call;
+    return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
 function CallRow({
     call,
     canPlayMedia,
@@ -217,6 +229,8 @@ function CallRow({
 }) {
     const [expanded, setExpanded] = useState(false);
     const [summaryPreviewOpen, setSummaryPreviewOpen] = useState(false);
+    const [bestTimeOpen, setBestTimeOpen] = useState(false);
+    const bestTimeToCall = callBestTimeToCall(call);
     const [showTranscript, setShowTranscript] = useState(false);
     const summaryQuery = useCallSummary(expanded || summaryPreviewOpen ? call.id : undefined);
     const transcriptQuery = useCallTranscript(showTranscript ? call.id : undefined, "json");
@@ -415,7 +429,7 @@ function CallRow({
                 <div className="flex justify-center">
                     <CallTimestamp iso={call.created_at} durationSeconds={call.duration_seconds} />
                 </div>
-                <div className="flex justify-center">
+                <div className="flex items-center justify-center gap-1">
                     <TooltipProvider delayDuration={250}>
                         <Tooltip onOpenChange={setSummaryPreviewOpen}>
                             <TooltipTrigger asChild>
@@ -431,6 +445,24 @@ function CallRow({
                             </TooltipTrigger>
                             <TooltipContent side="top" align="end" sideOffset={8} className="w-80 max-w-[calc(100vw-2rem)] p-4 shadow-xl">
                                 <SummaryPreview fallback={call.summary} isLoading={summaryQuery.isLoading} isError={summaryQuery.isError} data={summaryQuery.data} />
+                            </TooltipContent>
+                        </Tooltip>
+                    </TooltipProvider>
+                    <TooltipProvider delayDuration={250}>
+                        <Tooltip>
+                            <TooltipTrigger asChild>
+                                <button
+                                    type="button"
+                                    onClick={() => setBestTimeOpen((value) => !value)}
+                                    aria-expanded={bestTimeOpen}
+                                    aria-label={bestTimeOpen ? "Hide best time to call" : "Show best time to call"}
+                                    className={`inline-flex h-8 w-8 items-center justify-center rounded-lg border transition-colors ${bestTimeOpen ? "border-ring/60 bg-accent text-accent-foreground" : "border-border bg-background text-muted-foreground hover:bg-accent hover:text-foreground"}`}
+                                >
+                                    <CalendarClock className="h-4 w-4" aria-hidden />
+                                </button>
+                            </TooltipTrigger>
+                            <TooltipContent side="top" align="end" sideOffset={8} className="shadow-xl">
+                                Best time to call
                             </TooltipContent>
                         </Tooltip>
                     </TooltipProvider>
@@ -526,6 +558,32 @@ function CallRow({
                                 data={summaryQuery.data}
                                 onRetry={() => void summaryQuery.refetch()}
                             />
+                        </div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+
+            {/* Desktop only: the button that opens this lives in the grid row, which is hidden below 768px. */}
+            <AnimatePresence initial={false}>
+                {bestTimeOpen && (
+                    <motion.div
+                        key="best-time"
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: "auto" }}
+                        exit={{ opacity: 0, height: 0 }}
+                        transition={{ duration: 0.18 }}
+                        className="mt-2 hidden overflow-hidden rounded-xl border border-border bg-muted/40 md:block"
+                    >
+                        <div className="px-4 py-3">
+                            <div className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                                <CalendarClock className="h-3.5 w-3.5" aria-hidden />
+                                Best time to call
+                            </div>
+                            {bestTimeToCall ? (
+                                <p className="text-sm font-semibold text-foreground">{bestTimeToCall}</p>
+                            ) : (
+                                <p className="text-sm text-muted-foreground">Best time to call is not available for this call yet.</p>
+                            )}
                         </div>
                     </motion.div>
                 )}
@@ -683,6 +741,48 @@ function CampaignSection({
 
     const rowsScrollCapped = group.calls.length >= 10 && rowsMaxHeightPx !== null;
 
+    // Keep the headings of the fixed-width columns right of Notes (time, AI
+    // Summary, AI Script / Form, Actions) over their own columns. The header
+    // spans the full card width, but the rows list is narrower by its own
+    // border (1px) and, once capped, by its vertical scrollbar + `pr-1`, so
+    // those columns sit left of their headings by that amount. Each heading is
+    // nudged by the measured offset to the first row's matching cell (a
+    // transform, so no layout, width or gap changes); it is exact for any
+    // scrollbar width (classic, overlay, none). Phone .. Notes start at the
+    // left edge, where the offset is only the 1px border, so they are left as is.
+    const headerRef = useRef<HTMLDivElement | null>(null);
+    useEffect(() => {
+        if (!open) return;
+        const align = () => {
+            const header = headerRef.current;
+            const row = scrollRef.current?.querySelector<HTMLElement>('[data-call-grid="row"]');
+            if (!header) return;
+            for (const index of FIXED_TRACK_HEADINGS) {
+                const head = header.children[index] as HTMLElement | undefined;
+                if (head) head.style.transform = "";
+            }
+            if (!row) return;
+            for (const index of FIXED_TRACK_HEADINGS) {
+                const head = header.children[index] as HTMLElement | undefined;
+                const cell = row.children[index] as HTMLElement | undefined;
+                if (!head || !cell) continue;
+                const h = head.getBoundingClientRect();
+                const c = cell.getBoundingClientRect();
+                if (h.width === 0 || c.width === 0) continue; // grid hidden below 768px
+                const dx = c.left + c.width / 2 - (h.left + h.width / 2);
+                if (Math.abs(dx) >= 0.25) head.style.transform = `translateX(${dx.toFixed(2)}px)`;
+            }
+        };
+        align();
+        const observer = new ResizeObserver(align);
+        if (scrollRef.current) observer.observe(scrollRef.current);
+        window.addEventListener("resize", align, { passive: true });
+        return () => {
+            observer.disconnect();
+            window.removeEventListener("resize", align);
+        };
+    }, [open, callsFingerprint, rowsScrollCapped]);
+
     return (
         <motion.section
             initial={{ opacity: 0, y: 12 }}
@@ -740,7 +840,7 @@ function CampaignSection({
                             sticky` to stay visible — it only ever scrolls horizontally,
                             together with the rows, via this shared ancestor. */}
                         <div className="mt-4 overflow-x-auto">
-                            <div data-call-grid="header" className={`hidden ${DESKTOP_CALL_MIN_WIDTH} md:grid ${DESKTOP_CALL_GRID} gap-2 px-3 pb-2 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground whitespace-nowrap`}>
+                            <div ref={headerRef} data-call-grid="header" className={`hidden ${DESKTOP_CALL_MIN_WIDTH} md:grid ${DESKTOP_CALL_GRID} gap-2 px-3 pb-2 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground whitespace-nowrap`}>
                                 <div>Phone <span className="text-[10px] font-medium normal-case tracking-normal">/ Duration</span></div>
                                 <div>Lead type</div>
                                 <div>Outcome</div>
