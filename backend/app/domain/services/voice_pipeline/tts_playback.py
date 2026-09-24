@@ -600,23 +600,23 @@ class TtsPlayback:
             # session._spoken_sentences (turn_streamer.py:952) — the same
             # signal a real barge-in sets.
             #
-            # SCOPE / KNOWN GAP (review of 91b61694, 2026-09-24 — NOT fixed,
-            # needs a file outside this fix's fence): turn_streamer.py only
-            # substitutes _spoken_sentences into the PERSISTED full_text when
-            # `_barged()` is ALSO true (turn_streamer.py:1147). A
-            # TtsDeliveryError with no real barge-in event leaves `_barged()`
-            # False, so full_text still comes from the LLM's raw
-            # all_tokens/raw_response_text — the undelivered sentence is
-            # STILL what turn_runner.py commits via accumulate_turn on
-            # 6aaeb4dd's exact call path. This except clause only stops the
-            # turn from continuing to speak past a dead/erroring channel; it
-            # does NOT by itself fix what gets persisted. See
-            # tests/unit/test_turn_streamer_tts_delivery_error_transcript_gap.py
-            # for the reproduction and the exact turn_streamer.py change
-            # still needed. The recovery attempt below is unchanged from the
+            # FIXED (round 2, review of 91b61694, 2026-09-24 — was a KNOWN
+            # GAP): interrupted=True alone only kept this sentence out of
+            # _spoken_sentences; turn_streamer.py's persisted full_text used
+            # to fall back to the LLM's raw all_tokens/raw_response_text
+            # whenever `_barged()` was False (turn_streamer.py:1180 only
+            # checked for a real caller barge-in) — a TtsDeliveryError with
+            # no barge-in event left the undelivered sentence as exactly what
+            # turn_runner.py committed via accumulate_turn on 6aaeb4dd's call
+            # path. Setting this session flag lets turn_streamer.py tell a
+            # delivery failure apart from ordinary silence and substitute
+            # _spoken_sentences into full_text on this path too. See
+            # tests/unit/test_turn_streamer_tts_delivery_error_transcript_gap.py.
+            # The recovery attempt below is unchanged from the
             # generic-exception path — not every TtsDeliveryError means the
             # channel is dead (a couple of the raise sites are frame/ack
             # validation, not "no session").
+            session._tts_delivery_failed = True
             interrupted = True
             silent_reason = "tts_delivery_error"
             logger.error(f"TTS delivery failed for call {call_id}: {e}")

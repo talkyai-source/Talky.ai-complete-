@@ -1,35 +1,32 @@
-"""Reproduction of the STILL-OPEN part of hangup-vs-inflight-reply, 12b
-(review of 91b61694, 2026-09-24).
+"""Regression test for the now-CLOSED part of hangup-vs-inflight-reply, 12b
+(round 2, review of 91b61694, 2026-09-24).
 
 PRODUCTION EVIDENCE
 --------------------
 Call 6aaeb4dd, turn 17: TTS delivery failed partway through the agent's
 reply ("Would you like us to call you tomorrow with the appointment
-details?") — 13:10:55.31 "no gateway session", TtsDeliveryError. Despite
-tts_playback.py's TtsDeliveryError handling (interrupted=True, this fix's
-fence), the FULL sentence — not just the ~0.65s that actually played — is
-still what gets persisted as ``assistant_response`` via
-``turn_runner.py:663``'s ``accumulate_turn`` call.
+details?") — 13:10:55.31 "no gateway session", TtsDeliveryError. Round 1
+fixed tts_playback.py's own bookkeeping (interrupted=True, kept out of
+_spoken_sentences), but the FULL sentence — not just the ~0.65s that
+actually played — still reached turn_streamer.py's persisted ``full_text``
+and, via ``turn_runner.py:663``'s ``accumulate_turn`` call, the stored
+transcript and conversation history.
 
 ROOT CAUSE (confirmed by this test running the REAL turn_streamer.py, not a
-mock of it): ``turn_streamer.py:1147`` only substitutes the delivered
-``session._spoken_sentences`` into the persisted ``full_text`` when
-``tts_was_interrupted and _barged()`` are BOTH true. A TtsDeliveryError sets
+mock of it): the persisted-``full_text`` substitution only fired when
+``tts_was_interrupted and _barged()`` were BOTH true. A TtsDeliveryError sets
 ``tts_was_interrupted=True`` but there was no real barge-in event, so
-``_barged()`` stays False and ``full_text`` falls through to
+``_barged()`` stayed False and ``full_text`` fell through to
 ``guardrails.clean_response(raw_response_text, ...)`` — the LLM's full raw
 output, unfiltered by what was actually delivered.
 
-FIX NEEDED (outside this fence — turn_streamer.py is not one of the 4 fenced
-files): apply the same substitution when `tts_was_interrupted` is True
-because of a delivery failure, not only a caller barge-in. One shape: read a
-flag tts_playback.py sets on the session (e.g. a delivery-failure marker)
-alongside `interrupted=True`, and OR it into the turn_streamer.py:1147
-condition, or have turn_runner.py tag the row `metadata={"delivered": False}`
-instead of dropping the text. Either change is out of fence; this test
-exists so whoever makes it does not need to rediscover the mechanism, and so
-this file starts FAILING (not silently) the day someone "fixes" 12b without
-also fixing this.
+FIX (this round): tts_playback.py's TtsDeliveryError clause now also sets
+``session._tts_delivery_failed = True`` (reset to False each turn alongside
+``session._spoken_sentences = []``). turn_streamer.py's full_text block adds
+an ``elif tts_was_interrupted and session._tts_delivery_failed`` branch that
+substitutes in only ``_spoken_sentences`` (empty string if none were
+delivered) — turn_runner.py already treats an empty reply as nothing to
+commit.
 """
 from __future__ import annotations
 
@@ -90,6 +87,26 @@ class _GatewayFailsOnSecondChunk:
 
     async def send_audio(self, call_id, raw):
         if self.sent:
+            raise TtsDeliveryError(f"no gateway session for call_id={call_id[:12]}")
+        self.sent.append(raw)
+
+    async def clear_output_buffer(self, call_id):
+        return {"ok": True}
+
+    async def flush_tts_buffer(self, call_id):
+        return None
+
+
+class _GatewayFailsOnThirdChunk:
+    """The first sentence's two chunks succeed; the second sentence's first
+    chunk fails. Proves the fix returns only what was ACTUALLY delivered,
+    not that any delivery failure collapses full_text to empty."""
+
+    def __init__(self):
+        self.sent: list[bytes] = []
+
+    async def send_audio(self, call_id, raw):
+        if len(self.sent) >= 2:
             raise TtsDeliveryError(f"no gateway session for call_id={call_id[:12]}")
         self.sent.append(raw)
 
@@ -169,16 +186,19 @@ def _make_session() -> CallSession:
 REPLY = "Would you like us to call you tomorrow with the appointment details."
 
 
-async def test_undelivered_text_still_reaches_full_text_despite_interrupted_true(monkeypatch):
-    """DOCUMENTS THE GAP (does not assert the fix — the fix is out of fence).
+async def test_undelivered_text_is_excluded_from_full_text_on_delivery_failure(monkeypatch):
+    """The fix: a TtsDeliveryError with no real caller barge-in must not
+    leave the undelivered line in the persisted ``full_text`` (what
+    turn_runner.py:663 passes to accumulate_turn).
 
-    Even though tts_playback.py correctly reports interrupted=True for this
-    TtsDeliveryError (proven separately in
-    test_tts_delivery_error_stops_turn.py), turn_streamer.py's ``full_text``
-    still equals the LLM's full raw output because ``_barged()`` is False —
-    there was no real caller barge-in, just a delivery failure. This is
-    exactly what turn_runner.py then commits via accumulate_turn on
-    6aaeb4dd, turn 17.
+    tts_playback.py's TtsDeliveryError clause reports interrupted=True AND
+    sets session._tts_delivery_failed (proven separately in
+    test_tts_delivery_error_stops_turn.py); turn_streamer.py's new elif
+    branch substitutes in only what actually reached _spoken_sentences.
+    Nothing was delivered here (the only sentence failed mid-send), so
+    full_text must come back empty — turn_runner.py's
+    ``if response_text and response_text.strip():`` gate then commits
+    nothing, closing 6aaeb4dd turn 17's transcript-leak gap.
     """
     monkeypatch.setenv("TELEPHONY_FILLER_DELAY_MS", "0")
     session = _make_session()
@@ -191,24 +211,47 @@ async def test_undelivered_text_still_reaches_full_text_despite_interrupted_true
     # The delivery failure IS visible in the delivered-sentences bookkeeping...
     assert session._spoken_sentences == [], (
         "the undelivered sentence must not appear in _spoken_sentences — "
-        "this part of 12b IS fixed (tts_playback.py's TtsDeliveryError "
-        "handling)"
+        "this part of 12b was already fixed in round 1 (tts_playback.py's "
+        "TtsDeliveryError handling)"
     )
     assert pipeline.silent_turns == [], (
         "some audio was sent before the failure, so this must not be "
         "recorded as a fully silent turn"
     )
 
-    # ...but the text that gets PERSISTED (this is what turn_runner.py:663
-    # passes to accumulate_turn) still contains the full undelivered line.
-    # THIS IS THE STILL-OPEN GAP. If this assertion ever fails, turn_streamer
-    # .py has started honouring a delivery-failure signal the way it already
-    # honours a real barge-in — update this test (and the tts_playback.py /
-    # test_tts_delivery_error_stops_turn.py comments it's cross-referenced
-    # from) to match, do not just delete the assertion.
-    assert REPLY.rstrip(".") in full_text, (
-        f"expected the known gap (undelivered text still reaches full_text) "
-        f"to still be present; got full_text={full_text!r}. If turn_streamer"
-        f".py now excludes undelivered text here, 12b's transcript gap is "
-        f"actually closed — update the comments that say otherwise."
+    # ...and now full_text must be trimmed to match: nothing was actually
+    # delivered, so there is nothing for turn_runner.py to persist.
+    assert full_text == "", (
+        f"expected the undelivered line to be excluded from full_text "
+        f"(nothing was actually spoken); got full_text={full_text!r}"
     )
+    assert REPLY.rstrip(".") not in full_text
+
+
+TWO_SENTENCE_REPLY = (
+    "Great, thanks for calling. Would you like us to call you tomorrow "
+    "with the appointment details."
+)
+
+
+async def test_partial_delivery_keeps_only_what_was_actually_spoken(monkeypatch):
+    """Multi-sentence reply where the FIRST sentence played fully and only
+    the SECOND failed mid-delivery: the fix must keep the delivered
+    sentence in full_text, not collapse the whole turn to "" — the brief
+    says "return only what was actually delivered", not "always empty on
+    any delivery failure"."""
+    monkeypatch.setenv("TELEPHONY_FILLER_DELAY_MS", "0")
+    session = _make_session()
+    gateway = _GatewayFailsOnThirdChunk()
+    pipeline = _FakePipeline(
+        TWO_SENTENCE_REPLY, [b"\x01\x02" * 80, b"\x03\x04" * 80], gateway,
+    )
+    streamer = TurnStreamer(pipeline)
+
+    full_text, _llm_ms, _tts_ms = await streamer.stream(session, websocket=None)
+
+    # clean_response strips the "Great," filler opener — the point of this
+    # test is that the DELIVERED sentence survives at all, not its wording.
+    assert session._spoken_sentences == ["Thanks for calling."]
+    assert full_text == "Thanks for calling."
+    assert "tomorrow" not in full_text

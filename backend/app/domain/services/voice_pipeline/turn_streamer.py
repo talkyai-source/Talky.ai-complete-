@@ -660,6 +660,14 @@ class TurnStreamer:
         # it already said things it never spoke → garbled "absurd" replies after
         # a few interruptions.
         session._spoken_sentences = []
+        # 12b (round 2, review of 91b61694, 2026-09-24): reset each turn.
+        # tts_playback.py's TtsDeliveryError clause sets this when a mid-turn
+        # delivery failure (e.g. "no gateway session" after the caller hung
+        # up -- call 6aaeb4dd, 13:10:55.31) ends the turn early with no real
+        # barge-in event. It tells the full_text substitution below that
+        # `tts_was_interrupted` came from a dead channel, not the caller
+        # going silent, so it must not carry over from a previous turn.
+        session._tts_delivery_failed = False
         # P1: this turn's epoch. A barge-in event that targeted an OLDER turn
         # (stale signal from a previous interruption) must not kill this fresh
         # reply. _barged() below ignores such stale events.
@@ -1180,5 +1188,18 @@ class TurnStreamer:
         if tts_was_interrupted and _barged():
             spoken = " ".join(session._spoken_sentences).strip()
             full_text = (spoken + " [interrupted by caller]") if spoken else "[interrupted by caller]"
+        elif tts_was_interrupted and getattr(session, "_tts_delivery_failed", False):
+            # 12b (round 2, review of 91b61694, 2026-09-24): a TtsDeliveryError
+            # also returns tts_was_interrupted=True, but with no real
+            # caller barge-in `_barged()` stayed False above, so full_text
+            # fell through to the LLM's raw output -- the undelivered
+            # sentence ("Would you like us to call you tomorrow with the
+            # appointment details?", call 6aaeb4dd turn 17) was committed to
+            # history AND the persisted transcript as if it had been spoken.
+            # Only what actually reached _spoken_sentences was delivered; an
+            # empty string here means nothing was, and turn_runner.py's
+            # `if response_text and response_text.strip():` gate already
+            # treats an empty reply as nothing to commit.
+            full_text = " ".join(session._spoken_sentences).strip()
 
         return full_text, llm_latency_ms, tts_latency_ms

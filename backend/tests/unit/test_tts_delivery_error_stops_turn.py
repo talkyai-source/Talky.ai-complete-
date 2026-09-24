@@ -18,17 +18,13 @@ SCOPE (renamed from test_tts_delivery_error_transcript.py on review,
 (not a mock of the unit under test) with a fake media gateway that raises
 ``TtsDeliveryError`` mid-stream, and asserts on the ``interrupted`` boolean
 and ``_spoken_sentences``/silent-turn bookkeeping this method itself owns.
-It does NOT prove the persisted transcript is correct — the original file
-name and this module's earlier wording implied it did, which was wrong.
-``interrupted=True`` alone stops the rest of the turn and keeps the sentence
-out of ``_spoken_sentences``, but turn_streamer.py:1147 only substitutes
-``_spoken_sentences`` into the text that gets persisted when a real
-barge-in (`_barged()`) is ALSO true — a TtsDeliveryError with no barge-in
-does not qualify, so 6aaeb4dd's undelivered line is still what
-turn_runner.py commits via accumulate_turn. See
-test_turn_streamer_tts_delivery_error_transcript_gap.py for that
-reproduction (real code path, out-of-fence fix needed) and
-tts_playback.py:590-611 for the corrected comment.
+It does NOT by itself prove the persisted transcript is correct — that is
+turn_streamer.py's job. Round 2 (2026-09-24) closed that remaining gap:
+``interrupted=True`` now comes with ``session._tts_delivery_failed = True``
+(set here), and turn_streamer.py's full_text substitution fires on that flag
+too, not only on a real barge-in (`_barged()`). See
+test_turn_streamer_tts_delivery_error_transcript_gap.py for that end-to-end
+proof and tts_playback.py:590-616 for the corrected comment.
 """
 from __future__ import annotations
 
@@ -116,9 +112,11 @@ async def test_tts_delivery_error_mid_stream_is_not_reported_as_delivered():
     """A mid-sentence TtsDeliveryError must return interrupted=True so the
     caller's `if not tts_was_interrupted: _spoken_sentences.append(...)` gate
     excludes this sentence from `_spoken_sentences` and stops the rest of the
-    turn — the same as a real barge-in already does. This does NOT by itself
-    keep the sentence out of the PERSISTED transcript (see the module
-    docstring's known-gap note; that needs turn_streamer.py, out of fence)."""
+    turn — the same as a real barge-in already does. It also sets
+    `session._tts_delivery_failed`, which turn_streamer.py now reads to keep
+    this sentence out of the PERSISTED transcript too (see
+    test_turn_streamer_tts_delivery_error_transcript_gap.py for that
+    end-to-end proof)."""
     gateway = _GatewayFailsOnSecondChunk()
     provider = _Provider([b"\x01\x02" * 80, b"\x03\x04" * 80])
     pipe = _Pipeline(provider, gateway)
