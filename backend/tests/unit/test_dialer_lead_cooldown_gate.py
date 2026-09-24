@@ -76,6 +76,13 @@ def _cooldown_worker() -> DialerWorker:
     # process_job's branching decision is what these tests verify.
     worker._lead_has_live_or_answered_call = AsyncMock(return_value=False)
     worker._persist_job_attempt_number = AsyncMock()
+    # Round-2 follow-up (review non-blocking #1 on e8e93870/620d9ac5): the
+    # genuine-cooldown branch now times its retry off the lead's actual
+    # remaining cooldown instead of a fixed 300s. Mocked at the same DB
+    # boundary as the other `_get_*`/`_lead_*` helpers above; None (unknown)
+    # is the default so tests that don't care about the exact delay still
+    # exercise the real fallback-to-full-window path.
+    worker._lead_cooldown_remaining_seconds = AsyncMock(return_value=None)
     return worker
 
 
@@ -112,3 +119,50 @@ async def test_genuinely_stale_cooldown_clears_and_persists_attempt_number():
     worker.queue_service.enqueue_job.assert_awaited_once()
     assert job.attempt_number == 2
     worker._persist_job_attempt_number.assert_awaited_once_with(job)
+
+
+@pytest.mark.asyncio
+async def test_genuine_cooldown_retries_once_when_it_actually_clears():
+    """Round-2 follow-up (review non-blocking #1): the old fixed 300s retry
+    on a genuine cooldown re-woke this branch every 5 minutes for the whole
+    window -- about 24 cycles on a 2h cooldown -- bumping
+    `job.attempt_number` via `queue_service.schedule_retry` each cycle
+    (Redis only, never persisted here). `call_service._effective_attempt_
+    number` takes max(db, live), so `decide_disposition` then saw attempt
+    ~25 and treated the first post-cooldown no-answer as terminal. Timing
+    the retry off the real remaining cooldown makes this one retry, not 24.
+    """
+    worker = _cooldown_worker()
+    worker._lead_has_live_or_answered_call = AsyncMock(return_value=True)
+    # 100 of 120 minutes already elapsed on the call backing the cooldown.
+    worker._lead_cooldown_remaining_seconds = AsyncMock(return_value=1200.0)
+
+    await worker.process_job(_job())
+
+    worker.queue_service.schedule_retry.assert_awaited_once()
+    assert worker.queue_service.schedule_retry.call_args.kwargs["delay_seconds"] == 1200
+
+
+@pytest.mark.asyncio
+async def test_genuine_cooldown_retry_delay_has_a_floor_and_a_fallback():
+    """A near-expired cooldown still waits the sane floor, not an immediate
+    re-poll; an unknown remaining time (the qualifying call fell outside
+    the window between the two reads) falls back to the full configured
+    window rather than the old fixed 300s.
+    """
+    worker = _cooldown_worker()
+    worker._lead_has_live_or_answered_call = AsyncMock(return_value=True)
+    worker._lead_cooldown_remaining_seconds = AsyncMock(return_value=5.0)
+
+    await worker.process_job(_job())
+
+    assert worker.queue_service.schedule_retry.call_args.kwargs["delay_seconds"] == 300
+
+    worker2 = _cooldown_worker()
+    worker2._lead_has_live_or_answered_call = AsyncMock(return_value=True)
+    worker2._lead_cooldown_remaining_seconds = AsyncMock(return_value=None)
+
+    await worker2.process_job(_job())
+
+    # CallingRules(min_hours_between_calls=2) -> fallback is the full 2h window.
+    assert worker2.queue_service.schedule_retry.call_args.kwargs["delay_seconds"] == 7200

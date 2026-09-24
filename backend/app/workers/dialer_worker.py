@@ -543,7 +543,24 @@ class DialerWorker:
                     # Genuine cooldown: a real call for this lead was answered, or is
                     # still live, inside the window. Respect it like any other
                     # blocked reason instead of clearing it out from under a live call.
-                    delay = 300
+                    #
+                    # Review non-blocking finding on this same 2026-09-23 case: a
+                    # fixed delay=300 here re-woke this branch every 5 minutes for
+                    # the whole cooldown (~24 cycles on a 2h window), and each
+                    # cycle bumped job.attempt_number via queue_service.
+                    # schedule_retry -- Redis only, never persisted -- so the lead
+                    # was finally redialled at attempt_number ~25.
+                    # call_service._effective_attempt_number takes max(db, live),
+                    # so decide_disposition then treated any no-answer right after
+                    # the cooldown as terminal. Schedule ONE retry for when the
+                    # cooldown actually expires instead of polling every 5 minutes.
+                    remaining = await self._lead_cooldown_remaining_seconds(
+                        job, cooldown_hours
+                    )
+                    fallback_delay = cooldown_hours * 3600.0
+                    delay = int(
+                        max(300.0, remaining if remaining is not None else fallback_delay)
+                    )
                 elif "daily_lead_cap" in reason:
                     # The per-day ceiling resets at UTC midnight. Reschedule
                     # the lead for just after the day rolls over; the
@@ -2542,6 +2559,48 @@ class DialerWorker:
                 list(TERMINAL_CALL_STATUSES),
             )
         return bool(row)
+
+    async def _lead_cooldown_remaining_seconds(
+        self, job: DialerJob, window_hours: float
+    ) -> Optional[float]:
+        """Seconds left before the lead's cooldown actually clears.
+
+        Anchored on the newest call matching the SAME predicate
+        `_lead_has_live_or_answered_call` uses (answered, or still live,
+        inside the window) rather than a fixed guess. Review non-blocking
+        finding on e8e93870/620d9ac5, 2026-09-23: the genuine-cooldown
+        branch retried every 300s via `queue_service.schedule_retry`, which
+        bumps `job.attempt_number` on every cycle (Redis only, never
+        persisted here) -- a 2h cooldown meant ~24 cycles, so the lead was
+        finally redialled at attempt_number ~25 and
+        `call_service._effective_attempt_number`'s max(db, live) made the
+        first post-cooldown no-answer look terminal. Returns None (caller
+        falls back to the full window) when no such call is found, e.g. the
+        qualifying call aged out of the window between the two DB reads.
+        """
+        from app.domain.services.call_status import TERMINAL_CALL_STATUSES
+
+        async with self._acquire_db() as conn:
+            anchor = await conn.fetchval(
+                """
+                SELECT MAX(created_at) FROM calls
+                 WHERE tenant_id = $1::uuid
+                   AND lead_id = $2::uuid
+                   AND created_at > now() - ($3::float8 * interval '1 hour')
+                   AND (
+                         answered_at IS NOT NULL
+                      OR NOT (status = ANY($4::text[]))
+                       )
+                """,
+                str(job.tenant_id),
+                str(job.lead_id),
+                float(window_hours),
+                list(TERMINAL_CALL_STATUSES),
+            )
+        if anchor is None:
+            return None
+        elapsed = (datetime.now(timezone.utc) - anchor).total_seconds()
+        return (window_hours * 3600.0) - elapsed
 
     async def _persist_job_attempt_number(self, job: DialerJob) -> None:
         """Persist an in-memory attempt_number bump to dialer_jobs.

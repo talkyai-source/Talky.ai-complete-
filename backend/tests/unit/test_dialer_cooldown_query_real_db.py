@@ -214,6 +214,58 @@ async def test_answered_call_outside_the_window_does_not_block_the_clear(pool):
     assert await _worker(pool)._lead_has_live_or_answered_call(job, 2) is False
 
 
+async def test_cooldown_remaining_seconds_anchors_on_the_qualifying_call(pool):
+    """Round-2 follow-up (review non-blocking #1 on e8e93870/620d9ac5): the
+    genuine-cooldown retry used a fixed 300s delay via
+    `queue_service.schedule_retry`, which bumps `job.attempt_number` every
+    cycle (Redis only) -- ~24 cycles on a 2h cooldown, so the lead was
+    finally redialled at attempt ~25 and `call_service.
+    _effective_attempt_number`'s max(db, live) made the next no-answer
+    terminal. `_lead_cooldown_remaining_seconds` must return the real time
+    left, anchored on the SAME qualifying call `_lead_has_live_or_answered_
+    call` found, not a guess."""
+    tenant_id, campaign_id, lead_id = _ids()
+    await _insert_call(
+        pool,
+        tenant_id=tenant_id,
+        campaign_id=campaign_id,
+        lead_id=lead_id,
+        status="ended",
+        answered_at=datetime.now(timezone.utc) - timedelta(minutes=100),
+        created_at=datetime.now(timezone.utc) - timedelta(minutes=100),
+    )
+    job = DialerJob(
+        job_id=str(uuid.uuid4()),
+        campaign_id=campaign_id,
+        lead_id=lead_id,
+        tenant_id=tenant_id,
+        phone_number=PHONE,
+    )
+
+    remaining = await _worker(pool)._lead_cooldown_remaining_seconds(job, 2)
+
+    # 2h window minus ~100 elapsed minutes -> ~20 minutes (1200s) left.
+    # A wide tolerance absorbs the real wall-clock time this test takes.
+    assert remaining is not None
+    assert 1100 < remaining < 1300
+
+
+async def test_cooldown_remaining_seconds_is_none_without_a_qualifying_call(pool):
+    """No answered/live call inside the window -> nothing to anchor on, so
+    the caller falls back to the full configured window rather than a
+    guessed number."""
+    tenant_id, campaign_id, lead_id = _ids()
+    job = DialerJob(
+        job_id=str(uuid.uuid4()),
+        campaign_id=campaign_id,
+        lead_id=lead_id,
+        tenant_id=tenant_id,
+        phone_number=PHONE,
+    )
+
+    assert await _worker(pool)._lead_cooldown_remaining_seconds(job, 2) is None
+
+
 async def test_persist_job_attempt_number_updates_the_real_row(pool):
     tenant_id, campaign_id, lead_id = _ids()
     job = DialerJob(
