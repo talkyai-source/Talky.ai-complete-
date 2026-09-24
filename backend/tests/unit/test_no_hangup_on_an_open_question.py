@@ -154,3 +154,25 @@ def test_turn_id_is_read_before_it_is_incremented():
     assert src.index('getattr(session, "turn_id", None) == 0') < src.index(
         "session.increment_turn()"
     )
+
+
+@pytest.mark.parametrize(
+    "agent_line",
+    [
+        # Live call d1121622 (2026-09-24 11:12:13): hung up on this.
+        "Got it. Any recent changes — like new locations, more online orders, "
+        "or a different EPOS?...I’m sorry — could you repeat that?...",
+        "Is now a good time?…",
+        "Could you repeat that? ...",
+    ],
+)
+def test_a_question_followed_by_an_ellipsis_is_still_open(agent_line):
+    from app.domain.services.end_session_action import agent_left_a_question_open
+
+    assert agent_left_a_question_open(agent_line)
+
+
+def test_a_statement_ending_in_an_ellipsis_is_not_a_question():
+    from app.domain.services.end_session_action import agent_left_a_question_open
+
+    assert not agent_left_a_question_open("Thanks for your time, take care...")

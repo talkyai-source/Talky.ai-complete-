@@ -58,7 +58,11 @@ def agent_left_a_question_open(agent_text: Optional[str]) -> bool:
     sentence's punctuation rather than at anything the caller said.
     """
     text = _SENTINEL_RE.sub("", str(agent_text or "")).strip()
-    text = text.rstrip(" \"'”’)]")
+    # Trailing ellipses too: live call d1121622 (2026-09-24 11:12:13) ended
+    # its turn "...could you repeat that?..." with a hangup request, this
+    # check read the final "." as a statement, and the agent hung up on the
+    # question it had just asked.
+    text = text.rstrip(" \"'”’)].…")
     return text.endswith("?")
 
 
