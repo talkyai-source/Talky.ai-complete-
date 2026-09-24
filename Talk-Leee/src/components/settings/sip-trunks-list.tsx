@@ -506,63 +506,67 @@ export function SipTrunksList() {
                         {/*
                          * Fixed column widths (colgroup) except Endpoint, which is left
                          * unset so table-layout:fixed hands it 100% of any width beyond
-                         * the min-width below (the card fills edge-to-edge on wide
-                         * screens instead of leaving a gap after Actions). Every column
-                         * uses the same px-2 horizontal cell padding, header and body.
-                         * The six fixed widths are each sized to their column's real
-                         * longest content at that padding, verified against the rendered
-                         * page (not just content-width estimates): Trunk holds an 18-char
-                         * hyphenated name like "blaze-pool-150004" on one line,
-                         * Direction/Auth/Active fit their real longest values
-                         * ("outbound"/"configured"/"Inactive") on one line, Actions is
-                         * wide enough for all 4 controls on one line, and Live status (no
-                         * pill, bold plain text — see TestStatusBadge) is sized so the
-                         * common "Registered · Asterisk reports a healthy registration"
-                         * text wraps to at most 2 lines and the longest real failure
-                         * detail (missing_config's fixed reason string) wraps to at most
-                         * 3, measured directly in a browser rather than estimated. Detail
-                         * text ultimately comes from an Asterisk log line and has no hard
-                         * length cap, so wrapping — not a single-line guarantee — is the
-                         * contract here. min-width is the fixed-column sum plus Endpoint's
-                         * own floor (fits a domain the length of
-                         * "sip3.blazedigital.com" on one line); below it the wrapper above
-                         * scrolls horizontally instead of shrinking these. The settings
-                         * page wraps this whole tab section in its own outer Card, which
-                         * costs ~50px this table doesn't control, so the true available
-                         * width is 922px (not the card's own max-w-5xl) at desktop
-                         * breakpoints from 1280px up with the sidebar collapsed, and at
-                         * every breakpoint >=1366px with the sidebar expanded too. Widening
-                         * Live status for readability pushed min-width past that 922px
-                         * ceiling, so the table now also scrolls at 1280px with the
-                         * sidebar expanded (and at any width below ~1070px) — accepted
-                         * tradeoff; the wrapper's horizontal scroll still reaches every
-                         * column.
+                         * the min-width below. Every header and body cell uses the same
+                         * px-2 horizontal padding, so the gap between every pair of
+                         * columns is the same 16px; each width below is the column's
+                         * longest real content, measured in a browser, plus that 16px, so
+                         * the visible gaps stay close to even too. Trunk 137 (an 18-char
+                         * hyphenated name like "blaze-pool-150004" wraps at the hyphens),
+                         * Direction 80 ("outbound" is 64px), Auth 112 (an 11-digit number
+                         * is 83px, so up to ~12 digits stay on one line), Live status 288
+                         * (plain bold text that wraps; the detail comes from an Asterisk
+                         * log line with no length cap), Active 77 (the "Inactive" pill is
+                         * 60px), Endpoint 191 at the min-width (fits
+                         * "UDP://sip3.blazedigital.com:5060", 174px, on one line).
+                         * Text cells use wrap-anywhere (overflow-wrap:anywhere), so a value
+                         * longer than its column (a 15-digit Auth, a hyphenless 60-char
+                         * name) wraps inside its own column instead of spilling into the
+                         * next one.
+                         * Actions is four columns, one per control, under a spanning
+                         * "Actions" heading: Test 92, Edit 56, Status (On/Off) 88,
+                         * Delete 56 — each the button's width plus the 16px padding, with
+                         * the button centred in its cell under its own sub-heading.
+                         * min-width is the fixed-column sum (986) plus Endpoint's 191 =
+                         * 1177px; below it the wrapper above scrolls horizontally instead
+                         * of shrinking these. The settings page wraps this tab in its own
+                         * outer Card, so the available width is at most 922px and the
+                         * table scrolls at every desktop width as well as on phones and
+                         * tablets; the wrapper's horizontal scroll reaches every column.
                          */}
-                        <table className="table-fixed w-full min-w-[1070px] text-sm">
+                        <table className="table-fixed w-full min-w-[1177px] text-sm">
                             <colgroup>
                                 <col style={{ width: 137 }} />
                                 <col />
-                                <col style={{ width: 69 }} />
-                                <col style={{ width: 81 }} />
+                                <col style={{ width: 80 }} />
+                                <col style={{ width: 112 }} />
                                 <col style={{ width: 288 }} />
-                                <col style={{ width: 65 }} />
-                                <col style={{ width: 247 }} />
+                                <col style={{ width: 77 }} />
+                                <col style={{ width: 92 }} />
+                                <col style={{ width: 56 }} />
+                                <col style={{ width: 88 }} />
+                                <col style={{ width: 56 }} />
                             </colgroup>
                             <thead>
-                                <tr className="border-b border-border bg-muted/30 text-left text-xs font-semibold text-muted-foreground">
-                                    <th className="px-2 py-3">Trunk</th>
-                                    <th className="px-2 py-3">Endpoint</th>
-                                    <th className="px-2 py-3">Direction</th>
-                                    <th className="px-2 py-3">Auth</th>
-                                    <th className="px-2 py-3">Live status</th>
-                                    <th className="px-2 py-3">Active</th>
-                                    <th className="px-2 py-3 text-right">Actions</th>
+                                <tr className="bg-muted/30 text-left text-xs font-semibold text-muted-foreground">
+                                    <th rowSpan={2} className="border-b border-border px-2 py-3">Trunk</th>
+                                    <th rowSpan={2} className="border-b border-border px-2 py-3">Endpoint</th>
+                                    <th rowSpan={2} className="border-b border-border px-2 py-3">Direction</th>
+                                    <th rowSpan={2} className="border-b border-border px-2 py-3">Auth</th>
+                                    <th rowSpan={2} className="border-b border-border px-2 py-3">Live status</th>
+                                    <th rowSpan={2} className="border-b border-border px-2 py-3">Active</th>
+                                    <th colSpan={4} className="px-2 pb-1 pt-3 text-center">Actions</th>
+                                </tr>
+                                <tr className="border-b border-border bg-muted/30 text-center text-xs font-semibold text-muted-foreground">
+                                    <th className="px-2 pb-3 pt-1">Test</th>
+                                    <th className="px-2 pb-3 pt-1">Edit</th>
+                                    <th className="px-2 pb-3 pt-1">Status</th>
+                                    <th className="px-2 pb-3 pt-1">Delete</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 {trunks.map((t) => (
                                     <tr key={t.id} className="border-b border-border last:border-b-0">
-                                        <td className="px-2 py-3 font-semibold text-foreground">
+                                        <td className="px-2 py-4 font-semibold text-foreground wrap-anywhere">
                                             {t.trunk_name}
                                             {typeof t.metadata?.caller_id === "string" && t.metadata.caller_id ? (
                                                 <div className="text-[10px] font-normal text-muted-foreground">
@@ -570,17 +574,17 @@ export function SipTrunksList() {
                                                 </div>
                                             ) : null}
                                         </td>
-                                        <td className="px-2 py-3 text-muted-foreground font-mono text-xs">
+                                        <td className="px-2 py-4 text-muted-foreground font-mono text-xs wrap-anywhere">
                                             {t.transport.toUpperCase()}://{t.sip_domain}:{t.port}
                                         </td>
-                                        <td className="px-2 py-3 capitalize text-muted-foreground">{t.direction}</td>
-                                        <td className="px-2 py-3 text-muted-foreground">
+                                        <td className="px-2 py-4 capitalize text-muted-foreground wrap-anywhere">{t.direction}</td>
+                                        <td className="px-2 py-4 text-muted-foreground wrap-anywhere">
                                             {t.auth_configured ? t.auth_username || "configured" : "—"}
                                         </td>
-                                        <td className="px-2 py-3">
+                                        <td className="px-2 py-4 wrap-anywhere">
                                             <TestStatusBadge trunk={t} />
                                         </td>
-                                        <td className="px-2 py-3">
+                                        <td className="px-2 py-4">
                                             <span
                                                 className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-semibold ${t.is_active
                                                     ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
@@ -590,54 +594,68 @@ export function SipTrunksList() {
                                                 {t.is_active ? "Active" : "Inactive"}
                                             </span>
                                         </td>
-                                        <td className="px-2 py-3 text-right space-x-1 whitespace-nowrap">
-                                            <Button
-                                                size="sm"
-                                                variant="outline"
-                                                onClick={() => handleTest(t)}
-                                                disabled={testingId === t.id}
-                                                title="Probe SIP host for reachability"
-                                            >
-                                                {testingId === t.id ? (
-                                                    <Loader2 className="h-3 w-3 animate-spin" aria-hidden />
-                                                ) : (
-                                                    <><Activity className="mr-1 h-3 w-3" aria-hidden /> Test</>
-                                                )}
-                                            </Button>
-                                            <Button
-                                                size="sm"
-                                                variant="ghost"
-                                                onClick={() => openEdit(t)}
-                                                title="Edit trunk"
-                                            >
-                                                <Pencil className="h-3 w-3" aria-hidden />
-                                            </Button>
-                                            <Button
-                                                size="sm"
-                                                variant={t.is_active ? "outline" : "default"}
-                                                onClick={() => handleToggle(t)}
-                                                title={
-                                                    t.is_active
-                                                        ? "Deactivate"
-                                                        : t.last_test_result?.ok
-                                                            ? "Activate"
-                                                            : "Run a successful Test first"
-                                                }
-                                            >
-                                                {t.is_active ? (
-                                                    <><PowerOff className="mr-1 h-3 w-3" aria-hidden /> Off</>
-                                                ) : (
-                                                    <><Power className="mr-1 h-3 w-3" aria-hidden /> On</>
-                                                )}
-                                            </Button>
-                                            <Button
-                                                size="sm"
-                                                variant="ghost"
-                                                onClick={() => handleDelete(t)}
-                                                title="Delete"
-                                            >
-                                                <Trash2 className="h-3 w-3" aria-hidden />
-                                            </Button>
+                                        <td className="px-2 py-4">
+                                            <div className="flex items-center justify-center">
+                                                <Button
+                                                    size="sm"
+                                                    variant="outline"
+                                                    onClick={() => handleTest(t)}
+                                                    disabled={testingId === t.id}
+                                                    title="Probe SIP host for reachability"
+                                                >
+                                                    {testingId === t.id ? (
+                                                        <Loader2 className="h-3 w-3 animate-spin" aria-hidden />
+                                                    ) : (
+                                                        <><Activity className="mr-1 h-3 w-3" aria-hidden /> Test</>
+                                                    )}
+                                                </Button>
+                                            </div>
+                                        </td>
+                                        <td className="px-2 py-4">
+                                            <div className="flex items-center justify-center">
+                                                <Button
+                                                    size="sm"
+                                                    variant="ghost"
+                                                    onClick={() => openEdit(t)}
+                                                    title="Edit trunk"
+                                                >
+                                                    <Pencil className="h-3 w-3" aria-hidden />
+                                                </Button>
+                                            </div>
+                                        </td>
+                                        <td className="px-2 py-4">
+                                            <div className="flex items-center justify-center">
+                                                <Button
+                                                    size="sm"
+                                                    variant={t.is_active ? "outline" : "default"}
+                                                    onClick={() => handleToggle(t)}
+                                                    title={
+                                                        t.is_active
+                                                            ? "Deactivate"
+                                                            : t.last_test_result?.ok
+                                                                ? "Activate"
+                                                                : "Run a successful Test first"
+                                                    }
+                                                >
+                                                    {t.is_active ? (
+                                                        <><PowerOff className="mr-1 h-3 w-3" aria-hidden /> Off</>
+                                                    ) : (
+                                                        <><Power className="mr-1 h-3 w-3" aria-hidden /> On</>
+                                                    )}
+                                                </Button>
+                                            </div>
+                                        </td>
+                                        <td className="px-2 py-4">
+                                            <div className="flex items-center justify-center">
+                                                <Button
+                                                    size="sm"
+                                                    variant="ghost"
+                                                    onClick={() => handleDelete(t)}
+                                                    title="Delete"
+                                                >
+                                                    <Trash2 className="h-3 w-3" aria-hidden />
+                                                </Button>
+                                            </div>
                                         </td>
                                     </tr>
                                 ))}
