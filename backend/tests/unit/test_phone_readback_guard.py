@@ -53,6 +53,9 @@ import pytest
 
 from app.domain.models.session import CallSession
 from app.domain.services.voice_pipeline.contact_capture import CaptureStatus
+from app.domain.services.voice_pipeline.readback_guard import (
+    is_unconfirmed_phone_readback,
+)
 from app.domain.services.voice_pipeline_service import VoicePipelineService
 from app.services.scripts.call_state_tracker import (
     CallState,
@@ -159,6 +162,34 @@ async def test_an_unvalidated_number_is_not_read_back_as_confirmed(monkeypatch):
     assert "country code" in joined, spoken
     # And the turn ends there -- no follow-on sentence in the same completion.
     assert len(spoken) == 1, spoken
+
+
+def test_seven_digit_readback_is_recognized_as_a_phone_readback():
+    """Round-2 review (2026-09-24): readback_guard.py's comment and its
+    commit message say '7+ digits', but the old regex
+    `(?:\\d[\\s.\\-]*){7,}\\d` needed 8+ (7 repeats of "digit + separator"
+    plus one more trailing digit). A genuine 7-digit read-back like "So
+    that's 555 2671, correct?" fell through ungated on the unmodified code.
+    """
+    assert is_unconfirmed_phone_readback("So that's 555 2671, correct?")
+
+
+@pytest.mark.asyncio
+async def test_a_seven_digit_needs_clarification_readback_is_blocked(monkeypatch):
+    """The 7-digit regex floor must actually gate a NEEDS_CLARIFICATION
+    phone, not just match in isolation -- drives the real guard end to end,
+    same harness as test_an_unvalidated_number_is_not_read_back_as_confirmed.
+    """
+    state = _needs_clarification_state()
+    spoken = await _spoken(
+        ["So that's 555 2671, correct?"],
+        state,
+        monkeypatch,
+    )
+    joined = " ".join(spoken)
+    assert "555" not in joined, spoken
+    assert "correct?" not in joined, spoken
+    assert "country code" in joined, spoken
 
 
 @pytest.mark.asyncio

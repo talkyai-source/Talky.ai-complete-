@@ -57,8 +57,16 @@ _DIGIT_WORD = r"(?:zero|oh|one|two|three|four|five|six|seven|eight|nine)"
 # separators -- space, dot, dash) or 7+ spelled-out digit words in a row.
 # 7 is the shortest a real phone read-back segment gets; shorter runs are
 # routinely dates, prices or reference numbers, not a number being read back.
+#
+# BUG (round-2 review, 2026-09-24): `{7,}` here counts REPEATS of "digit +
+# optional separator", then requires one more trailing \d -- so it actually
+# needed 8+ digits, not the 7+ this comment (and the original commit message)
+# document. A genuine 7-digit read-back ("So that's 555 2671, correct?")
+# fell through ungated. {6,} + the trailing \d is the correct floor for 7.
+# The digit-word alternative already matches its own documented 7+ (6
+# repeats + 1 trailing word), so only this branch needed the fix.
 _DIGIT_RUN_RE = re.compile(
-    r"(?:\d[\s.\-]*){7,}\d" rf"|(?:{_DIGIT_WORD}[\s,]+){{6,}}{_DIGIT_WORD}",
+    r"(?:\d[\s.\-]*){6,}\d" rf"|(?:{_DIGIT_WORD}[\s,]+){{6,}}{_DIGIT_WORD}",
     re.IGNORECASE,
 )
 
