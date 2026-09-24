@@ -480,6 +480,19 @@ class AudioIngest:
                     mark_caller_speaking,
                 )
                 mark_caller_speaking(session)
+                # Explicit "the caller's STT turn is still open" state — set on
+                # EVERY real StartOfTurn, not just the tts_active-gated one
+                # below. That gated flag (`_barge_in_events[call_id]`) never
+                # arms when the agent has already finished speaking, which is
+                # exactly the state right after an opening "Hello?" — the
+                # silence monitor then had only a once-a-second RMS bucket
+                # left, and a single quiet inter-word gap read as silence and
+                # released the next re-greet rung on top of a still-open
+                # utterance (7dbf415f, 4a9dd845 — 2026-09-23). Cleared on
+                # EndOfTurn in the STT consumer loop below; bounded by a
+                # safety max age there so a lost EndOfTurn can't silence
+                # nudges for the rest of the call.
+                session._caller_turn_open_since = time.monotonic()
                 # F-09: bump the per-call utterance counter on every StartOfTurn
                 # so transcript_handler can tag a suppressed backchannel with
                 # the utterance it belongs to (see _utterance_seq docstring).
@@ -587,6 +600,13 @@ class AudioIngest:
             # _NUDGE_MIN_GAP_S whenever opening_gap_s is left unset, so mid
             # behaviour is untouched by this change.
             _OPENING_NUDGE_GAP_S = float(os.getenv("VOICE_OPENING_NUDGE_GAP_S", "2.5"))
+            # Safety cap for `session._caller_turn_open_since` (set on every
+            # StartOfTurn, cleared on EndOfTurn below). A lost EndOfTurn — e.g.
+            # across an STT reconnect — must not silence nudges for the rest of
+            # the call, so a turn stops counting as "open" past this age.
+            _CALLER_TURN_OPEN_MAX_AGE_S = float(
+                os.getenv("VOICE_CALLER_TURN_OPEN_MAX_AGE_S", "12.0")
+            )
             # Phrase ladders + suppression rule moved to turn_director.py
             # (2026-07-08) — pure, unit-tested, and shared so this monitor
             # never again picks a random needy line at random tiers. See
@@ -714,8 +734,20 @@ class AudioIngest:
                             _silence_since = _audio_from
 
                         # Caller mid-utterance (StartOfTurn before the transcript).
+                        # Two signals, either sufficient: the tts_active-gated
+                        # barge-in event (a genuine interrupt of the agent), OR
+                        # the explicit turn-open stamp set on EVERY StartOfTurn
+                        # (also covers StartOfTurn arriving after the agent has
+                        # already finished speaking — see its comment above).
+                        # The stamp has a safety max age so a lost EndOfTurn
+                        # can't hold this "open" forever.
                         _barge = self._p._barge_in_events.get(call_id)
-                        if _barge and _barge.is_set():
+                        _turn_open_since = getattr(session, "_caller_turn_open_since", None)
+                        _turn_open = (
+                            isinstance(_turn_open_since, (int, float))
+                            and (_now() - _turn_open_since) < _CALLER_TURN_OPEN_MAX_AGE_S
+                        )
+                        if (_barge and _barge.is_set()) or _turn_open:
                             _last_caller_at = _now()
                             _silence_since = _now()
                             continue
@@ -1029,6 +1061,18 @@ class AudioIngest:
                     call_id=call_id,
                     on_barge_in=_on_barge_in_direct,
                 ):
+                    # Close the "caller turn open" window the moment the
+                    # PROVIDER says the turn ended — provider-agnostic
+                    # (detect_turn_end is a plain is_final-and-no-text check),
+                    # so this covers the Nova/failover path through the same
+                    # loop, not just Flux. Runs before dispatch so a turn that
+                    # gets suppressed downstream (backchannel, duplicate, etc.)
+                    # still closes the window.
+                    try:
+                        if self._p.stt_provider.detect_turn_end(transcript):
+                            session._caller_turn_open_since = None
+                    except Exception:
+                        pass
                     await self._p.handle_transcript(session, transcript, websocket)
             except Exception as e:
                 stt_span.record_exception(e)
