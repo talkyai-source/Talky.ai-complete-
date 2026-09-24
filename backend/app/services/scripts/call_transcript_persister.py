@@ -524,9 +524,22 @@ async def _safe_generate(pool, tenant_id, call_id) -> None:
 
 
 def _safe_clear(transcript_service, session_call_id: str) -> None:
-    """Clear the in-memory transcript buffer, swallowing any error."""
+    """Close the call's in-memory transcript, swallowing any error.
+
+    This runs only at hangup, so it SEALS rather than just clears: a late STT
+    final arriving after this point must not start a fresh buffer that the
+    per-turn flush then writes over the saved transcript (call 4291700f,
+    2026-09-24 — 34 turns overwritten by one line).
+    """
     try:
         transcript_service.clear_buffer(session_call_id)
+    except Exception:
+        pass
+    try:
+        from app.domain.services.transcript_service import TranscriptService
+
+        if isinstance(transcript_service, TranscriptService):
+            transcript_service.seal(session_call_id)
     except Exception:
         pass
 

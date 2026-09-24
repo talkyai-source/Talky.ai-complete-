@@ -61,6 +61,15 @@ class TranscriptService:
     # This allows multiple instances to share the same data
     _buffers: Dict[str, List[TranscriptTurn]] = {}
     _call_bindings: Dict[str, str] = {}
+    # Calls whose final transcript the hangup persister has written. Live call
+    # 4291700f (2026-09-24 11:18:14): the hangup save wrote 34 turns / 399
+    # words, then 44 ms later a late STT final ("Yes. But") started a fresh
+    # buffer and the per-turn flush wrote that ONE line over the whole
+    # transcript — so the lead gate then saw caller_turns=1 and refused to
+    # mark a qualified lead. Same shape on 08-12, 08-20 and 09-10. Once
+    # sealed, a call's buffer takes no more turns and flushes nothing.
+    _sealed: Dict[str, None] = {}
+    _SEALED_MAX = 5000
 
     @staticmethod
     def _resolve_pool(db_client, db_pool):
@@ -152,7 +161,12 @@ class TranscriptService:
         """
         if not content or not content.strip():
             return  # Skip empty content
-        
+        if call_id in self._sealed:
+            # The hangup persister already wrote the final transcript. A late
+            # STT final landing here would start a fresh one-line buffer that
+            # the next per-turn flush writes OVER the full transcript.
+            return
+
         if call_id not in self._buffers:
             self._buffers[call_id] = []
 
@@ -541,8 +555,17 @@ class TranscriptService:
             self._call_bindings.pop(call_id, None)
             logger.debug(f"Transcript buffer cleared for call {call_id}")
     
+    def seal(self, call_id: str) -> None:
+        """Mark a call's transcript final and drop its buffer (see _sealed)."""
+        self.clear_buffer(call_id)
+        self._sealed[call_id] = None
+        if len(self._sealed) > self._SEALED_MAX:
+            for stale in list(self._sealed)[: len(self._sealed) - self._SEALED_MAX]:
+                self._sealed.pop(stale, None)
+
     @classmethod
     def clear_all_buffers(cls) -> None:
         """Clear all transcript buffers (for testing/cleanup)."""
         cls._buffers.clear()
         cls._call_bindings.clear()
+        cls._sealed.clear()
