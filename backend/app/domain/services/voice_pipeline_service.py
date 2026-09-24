@@ -675,10 +675,18 @@ class VoicePipelineService:
         # id across the whole chain and — because interrupt_playback is
         # single-flight — no possibility of two concurrent barge-ins cancelling
         # the same task twice.
+        _cancelled_turn: dict = {}
+        _barge_at = time.monotonic()
+
         async def _cancel_pending_turn() -> bool:
             cancelled_task = self._pending_llm_tasks.pop(call_id, None)
             if not cancelled_task:
                 return False
+            # Remember what this turn was answering, so a barge-in that turns
+            # out to carry no words at all can re-issue it (see
+            # _resume_after_false_barge_in).
+            _cancelled_turn["text"] = getattr(cancelled_task, "_source_text", None)
+            _cancelled_turn["type"] = getattr(cancelled_task, "_turn_type", "final")
             # Bounded, NON-blocking cancel: never freeze the single STT consumer
             # waiting for the cancelled turn to unwind. Unbounded awaiting here let
             # rapid barge-ins pile up and dropped every backlogged turn → seconds
@@ -691,9 +699,18 @@ class VoicePipelineService:
             session.llm_active = False
             # Roll back any history the cancelled task may have appended before
             # being cancelled (mirrors the TurnResumed rollback path).
+            # The snapshot is taken BEFORE turn_runner appends the caller's own
+            # message, so cutting straight to it deleted what the caller had
+            # just said whenever the cancelled task had not unwound yet (the
+            # common case under this bounded cancel) — 51450718, "I want full
+            # body checkup", never answered. Keep that USER entry; drop only
+            # what the cancelled task added after it.
             restore_len = getattr(session, "_speculative_history_len", None)
             if restore_len is not None and len(session.conversation_history) > restore_len:
-                session.conversation_history = session.conversation_history[:restore_len]
+                keep = restore_len
+                if session.conversation_history[restore_len].role == MessageRole.USER:
+                    keep += 1
+                session.conversation_history = session.conversation_history[:keep]
             session._speculative_history_len = None
             return True
 
@@ -741,6 +758,12 @@ class VoicePipelineService:
             cancel_task=_cancel_pending_turn,
             tts_provider=self.tts_provider,
         )
+        if _cancelled_turn.get("text") and _cancelled_turn.get("type") == "final":
+            asyncio.create_task(
+                self._resume_after_false_barge_in(
+                    session, websocket, _cancelled_turn["text"], _barge_at,
+                )
+            )
         if websocket:
             try:
                 await websocket.send_json({
@@ -750,6 +773,64 @@ class VoicePipelineService:
                 })
             except Exception as e:
                 logger.warning(f"Failed to send barge_in to websocket: {e}")
+
+    async def _resume_after_false_barge_in(
+        self,
+        session: CallSession,
+        websocket: Optional[WebSocket],
+        user_text: str,
+        barge_at: float,
+    ) -> None:
+        """Re-issue a reply that a word-less barge-in cancelled.
+
+        Live call c54579ea (2026-09-24 07:51:45, softphone → ext 940003): after
+        a Flux stall the call ran on Nova, whose acoustic SpeechStarted fired
+        0.5 s into the reply to "I'm the existing patient." with no words
+        behind it. The reply was cancelled, no caller turn ever followed, and
+        the agent sat silent for 14 s until the caller hung up. A real
+        interruption always produces caller text; if none arrives within the
+        window and nothing else is running, the barge-in was noise or echo —
+        answer the caller's last turn again instead of leaving dead air.
+        """
+        try:
+            window = float(os.getenv("VOICE_FALSE_BARGE_IN_WINDOW_S", "2.0"))
+        except ValueError:
+            window = 2.0
+        await asyncio.sleep(window)
+        call_id = session.call_id
+        if call_id not in self._barge_in_events:
+            return  # session torn down
+        last_text = getattr(session, "_caller_last_text_at", None)
+        if isinstance(last_text, (int, float)) and last_text >= barge_at:
+            return  # the caller really spoke; their words drive the next turn
+        pending = self._pending_llm_tasks.get(call_id)
+        if pending is not None and not pending.done():
+            return
+        if getattr(session, "tts_active", False):
+            return
+        # The cancelled turn's USER message is kept in history (so the model
+        # still sees it); the re-run appends it again, so drop the kept copy.
+        history = session.conversation_history
+        if (
+            history
+            and history[-1].role == MessageRole.USER
+            and history[-1].content == user_text
+        ):
+            session.conversation_history = history[:-1]
+        logger.info(
+            "false_barge_in_resumed call=%s — no caller words within %.1fs of "
+            "the barge-in; re-issuing the cancelled reply",
+            call_id[:12], window,
+        )
+        task = asyncio.create_task(
+            self.handle_turn_end(
+                session, websocket, source="final", user_text=user_text,
+            )
+        )
+        task._turn_type = "final"
+        task._utterance_seq = self._utterance_seq.get(call_id, 0)
+        task._source_text = user_text
+        self._pending_llm_tasks[call_id] = task
 
     def clear_barge_in_event(self, session: CallSession) -> None:
         """Clear the barge-in event so pending TTS is not immediately interrupted."""

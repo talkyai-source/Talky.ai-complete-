@@ -607,6 +607,15 @@ class AudioIngest:
             _CALLER_TURN_OPEN_MAX_AGE_S = float(
                 os.getenv("VOICE_CALLER_TURN_OPEN_MAX_AGE_S", "12.0")
             )
+            # A turn-open stamp with NO caller words behind it only counts for
+            # this long. Nova's acoustic SpeechStarted fires on noise/echo and
+            # never gets an EndOfTurn; on live call c54579ea (2026-09-24) such
+            # events kept re-stamping the turn as open, which would hold off
+            # the "Still there?" recovery indefinitely. Real speech produces
+            # interim text within a second or two and keeps the turn open.
+            _CALLER_TURN_NO_TEXT_S = float(
+                os.getenv("VOICE_CALLER_TURN_NO_TEXT_S", "3.0")
+            )
             # Phrase ladders + suppression rule moved to turn_director.py
             # (2026-07-08) — pure, unit-tested, and shared so this monitor
             # never again picks a random needy line at random tiers. See
@@ -743,9 +752,17 @@ class AudioIngest:
                         # can't hold this "open" forever.
                         _barge = self._p._barge_in_events.get(call_id)
                         _turn_open_since = getattr(session, "_caller_turn_open_since", None)
+                        _last_text_at = getattr(session, "_caller_last_text_at", None)
                         _turn_open = (
                             isinstance(_turn_open_since, (int, float))
                             and (_now() - _turn_open_since) < _CALLER_TURN_OPEN_MAX_AGE_S
+                            and (
+                                (_now() - _turn_open_since) < _CALLER_TURN_NO_TEXT_S
+                                or (
+                                    isinstance(_last_text_at, (int, float))
+                                    and (_now() - _last_text_at) < _CALLER_TURN_NO_TEXT_S
+                                )
+                            )
                         )
                         if (_barge and _barge.is_set()) or _turn_open:
                             _last_caller_at = _now()
@@ -1079,6 +1096,11 @@ class AudioIngest:
                     # gets suppressed downstream (backchannel, duplicate, etc.)
                     # still closes the window.
                     try:
+                        # Caller WORDS (interim or final) — what separates real
+                        # speech from a word-less SpeechStarted. Read by the
+                        # silence monitor and by the false-barge-in recovery.
+                        if (getattr(transcript, "text", "") or "").strip():
+                            session._caller_last_text_at = time.monotonic()
                         if self._p.stt_provider.detect_turn_end(transcript):
                             session._caller_turn_open_since = None
                     except Exception:

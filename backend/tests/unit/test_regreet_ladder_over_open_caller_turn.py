@@ -173,3 +173,50 @@ async def test_a_stale_open_stamp_does_not_silence_nudges_forever():
     assert "Hello?" in spoken, (
         "a stale caller_turn_open stamp must not suppress nudges forever"
     )
+
+
+@pytest.mark.asyncio
+async def test_a_wordless_speech_start_holds_nudges_only_briefly():
+    """Live call c54579ea (2026-09-24): on Nova, acoustic SpeechStarted fired
+    on noise/echo with no words and no EndOfTurn. A stamp with no caller text
+    behind it must stop counting as an open turn after
+    VOICE_CALLER_TURN_NO_TEXT_S (3s), well before the 12s safety cap.
+
+    Same time-accurate harness as the first test in this file (_instant_yield,
+    1.5s window): the stamp is 5s old, so real elapsed time stays far below
+    the 12s cap and only the no-text rule can release the nudge."""
+    session = _make_session("user")
+    session._caller_turn_open_since = time.monotonic() - 5.0
+    pipeline = _make_pipeline()
+    pipeline.handle_transcript = AsyncMock()
+
+    ingest = AudioIngest(pipeline)
+    with (
+        patch.dict(
+            os.environ,
+            {
+                "VOICE_OPENING_HELLO_S": "0.03",
+                "VOICE_MID_NUDGE_S": "0.03",
+                "VOICE_SILENCE_HANGUP_S": "30",
+                "VOICE_NUDGE_MIN_GAP_S": "0.03",
+            },
+        ),
+        patch("asyncio.sleep", new=_instant_yield),
+    ):
+        task = asyncio.ensure_future(ingest.process(session))
+        try:
+            await asyncio.wait_for(asyncio.shield(task), timeout=1.5)
+        except asyncio.TimeoutError:
+            pass
+        finally:
+            session.stt_active = False
+            task.cancel()
+            try:
+                await task
+            except (asyncio.CancelledError, Exception):
+                pass
+
+    spoken = [c.args[1] for c in pipeline.synthesize_and_send_audio.await_args_list]
+    assert "Hello?" in spoken, (
+        "a word-less SpeechStarted 5s ago must not keep suppressing nudges"
+    )
