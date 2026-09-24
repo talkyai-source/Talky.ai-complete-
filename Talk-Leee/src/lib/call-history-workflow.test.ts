@@ -25,6 +25,23 @@ test("AI outcomes seed useful lead types without replacing a saved choice", () =
     assert.equal(inferCallLeadType({ status: "completed", outcome: "answered", lead_outcome: null }), "warm");
 });
 
+test("a caller who left a phone or email is a hot lead whatever the verdict says", () => {
+    // Live call b97ce4c5 (2026-09-23): the caller gave +923085397539, the
+    // summary verdict was "callback", and the call never showed as hot.
+    assert.equal(
+        inferCallLeadType({ status: "ended", outcome: "answered", lead_outcome: "callback | x", captured_phone: "+923085397539" }),
+        "hot",
+    );
+    assert.equal(
+        inferCallLeadType({ status: "ended", outcome: "answered", lead_outcome: null, captured_email: "guide@gmail.com" }),
+        "hot",
+    );
+    assert.equal(
+        inferCallLeadType({ status: "ended", outcome: "answered", lead_outcome: null, captured_phone: "  ", captured_email: null }),
+        "warm",
+    );
+});
+
 test("review polling treats answered calls as live until a terminal state arrives", () => {
     assert.equal(isActiveCallStatus("answered"), true);
     assert.equal(isActiveCallStatus("in_call"), true);

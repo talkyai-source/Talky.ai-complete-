@@ -26,6 +26,7 @@ import { useEffectivePermissions } from "@/lib/queries/inbound-queries";
 import { useAuth } from "@/lib/auth-context";
 import {
     defaultCallHistoryWorkflow,
+    callHasCapturedContact,
     isActiveCallStatus,
     readCallHistoryWorkflow,
     writeCallHistoryWorkflow,
@@ -143,11 +144,25 @@ function DirectionBadge({ direction }: { direction?: "inbound" | "outbound" }) {
     );
 }
 
+function CapturedContact({ call }: { call: Call }) {
+    // The number / email the caller GAVE during the call — the one to follow
+    // up on. Distinct from the line they rang from (often an extension or a
+    // withheld number).
+    const phone = call.captured_phone?.trim();
+    const email = call.captured_email?.trim();
+    if (!phone && !email) return null;
+    return (
+        <span className="truncate text-xs font-semibold text-emerald-700 dark:text-emerald-300">
+            Contact: {[phone, email].filter(Boolean).join(" · ")}
+        </span>
+    );
+}
+
 function CallParties({ call }: { call: Call }) {
     if (call.direction === "inbound") {
-        return <><span className="truncate text-sm font-semibold text-foreground">{call.from_number || "Private caller"}</span><span className="truncate text-xs text-muted-foreground">to {call.to_number || "assigned DID"}</span></>;
+        return <><span className="truncate text-sm font-semibold text-foreground">{call.from_number || "Private caller"}</span><span className="truncate text-xs text-muted-foreground">to {call.to_number || "assigned DID"}</span><CapturedContact call={call} /></>;
     }
-    return <span className="truncate text-sm font-semibold text-foreground">{call.phone_number}</span>;
+    return <><span className="truncate text-sm font-semibold text-foreground">{call.phone_number}</span><CapturedContact call={call} /></>;
 }
 
 function SummaryPreview({
@@ -968,9 +983,9 @@ export default function CallsPage() {
             if (direction !== "all" && c.direction !== direction) return false;
             if (inboundCampaignId && c.inbound_campaign_id !== inboundCampaignId) return false;
             if (selectedDid && c.to_number !== selectedDid) return false;
-            if (term && ![c.phone_number, c.from_number, c.to_number, c.campaign_name].some((entry) => (entry || "").toLowerCase().includes(term))) return false;
+            if (term && ![c.phone_number, c.from_number, c.to_number, c.campaign_name, c.captured_phone, c.captured_email].some((entry) => (entry || "").toLowerCase().includes(term))) return false;
             const v = (c.lead_outcome || "").toLowerCase();
-            if (filter === "leads") return v.startsWith("qualified") || v.startsWith("callback");
+            if (filter === "leads") return callHasCapturedContact(c) || v.startsWith("qualified") || v.startsWith("callback");
             if (filter === "issues") {
                 return classifyCall(c).failed || v.startsWith("no_interest") || v.startsWith("disqualified");
             }

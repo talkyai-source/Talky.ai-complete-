@@ -66,9 +66,19 @@ export function isActiveCallStatus(status: string): boolean {
     return ACTIVE_CALL_STATUSES.has(status.trim().toLowerCase());
 }
 
+export function callHasCapturedContact(
+    call: Pick<Call, "captured_phone" | "captured_email">,
+): boolean {
+    return Boolean(call.captured_phone?.trim() || call.captured_email?.trim());
+}
+
 export function inferCallLeadType(
-    call: Pick<Call, "lead_outcome" | "outcome" | "status">,
+    call: Pick<Call, "lead_outcome" | "outcome" | "status" | "captured_phone" | "captured_email">,
 ): CallHistoryLeadType {
+    // A caller who gave us a way to reach them is a hot lead, whatever the
+    // summary verdict says (2026-09-25: b97ce4c5 left +923085397539 but its
+    // verdict was "callback", so it never showed as hot).
+    if (callHasCapturedContact(call)) return "hot";
     const verdict = call.lead_outcome?.split("|")[0].trim().toLowerCase() ?? "";
     const outcome = call.outcome?.trim().toLowerCase() ?? "";
     const status = call.status.trim().toLowerCase();
@@ -88,7 +98,7 @@ export function inferCallLeadType(
 }
 
 export function defaultCallHistoryWorkflow(
-    call: Pick<Call, "lead_outcome" | "outcome" | "status">,
+    call: Pick<Call, "lead_outcome" | "outcome" | "status" | "captured_phone" | "captured_email">,
 ): CallHistoryWorkflowEntry {
     return {
         leadType: inferCallLeadType(call),

@@ -205,6 +205,9 @@ export interface Call {
     recording_id?: string | null;
     /** AI per-call verdict ("qualified | …", "callback | …", "no_interest | …") — the "was this call a success" answer. */
     lead_outcome?: string | null;
+    /** Contact the caller GAVE during the call (not the line they rang from). */
+    captured_phone?: string | null;
+    captured_email?: string | null;
     /** True when a reviewer has left a voice note on this call. */
     has_feedback?: boolean;
     /** Direction defaults to outbound for historical rows. */
@@ -395,6 +398,8 @@ interface CallListItem {
     campaign_name?: string;
     recording_id?: string | null;
     lead_outcome?: string | null;
+    captured_phone?: string | null;
+    captured_email?: string | null;
     has_feedback?: boolean;
     campaign_id?: string | null;
     direction?: "inbound" | "outbound" | string;
@@ -700,6 +705,8 @@ class DashboardApi {
             summary: item.summary,
             recording_id: item.recording_id,
             lead_outcome: item.lead_outcome,
+            captured_phone: item.captured_phone ?? null,
+            captured_email: item.captured_email ?? null,
             has_feedback: item.has_feedback,
             direction: item.direction === "inbound" ? "inbound" : "outbound",
             from_number: item.from_number ?? item.caller_ani,

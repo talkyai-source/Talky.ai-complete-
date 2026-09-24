@@ -81,6 +81,27 @@ def _inbound_config_id(call: Any) -> Optional[str]:
     return str(value) if value else None
 
 
+def _captured_contact_sql(kind: str) -> str:
+    """Scalar subquery: the contact of ``kind`` the caller gave on call ``c``.
+
+    Prefers a confirmed value, then the most recent. Values the capture flow
+    rejected (invalid / cancelled / still being clarified) are never shown as
+    a lead's number. Tenant-scoped explicitly — this runs under bypass_rls.
+    """
+    if kind not in ("phone", "email"):
+        raise ValueError(kind)
+    return f"""(SELECT COALESCE(NULLIF(BTRIM(d.normalized_value), ''), BTRIM(d.value))
+                  FROM call_lead_details d
+                 WHERE d.call_id = c.id
+                   AND d.tenant_id = c.tenant_id
+                   AND (d.field_type = '{kind}' OR d.field_key = '{kind}')
+                   AND NULLIF(BTRIM(COALESCE(d.normalized_value, d.value, '')), '') IS NOT NULL
+                   AND COALESCE(d.validation_status, 'confirmed')
+                       NOT IN ('invalid', 'cancelled', 'needs_clarification')
+                 ORDER BY d.confirmed DESC, d.updated_at DESC
+                 LIMIT 1)"""
+
+
 def _display_from_number(call: Any) -> Optional[str]:
     """Project a direction-correct, durable source number."""
     if (call.get("direction") or "outbound") == "inbound":
@@ -193,6 +214,13 @@ class CallListItem(BaseModel):
     # AI per-call verdict from the post-call summary (e.g. "qualified | …",
     # "callback | …", "no_interest | …") — the "was this call a success" answer.
     lead_outcome: Optional[str] = None
+    # The contact the CALLER gave during the call (call_lead_details), as
+    # opposed to the line they rang from. 2026-09-25: these were captured and
+    # stored (e.g. b97ce4c5 phone +923085397539) but never returned by the
+    # list, so a caller who left their number showed only "ext:940007" or
+    # "Private caller" and was never marked a hot lead.
+    captured_phone: Optional[str] = None
+    captured_email: Optional[str] = None
     # Whether a reviewer has left a voice note on this call. Computed per row by
     # an EXISTS against call_feedback, so it varies with the data instead of
     # defaulting to False forever — a list flag wired to nothing looks identical
@@ -1292,7 +1320,9 @@ async def list_calls(
                                            AND COALESCE(tr.full_text, '') <> ''))
                                AS has_transcript,
                            EXISTS (SELECT 1 FROM call_feedback f
-                                    WHERE f.call_id = c.id) AS has_feedback
+                                    WHERE f.call_id = c.id) AS has_feedback,
+                           {_captured_contact_sql("phone")} AS captured_phone,
+                           {_captured_contact_sql("email")} AS captured_email
                     FROM calls c
                     LEFT JOIN campaigns camp ON camp.id = c.campaign_id
                     WHERE {where}
@@ -1339,6 +1369,8 @@ async def list_calls(
                         str(row["recording_id"]) if row["recording_id"] is not None else None
                     ),
                     lead_outcome=row["lead_outcome"],
+                    captured_phone=row["captured_phone"],
+                    captured_email=row["captured_email"],
                     has_feedback=bool(row["has_feedback"]),
                     direction=row_direction,
                     caller_ani=inbound_from,
