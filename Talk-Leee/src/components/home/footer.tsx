@@ -16,8 +16,9 @@ export function Footer() {
   return (
     <footer className="bg-card pt-16 pb-8 px-4 md:px-6 lg:px-8 border-t border-border/60">
       <div className="max-w-7xl mx-auto">
-        {/* Top Section */}
-        <div className="flex flex-col md:flex-row items-center justify-between gap-8 mb-12">
+        <div className="grid grid-cols-2 gap-10 lg:grid-cols-[1.5fr_1fr_1fr] lg:gap-12">
+          {/* Brand block */}
+          <div className="col-span-2 lg:col-span-1 flex flex-col items-start gap-6">
           {/* Logo */}
           <Link href="/" className="flex items-center gap-3 group">
             <svg viewBox="327 327 369 369" className="w-8 h-8 text-primary dark:text-foreground" aria-hidden="true" fill="currentColor">
@@ -28,9 +29,15 @@ export function Footer() {
             </span>
           </Link>
 
+          <div className="text-sm text-gray-700 dark:text-muted-foreground">
+            <p>© {currentYear} Talk-Lee. All rights reserved.</p>
+            <p className="mt-1">Powered by Aresync</p>
+          </div>
+          </div>
+
           {/* Navigation */}
           <nav>
-            <ul className="flex flex-wrap items-center justify-center gap-6 md:gap-8">
+            <ul className="flex flex-col items-start gap-4">
               {navLinks.map((link) => (
                 <li key={link.label}>
                   <Link
@@ -43,19 +50,9 @@ export function Footer() {
               ))}
             </ul>
           </nav>
-        </div>
 
-        {/* Divider */}
-        <hr className="border-border/60 mb-8" />
-
-        {/* Bottom Section */}
-        <div className="flex flex-col md:flex-row items-center justify-between gap-6 text-sm">
-          <div className="text-gray-700 dark:text-muted-foreground text-center md:text-left">
-            <p>© {currentYear} Talk-Lee. All rights reserved.</p>
-            <p className="mt-1">Powered by Aresync</p>
-          </div>
-
-          <div className="flex items-center gap-6">
+          {/* Secondary links */}
+          <div className="flex flex-col items-start gap-4 text-sm">
             <Link
               href="/terms"
               className="font-medium text-gray-700 dark:text-muted-foreground hover:text-primary dark:hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background rounded-md"
