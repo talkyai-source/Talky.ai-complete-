@@ -522,10 +522,11 @@ export function SipTrunksList() {
                          * longer than its column (a 15-digit Auth, a hyphenless 60-char
                          * name) wraps inside its own column instead of spilling into the
                          * next one.
-                         * Actions is four columns, one per control, under a spanning
-                         * "Actions" heading: Test 92, Edit 56, Status (On/Off) 88,
-                         * Delete 56 — each the button's width plus the 16px padding, with
-                         * the button centred in its cell under its own sub-heading.
+                         * The four control columns each get their own centred heading on
+                         * the same single header row as the rest: Test 92, Edit 56,
+                         * Status (On/Off) 88, Delete 56 — each the button's width plus the
+                         * 16px padding, with the button centred in its cell under its own
+                         * heading.
                          * min-width is the fixed-column sum (986) plus Endpoint's 191 =
                          * 1177px; below it the wrapper above scrolls horizontally instead
                          * of shrinking these. The settings page wraps this tab in its own
@@ -548,19 +549,16 @@ export function SipTrunksList() {
                             </colgroup>
                             <thead>
                                 <tr className="bg-muted/30 text-left text-xs font-semibold text-muted-foreground">
-                                    <th rowSpan={2} className="border-b border-border px-2 py-3">Trunk</th>
-                                    <th rowSpan={2} className="border-b border-border px-2 py-3">Endpoint</th>
-                                    <th rowSpan={2} className="border-b border-border px-2 py-3">Direction</th>
-                                    <th rowSpan={2} className="border-b border-border px-2 py-3">Auth</th>
-                                    <th rowSpan={2} className="border-b border-border px-2 py-3">Live status</th>
-                                    <th rowSpan={2} className="border-b border-border px-2 py-3">Active</th>
-                                    <th colSpan={4} className="px-2 pb-1 pt-3 text-center">Actions</th>
-                                </tr>
-                                <tr className="border-b border-border bg-muted/30 text-center text-xs font-semibold text-muted-foreground">
-                                    <th className="px-2 pb-3 pt-1">Test</th>
-                                    <th className="px-2 pb-3 pt-1">Edit</th>
-                                    <th className="px-2 pb-3 pt-1">Status</th>
-                                    <th className="px-2 pb-3 pt-1">Delete</th>
+                                    <th className="border-b border-border px-2 py-3">Trunk</th>
+                                    <th className="border-b border-border px-2 py-3">Endpoint</th>
+                                    <th className="border-b border-border px-2 py-3">Direction</th>
+                                    <th className="border-b border-border px-2 py-3">Auth</th>
+                                    <th className="border-b border-border px-2 py-3">Live status</th>
+                                    <th className="border-b border-border px-2 py-3">Active</th>
+                                    <th className="border-b border-border px-2 py-3 text-center">Test</th>
+                                    <th className="border-b border-border px-2 py-3 text-center">Edit</th>
+                                    <th className="border-b border-border px-2 py-3 text-center">Status</th>
+                                    <th className="border-b border-border px-2 py-3 text-center">Delete</th>
                                 </tr>
                             </thead>
                             <tbody>
