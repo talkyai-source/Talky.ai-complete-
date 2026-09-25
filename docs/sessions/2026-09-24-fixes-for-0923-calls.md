@@ -181,3 +181,48 @@ All four items below were started in the second round but not finished before th
 - Full suite: 9,485 passed, 16 skipped, and 1 failure: the known intermittent timing test, which passes 8 of 8 on its own.
 - Ruff: clean.
 - All 23 checks on the deployed code passed, with 0 errors after the restart.
+
+## The captured contact on the Calls list, and hot leads (`0c9196bd`)
+
+**What went wrong.**
+- The number or email a caller gave during the call was captured and saved (in `call_lead_details`). For example, b97ce4c5 saved +923085397539 and 4291700f saved guide@gmail.com.
+- `GET /calls` never returned these values, so the Calls list showed only the line the caller rang from ("ext:940007" or "Private caller").
+- "Hot" came only from the summary's verdict. b97ce4c5's verdict was "callback", so that call was never marked hot.
+
+**What changed.**
+- `GET /calls` now returns `captured_phone` and `captured_email`.
+  - A confirmed value is shown first.
+  - A value the capture step rejected (invalid, cancelled, or still being clarified) is never shown.
+  - The lookup is scoped to the tenant.
+- The Calls list shows a green **"Contact: …"** line under the caller.
+- Any call with a captured contact is marked **Hot**, is included in the **Leads** filter, and can be found by searching for that number or email.
+- Deployed to the backend, and the Vercel production build for this commit completed.
+
+## Two more live-call bugs (`cad3f7d1`, deployed 2026-09-24 20:03 UTC)
+
+**The agent hung up on its own question (d1121622, 11:12:13).**
+- The model ended its reply "…could you repeat that?..." and asked to end the call.
+- The rule that blocks hanging up on an open question read the trailing "." as the end of a statement.
+- Trailing ellipses are now stripped before the "?" check.
+
+**A saved transcript was overwritten by one line (4291700f, 11:18:14).**
+- The hang-up save wrote the full transcript: 34 turns, 399 words.
+- 44 ms later a late speech-to-text line ("Yes. But") started a fresh transcript buffer, and the per-turn save wrote that one line over the full transcript.
+- The lead check then counted `caller_turns=1<3`, so this qualified call was not marked as a lead.
+- The same thing happened on 12 Aug, 20 Aug and 10 Sep.
+- The hang-up save now seals the call's transcript, so nothing arriving later can write to it.
+- The full 34-turn copy still exists in the `transcripts` table (id ea359de3). It can be restored on request; that is a production data write, so it has not been done.
+
+## Final state
+
+- **Production:** `cad3f7d1`, the same as `origin/main`.
+  - All five services are active and `/health` returns 200.
+  - The Vercel production deploy completed.
+- **Backend suite:** 9,496 passed, 0 failed, 16 skipped. Ruff is clean.
+- **Frontend suite:** 474 of 476 passed, 0 failed. Typecheck and lint are clean.
+- **Post-deploy checks:** 26 of 26 passed on the server, with 0 errors after the restart.
+
+## Not verified on live calls yet
+
+- No live call has run on `cad3f7d1` yet.
+- Synthetic test calls into extension 940003 need root on the production server, and the permission check blocks them. A test call from the owner's softphone confirms everything above.
