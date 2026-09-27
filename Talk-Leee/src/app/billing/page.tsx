@@ -7,7 +7,7 @@ import { TopupCard } from "@/components/billing/topup-card";
 
 export default function BillingPage() {
   return (
-    <DashboardLayout title="Billing" description="Manage your subscription, track usage, and view invoices.">
+    <DashboardLayout title="Billing & usage" description="Manage your plan, minutes, top-ups, invoices, and account activity.">
       <BillingOverview
         // Suspense: TopupCard reads the ?topup= return param via
         // useSearchParams, which Next requires a boundary for. It is passed in

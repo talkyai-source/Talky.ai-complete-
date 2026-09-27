@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import {
@@ -30,6 +30,7 @@ import { Label } from "@/components/ui/label";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { markFreshLogin } from "@/lib/http-client";
+import { postAuthDashboard } from "@/lib/post-auth-navigation";
 import MFAVerification from "@/components/auth/mfa-verification";
 import PasskeyLogin from "@/components/auth/passkey-login";
 
@@ -167,7 +168,6 @@ function TurnstileWidget({
 // ─── Main Login Component ────────────────────────────────────────────────────
 export default function LoginClientPage() {
     const router = useRouter();
-    const searchParams = useSearchParams();
 
     const [step, setStep] = useState<Step>("email");
     const [direction, setDirection] = useState(1);
@@ -227,6 +227,7 @@ export default function LoginClientPage() {
                         role: tokens.role!,
                         business_name: tokens.business_name,
                         minutes_remaining: tokens.minutes_remaining,
+                        access_token: tokens.access_token,
                     });
                 });
             }
@@ -237,21 +238,6 @@ export default function LoginClientPage() {
             // cookie propagation race).
             markFreshLogin();
 
-            const rawNext = searchParams.get("next");
-            const safeNext =
-                rawNext && rawNext.startsWith("/") && !rawNext.startsWith("//")
-                    ? rawNext
-                    : null;
-
-            // Source-aware redirect. When the login was triggered by the
-            // floating Ask-AI assistant (or any non-dashboard surface), we
-            // pass `from=assistant` and return the user to the hero / where
-            // they were chatting — NOT the dashboard. A direct visit to
-            // /auth/login still lands on /dashboard as the canonical
-            // post-login destination.
-            const from = searchParams.get("from");
-            const cameFromAssistant = from === "assistant";
-
             // Use the role straight from the login response. Calling
             // /auth/me here used to be the source of a "after login,
             // redirected back to login" bug: any 401 from that round-trip
@@ -259,12 +245,7 @@ export default function LoginClientPage() {
             // hiccup, etc.) would trip the http-client's session-expired
             // handler, clear the token we just stored, and bounce the user
             // to /auth/login — making it look like the login never worked.
-            const role = tokens.role ?? null;
-
-            const destination =
-                role === "white_label_admin"
-                    ? "/white-label/dashboard"
-                    : safeNext ?? (cameFromAssistant ? "/" : "/dashboard");
+            const destination = postAuthDashboard(tokens.role);
 
             // Use a hard navigation instead of router.push.
             //
@@ -292,7 +273,7 @@ export default function LoginClientPage() {
                 router.push(destination);
             }
         },
-        [router, searchParams, rememberMe, applyLoginResult],
+        [router, rememberMe, applyLoginResult],
     );
 
     // ─── Step navigation ─────────────────────────────────────────────

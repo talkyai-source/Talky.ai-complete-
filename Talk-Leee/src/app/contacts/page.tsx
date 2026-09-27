@@ -14,7 +14,24 @@ import { parseContactsCsv } from "@/lib/contact-csv";
 import { contactPayload, EMPTY_CONTACT_FORM, type ContactFormState } from "@/lib/contact-form";
 import { ContactLists } from "@/components/campaigns/contact-lists";
 import { CsvImportMapper } from "@/components/contacts/csv-import-mapper";
-import { Upload, FileText, CheckCircle, AlertCircle, Loader2, Download, X, Search, Plus, Pencil, Trash2, ChevronDown } from "lucide-react";
+import {
+    AlertCircle,
+    Building2,
+    CheckCircle,
+    ChevronDown,
+    Download,
+    FileText,
+    ListChecks,
+    Loader2,
+    Pencil,
+    PhoneCall,
+    Plus,
+    Search,
+    Trash2,
+    Upload,
+    UserRound,
+    X,
+} from "lucide-react";
 import { motion } from "framer-motion";
 import Link from "next/link";
 
@@ -39,6 +56,75 @@ type ParseSummary = {
     invalid: number;
     headerError?: string;
 };
+
+function ContactRequirementsGuide() {
+    const steps = [
+        {
+            number: "01",
+            title: "Choose a campaign",
+            copy: "Contacts stay attached to the selected campaign and its contact lists.",
+            icon: ListChecks,
+        },
+        {
+            number: "02",
+            title: "Add a phone number",
+            copy: "Required. Use international format, for example +44 20 7946 0958.",
+            icon: PhoneCall,
+        },
+        {
+            number: "03",
+            title: "Identify the person",
+            copy: "First name, last name, and email make lists easier to review and personalise.",
+            icon: UserRound,
+        },
+        {
+            number: "04",
+            title: "Give the agent context",
+            copy: "Company, timezone, best call time, and notes help the AI handle the call well.",
+            icon: Building2,
+        },
+    ];
+
+    return (
+        <section
+            aria-labelledby="contact-setup-heading"
+            className="content-card relative overflow-hidden border-primary/20 bg-gradient-to-br from-primary/[0.07] via-background to-background"
+        >
+            <div className="pointer-events-none absolute -right-24 -top-28 h-64 w-64 rounded-full bg-primary/10 blur-3xl" />
+            <div className="relative">
+                <div className="mb-2 text-[11px] font-bold uppercase tracking-[0.18em] text-primary">Contact setup</div>
+                <div className="flex flex-col gap-2 lg:flex-row lg:items-end lg:justify-between">
+                    <div>
+                        <h2 id="contact-setup-heading" className="text-xl font-bold tracking-tight text-foreground">
+                            What you need before adding contacts
+                        </h2>
+                        <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
+                            Add one person manually or import a CSV. You can preview and map CSV columns before anything is saved.
+                        </p>
+                    </div>
+                    <span className="w-fit rounded-full border border-emerald-500/25 bg-emerald-500/10 px-3 py-1 text-xs font-semibold text-emerald-700 dark:text-emerald-400">
+                        Only phone number is required
+                    </span>
+                </div>
+
+                <ol className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                    {steps.map((step) => (
+                        <li key={step.number} className="rounded-2xl border border-border/75 bg-background/75 p-4 shadow-sm backdrop-blur-sm">
+                            <div className="flex items-center justify-between">
+                                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                                    <step.icon className="h-4 w-4" aria-hidden />
+                                </div>
+                                <span className="text-xs font-black tabular-nums text-muted-foreground/60">{step.number}</span>
+                            </div>
+                            <h3 className="mt-3 text-sm font-bold text-foreground">{step.title}</h3>
+                            <p className="mt-1 text-xs leading-5 text-muted-foreground">{step.copy}</p>
+                        </li>
+                    ))}
+                </ol>
+            </div>
+        </section>
+    );
+}
 
 function isLikelyValidPhone(raw: string): boolean {
     const cleaned = raw.replace(/[^\d]/g, "");
@@ -759,11 +845,15 @@ export default function ContactsPage() {
         <form
             id="contact-inline-form"
             onSubmit={handleSaveContact}
-            className="mb-6 rounded-lg border border-border bg-muted/30 p-4"
+            className="mb-6 rounded-2xl border border-primary/20 bg-primary/[0.035] p-4 sm:p-5"
         >
+            <div className="mb-4 flex flex-col gap-1 border-b border-border/60 pb-4">
+                <h4 className="text-sm font-bold text-foreground">{editingContact ? "Edit contact details" : "New contact details"}</h4>
+                <p className="text-xs text-muted-foreground">Fields marked required must be completed. Extra context is optional but improves call quality.</p>
+            </div>
             <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
                 <div>
-                    <Label htmlFor="contact-phone">Phone Number</Label>
+                    <Label htmlFor="contact-phone">Phone Number <span className="text-destructive">*</span></Label>
                     <Input
                         id="contact-phone"
                         type="tel"
@@ -773,10 +863,12 @@ export default function ContactsPage() {
                         onChange={(event) => setContactForm((previous) => ({ ...previous, phone_number: event.target.value }))}
                         placeholder="+1234567890"
                         required
+                        aria-describedby="contact-phone-help"
                     />
+                    <p id="contact-phone-help" className="mt-1.5 text-xs text-muted-foreground">Required · include country code</p>
                 </div>
                 <div>
-                    <Label htmlFor="contact-first-name">First Name</Label>
+                    <Label htmlFor="contact-first-name">First Name <span className="font-normal text-muted-foreground">(recommended)</span></Label>
                     <Input
                         id="contact-first-name"
                         autoComplete="given-name"
@@ -952,13 +1044,16 @@ export default function ContactsPage() {
                     <span className="sr-only">Loading campaigns…</span>
                 </div>
             ) : campaigns.length === 0 ? (
-                <div className="max-w-3xl">
-                    <div className="content-card text-center text-sm text-muted-foreground">
-                        You don&apos;t have any campaigns yet.{" "}
-                        <Link href="/campaigns" className="font-semibold text-emerald-700 hover:underline dark:text-emerald-400">
-                            Create a campaign
-                        </Link>{" "}
-                        first, then import contacts here.
+                <div className="max-w-5xl space-y-6">
+                    <ContactRequirementsGuide />
+                    <div className="content-card text-center">
+                        <h2 className="text-lg font-bold text-foreground">Create a campaign first</h2>
+                        <p className="mx-auto mt-2 max-w-xl text-sm text-muted-foreground">
+                            Every contact belongs to a campaign so calls, recordings, and results stay organised in the right workspace.
+                        </p>
+                        <Button asChild className="mt-5">
+                            <Link href="/campaigns">Create a campaign</Link>
+                        </Button>
                     </div>
                 </div>
             ) : !firstLoadDone ? (
@@ -969,6 +1064,7 @@ export default function ContactsPage() {
             ) : campaignHasContacts ? (
                 // ─────────────── Contacts HOME ───────────────
                 <div className="space-y-6">
+                    <ContactRequirementsGuide />
                     {/* Toolbar: campaign selector + search + add-more */}
                     <motion.div
                         initial={{ opacity: 0, y: 10 }}
@@ -1222,7 +1318,8 @@ export default function ContactsPage() {
                 </div>
             ) : (
                 // ─────────────── Empty campaign: add one or import many ───────────────
-                <div className="max-w-3xl space-y-6">
+                <div className="max-w-5xl space-y-6">
+                    <ContactRequirementsGuide />
                     {contactsError && (
                         <div role="alert" className="flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
                             <AlertCircle className="h-4 w-4" /> {contactsError}

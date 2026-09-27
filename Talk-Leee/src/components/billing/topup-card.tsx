@@ -12,6 +12,8 @@ import {
   Loader2,
   Plus,
   RotateCcw,
+  ShieldCheck,
+  Sparkles,
   Zap,
 } from "lucide-react";
 import { isApiClientError } from "@/lib/http-client";
@@ -167,6 +169,11 @@ export function TopupCard() {
   const offerTopups = canTopUp(balance);
   const unlimited = balance?.unlimited ?? false;
   const lowBalance = isLowBalance(balance);
+  const bestValueCode = packages.length > 1
+    ? packages.reduce((best, pkg) =>
+        pkg.price_per_minute_cents < best.price_per_minute_cents ? pkg : best,
+      ).code
+    : null;
 
   return (
     <Card>
@@ -326,11 +333,19 @@ export function TopupCard() {
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
             {packages.map((pkg) => {
               const busy = pending && chosen === pkg.code;
+              const bestValue = pkg.code === bestValueCode;
               return (
                 <div
                   key={pkg.code}
-                  className="flex flex-col rounded-lg border border-border p-3 transition-colors hover:border-primary/50"
+                  className={`relative flex flex-col rounded-lg border p-3 transition-colors ${
+                    bestValue ? "border-primary/50 bg-primary/[0.04]" : "border-border hover:border-primary/50"
+                  }`}
                 >
+                  {bestValue ? (
+                    <div className="absolute right-2 top-2 inline-flex items-center gap-1 rounded-full bg-primary px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-primary-foreground">
+                      <Sparkles className="h-2.5 w-2.5" aria-hidden /> Best value
+                    </div>
+                  ) : null}
                   <div className="text-lg font-bold tabular-nums text-foreground">
                     {pkg.minutes.toLocaleString()}
                   </div>
@@ -344,11 +359,13 @@ export function TopupCard() {
                     {formatMoney(pkg.price_per_minute_cents, pkg.currency)} per minute
                   </div>
                   {pkg.expires_days ? (
-                    <div className="text-[11px] text-muted-foreground">
+                    <div className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                      <ShieldCheck className="h-3 w-3" aria-hidden />
                       Valid for {pkg.expires_days} days
                     </div>
                   ) : (
-                    <div className="text-[11px] text-muted-foreground">
+                    <div className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                      <ShieldCheck className="h-3 w-3" aria-hidden />
                       Never expires
                     </div>
                   )}

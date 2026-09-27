@@ -114,7 +114,10 @@ const nextConfig: NextConfig = {
         }
         return config;
     },
-    allowedDevOrigins: ["http://127.0.0.1:3100", "http://localhost:3100"],
+    // Next 16 expects hostnames here, not full URL origins. Supplying a scheme
+    // makes the dev server reject its own HMR request from 127.0.0.1, which in
+    // turn leaves Client Components unhydrated during local browser testing.
+    allowedDevOrigins: ["127.0.0.1", "localhost"],
 };
 
 const authToken = process.env.SENTRY_AUTH_TOKEN;

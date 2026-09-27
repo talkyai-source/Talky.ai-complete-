@@ -2,13 +2,18 @@
 
 import { Suspense, useCallback, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { flushSync } from "react-dom";
 import { api } from "@/lib/api";
+import { useAuth } from "@/lib/auth-context";
+import { markFreshLogin } from "@/lib/http-client";
 import { captureException } from "@/lib/monitoring";
+import { postAuthDashboard } from "@/lib/post-auth-navigation";
 import { Loader2 } from "lucide-react";
 
 function AuthCallbackInner() {
     const router = useRouter();
     const searchParams = useSearchParams();
+    const { applyLoginResult } = useAuth();
     const [status, setStatus] = useState("Processing authentication...");
     const [error, setError] = useState("");
 
@@ -47,6 +52,7 @@ function AuthCallbackInner() {
 
                 // Store the token
                 api.setToken(accessToken);
+                markFreshLogin();
 
                 // Phase 7 universal-auth-state: dropped the
                 // `localStorage.setItem("refresh_token", refreshToken)`
@@ -66,19 +72,31 @@ function AuthCallbackInner() {
                     // Ignore - profile creation is optional
                 }
 
-                const rawNext = searchParams.get("next");
-                const safeNext =
-                    rawNext && rawNext.startsWith("/") && !rawNext.startsWith("//") ? rawNext : null;
-
                 let role: string | null = null;
                 try {
                     const me = await api.getMe();
                     role = me.role;
+                    flushSync(() => {
+                        applyLoginResult({
+                            user_id: me.id,
+                            email: me.email,
+                            role: me.role,
+                            business_name: me.business_name,
+                            minutes_remaining: me.minutes_remaining,
+                            access_token: accessToken,
+                        });
+                    });
                 } catch {
-                    role = null;
+                    // The token is still persisted. The dashboard bootstrap can
+                    // retry /auth/me after the hard navigation.
                 }
 
-                router.push(role === "white_label_admin" ? "/white-label/dashboard" : safeNext ?? "/dashboard");
+                const destination = postAuthDashboard(role);
+                if (typeof window !== "undefined") {
+                    window.location.assign(destination);
+                } else {
+                    router.push(destination);
+                }
             } else {
                 // No token found - might be a different callback type
                 // Check if this is a Supabase email confirmation
@@ -95,7 +113,7 @@ function AuthCallbackInner() {
             captureException(err, { area: "auth-callback" });
             setError(err instanceof Error ? err.message : "Authentication failed");
         }
-    }, [router, searchParams]);
+    }, [applyLoginResult, router, searchParams]);
 
     useEffect(() => {
         const id = window.setTimeout(() => {

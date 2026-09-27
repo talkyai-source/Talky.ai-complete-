@@ -1,10 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { useEffect, useId, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { ArrowLeft, ArrowRight, Building2, KeyRound, Loader2, Lock, Mail, PhoneCall, ShieldCheck, User } from "lucide-react";
 import { api } from "@/lib/api";
+import { useAuth } from "@/lib/auth-context";
+import { markFreshLogin } from "@/lib/http-client";
+import { postAuthDashboard } from "@/lib/post-auth-navigation";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -14,7 +18,7 @@ type Step = "form" | "otp" | "password";
 
 export default function RegisterClientPage() {
     const router = useRouter();
-    const searchParams = useSearchParams();
+    const { applyLoginResult } = useAuth();
     const [step, setStep] = useState<Step>("form");
     const [formData, setFormData] = useState({
         email: "",
@@ -115,17 +119,30 @@ export default function RegisterClientPage() {
             );
             api.setToken(response.access_token);
 
-            const rawNext = searchParams.get("next");
-            const safeNext = rawNext && rawNext.startsWith("/") && !rawNext.startsWith("//") ? rawNext : null;
+            // Account creation returns everything needed to seed the shared
+            // auth state. Commit it before navigating; otherwise the dashboard
+            // layout mounts with user=null and sends a brand-new account back
+            // to login while its first /auth/me request is still in flight.
+            flushSync(() => {
+                applyLoginResult({
+                    user_id: response.user_id,
+                    email: response.email,
+                    role: response.role,
+                    business_name: response.business_name,
+                    minutes_remaining: response.minutes_remaining,
+                    access_token: response.access_token,
+                });
+            });
+            markFreshLogin();
 
-            // Use the role straight from the signup response. Calling
-            // /auth/me here triggered the same "back to /auth/login" bug
-            // that the login flow already documented: a transient 401 on
-            // that round-trip trips the http-client's session-expired
-            // handler, which clears the just-stored token and redirects.
-            const role = (response as { role?: string | null }).role ?? null;
-
-            router.push(role === "white_label_admin" ? "/white-label/dashboard" : safeNext ?? "/dashboard");
+            const destination = postAuthDashboard(response.role);
+            if (typeof window !== "undefined") {
+                // A hard navigation guarantees the auth cookies are committed
+                // before the dashboard's first protected request.
+                window.location.assign(destination);
+            } else {
+                router.push(destination);
+            }
         } catch (err) {
             setError(extractError(err, "Could not create account. Please try again."));
         } finally {

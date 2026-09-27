@@ -4,7 +4,23 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { AlertTriangle, ArrowRight, CreditCard, FileText, Loader2, TrendingUp, Phone, CheckCircle, Clock, XCircle, RotateCcw } from "lucide-react";
+import {
+  AlertTriangle,
+  ArrowRight,
+  CalendarDays,
+  CheckCircle,
+  CircleGauge,
+  Clock,
+  CreditCard,
+  FileText,
+  Layers3,
+  Loader2,
+  Phone,
+  RotateCcw,
+  Sparkles,
+  TrendingUp,
+  XCircle,
+} from "lucide-react";
 import { ErrorState } from "@/components/states/page-states";
 import { isApiClientError } from "@/lib/http-client";
 import {
@@ -285,12 +301,16 @@ export function BillingOverview({ topupSlot }: { topupSlot?: ReactNode }) {
 function PlanDisplay({ subscription }: { subscription: Subscription | null }) {
   if (!subscription) {
     return (
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2"><CreditCard className="h-5 w-5" aria-hidden /> Current Plan</CardTitle>
-          <CardDescription>No active subscription</CardDescription>
+      <Card className="relative overflow-hidden border-primary/20 bg-gradient-to-br from-primary/[0.08] via-card to-card">
+        <div className="pointer-events-none absolute -right-16 -top-20 h-52 w-52 rounded-full bg-primary/10 blur-3xl" />
+        <CardHeader className="relative">
+          <div className="mb-3 flex h-11 w-11 items-center justify-center rounded-2xl border border-primary/20 bg-primary/10 text-primary">
+            <CreditCard className="h-5 w-5" aria-hidden />
+          </div>
+          <CardTitle>Choose your calling plan</CardTitle>
+          <CardDescription>No active subscription is attached to this workspace yet.</CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="relative">
           <Button asChild>
             <Link href="/billing/plans">Choose a plan <ArrowRight className="ml-1 h-4 w-4" aria-hidden /></Link>
           </Button>
@@ -299,48 +319,94 @@ function PlanDisplay({ subscription }: { subscription: Subscription | null }) {
     );
   }
 
+  const usedPercent = subscription.minutes_allocated > 0
+    ? Math.min(100, Math.max(0, (subscription.minutes_used / subscription.minutes_allocated) * 100))
+    : 0;
+  const details = [
+    { label: "Plan", value: subscription.plan_name || "No plan selected", icon: Layers3, large: true },
+    {
+      label: "Billing cycle",
+      value: formatDateRange(subscription.current_period_start, subscription.current_period_end),
+      icon: CalendarDays,
+      large: false,
+    },
+    {
+      label: "Included minutes",
+      value: subscription.minutes_allocated.toLocaleString(),
+      icon: Phone,
+      large: true,
+    },
+    {
+      label: "Minutes remaining",
+      value: subscription.minutes_remaining.toLocaleString(),
+      icon: CircleGauge,
+      large: true,
+    },
+  ];
+
   return (
-    <Card>
-      <CardHeader>
-        <div className="flex items-center justify-between">
-          <div>
-            <CardTitle className="flex items-center gap-2"><CreditCard className="h-5 w-5" aria-hidden /> Current Plan</CardTitle>
-            <CardDescription>Your active subscription details</CardDescription>
-          </div>
-          {statusBadge(subscription.status)}
-        </div>
-      </CardHeader>
-      <CardContent>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <div className="rounded-xl border border-border bg-card/50 p-4">
-            <div className="text-xs font-semibold text-muted-foreground">Plan</div>
-            <div className="mt-1 text-xl font-bold text-foreground">{subscription.plan_name || "—"}</div>
-          </div>
-          <div className="rounded-xl border border-border bg-card/50 p-4">
-            <div className="text-xs font-semibold text-muted-foreground">Billing Cycle</div>
-            <div className="mt-1 text-sm font-semibold text-foreground">
-              {formatDateRange(subscription.current_period_start, subscription.current_period_end)}
+    <Card className="relative overflow-hidden border-primary/20 bg-gradient-to-br from-primary/[0.08] via-card to-card shadow-sm">
+      <div className="pointer-events-none absolute -right-20 -top-24 h-64 w-64 rounded-full bg-primary/10 blur-3xl" />
+      <CardHeader className="relative pb-5">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div className="flex items-start gap-3">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-primary/20 bg-primary/10 text-primary shadow-sm">
+              <CreditCard className="h-5 w-5" aria-hidden />
+            </div>
+            <div>
+              <div className="mb-1 flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.18em] text-primary">
+                <Sparkles className="h-3.5 w-3.5" aria-hidden /> Subscription overview
+              </div>
+              <CardTitle>Current plan</CardTitle>
+              <CardDescription className="mt-1">Plan allowance, renewal window, and live minute balance.</CardDescription>
             </div>
           </div>
-          <div className="rounded-xl border border-border bg-card/50 p-4">
-            <div className="text-xs font-semibold text-muted-foreground">Included Minutes</div>
-            <div className="mt-1 text-xl font-bold text-foreground tabular-nums">{subscription.minutes_allocated.toLocaleString()}</div>
+          <div className="self-start">{statusBadge(subscription.status)}</div>
+        </div>
+      </CardHeader>
+      <CardContent className="relative">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          {details.map((detail) => (
+            <div
+              key={detail.label}
+              className="group rounded-2xl border border-border/80 bg-background/70 p-4 shadow-sm backdrop-blur-sm transition-colors hover:border-primary/30"
+            >
+              <div className="flex items-center gap-2 text-xs font-semibold text-muted-foreground">
+                <detail.icon className="h-4 w-4 text-primary/80" aria-hidden />
+                {detail.label}
+              </div>
+              <div className={`${detail.large ? "text-xl" : "text-sm leading-6"} mt-2 font-bold tabular-nums text-foreground`}>
+                {detail.value}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div className="mt-5 rounded-2xl border border-border/70 bg-background/50 p-4">
+          <div className="mb-2 flex items-center justify-between gap-3 text-xs">
+            <span className="font-semibold text-foreground">Monthly allowance</span>
+            <span className="tabular-nums text-muted-foreground">{usedPercent.toFixed(0)}% used</span>
           </div>
-          <div className="rounded-xl border border-border bg-card/50 p-4">
-            <div className="text-xs font-semibold text-muted-foreground">Minutes Remaining</div>
-            <div className="mt-1 text-xl font-bold text-foreground tabular-nums">{subscription.minutes_remaining.toLocaleString()}</div>
+          <div className="h-2 overflow-hidden rounded-full bg-muted">
+            <div
+              className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-primary transition-[width] duration-500"
+              style={{ width: `${usedPercent}%` }}
+            />
           </div>
         </div>
-        <div className="mt-4 flex flex-wrap items-center gap-3">
-          <Button asChild variant="outline" size="sm">
-            <Link href="/billing/plans">Change Plan <ArrowRight className="ml-1 h-4 w-4" aria-hidden /></Link>
+
+        <div className="mt-5 flex flex-col gap-3 border-t border-border/60 pt-5 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+            {subscription.cancel_at_period_end && (
+              <span className="font-semibold text-amber-600 dark:text-amber-400">Cancels at period end</span>
+            )}
+            {subscription.current_period_end && (
+              <span>Next invoice: {formatDate(subscription.current_period_end)}</span>
+            )}
+          </div>
+          <Button asChild size="sm" className="w-full sm:w-auto">
+            <Link href="/billing/plans">Manage plan <ArrowRight className="ml-1 h-4 w-4" aria-hidden /></Link>
           </Button>
-          {subscription.cancel_at_period_end && (
-            <span className="text-xs text-amber-600 dark:text-amber-400">Cancels at period end</span>
-          )}
-          {subscription.current_period_end && (
-            <span className="text-xs text-muted-foreground">Next invoice: {formatDate(subscription.current_period_end)}</span>
-          )}
         </div>
       </CardContent>
     </Card>
@@ -472,15 +538,26 @@ function UsageSummarySection({
           <div className="py-8 text-center text-sm text-muted-foreground">No call activity in the last 30 days.</div>
         ) : (
           <>
-            <div className="flex items-end gap-1 h-24">
-              {daily.map((d) => {
-                const h = (d.minutesUsed / max) * 100;
-                return (
-                  <div key={d.date} className="flex-1 flex flex-col items-center gap-1" title={`${d.date}: ${d.minutesUsed} min`}>
-                    <div className="w-full rounded-t bg-primary/70 transition-all" style={{ height: `${h}%` }} />
-                  </div>
-                );
-              })}
+            <div className="relative h-32 overflow-hidden rounded-2xl border border-border/70 bg-muted/20 px-3 pb-3 pt-5">
+              <div className="pointer-events-none absolute inset-x-3 top-1/3 border-t border-dashed border-border/70" />
+              <div className="pointer-events-none absolute inset-x-3 top-2/3 border-t border-dashed border-border/70" />
+              <div className="relative flex h-full items-end gap-2">
+                {daily.map((d) => {
+                  const h = (d.minutesUsed / max) * 100;
+                  return (
+                    <div
+                      key={d.date}
+                      className="group flex h-full flex-1 items-end"
+                      title={`${d.date}: ${d.minutesUsed} min`}
+                    >
+                      <div
+                        className="w-full min-w-1 rounded-t-md bg-gradient-to-t from-primary to-primary/55 transition-[height,filter] duration-500 group-hover:brightness-110"
+                        style={{ height: `${Math.max(h, 4)}%` }}
+                      />
+                    </div>
+                  );
+                })}
+              </div>
             </div>
             <div className="flex justify-between text-[10px] text-muted-foreground mt-1">
               <span>{formatDate(daily[0].date)}</span>
