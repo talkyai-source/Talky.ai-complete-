@@ -89,3 +89,22 @@ async def test_no_resume_while_another_turn_is_already_running(monkeypatch):
     await svc._resume_after_false_barge_in(s, None, "I'm the existing patient.", time.monotonic())
     svc.handle_turn_end.assert_not_awaited()
     running.cancel()
+
+
+@pytest.mark.asyncio
+async def test_resumes_are_capped_per_caller_line(monkeypatch):
+    """Call d3a21591 (2026-09-27): the same reply was re-issued five times and
+    cut off every time. At most two re-issues per caller line."""
+    monkeypatch.setenv("VOICE_FALSE_BARGE_IN_WINDOW_S", "0.01")
+    svc, s = _service(), _session()
+    svc._barge_in_events[s.call_id] = asyncio.Event()
+    for _ in range(4):
+        svc._pending_llm_tasks.pop(s.call_id, None)
+        await svc._resume_after_false_barge_in(s, None, "I'm the existing patient.", time.monotonic())
+        await asyncio.sleep(0)
+    assert svc.handle_turn_end.await_count == 2
+    # A new caller line starts its own budget.
+    svc._pending_llm_tasks.pop(s.call_id, None)
+    await svc._resume_after_false_barge_in(s, None, "Tomorrow at 3.", time.monotonic())
+    await asyncio.sleep(0)
+    assert svc.handle_turn_end.await_count == 3

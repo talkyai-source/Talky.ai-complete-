@@ -808,6 +808,22 @@ class VoicePipelineService:
             return
         if getattr(session, "tts_active", False):
             return
+        # Bounded: on call d3a21591 (2026-09-27) this re-issued the same reply
+        # five times and every copy was cut off again by the same line noise.
+        # Two re-issues per caller line; after that the loop is doing harm.
+        try:
+            cap = int(os.getenv("VOICE_FALSE_BARGE_IN_MAX_RESUMES", "2"))
+        except ValueError:
+            cap = 2
+        state = getattr(session, "_false_barge_resumes", None)
+        count = state[1] if isinstance(state, tuple) and state[0] == user_text else 0
+        if count >= cap:
+            logger.info(
+                "false_barge_in_resume_capped call=%s resumes=%d — not re-issuing again",
+                call_id[:12], count,
+            )
+            return
+        session._false_barge_resumes = (user_text, count + 1)
         # The cancelled turn's USER message is kept in history (so the model
         # still sees it); the re-run appends it again, so drop the kept copy.
         history = session.conversation_history
