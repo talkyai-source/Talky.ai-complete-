@@ -27,6 +27,7 @@ Output contract MATCHES DeepgramFluxSTTProvider so the pipeline is unchanged:
 import asyncio
 import logging
 import os
+import time
 from typing import AsyncIterator, Callable, Optional
 
 from app.domain.interfaces.stt_provider import STTProvider
@@ -35,6 +36,11 @@ from app.infrastructure.providers.provider_concurrency import get_provider_guard
 from app.infrastructure.stt.transcript_compose import compose_turn_text
 
 logger = logging.getLogger(__name__)
+
+# How long a SpeechStarted stays armed waiting for the caller's first words.
+# Nova's first interim lands a few hundred ms into speech; noise never yields
+# words, so an armed barge-in with no words simply lapses.
+_BARGE_WORD_WINDOW_S = float(os.getenv("NOVA_BARGE_WORD_WINDOW_S", "2.0"))
 
 
 class DeepgramNovaSTTProvider(STTProvider):
@@ -94,6 +100,15 @@ class DeepgramNovaSTTProvider(STTProvider):
         finals: list[str] = []
         last_interim: list[str] = [""]  # newest interim (fallback if stream closes before a final)
         grace: list[int] = [0]          # consecutive idle ticks after the audio stream ends
+        pending_barge: list[Optional[float]] = [None]  # SpeechStarted awaiting words
+        # Same gate Flux applies to its StartOfTurn transcript (imported here,
+        # as deepgram_flux does, to keep infrastructure free of a module-level
+        # dependency on the voice pipeline).
+        from app.domain.services.voice_pipeline.backchannel import (
+            is_backchannel,
+            is_disfluency,
+            is_hard_interrupt,
+        )
 
         def turn_text() -> str:
             """
@@ -245,12 +260,21 @@ class DeepgramNovaSTTProvider(STTProvider):
                                 # backchannels interrupt. If Nova ever becomes a
                                 # primary engine rather than a fallback, this must be
                                 # revisited — gate on the first interim there.
-                                if on_barge_in is not None:
-                                    try:
-                                        on_barge_in()
-                                    except Exception as exc:  # noqa: BLE001
-                                        logger.debug("nova on_barge_in error: %s", exc)
-                                yield BargeInSignal(text="")
+                                #
+                                # REVISITED 2026-09-28 — the "rare over-interrupt"
+                                # was not rare. Nova takes over on exactly the calls
+                                # whose line is loud (the primary is failed over
+                                # there), and its VAD fires on that noise: on call
+                                # d3a21591 (09-27 19:42-19:44) SpeechStarted cut ten
+                                # replies off within 1-2 s and almost none had any
+                                # caller words behind them, so the caller heard
+                                # nothing for 90 s. "Too eager to stop talking" meant
+                                # never talking. SpeechStarted now only ARMS a
+                                # barge-in; the first words that arrive within
+                                # _BARGE_WORD_WINDOW_S fire it, through the same
+                                # hard-interrupt / backchannel / disfluency rules
+                                # Flux applies to its StartOfTurn transcript.
+                                pending_barge[0] = time.monotonic()
                                 continue
 
                             if kind == "utterance_end":
@@ -265,6 +289,20 @@ class DeepgramNovaSTTProvider(STTProvider):
 
                             # kind == "results"
                             text, is_final, speech_final, conf, alternatives = payload
+                            if pending_barge[0] is not None and text:
+                                armed_at, pending_barge[0] = pending_barge[0], None
+                                if time.monotonic() - armed_at <= _BARGE_WORD_WINDOW_S and (
+                                    is_hard_interrupt(text)
+                                    or not (is_backchannel(text) or is_disfluency(text))
+                                ):
+                                    if on_barge_in is not None:
+                                        try:
+                                            on_barge_in(text)
+                                        except TypeError:
+                                            on_barge_in()
+                                        except Exception as exc:  # noqa: BLE001
+                                            logger.debug("nova on_barge_in error: %s", exc)
+                                    yield BargeInSignal(text=text)
                             if is_final:
                                 if text:
                                     finals.append(text)
