@@ -293,8 +293,11 @@ async def test_local_save_offloaded_and_byte_identical(tmp_path, monkeypatch):
     assert "_write_wav_file" in calls, (
         "the makedirs+open+write sequence must run via asyncio.to_thread"
     )
-    written = (tmp_path / "call-1.wav").read_bytes()
+    written = (tmp_path / "t1" / "c1" / "call-1.wav").read_bytes()
     assert written == expected_wav, "recording output must be byte-identical"
+    assert not (tmp_path / "call-1.wav").exists(), (
+        "local recordings must not share a flat cross-tenant namespace"
+    )
     # DB insert failed (mocked None) -> falls back to returning the filepath.
     assert result is not None
 

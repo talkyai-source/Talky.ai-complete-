@@ -464,7 +464,10 @@ def _write_wav_file(recordings_dir: str, filepath: str, wav_data: bytes) -> None
     access to ``self``/event-loop state — the thread only ever touches the
     plain, immutable arguments passed in, so there's nothing for it to race.
     """
-    os.makedirs(recordings_dir, exist_ok=True)
+    # Local fallback recordings use the same tenant/campaign hierarchy as
+    # object storage. Create the leaf directory, not only the configured
+    # root, so tenants never share a flat filesystem namespace.
+    os.makedirs(os.path.dirname(filepath) or recordings_dir, exist_ok=True)
     with open(filepath, "wb") as fh:
         fh.write(wav_data)
 
@@ -734,7 +737,19 @@ class RecordingService:
             # Compress for storage (MP3 by default; see encode_recording_audio).
             # The encoder is a subprocess, so it runs off the event loop too.
             wav_data, ext, mime_type = await asyncio.to_thread(encode_recording_audio, raw_wav)
-            filepath = os.path.join(abs_dir, f"{call_id}{ext}")
+            relative_key = self._s3_key(tenant_id, campaign_id, call_id, ext)
+            filepath = os.path.abspath(os.path.join(abs_dir, *relative_key.split("/")))
+            # `_s3_key` strips path separators and ".." from every
+            # caller-provided segment. Keep a containment assertion here as
+            # defence in depth in case key generation changes later.
+            if os.path.commonpath([abs_dir, filepath]) != abs_dir:
+                logger.error(
+                    "Refusing local recording path outside configured root: "
+                    "call=%s tenant=%s",
+                    call_id,
+                    tenant_id,
+                )
+                return None
             # ROOT CAUSE FIX (2026-07-13): os.makedirs + open()/write() are
             # synchronous filesystem calls — blocking on this process's
             # single asyncio event loop for as long as the disk write takes

@@ -98,7 +98,9 @@ async def test_local_save_stores_the_encoded_file_with_its_mime(tmp_path, monkey
 
     monkeypatch.setattr(svc, "_insert_recording_record", fake_insert)
     result = await svc._save_local(call_id="call-9", buffer=buf, tenant_id="t1", campaign_id="c1")
-    assert (tmp_path / "call-9.mp3").read_bytes() == b"MP3DATA"
+    # Local fallback recordings live under the same tenant/campaign hierarchy
+    # as object storage, not a flat cross-tenant namespace.
+    assert (tmp_path / "t1" / "c1" / "call-9.mp3").read_bytes() == b"MP3DATA"
     assert inserted["mime_type"] == "audio/mpeg"
     assert inserted["file_size_bytes"] == len(b"MP3DATA")
     assert inserted["s3_key"].endswith("call-9.mp3")
