@@ -276,6 +276,15 @@ async def signup_complete(
                 detail="Default plan unavailable; contact support.",
             )
 
+        tenant_admin_role_id = await conn.fetchval(
+            "SELECT id FROM roles WHERE name = 'tenant_admin'"
+        )
+        if not tenant_admin_role_id:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Default account role unavailable; contact support.",
+            )
+
         # Race: someone may have registered with the same email between
         # /signup/start and /signup/complete. Re-check.
         existing = await conn.fetchrow(
@@ -327,6 +336,23 @@ async def signup_complete(
                 pending["name"],
                 tenant["id"],
                 pw_hash,
+            )
+
+            # RBAC reads membership from tenant_users (role_permissions and
+            # active tenant_users rows drive every DB-backed permission
+            # check — see app/core/security/rbac.py). Creating only the
+            # user_profiles row produces a valid login token but leaves the
+            # new owner unable to read dashboard data once those checks are
+            # active, because no membership row exists for them.
+            await conn.execute(
+                """
+                INSERT INTO tenant_users
+                    (user_id, tenant_id, role_id, is_primary, status, joined_at)
+                VALUES ($1, $2, $3, TRUE, 'active', NOW())
+                """,
+                user_id,
+                tenant["id"],
+                tenant_admin_role_id,
             )
 
             # Seed the platform-default SIP trunk so the new tenant can
@@ -387,7 +413,7 @@ async def signup_complete(
         access_token=token,
         user_id=user_id,
         email=email,
-        role="owner",
+        role="tenant_admin",
         business_name=pending["business_name"],
         minutes_remaining=plan["minutes"],
         message="Account created successfully.",
