@@ -2659,7 +2659,16 @@ class AsteriskAdapter(CallControlAdapter):
                     and not self._is_inbound_parent_channel(channel_id)
                     and (
                         channel_id in self._originated_channels
-                        or channel_id.startswith("talky-out")
+                        # "talky-out-" (trailing hyphen) is the real outbound
+                        # leg's own prefix. Bare "talky-out" also matches the
+                        # bridge/media ids this adapter generates for an
+                        # ANSWERED call, which would promote one of THEM into
+                        # _outbound_answered_at_monotonic and make
+                        # _is_outbound_parent_channel() misidentify that child
+                        # as the parent leg — same collision class as the
+                        # pre-answer-terminal branch below (day0923: 8b3176ca,
+                        # 6e0e221b, 943702f0).
+                        or channel_id.startswith("talky-out-")
                     )
                 ):
                     # A very fast answer/hangup can destroy the planned
@@ -2675,7 +2684,14 @@ class AsteriskAdapter(CallControlAdapter):
                 if self._is_inbound_parent_channel(channel_id):
                     self._record_terminal_at_monotonic(channel_id)
                 elif self._is_outbound_parent_channel(channel_id) or (
-                    channel_id.startswith("talky-out")
+                    # "talky-out-" (trailing hyphen): bare "talky-out" also
+                    # matched "talky-outbound-bridge-..."/"talky-outbound-
+                    # media-..." and recorded THEIR ChannelDestroyed into
+                    # _terminal_at_monotonic — capped at 4000, evicting the
+                    # oldest 2000 — which is exactly the "leaked clocks...
+                    # evict the live parent's proof" the comment above warns
+                    # about.
+                    channel_id.startswith("talky-out-")
                     and channel_id not in self._end_dispatched
                 ):
                     self._record_terminal_at_monotonic(channel_id)
@@ -4996,7 +5012,14 @@ class AsteriskAdapter(CallControlAdapter):
             not channel_id
             or self._on_early_ringing is None
             or channel_id in self._early_ring_emitted
-            or not (channel_id in self._originated_channels or channel_id.startswith("talky-out"))
+            # "talky-out-" (trailing hyphen) is the real dialed leg's own
+            # prefix. Bare "talky-out" also matches the bridge/media ids this
+            # adapter generates for an ANSWERED call, which never ring — only
+            # the real outbound leg the carrier is dialing does.
+            or not (
+                channel_id in self._originated_channels
+                or channel_id.startswith("talky-out-")
+            )
         ):
             return
         self._early_ring_emitted.add(channel_id)
