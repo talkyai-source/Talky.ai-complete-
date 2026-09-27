@@ -326,8 +326,15 @@ async def _speak_recording_disclosure(voice_session) -> None:
         # can only ever REMOVE a retry that talked over the caller; it
         # cannot cause a recording to be kept that previously would not
         # have been.
+        # track_latency=False (2026-09-24, call 6e0e221b): this notice is the
+        # FIRST audio on a callee-first outbound call, spoken before turn 0's
+        # own start_turn/mark_llm_start ever run. Left at the default (True)
+        # its TTS stamped tts_first_chunk/response_start/audio_start on the
+        # turn-0 LatencyMetrics, so when the real reply played later the
+        # subtraction went negative ("Turn 0 latency" garbage) -- the same
+        # class of bug fixed for the silence-monitor nudge on 2026-09-23.
         interrupted = await voice_session.pipeline.synthesize_and_send_audio(
-            session, text, websocket=None
+            session, text, websocket=None, track_latency=False,
         )
         if interrupted:
             record_disclosure_state(DISCLOSURE_FAILED, *call_ids)
@@ -598,8 +605,11 @@ async def _send_outbound_greeting(voice_session) -> None:
                 "outbound_greeting_realtime call_id=%s first_speaker=%s text=%r",
                 call_id[:12], first_speaker, greeting[:60],
             )
+            # track_latency=False: the greeting is not an LLM turn either
+            # (same 6e0e221b reasoning as the disclosure call above) -- it
+            # must not stamp turn-0 LatencyMetrics.
             await voice_session.pipeline.synthesize_and_send_audio(
-                session, greeting, websocket=None
+                session, greeting, websocket=None, track_latency=False,
             )
 
         # Persist the greeting so the LLM sees it as conversation history on the

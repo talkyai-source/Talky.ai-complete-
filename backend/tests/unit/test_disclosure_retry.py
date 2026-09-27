@@ -68,7 +68,7 @@ class _CountingInterruptedPipeline:
     def clear_barge_in_event(self, session):
         pass
 
-    async def synthesize_and_send_audio(self, session, text, websocket=None):
+    async def synthesize_and_send_audio(self, session, text, websocket=None, **k):
         self.calls += 1
         return True  # interrupted
 

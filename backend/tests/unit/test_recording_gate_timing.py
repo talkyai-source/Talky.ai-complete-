@@ -76,7 +76,7 @@ class _NoticePipeline:
     def clear_barge_in_event(self, session):
         pass
 
-    async def synthesize_and_send_audio(self, session, text, websocket=None):
+    async def synthesize_and_send_audio(self, session, text, websocket=None, **k):
         with patch("asyncio.sleep", new=AsyncMock(return_value=None)):
             await self._gateway.send_audio(self._call_id, self._chunk)
         return False  # not interrupted

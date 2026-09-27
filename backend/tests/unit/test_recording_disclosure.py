@@ -117,7 +117,7 @@ class _FakePipeline:
     def clear_barge_in_event(self, session):
         pass
 
-    async def synthesize_and_send_audio(self, session, text, websocket=None):
+    async def synthesize_and_send_audio(self, session, text, websocket=None, **k):
         if self._raises:
             raise RuntimeError("tts down")
         self._log.append(("tts", text))

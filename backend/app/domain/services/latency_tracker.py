@@ -156,9 +156,15 @@ class LatencyMetrics:
 
     @property
     def response_start_latency_ms(self) -> Optional[float]:
-        """Time from speech end to first outbound response audio."""
+        """Time from speech end to first outbound response audio.
+
+        Clamped to None rather than a negative value (2026-09-24), same
+        reasoning as total_latency_ms/tts_latency_ms/tts_first_chunk_ms
+        above -- see mark_response_start's staleness guard.
+        """
         if self.speech_end_time is not None and self.response_start_time is not None:
-            return (self.response_start_time - self.speech_end_time) * 1000
+            ms = (self.response_start_time - self.speech_end_time) * 1000
+            return ms if ms >= 0 else None
         return None
 
     @property
@@ -370,13 +376,36 @@ class LatencyTracker:
         """
         Mark first outbound response audio.
         Keeps audio_start_time in sync for backward-compatible calculations.
+
+        Same staleness guard as mark_tts_start/mark_tts_end/mark_audio_start
+        (2026-09-24): this was still plain first-write-wins, so a pre-turn
+        silence-monitor nudge's stamp survived into the real turn and made
+        response_start_latency_ms negative on exactly the turns the
+        2026-09-23 nudge fix (track_latency=False at the nudge call site)
+        was meant to cover for the OTHER latency fields --
+        day0923/3a17c06c.talky-api.log, 4a9dd845, 7dbf415f, and 6aaeb4dd
+        turn 17. turn_ender's voice_slow_turn WARNING reads this value.
         """
-        if call_id in self._metrics:
-            now = time.monotonic()
-            if self._metrics[call_id].response_start_time is None:
-                self._metrics[call_id].response_start_time = now
-            if self._metrics[call_id].audio_start_time is None:
-                self._metrics[call_id].audio_start_time = now
+        metrics = self._metrics.get(call_id)
+        if metrics is None:
+            return
+        now = time.monotonic()
+        if (
+            metrics.response_start_time is not None
+            and metrics.llm_start_time is not None
+            and metrics.response_start_time < metrics.llm_start_time
+        ):
+            metrics.response_start_time = None
+        if metrics.response_start_time is None:
+            metrics.response_start_time = now
+        if (
+            metrics.audio_start_time is not None
+            and metrics.llm_start_time is not None
+            and metrics.audio_start_time < metrics.llm_start_time
+        ):
+            metrics.audio_start_time = None
+        if metrics.audio_start_time is None:
+            metrics.audio_start_time = now
 
     def mark_interrupted(self, call_id: str, reason: str = "barge_in") -> None:
         """Mark the active turn as interrupted before a full reply completed."""

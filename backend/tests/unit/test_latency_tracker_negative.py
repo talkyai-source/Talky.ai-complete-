@@ -69,6 +69,91 @@ def test_a_preturn_nudge_no_longer_makes_total_latency_negative(monkeypatch):
     assert metrics.tts_latency_ms == pytest.approx((108.0 - 107.0) * 1000)
 
 
+class _FakeClock:
+    """A monotonic clock whose value only moves when told to, so a batch of
+    calls made "at the same instant" (as tts_playback.py's first-chunk block
+    calls mark_tts_first_chunk/mark_response_start/mark_audio_start back to
+    back with no `await` between them) really do read the same timestamp,
+    instead of having to hand-count how many times each tracker method
+    happens to call ``time.monotonic()``."""
+
+    def __init__(self, t: float) -> None:
+        self.t = t
+
+    def __call__(self) -> float:
+        return self.t
+
+    def advance(self, dt: float) -> float:
+        self.t += dt
+        return self.t
+
+
+def test_response_start_latency_ms_not_made_negative_by_a_preturn_nudge(monkeypatch):
+    """mark_response_start (2026-09-24) was still plain first-write-wins,
+    unlike mark_tts_start/mark_tts_end/mark_audio_start above. Drives the
+    EXACT production call order tts_playback.py's first-chunk block uses
+    (mark_tts_first_chunk, mark_response_start, mark_audio_start, called
+    together right after mark_tts_start -- see tts_playback.py:436-439) for
+    BOTH the nudge and the real turn, closing the gap the test above leaves
+    open (it never calls mark_tts_first_chunk/mark_response_start for the
+    real turn and never asserts response_start_latency_ms). turn_ender's
+    voice_slow_turn WARNING reads this field, so a stale negative silently
+    hid the exact turns round 1 fixed for total/tts latency:
+
+        day0923/3a17c06c.talky-api.log, 4a9dd845, 7dbf415f, 6aaeb4dd turn 17
+    """
+    clock = _FakeClock(100.0)
+    monkeypatch.setattr(
+        "app.domain.services.latency_tracker.time.monotonic", clock
+    )
+
+    tracker = LatencyTracker()
+    call_id = "6aaeb4dd"
+    tracker.start_turn(call_id, 17)
+
+    # The nudge — fire-and-forget through the same TTS path, no start_turn.
+    clock.advance(1.0)  # 101.0
+    tracker.mark_tts_start(call_id)
+    clock.advance(0.05)  # 101.05 — first-chunk block, all three together
+    tracker.mark_tts_first_chunk(call_id)
+    tracker.mark_response_start(call_id)
+    tracker.mark_audio_start(call_id)
+    clock.advance(0.25)  # 101.3
+    tracker.mark_tts_end(call_id)
+
+    # The real turn.
+    clock.advance(3.7)  # 105.0
+    tracker.mark_speech_end(call_id)
+    clock.advance(0.1)  # 105.1
+    tracker.mark_llm_start(call_id)
+    clock.advance(0.9)  # 106.0
+    tracker.mark_llm_end(call_id)
+    clock.advance(1.0)  # 107.0
+    tracker.mark_tts_start(call_id)
+    clock.advance(0.1)  # 107.1 — first-chunk block, all three together
+    tracker.mark_tts_first_chunk(call_id)
+    tracker.mark_response_start(call_id)
+    tracker.mark_audio_start(call_id)
+    clock.advance(0.9)  # 108.0
+    tracker.mark_tts_end(call_id)
+
+    metrics = tracker._metrics[call_id]
+    assert metrics.response_start_latency_ms is not None
+    assert metrics.response_start_latency_ms >= 0, (
+        f"response_start_latency_ms went negative: {metrics.response_start_latency_ms}"
+    )
+    assert metrics.response_start_latency_ms == pytest.approx((107.1 - 105.0) * 1000)
+
+
+def test_response_start_latency_ms_clamps_negative_to_none():
+    """Defense in depth alongside the staleness guard above — mirrors the
+    clamp total_latency_ms/tts_latency_ms already apply."""
+    metrics = LatencyMetrics(
+        call_id="c", turn_id=0, speech_end_time=10.0, response_start_time=9.0,
+    )
+    assert metrics.response_start_latency_ms is None
+
+
 def test_total_latency_ms_clamps_negative_to_none():
     """Defense in depth alongside the staleness guard above — mirrors the
     clamp tts_first_chunk_ms already applies."""

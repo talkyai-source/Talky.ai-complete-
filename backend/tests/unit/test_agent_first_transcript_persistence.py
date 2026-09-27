@@ -86,7 +86,7 @@ class _FakePipeline:
     def clear_barge_in_event(self, session):
         pass
 
-    async def synthesize_and_send_audio(self, session, text, websocket=None):
+    async def synthesize_and_send_audio(self, session, text, websocket=None, **k):
         return self._interrupted
 
 

@@ -235,12 +235,30 @@ class TurnEnder:
         # bare-pickup turn 1, must not greet again. A failed/no-op instant
         # opener (is_bare_greeting False, no pre-synth audio, etc.) already
         # falls through identically, so there is nothing special to branch on.
+        #
+        # 2026-09-24 review follow-up: the above assumed the pre-synth
+        # greeting is ALWAYS content-free. When TELEPHONY_LLM_OPENER_ENABLED
+        # is on, the pre-synth greeting is LLM-authored and already carries
+        # identity plus a single trailing question (llm_opener.py's
+        # validated shape) — _send_outbound_greeting's own
+        # _looks_like_bare_pickup_greeting check then sets
+        # session._has_introduced True (agent_first.py ~680). Falling
+        # through unconditionally ran a SECOND LLM turn on the caller's same
+        # "Hello?", talking straight over the greeting's own question before
+        # the caller could answer it. Only continue into the normal LLM turn
+        # when the greeting that just played did NOT introduce the agent
+        # (_has_introduced still False, the bare-pickup case this
+        # fallthrough exists for); an introducing greeting keeps the old
+        # behavior of returning here and waiting for the reply to its
+        # question.
         if not _has_prior_user_turn_for_floor and _first_speaker_label(session) == "user":
             from app.domain.services.voice_pipeline.instant_opener import (
                 is_bare_greeting, try_instant_opener,
             )
             if is_bare_greeting(full_transcript):
-                await try_instant_opener(session, full_transcript)
+                _opener_played = await try_instant_opener(session, full_transcript)
+                if _opener_played and getattr(session, "_has_introduced", False):
+                    return
 
         # Guard against the confirmed Deepgram Flux hallucination bug (GitHub #1524)
         # where the STT model outputs repetitive nonsense text ("blah blah blah…").
