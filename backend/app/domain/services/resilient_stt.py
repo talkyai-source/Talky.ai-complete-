@@ -188,6 +188,11 @@ _RMS_STRIDE = 8
 # One constant governs both, so the two cannot drift apart.
 _ECHO_TAIL_S = float(os.getenv("VOICE_STT_ECHO_TAIL_S", "0.25"))
 
+# A provider that sent ANY message within this many seconds is alive, whatever
+# the silent-stream watchdog's voiced-audio count says. Flux sends a TurnInfo
+# roughly every 0.25 s while connected, so 2 s is ~8 missed messages.
+_LIVENESS_WINDOW_S = float(os.getenv("STT_WATCHDOG_LIVENESS_S", "2.0"))
+
 
 def _chunk_rms(chunk: AudioChunk, stride: int = _RMS_STRIDE) -> float:
     """Approximate RMS of a 16-bit mono PCM chunk. Returns 0.0 for anything
@@ -293,6 +298,11 @@ class _SilentStreamWatchdog:
 
     def observe_transcript(self) -> None:
         """The stream answered — it is alive; start the clock over."""
+        self.voiced_ms = 0.0
+
+    def clear_trip(self) -> None:
+        """Undo a trip that proved false: the provider is still talking."""
+        self.tripped = False
         self.voiced_ms = 0.0
 
     def observe_audio(
@@ -543,12 +553,26 @@ class ResilientSTTProvider(STTProvider):
             """Per-call verdict, written on healthy calls too."""
             logger.info(
                 "resilient_stt_audit provider=%s outcome=%s counted_voiced_ms=%.0f "
-                "suppressed_ms=%.0f probe=%s probe_errors=%d",
+                "suppressed_ms=%.0f probe=%s probe_errors=%d alive_overrides=%d",
                 chosen.name, outcome, watchdog.voiced_ms, watchdog.suppressed_ms,
                 "installed" if self._agent_speaking_probe is not None else "ABSENT",
-                self._probe_errors,
+                self._probe_errors, alive_overrides,
                 extra={"call_id": call_id},
             )
+
+        def _provider_message_age(provider: STTProvider) -> Optional[float]:
+            """Seconds since the provider last sent ANY message, or None when
+            it cannot say (then the watchdog behaves exactly as before)."""
+            fn = getattr(provider, "seconds_since_last_message", None)
+            if fn is None:
+                return None
+            try:
+                age = fn(call_id)
+            except Exception:
+                return None
+            return float(age) if isinstance(age, (int, float)) else None
+
+        alive_overrides = 0
 
         async def _tee_audio() -> AsyncIterator[AudioChunk]:
             """Pass-through that also populates the replay buffer and feeds the
@@ -561,6 +585,7 @@ class ResilientSTTProvider(STTProvider):
             covered by the ``watchdog.tripped`` re-check after the loop, so the
             failover happens either way.
             """
+            nonlocal alive_overrides
             async for chunk in audio_stream:
                 buffer.add(chunk)
                 if watchdog.observe_audio(
@@ -568,16 +593,44 @@ class ResilientSTTProvider(STTProvider):
                     muted=_provider_muted(chosen),
                     agent_speaking=_agent_speaking(),
                 ):
+                    # A loud line is not a dead stream. Nine "stalls" from
+                    # 2026-09-10 to 09-27 (e.g. c79e7f3b, 09-27 19:42:44) were
+                    # all on lines whose caller side never went quiet (RMS
+                    # 1,000-10,000, clipping at 32,768, versus 7 on a normal
+                    # line), so 6 s of "voiced" audio with no words built up
+                    # after every agent reply while Flux, correctly, heard no
+                    # words in the noise — and no Flux connection had closed or
+                    # errored. Failing over then handed the call to Nova, whose
+                    # bare VAD cut the agent off on that same noise for 90 s.
+                    # A dead stream sends nothing; a live one keeps sending
+                    # status messages even with no words. Only the former
+                    # fails over.
+                    age = _provider_message_age(chosen)
+                    if age is not None and age < _LIVENESS_WINDOW_S:
+                        alive_overrides += 1
+                        if alive_overrides == 1 or alive_overrides % 10 == 0:
+                            logger.info(
+                                "resilient_stt_watchdog_alive provider=%s "
+                                "last_message_age_s=%.2f overrides=%d — loud "
+                                "line without words, provider still sending; "
+                                "not failing over",
+                                chosen.name, age, alive_overrides,
+                                extra={"call_id": call_id},
+                            )
+                        watchdog.clear_trip()
+                        yield chunk
+                        continue
                     logger.error(
                         "resilient_stt_stream_silent provider=%s voiced_s=%.1f "
                         "— %.1fs of caller speech went in and no transcript "
                         "event came back; treating the stream as dead and "
                         "failing over (suppressed_ms=%.0f of agent audio was "
-                        "correctly not counted)",
+                        "correctly not counted; last_message_age_s=%s)",
                         chosen.name,
                         policy.silent_stream_voiced_seconds,
                         watchdog.voiced_ms / 1000.0,
                         watchdog.suppressed_ms,
+                        "unknown" if age is None else f"{age:.2f}",
                         extra={"call_id": call_id},
                     )
                     _emit_audit("failover")

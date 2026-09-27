@@ -29,6 +29,7 @@ import os
 import json
 import asyncio
 import random
+import time
 import websockets
 import logging
 from collections import deque
@@ -216,6 +217,13 @@ class DeepgramFluxSTTProvider(STTProvider):
         self._muted_calls: set[str] = set()
         self._mute_lock = asyncio.Lock()
 
+        # Liveness: monotonic time of the last message of ANY type Flux sent
+        # for a call. Flux emits a TurnInfo "Update" roughly every 0.25 s even
+        # when it hears no words, so a live stream keeps this fresh on a loud
+        # line where no transcript text ever arrives. Read by the resilient
+        # wrapper's silent-stream watchdog (see seconds_since_last_message).
+        self._last_message_at: dict[str, float] = {}
+
         # Eager turn state tracking
         self._eager_states: dict[str, FluxEagerTurnState] = {}
         self._stream_stats: dict[str, FluxStreamStats] = {}
@@ -270,6 +278,20 @@ class DeepgramFluxSTTProvider(STTProvider):
     def is_muted(self, call_id: str) -> bool:
         """Check if microphone is muted for a call."""
         return call_id in self._muted_calls
+
+    def seconds_since_last_message(self, call_id: Optional[str]) -> Optional[float]:
+        """Seconds since Flux last sent any message for ``call_id``.
+
+        None when nothing has been received yet (or the call is unknown), so
+        the caller falls back to its previous behaviour instead of treating a
+        stream that never spoke as alive.
+        """
+        if not call_id:
+            return None
+        at = self._last_message_at.get(call_id)
+        if at is None:
+            return None
+        return max(0.0, time.monotonic() - at)
         
     async def initialize(self, config: dict) -> None:
         """Initialize Deepgram Flux with configuration"""
@@ -731,6 +753,8 @@ class DeepgramFluxSTTProvider(STTProvider):
             try:
                 async for message in ws:
                     msg_count += 1
+                    if call_id:
+                        self._last_message_at[call_id] = time.monotonic()
                     data = json.loads(message)
                     msg_type = data.get("type", "")
                     if stream_stats:
@@ -981,6 +1005,8 @@ class DeepgramFluxSTTProvider(STTProvider):
                     stop_reason = "stt_internal_error"
                 logger.error(f"Flux receive error: {e}")
             finally:
+                if call_id:
+                    self._last_message_at.pop(call_id, None)
                 logger.debug(f"receive_transcripts ending. Total: {msg_count} msgs, {turn_info_count} TurnInfo")
                 stop_event.set()
                 await transcript_queue.put(None)
