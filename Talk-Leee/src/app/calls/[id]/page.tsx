@@ -39,6 +39,13 @@ interface TranscriptTurn {
     timestamp: string;
 }
 
+// Messages shown at a time before the transcript scrolls inside its card.
+const TRANSCRIPT_ROWS_DESKTOP = 9;
+const TRANSCRIPT_ROWS_MOBILE = 6;
+const TRANSCRIPT_MOBILE_BREAKPOINT_PX = 768;
+// Matches the `space-y-3` gap between message rows.
+const TRANSCRIPT_ROW_GAP_PX = 12;
+
 export default function CallDetailPage() {
     const params = useParams();
     const router = useRouter();
@@ -184,6 +191,58 @@ export default function CallDetailPage() {
         }
     }, [canDownloadMedia, recordingDownloading, recordingId]);
 
+    // Cap the message list to the first N rows' real rendered heights (wrapped
+    // messages differ in height, so firstRowHeight × N would risk a half-cut
+    // row). Only capped once there are more than N messages; otherwise the
+    // card just fits its content.
+    // Callback ref held in state: the list only mounts once the call has loaded,
+    // which can be after the transcript arrived, so the effects below must
+    // re-run when the element itself appears.
+    const [transcriptList, setTranscriptList] = useState<HTMLDivElement | null>(null);
+    const [transcriptMaxHeightPx, setTranscriptMaxHeightPx] = useState<number | null>(null);
+
+    useEffect(() => {
+        const list = transcriptList;
+        if (!list) return;
+        const measure = () => {
+            const rows = Array.from(list.children) as HTMLElement[];
+            const limit = window.innerWidth >= TRANSCRIPT_MOBILE_BREAKPOINT_PX ? TRANSCRIPT_ROWS_DESKTOP : TRANSCRIPT_ROWS_MOBILE;
+            if (rows.length <= limit) {
+                setTranscriptMaxHeightPx(null);
+                return;
+            }
+            let sum = 0;
+            for (let i = 0; i < limit; i += 1) {
+                const h = rows[i].getBoundingClientRect().height;
+                if (!Number.isFinite(h) || h <= 0) {
+                    // A row couldn't be measured — fall back to no cap rather
+                    // than clamp to a broken height.
+                    setTranscriptMaxHeightPx(null);
+                    return;
+                }
+                sum += h;
+            }
+            setTranscriptMaxHeightPx(Math.ceil(sum + TRANSCRIPT_ROW_GAP_PX * (limit - 1)));
+        };
+        const raf = window.requestAnimationFrame(measure);
+        window.addEventListener("resize", measure, { passive: true });
+        // Text re-wraps when the container width changes without the window
+        // resizing (sidebar toggle), so watch the list and its capped rows too.
+        const observer = new ResizeObserver(measure);
+        observer.observe(list);
+        Array.from(list.children).slice(0, TRANSCRIPT_ROWS_DESKTOP).forEach((row) => observer.observe(row));
+        return () => {
+            window.cancelAnimationFrame(raf);
+            window.removeEventListener("resize", measure);
+            observer.disconnect();
+        };
+    }, [transcriptList, transcript]);
+
+    // Back to the first message when the transcript itself changes.
+    useEffect(() => {
+        transcriptList?.scrollTo({ top: 0, behavior: "instant" });
+    }, [transcriptList, transcript]);
+
     return (
         <DashboardLayout title="Call Details" description="Transcript, recording, and metadata for this call.">
             <motion.div
@@ -204,7 +263,7 @@ export default function CallDetailPage() {
             ) : error ? (
                 <CallLoadError message={error} onRetry={() => void callQuery.refetch()} />
             ) : call ? (
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <div className="call-detail-page grid grid-cols-1 lg:grid-cols-3 gap-6">
                     {/* Call Info */}
                     <div className="lg:col-span-1 space-y-6">
                         <motion.div
@@ -220,7 +279,7 @@ export default function CallDetailPage() {
                             <div className="space-y-3">
                                 <CallPartiesPanel direction={call.direction} phoneNumber={call.phone_number} toNumber={call.to_number} />
 
-                                <div className="group flex items-center gap-3 rounded-2xl border border-border bg-muted/60 p-3 shadow-sm transition-[transform,background-color,border-color,box-shadow] duration-150 ease-out hover:-translate-y-0.5 hover:bg-background hover:shadow-md">
+                                <div className="group flex items-center gap-3 rounded-2xl border border-border bg-muted/60 p-3 shadow-sm transition-[transform,background-color,border-color,box-shadow] duration-150 ease-out hover:bg-background">
                                     <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-background/60 text-foreground transition-colors group-hover:bg-background">
                                         <Clock className="h-5 w-5" />
                                     </div>
@@ -233,7 +292,7 @@ export default function CallDetailPage() {
                                 </div>
 
                                 {call.outcome ? (
-                                    <div className="group rounded-2xl border border-border bg-muted/60 p-3 shadow-sm transition-[transform,background-color,border-color,box-shadow] duration-150 ease-out hover:-translate-y-0.5 hover:bg-background hover:shadow-md">
+                                    <div className="group rounded-2xl border border-border bg-muted/60 p-3 shadow-sm transition-[transform,background-color,border-color,box-shadow] duration-150 ease-out hover:bg-background">
                                         <div className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">Outcome</div>
                                         <div className="mt-1">
                                             <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold ${getStatusStyle(call.outcome)}`}>
@@ -243,7 +302,7 @@ export default function CallDetailPage() {
                                     </div>
                                 ) : null}
 
-                                <div className="group rounded-2xl border border-border bg-muted/60 p-3 shadow-sm transition-[transform,background-color,border-color,box-shadow] duration-150 ease-out hover:-translate-y-0.5 hover:bg-background hover:shadow-md">
+                                <div className="group rounded-2xl border border-border bg-muted/60 p-3 shadow-sm transition-[transform,background-color,border-color,box-shadow] duration-150 ease-out hover:bg-background">
                                     <div className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">Date</div>
                                     <div className="mt-1 text-sm font-semibold text-foreground">{new Date(call.created_at).toLocaleString()}</div>
                                 </div>
@@ -293,11 +352,10 @@ export default function CallDetailPage() {
                                 initial={{ opacity: 0, y: 20 }}
                                 animate={{ opacity: 1, y: 0 }}
                                 transition={{ delay: 0.1 }}
-                                whileHover={{ scale: 1.01 }}
                                 className="content-card"
                             >
                                 <h2 className="text-sm font-semibold text-foreground mb-4">Summary</h2>
-                                <div className="rounded-2xl border border-border bg-muted/60 p-4 shadow-sm transition-[transform,background-color,box-shadow] duration-150 ease-out hover:-translate-y-0.5 hover:bg-background hover:shadow-md">
+                                <div className="rounded-2xl border border-border bg-muted/60 p-4 shadow-sm transition-[transform,background-color,box-shadow] duration-150 ease-out hover:bg-background">
                                     <p className="text-sm leading-relaxed text-muted-foreground">{call.summary}</p>
                                 </div>
                             </motion.div>
@@ -308,7 +366,6 @@ export default function CallDetailPage() {
                                 initial={{ opacity: 0, y: 20 }}
                                 animate={{ opacity: 1, y: 0 }}
                                 transition={{ delay: 0.2 }}
-                                whileHover={{ scale: 1.01 }}
                                 className="content-card"
                             >
                                 <h2 className="text-sm font-semibold text-foreground mb-4">Recording</h2>
@@ -418,14 +475,17 @@ export default function CallDetailPage() {
                                 </div>
                             ) : (
                                 <div className="rounded-2xl border border-border bg-muted/60 p-4 shadow-sm">
-                                    <div className="space-y-3">
+                                    <div
+                                        ref={setTranscriptList}
+                                        className={`space-y-3${transcriptMaxHeightPx !== null ? " overflow-y-auto overflow-x-hidden overscroll-contain pr-1" : ""}`}
+                                        style={transcriptMaxHeightPx !== null ? { maxHeight: transcriptMaxHeightPx } : undefined}
+                                    >
                                     {transcript.map((turn, index) => (
                                         <motion.div
                                             key={index}
                                             initial={{ opacity: 0, x: turn.role === "assistant" ? -10 : 10 }}
                                             animate={{ opacity: 1, x: 0 }}
                                             transition={{ delay: 0.4 + index * 0.05 }}
-                                            whileHover={{ scale: 1.01 }}
                                             className={`flex gap-3 ${turn.role === "assistant" ? "flex-row" : "flex-row-reverse"}`}
                                         >
                                             <div
@@ -434,7 +494,7 @@ export default function CallDetailPage() {
                                                 {turn.role === "assistant" ? "AI" : "U"}
                                             </div>
                                             <div
-                                                className={`flex-1 max-w-[82%] rounded-2xl border p-4 shadow-sm transition-[transform,box-shadow] duration-150 ease-out hover:-translate-y-0.5 hover:shadow-md ${turn.role === "assistant" ? "border-border bg-background" : "border-border bg-muted/60"}`}
+                                                className={`flex-1 max-w-[82%] rounded-2xl border p-4 shadow-sm ${turn.role === "assistant" ? "border-border bg-background" : "border-border bg-muted/60"}`}
                                             >
                                                 <p className="text-sm text-foreground">{turn.content}</p>
                                                 <p className="mt-2 text-xs text-muted-foreground">

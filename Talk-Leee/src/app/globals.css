@@ -942,6 +942,19 @@ details > summary.home-menu-toggle {
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.20);
 }
 
+/* Call Details window (/calls/[id]): the shared .content-card hover grows the
+   cards and casts a wide shadow, and the cards sit close together. Keep only
+   the colour change here, scoped to this window instead of touching
+   .content-card. */
+.call-detail-page .content-card:hover {
+  transform: none;
+  box-shadow: none;
+}
+
+.dark .call-detail-page .content-card:hover {
+  box-shadow: none;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .content-card,
   .content-card:hover {
