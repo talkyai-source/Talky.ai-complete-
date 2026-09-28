@@ -57,6 +57,11 @@ from app.domain.services.voice_pipeline.sentence_cap import (
 from app.domain.services.voice_pipeline.sentence_segmentation import (
     _is_missing_space_boundary,
 )
+from app.domain.services.voice_pipeline.conversation_guards import (
+    is_repeated_question,
+    unbacked_contact_claim,
+)
+from app.domain.services.voice_pipeline.grounded_figures import ground_spoken_figures
 from app.domain.services.voice_pipeline.grounded_links import ground_spoken_links
 from app.domain.services.voice_pipeline.readback_guard import phone_readback_guard
 from app.services.scripts.prompts.live_state import build_live_state_block
@@ -159,7 +164,32 @@ from app.domain.services.voice_pipeline.kb_budget import (  # noqa: E402
     _KB_TOTAL_CHARS,
     _KNOWLEDGE_RETRIEVE_TIMEOUT_S,
     _trim_kb_body,
+    knowledge_match_is_weak,
+    needs_previous_turn_context,
     should_retrieve_knowledge,
+)
+
+# What the agent is told when the knowledge base has nothing that answers the
+# caller. Call d644f0ea (2026-09-28): with no relevant section the agent said
+# "Yes, we've helped set up your EPOS" -- a claim nothing supported.
+KNOWLEDGE_NO_MATCH_NOTE = (
+    "COMPANY KNOWLEDGE — NO CONFIRMED ANSWER. The knowledge base has nothing that "
+    "answers what the caller just asked. If they asked about the company, its "
+    "products, prices, fees, integrations, policies or what it has done for them, "
+    "do NOT answer yes or no and do NOT give figures or details from general "
+    "knowledge or the call's background. Say briefly that you'll check and make "
+    "sure it gets confirmed, then carry on.\n"
+)
+KNOWLEDGE_WEAK_MATCH_HEADER = (
+    "COMPANY KNOWLEDGE — NO CONFIRMED ANSWER. These are the closest sections, but "
+    "they may not answer the caller's question. Use a fact only if it directly "
+    "answers what was asked; otherwise do not answer yes or no or give figures — "
+    "say you'll check and make sure it gets confirmed.\n"
+)
+# Every knowledge block, confirmed or not.
+KNOWLEDGE_ONLY_WHAT_IT_SAYS = (
+    "Don't fill gaps from the call's background or general knowledge. Quote each "
+    "price exactly as written, with its unit; never add figures together.\n"
 )
 
 
@@ -184,7 +214,13 @@ async def _knowledge_block_for_turn(session: CallSession, messages: list) -> str
         if not should_retrieve_knowledge(last_user):
             return ""
         query = last_user
-        if len(user_msgs) > 1 and user_msgs[1].strip():
+        # Only a thin follow-up ("and the price?") borrows the previous caller
+        # turn; a self-contained question is searched on its own words.
+        if (
+            needs_previous_turn_context(last_user)
+            and len(user_msgs) > 1
+            and user_msgs[1].strip()
+        ):
             query = f"{last_user} {user_msgs[1]}".strip()
 
         from app.services.scripts.knowledge.retrieval import (
@@ -250,11 +286,16 @@ async def _knowledge_block_for_turn(session: CallSession, messages: list) -> str
                 session.call_id[:8], _ms, last_user[:60],
                 session.knowledge_mode, str(session.tenant_id)[:8],
             )
-            return ""
+            # An empty block used to leave the model free to answer from the
+            # call's background or general knowledge. Say so explicitly.
+            return KNOWLEDGE_NO_MATCH_NOTE
+        weak = knowledge_match_is_weak(hits)
         logger.info(
-            "KB_DEBUG call=%s HITS=%d %.0fms q=%r headings=%s",
+            "KB_DEBUG call=%s HITS=%d %.0fms q=%r headings=%s coverage=%s%s",
             session.call_id[:8], len(hits), _ms, last_user[:60],
             [h.get("heading") for h in hits],
+            [round(float(h["coverage"]), 2) if h.get("coverage") is not None else None for h in hits],
+            " WEAK" if weak else "",
         )
 
         # Retrieved knowledge is tenant/3rd-party data, not a trusted authored
@@ -314,15 +355,21 @@ async def _knowledge_block_for_turn(session: CallSession, messages: list) -> str
                 session.call_id[:8], dropped_injection,
             )
         if not entries:
-            return ""
+            return KNOWLEDGE_NO_MATCH_NOTE if weak else ""
         fenced = fence_untrusted("\n".join(entries), tag=_KB_TAG)
         from app.services.scripts.prompts.guardrails import KNOWLEDGE_PRICE_GUARD
 
+        header = (
+            KNOWLEDGE_WEAK_MATCH_HEADER
+            if weak
+            else "COMPANY KNOWLEDGE — official answers for this caller's question.\n"
+        )
         return (
-            "COMPANY KNOWLEDGE — official answers for this caller's question.\n"
+            header
             + DATA_ONLY_NOTE(_KB_TAG)
             + "\nAnswer naturally and stay faithful to it; don't invent details "
             "beyond it.\n"
+            + KNOWLEDGE_ONLY_WHAT_IT_SAYS
             + fenced
             + "\n"
             + KNOWLEDGE_PRICE_GUARD
@@ -653,6 +700,17 @@ class TurnStreamer:
         # appear here or it is rewritten (see grounded_links.py).
         turn_grounding: list[str] = []
         guardrail_blocked_response: Optional[str] = None
+        # Prices/percentages with no source this turn (see grounded_figures.py).
+        # A list so the nested validator can record into it.
+        ungrounded_figures: list[str] = []
+        # Sentences replaced or dropped by the conversation guards; when any
+        # were, history keeps only what was actually spoken.
+        speech_rewrites: list[str] = []
+        _earlier_agent_turns = [
+            str(m.content or "")
+            for m in getattr(session, "conversation_history", [])[-12:]
+            if getattr(m, "role", None) == MessageRole.ASSISTANT
+        ]
 
         # P3: track sentences ACTUALLY delivered to TTS, so on a barge-in we
         # commit to history only what the caller really heard — not the full
@@ -683,7 +741,7 @@ class TurnStreamer:
                 return False
             return True
 
-        def _validate_for_tts(text: str) -> tuple[str, Optional[str]]:
+        def _validate_for_tts(text: str, *, speaking: bool = True) -> tuple[str, Optional[str]]:
             """Validate cleaned model text before any byte reaches TTS."""
             text, _links = ground_spoken_links(text, [system_prompt, *turn_grounding])
             if _links:
@@ -692,6 +750,50 @@ class TurnStreamer:
                     call_id[:12],
                     _links,
                 )
+            _fig_text, _figures = ground_spoken_figures(text, [system_prompt, *turn_grounding])
+            if _figures and not speaking:
+                # Whole-reply pre-check on a tool turn: leave the figure to the
+                # per-sentence pass, which is what actually speaks.
+                pass
+            elif _figures:
+                logger.warning(
+                    "ungrounded_figure_replaced call=%s figures=%s",
+                    call_id[:12],
+                    _figures,
+                )
+                first = not ungrounded_figures
+                ungrounded_figures.extend(_figures)
+                # Say the "I'll get that confirmed" line once per reply; any
+                # later sentence with a made-up figure is simply dropped.
+                return (_fig_text if first else ""), None
+            else:
+                text = _fig_text  # at most a corrected currency sign
+            if speaking:
+                _reask = unbacked_contact_claim(
+                    text,
+                    getattr(session, "captured_slots", None),
+                    last_user_text_for_limit,
+                )
+                if _reask:
+                    logger.warning(
+                        "unbacked_contact_claim_replaced call=%s — claimed to pass on "
+                        "contact details none of which are confirmed; re-asking",
+                        call_id[:12],
+                    )
+                    speech_rewrites.append("contact_claim")
+                    return _reask, None
+                if getattr(session, "_spoken_sentences", None) and is_repeated_question(
+                    text, _earlier_agent_turns,
+                ):
+                    # The answer is already out; the re-ask of a question asked
+                    # twice before is dropped. A reply that is ONLY the question
+                    # is still spoken -- silence would be worse.
+                    logger.info(
+                        "repeated_question_dropped call=%s q=%r",
+                        call_id[:12], text[:80],
+                    )
+                    speech_rewrites.append("repeated_question")
+                    return "", None
             # Deterministic backstop: the capture state machine's "please
             # repeat" for a NEEDS_CLARIFICATION/INVALID phone is advisory-only
             # prompt text, and the model can (and on 6aaeb4dd did) ignore it
@@ -865,7 +967,9 @@ class TurnStreamer:
                         protected_values=_protected_readback,
                     )
                     if _candidate:
-                        _candidate, _candidate_reason = _validate_for_tts(_candidate)
+                        _candidate, _candidate_reason = _validate_for_tts(
+                            _candidate, speaking=False,
+                        )
                         if _candidate_reason:
                             guardrail_block_reason = _candidate_reason
                             all_tokens[:] = [_candidate]
@@ -1167,10 +1271,10 @@ class TurnStreamer:
                 full_text, [system_prompt, *turn_grounding]
             )
 
-        if model_wrote_caller_turn:
+        if model_wrote_caller_turn or ungrounded_figures or speech_rewrites:
             # History must hold what was spoken. Keeping the fabricated caller
-            # line would feed the model its own invention as established fact
-            # on every later turn.
+            # line (or a made-up price) would feed the model its own invention
+            # as established fact on every later turn.
             full_text = " ".join(session._spoken_sentences).strip() or full_text
 
         if not ask_ai_end_action and max_sentences and full_text:

@@ -396,7 +396,12 @@ async def test_supplied_retrieval_connection_never_acquires_pool():
     class RetrievalConn:
         async def fetch(self, sql, *args):
             assert "n.tenant_id = $5" in sql
-            assert args == (CAMPAIGN_ID, "price", 3, retrieval._WORD_SIM_FLOOR, TENANT_ID)
+            # $6 (2026-09-29) is the spoken-number/filler list the coverage
+            # label ignores; the tenant stays bound explicitly as $5.
+            assert args == (
+                CAMPAIGN_ID, "price", 3, retrieval._WORD_SIM_FLOOR, TENANT_ID,
+                list(retrieval._COVERAGE_IGNORED_LEXEMES),
+            )
             return []
 
     class NoAcquirePool:

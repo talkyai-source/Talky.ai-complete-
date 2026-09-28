@@ -25,6 +25,35 @@ from app.services.scripts.knowledge.budget import INLINE_BAKE_MAX_CHARS
 
 logger = logging.getLogger(__name__)
 _TOKEN_RE = re.compile(r"[a-z0-9]+")
+# Postgres english-stemmed forms of spoken numbers and filler. STT writes
+# "eleven ninety nine" where the knowledge says "£11.99", so counting those
+# words made a real question look unanswered (d644f0ea: 0.29 -> 1.0 once
+# excluded). Only the coverage label ignores them; matching and ranking do not.
+_COVERAGE_IGNORED_LEXEMES = (
+    "zero", "one", "two", "three", "four", "five", "six", "seven", "eight",
+    "nine", "ten", "eleven", "twelv", "thirteen", "fourteen", "fifteen",
+    "sixteen", "seventeen", "eighteen", "nineteen", "twenti", "thirti", "forti",
+    "fifti", "sixti", "seventi", "eighti", "nineti", "hundr", "thousand",
+    "million", "dot", "point", "alreadi", "right", "okay", "yeah", "realli",
+    "actual", "get", "got", "mean", "think", "like", "want", "tell", "say",
+    "said", "pleas", "just", "know",
+)
+_NUMBER_WORDS = frozenset(
+    "zero one two three four five six seven eight nine ten eleven twelve thirteen "
+    "fourteen fifteen sixteen seventeen eighteen nineteen twenty thirty forty fifty "
+    "sixty seventy eighty ninety hundred thousand million dot point already right "
+    "okay yeah really actually get got mean think like want tell say said know".split()
+)
+
+# Words that say nothing about WHAT is being asked; excluded when measuring how
+# much of a question a pinned-snapshot hit covers (the SQL path uses the
+# Postgres english stopword list for the same purpose).
+_COVERAGE_STOPWORDS = frozenset(
+    "a an the and or but if so of to in on at by for with from about as is are was "
+    "were be do does did have has had can could will would should may might i me my "
+    "we us our you your it its they them this that what which who when where why how "
+    "not no yes please just much many".split()
+)
 
 # Minimum pg_trgm *word* similarity for the fuzzy fallback. We use
 # word_similarity() (not similarity()) because the query is short and the node
@@ -191,24 +220,56 @@ async def retrieve_knowledge(
                       )
                     ORDER BY n.priority DESC, n.hit_count DESC
                     LIMIT 200
+                ),
+                top_k AS (
+                    SELECT c.id, c.heading, c.summary, c.voice_answer, c.content,
+                           c.search_tsv,
+                           ts_rank(c.search_tsv, tq.q_and) AS fts,
+                           word_similarity($2, c.search_text) AS sim,
+                           row_number() OVER (ORDER BY
+                               CASE WHEN c.search_tsv @@ tq.q_and THEN 2
+                                    WHEN tq.q_or IS NOT NULL AND c.search_tsv @@ tq.q_or THEN 1
+                                    ELSE 0 END DESC,
+                               GREATEST(
+                                   ts_rank(c.search_tsv, COALESCE(tq.q_or, tq.q_and)),
+                                   word_similarity($2, c.search_text)
+                               ) DESC,
+                               c.priority DESC,
+                               c.hit_count DESC
+                           ) AS ord
+                    FROM cand c, tq
+                    ORDER BY ord
+                    LIMIT $3
+                ),
+                -- How much of the QUESTION a hit covers, each query word
+                -- weighted by how rare it is in this campaign's knowledge
+                -- (idf). A hit that only shares a common word ("pay", "work")
+                -- with the question scores low. Ranking is unchanged: this
+                -- only labels the rows returned.
+                w AS (
+                    SELECT l.lexeme,
+                           ln((tot.n + 1.0) / (count(d.id) + 0.5)) AS idf
+                    FROM (SELECT DISTINCT lexeme
+                            FROM unnest(to_tsvector('english', $2))
+                           WHERE NOT (lexeme = ANY($6::text[]))) l
+                    CROSS JOIN (SELECT count(*)::numeric AS n
+                                  FROM campaign_knowledge_nodes
+                                 WHERE campaign_id = $1 AND tenant_id = $5
+                                   AND enabled) tot
+                    LEFT JOIN campaign_knowledge_nodes d
+                           ON d.campaign_id = $1 AND d.tenant_id = $5 AND d.enabled
+                          AND d.search_tsv @@ plainto_tsquery('simple', l.lexeme)
+                    GROUP BY l.lexeme, tot.n
                 )
-                SELECT c.id, c.heading, c.summary, c.voice_answer, c.content,
-                       ts_rank(c.search_tsv, tq.q_and) AS fts,
-                       word_similarity($2, c.search_text) AS sim
-                FROM cand c, tq
-                ORDER BY
-                    CASE WHEN c.search_tsv @@ tq.q_and THEN 2
-                         WHEN tq.q_or IS NOT NULL AND c.search_tsv @@ tq.q_or THEN 1
-                         ELSE 0 END DESC,
-                    GREATEST(
-                        ts_rank(c.search_tsv, COALESCE(tq.q_or, tq.q_and)),
-                        word_similarity($2, c.search_text)
-                    ) DESC,
-                    c.priority DESC,
-                    c.hit_count DESC
-                LIMIT $3
+                SELECT t.id, t.heading, t.summary, t.voice_answer, t.content,
+                       t.fts, t.sim,
+                       COALESCE((SELECT sum(w.idf) FROM w
+                                  WHERE t.search_tsv @@ plainto_tsquery('simple', w.lexeme)), 0)
+                         / NULLIF((SELECT sum(w.idf) FROM w), 0) AS coverage
+                FROM top_k t
+                ORDER BY t.ord
                 """,
-                campaign_id, q, k, _WORD_SIM_FLOOR, tenant_id,
+                campaign_id, q, k, _WORD_SIM_FLOOR, tenant_id, list(_COVERAGE_IGNORED_LEXEMES),
             )
             if rows and bump_hits:
                 # analytics: best-effort hit_count bump, same txn (cheap).
@@ -220,7 +281,11 @@ async def retrieve_knowledge(
                     [r["id"] for r in rows],
                     tenant_id,
                 )
-            return [dict(r) for r in rows]
+            out = [dict(r) for r in rows]
+            for row in out:
+                if row.get("coverage") is not None:
+                    row["coverage"] = float(row["coverage"])
+            return out
     except Exception as exc:
         logger.warning("retrieve_knowledge failed campaign=%s: %s", str(campaign_id)[:12], exc)
         if raise_on_error:
@@ -273,6 +338,12 @@ def retrieve_pinned_knowledge(
         phrase = 1 if q in blob else 0
         priority = int(node.get("priority") or 0)
         score = phrase * 100.0 + exact * 10.0 + fuzzy * 5.0
+        content_tokens = {
+            t for t in q_tokens
+            if t not in _COVERAGE_STOPWORDS and t not in _NUMBER_WORDS and not t.isdigit()
+        }
+        if content_tokens:
+            node["coverage"] = len(content_tokens & doc_tokens) / len(content_tokens)
         ranked.append((score, priority, -index, node))
     ranked.sort(key=lambda item: (item[0], item[1], item[2]), reverse=True)
     return [item[3] for item in ranked[: max(1, int(k or 1))]]

@@ -111,6 +111,54 @@ _QUESTION_SIGNAL = re.compile(
 )
 
 
+_STOPWORDS = frozenset(
+    "a an the and or but if then so of to in on at by for with from about as into "
+    "is are was were be been being am do does did done have has had having can could "
+    "will would shall should may might must i me my mine we us our you your yours he "
+    "him his she her it its they them their this that these those there here what "
+    "which who whom whose when where why how not no yes yeah ok okay please just "
+    "also very really any some all more most much many than too up out".split()
+)
+
+# Share of the question the best knowledge hit actually covers (idf-weighted,
+# see retrieval.py) below which the hit is treated as NOT answering it.
+# Measured on prod 2026-09-29 over 2,354 real example questions across 24
+# campaigns: 0.30% of real questions fall below 0.5, while off-topic probes
+# (Klarna, weather, flights, car insurance, football, bitcoin) sit at a median
+# of 0.23 and a max of 0.53.
+KNOWLEDGE_MIN_COVERAGE = float(os.getenv("KNOWLEDGE_MIN_COVERAGE", "0.5"))
+
+
+def content_words(text: str) -> list[str]:
+    """The words of an utterance that carry meaning for a knowledge search."""
+    tokens = re.findall(r"[a-z0-9]+", (text or "").lower())
+    return [t for t in tokens if len(t) > 1 and t not in _STOPWORDS]
+
+
+def needs_previous_turn_context(text: str) -> bool:
+    """True for a follow-up too thin to search on its own ("and the price?").
+
+    The previous caller turn used to be appended to EVERY query. On call
+    d644f0ea (2026-09-28) "does Did you work with my EPOs?" was searched as
+    "work epos total twenty one dot ninety nine" and lost the section that
+    tells the agent to ask which EPOS; alone it retrieves it.
+    """
+    return len(content_words(text)) < 2
+
+
+def knowledge_match_is_weak(hits: list[dict]) -> bool:
+    """True when no retrieved node covers enough of the question to answer it.
+
+    Nodes without a coverage figure (older retrieval paths) are trusted, so
+    this can only ever ADD caution, never remove knowledge.
+    """
+    coverages = [h.get("coverage") for h in hits if isinstance(h, dict)]
+    known = [float(c) for c in coverages if c is not None]
+    if not known or len(known) < len(coverages):
+        return False
+    return max(known) < KNOWLEDGE_MIN_COVERAGE
+
+
 def should_retrieve_knowledge(text: str) -> bool:
     """Decide whether a caller turn warrants a knowledge-base lookup.
 
