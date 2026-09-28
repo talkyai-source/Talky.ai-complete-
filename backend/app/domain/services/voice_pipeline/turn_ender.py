@@ -108,6 +108,55 @@ def _resolve_transcript_target_call_id(session) -> Optional[str]:
     return target
 
 
+# Caller words that arrive this long after the turn began are the caller
+# talking over the reply, not a trailing copy of the words that started it.
+_TALKED_OVER_AFTER_S = 1.5
+_SPEAKING_FLAG_FRESH_S = 8.0
+_COURTESY_WORDS = frozenset(
+    "thanks thank you cheers bye goodbye ta lovely great ok okay alright take care "
+    "see ya then".split()
+)
+
+
+def _is_courtesy(text: str) -> bool:
+    """A short 'thank you' / 'cheers' / 'take care' -- the caller closing too."""
+    words = re.findall(r"[a-z]+", text.lower())
+    return 0 < len(words) <= 4 and all(w in _COURTESY_WORDS for w in words)
+
+
+def caller_talking_over_close(session, turn_started_at: float) -> bool:
+    """True when the caller has the floor or spoke during this reply.
+
+    Call d644f0ea (2026-09-28): the caller was correcting their number when a
+    re-issued reply ("Thanks, I'll pass that on...") carried a hangup; their
+    words streamed in from 20:02:28 and the call was cut at 20:02:31. Hanging
+    up over someone who is still talking is never a clean close, on any
+    campaign. A backchannel or a goodbye said over the agent's goodbye does
+    not count -- the caller is closing too.
+    """
+    newest = str(getattr(session, "current_user_input", "") or "").strip()
+    if newest and (
+        _is_backchannel(newest)
+        or contains_explicit_goodbye(newest)
+        or _is_courtesy(newest)
+    ):
+        return False
+    # The floor flag has been stuck True before (see playback_gate); trust it
+    # only while fresh, so a stuck flag can never keep a call open forever.
+    since = getattr(session, "_caller_speaking_since", None)
+    if (
+        bool(getattr(session, "_caller_speaking", False))
+        and isinstance(since, (int, float))
+        and time.monotonic() - since < _SPEAKING_FLAG_FRESH_S
+    ):
+        return True
+    last_words_at = getattr(session, "_caller_last_text_at", None)
+    return (
+        isinstance(last_words_at, (int, float))
+        and last_words_at > turn_started_at + _TALKED_OVER_AFTER_S
+    )
+
+
 class TurnEnder:
     """Runs the end-of-turn LLM+TTS cycle with all pre-turn guards."""
 
@@ -124,6 +173,7 @@ class TurnEnder:
         transcript_alternatives: Any = _CONTACT_EVIDENCE_UNSET,
     ) -> None:
         call_id = session.call_id
+        turn_started_at = time.monotonic()
         # Prefer the transcript captured at SCHEDULE time. A barge-in can reset
         # session.current_user_input to "" before this (detached) task reads it,
         # which would strand the turn as "Empty transcript, skipping" and
@@ -981,6 +1031,18 @@ class TurnEnder:
                             "end_call_stripped_question_open call_id=%s turn=%s — "
                             "model asked for a hangup on its first reply, with a "
                             "question, or with a contact capture still open; "
+                            "keeping call alive",
+                            call_id[:12],
+                            getattr(session, "turn_id", None),
+                        )
+                        try:
+                            session._end_call_requested = False
+                        except Exception:
+                            pass
+                    elif caller_talking_over_close(session, turn_started_at):
+                        logger.info(
+                            "end_call_stripped_caller_talking call_id=%s turn=%s — "
+                            "model asked to hang up while the caller was speaking; "
                             "keeping call alive",
                             call_id[:12],
                             getattr(session, "turn_id", None),
