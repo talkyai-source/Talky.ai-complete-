@@ -191,3 +191,10 @@ def test_differently_worded_repeats_are_recognised():
     assert is_repeated_question("Would you prefer him to call you or reach you via WhatsApp?", earlier)
     assert not is_repeated_question("What number should we use for his WhatsApp message?", earlier)
     assert not is_repeated_question("Is that okay?", ["Is that okay?", "Is that okay?"])
+
+
+@pytest.mark.asyncio
+async def test_a_price_split_across_tokens_is_spoken_whole_and_kept(monkeypatch):
+    """"£11." then "99 ..." must not become "£11" (ungrounded) + "99"."""
+    spoken = await _spoken(["Dojo Plus is £11.", "99 per location each month."], monkeypatch)
+    assert spoken == ["Dojo Plus is £11.99 per location each month."]

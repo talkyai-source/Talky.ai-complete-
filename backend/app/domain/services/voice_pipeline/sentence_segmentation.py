@@ -111,7 +111,14 @@ def find_sentence_end(text: str, allow_clause: bool = False) -> int:
                 # After the ellipsis just continue scanning — don't return.
             elif i + 1 < len(text) and text[i + 1] == " ":
                 return i
-            elif i + 1 == len(text) and is_terminal_period_boundary(text, i):
+            elif (
+                i + 1 == len(text)
+                # "1." / "£11." at the end of what has arrived may be half of
+                # a decimal: wait for the next token instead of speaking
+                # "one." and "five percent" (or "£11" and "99") separately.
+                and not (i > 0 and text[i - 1].isdigit())
+                and is_terminal_period_boundary(text, i)
+            ):
                 return i
             elif _is_missing_space_boundary(text, i):
                 return i

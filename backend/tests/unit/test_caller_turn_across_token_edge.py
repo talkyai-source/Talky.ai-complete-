@@ -34,7 +34,7 @@ class _Stream:
             yield chunk
 
 
-async def _spoken(chunks, monkeypatch):
+async def _spoken(chunks, monkeypatch, prompt="Use plain spoken text only."):
     monkeypatch.setenv("TELEPHONY_FILLER_DELAY_MS", "0")
     service = VoicePipelineService(
         stt_provider=AsyncMock(),
@@ -50,7 +50,7 @@ async def _spoken(chunks, monkeypatch):
         campaign_id="campaign-1",
         lead_id="lead-1",
         provider_call_id="provider-1",
-        system_prompt="Use plain spoken text only.",
+        system_prompt=prompt,
         voice_id="voice-1",
     )
     session.barge_in_event = asyncio.Event()
@@ -105,6 +105,10 @@ async def test_a_decimal_split_across_tokens_is_not_a_boundary(monkeypatch):
     spoken = await _spoken(
         ["The rate is 1.", "5 percent on card payments.", " Does that work for you?"],
         monkeypatch,
+        # A real rate comes from what the model was given (grounded_figures).
+        prompt="Use plain spoken text only. The card rate is 1.5 percent.",
     )
-    joined = " ".join(spoken)
-    assert "5 percent" in joined and "Does that work" in joined, spoken
+    # The decimal is spoken whole -- not "The rate is 1." then "5 percent".
+    # The old assertion ("5 percent" somewhere) passed while it WAS split.
+    assert spoken[0] == "The rate is 1.5 percent on card payments.", spoken
+    assert "Does that work" in " ".join(spoken), spoken
