@@ -46,6 +46,54 @@ class TranscriptTurn:
         }
 
 
+def conversation_turns(turns: Optional[List[Dict[str, Any]]]) -> List[Dict[str, Any]]:
+    """The conversation as people read it: one row per spoken line.
+
+    The buffer records every STT interim as its own caller row
+    (``is_final=False``, event_type ``update``) so live consumers can react to
+    partial speech. Stored and shown as-is, a caller who said one number read
+    "It's", "It's plus", "It's plus nine", ... as a dozen lines (2026-09-28,
+    call b847f447: 132 rows for 24 turns).
+
+    Within each run of consecutive caller rows for the same turn: keep the
+    final recognitions (dropping exact repeats), or — if the line never
+    finalised, e.g. the caller hung up mid-sentence — the latest partial.
+    Rows with no ``is_final`` (older calls, agent lines) count as final.
+    """
+    out: List[Dict[str, Any]] = []
+    group: List[Dict[str, Any]] = []
+
+    def flush() -> None:
+        if not group:
+            return
+        finals = [t for t in group if t.get("is_final") is not False]
+        kept = finals or [group[-1]]
+        for turn in kept:
+            text = str(turn.get("content") or "").strip()
+            previous = out[-1] if out else None
+            if (
+                previous is not None
+                and previous.get("role") == turn.get("role")
+                and str(previous.get("content") or "").strip() == text
+            ):
+                continue
+            out.append(turn)
+        group.clear()
+
+    for turn in turns or []:
+        if not isinstance(turn, dict):
+            continue
+        if turn.get("role") != "user":
+            flush()
+            out.append(turn)
+            continue
+        if group and group[-1].get("turn_index") != turn.get("turn_index"):
+            flush()
+        group.append(turn)
+    flush()
+    return out
+
+
 class TranscriptService:
     """
     Handles transcript accumulation and storage.
@@ -260,7 +308,7 @@ class TranscriptService:
             List of turn dictionaries
         """
         turns = self.get_turns(call_id)
-        return [turn.to_dict() for turn in turns]
+        return conversation_turns([turn.to_dict() for turn in turns])
     
     def get_metrics(self, call_id: str) -> Dict[str, int]:
         """

@@ -21,6 +21,7 @@ from app.domain.services.telephony.termination import (
     request_confirmed_hangup,
 )
 from app.utils.tenant_filter import verify_tenant_access
+from app.domain.services.transcript_service import conversation_turns
 
 logger = logging.getLogger(__name__)
 
@@ -1651,7 +1652,9 @@ async def get_call_transcript(
             else:
                 return {
                     "format": "json",
-                    "turns": transcript_data.get("turns", []),
+                    # Older calls stored every STT partial as its own row;
+                    # show them one line per spoken turn.
+                    "turns": conversation_turns(transcript_data.get("turns") or []),
                     "metadata": {
                         "word_count": transcript_data.get("word_count", 0),
                         "turn_count": transcript_data.get("turn_count", 0),
@@ -1683,7 +1686,7 @@ async def get_call_transcript(
         else:
             return {
                 "format": "json",
-                "turns": call_data.get("transcript_json", []),
+                "turns": conversation_turns(call_data.get("transcript_json") or []),
                 "metadata": {},
                 "call_id": call_id,
             }
