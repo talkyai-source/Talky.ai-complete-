@@ -19,9 +19,13 @@ provenance for everything written here is ``caller_stated``, never
 forbids.
 
 ``email`` and ``phone`` additionally carry the read-back confirmation state and
-audit values from the confirm-before-commit machine.  A pending value stays in
-memory and produces no row at all; only the caller-approved canonical value can
-leave the live pipeline.
+audit values from the confirm-before-commit machine.  Since 2026-09-28 (owner
+decision) a value the machine parsed out of the caller's words and is reading
+back (``awaiting_confirmation``) is written too, as ``confirmed=FALSE``, so a
+number the caller gave is not lost when the read-back never completes. Nothing
+else is: a value needing clarification, invalid, cancelled, or seeded from the
+lead record (plain ``CallState.email`` without a capture) never leaves memory.
+For now only email and phone are captured live.
 
 WHAT MUST NOT HAPPEN
 --------------------
@@ -65,10 +69,14 @@ CAPTURE_SOURCE = "caller_stated"
 SLOT_FIELDS: tuple[tuple[str, str, str, Optional[str]], ...] = (
     ("email", "email", "email", "email_confirmed"),
     ("phone", "phone", "phone", "phone_confirmed"),
-    ("follow_up", "follow_up", "text", None),
-    ("project_type", "project_type", "text", None),
-    ("bidding_active", "bidding_active", "single_select", None),
 )
+# follow_up / project_type / bidding_active were captured here until 2026-09-28;
+# the owner narrowed live capture to what the caller gives as contact details.
+# Add a row to widen it again — the table and the lead panel take any field.
+
+# Capture states whose value is WRITTEN. pending_contact_revocations decides
+# when an already-written row is withdrawn.
+_KEPT_CAPTURE_STATES = ("confirmed", "awaiting_confirmation")
 
 _WRITTEN_ATTR = "_lead_capture_written"
 _IS_TEST_ATTR = "_lead_capture_is_test"
@@ -187,21 +195,26 @@ def snapshot_slots(captured_slots: Any) -> dict[str, dict]:
                 CaptureStatus,
             )
 
-            # S7: contact fields do not leave the in-memory confirmation loop
-            # until the caller has approved the canonical value.
+            # A value the machine parsed from the caller's words is kept while
+            # it is confirmed or being read back; confirmed only once approved.
             if (
-                capture.status is not CaptureStatus.CONFIRMED
+                capture.validation_status not in _KEPT_CAPTURE_STATES
                 or not capture.normalized_value
             ):
+                continue
+            confirmed = capture.status is CaptureStatus.CONFIRMED
+            if not confirmed and not getattr(capture, "from_caller", False):
+                # Never invented: a pending value the caller did not say
+                # (e.g. the agent's own assembled read-back) waits for a yes.
                 continue
             out[field_key] = {
                 "value": capture.normalized_value,
                 "field_type": field_type,
-                "confirmed": True,
+                "confirmed": confirmed,
                 "raw_value": capture.raw_value,
                 "normalized_value": capture.normalized_value,
                 "validation_status": capture.validation_status,
-                "confirmed_at": capture.confirmed_at,
+                "confirmed_at": capture.confirmed_at if confirmed else None,
             }
             continue
         raw = getattr(captured_slots, attr, None)
@@ -241,7 +254,14 @@ def snapshot_slots(captured_slots: Any) -> dict[str, dict]:
 
 
 def pending_contact_revocations(session: Any) -> dict[str, str]:
-    """Caller-stated contacts written by this session that lost confirmation."""
+    """Caller-stated contacts written by this session that must stop showing.
+
+    Two cases: the value was withdrawn or became unusable (clarification,
+    invalid, cancelled), or a CONFIRMED value is being replaced by a pending
+    correction — the upsert refuses to put an unconfirmed value over a
+    confirmed one, so the old row is tombstoned first and the pending
+    replacement is then written in its place.
+    """
     written = getattr(session, _WRITTEN_ATTR, None)
     captured_slots = getattr(session, "captured_slots", None)
     if not isinstance(written, dict) or captured_slots is None:
@@ -252,11 +272,25 @@ def pending_contact_revocations(session: Any) -> dict[str, str]:
     revocations: dict[str, str] = {}
     for field_key in ("email", "phone"):
         capture = getattr(captured_slots, f"{field_key}_capture", None)
-        if (
-            field_key in written
-            and capture is not None
-            and capture.status is not CaptureStatus.CONFIRMED
-        ):
+        previous = written.get(field_key)
+        if previous is None or capture is None:
+            continue
+        previous_value = previous[0] if isinstance(previous, tuple) else None
+        previous_confirmed = bool(previous[1]) if isinstance(previous, tuple) else True
+        if capture.status in (CaptureStatus.CANCELLED, CaptureStatus.INVALID):
+            withdrawn = True
+        elif capture.status is CaptureStatus.NEEDS_CLARIFICATION:
+            # A rejected read-back clears normalized_value ("no, that's wrong");
+            # an exhausted unclear loop keeps it — the caller never disowned
+            # the value they gave, so its unconfirmed row stays.
+            withdrawn = (
+                previous_confirmed
+                or not capture.normalized_value
+                or capture.normalized_value != previous_value
+            )
+        else:
+            withdrawn = previous_confirmed and capture.status is not CaptureStatus.CONFIRMED
+        if withdrawn:
             revocations[field_key] = capture.validation_status
     return revocations
 

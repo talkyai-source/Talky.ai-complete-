@@ -208,6 +208,9 @@ export interface Call {
     /** Contact the caller GAVE during the call (not the line they rang from). */
     captured_phone?: string | null;
     captured_email?: string | null;
+    /** false = the caller said it but never confirmed the read-back. */
+    captured_phone_confirmed?: boolean | null;
+    captured_email_confirmed?: boolean | null;
     /** True when a reviewer has left a voice note on this call. */
     has_feedback?: boolean;
     /** Direction defaults to outbound for historical rows. */
@@ -400,6 +403,8 @@ interface CallListItem {
     lead_outcome?: string | null;
     captured_phone?: string | null;
     captured_email?: string | null;
+    captured_phone_confirmed?: boolean | null;
+    captured_email_confirmed?: boolean | null;
     has_feedback?: boolean;
     campaign_id?: string | null;
     direction?: "inbound" | "outbound" | string;
@@ -707,6 +712,8 @@ class DashboardApi {
             lead_outcome: item.lead_outcome,
             captured_phone: item.captured_phone ?? null,
             captured_email: item.captured_email ?? null,
+            captured_phone_confirmed: item.captured_phone_confirmed ?? null,
+            captured_email_confirmed: item.captured_email_confirmed ?? null,
             has_feedback: item.has_feedback,
             direction: item.direction === "inbound" ? "inbound" : "outbound",
             from_number: item.from_number ?? item.caller_ani,

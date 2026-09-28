@@ -49,6 +49,12 @@ class ContactCaptureState:
     attempts: int = 0
     segments: tuple[str, ...] = ()
     clarification_prompt: Optional[str] = None
+    # True when the value was parsed out of the caller's own words by this
+    # machine. False for a value lifted from a scalar slot (a legacy restore,
+    # or an address the AGENT assembled and read back — turn_runner seeds
+    # those). Only a caller-parsed value may be stored before the caller
+    # confirms it (lead_slot_capture, 2026-09-28).
+    from_caller: bool = True
 
     def __post_init__(self) -> None:
         # Status is the source of truth; keep the audit string impossible to

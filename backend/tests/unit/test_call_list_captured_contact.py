@@ -35,3 +35,23 @@ def test_the_list_item_carries_the_captured_contact():
         status="ended", captured_phone="+923085397539", captured_email=None,
     )
     assert item.model_dump()["captured_phone"] == "+923085397539"
+
+
+@pytest.mark.parametrize("kind", ["phone", "email"])
+def test_the_confirmed_flag_comes_from_the_same_row_as_the_value(kind):
+    """2026-09-28: a stated-but-unconfirmed contact is listed, so the list must
+    say which. The flag subquery picks the SAME row (same filter + order)."""
+    value_sql = " ".join(_captured_contact_sql(kind).split())
+    flag_sql = " ".join(_captured_contact_sql(kind, confirmed_flag=True).split())
+    assert flag_sql.startswith("(SELECT d.confirmed ")
+    assert value_sql.split(" FROM ", 1)[1] == flag_sql.split(" FROM ", 1)[1]
+
+
+def test_the_list_item_says_when_a_contact_is_unconfirmed():
+    item = CallListItem(
+        id="4291700f", timestamp="2026-09-24T11:10:00Z", to_number="+923001234567",
+        status="ended", captured_phone="+923085397539", captured_phone_confirmed=False,
+    )
+    dumped = item.model_dump()
+    assert dumped["captured_phone_confirmed"] is False
+    assert dumped["captured_email_confirmed"] is None

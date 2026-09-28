@@ -149,11 +149,14 @@ def test_an_unconfirmed_phone_is_not_persisted_at_all():
     assert "phone" not in snap
 
 
-def test_a_yes_no_slot_is_stored_as_words_not_a_python_bool():
-    """`str(False)` in a CRM field reads as the string 'False'. Store the
-    answer the caller actually gave."""
-    assert snapshot_slots(CallState(bidding_active=False))["bidding_active"]["value"] == "no"
-    assert snapshot_slots(CallState(bidding_active=True))["bidding_active"]["value"] == "yes"
+def test_only_contact_details_are_captured_live():
+    """2026-09-28 (owner): live capture is narrowed to the contact details the
+    caller gives. A callback day, project type or yes/no answer is no longer
+    written as a lead detail."""
+    snap = snapshot_slots(
+        CallState(follow_up="tuesday", project_type="roofing", bidding_active=True)
+    )
+    assert snap == {}
 
 
 def test_a_missing_slot_store_is_not_an_error():
@@ -167,13 +170,16 @@ async def test_a_call_with_stated_facts_writes_them_with_caller_provenance():
     """THE P0. Before this wiring the count here was 0 for every call ever
     placed."""
     conn = _FakeConn()
-    session = _session(email="dana@acme.co", email_confirmed=True, follow_up="tuesday")
+    session = _session(
+        email="dana@acme.co", email_confirmed=True,
+        phone="+442079460958", phone_confirmed=True,
+    )
 
     written = await _flush(session, conn)
 
     assert written == 2
     keys = {args[A_KEY] for _sql, args in conn.inserts}
-    assert keys == {"email", "follow_up"}
+    assert keys == {"email", "phone"}
     for _sql, args in conn.inserts:
         assert args[A_SOURCE] == CAPTURE_SOURCE == "caller_stated"
         assert args[A_TENANT] == TENANT
@@ -272,8 +278,10 @@ async def test_the_same_fact_is_not_rewritten_every_turn():
 
 @pytest.mark.asyncio
 async def test_a_value_reaches_the_database_only_once_confirmed():
-    """The read-back loop confirms an email several turns after it was heard.
-    Nothing is written while it is pending; the confirmation is what writes."""
+    """A plain CallState value with no capture record (e.g. seeded from the
+    lead record, turn_runner) is not something the caller stated on this call:
+    nothing is written while it is unconfirmed. Caller-stated pending values
+    go through the capture machine — see the *_before_confirmation tests."""
     conn = _FakeConn()
     session = _session(email="dana@acme.co", email_confirmed=False)
 
@@ -299,11 +307,15 @@ async def test_a_corrected_and_reconfirmed_value_is_written():
 @pytest.mark.asyncio
 async def test_the_is_test_flag_is_read_once_per_call_not_once_per_turn():
     conn = _FakeConn()
-    session = _session(email="a@b.co")
+    session = _session(email="a@b.co", email_confirmed=True)
     await _flush(session, conn)
-    session.captured_slots = CallState(email="a@b.co", follow_up="friday")
+    session.captured_slots = CallState(
+        email="a@b.co", email_confirmed=True,
+        phone="+442079460958", phone_confirmed=True,
+    )
     await _flush(session, conn)
 
+    assert len(conn.inserts) == 2
     assert len(conn.is_test_lookups) == 1
 
 
@@ -332,9 +344,11 @@ async def test_a_broken_pool_does_not_propagate_into_the_call():
 
 @pytest.mark.asyncio
 async def test_one_bad_field_does_not_lose_the_others():
-    """An overlong note must not cost the call its email."""
+    """A phone that fails E.164 validation must not cost the call its email."""
     conn = _FakeConn()
-    session = _session(email="dana@acme.co", email_confirmed=True, follow_up="x" * 5000)
+    session = _session(
+        email="dana@acme.co", email_confirmed=True, phone="12345", phone_confirmed=True
+    )
 
     assert await _flush(session, conn) == 1
     assert conn.inserts[0][1][A_KEY] == "email"
@@ -730,3 +744,139 @@ async def test_capture_turn_slots_never_raises_when_the_state_map_explodes(
     )
 
     assert await capture_turn_slots(session, pool=_FakePool(conn)) == 0
+
+
+# -- 2026-09-28: a contact the caller SAID is kept before confirmation ---------
+#
+# 4291700f: the caller gave a number, the read-back never completed, and the
+# number appeared nowhere in the UI. Owner rule: store a contact if and only
+# if the caller provided it — never invented — labelled unconfirmed until the
+# caller approves the read-back.
+
+A_STATUS = 12
+
+
+def _stated(utterance: str) -> CallState:
+    from app.services.scripts.call_state_tracker import update_state_from_user_turn
+
+    return update_state_from_user_turn(CallState(), utterance)
+
+
+def _phone_state(status, normalized="+14155552671"):
+    from dataclasses import replace
+
+    from app.domain.services.voice_pipeline.contact_capture import CaptureStatus
+
+    base = _stated("call me on +1 415 555 2671")
+    capture = replace(base.phone_capture, status=status, normalized_value=normalized)
+    # Keep the scalar slot in step with the machine, as call_state_tracker does.
+    return replace(
+        base,
+        phone=normalized,
+        phone_confirmed=status is CaptureStatus.CONFIRMED,
+        phone_capture=capture,
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_number_the_caller_said_is_kept_before_confirmation():
+    conn = _FakeConn()
+    session = SimpleNamespace(call_id=CALL, captured_slots=_stated("call me on +1 415 555 2671"))
+
+    assert await _flush(session, conn) == 1
+    args = conn.inserts[0][1]
+    assert args[A_KEY] == "phone"
+    assert args[A_VALUE] == "+14155552671"
+    assert args[A_SOURCE] == "caller_stated"
+    assert args[A_CONFIRMED] is False
+    assert args[A_STATUS] == "awaiting_confirmation"
+
+
+@pytest.mark.asyncio
+async def test_an_email_the_caller_said_is_kept_and_then_upgraded_on_confirmation():
+    from app.services.scripts.call_state_tracker import update_state_from_user_turn
+
+    conn = _FakeConn()
+    pending = _stated("bob at acme dot com")
+    session = SimpleNamespace(call_id=CALL, captured_slots=pending)
+    assert await _flush(session, conn) == 1
+    assert conn.inserts[-1][1][A_CONFIRMED] is False
+
+    session.captured_slots = update_state_from_user_turn(
+        pending, "yes, that's right", readback_issued=True, confirmation_verdict="affirm"
+    )
+    assert await _flush(session, conn) == 1
+    assert conn.inserts[-1][1][A_VALUE] == "bob@acme.com"
+    assert conn.inserts[-1][1][A_CONFIRMED] is True
+
+
+def _revokes(conn):
+    return [a for s, a in conn.statements if "UPDATE call_lead_details" in s]
+
+
+@pytest.mark.asyncio
+async def test_a_rejected_readback_withdraws_the_unconfirmed_value():
+    """'No, that's wrong' — the heard value was not what the caller said."""
+    from app.domain.services.voice_pipeline.contact_capture import CaptureStatus
+
+    conn = _FakeConn()
+    session = SimpleNamespace(call_id=CALL, captured_slots=_phone_state(CaptureStatus.AWAITING_CONFIRMATION))
+    await _flush(session, conn)
+
+    session.captured_slots = _phone_state(CaptureStatus.NEEDS_CLARIFICATION, normalized=None)
+    await _flush(session, conn)
+    assert len(_revokes(conn)) == 1
+
+
+@pytest.mark.asyncio
+async def test_an_unclear_readback_keeps_the_value_the_caller_gave():
+    """Three unclear replies exhaust the loop but keep the candidate; the
+    caller never disowned it, so the unconfirmed row stays."""
+    from app.domain.services.voice_pipeline.contact_capture import CaptureStatus
+
+    conn = _FakeConn()
+    session = SimpleNamespace(call_id=CALL, captured_slots=_phone_state(CaptureStatus.AWAITING_CONFIRMATION))
+    await _flush(session, conn)
+
+    session.captured_slots = _phone_state(CaptureStatus.NEEDS_CLARIFICATION)
+    await _flush(session, conn)
+    assert _revokes(conn) == []
+
+
+@pytest.mark.asyncio
+async def test_a_cancelled_contact_is_withdrawn():
+    from app.domain.services.voice_pipeline.contact_capture import CaptureStatus
+
+    conn = _FakeConn()
+    session = SimpleNamespace(call_id=CALL, captured_slots=_phone_state(CaptureStatus.AWAITING_CONFIRMATION))
+    await _flush(session, conn)
+
+    session.captured_slots = _phone_state(CaptureStatus.CANCELLED, normalized=None)
+    await _flush(session, conn)
+    assert len(_revokes(conn)) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_pending_correction_replaces_a_confirmed_value_after_tombstoning_it():
+    from app.domain.services.voice_pipeline.contact_capture import CaptureStatus
+
+    conn = _FakeConn()
+    session = SimpleNamespace(call_id=CALL, captured_slots=_phone_state(CaptureStatus.CONFIRMED))
+    await _flush(session, conn)
+
+    session.captured_slots = _phone_state(
+        CaptureStatus.AWAITING_CONFIRMATION, normalized="+14155550000"
+    )
+    await _flush(session, conn)
+    assert len(_revokes(conn)) == 1
+    last = conn.inserts[-1][1]
+    assert last[A_VALUE] == "+14155550000" and last[A_CONFIRMED] is False
+
+
+def test_an_email_the_agent_assembled_is_not_stored_until_the_caller_confirms():
+    """turn_runner seeds the address the AGENT read back as a pending value.
+    The caller never said it in that form, so it is not stored unconfirmed."""
+    snap = snapshot_slots(CallState(email="agent@built.com", email_confirmed=False))
+    assert snap == {}
+    snap = snapshot_slots(CallState(email="agent@built.com", email_confirmed=True))
+    assert snap["email"]["confirmed"] is True

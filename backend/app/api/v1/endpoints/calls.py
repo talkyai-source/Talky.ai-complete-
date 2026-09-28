@@ -81,16 +81,23 @@ def _inbound_config_id(call: Any) -> Optional[str]:
     return str(value) if value else None
 
 
-def _captured_contact_sql(kind: str) -> str:
+def _captured_contact_sql(kind: str, *, confirmed_flag: bool = False) -> str:
     """Scalar subquery: the contact of ``kind`` the caller gave on call ``c``.
 
     Prefers a confirmed value, then the most recent. Values the capture flow
     rejected (invalid / cancelled / still being clarified) are never shown as
     a lead's number. Tenant-scoped explicitly — this runs under bypass_rls.
+    With ``confirmed_flag`` it returns whether that same row was confirmed by
+    the caller (a stated-but-unconfirmed contact is shown, labelled).
     """
     if kind not in ("phone", "email"):
         raise ValueError(kind)
-    return f"""(SELECT COALESCE(NULLIF(BTRIM(d.normalized_value), ''), BTRIM(d.value))
+    selected = (
+        "d.confirmed"
+        if confirmed_flag
+        else "COALESCE(NULLIF(BTRIM(d.normalized_value), ''), BTRIM(d.value))"
+    )
+    return f"""(SELECT {selected}
                   FROM call_lead_details d
                  WHERE d.call_id = c.id
                    AND d.tenant_id = c.tenant_id
@@ -221,6 +228,10 @@ class CallListItem(BaseModel):
     # "Private caller" and was never marked a hot lead.
     captured_phone: Optional[str] = None
     captured_email: Optional[str] = None
+    # False = the caller said it but never confirmed the read-back (shown,
+    # labelled unconfirmed); None = no contact captured.
+    captured_phone_confirmed: Optional[bool] = None
+    captured_email_confirmed: Optional[bool] = None
     # Whether a reviewer has left a voice note on this call. Computed per row by
     # an EXISTS against call_feedback, so it varies with the data instead of
     # defaulting to False forever — a list flag wired to nothing looks identical
@@ -1322,7 +1333,11 @@ async def list_calls(
                            EXISTS (SELECT 1 FROM call_feedback f
                                     WHERE f.call_id = c.id) AS has_feedback,
                            {_captured_contact_sql("phone")} AS captured_phone,
-                           {_captured_contact_sql("email")} AS captured_email
+                           {_captured_contact_sql("email")} AS captured_email,
+                           {_captured_contact_sql("phone", confirmed_flag=True)}
+                               AS captured_phone_confirmed,
+                           {_captured_contact_sql("email", confirmed_flag=True)}
+                               AS captured_email_confirmed
                     FROM calls c
                     LEFT JOIN campaigns camp ON camp.id = c.campaign_id
                     WHERE {where}
@@ -1371,6 +1386,8 @@ async def list_calls(
                     lead_outcome=row["lead_outcome"],
                     captured_phone=row["captured_phone"],
                     captured_email=row["captured_email"],
+                    captured_phone_confirmed=row["captured_phone_confirmed"],
+                    captured_email_confirmed=row["captured_email_confirmed"],
                     has_feedback=bool(row["has_feedback"]),
                     direction=row_direction,
                     caller_ani=inbound_from,

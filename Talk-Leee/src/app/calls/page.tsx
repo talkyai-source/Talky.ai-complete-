@@ -27,6 +27,7 @@ import { useAuth } from "@/lib/auth-context";
 import {
     defaultCallHistoryWorkflow,
     callHasCapturedContact,
+    capturedContactParts,
     isActiveCallStatus,
     readCallHistoryWorkflow,
     writeCallHistoryWorkflow,
@@ -148,12 +149,20 @@ function CapturedContact({ call }: { call: Call }) {
     // The number / email the caller GAVE during the call — the one to follow
     // up on. Distinct from the line they rang from (often an extension or a
     // withheld number).
-    const phone = call.captured_phone?.trim();
-    const email = call.captured_email?.trim();
-    if (!phone && !email) return null;
+    // A contact the caller said but never confirmed is still shown (it is
+    // what they gave), labelled so nobody mistakes it for a verified one.
+    const parts = capturedContactParts(call);
+    if (parts.length === 0) return null;
     return (
         <span className="truncate text-xs font-semibold text-emerald-700 dark:text-emerald-300">
-            Contact: {[phone, email].filter(Boolean).join(" · ")}
+            Contact:{" "}
+            {parts.map((part, index) => (
+                <span key={part.value}>
+                    {index > 0 ? " · " : ""}
+                    {part.value}
+                    {part.confirmed ? null : <span className="font-normal text-amber-700 dark:text-amber-300"> (unconfirmed)</span>}
+                </span>
+            ))}
         </span>
     );
 }

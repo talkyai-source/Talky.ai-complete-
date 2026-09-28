@@ -150,7 +150,7 @@ function DetailRow({
                     </span>
                 ) : (
                     <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground">
-                        <AlertCircle className="h-3 w-3" /> not read back
+                        <AlertCircle className="h-3 w-3" /> not confirmed by the caller
                     </span>
                 )}
             </div>

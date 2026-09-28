@@ -147,7 +147,8 @@ async def test_an_empty_field_key_is_refused():
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "source",
-    ("caller_stated", "agent_inferred", "imported", "manual_edit"),
+    # caller_stated is the one exception since 2026-09-28 — see below.
+    ("agent_inferred", "imported", "manual_edit"),
 )
 async def test_contact_is_refused_until_machine_confirmation(source):
     svc = LeadCaptureService(pool=object())
@@ -160,6 +161,88 @@ async def test_contact_is_refused_until_machine_confirmation(source):
             source=source,
             field_type="email",
             confirmed=False,
+            validation_status="awaiting_confirmation",
+        )
+
+
+class _RecordingConn:
+    def __init__(self):
+        self.args = None
+
+    def transaction(self):
+        return _CM(None)
+
+    async def execute(self, *_a):
+        return None
+
+    async def fetchrow(self, _sql, *args):
+        self.args = args
+        return {"id": "row"}
+
+
+class _CM:
+    def __init__(self, v):
+        self.v = v
+
+    async def __aenter__(self):
+        return self.v
+
+    async def __aexit__(self, *_a):
+        return None
+
+
+class _RecordingPool:
+    def __init__(self, conn):
+        self.conn = conn
+
+    def acquire(self, **_kw):
+        return _CM(self.conn)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("field_type", "value", "stored"),
+    (("phone", "+1 415 555 2671", "+14155552671"), ("email", "Bob@Acme.com", "bob@acme.com")),
+)
+async def test_a_contact_the_caller_stated_is_stored_unconfirmed(field_type, value, stored):
+    """2026-09-28 (owner): what the caller SAID is kept while the read-back is
+    pending, as confirmed=FALSE — validated exactly like a confirmed value."""
+    conn = _RecordingConn()
+    svc = LeadCaptureService(pool=_RecordingPool(conn))
+    assert await svc.capture(
+        tenant_id="11111111-1111-1111-1111-111111111111",
+        call_id="22222222-2222-2222-2222-222222222222",
+        field_key=field_type, value=value, source="caller_stated",
+        field_type=field_type, confirmed=False,
+        validation_status="awaiting_confirmation",
+    ) is True
+    assert conn.args[6] == stored
+    assert conn.args[8] is False
+    assert conn.args[12] == "awaiting_confirmation"
+    assert conn.args[13] is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "status", ("needs_clarification", "invalid", "cancelled"),
+)
+async def test_a_caller_contact_that_is_not_being_read_back_is_refused(status):
+    svc = LeadCaptureService(pool=object())
+    with pytest.raises(InvalidCaptureError, match="confirmed"):
+        await svc.capture(
+            tenant_id="t", call_id="c", field_key="phone", value="+14155552671",
+            source="caller_stated", field_type="phone", confirmed=False,
+            validation_status=status,
+        )
+
+
+@pytest.mark.asyncio
+async def test_an_unconfirmed_caller_contact_is_still_validated():
+    svc = LeadCaptureService(pool=object())
+    with pytest.raises(InvalidCaptureError, match="E.164"):
+        await svc.capture(
+            tenant_id="t", call_id="c", field_key="phone", value="4155552671",
+            source="caller_stated", field_type="phone", confirmed=False,
             validation_status="awaiting_confirmation",
         )
 

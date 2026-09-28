@@ -183,9 +183,19 @@ class LeadCaptureService:
                     "unknown contact validation_status; expected one of "
                     f"{sorted(CONTACT_VALIDATION_STATUSES)}"
                 )
-            if not confirmed or audit_status != "confirmed":
+            # 2026-09-28 (owner): a contact the caller SAID is kept even if the
+            # read-back never completed (4291700f gave a number that was never
+            # shown), stored unconfirmed. Only the caller's own parsed words
+            # may do that — never a model guess, an import or a manual edit.
+            caller_pending = (
+                source == "caller_stated"
+                and not confirmed
+                and audit_status == "awaiting_confirmation"
+            )
+            if not caller_pending and (not confirmed or audit_status != "confirmed"):
                 raise InvalidCaptureError(
-                    "email/phone must be confirmed before persistence"
+                    "email/phone must be confirmed before persistence unless "
+                    "the caller stated it and it is awaiting confirmation"
                 )
             if confirmed != (audit_status == "confirmed"):
                 raise InvalidCaptureError(

@@ -260,6 +260,9 @@ class CallState:
         # Lift those into the state machine once so every subsequent transition
         # still uses the canonical machine. This does not validate or persist a
         # legacy value; live capture always enters through ``advance_capture``.
+        # Lifted values are marked from_caller=False: turn_runner seeds an email
+        # the AGENT assembled this way, and it must not be stored as the
+        # caller's until the caller confirms it.
         if self.email and (
             self.email_capture is None
             or self.email_capture.normalized_value != self.email
@@ -279,6 +282,7 @@ class CallState:
                     normalized_value=self.email,
                     validation_status=status.value,
                     attempts=self.email_readback_attempts,
+                    from_caller=False,
                     segments=tuple(self.email.split("@", 1)) if "@" in self.email else (),
                 ),
             )
@@ -302,6 +306,7 @@ class CallState:
                     validation_status=status.value,
                     attempts=self.phone_readback_attempts,
                     segments=(self.phone,),
+                    from_caller=False,
                 ),
             )
 

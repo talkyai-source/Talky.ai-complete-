@@ -875,7 +875,11 @@ async def test_interrupted_realtime_readback_cannot_confirm_contact():
 
 def test_only_confirmed_contact_exposes_full_audit_payload_for_persistence():
     pending = update_state_from_user_turn(CallState(), "bob at acme dot com")
-    assert "email" not in snapshot_slots(pending)
+    # 2026-09-28: a caller-stated pending value is persisted, but unconfirmed.
+    pending_item = snapshot_slots(pending)["email"]
+    assert pending_item["confirmed"] is False
+    assert pending_item["validation_status"] == "awaiting_confirmation"
+    assert pending_item["confirmed_at"] is None
 
     confirmed = update_state_from_user_turn(
         pending,
@@ -951,7 +955,10 @@ async def test_realtime_confirmation_persists_canonical_value_and_audit_once():
     await bridge._observe_contact_turn("bob at acme dot com")
     if bridge._contact_tasks:
         await asyncio.gather(*tuple(bridge._contact_tasks))
-    assert not [sql for sql, _args in conn.statements if "INSERT INTO call_lead_details" in sql]
+    # 2026-09-28: the caller-stated value is written at once, unconfirmed.
+    pending = [a for sql, a in conn.statements if "INSERT INTO call_lead_details" in sql]
+    assert len(pending) == 1 and pending[0][8] is False
+    conn.statements.clear()
 
     bridge._remember_contact_turn(
         "assistant", "So that's bob at acme dot com — did I get that right?"

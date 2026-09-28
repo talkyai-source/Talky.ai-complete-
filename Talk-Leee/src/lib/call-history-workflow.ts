@@ -72,6 +72,24 @@ export function callHasCapturedContact(
     return Boolean(call.captured_phone?.trim() || call.captured_email?.trim());
 }
 
+export interface CapturedContactPart {
+    value: string;
+    /** false only when the caller said it but never confirmed the read-back. */
+    confirmed: boolean;
+}
+
+/** The contacts the caller gave, each with whether they confirmed it. */
+export function capturedContactParts(
+    call: Pick<Call, "captured_phone" | "captured_email" | "captured_phone_confirmed" | "captured_email_confirmed">,
+): CapturedContactPart[] {
+    const parts: CapturedContactPart[] = [];
+    const phone = call.captured_phone?.trim();
+    const email = call.captured_email?.trim();
+    if (phone) parts.push({ value: phone, confirmed: call.captured_phone_confirmed !== false });
+    if (email) parts.push({ value: email, confirmed: call.captured_email_confirmed !== false });
+    return parts;
+}
+
 export function inferCallLeadType(
     call: Pick<Call, "lead_outcome" | "outcome" | "status" | "captured_phone" | "captured_email">,
 ): CallHistoryLeadType {

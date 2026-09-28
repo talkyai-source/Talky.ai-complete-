@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 
 import {
+    capturedContactParts,
     inferCallLeadType,
     isCallHistoryFormComplete,
     isActiveCallStatus,
@@ -78,4 +79,15 @@ test("malformed saved workflow is ignored safely", () => {
 test("post-call form is complete only when all three key fields have content", () => {
     assert.equal(isCallHistoryFormComplete({ contact: "Ava", interest: "Pricing", nextStep: "Call Friday", completed: false }), true);
     assert.equal(isCallHistoryFormComplete({ contact: "Ava", interest: " ", nextStep: "Call Friday", completed: true }), false);
+});
+
+test("a contact the caller said but never confirmed is listed and labelled", () => {
+    // 2026-09-28: stated-but-unconfirmed contacts are now stored and shown.
+    assert.deepEqual(
+        capturedContactParts({ captured_phone: "+923085397539", captured_phone_confirmed: false, captured_email: "a@b.co", captured_email_confirmed: true }),
+        [{ value: "+923085397539", confirmed: false }, { value: "a@b.co", confirmed: true }],
+    );
+    // An older API without the flag keeps today's (confirmed) rendering.
+    assert.deepEqual(capturedContactParts({ captured_phone: "+923085397539" }), [{ value: "+923085397539", confirmed: true }]);
+    assert.deepEqual(capturedContactParts({ captured_phone: "  ", captured_email: null }), []);
 });
