@@ -3,6 +3,8 @@ import { afterEach, test } from "node:test";
 
 import {
     capturedContactParts,
+    classifyCall,
+    formatPhoneForDisplay,
     inferCallLeadType,
     isCallHistoryFormComplete,
     isActiveCallStatus,
@@ -85,9 +87,29 @@ test("a contact the caller said but never confirmed is listed and labelled", () 
     // 2026-09-28: stated-but-unconfirmed contacts are now stored and shown.
     assert.deepEqual(
         capturedContactParts({ captured_phone: "+923085397539", captured_phone_confirmed: false, captured_email: "a@b.co", captured_email_confirmed: true }),
-        [{ value: "+923085397539", confirmed: false }, { value: "a@b.co", confirmed: true }],
+        [{ kind: "phone", value: "+92 308 5397539", confirmed: false }, { kind: "email", value: "a@b.co", confirmed: true }],
     );
     // An older API without the flag keeps today's (confirmed) rendering.
-    assert.deepEqual(capturedContactParts({ captured_phone: "+923085397539" }), [{ value: "+923085397539", confirmed: true }]);
+    assert.deepEqual(capturedContactParts({ captured_phone: "+923085397539" }), [{ kind: "phone", value: "+92 308 5397539", confirmed: true }]);
     assert.deepEqual(capturedContactParts({ captured_phone: "  ", captured_email: null }), []);
+});
+
+test("a finished answered call counts as answered (status ended, outcome answered)", () => {
+    // 2026-09-28 Dojo-PC b847f447: status "ended", outcome "answered" read "0 answered".
+    assert.deepEqual(classifyCall({ status: "ended", outcome: "answered" }), { answered: true, failed: false });
+    assert.deepEqual(classifyCall({ status: "ended", outcome: "customer_hung_up" }), { answered: true, failed: false });
+    assert.deepEqual(classifyCall({ status: "ended", outcome: "no_answer" }), { answered: false, failed: true });
+    assert.deepEqual(classifyCall({ status: "ended", outcome: "voicemail" }), { answered: false, failed: false });
+    assert.deepEqual(classifyCall({ status: "completed" }), { answered: true, failed: false });
+});
+
+test("contact numbers are shown in full, grouped the way people read them", () => {
+    assert.equal(formatPhoneForDisplay("+923120750496"), "+92 312 0750496");
+    assert.equal(formatPhoneForDisplay("+447429916656"), "+44 7429 916656");
+    assert.equal(formatPhoneForDisplay("+16473476870"), "+1 647 347 6870");
+    // Unknown layout: grouped, no digit dropped.
+    assert.equal(formatPhoneForDisplay("+4791234567").replace(/ /g, ""), "+4791234567");
+    // Extensions and non-E.164 values pass through untouched.
+    assert.equal(formatPhoneForDisplay("940007"), "940007");
+    assert.equal(formatPhoneForDisplay(null), "");
 });

@@ -72,7 +72,75 @@ export function callHasCapturedContact(
     return Boolean(call.captured_phone?.trim() || call.captured_email?.trim());
 }
 
+const FAILED_CALL_OUTCOMES = new Set([
+    "busy",
+    "failed",
+    "no_answer",
+    "rejected",
+    "timeout",
+    "unavailable",
+]);
+
+// Outcomes the backend records for a call that was picked up and ran
+// (app/domain/services/call_status.py CallOutcome + the goal outcomes).
+const CONNECTED_CALL_OUTCOMES = new Set([
+    "answered",
+    "completed",
+    "customer_hung_up",
+    "agent_hung_up",
+    "goal_achieved",
+    "goal_not_achieved",
+]);
+
+export function classifyCall(call: Pick<Call, "status" | "outcome">): { answered: boolean; failed: boolean } {
+    const status = call.status.trim().toLowerCase();
+    const outcome = call.outcome?.trim().toLowerCase() ?? "";
+    const failed =
+        ["busy", "failed", "no_answer"].includes(status) ||
+        FAILED_CALL_OUTCOMES.has(outcome);
+    // A finished call ends with status "ended" and carries the result in
+    // outcome (2026-09-28: every answered call read "0 answered" because only
+    // the status was checked).
+    return {
+        answered: !failed && (["answered", "completed"].includes(status) || CONNECTED_CALL_OUTCOMES.has(outcome)),
+        failed,
+    };
+}
+
+// Country calling code -> national digit grouping, for the numbers this
+// product dials most. Anything else falls back to groups of three.
+const PHONE_GROUPS: Array<[string, number[]]> = [
+    ["92", [3, 7]], // Pakistan mobile: +92 312 0750496
+    ["44", [4, 6]], // UK: +44 7429 916656
+    ["1", [3, 3, 4]], // NANP: +1 647 347 6870
+    ["971", [2, 3, 4]],
+    ["91", [5, 5]],
+    ["61", [3, 3, 3]],
+];
+
+/** A stored contact number laid out the way people read it. Never drops digits. */
+export function formatPhoneForDisplay(value: string | null | undefined): string {
+    const raw = (value ?? "").trim();
+    if (!raw.startsWith("+")) return raw;
+    const digits = raw.slice(1).replace(/D/g, "");
+    if (digits.length < 7) return raw;
+    for (const [code, groups] of PHONE_GROUPS) {
+        const national = digits.slice(code.length);
+        if (digits.startsWith(code) && national.length === groups.reduce((a, b) => a + b, 0)) {
+            const parts: string[] = [];
+            let at = 0;
+            for (const size of groups) {
+                parts.push(national.slice(at, at + size));
+                at += size;
+            }
+            return "+" + code + " " + parts.join(" ");
+        }
+    }
+    return "+" + (digits.match(/.{1,3}/g) ?? [digits]).join(" ");
+}
+
 export interface CapturedContactPart {
+    kind: "phone" | "email";
     value: string;
     /** false only when the caller said it but never confirmed the read-back. */
     confirmed: boolean;
@@ -85,8 +153,8 @@ export function capturedContactParts(
     const parts: CapturedContactPart[] = [];
     const phone = call.captured_phone?.trim();
     const email = call.captured_email?.trim();
-    if (phone) parts.push({ value: phone, confirmed: call.captured_phone_confirmed !== false });
-    if (email) parts.push({ value: email, confirmed: call.captured_email_confirmed !== false });
+    if (phone) parts.push({ kind: "phone", value: formatPhoneForDisplay(phone), confirmed: call.captured_phone_confirmed !== false });
+    if (email) parts.push({ kind: "email", value: email, confirmed: call.captured_email_confirmed !== false });
     return parts;
 }
 

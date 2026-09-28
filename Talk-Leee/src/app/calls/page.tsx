@@ -28,6 +28,7 @@ import {
     defaultCallHistoryWorkflow,
     callHasCapturedContact,
     capturedContactParts,
+    classifyCall,
     isActiveCallStatus,
     readCallHistoryWorkflow,
     writeCallHistoryWorkflow,
@@ -80,28 +81,6 @@ const CALL_HISTORY_ROWS_VISIBLE = 9;
 const FIXED_TRACK_HEADINGS = [4, 5, 6, 7];
 const CALL_HISTORY_ROW_GAP_PX = 8; // matches the rows list's `space-y-2` (0.5rem)
 
-const FAILED_CALL_OUTCOMES = new Set([
-    "busy",
-    "failed",
-    "no_answer",
-    "rejected",
-    "timeout",
-    "unavailable",
-]);
-
-function classifyCall(call: Call) {
-    const status = call.status.trim().toLowerCase();
-    const outcome = call.outcome?.trim().toLowerCase() ?? "";
-    const failed =
-        ["busy", "failed", "no_answer"].includes(status) ||
-        FAILED_CALL_OUTCOMES.has(outcome);
-
-    return {
-        answered: !failed && ["answered", "completed"].includes(status),
-        failed,
-    };
-}
-
 function formatDuration(seconds?: number) {
     if (!seconds) return "--";
     const mins = Math.floor(seconds / 60);
@@ -151,14 +130,15 @@ function CapturedContact({ call }: { call: Call }) {
     // withheld number).
     // A contact the caller said but never confirmed is still shown (it is
     // what they gave), labelled so nobody mistakes it for a verified one.
+    // Each value on its own line and never truncated: a cut-off number
+    // ("+92312075…") is useless for a follow-up (2026-09-28).
     const parts = capturedContactParts(call);
     if (parts.length === 0) return null;
     return (
-        <span className="truncate text-xs font-semibold text-emerald-700 dark:text-emerald-300">
-            Contact:{" "}
-            {parts.map((part, index) => (
-                <span key={part.value}>
-                    {index > 0 ? " · " : ""}
+        <span className="flex flex-col gap-0.5 text-xs font-semibold text-emerald-700 dark:text-emerald-300">
+            {parts.map((part) => (
+                <span key={part.kind} className="break-all tabular-nums">
+                    <span className="font-normal text-muted-foreground">{part.kind === "phone" ? "Phone " : "Email "}</span>
                     {part.value}
                     {part.confirmed ? null : <span className="font-normal text-amber-700 dark:text-amber-300"> (unconfirmed)</span>}
                 </span>
@@ -167,11 +147,23 @@ function CapturedContact({ call }: { call: Call }) {
     );
 }
 
+function CallHighlight({ call }: { call: Call }) {
+    // The one-line outcome of the call (what the caller wants next), so the
+    // list answers "what happened" without opening the summary.
+    const text = call.summary?.trim();
+    if (!text) return null;
+    return (
+        <span className="line-clamp-2 text-xs leading-snug text-muted-foreground" title={text}>
+            {text}
+        </span>
+    );
+}
+
 function CallParties({ call }: { call: Call }) {
     if (call.direction === "inbound") {
-        return <><span className="truncate text-sm font-semibold text-foreground">{call.from_number || "Private caller"}</span><span className="truncate text-xs text-muted-foreground">to {call.to_number || "assigned DID"}</span><CapturedContact call={call} /></>;
+        return <><span className="truncate text-sm font-semibold text-foreground">{call.from_number || "Private caller"}</span><span className="truncate text-xs text-muted-foreground">to {call.to_number || "assigned DID"}</span><CapturedContact call={call} /><CallHighlight call={call} /></>;
     }
-    return <><span className="truncate text-sm font-semibold text-foreground">{call.phone_number}</span><CapturedContact call={call} /></>;
+    return <><span className="truncate text-sm font-semibold text-foreground">{call.phone_number}</span><CapturedContact call={call} /><CallHighlight call={call} /></>;
 }
 
 function SummaryPreview({
