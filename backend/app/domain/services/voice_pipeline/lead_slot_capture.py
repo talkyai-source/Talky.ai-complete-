@@ -174,6 +174,25 @@ def _as_uuid(value: Any) -> Optional[str]:
         return None
 
 
+def contact_field_key(captured_slots: Any, kind: str) -> str:
+    """Where the CURRENT capture of ``kind`` is stored: ``email`` for the first,
+    ``email_2``, ``email_3`` for each one the caller asked us to add after it."""
+    earlier = getattr(captured_slots, f"earlier_{kind}_captures", ()) or ()
+    return kind if not earlier else f"{kind}_{len(earlier) + 1}"
+
+
+def _confirmed_row(capture: Any, field_type: str) -> dict:
+    return {
+        "value": capture.normalized_value,
+        "field_type": field_type,
+        "confirmed": True,
+        "raw_value": capture.raw_value,
+        "normalized_value": capture.normalized_value,
+        "validation_status": capture.validation_status,
+        "confirmed_at": capture.confirmed_at,
+    }
+
+
 def snapshot_slots(captured_slots: Any) -> dict[str, dict]:
     """The facts this call has established, keyed by ``field_key``.
 
@@ -184,12 +203,21 @@ def snapshot_slots(captured_slots: Any) -> dict[str, dict]:
     out: dict[str, dict] = {}
     if captured_slots is None:
         return out
+    for kind in ("email", "phone"):
+        for index, earlier in enumerate(
+            getattr(captured_slots, f"earlier_{kind}_captures", ()) or ()
+        ):
+            if getattr(earlier, "normalized_value", None):
+                key = kind if index == 0 else f"{kind}_{index + 1}"
+                out[key] = _confirmed_row(earlier, kind)
     for attr, field_key, field_type, confirmed_attr in SLOT_FIELDS:
         capture = (
             getattr(captured_slots, f"{field_key}_capture", None)
             if field_key in {"email", "phone"}
             else None
         )
+        if field_key in {"email", "phone"}:
+            field_key = contact_field_key(captured_slots, field_key)
         if capture is not None:
             from app.domain.services.voice_pipeline.contact_capture import (
                 CaptureStatus,
@@ -270,8 +298,9 @@ def pending_contact_revocations(session: Any) -> dict[str, str]:
     from app.domain.services.voice_pipeline.contact_capture import CaptureStatus
 
     revocations: dict[str, str] = {}
-    for field_key in ("email", "phone"):
-        capture = getattr(captured_slots, f"{field_key}_capture", None)
+    for kind in ("email", "phone"):
+        capture = getattr(captured_slots, f"{kind}_capture", None)
+        field_key = contact_field_key(captured_slots, kind)
         previous = written.get(field_key)
         if previous is None or capture is None:
             continue
@@ -535,6 +564,10 @@ def contact_outcome(captured_slots: Any) -> dict:
         confirmed = bool(getattr(captured_slots, f"{field}_confirmed", False)) or (
             capture is not None and capture.status is CaptureStatus.CONFIRMED
         )
+        if not confirmed and getattr(captured_slots, f"earlier_{field}_captures", ()):
+            # One was confirmed; only the extra one is open. That is not a
+            # contact the team has to chase.
+            confirmed = True
         if confirmed:
             status = "confirmed"
         elif capture is not None and capture.status is not CaptureStatus.CANCELLED:

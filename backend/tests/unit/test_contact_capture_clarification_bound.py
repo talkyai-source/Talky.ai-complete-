@@ -126,7 +126,7 @@ def test_phone_clarification_stops_asking_after_three_asks():
         state = advance_capture(
             state,
             kind="phone",
-            utterance="923016253193",
+            utterance="2079460958",
             mode_active=True,
         )
         prompts.append(state.clarification_prompt or "")

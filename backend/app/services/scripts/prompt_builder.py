@@ -183,6 +183,16 @@ def compose_system_prompt(
         )
 
     lines: list[str] = []
+    for earlier in getattr(state, "earlier_email_captures", ()) or ():
+        lines.append(
+            "- Caller email (confirmed earlier and saved; they asked you to take "
+            f"another one as well): {earlier.normalized_value}."
+        )
+    for earlier in getattr(state, "earlier_phone_captures", ()) or ():
+        lines.append(
+            "- Caller phone number (confirmed earlier and saved; they asked you "
+            f"to take another one as well): {earlier.normalized_value}."
+        )
     if state.email and state.email_confirmed:
         readback = natural_email_readback(state.email)
         say = f' If you read it back, say it naturally as EXACTLY: "{readback}".' if readback else ""

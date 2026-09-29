@@ -59,7 +59,11 @@ from app.domain.services.voice_pipeline.sentence_segmentation import (
     _is_missing_space_boundary,
 )
 from app.domain.services.voice_pipeline.conversation_guards import (
+    CALLBACK_PREFERENCE,
+    PHONE_REASK,
     is_repeated_question,
+    phone_readback_changed,
+    promises_timed_callback,
     unbacked_contact_claim,
 )
 from app.domain.services.voice_pipeline.grounded_figures import ground_spoken_figures
@@ -752,6 +756,24 @@ class TurnStreamer:
             for m in getattr(session, "conversation_history", [])[-12:]
             if getattr(m, "role", None) == MessageRole.ASSISTANT
         ]
+        # What the caller said lately -- the truth a phone read-back must match.
+        _recent_caller_turns = [
+            str(m.content or "")
+            for m in getattr(session, "conversation_history", [])[-8:]
+            if getattr(m, "role", None) == MessageRole.USER
+        ][-3:]
+        # Numbers already known on this call are true too: the line's own
+        # number and any the caller confirmed before adding another.
+        _slots = getattr(session, "captured_slots", None)
+        _recent_caller_turns += [
+            str(v)
+            for v in [getattr(_slots, "line_phone", None)]
+            + [
+                getattr(c, "normalized_value", None)
+                for c in getattr(_slots, "earlier_phone_captures", ()) or ()
+            ]
+            if v
+        ]
 
         # P3: track sentences ACTUALLY delivered to TTS, so on a barge-in we
         # commit to history only what the caller really heard — not the full
@@ -823,6 +845,29 @@ class TurnStreamer:
                     )
                     speech_rewrites.append("contact_claim")
                     return _reask, None
+                _phone_capture = getattr(
+                    getattr(session, "captured_slots", None), "phone_capture", None
+                )
+                if phone_readback_changed(
+                    text,
+                    _recent_caller_turns,
+                    getattr(_phone_capture, "normalized_value", None),
+                ):
+                    logger.warning(
+                        "phone_readback_changed call=%s — read-back digits differ "
+                        "from what the caller said; asking again",
+                        call_id[:12],
+                    )
+                    speech_rewrites.append("phone_readback_changed")
+                    return PHONE_REASK, None
+                if promises_timed_callback(text):
+                    logger.warning(
+                        "timed_callback_promise_replaced call=%s — no call back can "
+                        "be booked from a call",
+                        call_id[:12],
+                    )
+                    speech_rewrites.append("timed_callback_promise")
+                    return CALLBACK_PREFERENCE, None
                 if getattr(session, "_spoken_sentences", None) and is_repeated_question(
                     text, _earlier_agent_turns,
                 ):

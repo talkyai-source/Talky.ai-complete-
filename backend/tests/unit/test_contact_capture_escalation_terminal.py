@@ -53,8 +53,9 @@ _UNRELATED_TURNS = [
 
 def _drive_phone_past_the_cap() -> CallState:
     """Arm phone mode the way a real agent turn does, then exhaust the cap
-    with the reviewer's region-less repeat ("923016253193", no leading +,
-    no region on file -- the missing_region NEEDS_CLARIFICATION branch).
+    with a region-less repeat valid in more than one likely country
+    ("2079460958": London without its 0, or Maine), no leading +, no region
+    on file -- the missing_region NEEDS_CLARIFICATION branch.
 
     MAX_CLARIFICATION_ATTEMPTS turns fail plainly; the (MAX+1)th turn is the
     one-time escalation (still NEEDS_CLARIFICATION); the (MAX+2)th turn is
@@ -67,7 +68,7 @@ def _drive_phone_past_the_cap() -> CallState:
     )
     assert state.active_contact_kind == "phone"
     for _ in range(MAX_CLARIFICATION_ATTEMPTS + 2):
-        state = update_state_from_user_turn(state, "923016253193")
+        state = update_state_from_user_turn(state, "2079460958")
     return state
 
 

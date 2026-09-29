@@ -38,8 +38,15 @@ _H = "\\-" + _HYPHENS
 _URL_RE = re.compile(
     rf"(?<![@\w.{_H}])"                       # not the tail of an email/word
     rf"(?:https?://)?(?:www\.)?"
-    rf"(?P<host>(?:[a-z0-9][a-z0-9{_H}]*\.)+[a-z]{{2,}})"
-    rf"(?P<path>/[^\s,;!?\"')\]]*)?",
+    # The host ends at a real boundary: without this the email exemption
+    # below just backtracked to a shorter "host" ("john.cen").
+    rf"(?P<host>(?:[a-z0-9][a-z0-9{_H}]*\.)+[a-z]{{2,}})(?![a-z0-9{_H}])"
+    rf"(?P<path>/[^\s,;!?\"')\]]*)?"
+    # ...and not the NAME part of an email: "john.cena at gmail dot com" or
+    # "john.cena@gmail.com". Test call 1436672a (2026-09-29) had "john.cena"
+    # rewritten to "our website" mid read-back. A real site followed by an
+    # ordinary "at" ("...co.uk at any time") is still checked.
+    r"(?!\s*@|\s+at\s+(?:the\s+rate\s+)?[a-z0-9][a-z0-9\s-]{0,30}?(?:\s+dot\s+|\.)[a-z])",
     re.IGNORECASE,
 )
 

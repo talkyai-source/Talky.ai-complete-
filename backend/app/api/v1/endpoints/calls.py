@@ -106,7 +106,8 @@ def _captured_contact_sql(kind: str, *, confirmed_flag: bool = False) -> str:
                    AND NULLIF(BTRIM(COALESCE(d.normalized_value, d.value, '')), '') IS NOT NULL
                    AND COALESCE(d.validation_status, 'confirmed')
                        NOT IN ('invalid', 'cancelled', 'needs_clarification')
-                 ORDER BY d.confirmed DESC, d.updated_at DESC
+                 ORDER BY d.confirmed DESC, (d.field_key = '{kind}') DESC,
+                          d.updated_at DESC
                  LIMIT 1)"""
 
 

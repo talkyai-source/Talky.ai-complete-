@@ -122,6 +122,43 @@ _CONTACT_OBJECTION_RE = re.compile(
     re.IGNORECASE,
 )
 # "Why are you asking?" with no object only counts straight after a contact ask.
+# "my other email", "a second number", "secondary email as well", "take my
+# work number too". Only ever acted on once that kind is already CONFIRMED.
+_ANOTHER_CONTACT_RE = {
+    "email": re.compile(
+        r"\b(?:other|another|second|secondary|alternative|alternate|backup|"
+        r"additional|extra|spare|work|personal|different|new)\s+"
+        r"(?:e-?mail|email\s+address|address)\b"
+        r"|\b(?:e-?mail|email\s+address)\s+(?:as\s+well|too)\b",
+        re.IGNORECASE,
+    ),
+    "phone": re.compile(
+        r"\b(?:other|another|second|secondary|alternative|alternate|backup|"
+        r"additional|extra|spare|work|personal|different|new|landline|mobile|cell)\s+"
+        r"(?:phone\s+)?(?:number|phone|mobile|contact\s+number)\b"
+        r"|\b(?:phone\s+)?number\s+(?:as\s+well|too)\b",
+        re.IGNORECASE,
+    ),
+}
+_GIVES_EMAIL_RE = re.compile(r"@|\bat\b", re.IGNORECASE)
+_GIVES_DIGITS_RE = re.compile(
+    r"\d|\b(?:zero|oh|one|two|three|four|five|six|seven|eight|nine)\b",
+    re.IGNORECASE,
+)
+
+
+def _start_another_capture(
+    kind: str, capture: Optional[ContactCaptureState], utterance: str
+) -> bool:
+    """True when the caller asks us to take an ADDITIONAL value of ``kind``
+    while one is already confirmed -- the confirmed one is kept, not replaced."""
+    return bool(
+        capture is not None
+        and capture.status is CaptureStatus.CONFIRMED
+        and _ANOTHER_CONTACT_RE[kind].search(utterance or "")
+    )
+
+
 _GENERIC_WHY_ASK_RE = re.compile(r"\bwhy\b[^.?!]{0,25}\bask(?:ing)?\b", re.IGNORECASE)
 # The caller asked us something. STT routinely drops the question mark, so a
 # leading interrogative counts too.
@@ -242,6 +279,13 @@ class CallState:
     # its raw/normalised audit pair, and the actual confirmation timestamp.
     email_capture: Optional[ContactCaptureState] = None
     phone_capture: Optional[ContactCaptureState] = None
+    # Contacts the caller confirmed and then asked us to take ANOTHER one as
+    # well ("record my other email"), oldest first. The capture above starts
+    # fresh for the new value; these stay saved as they were. Test call
+    # 1436672a (2026-09-29): a confirmed first email was sticky, so the second
+    # one had nowhere to go and was never stored.
+    earlier_email_captures: tuple = ()
+    earlier_phone_captures: tuple = ()
     # Only one contact clarification/confirmation is active at a time. This
     # prevents "never mind" for a phone from cancelling an unrelated email.
     active_contact_kind: Optional[CaptureKind] = None
@@ -382,9 +426,27 @@ def update_state_from_user_turn(
 
     email_capture = state.email_capture
     phone_capture = state.phone_capture
-    if active_kind == "email" or (email_intent and phone_intent) or dual_readback:
+    earlier_emails = tuple(state.earlier_email_captures or ())
+    earlier_phones = tuple(state.earlier_phone_captures or ())
+    skip_email = skip_phone = False
+    if _start_another_capture("email", email_capture, utterance):
+        earlier_emails += (email_capture,)
+        email_capture = None
+        active_kind = "email"
+        # "Can you record my other email?" names no address yet; parsing it
+        # would open a spell-it-out clarification for nothing.
+        skip_email = not _GIVES_EMAIL_RE.search(utterance)
+    if _start_another_capture("phone", phone_capture, utterance):
+        earlier_phones += (phone_capture,)
+        phone_capture = None
+        if earlier_emails == tuple(state.earlier_email_captures or ()):
+            active_kind = "phone"
+        skip_phone = not _GIVES_DIGITS_RE.search(utterance)
+    if not skip_email and (
+        active_kind == "email" or (email_intent and phone_intent) or dual_readback
+    ):
         email_capture = advance_capture(
-            state.email_capture,
+            email_capture,
             kind="email",
             utterance=utterance,
             readback_issued=readback_issued,
@@ -394,9 +456,11 @@ def update_state_from_user_turn(
             explicit_reask=explicit_contact_reask,
             mode_active=True,
         )
-    if active_kind == "phone" or (email_intent and phone_intent) or dual_readback:
+    if not skip_phone and (
+        active_kind == "phone" or (email_intent and phone_intent) or dual_readback
+    ):
         phone_capture = advance_capture(
-            state.phone_capture,
+            phone_capture,
             kind="phone",
             utterance=utterance,
             readback_issued=phone_readback_issued,
@@ -429,6 +493,11 @@ def update_state_from_user_turn(
             }:
                 active_kind = candidate_kind
                 break
+
+    if skip_email and email_capture is None:
+        active_kind = "email"  # the other address is what they say next
+    elif skip_phone and phone_capture is None:
+        active_kind = "phone"
 
     def public_value(capture: Optional[ContactCaptureState]) -> Optional[str]:
         if capture is None or capture.status in {
@@ -500,6 +569,8 @@ def update_state_from_user_turn(
         phone_readback_attempts=phone_readback_attempts,
         email_capture=email_capture,
         phone_capture=phone_capture,
+        earlier_email_captures=earlier_emails,
+        earlier_phone_captures=earlier_phones,
         active_contact_kind=active_kind,
         follow_up=follow_up,
         bidding_active=bidding_active,

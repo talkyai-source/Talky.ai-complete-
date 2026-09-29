@@ -93,6 +93,10 @@ def unbacked_contact_claim(
         getattr(call_state, "email_confirmed", False)
     ):
         return None
+    if getattr(call_state, "earlier_email_captures", ()) or getattr(
+        call_state, "earlier_phone_captures", ()
+    ):
+        return None
     last = last_caller_text or ""
     if email is not None or _EMAIL_CUES.search(last):
         return EMAIL_REASK
@@ -147,3 +151,92 @@ def is_repeated_question(
                 asked += 1
                 break
     return asked >= max_asks
+
+
+# ── 3. A phone read-back must say the digits the caller said ───────────────
+#
+# Test call 1436672a (2026-09-29): the caller said "zero three one two, zero
+# seven five, zero four nine six" and the agent read back "0 3 1 2, 0 7 5,
+# 0 4 9 -- is that correct?" -- the last digit gone. The caller said yes to a
+# wrong number. Any read-back whose digits are not the caller's (allowing only
+# a country code added in front, or a leading 0 dropped for it) is replaced by
+# a request to hear it again.
+
+PHONE_REASK = (
+    "Sorry, I want to get that exactly right. Could you say the number once "
+    "more, slowly?"
+)
+
+
+def _digit_runs(text: str) -> list[str]:
+    from app.services.scripts.spoken_email_normalizer import spoken_digits_to_numerals
+
+    numerals = spoken_digits_to_numerals(text)
+    runs = re.findall(r"\+?\d[\d\s().,\-]{5,}\d", numerals)
+    return [re.sub(r"\D", "", r) for r in runs if len(re.sub(r"\D", "", r)) >= 7]
+
+
+def _same_number(said: str, heard: str) -> bool:
+    """True when two digit strings are the same number, up to a country code."""
+    if said == heard:
+        return True
+    for a, b in ((said, heard), (heard, said)):
+        core = b.lstrip("0")
+        if core and a.endswith(core) and len(a) - len(core) <= 3:
+            return True
+    return False
+
+
+def phone_readback_changed(
+    sentence: str,
+    caller_texts: Iterable[str],
+    expected: Optional[str] = None,
+) -> bool:
+    """True when ``sentence`` reads back a number nobody said.
+
+    The truth is the number the capture machine parsed (``expected``) or any
+    number in the caller's recent turns. With neither there is nothing to
+    compare against, and the sentence is left alone.
+    """
+    from app.domain.services.voice_pipeline.readback_guard import (
+        is_unconfirmed_phone_readback,
+    )
+
+    if not sentence or not is_unconfirmed_phone_readback(sentence):
+        return False
+    spoken = _digit_runs(sentence)
+    if not spoken:
+        return False
+    agent_digits = max(spoken, key=len)
+    truths = [re.sub(r"\D", "", expected)] if expected else []
+    for text in caller_texts:
+        truths.extend(_digit_runs(text))
+    truths = [t for t in truths if t]
+    if not truths:
+        return False
+    return not any(_same_number(agent_digits, t) for t in truths)
+
+
+# ── 4. No promise of a call back at a set time ─────────────────────────────
+#
+# Nothing can book a call back from a call (no executor exists; the prompt's
+# CALLBACK POLICY says so). Test call 1436672a: "We'll ring you at 2 pm on
+# that number." That is a commitment the business never made. The time the
+# caller wants is still useful -- it is passed on as a preference.
+
+CALLBACK_PREFERENCE = (
+    "I'll pass that time on to the team as your preferred time for a call back."
+)
+_CALLBACK_PROMISE = re.compile(
+    r"\b(?:we|i|someone|he|she|they|the\s+team|azian|[a-z]+)\s*(?:'ll|\s+will)\s+"
+    r"(?:give\s+you\s+a\s+)?(?:ring|call|phone)\s+(?:you\s+)?(?:back\s+)?"
+    r"[^.?!]*?\b(?:\d{1,2}(?::\d{2})?\s*(?:am|pm|a\.m\.|p\.m\.)?|tomorrow|today|tonight|"
+    r"monday|tuesday|wednesday|thursday|friday|saturday|sunday|morning|afternoon|"
+    r"evening|o'?clock)\b",
+    re.IGNORECASE,
+)
+
+
+def promises_timed_callback(sentence: str) -> bool:
+    """True when the agent commits to calling back at a specific time or day."""
+    return bool(sentence and _CALLBACK_PROMISE.search(_plain(sentence)))

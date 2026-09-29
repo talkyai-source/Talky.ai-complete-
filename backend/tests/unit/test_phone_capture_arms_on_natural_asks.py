@@ -78,9 +78,22 @@ def test_the_number_from_the_live_call_is_questioned_not_guessed():
     assert "repeat" in (capture.clarification_prompt or "").lower()
 
 
-def test_without_a_region_it_asks_for_the_country_code_rather_than_guessing():
+def test_without_a_region_a_number_valid_in_one_likely_country_is_read_back_with_it():
+    # Valid only as a Pakistani mobile (test call 1436672a gave the same number
+    # with its leading 0). Taken, and the read-back says "plus 9 2" aloud, so
+    # the caller's yes confirms the country; nothing is confirmed before it.
     state = _after_the_live_ask(
         "Yeah. It's three one two zero seven five zero four nine six.", None
+    )
+    assert state.phone_capture.status is CaptureStatus.AWAITING_CONFIRMATION
+    assert state.phone == "+923120750496"
+    assert state.phone_confirmed is False
+
+
+def test_without_a_region_it_asks_for_the_country_code_rather_than_guessing():
+    # Valid in more than one likely country (London without its 0, or Maine).
+    state = _after_the_live_ask(
+        "Yeah. It's two zero seven nine four six zero nine five eight.", None
     )
     assert state.phone_capture.status is CaptureStatus.NEEDS_CLARIFICATION
     assert "country code" in state.phone_capture.clarification_prompt

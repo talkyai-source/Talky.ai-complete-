@@ -17,6 +17,35 @@ from typing import Literal, Optional, Sequence
 
 from app.domain.services.phone_number_normalizer import normalize_phone_for_capture
 
+# Regions tried, in order, when a caller gives a national-format number and the
+# campaign names no region. Only a number valid in EXACTLY ONE of them is
+# accepted -- and the read-back then says the country code aloud, so the
+# caller confirms it. Test call 1436672a (2026-09-29): "zero three one two,
+# zero seven five, zero four nine six" is valid only as +92 (Pakistan).
+_LIKELY_PHONE_REGIONS = tuple(
+    r.strip().upper()
+    for r in __import__("os").getenv("CONTACT_PHONE_LIKELY_REGIONS", "GB,PK,US").split(",")
+    if r.strip()
+)
+
+
+def _normalize_phone(raw: str, region: Optional[str]) -> str:
+    """normalize_phone_for_capture, inferring the region when it is missing."""
+    try:
+        return normalize_phone_for_capture(raw, region)
+    except ValueError:
+        if region or str(raw or "").strip().startswith("+"):
+            raise
+    valid = []
+    for candidate in _LIKELY_PHONE_REGIONS:
+        try:
+            valid.append(normalize_phone_for_capture(raw, candidate))
+        except ValueError:
+            continue
+    if len(set(valid)) == 1:
+        return valid[0]
+    raise ValueError("phone number needs a country code")
+
 CaptureKind = Literal["email", "phone"]
 
 
@@ -323,6 +352,35 @@ def _spoken_local_candidates(text: str) -> tuple[Optional[str], Optional[str]]:
     return None, None
 
 
+def _either_or_prompt(text: str) -> Optional[str]:
+    """The one question that settles a two-word spoken address, or None.
+
+    We have the words; only the separator is open. 2026-09-29 (test call
+    56578fa2): handed two raw addresses, the model guessed "allstate dot
+    estimation" instead of asking. Test call 1436672a the same evening: the
+    question was asked for the FIRST email only, and for the second the model
+    guessed "John dot Cena" twice. Every new two-word address gets it.
+    """
+    joined, dotted = _spoken_local_candidates(text)
+    if not (joined and dotted):
+        return None
+    from app.services.scripts.spoken_email_normalizer import natural_email_readback
+
+    joined_local = joined.split("@", 1)[0]
+    domain_spoken = natural_email_readback(joined).split(" at ", 1)[-1]
+    dotted_spoken = natural_email_readback(dotted).split(" at ", 1)[0]
+    return (
+        "You heard two words before the at, so one thing is open: "
+        f"whether it is {joined} or {dotted}. Do not guess and do "
+        'not read either version back as settled. Ask: "Is that '
+        f'{joined_local} all one word, or {dotted_spoken}, at '
+        f'{domain_spoken}?" When they answer ("one word", "no '
+        'dot", "with a dot"), read back the address they chose '
+        "and ask if it is right. If neither, ask them to spell it "
+        "one letter at a time."
+    )
+
+
 def _extract_lead_in_email(text: str) -> Optional[str]:
     """Resolve "my email is bob at gmail dot com" to bob@gmail.com.
 
@@ -560,7 +618,7 @@ def _phone_correction(
         corrected = digits[:-count] + replacement
     candidate = f"+{corrected}"
     try:
-        normalized = normalize_phone_for_capture(candidate, region)
+        normalized = _normalize_phone(candidate, region)
     except ValueError:
         return _state(
             "phone",
@@ -623,7 +681,7 @@ def _extract_normalized(
     if not raw_phone:
         return None, None
     try:
-        return raw_phone, normalize_phone_for_capture(raw_phone, region)
+        return raw_phone, _normalize_phone(raw_phone, region)
     except ValueError:
         return raw_phone, None
 
@@ -813,18 +871,27 @@ def advance_capture(
         raw_candidate = extract_phone_from_speech(f"phone number {text}")
         if raw_candidate:
             try:
-                normalized = normalize_phone_for_capture(
+                normalized = _normalize_phone(
                     raw_candidate,
                     phone_region,
                 )
             except ValueError:
                 normalized = None
     if kind == "phone" and mode_active and raw_candidate is None:
-        bare = re.search(r"\+?\d[\d\s().\-]{5,}\d", text)
+        # The agent asked for a number, so a bare one is the answer -- spoken
+        # as words ("zero three one two, zero seven five ...") just as often as
+        # digits. Converting first is what the 2026-09-29 test call needed.
+        from app.services.scripts.spoken_email_normalizer import (
+            spoken_digits_to_numerals,
+        )
+
+        bare = re.search(
+            r"\+?\d[\d\s().\-]{5,}\d", spoken_digits_to_numerals(text)
+        )
         if bare:
             raw_candidate = bare.group(0)
             try:
-                normalized = normalize_phone_for_capture(
+                normalized = _normalize_phone(
                     raw_candidate,
                     phone_region,
                 )
@@ -941,30 +1008,7 @@ def advance_capture(
                 else "Please repeat the phone number one digit at a time."
             )
             if kind == "email":
-                joined, dotted = _spoken_local_candidates(text)
-                if joined and dotted:
-                    # We have the words; only the separator is open. Ask the
-                    # one question that settles it instead of restarting.
-                    # 2026-09-29 (test call 56578fa2): handed two raw
-                    # addresses, the model guessed "allstate dot estimation"
-                    # instead of asking. Give it the question to say.
-                    from app.services.scripts.spoken_email_normalizer import (
-                        natural_email_readback,
-                    )
-
-                    joined_local = joined.split("@", 1)[0]
-                    domain_spoken = natural_email_readback(joined).split(" at ", 1)[-1]
-                    dotted_spoken = natural_email_readback(dotted).split(" at ", 1)[0]
-                    prompt = (
-                        "You heard two words before the at, so one thing is open: "
-                        f"whether it is {joined} or {dotted}. Do not guess and do "
-                        'not read either version back as settled. Ask: "Is that '
-                        f'{joined_local} all one word, or {dotted_spoken}, at '
-                        f'{domain_spoken}?" When they answer ("one word", "no '
-                        'dot", "with a dot"), read back the address they chose '
-                        "and ask if it is right. If neither, ask them to spell it "
-                        "one letter at a time."
-                    )
+                prompt = _either_or_prompt(text) or prompt
                 # The caller has given nothing we could resolve, so there is no
                 # address to repeat. Saying one anyway is what call 2427af7e
                 # did, and the caller spent four turns failing to correct it.
@@ -1042,6 +1086,20 @@ def advance_capture(
         CaptureStatus.AWAITING_CONFIRMATION,
         CaptureStatus.CANCELLED,
     }:
+        either_or = _either_or_prompt(text) if kind == "email" else None
+        if either_or:
+            # A fresh two-word address is a new answer, not another failed
+            # spelling: ask the one question that settles it.
+            return replace(
+                previous,
+                status=CaptureStatus.NEEDS_CLARIFICATION,
+                validation_status=CaptureStatus.NEEDS_CLARIFICATION.value,
+                raw_value=text,
+                normalized_value=None,
+                confirmed_at=None,
+                attempts=1,
+                clarification_prompt=either_or,
+            )
         status, attempts, prompt = _clarification_progress(
             kind,
             previous,

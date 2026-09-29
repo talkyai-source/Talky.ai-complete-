@@ -332,6 +332,23 @@ def _expand_phone_repeats(s: str) -> str:
     return s
 
 
+def spoken_digits_to_numerals(utterance: str) -> str:
+    """Turn a spoken number into numerals: "zero three one two, zero seven
+    five" -> "0312 075". Digit words, "oh", "double"/"triple" and a leading
+    "plus" are converted; a comma BETWEEN digits is just a pause. Everything
+    else is left as it was.
+    """
+    s = f" {str(utterance or '').lower()} "
+    for pattern, repl in _SUBSTITUTIONS:
+        if repl.isdigit():
+            s = re.sub(pattern, repl, s)
+    s = _PHONE_OH_RE.sub("0", s)
+    s = _expand_phone_repeats(s)
+    s = re.sub(r"\bplus\b\s*", "+", s)
+    s = re.sub(r"(?<=\d)\s*,\s*(?=\d)", " ", s)
+    return s.strip()
+
+
 def extract_phone_from_speech(utterance: str) -> Optional[str]:
     """Pin a canonical phone/callback number ONLY when it is unambiguous.
 

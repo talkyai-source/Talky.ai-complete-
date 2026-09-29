@@ -165,14 +165,14 @@ def test_two_failed_asks_then_the_agent_moves_on():
     assert MAX_CLARIFICATION_ATTEMPTS == 2
     state = None
     for _ in range(6):
-        state = advance_capture(state, kind="phone", utterance="923016253193", mode_active=True)
+        state = advance_capture(state, kind="phone", utterance="2079460958", mode_active=True)
     assert state.status is CaptureStatus.CANCELLED  # did not restart the loop
 
 
 def test_a_complete_number_still_reopens_after_giving_up():
     state = None
     for _ in range(4):
-        state = advance_capture(state, kind="phone", utterance="923016253193", mode_active=True)
+        state = advance_capture(state, kind="phone", utterance="2079460958", mode_active=True)
     state = advance_capture(state, kind="phone", utterance="call me on +1 415 555 2671", mode_active=True)
     assert state.status is CaptureStatus.AWAITING_CONFIRMATION
 

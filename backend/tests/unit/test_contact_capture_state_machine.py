@@ -301,8 +301,9 @@ def test_clean_repeat_recovers_from_recognition_clarification():
     assert state.validation_status == state.status.value
 
 
-def test_non_e164_phone_requires_explicit_region_context():
-    state = _capture("phone", "my number is 020 7946 0958", phone_region=None)
+def test_non_e164_phone_valid_in_several_countries_asks_for_the_country():
+    # London without its 0, or a Maine number: never guessed.
+    state = _capture("phone", "my number is 207 946 0958", phone_region=None)
     assert state.status is CaptureStatus.NEEDS_CLARIFICATION
     assert state.normalized_value is None
     assert "country" in (state.clarification_prompt or "").lower()
@@ -314,6 +315,20 @@ def test_non_e164_phone_requires_explicit_region_context():
     )
     assert state.status is CaptureStatus.AWAITING_CONFIRMATION
     assert state.normalized_value == "+442079460958"
+
+
+def test_non_e164_phone_valid_in_one_likely_country_is_read_back_with_its_code():
+    # Test call 1436672a: "zero three one two, zero seven five, zero four nine
+    # six" is valid only as a Pakistani number. It is taken, and the read-back
+    # says the country code aloud, so the caller's yes confirms the country.
+    state = update_state_from_user_turn(
+        CallState(), "my number is 020 7946 0958", phone_region=None
+    )
+    assert state.phone_capture.status is CaptureStatus.AWAITING_CONFIRMATION
+    assert state.phone == "+442079460958"
+    prompt = compose_system_prompt("BASE", state)
+    assert "plus 4 4" in prompt
+    assert state.phone_confirmed is False
 
 
 def test_non_e164_phone_normalizes_with_explicit_region_context():
@@ -462,7 +477,7 @@ def test_email_clarification_mode_is_injected_into_the_next_turn_prompt():
 
 def test_phone_missing_region_prompt_asks_for_country_instead_of_guessing_us():
     state = update_state_from_user_turn(
-        CallState(), "my number is 020 7946 0958", phone_region=None
+        CallState(), "my number is 207 946 0958", phone_region=None
     )
     prompt = compose_system_prompt("BASE", state).lower()
     assert "country" in prompt
