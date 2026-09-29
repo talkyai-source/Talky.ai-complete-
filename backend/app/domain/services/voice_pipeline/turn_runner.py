@@ -195,6 +195,34 @@ def _is_phone_correction(utterance, current_phone) -> bool:
     return bool(parsed and parsed != current_phone)
 
 
+def email_on_the_table(pending, full_transcript, history):
+    """The email the caller is answering about, and whether it was read back.
+
+    The agent's LATEST read-back is the value on the table: the caller's yes
+    to an address read back to them word for word is what makes it correct,
+    not the deterministic parser. A confirmed email is never replaced, and a
+    caller who just said a fresh address is parsed from their own words.
+    Returns ``(pending_state, readback_issued)``.
+    """
+    pending_email = getattr(pending, "email", None)
+    latest = None
+    if (
+        not getattr(pending, "email_confirmed", False)
+        and extract_email_from_speech(full_transcript) is None
+    ):
+        latest = _email_from_recent_agent_readback(history)
+        if latest and latest != pending_email:
+            pending = replace(
+                pending, email=latest, email_confirmed=False,
+                email_readback_attempts=0,
+            )
+            pending_email = latest
+    readback_issued = _agent_read_back_email(history, pending_email) or bool(
+        latest and latest == pending_email
+    )
+    return pending, readback_issued
+
+
 def _email_from_recent_agent_readback(history):
     """Parse an ASSEMBLED email out of the agent's most recent REAL turn (gap #2).
 
@@ -441,17 +469,22 @@ class TurnRunner:
         # is pinned yet and this turn isn't itself a fresh email, seed the address
         # the AGENT assembled and read back in its prior turn as UNCONFIRMED — so
         # the SAME read-back → verdict → commit loop runs over it.
-        if not _pending_email and extract_email_from_speech(full_transcript) is None:
-            _seeded = _email_from_recent_agent_readback(session.conversation_history)
-            if _seeded:
-                _pending = replace(
-                    _pending, email=_seeded, email_confirmed=False,
-                    email_readback_attempts=0,
-                )
-                session.captured_slots = _pending
-                _pending_email = _seeded
-
-        _readback_issued = _agent_read_back_email(session.conversation_history, _pending_email)
+        #
+        # 2026-09-29 (test call 56578fa2): this used to seed ONLY when nothing
+        # was pending, so once a first read-back was pinned, every correction
+        # the agent read back afterwards ("remove the dot" -> "allstateestimation
+        # at gmail dot com, is that correct?") was ignored and the caller's
+        # "yes" confirmed nothing. The agent's LATEST read-back is what the
+        # caller is answering, so it is the value on the table -- whatever the
+        # deterministic parser made of the earlier words. The caller's yes to a
+        # value read back to them word for word is the guarantee; nothing is
+        # persisted before it (lead_slot_capture keeps agent-assembled values
+        # in memory until confirmed).
+        _pending, _readback_issued = email_on_the_table(
+            _pending, full_transcript, session.conversation_history
+        )
+        session.captured_slots = _pending
+        _pending_email = getattr(_pending, "email", None)
         # Phone / callback number — SAME gate as email, resolved independently.
         _pending_phone = getattr(_pending, "phone", None)
         _phone_readback_issued = _agent_read_back_phone(

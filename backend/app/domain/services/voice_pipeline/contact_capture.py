@@ -931,11 +931,25 @@ def advance_capture(
                 if joined and dotted:
                     # We have the words; only the separator is open. Ask the
                     # one question that settles it instead of restarting.
+                    # 2026-09-29 (test call 56578fa2): handed two raw
+                    # addresses, the model guessed "allstate dot estimation"
+                    # instead of asking. Give it the question to say.
+                    from app.services.scripts.spoken_email_normalizer import (
+                        natural_email_readback,
+                    )
+
+                    joined_local = joined.split("@", 1)[0]
+                    domain_spoken = natural_email_readback(joined).split(" at ", 1)[-1]
+                    dotted_spoken = natural_email_readback(dotted).split(" at ", 1)[0]
                     prompt = (
-                        f"You heard two words before the at. Ask which is right: "
-                        f"{joined} or {dotted}. Say both aloud, plainly, as whole "
-                        f"addresses. If neither, ask them to spell it one letter "
-                        f"at a time."
+                        "You heard two words before the at, so one thing is open: "
+                        f"whether it is {joined} or {dotted}. Do not guess and do "
+                        'not read either version back as settled. Ask: "Is that '
+                        f'{joined_local} all one word, or {dotted_spoken}, at '
+                        f'{domain_spoken}?" When they answer ("one word", "no '
+                        'dot", "with a dot"), read back the address they chose '
+                        "and ask if it is right. If neither, ask them to spell it "
+                        "one letter at a time."
                     )
                 # The caller has given nothing we could resolve, so there is no
                 # address to repeat. Saying one anyway is what call 2427af7e

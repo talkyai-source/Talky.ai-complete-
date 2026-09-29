@@ -628,11 +628,10 @@ class RealtimeBridge:
             extract_email_from_speech,
         )
         from app.domain.services.voice_pipeline.turn_runner import (
-            _agent_read_back_email,
             _agent_read_back_phone,
-            _email_from_recent_agent_readback,
             _is_email_correction,
             _is_phone_correction,
+            email_on_the_table,
         )
 
         slots = getattr(self._contact_session, "captured_slots", None)
@@ -640,23 +639,12 @@ class RealtimeBridge:
             slots = CallState()
         before_signature = self._contact_state_signature(slots)
 
+        # Same rule as the cascaded path (turn_runner.email_on_the_table): the
+        # agent's LATEST read-back is the value the caller is answering.
+        slots, email_readback = email_on_the_table(slots, text, self._contact_history)
         pending_email = getattr(slots, "email", None)
-        if not pending_email and extract_email_from_speech(text) is None:
-            seeded = _email_from_recent_agent_readback(self._contact_history)
-            if seeded:
-                slots = replace(
-                    slots,
-                    email=seeded,
-                    email_confirmed=False,
-                    email_readback_attempts=0,
-                    email_capture=None,
-                )
-                pending_email = seeded
 
         pending_phone = getattr(slots, "phone", None)
-        email_readback = _agent_read_back_email(
-            self._contact_history, pending_email
-        )
         phone_readback = _agent_read_back_phone(
             self._contact_history, pending_phone
         )

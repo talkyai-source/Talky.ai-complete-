@@ -200,7 +200,38 @@ def extract_email_from_agent_readback(text: str) -> Optional[str]:
     if not _READBACK_CONFIRM_RE.search(low):
         return None
 
-    s = f" {join_split_providers(low)} "
+    # Split into clauses at REAL punctuation first. A spoken address uses the
+    # WORD "dot"; a "." followed by a space is the end of a sentence. Collapsing
+    # every "." turned "...gmail dot com. Is that correct?" into
+    # "gmail.com.is" (test call 56578fa2, 2026-09-29), so the read-back never
+    # matched and the caller's "yes" could not confirm anything. A written
+    # address ("bob@gmail.com?") has no space after its dots and is untouched.
+    # "all one word" / "no dots" are instructions about the address, not part
+    # of it -- drop them so they neither split nor join into the local part.
+    low = re.sub(
+        r",?\s*\b(?:all\s+)?(?:one|a\s+single)\s+word\b,?|,?\s*\bno\s+(?:dots?|spaces?)\b,?",
+        " ", low,
+    )
+    clauses = re.split(r"[.?!;,:]\s+|[.?!]$|\s[—–]\s?|\s-\s", f"{low} ")
+    candidates = [c for c in (_readback_clause_email(cl) for cl in clauses) if c]
+    # The read-back the caller is answering is the one next to the question:
+    # "allstate estimation at gmail dot com -- so allstateestimation at gmail
+    # dot com, is that right?" confirms the LAST address, not the first.
+    return candidates[-1] if candidates else None
+
+
+# Words that never belong to an email's local part; a "local part" made of them
+# is the rest of a sentence ("should I reach you at your gmail dot com").
+_NOT_LOCAL_WORDS = frozenset(
+    "i you your me my we our should could would can will reach send email address "
+    "the a an and or is it's its that this at to for on of".split()
+)
+_CLAUSE_LEAD_IN = re.compile(r"^\s*(?:so|okay|ok|right|and|yes|yeah|great|perfect)\b[\s,]*")
+
+
+def _readback_clause_email(clause: str) -> Optional[str]:
+    """The address read back in one clause, or None when it isn't clear."""
+    s = f" {join_split_providers(clause)} "
     for pattern, repl in _SUBSTITUTIONS:
         s = re.sub(pattern, repl, s)
     s = re.sub(r"\s*@\s*", "@", s)
@@ -208,11 +239,10 @@ def extract_email_from_agent_readback(text: str) -> Optional[str]:
     s = re.sub(r"\s*_\s*", "_", s)
     s = re.sub(r"\s*-\s*", "-", s)
 
-    # Exactly one spoken "@": more than one means two "at"s in the sentence and we
-    # can't tell which is the address — bail rather than guess.
+    # Exactly one spoken "@" in the clause: two "at"s ("you work at microsoft
+    # and it's bob at gmail") can't be told apart -- bail rather than guess.
     if s.count("@") != 1:
         return None
-
     at = s.index("@")
     before, after = s[:at], s[at + 1:]
 
@@ -222,11 +252,26 @@ def extract_email_from_agent_readback(text: str) -> Optional[str]:
     domain = dm.group(0).rstrip(".?!,;:")
 
     pre = list(_READBACK_PREAMBLE_RE.finditer(before))
-    if not pre:
-        return None
-    local_tokens = before[pre[-1].end():].split()
+    if pre:
+        local_tokens = before[pre[-1].end():].split()
+    else:
+        # No preamble: only a SHORT run at the very start of its own clause
+        # ("-- so allstateestimation at gmail dot com") counts, and never one
+        # made of sentence words.
+        local_tokens = _CLAUSE_LEAD_IN.sub("", before).split()
+        if not local_tokens or len(local_tokens) > 3:
+            return None
+        if any(t in _NOT_LOCAL_WORDS for t in local_tokens):
+            return None
     if not local_tokens or "@" in "".join(local_tokens):
         return None
+    # Letters spelled one by one ("a-l-l-s-t-a-t-e", "a-l-l-s-t-a-t-e-estimation")
+    # are one word: those hyphens are spelling pauses, not a character (a real
+    # hyphen is spoken as "dash").
+    local_tokens = [
+        t.replace("-", "") if re.search(r"(?:^|-)[a-z0-9]-[a-z0-9](?:-|$)", t) else t
+        for t in local_tokens
+    ]
     local = "".join(local_tokens)
 
     candidate = f"{local}@{domain}"
