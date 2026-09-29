@@ -3,7 +3,6 @@
 import type React from "react";
 import { useCallback, useEffect, useMemo, useRef, useState, useLayoutEffect } from "react";
 import { MagneticText } from "./morphing-cursor";
-import { motion } from "framer-motion";
 import { TrustedByMarquee } from "../home/trusted-by-section";
 import dynamic from "next/dynamic";
 
@@ -21,7 +20,9 @@ interface HeroProps {
 function DescriptionSlideshow({ paragraphs }: { paragraphs: string[]; intervalMs?: number }) {
     const [activeIndex, setActiveIndex] = useState(0);
     const [phase, setPhase] = useState<"entering" | "typing" | "holding" | "exiting">("typing");
-    const [visibleWords, setVisibleWords] = useState(0);
+    // Starts fully revealed so the first paragraph is in the server HTML and
+    // readable before any JavaScript runs; later paragraphs still type in.
+    const [visibleWords, setVisibleWords] = useState(() => (paragraphs[0] ?? "").split(/\s+/).filter(Boolean).length);
     const [containerHeight, setContainerHeight] = useState<number | undefined>(undefined);
     const measureRefs = useRef<(HTMLParagraphElement | null)[]>([]);
     const TRANSITION_MS = 400;
@@ -119,23 +120,24 @@ function DescriptionSlideshow({ paragraphs }: { paragraphs: string[]; intervalMs
     const isSlideVisible = phase === "typing" || phase === "holding";
 
     return (
-        <div className="relative" style={{ minHeight: containerHeight }}>
-            {/* Hidden measurement elements */}
-            <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 opacity-0">
-                {paragraphs.map((text, i) => (
-                    <p
-                        key={i}
-                        ref={(el) => { measureRefs.current[i] = el; }}
-                        className={pClass}
-                        style={pStyle}
-                    >
-                        {text}
-                    </p>
-                ))}
-            </div>
+        <div className="relative grid" style={{ minHeight: containerHeight }}>
+            {/* Hidden measurement elements. They share one grid cell with the
+                active paragraph, so the block is already as tall as the tallest
+                paragraph in the server HTML and nothing shifts on hydration. */}
+            {paragraphs.map((text, i) => (
+                <p
+                    key={i}
+                    aria-hidden="true"
+                    ref={(el) => { measureRefs.current[i] = el; }}
+                    className={`${pClass} pointer-events-none col-start-1 row-start-1 self-start opacity-0`}
+                    style={pStyle}
+                >
+                    {text}
+                </p>
+            ))}
             {/* Active paragraph with word-by-word reveal */}
             <p
-                className={pClass}
+                className={`${pClass} col-start-1 row-start-1 self-start`}
                 style={{
                     ...pStyle,
                     transition: `opacity ${TRANSITION_MS}ms ease-in-out, transform ${TRANSITION_MS}ms ease-in-out`,
@@ -161,7 +163,7 @@ function DescriptionSlideshow({ paragraphs }: { paragraphs: string[]; intervalMs
 }
 
 export const Hero: React.FC<HeroProps> = ({ title, description, stats, adjustForNavbar = false }) => {
-    const [mobileTitleFontPx, setMobileTitleFontPx] = useState<number>(32);
+    const [mobileTitleFontPx, setMobileTitleFontPx] = useState<number | null>(null);
 
     const heroContentRef = useRef<HTMLDivElement | null>(null);
     const mobileTitleRef = useRef<HTMLHeadingElement | null>(null);
@@ -254,6 +256,16 @@ export const Hero: React.FC<HeroProps> = ({ title, description, stats, adjustFor
         return () => ro.disconnect();
     }, [headlineA, headlineB]);
 
+    // Until the layout effect above has measured the real fit, size the mobile
+    // title with the same rule in CSS (widest line ~0.645em per character, 10px
+    // of slack, 2px under the fit, clamped to 20-32px) so the server-rendered
+    // heading fits the viewport instead of overflowing at a fixed 32px.
+    const widestHeadlineChars = Math.max(headlineA.length, headlineB.length);
+    const mobileTitleFontSize =
+        mobileTitleFontPx !== null
+            ? `${mobileTitleFontPx}px`
+            : `clamp(20px, calc((100vw - 42px) / ${(widestHeadlineChars * 0.645).toFixed(2)} - 2px), 32px)`;
+
     const heroHeightClass = adjustForNavbar ? "h-[calc(100vh-var(--home-navbar-height))]" : "h-screen";
     // Fluid vertical rhythm is opt-in and reaches only the homepage hero — the
     // sole caller that passes adjustForNavbar. See the ".heroFluidSpacing"
@@ -272,15 +284,11 @@ export const Hero: React.FC<HeroProps> = ({ title, description, stats, adjustFor
                 className="heroContentWrap absolute inset-0 z-10 flex items-center justify-center px-4 md:px-16"
             >
                 <div className="w-full max-w-4xl text-center">
-                    <motion.div
-                        initial={{ opacity: 0, y: 10 }}
-                        animate={{ opacity: 1, y: 0, transition: { duration: 0.45, ease: "easeOut" } }}
-                        className="heroHeadlineContainer flex flex-col items-center gap-0 mb-6"
-                    >
+                    <div className="heroHeadlineContainer flex flex-col items-center gap-0 mb-6">
                         <h1
                             ref={mobileTitleRef}
                             className="heroMobileTitle md:hidden w-full text-center"
-                            style={{ fontFamily: "var(--font-orbitron)", fontSize: `${mobileTitleFontPx}px`, lineHeight: 1.02 }}
+                            style={{ fontFamily: "var(--font-orbitron)", fontSize: mobileTitleFontSize, lineHeight: 1.02 }}
                         >
                             <span
                                 className="heroTitleGlow block font-bold tracking-tighter text-foreground leading-none whitespace-nowrap"
@@ -313,13 +321,10 @@ export const Hero: React.FC<HeroProps> = ({ title, description, stats, adjustFor
                                 />
                             </span>
                         </h1>
-                    </motion.div>
+                    </div>
 
                     <div className="heroDescWrap mb-8 max-w-2xl mx-auto max-[420px]:mb-6 [@media(max-height:700px)]:mb-6">
-                        <motion.div
-                            initial={{ opacity: 0, y: 8 }}
-                            animate={{ opacity: 1, y: 0, transition: { duration: 0.45, ease: "easeOut", delay: 0.05 } }}
-                        >
+                        <div>
                             {descriptionParagraphs.length <= 1 ? (
                                 <p
                                     className="heroDescText text-muted-foreground text-base md:text-lg leading-relaxed font-normal tracking-tight whitespace-pre-line break-words max-w-full"
@@ -330,7 +335,7 @@ export const Hero: React.FC<HeroProps> = ({ title, description, stats, adjustFor
                             ) : (
                                 <DescriptionSlideshow paragraphs={descriptionParagraphs} />
                             )}
-                        </motion.div>
+                        </div>
                     </div>
                     {stats && stats.length > 0 && (
                         <div className="heroStatsGrid mx-auto grid w-full max-w-[820px] grid-cols-1 gap-4 max-[420px]:grid-cols-2 max-[420px]:gap-3 sm:grid-cols-3 sm:gap-6">

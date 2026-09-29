@@ -110,7 +110,12 @@ function FAQSection() {
   );
 }
 
+const HERO_VIDEO_SRC = "/images/hero-navbar-video.mp4";
+
+type HeroVideoWindow = Window & { __heroVideo?: Promise<Blob | null>; __heroVideoUrl?: string };
+
 function NavbarHeroBackgroundVideo() {
+  const [videoSrc, setVideoSrc] = useState<string | undefined>(undefined);
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const videoARef = useRef<HTMLVideoElement | null>(null);
   const videoBRef = useRef<HTMLVideoElement | null>(null);
@@ -158,10 +163,39 @@ function NavbarHeroBackgroundVideo() {
     return () => io.disconnect();
   }, []);
 
+  // Both crossfade elements play the same file. Pointing each at the URL makes
+  // the browser download it twice, so the file is fetched once (started by an
+  // inline script in page.tsx, which also attaches the resulting blob URL to
+  // both elements before hydration) and shared. This effect adopts that URL,
+  // or fetches the file itself if the script did not run.
+  useEffect(() => {
+    const w = window as HeroVideoWindow;
+    let cancelled = false;
+    const resolveUrl = (): Promise<string> => {
+      if (w.__heroVideoUrl) return Promise.resolve(w.__heroVideoUrl);
+      return (
+        w.__heroVideo ??
+        fetch(HERO_VIDEO_SRC)
+          .then((res) => (res.ok ? res.blob() : null))
+          .catch(() => null)
+      ).then((blob) => {
+        if (!blob) return HERO_VIDEO_SRC;
+        w.__heroVideoUrl ??= URL.createObjectURL(blob);
+        return w.__heroVideoUrl;
+      });
+    };
+    void resolveUrl().then((url) => {
+      if (!cancelled) setVideoSrc(url);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   useEffect(() => {
     const a = videoARef.current;
     const b = videoBRef.current;
-    if (!a || !b) return;
+    if (!a || !b || !videoSrc) return;
     if (!isInView) {
       try { a.pause(); } catch {}
       try { b.pause(); } catch {}
@@ -169,7 +203,7 @@ function NavbarHeroBackgroundVideo() {
     }
     if (activeRef.current === "A") safePlay(a);
     else safePlay(b);
-  }, [isInView]);
+  }, [isInView, videoSrc]);
 
   useEffect(() => {
     const a = videoARef.current;
@@ -233,7 +267,9 @@ function NavbarHeroBackgroundVideo() {
         ref={videoARef}
         className={videoClass}
         style={{ opacity: opacityA, transition: transitionStyle }}
-        src="/images/hero-navbar-video.mp4"
+        src={videoSrc}
+        data-hero-video=""
+        suppressHydrationWarning
         autoPlay
         muted
         playsInline
@@ -246,7 +282,9 @@ function NavbarHeroBackgroundVideo() {
         ref={videoBRef}
         className={videoClass}
         style={{ opacity: opacityB, transition: transitionStyle }}
-        src="/images/hero-navbar-video.mp4"
+        src={videoSrc}
+        data-hero-video=""
+        suppressHydrationWarning
         muted
         playsInline
         preload="metadata"

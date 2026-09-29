@@ -118,11 +118,11 @@ export function VoiceAgentPopup() {
     // being queued after resetAudioPlayer clears the pipeline.
     const audioGenerationRef = useRef<number>(0);
 
-    // Tessa intro greeting — pre-fetched on mount so it plays instantly on button press.
+    // Tessa intro greeting — fetched on the first interaction with the button.
     const tessaIntroF32Ref = useRef<Float32Array | null>(null);
     const tessaIntroFetchedRef = useRef<boolean>(false);
     // Stable reference to the in-flight prefetch promise so startSession() can
-    // await completion when the user clicks before the mount-time fetch finishes.
+    // await completion when the user clicks before the first-interaction fetch finishes.
     const tessaIntroPromiseRef = useRef<Promise<void> | null>(null);
 
     // Jitter buffer: collect audio chunks before starting playback to absorb
@@ -306,8 +306,8 @@ export function VoiceAgentPopup() {
         audioInitPromiseRef.current = null;
     }, []);
 
-    // Fetch Tessa's intro audio from the preview API on mount so it's ready
-    // to play the instant the user presses the button — no synthesis delay.
+    // Fetch Tessa's intro audio from the preview API so it is ready to play
+    // the instant the session starts — no synthesis delay.
     const prefetchTessaIntro = useCallback((): Promise<void> => {
         // Already done.
         if (tessaIntroF32Ref.current) return Promise.resolve();
@@ -710,15 +710,15 @@ export function VoiceAgentPopup() {
             // Non-fatal — handleMessage will retry on the first chunk
         }
 
-        // Wait briefly for the mount-time prefetch so the user always hears the
-        // intro on the first click. Disk-cache hit is ~100ms; cap at 2.5s so a
-        // slow network never blocks the session beyond the existing intro
-        // playback. If the prefetch hadn't started yet (component just mounted),
-        // calling prefetchTessaIntro() returns the same in-flight promise.
+        // Wait for the intro fetch (started on hover/focus/press, or right here
+        // if the click was the first interaction) so the user always hears the
+        // intro on the first click. Uncached, the request takes ~2s, so the cap
+        // is 6s; it only bounds a stalled network. If the fetch is already in
+        // flight, calling prefetchTessaIntro() returns the same promise.
         try {
             await Promise.race([
                 prefetchTessaIntro(),
-                new Promise((resolve) => setTimeout(resolve, 2500)),
+                new Promise((resolve) => setTimeout(resolve, 6000)),
             ]);
         } catch { /* Non-fatal — intro will be skipped */ }
 
@@ -860,10 +860,14 @@ export function VoiceAgentPopup() {
         }
     }, [isAuthed, isActive, startSession, endSession, router, pathname]);
 
-    // Pre-fetch Tessa's intro audio so it's ready the moment the button is pressed.
-    useEffect(() => {
+    // Start fetching Tessa's intro on the user's first interaction with the
+    // button (hover, focus or press) instead of on page load, so visitors who
+    // never touch it do not trigger a speech-synthesis call. Signed-out users
+    // are redirected to login on click, so they never need the intro.
+    const warmTessaIntro = useCallback(() => {
+        if (!isAuthed) return;
         void prefetchTessaIntro();
-    }, [prefetchTessaIntro]);
+    }, [isAuthed, prefetchTessaIntro]);
 
     // Pre-warm microphone stream on mount if permission is already granted.
     // getUserMedia() takes 100-500ms when called for the first time on button
@@ -915,6 +919,9 @@ export function VoiceAgentPopup() {
             <div className="relative">
                 <button
                     onClick={handleMainButtonClick}
+                    onPointerEnter={warmTessaIntro}
+                    onPointerDown={warmTessaIntro}
+                    onFocus={warmTessaIntro}
                     className={`relative rounded-full transition-[background-color,border-color,box-shadow,transform] duration-500 ease-out cursor-pointer group ${isActive ? "overflow-visible" : "overflow-hidden"} focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background ${!isActive
                         ? "stats-card inline-flex items-center justify-center h-10 w-10 px-0 bg-cyan-50/70 border border-cyan-200/80 shadow-[0_25px_50px_-12px_rgba(0,0,0,0.15)] backdrop-blur-sm transition-[background-color,border-color,box-shadow,transform,width,padding] hover:scale-105 md:justify-start md:gap-2 md:px-3 md:w-[150px] dark:bg-cyan-950/60 dark:border-cyan-200/35 dark:shadow-[0_25px_50px_-12px_rgba(0,0,0,0.55),0_0_0_1px_rgba(34,211,238,0.16),0_0_24px_rgba(34,211,238,0.14)]"
                         : "flex items-center justify-center w-20 h-20 lg:w-40 lg:h-40 bg-background/70 border-2 border-indigo-400/40 backdrop-blur-md transition-[width,height]"
