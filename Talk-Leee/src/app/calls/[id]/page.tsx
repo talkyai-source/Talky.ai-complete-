@@ -46,6 +46,12 @@ const TRANSCRIPT_MOBILE_BREAKPOINT_PX = 768;
 // Matches the `space-y-3` gap between message rows.
 const TRANSCRIPT_ROW_GAP_PX = 12;
 
+// Every card sits in a two-column flow from xl (one column below). The browser
+// balances the columns by height, so the layout holds whichever optional cards
+// are present. Cards never split across a column break, and a slot whose panel
+// rendered nothing is empty and hidden so it leaves no gap.
+const CARD_SLOT = "mb-6 break-inside-avoid empty:hidden";
+
 export default function CallDetailPage() {
     const params = useParams();
     const router = useRouter();
@@ -263,197 +269,57 @@ export default function CallDetailPage() {
             ) : error ? (
                 <CallLoadError message={error} onRetry={() => void callQuery.refetch()} />
             ) : call ? (
-                <div className="call-detail-page grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <div className="call-detail-page columns-1 xl:columns-2 gap-6">
                     {/* Call Info */}
-                    <div className="lg:col-span-1 space-y-6">
-                        <motion.div
-                            initial={{ opacity: 0, y: 20 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            className="content-card"
-                        >
-                            <div className="flex items-center justify-between gap-3 mb-4">
-                                <h2 className="text-sm font-semibold text-foreground">Call Details</h2>
-                                <div className="flex flex-wrap justify-end gap-2"><span className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-semibold ${call.direction === "inbound" ? "border-blue-500/30 bg-blue-500/10 text-blue-700 dark:text-blue-300" : "border-border bg-muted text-muted-foreground"}`}>{call.direction === "inbound" ? <PhoneIncoming className="h-3.5 w-3.5" aria-hidden /> : <PhoneOutgoing className="h-3.5 w-3.5" aria-hidden />}{call.direction === "inbound" ? "Inbound" : "Outbound"}</span><span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${getStatusStyle(call.status)}`}>{callStatusLabel(call.status)}</span></div>
-                            </div>
+                    <motion.div
+                        initial={{ opacity: 0, y: 20 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className={`content-card ${CARD_SLOT}`}
+                    >
+                        <div className="flex items-center justify-between gap-3 mb-4">
+                            <h2 className="text-sm font-semibold text-foreground">Call Details</h2>
+                            <div className="flex flex-wrap justify-end gap-2"><span className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-semibold ${call.direction === "inbound" ? "border-blue-500/30 bg-blue-500/10 text-blue-700 dark:text-blue-300" : "border-border bg-muted text-muted-foreground"}`}>{call.direction === "inbound" ? <PhoneIncoming className="h-3.5 w-3.5" aria-hidden /> : <PhoneOutgoing className="h-3.5 w-3.5" aria-hidden />}{call.direction === "inbound" ? "Inbound" : "Outbound"}</span><span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${getStatusStyle(call.status)}`}>{callStatusLabel(call.status)}</span></div>
+                        </div>
 
-                            <div className="space-y-3">
-                                <CallPartiesPanel direction={call.direction} phoneNumber={call.phone_number} toNumber={call.to_number} />
+                        <div className="space-y-3">
+                            <CallPartiesPanel direction={call.direction} phoneNumber={call.phone_number} toNumber={call.to_number} />
 
-                                <div className="group flex items-center gap-3 rounded-2xl border border-border bg-muted/60 p-3 shadow-sm transition-[transform,background-color,border-color,box-shadow] duration-150 ease-out hover:bg-background">
-                                    <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-background/60 text-foreground transition-colors group-hover:bg-background">
-                                        <Clock className="h-5 w-5" />
-                                    </div>
-                                    <div className="min-w-0 flex-1">
-                                        <div className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">Duration</div>
-                                        <div className="mt-0.5 text-sm font-semibold text-foreground tabular-nums">
-                                            {formatDuration(call.duration_seconds)}
-                                        </div>
+                            <div className="group flex items-center gap-3 rounded-2xl border border-border bg-muted/60 p-3 shadow-sm transition-[transform,background-color,border-color,box-shadow] duration-150 ease-out hover:bg-background">
+                                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-background/60 text-foreground transition-colors group-hover:bg-background">
+                                    <Clock className="h-5 w-5" />
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                    <div className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">Duration</div>
+                                    <div className="mt-0.5 text-sm font-semibold text-foreground tabular-nums">
+                                        {formatDuration(call.duration_seconds)}
                                     </div>
                                 </div>
+                            </div>
 
-                                {call.outcome ? (
-                                    <div className="group rounded-2xl border border-border bg-muted/60 p-3 shadow-sm transition-[transform,background-color,border-color,box-shadow] duration-150 ease-out hover:bg-background">
-                                        <div className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">Outcome</div>
-                                        <div className="mt-1">
-                                            <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold ${getStatusStyle(call.outcome)}`}>
-                                                {call.outcome.replace(/_/g, " ")}
-                                            </span>
-                                        </div>
-                                    </div>
-                                ) : null}
-
+                            {call.outcome ? (
                                 <div className="group rounded-2xl border border-border bg-muted/60 p-3 shadow-sm transition-[transform,background-color,border-color,box-shadow] duration-150 ease-out hover:bg-background">
-                                    <div className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">Date</div>
-                                    <div className="mt-1 text-sm font-semibold text-foreground">{new Date(call.created_at).toLocaleString()}</div>
-                                </div>
-                            </div>
-                        </motion.div>
-
-                        {call.direction === "inbound" ? (
-                            <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.08 }}>
-                                <InboundRouteSnapshot
-                                    canView={canViewInboundDetails}
-                                    inboundCampaignId={inboundCampaignId}
-                                    assignmentId={call.assignment_id}
-                                    routeId={call.route_id}
-                                    routeVersion={call.route_version}
-                                    configVersion={call.config_version}
-                                    configChecksum={call.config_checksum}
-                                />
-                            </motion.div>
-                        ) : null}
-
-                        {call.direction === "inbound" ? (
-                            <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.12 }}>
-                                <InboundConsentStatePanel
-                                    canView={canViewInboundDetails}
-                                    admissionStatus={call.admission_status}
-                                    consentStatus={call.consent_status}
-                                    processingStatus={call.processing_status}
-                                    mediaState={call.media_state}
-                                    recordingStatus={call.recording_status}
-                                    transcriptStatus={call.transcript_status}
-                                    admissionReason={call.admission_reason}
-                                />
-                            </motion.div>
-                        ) : null}
-
-                        <CallBillingPanel
-                            billingStatus={call.billing_status}
-                            billingHoldReason={call.billing_hold_reason}
-                            billedDurationSeconds={call.billed_duration_seconds}
-                        />
-
-                        <TransferLegsPanel legs={call.transfer_legs} />
-
-
-                        {call.summary && (
-                            <motion.div
-                                initial={{ opacity: 0, y: 20 }}
-                                animate={{ opacity: 1, y: 0 }}
-                                transition={{ delay: 0.1 }}
-                                className="content-card"
-                            >
-                                <h2 className="text-sm font-semibold text-foreground mb-4">Summary</h2>
-                                <div className="rounded-2xl border border-border bg-muted/60 p-4 shadow-sm transition-[transform,background-color,box-shadow] duration-150 ease-out hover:bg-background">
-                                    <p className="text-sm leading-relaxed text-muted-foreground">{call.summary}</p>
-                                </div>
-                            </motion.div>
-                        )}
-
-                        {call.recording_id && (
-                            <motion.div
-                                initial={{ opacity: 0, y: 20 }}
-                                animate={{ opacity: 1, y: 0 }}
-                                transition={{ delay: 0.2 }}
-                                className="content-card"
-                            >
-                                <h2 className="text-sm font-semibold text-foreground mb-4">Recording</h2>
-                                <div className="rounded-2xl border border-border bg-muted/60 p-4 shadow-sm space-y-2">
-                                    {recordingError && (
-                                        <p className="text-xs text-destructive mb-2">{recordingError}</p>
-                                    )}
-                                    <div className="flex gap-2">
-                                        <Button
-                                            variant="outline"
-                                            className="flex-1 hover:scale-[1.02] hover:shadow-md active:scale-[0.99]"
-                                            onClick={handlePlay}
-                                            disabled={recordingLoading || !canPlayMedia}
-                                        >
-                                            {recordingLoading ? (
-                                                <Loader2 className="w-4 h-4 animate-spin" />
-                                            ) : isPlaying ? (
-                                                <Pause className="w-4 h-4" />
-                                            ) : (
-                                                <Play className="w-4 h-4" />
-                                            )}
-                                            {isPlaying ? "Pause" : "Play"}
-                                        </Button>
-                                        {canDownloadMedia ? <Button
-                                            variant="outline"
-                                            className="flex-1 hover:scale-[1.02] hover:shadow-md active:scale-[0.99]"
-                                            onClick={handleDownload}
-                                            disabled={recordingDownloading}
-                                        >
-                                            {recordingDownloading ? (
-                                                <Loader2 className="w-4 h-4 animate-spin" />
-                                            ) : (
-                                                <Download className="w-4 h-4" />
-                                            )}
-                                            Download
-                                        </Button> : null}
+                                    <div className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">Outcome</div>
+                                    <div className="mt-1">
+                                        <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold ${getStatusStyle(call.outcome)}`}>
+                                            {call.outcome.replace(/_/g, " ")}
+                                        </span>
                                     </div>
-                                    {!permissionsSettled ? <p className="text-xs text-muted-foreground">Checking media permissions…</p> : !canPlayMedia ? <p className="text-xs text-muted-foreground">You do not have permission to play this recording.</p> : !canDownloadMedia ? <p className="text-xs text-muted-foreground">Playback is allowed; download requires a separate media permission.</p> : null}
                                 </div>
-                            </motion.div>
-                        )}
+                            ) : null}
 
-                        {/* Reviewer voice note about the agent's responses. It
-                            sits with the recording because the two are always
-                            reviewed together — you listen, then you comment. */}
-                        <motion.div
-                            initial={{ opacity: 0, y: 20 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            transition={{ delay: 0.25 }}
-                        >
-                            <VoiceFeedbackRecorder callId={callId} />
-                        </motion.div>
-
-                        {/* Structured review (goals.md §3). Sits with the
-                            recording and the voice note because all three are
-                            the same act: listen, then say what happened. */}
-                        <motion.div
-                            initial={{ opacity: 0, y: 20 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            transition={{ delay: 0.3 }}
-                        >
-                            <ConversationReviewPanel callId={callId} />
-                        </motion.div>
-
-                        {/* What the agent got OUT of the call, and how much to
-                            trust each piece (goals.md §7). Sits beside the
-                            review for the same reason the review sits beside
-                            the recording: you check a captured value against
-                            what was actually said. */}
-                        <motion.div
-                            initial={{ opacity: 0, y: 20 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            transition={{ delay: 0.35 }}
-                        >
-                            <LeadDetailsPanel
-                                callId={callId}
-                                campaignId={call?.campaign_id ?? undefined}
-                                leadOutcome={call?.lead_outcome}
-                            />
-                        </motion.div>
-                    </div>
+                            <div className="group rounded-2xl border border-border bg-muted/60 p-3 shadow-sm transition-[transform,background-color,border-color,box-shadow] duration-150 ease-out hover:bg-background">
+                                <div className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">Date</div>
+                                <div className="mt-1 text-sm font-semibold text-foreground">{new Date(call.created_at).toLocaleString()}</div>
+                            </div>
+                        </div>
+                    </motion.div>
 
                     {/* Transcript */}
                     <motion.div
                         initial={{ opacity: 0, y: 20 }}
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ delay: 0.3 }}
-                        className="lg:col-span-2"
+                        className={CARD_SLOT}
                     >
                         <div className="content-card">
                             <h2 className="mb-4 flex items-center gap-2 text-sm font-semibold text-foreground">
@@ -508,6 +374,150 @@ export default function CallDetailPage() {
                             )}
                         </div>
                     </motion.div>
+
+                    {call.summary && (
+                        <motion.div
+                            initial={{ opacity: 0, y: 20 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            transition={{ delay: 0.1 }}
+                            className={`content-card ${CARD_SLOT}`}
+                        >
+                            <h2 className="text-sm font-semibold text-foreground mb-4">Summary</h2>
+                            <div className="rounded-2xl border border-border bg-muted/60 p-4 shadow-sm transition-[transform,background-color,box-shadow] duration-150 ease-out hover:bg-background">
+                                <p className="text-sm leading-relaxed text-muted-foreground">{call.summary}</p>
+                            </div>
+                        </motion.div>
+                    )}
+
+                    {call.recording_id && (
+                        <motion.div
+                            initial={{ opacity: 0, y: 20 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            transition={{ delay: 0.2 }}
+                            className={`content-card ${CARD_SLOT}`}
+                        >
+                            <h2 className="text-sm font-semibold text-foreground mb-4">Recording</h2>
+                            <div className="rounded-2xl border border-border bg-muted/60 p-4 shadow-sm space-y-2">
+                                {recordingError && (
+                                    <p className="text-xs text-destructive mb-2">{recordingError}</p>
+                                )}
+                                <div className="flex gap-2">
+                                    <Button
+                                        variant="outline"
+                                        className="flex-1 hover:scale-[1.02] hover:shadow-md active:scale-[0.99]"
+                                        onClick={handlePlay}
+                                        disabled={recordingLoading || !canPlayMedia}
+                                    >
+                                        {recordingLoading ? (
+                                            <Loader2 className="w-4 h-4 animate-spin" />
+                                        ) : isPlaying ? (
+                                            <Pause className="w-4 h-4" />
+                                        ) : (
+                                            <Play className="w-4 h-4" />
+                                        )}
+                                        {isPlaying ? "Pause" : "Play"}
+                                    </Button>
+                                    {canDownloadMedia ? <Button
+                                        variant="outline"
+                                        className="flex-1 hover:scale-[1.02] hover:shadow-md active:scale-[0.99]"
+                                        onClick={handleDownload}
+                                        disabled={recordingDownloading}
+                                    >
+                                        {recordingDownloading ? (
+                                            <Loader2 className="w-4 h-4 animate-spin" />
+                                        ) : (
+                                            <Download className="w-4 h-4" />
+                                        )}
+                                        Download
+                                    </Button> : null}
+                                </div>
+                                {!permissionsSettled ? <p className="text-xs text-muted-foreground">Checking media permissions…</p> : !canPlayMedia ? <p className="text-xs text-muted-foreground">You do not have permission to play this recording.</p> : !canDownloadMedia ? <p className="text-xs text-muted-foreground">Playback is allowed; download requires a separate media permission.</p> : null}
+                            </div>
+                        </motion.div>
+                    )}
+
+                    {/* Reviewer voice note about the agent's responses. It
+                        sits with the recording because the two are always
+                        reviewed together — you listen, then you comment. */}
+                    <motion.div
+                        initial={{ opacity: 0, y: 20 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: 0.25 }}
+                        className={CARD_SLOT}
+                    >
+                        <VoiceFeedbackRecorder callId={callId} />
+                    </motion.div>
+
+                    {/* Structured review (goals.md §3). Sits with the
+                        recording and the voice note because all three are
+                        the same act: listen, then say what happened. */}
+                    <motion.div
+                        initial={{ opacity: 0, y: 20 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: 0.3 }}
+                        className={CARD_SLOT}
+                    >
+                        <ConversationReviewPanel callId={callId} />
+                    </motion.div>
+
+                    {/* What the agent got OUT of the call, and how much to
+                        trust each piece (goals.md §7). Sits beside the
+                        review for the same reason the review sits beside
+                        the recording: you check a captured value against
+                        what was actually said. */}
+                    <motion.div
+                        initial={{ opacity: 0, y: 20 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: 0.35 }}
+                        className={CARD_SLOT}
+                    >
+                        <LeadDetailsPanel
+                            callId={callId}
+                            campaignId={call?.campaign_id ?? undefined}
+                            leadOutcome={call?.lead_outcome}
+                        />
+                    </motion.div>
+
+                    <div className={CARD_SLOT}>
+                        <CallBillingPanel
+                            billingStatus={call.billing_status}
+                            billingHoldReason={call.billing_hold_reason}
+                            billedDurationSeconds={call.billed_duration_seconds}
+                        />
+                    </div>
+
+                    <div className={CARD_SLOT}>
+                        <TransferLegsPanel legs={call.transfer_legs} />
+                    </div>
+
+                    {call.direction === "inbound" ? (
+                        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.08 }} className={CARD_SLOT}>
+                            <InboundRouteSnapshot
+                                canView={canViewInboundDetails}
+                                inboundCampaignId={inboundCampaignId}
+                                assignmentId={call.assignment_id}
+                                routeId={call.route_id}
+                                routeVersion={call.route_version}
+                                configVersion={call.config_version}
+                                configChecksum={call.config_checksum}
+                            />
+                        </motion.div>
+                    ) : null}
+
+                    {call.direction === "inbound" ? (
+                        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.12 }} className={CARD_SLOT}>
+                            <InboundConsentStatePanel
+                                canView={canViewInboundDetails}
+                                admissionStatus={call.admission_status}
+                                consentStatus={call.consent_status}
+                                processingStatus={call.processing_status}
+                                mediaState={call.media_state}
+                                recordingStatus={call.recording_status}
+                                transcriptStatus={call.transcript_status}
+                                admissionReason={call.admission_reason}
+                            />
+                        </motion.div>
+                    ) : null}
                 </div>
             ) : null}
         </DashboardLayout>
