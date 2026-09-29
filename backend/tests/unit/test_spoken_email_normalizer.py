@@ -208,7 +208,13 @@ def test_extract_phone_negative(speech):
 
 
 def test_natural_phone_readback():
-    assert natural_phone_readback("5551234567") == "5 5 5 1 2 3 4 5 6 7"
-    assert natural_phone_readback("+447911") == "plus 4 4 7 9 1 1"
+    # Every digit is still said on its own (a wrong one is catchable), but in
+    # the chunks people use, with a comma pause between them (2026-09-29).
+    assert natural_phone_readback("5551234567") == "5 5 5, 1 2 3, 4 5 6 7"
+    assert natural_phone_readback("+447911") == "plus 4 4, 7 9 1 1"  # UK "7911" prefix
+    assert natural_phone_readback("+923120750496") == "plus 9 2, 3 1 2, 0 7 5, 0 4 9 6"
+    assert natural_phone_readback("+447429916656") == "plus 4 4, 7 4 2 9, 9 1 6, 6 5 6"
+    assert natural_phone_readback("+16473476870") == "plus 1, 6 4 7, 3 4 7, 6 8 7 0"
+    assert natural_phone_readback("12345") == "1 2 3 4 5"
     assert natural_phone_readback("") == ""
     assert natural_phone_readback(None) == ""

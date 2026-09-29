@@ -65,8 +65,11 @@ _DIGIT_WORD = r"(?:zero|oh|one|two|three|four|five|six|seven|eight|nine)"
 # fell through ungated. {6,} + the trailing \d is the correct floor for 7.
 # The digit-word alternative already matches its own documented 7+ (6
 # repeats + 1 trailing word), so only this branch needed the fix.
+# Commas are separators too since read-backs are spoken in comma-paused groups
+# ("plus 9 2, 3 1 2, 0 7 5, 0 4 9 6", 2026-09-29): without them a fabricated
+# grouped read-back would never reach 7 digits and slip past this guard.
 _DIGIT_RUN_RE = re.compile(
-    r"(?:\d[\s.\-]*){6,}\d" rf"|(?:{_DIGIT_WORD}[\s,]+){{6,}}{_DIGIT_WORD}",
+    r"(?:\d[\s.,\-]*){6,}\d" rf"|(?:{_DIGIT_WORD}[\s,]+){{6,}}{_DIGIT_WORD}",
     re.IGNORECASE,
 )
 

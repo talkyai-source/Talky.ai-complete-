@@ -348,19 +348,70 @@ def extract_phone_from_speech(utterance: str) -> Optional[str]:
     return best
 
 
-def natural_phone_readback(phone: Optional[str]) -> str:
-    """A spoken read-back of a phone number: each digit said individually so the
-    caller can catch a single wrong one. "+" is spoken as "plus".
+def _phone_groups(phone: str, digits: str) -> list[str]:
+    """Split a number into the chunks people say it in, for its own country.
 
-      "5551234567"  -> "5 5 5 1 2 3 4 5 6 7"
-      "+441234567"  -> "plus 4 4 1 2 3 4 5 6 7"
+    Uses the international layout libphonenumber prints ("+92 312 0750496",
+    "+44 7429 916656", "+1 647-347-6870"), then breaks any chunk longer than
+    four digits into threes with the last chunk up to four -- how a person
+    actually reads seven digits aloud ("075, 0496"). Falls back to the same
+    3/4 rule from the end when the number can't be parsed.
+    """
+    groups: list[str] = []
+    if phone.strip().startswith("+"):
+        try:
+            import phonenumbers
+
+            parsed = phonenumbers.parse(phone, None)
+            printed = phonenumbers.format_number(
+                parsed, phonenumbers.PhoneNumberFormat.INTERNATIONAL
+            )
+            groups = [g for g in re.split(r"[\s\-()]+", printed.lstrip("+")) if g]
+        except Exception:
+            groups = []
+    if not groups or "".join(groups) != digits:
+        groups = [digits]
+
+    def _split(chunk: str) -> list[str]:
+        n = len(chunk)
+        if n <= 5:
+            return [chunk]
+        if n == 6:
+            return [chunk[:3], chunk[3:]]
+        if n == 8:
+            return [chunk[:4], chunk[4:]]
+        head, tail = chunk[:-4], chunk[-4:]
+        out = [head[i:i + 3] for i in range(0, len(head), 3)]
+        if len(out) > 1 and len(out[-1]) == 1:
+            out[-2:] = [out[-2] + out[-1]]
+        return out + [tail]
+
+    result: list[str] = []
+    for g in groups:
+        result.extend(_split(g))
+    return result
+
+
+def natural_phone_readback(phone: Optional[str]) -> str:
+    """A spoken read-back of a phone number, in natural chunks.
+
+    Every digit is still said on its own (so the caller can catch a single
+    wrong one), but in the groups people use for their country, with a comma
+    -- a short pause in TTS -- between groups, instead of one flat run of
+    digits that sounds like a machine (2026-09-29, owner feedback on call
+    b847f447). "+" is spoken as "plus".
+
+      "+923120750496" -> "plus 9 2, 3 1 2, 0 7 5, 0 4 9 6"
+      "+447429916656" -> "plus 4 4, 7 4 2 9, 9 1 6, 6 5 6"
+      "+16473476870"  -> "plus 1, 6 4 7, 3 4 7, 6 8 7 0"
+      "5551234567"    -> "5 5 5, 1 2 3, 4 5 6 7"
     """
     if not phone:
         return ""
     digits = re.sub(r"\D", "", phone)
     if not digits:
         return ""
-    spoken = " ".join(digits)
+    spoken = ", ".join(" ".join(group) for group in _phone_groups(phone, digits))
     return f"plus {spoken}" if phone.strip().startswith("+") else spoken
 
 

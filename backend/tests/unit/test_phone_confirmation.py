@@ -138,7 +138,8 @@ def test_prompt_unconfirmed_phone_demands_readback():
     assert "5551234567" in out
     assert "say exactly" in low
     assert "did i get that right" in low
-    assert "5 5 5 1 2 3 4 5 6 7" in out   # the exact digit-by-digit read-back
+    # The exact read-back: every digit on its own, in comma-paused groups.
+    assert "5 5 5, 1 2 3, 4 5 6 7" in out
     assert "do not re-ask" not in low
 
 
