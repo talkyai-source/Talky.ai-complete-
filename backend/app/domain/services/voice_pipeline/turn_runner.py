@@ -297,10 +297,53 @@ def email_on_the_table(pending, full_transcript, history):
                 email_readback_attempts=0,
             )
             pending_email = latest
+            if _spelled_by_caller(latest, history) and pending.email_capture:
+                # Every letter of it came from the caller's own recent words
+                # ("Allstate estimation at Gmail dot com" + "one word"); the
+                # agent only chose the separator they asked for. It is the
+                # caller's, stored unconfirmed. Test call 5dfa4416 stored
+                # nothing because this was marked agent-invented.
+                pending = replace(
+                    pending,
+                    email_capture=replace(pending.email_capture, from_caller=True),
+                )
     readback_issued = _agent_read_back_email(history, pending_email) or bool(
         latest and latest == pending_email
     )
     return pending, readback_issued
+
+
+def _spelled_by_caller(email: str, history) -> bool:
+    """True when the caller SAID this address in one of their last few turns:
+    its name part is exactly the one to four words just before an "at", and
+    its domain is the words after it ("dot" as the dot). Only the separator
+    between the name words may differ -- which is what the agent asks about.
+    """
+    email = str(email or "").lower()
+    if "@" not in email:
+        return False
+    local, domain = email.split("@", 1)
+    want_local = re.sub(r"[^a-z0-9]", "", local)
+    want_domain = re.sub(r"[^a-z0-9]", "", domain)
+    if not want_local or not want_domain:
+        return False
+    said = [
+        str(m.content or "").lower()
+        for m in (history or [])[-8:]
+        if getattr(m, "role", None) == MessageRole.USER
+    ][-4:]
+    for text in said:
+        for word, digit in _READBACK_DIGIT_WORDS.items():
+            text = re.sub(rf"\b{word}\b", digit, text)
+        for sep in re.finditer(r"\s(?:at\s+the\s+rate|at)\s|@", text):
+            before = re.findall(r"[a-z0-9]+", text[: sep.start()])
+            after = re.findall(r"[a-z0-9]+", text[sep.end():])
+            after = [w for w in after if w != "dot"]
+            if "".join(after).startswith(want_domain) and any(
+                "".join(before[-n:]) == want_local for n in range(1, 5)
+            ):
+                return True
+    return False
 
 
 def _email_from_recent_agent_readback(history):

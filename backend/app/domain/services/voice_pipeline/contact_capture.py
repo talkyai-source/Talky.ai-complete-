@@ -352,6 +352,31 @@ def _spoken_local_candidates(text: str) -> tuple[Optional[str], Optional[str]]:
     return None, None
 
 
+_REQUEST_PROMPT = {
+    "phone": (
+        "The caller wants you to take their phone number and has not said it "
+        'yet. Ask for it now: "What\'s the best number to reach you on?"'
+    ),
+    "email": (
+        "The caller wants you to take their email address and has not said it "
+        'yet. Ask for it now: "What\'s the best email address for you?"'
+    ),
+}
+
+
+def _names_a_value(kind: str, text: str) -> bool:
+    """Whether ``text`` contains any attempt at the value itself (digits for a
+    phone, an "at"/"@" for an email) rather than only asking us to take one."""
+    body = str(text or "").lower()
+    if kind == "phone":
+        from app.services.scripts.spoken_email_normalizer import (
+            spoken_digits_to_numerals,
+        )
+
+        return bool(re.search(r"\d", spoken_digits_to_numerals(body)))
+    return bool(re.search(r"@|\bat\b", body))
+
+
 def _either_or_prompt(text: str) -> Optional[str]:
     """The one question that settles a two-word spoken address, or None.
 
@@ -802,6 +827,7 @@ def advance_capture(
     transcript_alternatives: Sequence[str] = (),
     explicit_reask: bool = False,
     mode_active: bool = False,
+    agent_asked: bool = True,
     now: Optional[datetime] = None,
 ) -> Optional[ContactCaptureState]:
     """Advance one contact field from final transcript evidence.
@@ -993,6 +1019,18 @@ def advance_capture(
         )
 
     if previous is None:
+        if has_intent and not _names_a_value(kind, text):
+            # "Note down my mobile number as well" -- a REQUEST to take one,
+            # with nothing said yet. Test call 5dfa4416 (2026-09-29): this was
+            # stored as a failed attempt with "please repeat the number", and
+            # the tries ran out before the agent ever asked.
+            return _state(
+                kind,
+                CaptureStatus.NEEDS_CLARIFICATION,
+                raw=text,
+                attempts=0,
+                prompt=_REQUEST_PROMPT[kind],
+            )
         # Contact-shaped but unparseable input must be visible to the prompt. A
         # multi-word spoken email is ambiguous (spell/segment clarification); a
         # malformed written address is invalid.
@@ -1081,6 +1119,17 @@ def advance_capture(
     # An EXPLICIT "never mind" cancellation is unaffected in practice: it is
     # only ever revived by an actual, fully-formed new value, which is the
     # unconditional AWAITING_CONFIRMATION branch above, not this one.
+    if not agent_asked and previous.status in {
+        CaptureStatus.NEEDS_CLARIFICATION,
+        CaptureStatus.INVALID,
+    }:
+        # Nothing usable, and the agent did not ask for this detail on its last
+        # turn: the caller was answering something else ("It's two PM
+        # Sunday."). That is not a failed try -- counting it is what ran the
+        # tries out on 5dfa4416 before the number was ever asked for.
+        either_or = _either_or_prompt(text) if kind == "email" else None
+        if not either_or:
+            return previous
     if has_intent and previous.status not in {
         CaptureStatus.CONFIRMED,
         CaptureStatus.AWAITING_CONFIRMATION,

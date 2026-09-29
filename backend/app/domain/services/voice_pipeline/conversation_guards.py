@@ -36,7 +36,9 @@ EMAIL_REASK = (
 _CLAIM = re.compile(
     r"\b(?:"
     r"(?:i'?ll|i will|we'?ll|we will|i can|let me)\s+(?:pass|send|share|forward|hand)\s+"
-    r"(?:that|it|this|those|them|your\s+\w+|the\s+(?:number|details|email|contact))\s+"
+    r"(?:that|it|this|those|them|your\s+\w+|"
+    r"(?:the|your)\s+(?:(?:project|contact|phone|mobile|email|callback|call-back|full|"
+    r"these|those|all|your|the)\s+){0,2}(?:number|details|email|contact|info(?:rmation)?))\s+"
     r"(?:on|over|along|through|to)"
     r"|(?:i'?ve|i have|we'?ve|we have)\s+(?:got|noted|taken|saved|recorded|written)\s+"
     r"(?:down\s+)?(?:your|the|that)\s+(?:number|details|email|contact)"
@@ -97,6 +99,12 @@ def unbacked_contact_claim(
         call_state, "earlier_phone_captures", ()
     ):
         return None
+    ask = pending_contact_ask(call_state)
+    if ask:
+        # Say the open question itself (5dfa4416: the email read-back was
+        # still waiting for a yes when the agent said "Perfect. I'll pass the
+        # project details to the estimating team").
+        return ask
     last = last_caller_text or ""
     if email is not None or _EMAIL_CUES.search(last):
         return EMAIL_REASK
@@ -240,3 +248,96 @@ _CALLBACK_PROMISE = re.compile(
 def promises_timed_callback(sentence: str) -> bool:
     """True when the agent commits to calling back at a specific time or day."""
     return bool(sentence and _CALLBACK_PROMISE.search(_plain(sentence)))
+
+
+# ── 5. No goodbye while a contact detail is still open ────────────────────
+#
+# Test call 5dfa4416 (2026-09-29): the email read-back had no yes and the
+# caller had asked twice for their mobile number to be taken, and the agent
+# said "Brilliant. Thanks for your time. Have a good day." The hang-up was
+# held back (turn_ender sees the open capture) but the goodbye had already
+# been spoken, so the caller left. The goodbye is replaced by the open
+# question; a caller who is ending the call themselves is let go.
+
+_CLOSING = re.compile(
+    r"\b(?:thanks?(?:\s+you)?\s+(?:so\s+much\s+)?for\s+your\s+time"
+    r"|have\s+a\s+(?:good|great|lovely|nice|brilliant)\s+"
+    r"(?:day|one|afternoon|evening|weekend|rest\s+of\s+your\s+day)"
+    r"|good\s*bye|bye(?:\s+(?:for\s+now|now|then))?|take\s+care|speak\s+(?:to\s+you\s+)?soon"
+    r"|all\s+the\s+best)\b",
+    re.IGNORECASE,
+)
+
+_OPEN_STATES = {"needs_clarification", "invalid", "awaiting_confirmation"}
+
+
+def _status_value(capture: Any) -> str:
+    status = getattr(capture, "status", None)
+    return str(getattr(status, "value", status) or "")
+
+
+def pending_contact_ask(call_state: Any) -> Optional[str]:
+    """The question that settles the open contact detail, or None.
+
+    The one being worked on comes first; a read-back is the exact sentence the
+    confirm gate recognises, so the caller's yes to it counts.
+    """
+    if call_state is None:
+        return None
+    from app.services.scripts.spoken_email_normalizer import (
+        natural_email_readback,
+        natural_phone_readback,
+    )
+
+    active = getattr(call_state, "active_contact_kind", None)
+    kinds = ["email", "phone"]
+    if active == "phone":
+        kinds.reverse()
+    for kind in kinds:
+        capture = _capture(call_state, f"{kind}_capture")
+        status = _status_value(capture)
+        if status not in _OPEN_STATES:
+            continue
+        value = getattr(capture, "normalized_value", None)
+        if status == "awaiting_confirmation" and value:
+            spoken = (
+                natural_email_readback(value) if kind == "email"
+                else natural_phone_readback(value)
+            ) or value
+            return f"So that's {spoken} — did I get that right?"
+        if kind == "phone":
+            return "What's the best number to reach you on?"
+        return "What's the best email address for you?"
+    return None
+
+
+_CLOSING_FILLER = frozenset(
+    "thanks thank you so much very really again and brilliant great perfect "
+    "lovely okay ok alright right cheers well then now too for your time it "
+    "was nice good to speak talk with".split()
+)
+
+
+def _is_goodbye(sentence: str) -> bool:
+    """The sentence is a goodbye and nothing else ("Thanks for your time.",
+    "Have a good day."), not an ordinary sentence that contains one ("Thanks
+    for your time explaining that", "take care of that paperwork")."""
+    plain = _plain(sentence).lower()
+    if not _CLOSING.search(plain):
+        return False
+    rest = _CLOSING.sub(" ", plain)
+    words = [w for w in re.findall(r"[a-z']+", rest) if w not in _CLOSING_FILLER]
+    return not words
+
+
+def closing_while_contact_open(
+    sentence: str, call_state: Any, last_caller_text: Optional[str]
+) -> Optional[str]:
+    """The open contact question to say instead of a goodbye, or None."""
+    if not sentence or not _is_goodbye(sentence):
+        return None
+    from app.domain.services.end_session_action import caller_signaled_end
+
+    if caller_signaled_end(last_caller_text):
+        return None
+    return pending_contact_ask(call_state)

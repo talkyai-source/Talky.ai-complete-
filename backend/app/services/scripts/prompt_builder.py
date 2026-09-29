@@ -8,6 +8,8 @@ its own system message.
 """
 from __future__ import annotations
 
+from typing import Optional
+
 from app.domain.services.voice_pipeline.contact_capture import CaptureStatus
 from app.services.scripts.call_state_tracker import CallState
 from app.services.scripts.spoken_email_normalizer import (
@@ -47,29 +49,9 @@ _NO_CALLBACK_EXECUTOR_POLICY = (
 )
 
 
-def compose_system_prompt(
-    base_prompt: str,
-    state: CallState,
-    *,
-    has_callback_executor: bool = False,
-) -> str:
-    """Return base_prompt with a CAPTURED-slots header prepended when state
-    has any filled slot; otherwise return base_prompt unchanged.
-
-    The header is deterministic and short (<= 120 tokens) so it never
-    crowds out the persona rules.
-
-    ``has_callback_executor`` defaults to False because that is the current
-    truth for every campaign in this codebase (action_tools.py has no live
-    executor for schedule_callback). When False, the CALLBACK POLICY line is
-    always appended (after any CAPTURED block, so CAPTURED still leads);
-    pass True once a real executor exists so the now-irrelevant line drops
-    out on its own, with no campaign-side change required.
-    """
-    # Confirm-before-commit (issue #1): only a CONFIRMED email is a settled
-    # "do not re-ask" CAPTURED fact. An unconfirmed email is surfaced as an
-    # action-this-turn: read it back, confirm, and do NOT save it until the
-    # caller says yes. This stops a first-utterance mishear being locked as truth.
+def _pending_actions(state: CallState) -> tuple[list[str], list[str]]:
+    """The contact actions still open this turn, and call details to keep
+    in hand. Shared by the prompt header and the trailing turn directive."""
     pending: list[str] = []
     # Facts to use only when the moment comes -- not an action for this turn.
     call_details: list[str] = []
@@ -79,11 +61,10 @@ def compose_system_prompt(
             CaptureStatus.INVALID,
         }:
             continue
-        if (
+        queued = (
             state.active_contact_kind is not None
             and capture.kind != state.active_contact_kind
-        ):
-            continue
+        )
         if state.contact_ask_objections and not capture.normalized_value:
             # The caller objected to being asked. An unresolved address from
             # before that is not something to keep chasing.
@@ -96,6 +77,13 @@ def compose_system_prompt(
             if capture.normalized_value
             else ""
         )
+        if queued:
+            # Settled one at a time, but never forgotten: 5dfa4416 lost a
+            # phone request that arrived while the email was being confirmed.
+            pending.append(
+                f"- Once that is settled, next: {instruction}{candidate}"
+            )
+            continue
         pending.append(f"- {instruction}{candidate} Do not save or rely on it yet.")
 
     if (
@@ -181,6 +169,97 @@ def compose_system_prompt(
             'reach them, ask: "Is this number the best one to reach you on?" '
             "Only ask them to say a number if they say no."
         )
+    # A read-back waiting behind the other contact is queued, not dropped.
+    for kind, value, confirmed, speak in (
+        ("email", state.email, state.email_confirmed, natural_email_readback),
+        ("phone", state.phone, state.phone_confirmed, natural_phone_readback),
+    ):
+        capture = getattr(state, f"{kind}_capture")
+        if (
+            value
+            and not confirmed
+            and state.active_contact_kind not in {None, kind}
+            and (capture is None or capture.status is CaptureStatus.AWAITING_CONFIRMATION)
+        ):
+            spoken = speak(value) or value
+            pending.append(
+                f'- Once that is settled, next: confirm their {kind} -- say '
+                f'"So that\'s {spoken} -- did I get that right?"'
+            )
+    # The action for THIS turn first; queued ones after it.
+    pending.sort(key=lambda line: line.startswith("- Once that is settled"))
+    return pending, call_details
+
+
+def turn_directive(state: Optional[CallState]) -> Optional[str]:
+    """The one open contact action, worded to be read LAST, after the caller's
+    latest words -- or None.
+
+    Test call 5dfa4416 (2026-09-29): the pending action sat in the system
+    prompt above ~12k tokens of script and knowledge, and the model followed
+    the script's next line instead ("What time works best for you?") three
+    turns running. The last thing read is what gets done.
+    """
+    if state is None:
+        return None
+    pending, _details = _pending_actions(state)
+    if not pending:
+        return None
+    first = pending[0].lstrip("- ").strip()
+    return (
+        "Before anything else in this reply -- ahead of the next line of your "
+        f"script -- do this: {first} Do not say goodbye while this is open."
+    )
+
+
+def with_turn_directive(messages: list, directive: Optional[str]) -> list:
+    """``messages`` with ``directive`` added to the caller's latest message as
+    a clearly marked note, so it is the last thing the model reads.
+
+    A trailing system-role message was the first idea; it breaks the Groq
+    GPT-OSS path (which keeps system roles out on purpose) and Gemini folds it
+    into the caller's words unmarked. A marked note on the user turn is read
+    the same way by every provider. The stored history is not touched.
+    """
+    if not directive or not messages:
+        return messages
+    from app.domain.models.conversation import MessageRole
+
+    for i in range(len(messages) - 1, -1, -1):
+        m = messages[i]
+        if getattr(m, "role", None) == MessageRole.USER:
+            note = (
+                f"{m.content}\n\n(Note for you, the agent -- the caller did not "
+                f"say this: {directive})"
+            )
+            return [*messages[:i], m.model_copy(update={"content": note}), *messages[i + 1:]]
+    return messages
+
+
+def compose_system_prompt(
+    base_prompt: str,
+    state: CallState,
+    *,
+    has_callback_executor: bool = False,
+) -> str:
+    """Return base_prompt with a CAPTURED-slots header prepended when state
+    has any filled slot; otherwise return base_prompt unchanged.
+
+    The header is deterministic and short (<= 120 tokens) so it never
+    crowds out the persona rules.
+
+    ``has_callback_executor`` defaults to False because that is the current
+    truth for every campaign in this codebase (action_tools.py has no live
+    executor for schedule_callback). When False, the CALLBACK POLICY line is
+    always appended (after any CAPTURED block, so CAPTURED still leads);
+    pass True once a real executor exists so the now-irrelevant line drops
+    out on its own, with no campaign-side change required.
+    """
+    # Confirm-before-commit (issue #1): only a CONFIRMED email is a settled
+    # "do not re-ask" CAPTURED fact. An unconfirmed email is surfaced as an
+    # action-this-turn: read it back, confirm, and do NOT save it until the
+    # caller says yes. This stops a first-utterance mishear being locked as truth.
+    pending, call_details = _pending_actions(state)
 
     lines: list[str] = []
     for earlier in getattr(state, "earlier_email_captures", ()) or ():

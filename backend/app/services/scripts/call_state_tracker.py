@@ -286,6 +286,10 @@ class CallState:
     # one had nowhere to go and was never stored.
     earlier_email_captures: tuple = ()
     earlier_phone_captures: tuple = ()
+    # The contact kind the agent's LAST turn asked for, if any. Only then is a
+    # caller turn with no usable value a failed try (5dfa4416: "It's two PM
+    # Sunday." answered a time question and used up the phone tries).
+    agent_asked_kind: Optional[CaptureKind] = None
     # Only one contact clarification/confirmation is active at a time. This
     # prevents "never mind" for a phone from cancelling an unrelated email.
     active_contact_kind: Optional[CaptureKind] = None
@@ -442,8 +446,13 @@ def update_state_from_user_turn(
         if earlier_emails == tuple(state.earlier_email_captures or ()):
             active_kind = "phone"
         skip_phone = not _GIVES_DIGITS_RE.search(utterance)
+    # Each field the caller spoke about is advanced, whichever one's
+    # confirmation is in progress: which reply a read-back verdict belongs to
+    # is serialized, noticing what the caller asked for is not. Test call
+    # 5dfa4416: "And note down my mobile number as well?" during the email
+    # read-back never reached the phone field and was lost.
     if not skip_email and (
-        active_kind == "email" or (email_intent and phone_intent) or dual_readback
+        active_kind == "email" or email_intent or dual_readback
     ):
         email_capture = advance_capture(
             email_capture,
@@ -455,9 +464,12 @@ def update_state_from_user_turn(
             transcript_alternatives=transcript_alternatives,
             explicit_reask=explicit_contact_reask,
             mode_active=True,
+            agent_asked=(
+                state.agent_asked_kind == "email" or readback_issued
+            ),
         )
     if not skip_phone and (
-        active_kind == "phone" or (email_intent and phone_intent) or dual_readback
+        active_kind == "phone" or phone_intent or dual_readback
     ):
         phone_capture = advance_capture(
             phone_capture,
@@ -470,6 +482,10 @@ def update_state_from_user_turn(
             transcript_alternatives=transcript_alternatives,
             explicit_reask=explicit_contact_reask,
             mode_active=True,
+            agent_asked=(
+                state.agent_asked_kind == "phone"
+                or phone_readback_issued
+            ),
         )
 
     active_capture = (
@@ -571,6 +587,7 @@ def update_state_from_user_turn(
         phone_capture=phone_capture,
         earlier_email_captures=earlier_emails,
         earlier_phone_captures=earlier_phones,
+        agent_asked_kind=None,
         active_contact_kind=active_kind,
         follow_up=follow_up,
         bidding_active=bidding_active,
@@ -601,10 +618,14 @@ def update_state_from_agent_turn(state: CallState, utterance: str) -> CallState:
     elif reask:
         kind = state.active_contact_kind
     if kind is None:
-        return state
+        return (
+            replace(state, agent_asked_kind=None)
+            if state.agent_asked_kind is not None
+            else state
+        )
 
     capture = getattr(state, f"{kind}_capture")
-    changes = {"active_contact_kind": kind}
+    changes = {"active_contact_kind": kind, "agent_asked_kind": kind}
     if (
         reask
         and capture is not None

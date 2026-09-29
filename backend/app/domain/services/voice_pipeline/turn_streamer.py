@@ -51,6 +51,7 @@ from app.services.scripts.prompts.accent_fillers import (
 from app.infrastructure.llm.groq import LLMTimeoutError
 from app.services.scripts import model_prompt_addendum
 from app.services.scripts.prompts.build import build_turn_prompt
+from app.services.scripts.prompt_builder import turn_directive, with_turn_directive
 from app.domain.services.voice_pipeline.sentence_cap import (
     cap_allows_another,
     truncate_to_cap,
@@ -61,6 +62,7 @@ from app.domain.services.voice_pipeline.sentence_segmentation import (
 from app.domain.services.voice_pipeline.conversation_guards import (
     CALLBACK_PREFERENCE,
     PHONE_REASK,
+    closing_while_contact_open,
     is_repeated_question,
     phone_readback_changed,
     promises_timed_callback,
@@ -832,6 +834,21 @@ class TurnStreamer:
             else:
                 text = _fig_text  # at most a corrected currency sign
             if speaking:
+                _open_ask = closing_while_contact_open(
+                    text,
+                    getattr(session, "captured_slots", None),
+                    last_user_text_for_limit,
+                )
+                if _open_ask:
+                    if "closing_with_contact_open" in speech_rewrites:
+                        return "", None  # the question is already said
+                    logger.warning(
+                        "closing_with_contact_open call=%s — goodbye replaced by "
+                        "the open contact question",
+                        call_id[:12],
+                    )
+                    speech_rewrites.append("closing_with_contact_open")
+                    return _open_ask, None
                 _reask = unbacked_contact_claim(
                     text,
                     getattr(session, "captured_slots", None),
@@ -928,6 +945,17 @@ class TurnStreamer:
             )
             return replacement, reason
 
+        # The one open contact action goes LAST, after the caller's latest
+        # words -- the position a model actually acts on. In the system prompt
+        # alone it lost to the campaign script's next line three turns running
+        # on test call 5dfa4416. The history itself is unchanged.
+        _directive = turn_directive(getattr(session, "captured_slots", None))
+        llm_messages = with_turn_directive(messages, _directive)
+        if _directive:
+            logger.info(
+                "turn_directive call=%s directive=%r", call_id[:12], _directive[:160]
+            )
+
         t_llm_start = time.monotonic()
         t_tts_first: Optional[float] = None
         t_tts_end: Optional[float] = None
@@ -979,7 +1007,7 @@ class TurnStreamer:
                 return result_json(result)
 
             _token_iter = self._p.llm_provider.stream_chat_with_tools(
-                messages,
+                llm_messages,
                 system_prompt=system_prompt,
                 tools=offered_tools,
                 tool_runner=_voice_tool_runner,
@@ -994,7 +1022,7 @@ class TurnStreamer:
             )
         else:
             _token_iter = self._p.llm_provider.stream_chat_with_timeout(
-                messages,
+                llm_messages,
                 system_prompt=system_prompt,
                 # Honor the tenant's AI-Options settings per turn. None falls
                 # back to the provider's configured default inside stream_chat.
