@@ -308,6 +308,99 @@ def thinking_filler(accent: str) -> str:
     return random.choice(pool)
 
 
+# ── Context-matched gap fillers (2026-09-29) ────────────────────────────────
+# One "Um, okay..." for every slow turn is what makes a filler sound canned:
+# the same sound after a question, after a phone number and after "yes".
+# Practitioner guidance (ElevenLabs soft-timeout fillers, Sierra's latency
+# write-up, Google Duplex) converges on: fill only a real gap, once per turn,
+# never on every turn, rotate the wording, and make it FIT what the caller just
+# said. Still no lookup narration ("let me check", "one sec") -- the 2026-08-06
+# rule above stands.
+#
+#   the caller ASKED something      -> acknowledge the question
+#   the caller TOLD us something    -> acknowledge that it landed
+#   a bare "yes"/"no"/"mm"          -> nothing (the reply is short and quick)
+_QUESTION_FILLERS: dict[str, tuple] = {
+    AMERICAN: ("Good question.", "Oh, sure.", "Yeah, so...", "Okay, so...", "Right, so..."),
+    BRITISH: ("Good question.", "Right, so...", "Ah, okay.", "Erm, right.", "Yeah, so..."),
+    AUSTRALIAN: ("Good question.", "Yeah, so...", "Ah, righto.", "Okay, so..."),
+    IRISH: ("Good question.", "Em, right.", "Ah, sure.", "Em, so..."),
+    INDIAN: ("Good question.", "Okay, so...", "Yes, so...", "Actually..."),
+    NEUTRAL: ("Good question.", "Right, so...", "Okay, so...", "Sure."),
+}
+_ACK_FILLERS: dict[str, tuple] = {
+    AMERICAN: ("Got it.", "Okay.", "Right.", "Mm, okay.", "Sure."),
+    BRITISH: ("Right.", "Lovely.", "Okay.", "Got it.", "Mm, right."),
+    AUSTRALIAN: ("Righto.", "Got it.", "Okay.", "Yep."),
+    IRISH: ("Grand.", "Right.", "Okay.", "Got it."),
+    INDIAN: ("Okay.", "Got it.", "Right.", "Yes, okay."),
+    NEUTRAL: ("Got it.", "Okay.", "Right.", "Sure."),
+}
+
+_QUESTION_OPENERS = re.compile(
+    r"^\s*(?:so\s+|and\s+|but\s+|okay\s+|um\s+|uh\s+)?"
+    r"(?:who|what|when|where|why|how|which|whose|do|does|did|can|could|would|"
+    r"will|is|are|was|were|have|has|should|shall|may)\b",
+    re.IGNORECASE,
+)
+_BARE_REPLY_WORDS = frozenset(
+    "yes yeah yep yup no nope nah ok okay sure right mm mhm hmm uh huh fine "
+    "correct exactly thanks thank you alright".split()
+)
+
+
+def caller_asked_a_question(text: str) -> bool:
+    t = (text or "").strip()
+    return "?" in t or bool(_QUESTION_OPENERS.search(t))
+
+
+def is_bare_reply(text: str) -> bool:
+    words = re.findall(r"[a-z]+", (text or "").lower())
+    return 0 < len(words) <= 3 and all(w in _BARE_REPLY_WORDS for w in words)
+
+
+def contextual_filler(
+    accent: str,
+    caller_text: str,
+    recent: tuple = (),
+) -> Optional[str]:
+    """A gap filler that fits what the caller just said, or None for none.
+
+    ``recent`` is the fillers already used on this call (most recent last); the
+    last three are never repeated, so the same line doesn't come back turn
+    after turn.
+    """
+    import random
+
+    if not (caller_text or "").strip() or is_bare_reply(caller_text):
+        return None
+    table = _QUESTION_FILLERS if caller_asked_a_question(caller_text) else _ACK_FILLERS
+    pool = table.get(accent or NEUTRAL) or table[NEUTRAL]
+    fresh = [p for p in pool if p not in tuple(recent)[-3:]] or list(pool)
+    return random.choice(fresh)
+
+
+# A reply that opens by acknowledging again right after a filler said "Got
+# it." sounds like an echo ("Got it. -- Sure! So..."). Only the FIRST sentence
+# of a reply is trimmed, and only when something substantial remains.
+_LEADING_ACK = re.compile(
+    r"^\s*(?:(?:yeah|yes|yep|sure|okay|ok|right|alright|got it|great question|"
+    r"good question|of course|absolutely|perfect|lovely|grand|mm)\b[\s,.!—–-]*)+",
+    re.IGNORECASE,
+)
+
+
+def strip_echoed_acknowledgement(sentence: str) -> str:
+    """Drop a leading acknowledgement that would echo the filler just spoken."""
+    m = _LEADING_ACK.match(sentence or "")
+    if not m:
+        return sentence
+    rest = sentence[m.end():].lstrip()
+    if len(re.findall(r"[A-Za-z']+", rest)) < 2:
+        return sentence
+    return rest[:1].upper() + rest[1:]
+
+
 def accent_filler_block(accent: str) -> str:
     """Return the prompt block for a normalized accent key, or "" for neutral/
     unknown (no override — generic guardrails apply)."""

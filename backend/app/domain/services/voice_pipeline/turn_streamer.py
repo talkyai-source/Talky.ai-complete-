@@ -45,7 +45,8 @@ from app.services.scripts.prompts.guardrails import (
 from app.services.scripts.prompts.accent_fillers import (
     resolve_accent,
     accent_filler_block,
-    thinking_filler,
+    contextual_filler,
+    strip_echoed_acknowledgement,
 )
 from app.infrastructure.llm.groq import LLMTimeoutError
 from app.services.scripts import model_prompt_addendum
@@ -386,7 +387,8 @@ class TurnStreamer:
         self._p = pipeline
 
     async def _maybe_speak_filler(
-        self, session: CallSession, websocket, accent: str, delay: float
+        self, session: CallSession, websocket, accent: str, delay: float,
+        caller_text: str = "",
     ) -> None:
         """If the real reply hasn't started producing audio within ``delay``
         seconds, speak a short accent-matched 'thinking' phrase so the caller
@@ -402,9 +404,16 @@ class TurnStreamer:
             be = self._p._barge_in_events.get(session.call_id)
             if be and be.is_set():
                 return
-            phrase = thinking_filler(accent)
+            # Fits what the caller just said (question vs. information) and is
+            # never one of the last three used on this call; None for a bare
+            # "yes"/"no", where the reply is short and needs no bridge.
+            recent = tuple(getattr(session, "_recent_fillers", ()) or ())
+            phrase = contextual_filler(accent, caller_text, recent)
             if not phrase:
                 return
+            session._recent_fillers = (recent + (phrase,))[-6:]
+            session._filler_said_this_turn = phrase
+            session._last_filler_turn = getattr(session, "turn_id", None)
             session._filler_playing = True
             session.tts_active = True
             await self._p.synthesize_and_send_audio(
@@ -642,16 +651,48 @@ class TurnStreamer:
         # two never overlap. Tunable via TELEPHONY_FILLER_DELAY_MS (0 disables).
         session._turn_first_audio = False
         session._filler_playing = False
+        session._filler_said_this_turn = None
         filler_task = None
         try:
             _filler_delay = float(os.getenv("TELEPHONY_FILLER_DELAY_MS", "700")) / 1000.0
         except (TypeError, ValueError):
             _filler_delay = 0.7
-        # Skip for ask-AI/end-session-action turns (may emit a JSON envelope).
-        if _filler_delay > 0 and not self._p._supports_llm_end_session_action(session):
-            filler_task = asyncio.create_task(
-                self._maybe_speak_filler(session, websocket, accent, _filler_delay)
+        # Skip for the in-app ask-AI assistant (its reply may be a bare JSON
+        # action with nothing to speak), the agent's first reply, and the turn
+        # right after one that already had a filler -- a filler on every turn
+        # is what makes it sound canned.
+        #
+        # This used to test _supports_llm_end_session_action(), which is True
+        # for EVERY campaign except "voice-demo" -- so the filler never ran on
+        # a single real phone call (found 2026-09-29). A telephony turn that
+        # ends in a JSON goodbye still speaks that goodbye after the filler.
+        _turn_no = getattr(session, "turn_id", None)
+        _filler_last_turn = getattr(session, "_last_filler_turn", None)
+        _filler_allowed = (
+            _filler_delay > 0
+            and not self._p._is_ask_ai_session(session)
+            and _turn_no not in (None, 0)
+            and not (
+                isinstance(_turn_no, int)
+                and isinstance(_filler_last_turn, int)
+                and _turn_no - _filler_last_turn <= 1
             )
+        )
+        if _filler_allowed:
+            filler_task = asyncio.create_task(
+                self._maybe_speak_filler(
+                    session, websocket, accent, _filler_delay,
+                    caller_text=last_user_text_for_limit or "",
+                )
+            )
+
+        def _after_filler(sentence: str) -> str:
+            """First real sentence after a filler: drop an echoed "Got it"."""
+            said = getattr(session, "_filler_said_this_turn", None)
+            if not said or not sentence:
+                return sentence
+            session._filler_said_this_turn = None
+            return strip_echoed_acknowledgement(sentence)
 
         async def _settle_filler() -> None:
             """Stop the thinking-filler before real audio plays. If the filler
@@ -662,17 +703,17 @@ class TurnStreamer:
             session._turn_first_audio = True
             if filler_task is None or filler_task.done():
                 return
+            # gather(return_exceptions=True) absorbs the FILLER's own
+            # CancelledError (a task cancelled before it ever ran raises it on
+            # await, and it is not an Exception) while a cancellation of THIS
+            # turn still propagates. The old `except Exception` let a cancelled
+            # filler kill the whole turn -- latent until fillers actually ran
+            # on phone calls (2026-09-29).
             if getattr(session, "_filler_playing", False):
-                try:
-                    await filler_task          # let it finish, then real audio
-                except Exception:
-                    pass
+                await asyncio.gather(filler_task, return_exceptions=True)
             else:
                 filler_task.cancel()
-                try:
-                    await filler_task
-                except Exception:
-                    pass
+                await asyncio.gather(filler_task, return_exceptions=True)
 
         all_tokens: list[str] = []
         buf = ""
@@ -1072,6 +1113,7 @@ class TurnStreamer:
                     # Settle the thinking-filler before the first real sentence
                     # so they never overlap on the audio channel.
                     await _settle_filler()
+                    sentence = _after_filler(sentence)
 
                     if t_tts_first is None:
                         t_tts_first = time.monotonic()
@@ -1205,6 +1247,7 @@ class TurnStreamer:
                             guardrail_block_reason = _tail_reason
                     if sentence:
                         await _settle_filler()
+                        sentence = _after_filler(sentence)
                         if t_tts_first is None:
                             t_tts_first = time.monotonic()
                             self._p.latency_tracker.mark_tts_start(call_id)
