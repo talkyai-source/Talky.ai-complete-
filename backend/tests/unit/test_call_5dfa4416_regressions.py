@@ -215,3 +215,58 @@ def test_the_directive_is_a_marked_note_on_the_callers_latest_turn():
     # The stored history is untouched.
     assert history[-1].content == "And note down my mobile number as well?"
     assert with_turn_directive(history, None) is history
+
+
+# ── a question the caller already answered is not asked again ────────────
+
+def _call_so_far():
+    def a(text):
+        return Message(role=MessageRole.ASSISTANT, content=text)
+
+    def u(text):
+        return Message(role=MessageRole.USER, content=text)
+
+    return [
+        a("Oh, hi."), u("Hello"), a("Hello?"), u("Hello?"),
+        a("Hi, this is Sarah, the AI assistant for All State Estimation. I’ll keep "
+          "this quick—do you have any upcoming projects you might need an estimate for?"),
+        u("Yes, I have plenty of it."),
+        a("Great. Is it something you’re currently tendering for, or a project "
+          "you’ve already secured?"),
+        u("I have, uh, both of them."),
+        a("Got it. What type of project is it?"),
+        u("They're the construction projects."),
+        a("Let me confirm that — allstateestimation at gmail dot com. Is that correct?"),
+        u("yes it is"),
+    ]
+
+
+def test_the_repeat_from_the_call_is_recognised_and_new_questions_are_not():
+    from app.domain.services.voice_pipeline.conversation_guards import (
+        answered_note,
+        answered_questions,
+        repeats_answered_question,
+    )
+
+    answered = answered_questions(_call_so_far())
+    assert repeats_answered_question(
+        "Do you have any upcoming projects that need estimating?", answered
+    ) == "Yes, I have plenty of it."
+    # A new question sharing a word or two is not a repeat.
+    assert repeats_answered_question("And when do you need the estimate by?", answered) is None
+    # Read-backs and contact asks may come back; they are never "answered".
+    assert repeats_answered_question(READBACK, answered) is None
+    assert repeats_answered_question("What's the best number to reach you on?", answered) is None
+    note = answered_note(answered)
+    assert "do not ask these again" in note
+    assert "plenty of it" in note
+
+
+def test_the_answered_note_and_the_drop_are_wired():
+    src = Path(__file__).resolve().parents[2].joinpath(
+        "app", "domain", "services", "voice_pipeline", "turn_streamer.py"
+    ).read_text(encoding="utf-8")
+    assert "answered_note(_answered)" in src
+    gate = src[src.index("def _validate_for_tts(") :]
+    gate = gate[: gate.index("valid, reason = guardrails.validate_response(")]
+    assert "repeats_answered_question(" in gate

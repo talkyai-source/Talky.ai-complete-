@@ -161,6 +161,82 @@ def is_repeated_question(
     return asked >= max_asks
 
 
+# ── 2b. Never re-ask a question the caller already answered ────────────────
+#
+# Test call 5dfa4416: "Do you have any upcoming projects you might need an
+# estimate for?" -- "Yes, I have plenty of it." -- and three turns later "Do
+# you have any upcoming projects that need estimating?". The rule above only
+# drops a question asked twice before; one clear answer is enough.
+
+# Read-backs and contact asks legitimately come back after an unclear reply,
+# and the goodbye guard relies on them; they are never "already answered".
+_NOT_A_SCRIPT_QUESTION = re.compile(
+    r"\b(?:number|email|e-mail|phone|mobile|address|spell|did\s+i\s+get|"
+    r"is\s+that\s+(?:right|correct))\b|\bat\b.*\bdot\b|\d",
+    re.IGNORECASE,
+)
+
+
+def answered_questions(history: Iterable[Any], *, limit: int = 4) -> list[tuple[str, str]]:
+    """(question, answer) pairs: an agent question followed directly by a
+    caller reply of two or more words that is not itself a question. Most
+    recent last, at most ``limit``."""
+    items = list(history or [])
+    pairs: list[tuple[str, str]] = []
+    for i, m in enumerate(items[:-1]):
+        if str(getattr(getattr(m, "role", None), "value", getattr(m, "role", ""))) != "assistant":
+            continue
+        questions = _questions_in(str(getattr(m, "content", "") or ""))
+        if not questions:
+            continue
+        q = questions[-1]
+        if _NOT_A_SCRIPT_QUESTION.search(q) or len(_question_words(_plain(q))) < 3:
+            continue
+        nxt = items[i + 1]
+        if str(getattr(getattr(nxt, "role", None), "value", getattr(nxt, "role", ""))) != "user":
+            continue
+        answer = str(getattr(nxt, "content", "") or "").strip()
+        if len(re.findall(r"[a-z']+", answer.lower())) < 2 or answer.endswith("?"):
+            continue
+        pairs.append((q, answer))
+    return pairs[-limit:]
+
+
+def repeats_answered_question(
+    sentence: str, answered: Iterable[tuple[str, str]], *, similarity: float = 0.6
+) -> Optional[str]:
+    """The caller's earlier answer when ``sentence`` asks an answered question
+    again, else None."""
+    if not sentence or "?" not in sentence or _NOT_A_SCRIPT_QUESTION.search(sentence):
+        return None
+    words = _question_words(_plain(sentence))
+    if len(words) < 3:
+        return None
+    for q, answer in answered:
+        other = _question_words(_plain(q))
+        shared = words & other
+        # Three shared content words as well as the ratio: "when do you need
+        # the estimate by?" shares only "need"/"estimate" with the projects
+        # question and is a new question.
+        if (
+            len(other) >= 3
+            and len(shared) >= 3
+            and len(shared) / min(len(words), len(other)) >= similarity
+        ):
+            return answer
+    return None
+
+
+def answered_note(answered: Iterable[tuple[str, str]]) -> Optional[str]:
+    """One short line for the turn note: what is already answered."""
+    items = [
+        f'"{q[:90]}" (they said: "{a[:60]}")' for q, a in answered
+    ]
+    if not items:
+        return None
+    return "Already answered -- do not ask these again: " + "; ".join(items) + "."
+
+
 # ── 3. A phone read-back must say the digits the caller said ───────────────
 #
 # Test call 1436672a (2026-09-29): the caller said "zero three one two, zero

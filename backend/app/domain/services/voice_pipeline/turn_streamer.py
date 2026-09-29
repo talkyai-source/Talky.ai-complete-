@@ -62,8 +62,11 @@ from app.domain.services.voice_pipeline.sentence_segmentation import (
 from app.domain.services.voice_pipeline.conversation_guards import (
     CALLBACK_PREFERENCE,
     PHONE_REASK,
+    answered_note,
+    answered_questions,
     closing_while_contact_open,
     is_repeated_question,
+    repeats_answered_question,
     phone_readback_changed,
     promises_timed_callback,
     unbacked_contact_claim,
@@ -885,6 +888,18 @@ class TurnStreamer:
                     )
                     speech_rewrites.append("timed_callback_promise")
                     return CALLBACK_PREFERENCE, None
+                if getattr(session, "_spoken_sentences", None) and repeats_answered_question(
+                    text, _answered,
+                ):
+                    # Already answered once (5dfa4416). Dropped only when the
+                    # reply has said something else first -- a reply that is
+                    # only this question is still spoken; silence is worse.
+                    logger.info(
+                        "answered_question_dropped call=%s q=%r",
+                        call_id[:12], text[:80],
+                    )
+                    speech_rewrites.append("answered_question")
+                    return "", None
                 if getattr(session, "_spoken_sentences", None) and is_repeated_question(
                     text, _earlier_agent_turns,
                 ):
@@ -949,7 +964,13 @@ class TurnStreamer:
         # words -- the position a model actually acts on. In the system prompt
         # alone it lost to the campaign script's next line three turns running
         # on test call 5dfa4416. The history itself is unchanged.
-        _directive = turn_directive(getattr(session, "captured_slots", None))
+        _answered = answered_questions(messages)
+        _directive = " ".join(
+            part for part in (
+                turn_directive(getattr(session, "captured_slots", None)),
+                answered_note(_answered),
+            ) if part
+        ) or None
         llm_messages = with_turn_directive(messages, _directive)
         if _directive:
             logger.info(

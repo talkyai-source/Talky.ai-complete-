@@ -764,7 +764,25 @@ class AudioIngest:
                                 )
                             )
                         )
-                        if (_barge and _barge.is_set()) or _turn_open:
+                        # Caller WORDS since the last turn ended mean the turn
+                        # is still open, StartOfTurn stamp or not. Test call
+                        # 5dfa4416 (2026-09-29): the caller's "Hello" arrived
+                        # as words at 22:30:39-41 with no turn-open stamp (its
+                        # StartOfTurn was not recorded), the provider held the
+                        # turn open until 22:30:46, and at 22:30:42 -- one
+                        # quiet second -- the opening "Hello?" was said over
+                        # it. Bounded by the same no-text window, so words
+                        # that stop still let the ladder run.
+                        _closed_at = getattr(session, "_caller_turn_closed_at", None)
+                        _words_open = (
+                            isinstance(_last_text_at, (int, float))
+                            and (_now() - _last_text_at) < _CALLER_TURN_NO_TEXT_S
+                            and (
+                                not isinstance(_closed_at, (int, float))
+                                or _last_text_at > _closed_at
+                            )
+                        )
+                        if (_barge and _barge.is_set()) or _turn_open or _words_open:
                             _last_caller_at = _now()
                             _silence_since = _now()
                             continue
@@ -1103,6 +1121,7 @@ class AudioIngest:
                             session._caller_last_text_at = time.monotonic()
                         if self._p.stt_provider.detect_turn_end(transcript):
                             session._caller_turn_open_since = None
+                            session._caller_turn_closed_at = time.monotonic()
                     except Exception:
                         pass
                     await self._p.handle_transcript(session, transcript, websocket)
