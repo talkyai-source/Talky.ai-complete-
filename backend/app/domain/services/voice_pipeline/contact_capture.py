@@ -34,7 +34,10 @@ MAX_CONFIRMATION_ATTEMPTS = 3
 # 13:09:02-13:10:06, 55% of the call, because every unparseable turn either
 # returned the identical state object or replaced it without ever touching
 # `attempts`). Bound it the same way AWAITING_CONFIRMATION already is.
-MAX_CLARIFICATION_ATTEMPTS = 3
+# 2026-09-30: two failed asks, then the team confirms it later -- a third
+# round of the same request is what made callers give up (research on
+# spoken email capture converges on ~2 before switching approach).
+MAX_CLARIFICATION_ATTEMPTS = 2
 _LOW_CONFIDENCE = 0.50
 
 
@@ -890,6 +893,17 @@ def advance_capture(
     # A phone candidate without '+' and without region is structurally
     # incomplete, not invalid. Ask for country context instead of guessing US.
     if kind == "phone" and raw_candidate and normalized is None:
+        # Given up after the tries ran out: the same unusable number said
+        # again must not restart the whole asking loop (the counter only
+        # carries over from NEEDS_CLARIFICATION/INVALID, so a CANCELLED
+        # previous used to begin again at 1). A complete, usable number still
+        # reopens it through the AWAITING_CONFIRMATION branch above.
+        if (
+            previous is not None
+            and previous.status is CaptureStatus.CANCELLED
+            and previous.attempts > MAX_CLARIFICATION_ATTEMPTS
+        ):
+            return previous
         missing_region = not raw_candidate.strip().startswith("+") and not phone_region
         status, attempts, prompt = _clarification_progress(
             kind,

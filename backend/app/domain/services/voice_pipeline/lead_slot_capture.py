@@ -510,3 +510,86 @@ async def _capture(
             count,
         )
     return count
+
+
+# ── End-of-call contact outcome (2026-09-30) ────────────────────────────────
+#
+# Two jobs at hang-up:
+#   1. one log line per call saying how contact capture went, so success rate
+#      and turns-to-confirm can be measured from production instead of guessed;
+#   2. when the caller tried to give an email or number and it never got
+#      confirmed, leave a visible note on the lead ("confirm it with them")
+#      instead of silently having nothing -- the agent tells the caller the
+#      team will confirm it, and this is what makes that true.
+
+FOLLOWUP_FIELD = "contact_followup"
+
+
+def contact_outcome(captured_slots: Any) -> dict:
+    """Per field: "confirmed", "unconfirmed" (tried, not settled) or "none"."""
+    from app.domain.services.voice_pipeline.contact_capture import CaptureStatus
+
+    out: dict[str, Any] = {}
+    for field in ("email", "phone"):
+        capture = getattr(captured_slots, f"{field}_capture", None)
+        confirmed = bool(getattr(captured_slots, f"{field}_confirmed", False)) or (
+            capture is not None and capture.status is CaptureStatus.CONFIRMED
+        )
+        if confirmed:
+            status = "confirmed"
+        elif capture is not None and capture.status is not CaptureStatus.CANCELLED:
+            status = "unconfirmed"
+        elif capture is not None and capture.attempts:
+            status = "unconfirmed"  # gave up after repeated tries, not a "never mind"
+        else:
+            status = "none"
+        out[field] = status
+        out[f"{field}_attempts"] = int(getattr(capture, "attempts", 0) or 0)
+    out["line_phone_known"] = bool(getattr(captured_slots, "line_phone", None))
+    return out
+
+
+async def record_contact_outcome(
+    session: Any,
+    *,
+    pool: Any,
+    call_id: Optional[str],
+    tenant_id: Optional[str],
+    campaign_id: Optional[str] = None,
+    lead_id: Optional[str] = None,
+) -> None:
+    """Log the call's contact outcome and flag unconfirmed contacts. Never raises."""
+    try:
+        slots = getattr(session, "captured_slots", None)
+        outcome = contact_outcome(slots)
+        target_call_id, tenant = _as_uuid(call_id), _as_uuid(tenant_id)
+        logger.info(
+            "contact_capture_outcome call=%s email=%s email_attempts=%d phone=%s "
+            "phone_attempts=%d line_phone_known=%s",
+            (target_call_id or "-")[:8], outcome["email"], outcome["email_attempts"],
+            outcome["phone"], outcome["phone_attempts"], outcome["line_phone_known"],
+        )
+        pending = [f for f in ("email", "phone") if outcome[f] == "unconfirmed"]
+        if not pending or pool is None or not target_call_id or not tenant:
+            return
+        is_test = getattr(session, _IS_TEST_ATTR, None)
+        if is_test is None:
+            is_test = await _call_is_test(pool, tenant, target_call_id)
+        if is_test or is_test is None:
+            return
+        from app.domain.services.lead_capture_service import LeadCaptureService
+
+        names = " and ".join("email address" if f == "email" else "phone number" for f in pending)
+        await LeadCaptureService(pool).capture(
+            tenant_id=tenant,
+            call_id=target_call_id,
+            field_key=FOLLOWUP_FIELD,
+            value=f"The caller's {names} could not be confirmed on the call. Please confirm it with them.",
+            source="agent_inferred",
+            field_type="notes",
+            confirmed=False,
+            campaign_id=_as_uuid(campaign_id),
+            lead_id=_as_uuid(lead_id),
+        )
+    except Exception as exc:  # noqa: BLE001 - teardown must never break
+        logger.warning("contact_capture_outcome_failed call=%s err=%s", str(call_id)[:8], exc)

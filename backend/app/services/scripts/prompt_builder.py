@@ -71,6 +71,8 @@ def compose_system_prompt(
     # action-this-turn: read it back, confirm, and do NOT save it until the
     # caller says yes. This stops a first-utterance mishear being locked as truth.
     pending: list[str] = []
+    # Facts to use only when the moment comes -- not an action for this turn.
+    call_details: list[str] = []
     for capture in (state.email_capture, state.phone_capture):
         if capture is None or capture.status not in {
             CaptureStatus.NEEDS_CLARIFICATION,
@@ -106,7 +108,7 @@ def compose_system_prompt(
         and state.active_contact_kind in {None, "email"}
     ):
         readback = natural_email_readback(state.email)
-        if state.email_readback_attempts >= 3:
+        if state.email_readback_attempts >= 2:
             # Bounded fallback: don't keep re-reading the same value forever.
             pending.append(
                 "- You've tried a few times to confirm the caller's email without a "
@@ -145,7 +147,7 @@ def compose_system_prompt(
         and state.active_contact_kind in {None, "phone"}
     ):
         readback = natural_phone_readback(state.phone)
-        if state.phone_readback_attempts >= 3:
+        if state.phone_readback_attempts >= 2:
             pending.append(
                 "- You've tried a few times to confirm the caller's phone number "
                 "without a clear yes. Change tack: ask them to say it once more "
@@ -165,6 +167,20 @@ def compose_system_prompt(
                 "ask if you got it right. Treat it as final only once they say "
                 f"yes: {state.phone}"
             )
+    elif (
+        not state.phone
+        and not state.phone_confirmed
+        and getattr(state, "line_phone", None)
+        and state.active_contact_kind in {None, "phone"}
+    ):
+        # 2026-09-30: confirm the number the call is already on instead of
+        # taking digits by voice -- the common case needs one yes/no.
+        call_details.append(
+            "- The caller is on "
+            f"{natural_phone_readback(state.line_phone)}. If you need a number to "
+            'reach them, ask: "Is this number the best one to reach you on?" '
+            "Only ask them to say a number if they say no."
+        )
 
     lines: list[str] = []
     if state.email and state.email_confirmed:
@@ -229,6 +245,12 @@ def compose_system_prompt(
             + "\n".join(pending)
             + "\n"
             + "------------------------------------------------------------\n"
+        )
+    if call_details:
+        blocks.append(
+            "CALL DETAILS (use only when you need them):\n"
+            + "\n".join(call_details)
+            + "\n"
         )
     if lines:
         blocks.append(

@@ -195,6 +195,86 @@ def _is_phone_correction(utterance, current_phone) -> bool:
     return bool(parsed and parsed != current_phone)
 
 
+# The agent asking to confirm the number the caller is already on:
+# "Is this number the best one to reach you on?", "...on the number you're
+# calling from?", "Can we reach you on this line?".
+_THIS_NUMBER_RE = re.compile(
+    r"\b(?:this|that|the\s+same)\s+(?:number|line)\b[^?]{0,80}\?"
+    r"|\bnumber\s+(?:you'?re|you\s+are)\s+(?:calling\s+from|on|using)\b[^?]{0,60}\?",
+    re.IGNORECASE,
+)
+
+
+def phone_on_the_table(pending, history):
+    """Offer the number the call is on when the agent just asked to confirm it.
+
+    2026-09-30: most callers can be reached on the number they're on, so the
+    agent asks one yes/no instead of taking digits by voice. When the agent's
+    latest turn is that question, the line number becomes the value the
+    caller's yes confirms. Returns ``(pending_state, offered)``.
+    """
+    line = getattr(pending, "line_phone", None)
+    if (
+        not line
+        or getattr(pending, "phone", None)
+        or getattr(pending, "phone_confirmed", False)
+    ):
+        return pending, False
+    for m in reversed(history or []):
+        if getattr(m, "role", None) != MessageRole.ASSISTANT:
+            continue
+        text = m.content or ""
+        if _is_interstitial_agent_turn(text.lower()):
+            continue
+        if _THIS_NUMBER_RE.search(text):
+            return (
+                replace(pending, phone=line, phone_confirmed=False, phone_readback_attempts=0),
+                True,
+            )
+        return pending, False
+    return pending, False
+
+
+async def known_line_number(session) -> Optional[str]:
+    """The E.164 number this call is on, or None. One small read per call.
+
+    Outbound: the number that was dialled. Inbound: caller ID. Extensions,
+    withheld numbers and anything that is not a real E.164 number give None,
+    so the agent simply asks for a number as before.
+    """
+    try:
+        from app.core.container import get_container
+        from app.domain.services.phone_number_normalizer import normalize_phone_for_capture
+        from app.domain.services.voice_pipeline.lead_slot_capture import resolve_call_binding
+
+        binding = resolve_call_binding(session)
+        call_id, tenant_id = binding.get("call_id"), binding.get("tenant_id")
+        container = get_container()
+        if not (call_id and tenant_id and getattr(container, "is_initialized", False)):
+            return None
+        from app.core.db_utils import acquire_with_tenant
+
+        async with acquire_with_tenant(container.db_pool, str(tenant_id), timeout=0.5) as conn:
+            row = await asyncio.wait_for(
+                conn.fetchrow(
+                    "SELECT direction, phone_number, caller_ani FROM calls "
+                    "WHERE id = $1::uuid AND tenant_id = $2::uuid",
+                    str(call_id), str(tenant_id),
+                ),
+                timeout=0.5,
+            )
+        if not row:
+            return None
+        raw = row["caller_ani"] if row["direction"] == "inbound" else row["phone_number"]
+        raw = str(raw or "").strip()
+        if not raw.startswith("+"):
+            return None
+        return normalize_phone_for_capture(raw, region=None)
+    except Exception as exc:  # noqa: BLE001 - never block a turn on this
+        logger.debug("known_line_number unavailable: %s", exc)
+        return None
+
+
 def email_on_the_table(pending, full_transcript, history):
     """The email the caller is answering about, and whether it was read back.
 
@@ -480,14 +560,22 @@ class TurnRunner:
         # value read back to them word for word is the guarantee; nothing is
         # persisted before it (lead_slot_capture keeps agent-assembled values
         # in memory until confirmed).
+        if getattr(_pending, "line_phone", None) is None and not getattr(
+            session, "_line_phone_checked", False
+        ):
+            session._line_phone_checked = True
+            _line = await known_line_number(session)
+            if _line:
+                _pending = replace(_pending, line_phone=_line)
         _pending, _readback_issued = email_on_the_table(
             _pending, full_transcript, session.conversation_history
         )
+        _pending, _line_offered = phone_on_the_table(_pending, session.conversation_history)
         session.captured_slots = _pending
         _pending_email = getattr(_pending, "email", None)
         # Phone / callback number — SAME gate as email, resolved independently.
         _pending_phone = getattr(_pending, "phone", None)
-        _phone_readback_issued = _agent_read_back_phone(
+        _phone_readback_issued = _line_offered or _agent_read_back_phone(
             session.conversation_history, _pending_phone
         )
 

@@ -53,15 +53,16 @@ def test_email_clarification_loop_never_advances_attempts_before_the_fix():
     it must fail on the unmodified module (attempts stayed 0 forever) and
     pass once advance_capture actually counts failed clarification turns.
 
-    Status is NEEDS_CLARIFICATION only through the escalation turn (index 3);
-    from there the field is terminal (CANCELLED -- give up for good), which
-    is the reviewer-required fix for the escalation itself repeating forever.
+    Status is NEEDS_CLARIFICATION only through the escalation turn (index
+    MAX_CLARIFICATION_ATTEMPTS); from there the field is terminal (CANCELLED
+    -- give up for good), which is the reviewer-required fix for the
+    escalation itself repeating forever.
     """
     state = None
     for index, utterance in enumerate(_CALL_6AAEB4DD_EMAIL_TURNS):
         state = advance_capture(state, kind="email", utterance=utterance, mode_active=True)
         assert state is not None
-        if index <= 3:
+        if index <= MAX_CLARIFICATION_ATTEMPTS:
             assert state.status is CaptureStatus.NEEDS_CLARIFICATION
         else:
             assert state.status is CaptureStatus.CANCELLED
@@ -85,14 +86,16 @@ def test_email_clarification_stops_asking_to_spell_after_three_asks():
         state = advance_capture(state, kind="email", utterance=utterance, mode_active=True)
         prompts.append(state.clarification_prompt or "")
 
-    assert MAX_CLARIFICATION_ATTEMPTS == 3
+    # 2026-09-30: two asks, then move on (was three). Spoken-capture practice
+    # converges on ~2 failed rounds before switching approach.
+    assert MAX_CLARIFICATION_ATTEMPTS == 2
     # Only the first MAX_CLARIFICATION_ATTEMPTS turns may still ask to spell.
     spell_asks = [p for p in prompts if "spell" in p.lower()]
     assert len(spell_asks) <= MAX_CLARIFICATION_ATTEMPTS
 
-    # The would-be 4th ask (turn index 3, matching the live 13:10:06 turn)
-    # must have escalated instead of repeating a spelling request.
-    escalated_prompt = prompts[3]
+    # The ask after the limit must have escalated instead of repeating a
+    # spelling request.
+    escalated_prompt = prompts[MAX_CLARIFICATION_ATTEMPTS]
     assert "spell" not in escalated_prompt.lower()
     assert "yes or no" in escalated_prompt.lower() or "team" in escalated_prompt.lower()
 
@@ -108,11 +111,13 @@ def test_phone_clarification_stops_asking_after_three_asks():
     identically to the email defect, because the same unbounded branch fed
     it.
 
-    Turn index 3 is the one-time escalation (still NEEDS_CLARIFICATION, with
-    the read-back-or-move-on prompt); turn 4 is the terminal give-up state
-    (CANCELLED, no clarification_prompt -- capture_mode_directive supplies
-    its own "stop asking, acknowledge, move on" line for that status instead
-    of repeating the escalation text turn after turn).
+    Turn index MAX is the one-time escalation (still NEEDS_CLARIFICATION,
+    with the read-back-or-move-on prompt); every turn after it is the
+    terminal give-up state (CANCELLED, no clarification_prompt --
+    capture_mode_directive supplies its own "stop asking, acknowledge, move
+    on" line for that status instead of repeating the escalation text turn
+    after turn). The same unusable number said again must NOT restart the
+    loop (2026-09-30: a CANCELLED previous used to begin again at 1).
     """
     state = None
     prompts: list[str] = []
@@ -129,7 +134,8 @@ def test_phone_clarification_stops_asking_after_three_asks():
 
     repeat_asks = [p for p in prompts if "repeat" in p.lower() and "team" not in p.lower()]
     assert len(repeat_asks) <= MAX_CLARIFICATION_ATTEMPTS
-    escalated_prompt = prompts[3]
+    escalated_prompt = prompts[MAX_CLARIFICATION_ATTEMPTS]
     assert "team" in escalated_prompt.lower() or "yes or no" in escalated_prompt.lower()
-    assert statuses[4] is CaptureStatus.CANCELLED
-    assert prompts[4] == ""
+    for later in range(MAX_CLARIFICATION_ATTEMPTS + 1, 5):
+        assert statuses[later] is CaptureStatus.CANCELLED, statuses
+        assert prompts[later] == ""

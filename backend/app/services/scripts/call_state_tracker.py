@@ -254,6 +254,10 @@ class CallState:
     contact_ask_objections: int = 0
     # Per turn: the caller just asked us a question.
     caller_asked_question: bool = False
+    # The number this call is on (outbound: the number dialled; inbound:
+    # caller ID), E.164, when known. Lets the agent confirm it with one
+    # yes/no instead of taking digits by voice (2026-09-30).
+    line_phone: Optional[str] = None
 
     def __post_init__(self) -> None:
         # Calls/tests created before C3 may restore the scalar slots directly.

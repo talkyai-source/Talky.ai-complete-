@@ -92,6 +92,12 @@ _TEMPLATES: Final[Mapping[str, str]] = {
 
 #: Current version per persona. Bump on any change to the composed text.
 _VERSIONS: Final[Mapping[str, str]] = {
+    # @7 / @6 (2026-09-30): contact capture the way production voice agents
+    # do it. The shared CORE DETAILS block now asks for the email provider
+    # first (Gmail/Outlook/Hotmail/Yahoo/work), asks about only the unclear
+    # part of the name ("one word, or with a dot?") with example-word letter
+    # checks, and confirms the number the call is on with one yes/no instead
+    # of taking digits by voice.
     # @6 / @5 (2026-09-08): a declined or hesitant contact detail is a no.
     # Prod call c63cdaff: the caller said "I know if I should give you my
     # email", the agent re-asked, the caller said they were not comfortable.
@@ -111,9 +117,9 @@ _VERSIONS: Final[Mapping[str, str]] = {
     # knowledge-driven lead_gen body reuses the shared opening for its
     # opening mode instead of a private agent-first copy. customer_support
     # and receptionist move only because the shared guardrails text changed.
-    "lead_gen": "lead_gen@6",
-    "customer_support": "customer_support@5",
-    "receptionist": "receptionist@5",
+    "lead_gen": "lead_gen@7",
+    "customer_support": "customer_support@6",
+    "receptionist": "receptionist@6",
 }
 
 #: Fallback for a persona that is not in the registry yet. Deliberately visible

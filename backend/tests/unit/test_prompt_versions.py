@@ -101,6 +101,11 @@ _EXPECTED_HASHES: dict[str, str] = {
     "lead_gen@6": "2f9dc73448dcba14",
     "customer_support@5": "e466ec4d2443d75f",
     "receptionist@5": "821091476cbc551a",
+    # v7/v6 (2026-09-30): provider-first email, ask only the unclear part,
+    # confirm the number the call is on.
+    "lead_gen@7": "9e7af81f15dd8d44",
+    "customer_support@6": "ee88d242cec19b86",
+    "receptionist@6": "7ddbe9ea1800b829",
 }
 
 
