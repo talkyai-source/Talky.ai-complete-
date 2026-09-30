@@ -259,7 +259,14 @@ def _readback_clause_email(clause: str) -> Optional[str]:
         # ("-- so allstateestimation at gmail dot com") counts, and never one
         # made of sentence words.
         local_tokens = _CLAUSE_LEAD_IN.sub("", before).split()
-        if not local_tokens or len(local_tokens) > 3:
+        # Letters and digits spelled one at a time ("u k 6 7 0 1 3") are one
+        # spoken word, not seven. Test call 68478c22 (2026-09-30): "Let me
+        # confirm that -- u k six seven zero one three at g mail dot com" lost
+        # its preamble at the dash, the seven single characters counted as
+        # seven words, the caller's "Yes." confirmed nothing, and the agent
+        # asked for the email again twice.
+        words = sum(1 for t in local_tokens if len(t) > 1)
+        if not local_tokens or words > 3 or len(local_tokens) > 24:
             return None
         if any(t in _NOT_LOCAL_WORDS for t in local_tokens):
             return None

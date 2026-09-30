@@ -842,6 +842,13 @@ class TurnStreamer:
                     getattr(session, "captured_slots", None),
                     last_user_text_for_limit,
                 )
+                if _open_ask and any(
+                    _open_ask in t for t in _earlier_agent_turns[-2:]
+                ):
+                    # Asked on one of the last two turns already: asking again
+                    # is the loop the caller on 68478c22 had to call out. The
+                    # goodbye goes ahead; the lead keeps the follow-up note.
+                    _open_ask = None
                 if _open_ask:
                     if "closing_with_contact_open" in speech_rewrites:
                         return "", None  # the question is already said

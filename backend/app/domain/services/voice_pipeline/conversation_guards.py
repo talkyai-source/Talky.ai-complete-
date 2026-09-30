@@ -381,8 +381,19 @@ def pending_contact_ask(call_state: Any) -> Optional[str]:
                 else natural_phone_readback(value)
             ) or value
             return f"So that's {spoken} — did I get that right?"
+        raw = str(getattr(capture, "raw_value", "") or "").lower()
         if kind == "phone":
+            if re.search(r"\d|\b(?:zero|oh|one|two|three|four|five|six|seven|eight|nine)\b", raw):
+                return "Could you say that number once more, slowly?"
             return "What's the best number to reach you on?"
+        if re.search(r"@|\bat\b", raw):
+            # They have given an address; asking for "the best email" again
+            # is what made the caller on 68478c22 say "I have just shared the
+            # email with you."
+            return (
+                "Just so I get your email exactly right -- could you spell the "
+                "part before the at, one letter at a time?"
+            )
         return "What's the best email address for you?"
     return None
 
