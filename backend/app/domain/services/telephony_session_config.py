@@ -363,7 +363,9 @@ _DEFAULT_TENANT_PROMPT_MAX_CHARS = 12000  # ~3000 tokens at ~4 chars/token
 # stage direction like "[repeat email slowly]", which is an instruction to the
 # model and works fine, so multi-word slots containing a verb are left alone by
 # requiring at most two words.
-_UNFILLED_SLOT_RE = re.compile(r"\[[a-z][a-z_]{1,18}(?:[ _][a-z][a-z_]{1,18})?\]")
+_UNFILLED_SLOT_RE = re.compile(
+    r"\[[a-z][a-z_]{1,18}(?:[ _][a-z][a-z_]{1,18})?\]", re.IGNORECASE
+)
 
 # Slots that are unmistakably a value the agent would try to SAY.
 _SPOKEN_SLOT_HINTS = (
@@ -376,10 +378,37 @@ def find_unfilled_slots(guidance: str) -> list:
     """Square-bracket slots in campaign guidance that would be spoken blank."""
     out = []
     for match in _UNFILLED_SLOT_RE.findall(str(guidance or "")):
-        inner = match[1:-1].replace("_", " ")
+        inner = match[1:-1].replace("_", " ").lower()
         if any(hint in inner for hint in _SPOKEN_SLOT_HINTS):
             out.append(match)
     return sorted(set(out))
+
+
+# A script slot for the callee's NAME ("[First Name]", "[name]", "{first_name}").
+_CALLEE_NAME_SLOT_RE = re.compile(
+    r"[\[{]{1,2}\s*(?:their\s+|the\s+|contact'?s?\s+|customer'?s?\s+|lead'?s?\s+|"
+    r"prospect'?s?\s+|owner'?s?\s+)?(?:first[\s_]*name|full[\s_]*name|name)\s*[\]}]{1,2}",
+    re.IGNORECASE,
+)
+
+# Said when the script greets the callee by name but no name is on file (a
+# browser test, or a lead without one). Browser test 98b83aaf (2026-09-30):
+# the Dojo-PC script opens "Hi, is that [First Name]?"; with no name to put
+# there the model used the only name in its prompt -- its own -- and asked
+# "Hi, is that Alex?" before saying "I'm Alex".
+UNKNOWN_CALLEE_NAME_BLOCK = (
+    "\n------------------------------------------------------------\n"
+    "PERSON YOU'RE CALLING: no name is on file for this call. Where your script "
+    'greets them by name (for example "Hi, is that [First Name]?"), greet them '
+    'without a name instead -- "Hi there, have I reached the business owner?" or '
+    "simply \"Hi there\" -- and ask who you're speaking with if you need to. Never "
+    "put your own name or any other name in that place.\n"
+)
+
+
+def script_greets_callee_by_name(prompt: str) -> bool:
+    """Whether the prompt has a slot for the callee's name."""
+    return bool(_CALLEE_NAME_SLOT_RE.search(str(prompt or "")))
 
 
 def _tenant_prompt_char_budget() -> int:
@@ -1513,6 +1542,15 @@ def build_telephony_session_config(
         logger.info(
             "telephony_call_target_injected campaign=%s has_company=%s position=suffix",
             _campaign_id(campaign), bool((lead_company or "").strip()),
+        )
+    elif script_greets_callee_by_name(system_prompt):
+        # Same place as the name block (the tail), and the same text on every
+        # such call, so the cached prefix above is untouched.
+        system_prompt = system_prompt + "\n" + UNKNOWN_CALLEE_NAME_BLOCK
+        logger.info(
+            "telephony_callee_name_unknown campaign=%s — script greets by name, "
+            "none on file; told to greet without one",
+            _campaign_id(campaign),
         )
 
     # AgentConfig mirrors the persona so downstream code (greeting
