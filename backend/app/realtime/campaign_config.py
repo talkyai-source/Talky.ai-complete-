@@ -19,7 +19,9 @@ def _with_campaign_context(prompt, script, attr):
     information." and opened with a generic line that had nothing to do with
     the campaign. Realtime-specific instructions, when set, still win.
     """
-    if (prompt.instructions or "").strip():
+    campaign_rt = script.get("realtime_prompt") or {}
+    if isinstance(campaign_rt, dict) and str(campaign_rt.get("instructions") or "").strip():
+        # A Realtime prompt written FOR THIS CAMPAIGN replaces its script.
         return prompt
     guidance = (
         script.get("additional_instructions")
@@ -30,6 +32,13 @@ def _with_campaign_context(prompt, script, attr):
     guidance = str(guidance or "").strip()
     if not guidance:
         return prompt
+    # Account-wide Realtime notes (AI Options) apply to every campaign, so
+    # they are added to the campaign's script, never swapped in for it.
+    # Browser test 94f47f14 (2026-09-30): the account note "be precise and
+    # specific and to the point" replaced Dojo-PC's whole script.
+    account_notes = str(prompt.instructions or "").strip()
+    if account_notes:
+        guidance = f"{guidance}\n\nAccount-wide notes: {account_notes}"
     from app.domain.services.telephony_session_config import (
         campaign_guidance_char_budget,
     )

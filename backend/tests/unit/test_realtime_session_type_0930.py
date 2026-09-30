@@ -157,3 +157,60 @@ def test_with_a_name_on_file_realtime_greets_them_by_it():
     )
     assert "You are calling Uzair Khan" in cfg.system_prompt
     assert "No name is on file" not in cfg.system_prompt
+
+
+# ── browser tests cb1b28c3 / 94f47f14 (2026-09-30, after the first fix) ─────
+
+def test_gemini_3_8_is_sent_its_lowest_supported_thinking_level():
+    """cb1b28c3: every turn got 400 "Thinking level MINIMAL is not supported
+    for this model" and failed over to Groq."""
+    from app.infrastructure.llm.gemini import GeminiLLMProvider as G
+
+    assert str(G._build_thinking_config("gemini-3.8-flash", 0).thinking_level).lower().endswith("low")
+    assert str(G._build_thinking_config("gemini-3.6-flash", 0).thinking_level).lower().endswith("minimal")
+
+
+def test_account_wide_realtime_notes_are_added_to_the_campaign_script():
+    """94f47f14: the account note "be precise and specific and to the point"
+    replaced Dojo-PC's whole script."""
+    from app.domain.models.ai_config import AIProviderConfig
+    from app.domain.services.telephony_session_config import build_telephony_session_config
+    from app.domain.services.voice_orchestrator import Direction
+
+    cfg = build_telephony_session_config(
+        gateway_type="browser",
+        campaign={"id": "c", "tenant_id": "11111111-1111-4111-8111-111111111111",
+                  "script_config": {"company_name": "Dojo", "agent_names": ["Alex"],
+                                    "additional_instructions": _SCRIPT}},
+        direction=Direction.OUTBOUND,
+        ai_config_override=AIProviderConfig(
+            pipeline_mode="realtime", realtime_voice="ash",
+            realtime_settings={"prompt": {"persona": "sales",
+                                          "instructions": "be precise and specific and to the point"}},
+        ),
+    )
+    assert "helping Azian" in cfg.system_prompt
+    assert "be precise and specific and to the point" in cfg.system_prompt
+
+
+@pytest.mark.asyncio
+async def test_an_unplayable_reply_is_withheld_not_a_call_ending_error():
+    s = _session()
+    offered = []
+    s._offer_event = offered.append
+    s._playout.reset("resp_1")
+    s._playout.add_audio({"response_id": "resp_1", "item_id": "i1"}, b"\x7f" * 160)
+    await s._handle_server_event({"type": "response.done",
+                                  "response": {"id": "resp_1", "status": "completed", "output": []}})
+    kinds = [getattr(e, "kind", None) for e in offered]
+    assert "response_unplayable" in kinds
+    assert "error" not in kinds
+
+
+def test_the_bridge_replaces_one_withheld_reply_and_ends_only_on_two():
+    src = Path(__file__).resolve().parents[2].joinpath(
+        "app", "realtime", "bridge.py").read_text(encoding="utf-8")
+    block = src[src.index('elif kind == "response_unplayable":'):]
+    block = block[: block.index("elif kind ==", 10)]
+    assert "repair_unspoken_response" in block
+    assert '_unplayable_streak", 0) >= 1' in block

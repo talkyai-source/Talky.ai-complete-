@@ -113,7 +113,10 @@ def test_realtime_prompt_never_uses_traditional_composer_or_guidance(monkeypatch
     })
     from app.realtime.prompts import build_realtime_instructions
     text = build_realtime_instructions(VoiceOrchestrator._build_realtime_persona(config))
-    assert "REALTIME ONLY" in text and "TRADITIONAL ONLY" not in text
+    # Account-wide Realtime notes are ADDED to the campaign's guidance, never
+    # swapped in for it (browser test 94f47f14, 2026-09-30: a one-line
+    # account note replaced Dojo-PC's script). The composer is still unused.
+    assert "REALTIME ONLY" in text and "TRADITIONAL ONLY" in text
     assert "verified troubleshooting" in text
     assert "Welcome" in text
 

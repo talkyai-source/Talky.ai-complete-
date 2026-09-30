@@ -837,9 +837,11 @@ class OpenAIRealtimeSession:
                 audio, transcript = candidate
                 self._offer_event(RealtimeEvent(kind="response_candidate", audio=audio, text=transcript, raw=data))
             elif resp.get("status") == "completed" and (self._playout.audio or self._playout.invalid):
-                self._offer_event(RealtimeEvent(kind="error", text="Realtime response was incomplete or exceeded the playback limit"))
+                # Withheld, not fatal: the bridge asks for a short replacement.
+                # Browser test 94f47f14 (2026-09-30) ended the whole call here.
+                self._offer_event(RealtimeEvent(kind="response_unplayable", text="Realtime response was incomplete or exceeded the playback limit", raw=data))
             if resp.get("status") == "incomplete" and (resp.get("status_details") or {}).get("reason") not in {"turn_detected", "interruption", "cancelled"}:
-                self._offer_event(RealtimeEvent(kind="error", text="Realtime response did not complete"))
+                self._offer_event(RealtimeEvent(kind="response_unplayable", text="Realtime response did not complete", raw=data))
             if resp.get("status") == "failed":
                 self._offer_event(RealtimeEvent(kind="error", text="Realtime response failed"))
             if resp.get("status") == "completed" and not self._playout.invalid:

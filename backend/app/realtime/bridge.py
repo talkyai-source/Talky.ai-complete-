@@ -411,7 +411,21 @@ class RealtimeBridge:
                         # Never overlap responses or create an unbounded playback queue.
                         self._failure_reason = "Realtime responses overlapped during playback"
                         break
+                    self._unplayable_streak = 0
                     self._playback_task = asyncio.create_task(self._play_validated_response(ev))
+
+                elif kind == "response_unplayable":
+                    # One reply that cannot be played (too long, or a part with
+                    # no transcript) is withheld and replaced by a short one;
+                    # only two in a row end the call. Browser test 94f47f14
+                    # (2026-09-30) ended on the first.
+                    logger.warning("realtime_response_withheld call=%s reason=%s streak=%d",
+                                   self._call_id, ev.text, getattr(self, "_unplayable_streak", 0))
+                    if getattr(self, "_unplayable_streak", 0) >= 1:
+                        self._failure_reason = "Realtime replies could not be played twice in a row"
+                        break
+                    self._unplayable_streak = getattr(self, "_unplayable_streak", 0) + 1
+                    await self._rt.repair_unspoken_response((ev.raw or {}).get("response") or {})
 
                 elif kind == "interrupted":
                     if self._playback_task and not self._playback_task.done():

@@ -216,6 +216,13 @@ class GeminiLLMProvider(LLMProvider):
             "gemini-flash-latest", "gemini-pro-latest",
         }
 
+    @staticmethod
+    def _rejects_minimal_thinking(model: str) -> bool:
+        """Gemini 3.8 answers 400 "Thinking level MINIMAL is not supported for
+        this model" (browser test cb1b28c3, 2026-09-30: every turn failed over
+        to Groq). Its lowest level is "low" -- verified from the prod host."""
+        return (model or "").lower().startswith("gemini-3.8")
+
     @classmethod
     def _build_thinking_config(cls, model: str, thinking_budget: Optional[int]):
         """Pick the thinking knob the model actually honours, or None.
@@ -240,6 +247,8 @@ class GeminiLLMProvider(LLMProvider):
             # thinking_budget is ignored on 3.x — map intent to thinking_level.
             # 0 / unset -> "minimal" (lowest latency, what voice wants).
             level = "low" if (thinking_budget or 0) > 0 else "minimal"
+            if level == "minimal" and cls._rejects_minimal_thinking(model):
+                level = "low"
             try:
                 return genai_types.ThinkingConfig(thinking_level=level)
             except Exception:  # noqa: BLE001 — SDK predates thinking_level
