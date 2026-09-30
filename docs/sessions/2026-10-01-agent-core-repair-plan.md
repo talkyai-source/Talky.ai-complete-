@@ -35,6 +35,17 @@ the older goal achieved. Useful work can continue on this plan.
 - This planning step prepares only the branch, audit and plan. No runtime code,
   database migration, production setting or external action has changed.
 
+Follow-up from the user: Google Gemini 3.8 Flash is enabled. The separate Realtime
+worktree now includes `61d5945c` (greeting/script behavior) and `4e88992a` (Gemini
+3.8 Flash catalog). They are not in this repair branch yet. Reconcile and preserve
+these authorized changes before implementation integration/release; verify their
+deployment separately. Include `gemini-3.8-flash` alongside Groq GPT-OSS 20B and
+Cerebras GPT-OSS 120B in the final traditional-provider acceptance matrix.
+The user has now authorized adding OpenAI GPT-6 Luna as a selectable fourth
+traditional provider, simplifying the shared LLM structure and prompts, and
+implementing the confirmed repairs below. Keep native Realtime separate and
+preserve existing saved selections. Benchmark before claiming any model is fastest.
+
 Four concurrent ownership tracks keep file changes controlled:
 
 | Owner | Primary work | Shared-file rule |
