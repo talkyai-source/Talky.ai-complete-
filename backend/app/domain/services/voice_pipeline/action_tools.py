@@ -361,21 +361,6 @@ def _chat_tool_spec(action: str) -> dict[str, Any]:
     }
 
 
-def realtime_voice_action_tools() -> list[dict[str, Any]]:
-    """All actions in the flattened OpenAI/xAI Realtime tool shape."""
-    tools: list[dict[str, Any]] = []
-    for action in VOICE_ACTION_NAMES:
-        tools.append(
-            {
-                "type": "function",
-                "name": action,
-                "description": _ACTION_DESCRIPTIONS[action],
-                "parameters": _ACTION_PARAMETERS[action],
-            }
-        )
-    return tools
-
-
 def _provider_supports_action_tools(provider: Any) -> bool:
     base = getattr(provider, "_primary", provider)
     return (

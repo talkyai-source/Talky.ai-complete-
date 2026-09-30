@@ -13,13 +13,13 @@ from fastapi.testclient import TestClient
 import app.api.v1.endpoints.twilio_bridge as twilio_bridge
 import app.api.v1.endpoints.vonage_bridge as vonage_bridge
 from app.domain.services.telephony import lifecycle
-from app.domain.services.voice_pipeline.realtime_bridge import RealtimeBridge
+from app.realtime.bridge import RealtimeBridge
 from app.domain.services.voice_orchestrator import (
     Direction,
     VoiceOrchestrator,
     VoiceSessionConfig,
 )
-from app.services.scripts.realtime_instructions import (
+from app.realtime.prompts import (
     RealtimePersona,
     build_realtime_instructions,
 )
@@ -239,15 +239,15 @@ async def test_orchestrator_honors_explicit_agent_first_inbound_realtime_policy(
             return_value=resolver,
         ),
         patch(
-            "app.infrastructure.realtime.openai_realtime.OpenAIRealtimeSession",
+            "app.realtime.openai.OpenAIRealtimeSession",
             return_value=realtime_session,
         ),
         patch(
-            "app.infrastructure.realtime.openai_realtime.knowledge_lookup_tool",
+            "app.realtime.openai.knowledge_lookup_tool",
             return_value={},
         ),
         patch(
-            "app.domain.services.voice_pipeline.realtime_bridge.RealtimeBridge"
+            "app.realtime.bridge.RealtimeBridge"
         ) as bridge_cls,
         patch(
             "app.core.container.get_container",

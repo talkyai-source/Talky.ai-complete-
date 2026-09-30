@@ -141,7 +141,18 @@ class CampaignCallingSchedule(BaseModel):
         return sorted(set(v))
 
 
-class CampaignCreateRequest(BaseModel):
+from app.realtime.config import RealtimePrompt, RealtimeSettings
+
+
+class CampaignVoiceSelection(BaseModel):
+    pipeline_mode: Optional[Literal["cascaded", "realtime"]] = None
+    realtime_model: Optional[str] = None
+    realtime_voice: Optional[str] = None
+    realtime_settings: Optional[RealtimeSettings] = None
+    realtime_prompt: Optional[RealtimePrompt] = None
+
+
+class CampaignCreateRequest(CampaignVoiceSelection):
     """Request body for creating a campaign.
 
     Persona fields are mandatory for new campaigns. This prevents new
@@ -152,7 +163,7 @@ class CampaignCreateRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
     description: Optional[str] = None
     system_prompt: str = Field(default="")
-    voice_id: str = Field(..., min_length=1, max_length=100)
+    voice_id: str = Field(default="", max_length=100)
     goal: Optional[str] = None
     persona_type: Literal["lead_gen", "customer_support", "receptionist"]
     agent_names: List[str] = Field(..., min_length=1)
@@ -220,7 +231,7 @@ class CampaignCreateRequest(BaseModel):
         return out
 
 
-class CampaignUpdateRequest(BaseModel):
+class CampaignUpdateRequest(CampaignVoiceSelection):
     """Request body for editing a campaign.
 
     Edits also require persona fields so an update cannot strip script_config
@@ -230,7 +241,7 @@ class CampaignUpdateRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
     description: Optional[str] = None
     system_prompt: str = Field(default="")
-    voice_id: str = Field(..., min_length=1, max_length=100)
+    voice_id: str = Field(default="", max_length=100)
     goal: Optional[str] = None
     persona_type: Literal["lead_gen", "customer_support", "receptionist"]
     agent_names: List[str] = Field(..., min_length=1)
@@ -290,7 +301,7 @@ class CampaignUpdateRequest(BaseModel):
         return out
 
 
-class CampaignPromptPreviewRequest(BaseModel):
+class CampaignPromptPreviewRequest(CampaignVoiceSelection):
     """Request body for ``POST /campaigns/preview-prompt`` (T4-B4).
 
     Mirrors the fields ``CampaignCreateRequest`` carries that affect the

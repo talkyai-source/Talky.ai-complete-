@@ -7,6 +7,7 @@ import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
+from app.realtime.tools import realtime_voice_action_tools
 import pytest
 
 from app.domain.models.conversation import Message, MessageRole
@@ -22,11 +23,10 @@ from app.domain.services.voice_pipeline.action_tools import (
     VOICE_ACTION_NAMES,
     action_results_for_session,
     action_tools_for_turn,
-    realtime_voice_action_tools,
     result_json,
     run_voice_action,
 )
-from app.domain.services.voice_pipeline.realtime_bridge import RealtimeBridge
+from app.realtime.bridge import RealtimeBridge
 from app.domain.services.voice_pipeline_service import VoicePipelineService
 from app.infrastructure.llm.groq import GroqLLMProvider
 

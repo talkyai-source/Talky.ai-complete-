@@ -1,3 +1,4 @@
+import type { CampaignVoiceSettingsValue } from "@/components/realtime/types";
 import { z } from "zod";
 import { sharedHttpClient } from "@/lib/api";
 
@@ -54,6 +55,8 @@ export interface ProviderListResponse {
     /** Phase 2 — gpt-realtime-2 (speech-to-speech) pipeline catalog. Absent
      *  when the backend hasn't shipped it yet; callers fall back locally. */
     realtime?: {
+        available?: boolean;
+        unavailable_reason?: string | null;
         model: string;
         voices: RealtimeVoiceInfo[];
         turn_detection: string[];
@@ -95,7 +98,7 @@ export interface AIProviderConfig {
     pipeline_mode?: "cascaded" | "realtime";
     realtime_model?: string;
     realtime_voice?: string;
-    realtime_settings?: { turn_detection?: string; noise_reduction?: string } | null;
+    realtime_settings?: { turn_detection?: string; noise_reduction?: string; reasoning_effort?: string; speed?: number; max_output_tokens?: number; prompt?: CampaignVoiceSettingsValue["realtime_prompt"] } | null;
 }
 
 export interface LLMTestRequest {
@@ -206,6 +209,8 @@ const RawRealtimeVoiceSchema = z
 
 const RawRealtimeBucketSchema = z
     .object({
+        available: z.boolean().optional(),
+        unavailable_reason: z.string().nullable().optional(),
         model: z.string(),
         voices: z.array(RawRealtimeVoiceSchema).optional(),
         turn_detection: z.array(z.string()).optional(),
@@ -255,10 +260,14 @@ const RawConfigSchema = z
         realtime_voice: z.string().optional(),
         realtimeVoice: z.string().optional(),
         realtime_settings: z
-            .object({ turn_detection: z.string().optional(), noise_reduction: z.string().optional() })
+            .object({ turn_detection: z.string().optional(), noise_reduction: z.string().optional(),
+                reasoning_effort: z.string().optional(), speed: z.number().optional(), max_output_tokens: z.number().optional(),
+                prompt: z.object({ persona: z.enum(["assistant", "sales", "support", "receptionist"]).optional(), goal: z.string(), instructions: z.string(), opening_greeting: z.string() }).optional() })
             .nullish(),
         realtimeSettings: z
-            .object({ turn_detection: z.string().optional(), noise_reduction: z.string().optional() })
+            .object({ turn_detection: z.string().optional(), noise_reduction: z.string().optional(),
+                reasoning_effort: z.string().optional(), speed: z.number().optional(), max_output_tokens: z.number().optional(),
+                prompt: z.object({ persona: z.enum(["assistant", "sales", "support", "receptionist"]).optional(), goal: z.string(), instructions: z.string(), opening_greeting: z.string() }).optional() })
             .nullish(),
     })
     .passthrough();
@@ -370,6 +379,8 @@ function normalizeProviderList(raw: z.infer<typeof RawProviderListSchema>): Prov
         tts: { providers: raw.tts.providers, models: raw.tts.models.map(normalizeModel) },
         realtime: raw.realtime
             ? {
+                  available: raw.realtime.available ?? false,
+                  unavailable_reason: raw.realtime.unavailable_reason,
                   model: raw.realtime.model,
                   voices: (raw.realtime.voices ?? []).map(normalizeRealtimeVoice),
                   turn_detection: raw.realtime.turn_detection ?? [],

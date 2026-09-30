@@ -1,5 +1,5 @@
 """Tests for the xAI Grok Voice realtime provider adapter
-(app/infrastructure/realtime/xai_realtime.py).
+(app/realtime/xai.py).
 
 Covers the documented protocol differences from OpenAI Realtime and proves
 the adapter is a safe drop-in for RealtimeBridge:
@@ -29,8 +29,8 @@ import json
 
 import pytest
 
-from app.infrastructure.realtime.openai_realtime import RealtimeEvent
-from app.infrastructure.realtime.xai_realtime import (
+from app.realtime.openai import RealtimeEvent
+from app.realtime.xai import (
     XAIRealtimeSession,
     XAI_DEFAULT_MODEL,
 )
@@ -235,12 +235,15 @@ async def test_audio_delta_still_decodes_to_bytes_via_inherited_path():
     sess._offer_event = lambda ev: events.append(ev) if ev else None
 
     # response.created establishes the active epoch (inherited logic).
-    await sess._handle_server_event({"type": "response.created"})
+    await sess._handle_server_event({"type": "response.created", "response": {"id": "r1"}})
     await sess._handle_server_event({
-        "type": "response.output_audio.delta", "delta": b64,
+        "type": "response.output_audio.delta", "delta": b64, "response_id": "r1", "item_id": "i1",
     })
 
-    audio_events = [e for e in events if e.kind == "audio"]
+    assert not events
+    await sess._handle_server_event({"type": "response.output_audio_transcript.done", "response_id": "r1", "item_id": "i1", "transcript": "Hello"})
+    await sess._handle_server_event({"type": "response.done", "response": {"id": "r1", "status": "completed"}})
+    audio_events = [e for e in events if e.kind == "response_candidate"]
     assert len(audio_events) == 1
     assert audio_events[0].audio == mulaw
 
@@ -251,13 +254,16 @@ async def test_function_call_flow_inherited_unchanged():
     events = []
     sess._offer_event = lambda ev: events.append(ev) if ev else None
 
+    await sess._handle_server_event({"type": "response.created", "response": {"id": "r1"}})
     await sess._handle_server_event({
-        "type": "response.function_call_arguments.done",
+        "type": "response.function_call_arguments.done", "response_id": "r1",
         "call_id": "call-1",
         "name": "knowledge_lookup",
         "arguments": json.dumps({"query": "hours"}),
     })
 
+    assert not events
+    await sess._handle_server_event({"type": "response.done", "response": {"id": "r1", "status": "completed"}})
     fc_events = [e for e in events if e.kind == "function_call"]
     assert len(fc_events) == 1
     fc = fc_events[0].function_call
@@ -294,7 +300,7 @@ async def test_barge_in_flushes_local_queue_without_ws_buffer_clear():
     sess._offer_event = lambda ev: events.append(ev) if ev else None
 
     # Queue up some model audio for a response, then barge in.
-    await sess._handle_server_event({"type": "response.created"})
+    await sess._handle_server_event({"type": "response.created", "response": {"id": "r1"}})
     await sess._handle_server_event({
         "type": "response.output_audio.delta",
         "delta": base64.b64encode(bytes(160)).decode("ascii"),

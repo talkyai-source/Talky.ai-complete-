@@ -62,7 +62,7 @@ async def test_create_endpoint_persists_the_requested_direction(monkeypatch):
             return False
 
     async def _cfg(conn, tenant_id):
-        return SimpleNamespace(tts_provider="cartesia")
+        return SimpleNamespace(tts_provider="cartesia", pipeline_mode="cascaded")
 
     async def _voices(provider):
         return {"voice-1"}

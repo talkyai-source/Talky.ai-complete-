@@ -11,7 +11,7 @@ from app.domain.services.voice_orchestrator import Direction, VoiceOrchestrator
 from app.services.scripts.prompts.composer import compose_prompt, PromptCompositionError
 from app.services.scripts.prompts.versions import hash_prompt
 from app.services.scripts.prompts.guardrails import compliance_floor
-from app.services.scripts.realtime_instructions import build_realtime_instructions
+from app.realtime.prompts import build_realtime_instructions
 from tests.unit.test_prompt_composer_direction import LEAD_GEN_SLOTS, SUPPORT_SLOTS, RECEPTIONIST_SLOTS
 
 
@@ -70,18 +70,21 @@ def test_real_pinned_builder_separates_direction_and_hashes_final_prompt(mode, a
     assert payload == before
     assert config.direction == Direction.INBOUND
     assert config.prompt_hash == hash_prompt(config.system_prompt)
-    assert config.system_prompt.count("TRUE INBOUND CALL") == 1
+    if pipeline == "cascaded":
+        assert config.system_prompt.count("TRUE INBOUND CALL") == 1
     for phrase in FORBIDDEN:
         assert phrase not in config.system_prompt
     if pipeline == "realtime":
         text = build_realtime_instructions(VoiceOrchestrator._build_realtime_persona(config))
-        assert "Preserve fixture-guidance exactly." in text
+        assert "Preserve fixture-guidance exactly." not in text
+        assert config.system_prompt == text
+        assert config.prompt_version == "realtime@2"
         assert "caller contacted the company" in text
         for phrase in FORBIDDEN:
             assert phrase not in text
     assert config.realtime_greet_on_start == (mode == "agent_first" or action == "voicemail")
     if action == "voicemail":
-        assert "AFTER-HOURS AI MESSAGE INTAKE" in config.system_prompt
+        assert ("AFTER-HOURS AI MESSAGE INTAKE" if pipeline == "cascaded" else "INBOUND after-hours AI message-intake") in config.system_prompt
 
 
 def test_legacy_caller_first_shaper_cannot_turn_inbound_into_outbound():

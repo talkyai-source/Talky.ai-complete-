@@ -72,7 +72,7 @@ def test_truncation_respects_the_budget():
     [
         "app/domain/services/voice_pipeline/turn_streamer.py",
         "app/domain/services/voice_pipeline/knowledge_tool.py",
-        "app/domain/services/voice_pipeline/realtime_bridge.py",
+        "app/realtime/bridge.py",
     ],
 )
 def test_every_delivery_path_uses_the_shared_renderer(module_path):

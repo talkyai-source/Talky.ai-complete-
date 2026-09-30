@@ -560,7 +560,7 @@ def test_normal_agent_readback_with_again_does_not_create_false_ambiguity():
 
 
 def test_both_live_pipelines_consume_agent_contact_mode_signal():
-    from app.domain.services.voice_pipeline.realtime_bridge import RealtimeBridge
+    from app.realtime.bridge import RealtimeBridge
     from app.domain.services.voice_pipeline.turn_runner import TurnRunner
 
     assert "update_state_from_agent_turn" in inspect.getsource(TurnRunner.run)
@@ -623,7 +623,7 @@ def test_one_turn_can_retain_both_contacts_but_serializes_confirmation():
 
 @pytest.mark.asyncio
 async def test_realtime_bridge_uses_same_machine_and_confirms_only_after_readback():
-    from app.domain.services.voice_pipeline.realtime_bridge import RealtimeBridge
+    from app.realtime.bridge import RealtimeBridge
 
     session = SimpleNamespace(captured_slots=None)
     bridge = RealtimeBridge(
@@ -656,7 +656,7 @@ async def test_realtime_resolution_supersedes_pending_contact_directive(
     reply: str,
     expected_status: str,
 ):
-    from app.domain.services.voice_pipeline.realtime_bridge import RealtimeBridge
+    from app.realtime.bridge import RealtimeBridge
 
     class RT:
         def __init__(self):
@@ -690,7 +690,7 @@ async def test_realtime_resolution_supersedes_pending_contact_directive(
 
 @pytest.mark.asyncio
 async def test_realtime_dual_contact_retires_email_before_advancing_to_phone():
-    from app.domain.services.voice_pipeline.realtime_bridge import RealtimeBridge
+    from app.realtime.bridge import RealtimeBridge
 
     class RT:
         def __init__(self):
@@ -729,7 +729,7 @@ async def test_realtime_dual_contact_retires_email_before_advancing_to_phone():
 
 @pytest.mark.asyncio
 async def test_realtime_bridge_none_confidence_is_neutral_but_alternatives_vary():
-    from app.domain.services.voice_pipeline.realtime_bridge import RealtimeBridge
+    from app.realtime.bridge import RealtimeBridge
 
     session = SimpleNamespace(captured_slots=None)
     bridge = RealtimeBridge(
@@ -756,7 +756,7 @@ async def test_realtime_bridge_none_confidence_is_neutral_but_alternatives_vary(
 
 @pytest.mark.asyncio
 async def test_realtime_ambiguity_interrupts_speculation_with_backend_directive():
-    from app.domain.services.voice_pipeline.realtime_bridge import RealtimeBridge
+    from app.realtime.bridge import RealtimeBridge
 
     class RT:
         def __init__(self):
@@ -793,7 +793,7 @@ async def test_realtime_ambiguity_interrupts_speculation_with_backend_directive(
 
 @pytest.mark.asyncio
 async def test_realtime_provider_replaces_directive_then_cancels_active_response():
-    from app.infrastructure.realtime.openai_realtime import (
+    from app.realtime.openai import (
         OpenAIRealtimeSession,
         RealtimeEvent,
     )
@@ -838,8 +838,8 @@ async def test_realtime_provider_replaces_directive_then_cancels_active_response
 @pytest.mark.asyncio
 async def test_interrupted_realtime_readback_cannot_confirm_contact():
     from app.domain.models.conversation import Message
-    from app.domain.services.voice_pipeline.realtime_bridge import RealtimeBridge
-    from app.infrastructure.realtime.openai_realtime import RealtimeEvent
+    from app.realtime.bridge import RealtimeBridge
+    from app.realtime.openai import RealtimeEvent
 
     session = SimpleNamespace(
         captured_slots=update_state_from_user_turn(
@@ -948,7 +948,7 @@ class _AuditPool:
 
 @pytest.mark.asyncio
 async def test_realtime_confirmation_persists_canonical_value_and_audit_once():
-    from app.domain.services.voice_pipeline.realtime_bridge import RealtimeBridge
+    from app.realtime.bridge import RealtimeBridge
 
     conn = _AuditConn()
     call_id = "22222222-2222-2222-2222-222222222222"
@@ -995,7 +995,7 @@ async def test_realtime_confirmation_persists_canonical_value_and_audit_once():
 
 @pytest.mark.asyncio
 async def test_realtime_pending_correction_revokes_prior_caller_contact_row():
-    from app.domain.services.voice_pipeline.realtime_bridge import RealtimeBridge
+    from app.realtime.bridge import RealtimeBridge
 
     conn = _AuditConn()
     session = SimpleNamespace(
@@ -1044,7 +1044,7 @@ async def test_realtime_contact_persistence_is_serialized_across_corrections(
     monkeypatch,
 ):
     from app.domain.services.voice_pipeline import lead_slot_capture
-    from app.domain.services.voice_pipeline.realtime_bridge import RealtimeBridge
+    from app.realtime.bridge import RealtimeBridge
 
     first_started = asyncio.Event()
     release_first = asyncio.Event()
@@ -1112,7 +1112,7 @@ def test_campaign_phone_region_is_threaded_only_when_explicitly_configured():
 
 
 def test_realtime_model_is_told_the_same_confirm_before_commit_contract():
-    from app.services.scripts.realtime_instructions import (
+    from app.realtime.prompts import (
         RealtimePersona,
         build_realtime_instructions,
     )

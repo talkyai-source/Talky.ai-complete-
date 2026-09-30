@@ -50,7 +50,10 @@ import { leadDetailsApi, type CampaignLeadField } from "@/lib/lead-details-api";
  * only whether one was attached is remembered; `hadFile` drives a restore
  * notice asking the user to re-attach it.
  */
+import { CampaignVoiceSettings, type CampaignVoiceSettingsValue } from "@/components/realtime/campaign-settings";
+
 type CampaignWizardDraft = {
+    voiceSelection?: CampaignVoiceSettingsValue;
     step: number;
     name: string;
     companyName: string;
@@ -139,6 +142,8 @@ export function CampaignWizard({ afterCreateHref, direction = "outbound", draftS
     const [error, setError] = useState<string | null>(null);
 
     // Step 1 — basics
+    const [voiceSelection, setVoiceSelection] = useState<CampaignVoiceSettingsValue>(restoredDraft?.voiceSelection ?? {});
+    const isRealtime = voiceSelection.pipeline_mode === "realtime";
     const [name, setName] = useState(() => (typeof restoredDraft?.name === "string" ? restoredDraft.name : ""));
     const [companyName, setCompanyName] = useState(() => (typeof restoredDraft?.companyName === "string" ? restoredDraft.companyName : ""));
     const [personaType, setPersonaType] = useState<PersonaType>(() => restoredDraft?.personaType ?? "lead_gen");
@@ -195,6 +200,7 @@ export function CampaignWizard({ afterCreateHref, direction = "outbound", draftS
     // was wired to storage.
     useEffect(() => {
         writeWizardDraft(draftStorageKey, {
+            voiceSelection,
             step,
             name,
             companyName,
@@ -212,7 +218,7 @@ export function CampaignWizard({ afterCreateHref, direction = "outbound", draftS
             hadFile: Boolean(file),
             createdCampaignId,
         });
-    }, [draftStorageKey, step, name, companyName, personaType, agentNamesRaw, agentGenders, voiceGender, voiceId, voiceName, provider, goal, schedule, briefDraft, leadFields.fields, file, createdCampaignId]);
+    }, [voiceSelection, draftStorageKey, step, name, companyName, personaType, agentNamesRaw, agentGenders, voiceGender, voiceId, voiceName, provider, goal, schedule, briefDraft, leadFields.fields, file, createdCampaignId]);
 
     const agentNames = useMemo(() => parseAgentNames(agentNamesRaw), [agentNamesRaw]);
     const requiredLeadFields = leadFields.fields
@@ -230,9 +236,9 @@ export function CampaignWizard({ afterCreateHref, direction = "outbound", draftS
         name.trim()
         && companyName.trim()
         && agentNames.length >= 1
-        && voiceId
-        && !briefError
-        && guidance.valid,
+        && (isRealtime ? voiceSelection.realtime_voice : voiceId)
+        && (isRealtime || !briefError)
+        && (isRealtime || guidance.valid),
     );
 
     const onPickFile = (f: File | null) => {
@@ -252,7 +258,7 @@ export function CampaignWizard({ afterCreateHref, direction = "outbound", draftS
     };
 
     const goToReview = async () => {
-        if (briefError || !guidance.valid) {
+        if (!isRealtime && (briefError || !guidance.valid)) {
             setError(briefError ?? guidance.message ?? "Campaign guidance is invalid.");
             return;
         }
@@ -261,6 +267,7 @@ export function CampaignWizard({ afterCreateHref, direction = "outbound", draftS
         setPreview(null);
         try {
             const res = await dashboardApi.previewCampaignPrompt({
+                ...voiceSelection,
                 persona_type: personaType,
                 company_name: companyName.trim(),
                 agent_name: agentNames[0] ?? "Alex",
@@ -284,7 +291,7 @@ export function CampaignWizard({ afterCreateHref, direction = "outbound", draftS
     };
 
     const onCreate = async () => {
-        if (briefError || !guidance.valid) {
+        if (!isRealtime && (briefError || !guidance.valid)) {
             setError(briefError ?? guidance.message ?? "Campaign guidance is invalid.");
             return;
         }
@@ -298,6 +305,7 @@ export function CampaignWizard({ afterCreateHref, direction = "outbound", draftS
         try {
             if (!campaignId) {
                 const { campaign } = await dashboardApi.createCampaign({
+                    ...voiceSelection,
                     name: name.trim(),
                     description: undefined,
                     system_prompt: goal.trim(),      // additional instructions
@@ -407,6 +415,8 @@ export function CampaignWizard({ afterCreateHref, direction = "outbound", draftS
                             <AgentNameGender names={agentNames} value={agentGenders} onChange={setAgentGenders} voiceGender={voiceGender} />
                         </div>
 
+                        <CampaignVoiceSettings value={voiceSelection} onChange={setVoiceSelection} />
+                        <div hidden={isRealtime}>
                         <CampaignBriefFields
                             idPrefix="wizard-campaign-brief"
                             value={briefDraft}
@@ -442,6 +452,7 @@ export function CampaignWizard({ afterCreateHref, direction = "outbound", draftS
                             onProviderChange={setProvider}
                             onVoiceGenderChange={setVoiceGender}
                         />
+                        </div>
 
                         {inbound ? null : (
                             <div className="rounded-lg border border-border bg-background/50 p-4">
@@ -539,7 +550,7 @@ export function CampaignWizard({ afterCreateHref, direction = "outbound", draftS
                             <SummaryRow label="Decision role" value={briefDraft.decision_maker_role || "— any informed contact —"} />
                             <SummaryRow label="Next actions" value={briefDraft.approved_next_actions.length ? briefDraft.approved_next_actions.join(", ").replaceAll("_", " ") : "— none approved —"} />
                             <SummaryRow label="Objections" value={`${briefDraft.max_objection_attempts} attempts maximum`} />
-                            <SummaryRow label="Voice" value={voiceName ? `${voiceName}${provider ? ` (${provider})` : ""}` : voiceId} />
+                            <SummaryRow label="Voice" value={isRealtime ? `GPT Realtime (${voiceSelection.realtime_voice})` : voiceName ? `${voiceName}${provider ? ` (${provider})` : ""}` : voiceId} />
                             <SummaryRow label="Knowledge" value={file ? file.name : "— none —"} />
                             <SummaryRow label="Lead fields" value={leadFields.fields.length ? `${leadFields.fields.length} selected` : "— none —"} />
                         </div>

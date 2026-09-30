@@ -30,6 +30,7 @@ from typing import Any, Dict, Optional
 
 from fastapi import WebSocket
 
+from app.realtime.session_config import RealtimeSessionConfig
 from app.domain.models.session import CallSession, CallState
 from app.domain.models.conversation_state import ConversationState, ConversationContext
 from app.domain.models.agent_config import AgentConfig
@@ -118,14 +119,6 @@ class Direction(str, enum.Enum):
 OPENING_MODE_AGENT_FIRST = "agent_first"
 OPENING_MODE_CALLEE_FIRST = "callee_first"
 
-# Realtime response audio is delivered before its terminal transcript.  Until
-# the bridge quarantines every response and validates that transcript before
-# playout, the action-result contract cannot be enforced on this path.  This is
-# deliberately not an environment flag: an operator typo must not re-enable an
-# unsafe speech path.
-_REALTIME_PREPLAY_GUARD_AVAILABLE = False
-
-
 def opening_mode_from_first_speaker(first_speaker: Optional[str]) -> str:
     """Map the per-call ``first_speaker`` knob onto an opening mode.
 
@@ -190,7 +183,7 @@ def _default_flux_capture_keyterms() -> list:
 
 
 @dataclass
-class VoiceSessionConfig:
+class VoiceSessionConfig(RealtimeSessionConfig):
     """All parameters needed to spin up a voice session."""
 
     # Provider selection
@@ -316,24 +309,9 @@ class VoiceSessionConfig:
     # ── Pipeline mode (Realtime add-on) ──────────────────────────────────
     # "cascaded" (default) = the classic STT→LLM→TTS pipeline, unchanged.
     # "realtime" = a single OpenAI gpt-realtime-2 speech-to-speech session
-    # (see app/infrastructure/realtime/openai_realtime.py). Mirrors the fields
+    # (see app/realtime/openai.py). Mirrors the fields
     # on AIProviderConfig; the telephony session-config builder threads them
     # through. Default "cascaded" keeps every existing call byte-for-byte.
-    pipeline_mode: str = "cascaded"
-    realtime_model: str = "gpt-realtime-2"
-    realtime_voice: str = "marin"
-    realtime_settings: Optional[Dict[str, Any]] = None
-
-    # True-inbound opening policy for the realtime speech-to-speech path.
-    # ``direction`` alone is not enough: an inbound campaign may be either
-    # caller-first or agent-first, and after-hours AI message intake is always
-    # agent-first.  These values are copied from the immutable pre-answer
-    # admission snapshot before the realtime socket is created. ``None`` keeps
-    # every legacy/outbound call on the historical direction-derived default.
-    realtime_greet_on_start: Optional[bool] = None
-    realtime_opening_greeting: Optional[str] = None
-    realtime_message_intake: bool = False
-
     # ── Callee identity ("who you're calling") ───────────────────────────
     # Set by build_telephony_session_config from the lead threaded through
     # make_call. The cascaded path bakes this into system_prompt directly;
@@ -548,46 +526,13 @@ class VoiceOrchestrator:
             f"talklee={talklee_call_id} type={config.session_type}"
         )
 
-        # ── PIPELINE-MODE BRANCH POINT (Realtime add-on) ────────────────────
-        if (
-            getattr(config, "pipeline_mode", "cascaded") == "realtime"
-            and not _REALTIME_PREPLAY_GUARD_AVAILABLE
-        ):
-            logger.warning(
-                "realtime_blocked reason=c1_preplay_guard_unavailable "
-                "call_id=%s fallback=cascaded",
-                call_id[:8],
-            )
-            # VoiceSessionConfig is mutable by contract. If that ever changes,
-            # assignment must fail the call here rather than fall through to an
-            # unguarded Realtime socket.
-            config.pipeline_mode = "cascaded"
-
-        # A single OpenAI gpt-realtime-2 speech-to-speech session replaces the
-        # cascaded STT→LLM→TTS middle. Default "cascaded" means every existing
-        # tenant skips this entirely and the code below is byte-for-byte
-        # unchanged. Fail-soft: if the realtime session can't connect, we log
-        # and FALL BACK to the cascaded pipeline so the call still goes out.
-        if getattr(config, "pipeline_mode", "cascaded") == "realtime":
-            rt_session = await self._create_realtime_voice_session(
-                config, call_id, talklee_call_id
-            )
-            if rt_session is not None:
-                self._active_sessions[call_id] = rt_session
-                logger.info("Realtime voice session created: %s", call_id[:8])
-                return rt_session
-            logger.warning(
-                "realtime session setup failed call_id=%s — falling back to "
-                "cascaded pipeline", call_id[:8],
-            )
-            # Force cascaded mode so the gateway + pipeline built below use the
-            # CASCADED sample rate (STT rate), not realtime's 8kHz. Without this
-            # the fallback ran the cascaded pipeline on an 8kHz gateway →
-            # half-rate/garbled "ghost" audio (the exact symptom the user hit).
-            try:
-                config.pipeline_mode = "cascaded"
-            except Exception:  # noqa: BLE001 — config may be immutable; best-effort
-                pass
+        # The selected Realtime engine must never silently become cascaded.
+        if config.pipeline_mode == "realtime":
+            rt_session = await self._create_realtime_voice_session(config, call_id, talklee_call_id)
+            if rt_session is None:
+                raise RuntimeError("Realtime could not start. Check OpenAI configuration and connection; no alternative engine was used.")
+            self._active_sessions[call_id] = rt_session
+            return rt_session
 
         # --- Providers: reuse singletons for ask_ai, init fresh for all others ---
         # TTS is always created fresh per-session (see __init__ comment for why).
@@ -755,101 +700,6 @@ class VoiceOrchestrator:
             raise
 
     # ------------------------------------------------------------------
-    # 1b. Mid-call realtime → cascaded fallback (Fix 14)
-    # ------------------------------------------------------------------
-
-    async def start_cascaded_fallback(
-        self, session: VoiceSession
-    ) -> Optional[asyncio.Task]:
-        """Rebuild the CASCADED pipeline on a live realtime session whose
-        speech-to-speech socket dropped mid-call, and start it.
-
-        Reuses the session's EXISTING media gateway (it is wired to the live
-        RTP/gateway session — a fresh gateway from the factory would not be),
-        creates fresh STT/LLM/TTS providers from the session's own config, and
-        returns the started pipeline task. Returns None on any failure so the
-        caller can fall through to normal teardown (the call ends — never worse
-        than today's dead-air-until-watchdog).
-
-        Sample-rate note: the realtime gateway runs at a single 8 kHz internal
-        rate (see _create_media_gateway). We align the cascaded pipeline's
-        stt/tts rates to the gateway's ACTUAL internal rate so the
-        gateway→STT ingest and TTS→gateway egress resample chains stay
-        self-consistent — a 16 kHz assumption on an 8 kHz gateway is exactly
-        the half-speed 'ghost audio' the connect-time fallback guards against.
-        """
-        config = getattr(session, "config", None)
-        gateway = getattr(session, "media_gateway", None)
-        call_session = getattr(session, "call_session", None)
-        if config is None or gateway is None or call_session is None:
-            logger.error(
-                "cascaded fallback missing config/gateway/call_session "
-                "call_id=%s — cannot rebuild", getattr(session, "call_id", "?"),
-            )
-            return None
-        try:
-            # Force cascaded mode so any provider/rate logic keyed off
-            # pipeline_mode builds the cascaded shape.
-            try:
-                config.pipeline_mode = "cascaded"
-            except Exception:  # noqa: BLE001 — config may be frozen; best-effort
-                pass
-
-            gw_rate = int(
-                getattr(gateway, "_sample_rate", None) or config.stt_sample_rate
-            )
-
-            stt_provider, llm_provider, tts_provider = await asyncio.gather(
-                self._create_stt_provider(config),
-                self._create_llm_provider(config),
-                self._create_tts_provider(config),
-            )
-
-            pipeline = VoicePipelineService(
-                stt_provider=stt_provider,
-                llm_provider=llm_provider,
-                tts_provider=tts_provider,
-                media_gateway=gateway,
-                stt_sample_rate=gw_rate,
-                tts_sample_rate=gw_rate,
-            )
-
-            # The realtime bridge told the gateway its output was already
-            # real-time-paced (batch=1). Clear that hint so cascaded TTS gets
-            # its normal opportunistic batching. Best-effort.
-            try:
-                set_rt = getattr(gateway, "set_realtime_output", None)
-                if set_rt:
-                    set_rt(session.call_id, False)
-            except Exception:  # noqa: BLE001
-                pass
-
-            # Swap the cascaded providers + pipeline onto the live session so
-            # end_session tears them down normally on hangup.
-            session.stt_provider = stt_provider
-            session.llm_provider = llm_provider
-            session.tts_provider = tts_provider
-            session.pipeline = pipeline
-
-            # The gateway session was already registered at answer time; the
-            # telephony start_pipeline path takes websocket=None and reuses it.
-            task = asyncio.create_task(
-                pipeline.start_pipeline(call_session, None)
-            )
-            logger.warning(
-                "cascaded fallback pipeline started call_id=%s rate=%d",
-                session.call_id[:8], gw_rate,
-            )
-            return task
-        except Exception as exc:  # noqa: BLE001 — never raise into the callback
-            logger.error(
-                "cascaded fallback build failed call_id=%s: %s",
-                getattr(session, "call_id", "?"), exc,
-            )
-            return None
-
-    # ------------------------------------------------------------------
-    # 2. Start pipeline
     # ------------------------------------------------------------------
 
     async def start_pipeline(
@@ -1734,306 +1584,19 @@ class VoiceOrchestrator:
     # Realtime (speech-to-speech) session assembly
     # ------------------------------------------------------------------
 
-    async def _create_realtime_voice_session(
-        self,
-        config: VoiceSessionConfig,
-        call_id: str,
-        talklee_call_id: str,
-    ):
-        """Build a VoiceSession backed by an OpenAI gpt-realtime-2 bridge.
-
-        Returns the assembled VoiceSession on success, or None on any failure
-        (the caller then falls back to the cascaded pipeline). NEVER raises —
-        a realtime setup error must not take down call origination.
-
-        Kept deliberately separate from the cascaded provider machinery:
-        - resolves OPENAI_API_KEY via CredentialResolver ("openai"),
-        - builds instructions with build_realtime_instructions (NOT
-          compose_prompt / compliance_floor / prompt_builder),
-        - creates + connects OpenAIRealtimeSession,
-        - wires a RealtimeBridge to the SAME media-gateway transport TTS uses.
-        """
-        try:
-            from app.domain.services.credential_resolver import (
-                get_credential_resolver,
-            )
-            from app.infrastructure.realtime.openai_realtime import (
-                OpenAIRealtimeSession,
-                knowledge_lookup_tool,
-            )
-            from app.domain.services.voice_pipeline.realtime_bridge import (
-                RealtimeBridge,
-            )
-            from app.domain.services.voice_pipeline.action_tools import (
-                realtime_voice_action_tools,
-            )
-            from app.services.scripts.realtime_instructions import (
-                RealtimePersona,
-                build_realtime_instructions,
-            )
-
-            # Provider selection — STRICTLY opt-in, per-tenant/campaign. Rides
-            # the EXISTING realtime_settings JSONB dict (no new DB column):
-            # realtime_settings["provider"] = "openai" (default, unchanged) |
-            # "xai". Every existing tenant/campaign that has never set this
-            # key gets byte-for-byte the same OpenAI path as before.
-            rt_settings = config.realtime_settings or {}
-            provider = str(rt_settings.get("provider") or "openai").strip().lower()
-
-            if provider == "xai":
-                api_key = await get_credential_resolver().resolve(
-                    "xai", tenant_id=config.tenant_id,
-                )
-                if not api_key:
-                    logger.error(
-                        "realtime session call_id=%s: no XAI_API_KEY resolved "
-                        "(tenant=%s) — cannot start xai realtime", call_id[:8],
-                        config.tenant_id,
-                    )
-                    return None
-            else:
-                api_key = await get_credential_resolver().resolve(
-                    "openai", tenant_id=config.tenant_id,
-                )
-                if not api_key:
-                    logger.error(
-                        "realtime session call_id=%s: no OPENAI_API_KEY resolved "
-                        "(tenant=%s) — cannot start realtime", call_id[:8],
-                        config.tenant_id,
-                    )
-                    return None
-
-            # Persona/company/goal → clean realtime instructions. Pull from the
-            # campaign agent_config when present; fall back to sane defaults.
-            persona = self._build_realtime_persona(config)
-            instructions = build_realtime_instructions(persona)
-
-            # Media gateway at 8 kHz internal so the μ-law wire needs NO
-            # resampling — only the codec conversion in the bridge.
-            gateway = await self._create_media_gateway(config)
-            internal_rate = getattr(gateway, "_sample_rate", config.gateway_sample_rate)
-
-            if provider == "xai":
-                from app.infrastructure.realtime.xai_realtime import (
-                    XAIRealtimeSession,
-                    XAI_DEFAULT_MODEL,
-                )
-                # config.realtime_model defaults to the OpenAI model name
-                # ("gpt-realtime-2") for every tenant that hasn't touched
-                # this field, so that value is NOT a meaningful xAI override.
-                # Precedence: explicit realtime_settings["model"] > a
-                # realtime_model the operator actually customised > the xAI
-                # default.
-                xai_model = (
-                    rt_settings.get("model")
-                    or (config.realtime_model
-                        if config.realtime_model and config.realtime_model != "gpt-realtime-2"
-                        else XAI_DEFAULT_MODEL)
-                )
-                rt = XAIRealtimeSession(
-                    api_key=api_key,
-                    model=xai_model,
-                    agent_id=rt_settings.get("agent_id"),
-                    instructions=instructions,
-                    tools=[knowledge_lookup_tool(), *realtime_voice_action_tools()],
-                    settings=config.realtime_settings,
-                    call_id=call_id,
-                )
-            else:
-                rt = OpenAIRealtimeSession(
-                    api_key=api_key,
-                    model=config.realtime_model or "gpt-realtime-2",
-                    voice=config.realtime_voice or "marin",
-                    instructions=instructions,
-                    tools=[knowledge_lookup_tool(), *realtime_voice_action_tools()],
-                    settings=config.realtime_settings,
-                    call_id=call_id,
-                )
-            connected = await rt.connect()
-            if not connected:
-                logger.warning(
-                    "realtime session call_id=%s: connect() failed", call_id[:8],
-                )
-                try:
-                    await rt.close()
-                except Exception:
-                    pass
-                return None
-
-            # Knowledge context (reuse the cascaded retrieval). Best-effort — a
-            # missing pool just means the knowledge tool returns "no info".
-            knowledge_pool = None
-            try:
-                from app.core.container import get_container
-                c = get_container()
-                if c.is_initialized:
-                    # Use the SAME accessor the cascaded per-turn retrieval uses
-                    # (turn_streamer._knowledge_block_for_turn:
-                    #   getattr(container.db_client, "pool", None)). Both resolve
-                    # to the one asyncpg pool, but aligning the accessor keeps the
-                    # two knowledge paths provably identical and avoids the
-                    # db_pool @property raising if the pool is torn down mid-setup.
-                    knowledge_pool = getattr(c.db_client, "pool", None)
-            except Exception:
-                knowledge_pool = None
-
-            call_session = CallSession(
-                call_id=call_id,
-                campaign_id=config.campaign_id,
-                lead_id=config.lead_id,
-                provider_call_id=f"{config.session_type}-realtime",
-                state=CallState.ACTIVE,
-                conversation_state=ConversationState.GREETING,
-                conversation_context=ConversationContext(),
-                agent_config=config.agent_config,
-                persona_type=config.persona_type,
-                # CallSession REQUIRES these (they're cascaded fields). Omitting
-                # them raised "2 validation errors for CallSession" → the realtime
-                # setup crashed and fell back to cascaded (at the wrong 8kHz rate),
-                # which is what produced the "ghost" audio. Realtime doesn't USE the
-                # cascaded system_prompt, but the model needs the field populated;
-                # voice_id carries the realtime voice for telemetry/consistency.
-                system_prompt=config.system_prompt,
-                voice_id=(getattr(config, "realtime_voice", None) or config.voice_id),
-                contact_phone_region=config.contact_phone_region,
-                started_at=datetime.utcnow(),
-                last_activity_at=datetime.utcnow(),
-            )
-            call_session.talklee_call_id = talklee_call_id
-            call_session.barge_in_event = asyncio.Event()
-            call_session._call_direction = config.direction.value
-
-            # Transcript accumulation for the realtime path. The speech-to-speech
-            # model emits no transcript on its own, so the bridge feeds the
-            # model's final agent + caller transcripts into a TranscriptService
-            # (class-level buffer keyed by call_id) — the SAME buffer the shared
-            # hangup persister reads. We stash it on the voice_session so
-            # lifecycle._on_call_ended finds it (pipeline is None on realtime).
-            from app.domain.services.transcript_service import TranscriptService
-            realtime_transcript_service = TranscriptService()
-
-            # Wire barge-in into the media gateway's pacing loop, mirroring
-            # the cascaded path (voice_pipeline_service.start_pipeline).
-            # Without this, TelephonyMediaGateway.send_audio's pacing loop
-            # never sees the event fire (it stays None), so it can't
-            # early-exit and the agent keeps talking ~200-400ms over the
-            # caller after a barge-in on realtime calls.
-            set_barge_in = getattr(gateway, "set_barge_in_event", None)
-            if set_barge_in:
-                set_barge_in(call_id, call_session.barge_in_event)
-
-            greet_on_start = self._resolve_realtime_greet_on_start(config)
-            bridge = RealtimeBridge(
-                call_id=call_id,
-                realtime_session=rt,
-                media_gateway=gateway,
-                internal_sample_rate=internal_rate,
-                knowledge_pool=knowledge_pool,
-                tenant_id=config.tenant_id,
-                campaign_id=config.campaign_id,
-                lead_id=config.lead_id,
-                contact_phone_region=config.contact_phone_region,
-                contact_session=call_session,
-                session_active=lambda: self._active_sessions.get(call_id) is not None,
-                barge_in_event=call_session.barge_in_event,
-                # True inbound can be caller-first OR agent-first. Admission
-                # pins that distinction explicitly on the config; direction is
-                # only the backwards-compatible default for older callers.
-                greet_on_start=greet_on_start,
-                transcript_service=realtime_transcript_service,
-                talklee_call_id=talklee_call_id,
-                call_direction=config.direction.value,
-                action_session=call_session,
-            )
-
-            voice_session = VoiceSession(
-                call_id=call_id,
-                talklee_call_id=talklee_call_id,
-                call_session=call_session,
-                media_gateway=gateway,
-                realtime_session=rt,
-                realtime_bridge=bridge,
-                config=config,
-            )
-            # Surface the transcript buffer for the hangup persister
-            # (lifecycle._on_call_ended falls back to this when pipeline is None).
-            voice_session.transcript_service = realtime_transcript_service
-            return voice_session
-        except Exception as exc:  # noqa: BLE001 — fail soft to cascaded
-            logger.error(
-                "realtime session setup raised call_id=%s: %s — falling back",
-                call_id[:8], exc,
-            )
-            return None
+    async def _create_realtime_voice_session(self, config, call_id, talklee_call_id):
+        from app.realtime.runtime import create_realtime_voice_session
+        return await create_realtime_voice_session(self, config, call_id, talklee_call_id)
 
     @staticmethod
-    def _resolve_realtime_greet_on_start(config: VoiceSessionConfig) -> bool:
-        """Who opens a realtime call.
-
-        Precedence: the immutable admission pin (true inbound decides this
-        before the socket exists) → the explicit ``opening_mode`` → the
-        direction-derived legacy default for callers that set neither.
-        """
-        pinned = getattr(config, "realtime_greet_on_start", None)
-        if pinned is not None:
-            return bool(pinned)
-        opening_mode = getattr(config, "opening_mode", None)
-        if opening_mode:
-            return opening_mode == OPENING_MODE_AGENT_FIRST
-        return config.direction == Direction.OUTBOUND
+    def _resolve_realtime_greet_on_start(config):
+        from app.realtime.runtime import resolve_realtime_greet_on_start
+        return resolve_realtime_greet_on_start(config)
 
     @staticmethod
-    def _build_realtime_persona(config: VoiceSessionConfig):
-        """Map campaign/agent config onto a RealtimePersona. Tolerant of
-        missing fields — realtime should work even on a bare campaign."""
-        from app.services.scripts.realtime_instructions import RealtimePersona
-
-        direction_value = getattr(config.direction, "value", config.direction)
-        direction_text = str(direction_value or "outbound").strip().lower()
-        ac = config.agent_config
-        agent_name = getattr(ac, "agent_name", None) or getattr(ac, "name", None) or "Alex"
-        company = getattr(ac, "company_name", None) or getattr(ac, "company", None) or "the company"
-        goal = (
-            getattr(ac, "goal", None)
-            or getattr(ac, "objective", None)
-            or "have a helpful, natural conversation with the caller"
-        )
-        role = getattr(ac, "role", None) or "a friendly voice assistant"
-
-        # "Who you're calling" for the realtime pipeline. The cascaded path
-        # gets this via system_prompt; realtime builds instructions from the
-        # persona, so surface it as extra_notes. Fail-soft: no name → no note.
-        extra_notes = None
-        first = (getattr(config, "callee_first_name", None) or "").strip()
-        last = (getattr(config, "callee_last_name", None) or "").strip()
-        callee_company = (getattr(config, "callee_company", None) or "").strip()
-        full = " ".join(p for p in (first, last) if p).strip()
-        if full and direction_text != "inbound":
-            greet = first or full
-            comp_clause = f" from {callee_company}" if callee_company else ""
-            extra_notes = (
-                f"You are calling {full}{comp_clause}. You haven't spoken to "
-                "them yet, so treat the name as who you expect to reach, not a "
-                "confirmed fact. Greet them by first name and check you've "
-                f'reached the right person (e.g. "Hi, is this {greet}?") before '
-                "getting into it. Don't recite their details back robotically."
-            )
-
-        return RealtimePersona(
-            agent_name=str(agent_name),
-            company_name=str(company),
-            role=str(role),
-            goal=str(goal),
-            extra_notes=extra_notes,
-            campaign_guidance=config.campaign_guidance,
-            call_direction=direction_text,
-            opening_greeting=getattr(
-                config, "realtime_opening_greeting", None
-            ),
-            message_intake=bool(
-                getattr(config, "realtime_message_intake", False)
-            ),
-        )
+    def _build_realtime_persona(config):
+        from app.realtime.runtime import build_realtime_persona
+        return build_realtime_persona(config)
 
     async def _create_media_gateway(self, config: VoiceSessionConfig):
         """Initialise and return a media gateway via the factory."""

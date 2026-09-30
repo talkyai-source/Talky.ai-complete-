@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from unittest.mock import AsyncMock
 
+import asyncio
 import pytest
 
 from app.domain.models.conversation import Message, MessageRole
@@ -21,16 +22,16 @@ from app.domain.services.voice_pipeline.live_structured_state import (
     replace_live_state_block,
     render_live_state_block,
 )
-from app.domain.services.voice_pipeline.realtime_bridge import RealtimeBridge
+from app.realtime.bridge import RealtimeBridge
 from app.domain.services.voice_pipeline.llm_response import generate_llm_response
 from app.domain.services.voice_pipeline.turn_streamer import TurnStreamer
-from app.infrastructure.realtime.openai_realtime import (
+from app.realtime.openai import (
     OpenAIRealtimeSession,
     RealtimeEvent,
 )
 from app.services.scripts.prompts.live_state import build_live_state_block
 from app.services.scripts.call_state_tracker import CallState as CapturedCallState
-from app.services.scripts.realtime_instructions import (
+from app.realtime.prompts import (
     RealtimePersona,
     build_realtime_instructions,
 )
@@ -443,23 +444,13 @@ async def test_realtime_identity_requires_uninterrupted_opening_delivery(
     interrupted, expects_identity
 ):
     blocks = []
+    started = asyncio.Event()
 
     async def _events():
-        yield RealtimeEvent(
-            kind="agent_transcript",
-            text="Hello, I'm Sarah from Acme.",
-            is_final=True,
-        )
+        yield RealtimeEvent(kind="response_candidate", text="Hello, I'm Sarah from Acme.", audio=b"\xff" * 320)
+        await started.wait()
         if interrupted:
             yield RealtimeEvent(kind="interrupted", raw={"during_response": True})
-        yield RealtimeEvent(
-            kind="response_done",
-            raw={
-                "response": {
-                    "status": "cancelled" if interrupted else "completed"
-                }
-            },
-        )
 
     class _RT:
         def events(self):
@@ -469,21 +460,25 @@ async def test_realtime_identity_requires_uninterrupted_opening_delivery(
             blocks.append(block)
 
     class _Gateway:
+        async def send_audio(self, *_args):
+            started.set()
+            if interrupted:
+                await asyncio.Event().wait()
+
+        async def wait_for_playback_complete(self, _call_id):
+            return True
+
         async def clear_output_buffer(self, _call_id):
             return None
 
     bridge = RealtimeBridge(
-        call_id="call-opening-proof",
-        realtime_session=_RT(),
-        media_gateway=_Gateway(),
-        greet_on_start=True,
+        call_id="call-opening-proof", realtime_session=_RT(),
+        media_gateway=_Gateway(), greet_on_start=True,
     )
-
-    await bridge._pump_model_events()
-
+    await asyncio.wait_for(bridge._pump_model_events(), 1)
+    await asyncio.gather(bridge._playback_task, return_exceptions=True)
     if expects_identity:
-        assert blocks
-        assert "identity_introduced=yes" in blocks[-1]
+        assert blocks and "identity_introduced=yes" in blocks[-1]
     else:
         assert not blocks
         assert bridge._live_state.identity_introduced is None

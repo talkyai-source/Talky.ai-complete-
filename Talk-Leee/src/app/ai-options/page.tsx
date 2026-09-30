@@ -1,5 +1,6 @@
 "use client";
 
+import { RealtimeControls } from "@/components/realtime/ai-options-controls";
 import { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { ApplyToCampaignsModal } from "@/components/campaigns/apply-to-campaigns-modal";
@@ -9,7 +10,6 @@ import {
     AIProviderConfig,
     ProviderListResponse,
     VoiceInfo,
-    RealtimeVoiceInfo,
 } from "@/lib/ai-options-api";
 import {
     Cpu,
@@ -99,33 +99,8 @@ function dedupeVoicesById(input: VoiceInfo[]): VoiceInfo[] {
 }
 
 // ── Realtime (gpt-realtime-2) fallback catalog ────────────────
-// Used only when the backend hasn't shipped `providers.realtime` yet, so the
-// card still renders (and is developable) before that lands. Remove once the
-// backend always returns this section.
-const FALLBACK_REALTIME_MODEL = "gpt-realtime-2";
-const FALLBACK_REALTIME_VOICES: RealtimeVoiceInfo[] = [
-    { id: "marin", name: "Marin", description: "Warm, natural, conversational.", gender: "female" },
-    { id: "cedar", name: "Cedar", description: "Calm, grounded, and clear.", gender: "male" },
-];
-const FALLBACK_TURN_DETECTION = ["low", "medium", "high", "auto"];
-const FALLBACK_NOISE_REDUCTION = ["off", "near_field", "far_field"];
 const DEFAULT_TURN_DETECTION = "high";
 const DEFAULT_NOISE_REDUCTION = "far_field";
-
-function getRealtimeCatalog(providers: ProviderListResponse | null): {
-    model: string;
-    voices: RealtimeVoiceInfo[];
-    turn_detection: string[];
-    noise_reduction: string[];
-} {
-    const realtime = providers?.realtime;
-    return {
-        model: realtime?.model || FALLBACK_REALTIME_MODEL,
-        voices: realtime?.voices?.length ? realtime.voices : FALLBACK_REALTIME_VOICES,
-        turn_detection: realtime?.turn_detection?.length ? realtime.turn_detection : FALLBACK_TURN_DETECTION,
-        noise_reduction: realtime?.noise_reduction?.length ? realtime.noise_reduction : FALLBACK_NOISE_REDUCTION,
-    };
-}
 
 // ── theme-aware card / header ─────────────────────────────────
 function Card({ children, className = "", delay = 0 }: { children: React.ReactNode; className?: string; delay?: number }) {
@@ -231,14 +206,14 @@ export default function AIOptionsPage() {
     useEffect(() => {
         if (seededRef.current) return;
         if (!providersQuery.data || !configQuery.data) return;
-        if (voicesQuery.isLoading) return; // let voices finish (or error) first
+        if (configQuery.data.pipeline_mode !== "realtime" && voicesQuery.isLoading) return; // let voices finish (or error) first
 
         const providersData = providersQuery.data;
         const configData = configQuery.data;
         const uniqueVoices = dedupeVoicesById(voicesQuery.data?.voices ?? []);
         const providerVoices = uniqueVoices.filter((v) => v.provider === configData.tts_provider);
         const providerModels = getProviderTtsModels(configData.tts_provider, providersData);
-        const normalizedConfig: AIProviderConfig = {
+        const normalizedConfig: AIProviderConfig = configData.pipeline_mode === "realtime" ? configData : {
             ...configData,
             tts_model: providerModels.some((m) => m.id === configData.tts_model)
                 ? configData.tts_model
@@ -264,13 +239,17 @@ export default function AIOptionsPage() {
 
     async function handleSaveConfig() {
         if (!config || saveInFlightRef.current) return;
+        if (config.pipeline_mode === "realtime" && !providers?.realtime?.available) {
+            setError(providers?.realtime?.unavailable_reason || "Realtime availability could not be verified.");
+            return;
+        }
         saveInFlightRef.current = true;
         setSaving(true);
         setError("");
         setSaveSuccess(false);
         setLatencyWarnings([]);
         try {
-            const normalizedConfig: AIProviderConfig = {
+            const normalizedConfig: AIProviderConfig = config.pipeline_mode === "realtime" ? config : {
                 ...config,
                 tts_model: config.tts_model || getDefaultTtsModel(config.tts_provider, providers),
                 tts_sample_rate: getDefaultTtsSampleRate(config.tts_provider),
@@ -279,14 +258,14 @@ export default function AIOptionsPage() {
             // Keep the query cache authoritative so other surfaces + a revisit
             // see the saved config without a refetch.
             queryClient.setQueryData(aiOptionsKeys.config(), saved);
-            setConfig({
+            setConfig(saved.pipeline_mode === "realtime" ? saved : {
                 ...saved,
                 tts_model: saved.tts_model || getDefaultTtsModel(saved.tts_provider, providers),
                 tts_sample_rate: getDefaultTtsSampleRate(saved.tts_provider),
             });
             setTtsProvider(saved.tts_provider);
             setSaveSuccess(true);
-            setApplyModal({
+            if (saved.pipeline_mode !== "realtime") setApplyModal({
                 provider: saved.tts_provider,
                 voiceId: saved.tts_voice_id,
                 voiceLabel: voices.find((v) => v.id === saved.tts_voice_id)?.name,
@@ -427,10 +406,14 @@ export default function AIOptionsPage() {
     // Phase 2 — realtime (speech-to-speech) pipeline catalog + mode switch.
     // Falls back to a small hardcoded catalog until the backend ships
     // `providers.realtime` (see getRealtimeCatalog above).
-    const realtimeCatalog = useMemo(() => getRealtimeCatalog(providers), [providers]);
+    const realtimeCatalog = providers?.realtime;
     const pipelineMode = config?.pipeline_mode ?? "cascaded";
 
     function setPipelineMode(mode: "cascaded" | "realtime") {
+        if (mode === "realtime" && !providers?.realtime?.available) {
+            setError(providers?.realtime?.unavailable_reason || "Realtime availability could not be verified.");
+            return;
+        }
         setConfig((prev) => {
             if (!prev) return prev;
             if (mode !== "realtime") return { ...prev, pipeline_mode: mode };
@@ -439,20 +422,14 @@ export default function AIOptionsPage() {
             return {
                 ...prev,
                 pipeline_mode: mode,
-                realtime_model: prev.realtime_model || realtimeCatalog.model,
-                realtime_voice: prev.realtime_voice || realtimeCatalog.voices[0]?.id || "marin",
+                realtime_model: prev.realtime_model || realtimeCatalog?.model,
+                realtime_voice: prev.realtime_voice || realtimeCatalog?.voices[0]?.id || "marin",
                 realtime_settings: {
+                    ...prev.realtime_settings,
                     turn_detection: prev.realtime_settings?.turn_detection || DEFAULT_TURN_DETECTION,
                     noise_reduction: prev.realtime_settings?.noise_reduction || DEFAULT_NOISE_REDUCTION,
                 },
             };
-        });
-    }
-
-    function updateRealtimeSetting(field: "turn_detection" | "noise_reduction", value: string) {
-        setConfig((prev) => {
-            if (!prev) return prev;
-            return { ...prev, realtime_settings: { ...(prev.realtime_settings ?? {}), [field]: value } };
         });
     }
 
@@ -541,85 +518,9 @@ export default function AIOptionsPage() {
 
                     <AnimatePresence mode="wait">
                     {pipelineMode === "realtime" ? (
-                        <motion.div key="realtime" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.25 }}>
-                            {/* Realtime (gpt-realtime-2) — one model listens, thinks, and
-                                speaks. Replaces the LLM / STT / TTS-voice / voice-tuning
-                                cards entirely; only latency + test stay cascaded-only. */}
-                            <Card delay={0.05}>
-                                <SectionHeader
-                                    icon={<AudioWaveform className="h-5 w-5" />}
-                                    title="Realtime 2"
-                                    subtitle="One model listens, thinks, and speaks — lowest latency, most natural"
-                                    right={
-                                        <span className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 text-xs font-semibold text-emerald-600 dark:text-emerald-400">
-                                            {realtimeCatalog.model}
-                                        </span>
-                                    }
-                                />
-
-                                <div className="mb-4 rounded-lg border border-border bg-muted/40 p-3 text-xs text-muted-foreground">
-                                    Realtime speaks with its own built-in voice and turn-taking — there is no separate STT/TTS
-                                    step. Campaign compliance and persona still apply, delivered through this model&apos;s instructions.
-                                </div>
-
-                                <label className="mb-1.5 block text-sm font-medium text-muted-foreground">Voice</label>
-                                <div className="mb-4 grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
-                                    {realtimeCatalog.voices.map((voice) => {
-                                        const selected = config.realtime_voice === voice.id;
-                                        const isPlaying = previewingVoiceId === voice.id;
-                                        return (
-                                            <motion.button
-                                                type="button"
-                                                key={voice.id}
-                                                // Speak-on-selection: persist the choice first (so it
-                                                // sticks even if the preview fails), then play a sample.
-                                                onClick={() => { setConfig({ ...config, realtime_voice: voice.id }); void handlePreviewVoiceById(voice.id, { provider: "realtime" }); }}
-                                                whileHover={{ y: -2 }}
-                                                className={`relative rounded-xl border p-2.5 text-left transition-colors ${selected ? "border-emerald-500 bg-emerald-500/10 ring-1 ring-emerald-500/40" : "border-border bg-background hover:border-emerald-500/40 hover:bg-muted/50"}`}
-                                            >
-                                                <span className="absolute right-2 top-2 grid h-7 w-7 place-items-center rounded-full bg-emerald-500/15" aria-hidden>
-                                                    {isPlaying ? <Equalizer active color="#10b981" /> : <Play className="h-3.5 w-3.5 text-emerald-500" />}
-                                                </span>
-                                                <div className="pr-8">
-                                                    <p className="truncate text-sm font-medium text-foreground">{voice.name}</p>
-                                                    {voice.description && <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{voice.description}</p>}
-                                                    {voice.gender && (
-                                                        <div className="mt-2 flex flex-wrap gap-1">
-                                                            <span className={`rounded px-1.5 py-0.5 text-[11px] ${voice.gender === "female" ? "bg-pink-500/15 text-pink-500" : "bg-blue-500/15 text-blue-500"}`}>{voice.gender}</span>
-                                                        </div>
-                                                    )}
-                                                </div>
-                                                {selected && <Check className="absolute bottom-2 right-2 h-4 w-4 text-emerald-500" />}
-                                            </motion.button>
-                                        );
-                                    })}
-                                </div>
-                                <p className="mb-5 text-[11px] text-muted-foreground">Selecting a voice plays a sample.</p>
-
-                                <div className="grid gap-4 sm:grid-cols-2">
-                                    <div>
-                                        <label className="mb-1.5 block text-sm font-medium text-muted-foreground">Turn detection</label>
-                                        <select
-                                            value={config.realtime_settings?.turn_detection ?? DEFAULT_TURN_DETECTION}
-                                            onChange={(e) => updateRealtimeSetting("turn_detection", e.target.value)}
-                                            className={selectCls}
-                                        >
-                                            {realtimeCatalog.turn_detection.map((opt) => (<option key={opt} value={opt} className="capitalize">{opt}</option>))}
-                                        </select>
-                                    </div>
-                                    <div>
-                                        <label className="mb-1.5 block text-sm font-medium text-muted-foreground">Noise reduction</label>
-                                        <select
-                                            value={config.realtime_settings?.noise_reduction ?? DEFAULT_NOISE_REDUCTION}
-                                            onChange={(e) => updateRealtimeSetting("noise_reduction", e.target.value)}
-                                            className={selectCls}
-                                        >
-                                            {realtimeCatalog.noise_reduction.map((opt) => (<option key={opt} value={opt} className="capitalize">{opt}</option>))}
-                                        </select>
-                                    </div>
-                                </div>
-                            </Card>
-                        </motion.div>
+                        <RealtimeControls config={config} catalog={providers?.realtime} onChange={setConfig}
+                            onPreview={(voice) => { void handlePreviewVoiceById(voice, { provider: "realtime" }); }}
+                            previewing={Boolean(previewingVoiceId)} />
                     ) : (
                         <motion.div key="cascaded" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.25 }}>
                     {/* Configuration grid — balanced 12-col so small cards pair up

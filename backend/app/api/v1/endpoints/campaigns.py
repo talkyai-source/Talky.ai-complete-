@@ -451,6 +451,23 @@ async def preview_prompt(
     inputs (unknown persona, missing slot, etc.) — same error class
     the create / update flows surface.
     """
+    if body.pipeline_mode == "realtime":
+        from app.realtime.config import RealtimePrompt
+        from app.realtime.prompts import RealtimePersona, build_realtime_instructions
+        prompt = body.realtime_prompt or RealtimePrompt()
+        text = build_realtime_instructions(RealtimePersona(
+            agent_name=body.agent_name, company_name=body.company_name,
+            goal=prompt.goal, campaign_guidance=prompt.instructions, persona_type=prompt.persona,
+            opening_greeting=prompt.opening_greeting, call_direction=body.direction,
+        ))
+        return CampaignPromptPreviewResponse(
+            system_prompt=text, greeting=prompt.opening_greeting,
+            direction=body.direction, has_inbound_directive=body.direction == "inbound",
+            prompt_chars=len(text), opening_mode=body.opening_mode or ("callee_first" if body.direction == "inbound" else "agent_first"),
+            campaign_guidance_chars=len(prompt.instructions), campaign_guidance_budget_chars=6000,
+            over_budget=False,
+            layers=[{"key": "realtime", "label": "Realtime voice prompt", "content": text}],
+        )
     from app.domain.services.campaign_prompt_service import (
         guidance_budget_error_message,
         guidance_budget_violation,
@@ -578,32 +595,11 @@ async def create_campaign(
 
         # Per-campaign provider: validate the voice against the campaign's chosen
         # provider (NULL falls back to the tenant global).
-        effective_provider = (campaign_data.tts_provider or ai_config.tts_provider or "").strip()
-        valid_voice_ids = await _valid_voice_ids_for_provider(effective_provider)
-        if selected_voice_id not in valid_voice_ids:
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    f"Voice '{selected_voice_id}' is not available for TTS provider "
-                    f"'{effective_provider}'. Pick a matching voice or change the provider."
-                ),
-            )
-
-        script_config = _build_validated_script_config(
-            persona_type=campaign_data.persona_type,
-            company_name=campaign_data.company_name,
-            agent_names=campaign_data.agent_names,
-            campaign_slots=campaign_data.campaign_slots,
-            additional_instructions=campaign_data.system_prompt,
-            knowledge_driven=campaign_data.knowledge_driven,
-            campaign_brief=(
-                campaign_data.campaign_brief.model_dump()
-                if campaign_data.campaign_brief
-                else None
-            ),
+        from app.api.v1.endpoints.campaign_voice_config import build_campaign_voice_config
+        existing_script = None
+        script_config, selected_voice_id = await build_campaign_voice_config(
+            campaign_data, ai_config, existing=existing_script,
         )
-        # Persist per-name gender tags so each call picks a name matching the
-        # selected voice's gender. Backward compatible: absent ⇒ legacy pick.
         if campaign_data.agent_name_genders:
             script_config["agent_name_genders"] = campaign_data.agent_name_genders
 
@@ -758,29 +754,14 @@ async def update_campaign(
             ai_config = await _fetch_tenant_config(conn, current_user.tenant_id)
         if ai_config is None:
             ai_config = AIProviderConfig()
-        effective_provider = (campaign_data.tts_provider or ai_config.tts_provider or "").strip()
-        valid_voice_ids = await _valid_voice_ids_for_provider(effective_provider)
-        if selected_voice_id not in valid_voice_ids:
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    f"Voice '{selected_voice_id}' is not available for TTS provider "
-                    f"'{effective_provider}'. Pick a matching voice or change the provider."
-                ),
-            )
-
-        script_config = _build_validated_script_config(
-            persona_type=campaign_data.persona_type,
-            company_name=campaign_data.company_name,
-            agent_names=campaign_data.agent_names,
-            campaign_slots=campaign_data.campaign_slots,
-            additional_instructions=campaign_data.system_prompt,
-            knowledge_driven=campaign_data.knowledge_driven,
-            campaign_brief=(
-                campaign_data.campaign_brief.model_dump()
-                if campaign_data.campaign_brief
-                else None
-            ),
+        from app.api.v1.endpoints.campaign_voice_config import build_campaign_voice_config
+        previous = db_client.table("campaigns").select("script_config").eq("id", campaign_id).eq("tenant_id", current_user.tenant_id).execute()
+        existing_script = (previous.data or [{}])[0].get("script_config") or {}
+        if isinstance(existing_script, str):
+            import json
+            existing_script = json.loads(existing_script)
+        script_config, selected_voice_id = await build_campaign_voice_config(
+            campaign_data, ai_config, existing=existing_script,
         )
         if campaign_data.agent_name_genders:
             script_config["agent_name_genders"] = campaign_data.agent_name_genders

@@ -118,90 +118,6 @@ def _track_task(coro) -> "asyncio.Task":
     return task
 
 
-def _realtime_fallback_enabled() -> bool:
-    """Fix 14 config gate. When a realtime speech-to-speech socket drops
-    mid-call, fall back to the cascaded pipeline instead of dying into dead
-    air. Default ON; set REALTIME_FALLBACK_ENABLED=false to keep today's
-    behaviour (the bridge ends and the inactivity watchdog eventually reaps
-    the call). Read per-call so an operator can flip it without a restart."""
-    return os.getenv("REALTIME_FALLBACK_ENABLED", "true").strip().lower() not in (
-        "false",
-        "0",
-        "no",
-        "off",
-    )
-
-
-async def _on_realtime_connection_lost(call_id: str, voice_session) -> None:
-    """Fix 14 recovery: the realtime session's websocket dropped mid-call.
-    Rebuild the cascaded pipeline on the SAME live media gateway and swap it in
-    so the caller keeps talking to the agent instead of hitting dead air.
-
-    Invoked (at most once per call) by RealtimeBridge.run() via its
-    on_connection_lost hook. Guards:
-      * config gate REALTIME_FALLBACK_ENABLED (also checked at wire time);
-      * once-per-call (``_realtime_fallback_attempted`` on the session);
-      * the call/session must still be live (present in the state backend).
-    If the cascaded rebuild itself fails we log and force-end the call — the
-    same terminal outcome as today, never worse.
-
-    Double-teardown safety: the swap replaces ``voice_session.pipeline_task``
-    with the new cascaded task BEFORE the dying realtime task's done-callback
-    fires. ``_pipeline_done_cb`` ignores a superseded task (and the realtime
-    task completes without an exception anyway), so it never force-ends the
-    call out from under the fallback.
-    """
-    if not _realtime_fallback_enabled():
-        return
-    if voice_session is None:
-        return
-    if getattr(voice_session, "_realtime_fallback_attempted", False):
-        logger.debug(
-            "realtime_fallback_skip call=%s — already attempted once",
-            call_id[:12],
-        )
-        return
-    voice_session._realtime_fallback_attempted = True
-
-    # Only recover a call that's still alive. A hangup that raced the socket
-    # drop already removed the session (and is tearing down) — nothing to do.
-    if _state().get_voice_session(call_id) is None:
-        logger.info(
-            "realtime_fallback_skip call=%s — session already gone",
-            call_id[:12],
-        )
-        return
-
-    try:
-        new_task = await _get_orchestrator().start_cascaded_fallback(voice_session)
-    except Exception as exc:  # noqa: BLE001 — defensive; builder already fail-soft
-        logger.error(
-            "realtime_fallback_build_raised call=%s: %s — ending call",
-            call_id[:12],
-            exc,
-        )
-        new_task = None
-
-    if new_task is None:
-        logger.error(
-            "realtime_fallback_failed call=%s — cascaded rebuild produced no "
-            "pipeline; ending call (same as today)",
-            call_id[:12],
-        )
-        _track_task(_force_end_and_hangup(call_id))
-        return
-
-    # Swap the live task reference, then attach the done-callback so a later
-    # crash of the cascaded pipeline still tears the call down.
-    voice_session.pipeline_task = new_task
-    new_task.add_done_callback(lambda t: _pipeline_done_cb(t, call_id))
-    logger.warning(
-        "realtime_fallback_active call=%s — cascaded pipeline swapped in after "
-        "realtime socket drop",
-        call_id[:12],
-    )
-
-
 def _pop_ringing_warmup(call_id: str):
     """
     Atomically pop a ringing-phase warmup entry and its parallel timestamp.
@@ -3504,7 +3420,7 @@ def _build_pinned_inbound_config(
         voice_tuning_override=voice_tuning,
         ai_config_override=ai_config,
     )
-    if selected_action == "voicemail":
+    if selected_action == "voicemail" and config.pipeline_mode != "realtime":
         config.system_prompt = f"{config.system_prompt}\n\n{_AFTER_HOURS_VOICEMAIL_DIRECTIVE}"
     # Direction is composed into the base itself, not prepended over a
     # contradictory outbound playbook. Include the pinned after-hours behavior
@@ -3529,6 +3445,9 @@ def _build_pinned_inbound_config(
     config.realtime_greet_on_start = first_speaker == "agent"
     config.realtime_opening_greeting = pinned_greeting if config.realtime_greet_on_start else None
     config.realtime_message_intake = selected_action == "voicemail"
+    if config.pipeline_mode == "realtime":
+        from app.realtime.prompt_config import prepare_realtime_prompt
+        prepare_realtime_prompt(config)
     return config, pinned_campaign
 
 
@@ -4344,19 +4263,6 @@ async def _on_new_call(call_id: str, inbound_admission: Any = None) -> None:
             # registered above, so any caller audio that arrived during warmup
             # is waiting in input_queue.
             if getattr(voice_session, "realtime_bridge", None) is not None:
-                # Fix 14 — wire the mid-call connection-loss fallback BEFORE the
-                # bridge starts. Gated on REALTIME_FALLBACK_ENABLED: when off we
-                # wire nothing, so a socket drop keeps today's behaviour. The
-                # closure captures THIS call's PBX call_id + session (the bridge
-                # only knows its internal uuid), which the recovery handler needs
-                # to look the session up in the state backend.
-                if _realtime_fallback_enabled():
-                    _rt_bridge = voice_session.realtime_bridge
-                    _rt_session = voice_session
-                    _rt_call_id = call_id
-                    _set_hook = getattr(_rt_bridge, "set_on_connection_lost", None)
-                    if callable(_set_hook):
-                        _set_hook(lambda: _on_realtime_connection_lost(_rt_call_id, _rt_session))
                 voice_session.pipeline_task = asyncio.create_task(
                     voice_session.realtime_bridge.run()
                 )

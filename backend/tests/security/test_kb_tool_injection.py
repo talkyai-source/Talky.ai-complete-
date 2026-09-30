@@ -26,7 +26,7 @@ import pytest
 
 import app.domain.services.voice_pipeline.kb_budget as kb_budget
 import app.domain.services.voice_pipeline.knowledge_tool as kt
-from app.domain.services.voice_pipeline.realtime_bridge import (
+from app.realtime.bridge import (
     _NO_KB_INFO,
     RealtimeBridge,
 )

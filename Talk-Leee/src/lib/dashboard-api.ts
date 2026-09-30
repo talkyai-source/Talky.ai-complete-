@@ -1,3 +1,4 @@
+import type { CampaignVoiceSettingsValue } from "@/components/realtime/types";
 import { sharedHttpClient } from "@/lib/api";
 import type { CampaignBrief } from "@/lib/campaign-brief";
 
@@ -65,7 +66,7 @@ export interface Campaign {
     created_at: string;
     started_at?: string;
     completed_at?: string;
-    script_config?: {
+    script_config?: CampaignVoiceSettingsValue & {
         persona_type?: PersonaType;
         company_name?: string;
         agent_names?: string[];
@@ -91,7 +92,7 @@ export interface CampaignCallingSchedule {
     ignore_schedule?: boolean;
 }
 
-export interface CampaignCreate {
+export interface CampaignCreate extends CampaignVoiceSettingsValue {
     /** 2026-09-09: inbound campaigns are created with the SAME creator; only this differs. Default outbound. */
     direction?: "outbound" | "inbound";
     name: string;
@@ -495,7 +496,7 @@ class DashboardApi {
         });
     }
 
-    async previewCampaignPrompt(input: {
+    async previewCampaignPrompt(input: CampaignVoiceSettingsValue & {
         persona_type: "lead_gen" | "customer_support" | "receptionist";
         company_name: string;
         agent_name: string;

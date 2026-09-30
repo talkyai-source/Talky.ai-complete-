@@ -1227,6 +1227,17 @@ def build_telephony_session_config(
     # concurrent tenants no longer share one mutable process-global.
     source_config = ai_config_override if ai_config_override is not None else get_global_config()
 
+    script = _extract_script_config(campaign) or {}
+    if (script.get("pipeline_mode") or source_config.pipeline_mode) == "realtime":
+        from app.realtime.campaign_config import build_realtime_campaign_config
+        return build_realtime_campaign_config(
+            source=source_config, campaign=campaign, script=script,
+            gateway_type=gateway_type, agent_name_override=agent_name_override,
+            direction=direction, opening_mode=opening_mode,
+            lead_first_name=lead_first_name, lead_last_name=lead_last_name,
+            lead_company=lead_company,
+        )
+
     # Per-campaign TTS: each campaign runs on its OWN provider + voice (stored on
     # the campaign row), falling back to the tenant config when unset. This is
     # what lets calls honor a campaign's chosen voice/engine independently of the

@@ -22,8 +22,9 @@ from app.domain.models.ai_config import (
     CARTESIA_VOICES,
     DEEPGRAM_AURA2_VOICES,
     GOOGLE_CHIRP3_VOICES,
-    REALTIME_VOICES,
 )
+
+from app.realtime.catalog import REALTIME_VOICES
 
 # Global configuration - applies to all voice interactions
 _global_config: Optional[AIProviderConfig] = None

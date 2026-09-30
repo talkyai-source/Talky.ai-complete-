@@ -28,28 +28,12 @@ entirely and only the cheap, unavoidable μ-law codec conversion happens — the
 "no resampling" ideal. The resample fallback keeps the bridge correct for any
 other internal rate.
 
-Discipline
-----------
-* Exactly TWO tasks (caller pump + model pump). Both are cancelled on stop().
-* No unbounded buffers — the gateway queue and the RealtimeSession event queue
-  are both already bounded; we add none.
-* Fail-soft: any error logs and ends the bridge cleanly. A realtime failure
-  must end the CALL, never crash the worker.
-
-Mid-call connection loss (Fix 14)
----------------------------------
-The realtime session runs ONE websocket per call with no reconnect. If that
-socket drops WHILE the call is still up, both pumps end and ``run()`` returns —
-which today leaves the call in dead air until the ~300 s inactivity watchdog
-notices. To avoid that, ``run()`` distinguishes an *unexpected mid-call socket
-death* (``realtime_session.closed()`` became true while nobody asked us to
-stop and the call is still active) from a *normal* call end (a caller hangup
-cancels the pipeline task → ``CancelledError``; a clean ``stop()`` sets the
-stop event). Only the former arms the ``on_connection_lost`` callback, which
-the lifecycle layer wires to rebuild the cascaded pipeline on the SAME media
-gateway. The callback fires EXACTLY ONCE, is wrapped so its own error can never
-crash the bridge, and the bridge then ends WITHOUT triggering the normal
-'call over' teardown — the callback owner decides what happens next.
+Playback and failure handling
+-----------------------------
+Caller and model pumps remain independent of one bounded playback task.
+Complete responses are validated before playback; barge-in cancels playback.
+Unexpected provider loss raises to the call lifecycle for explicit teardown.
+There is no automatic switch to the traditional voice engine.
 """
 from __future__ import annotations
 
@@ -147,6 +131,9 @@ class RealtimeBridge:
         # is a safe in-memory fallback for fail-closed unavailable results.
         self._action_session = action_session or self
         self._latest_caller_text = ""
+        self._playback_task = None
+        self._repair_attempted = False
+        self._failure_reason = None
         if transcript_service is not None and talklee_call_id:
             try:
                 transcript_service.bind_call_identity(call_id, talklee_call_id)
@@ -272,13 +259,7 @@ class RealtimeBridge:
                 if exc:
                     logger.warning("realtime_bridge task err call=%s: %s",
                                    self._call_id, exc)
-            # Fix 14 — decide, BEFORE stop() runs (stop() sets self._stop),
-            # whether the pumps ended because the realtime SOCKET died while
-            # the call is still up (→ arm the fallback) versus a normal end.
-            # A normal caller-hangup cancels this task → CancelledError, which
-            # skips this line entirely; a clean stop() sets self._stop; a
-            # voicemail/model-error break leaves the socket OPEN. Only a truly
-            # closed socket, unrequested, on a still-active call, arms it.
+            # Detect an unexpected disconnect before stop() sets the stop flag.
             if (
                 self._rt.closed()
                 and not self._stop.is_set()
@@ -286,7 +267,7 @@ class RealtimeBridge:
             ):
                 logger.warning(
                     "realtime_bridge connection_lost call=%s — realtime socket "
-                    "died mid-call; arming cascaded fallback", self._call_id,
+                    "died mid-call; ending Realtime session", self._call_id,
                 )
                 self._connection_lost = True
         except asyncio.CancelledError:
@@ -295,13 +276,13 @@ class RealtimeBridge:
             logger.error("realtime_bridge run error call=%s: %s",
                          self._call_id, exc)
         finally:
-            # Fully tear down the bridge (cancel pumps, close the socket)
-            # BEFORE handing off, so the cascaded pipeline the callback starts
-            # is the SOLE consumer of the gateway's caller-audio queue.
+            # Release pumps and provider resources before notifying the owner.
             await self.stop()
             if self._connection_lost:
                 await self._invoke_on_connection_lost()
             logger.info("realtime_bridge end call=%s", self._call_id)
+        if self._failure_reason or (self._connection_lost and self._on_connection_lost is None):
+            raise RuntimeError(self._failure_reason or "Realtime connection lost; no alternative engine was used")
 
     async def _invoke_on_connection_lost(self) -> None:
         """Invoke the connection-loss callback exactly once, wrapped so a
@@ -327,6 +308,8 @@ class RealtimeBridge:
         self._stop.set()
         tasks = [t for t in (self._caller_task, self._model_task) if t is not None]
         tasks += list(self._tool_tasks)
+        if self._playback_task is not None:
+            tasks.append(self._playback_task)
         for task in tasks:
             if not task.done():
                 task.cancel()
@@ -411,27 +394,29 @@ class RealtimeBridge:
                     break
                 kind = getattr(ev, "kind", None)
 
-                if kind == "audio" and ev.audio:
-                    pcm16 = ulaw_to_pcm(ev.audio)  # μ-law 8k -> PCM16 8k
-                    if self._internal_rate != _WIRE_RATE:
-                        try:
-                            pcm16 = resample_audio(
-                                pcm16,
-                                from_rate=_WIRE_RATE,
-                                to_rate=self._internal_rate,
-                                channels=1,
-                                bit_depth=16,
-                                res_type="soxr_mq",
-                            )
-                        except Exception as exc:  # noqa: BLE001
-                            logger.debug("realtime_bridge model resample failed: %s", exc)
-                            continue
-                    try:
-                        await self._gw.send_audio(self._call_id, pcm16)
-                    except Exception as exc:  # noqa: BLE001
-                        logger.debug("realtime_bridge send_audio err: %s", exc)
+                if kind == "response_candidate":
+                    from app.domain.services.llm_guardrails import get_guardrails
+                    from app.domain.services.voice_pipeline.action_tools import action_results_for_session
+                    valid, reason = get_guardrails().validate_response(
+                        ev.text or "", action_results=action_results_for_session(self._action_session))
+                    if not valid:
+                        logger.warning("realtime_playout_rejected call=%s reason=%s", self._call_id, reason)
+                        if self._repair_attempted:
+                            self._failure_reason = "Realtime reply failed validation twice"
+                            break
+                        self._repair_attempted = True
+                        await self._rt.repair_unspoken_response((ev.raw or {}).get("response") or {})
+                        continue
+                    if self._playback_task and not self._playback_task.done():
+                        # Never overlap responses or create an unbounded playback queue.
+                        self._failure_reason = "Realtime responses overlapped during playback"
+                        break
+                    self._playback_task = asyncio.create_task(self._play_validated_response(ev))
 
                 elif kind == "interrupted":
+                    if self._playback_task and not self._playback_task.done():
+                        self._playback_task.cancel()
+                        await asyncio.gather(self._playback_task, return_exceptions=True)
                     if bool((getattr(ev, "raw", None) or {}).get("during_response")):
                         self._contact_agent_interrupted = True
                     # Caller barged in: signal the gateway's pacing loop
@@ -443,6 +428,7 @@ class RealtimeBridge:
                     # mid-sentence immediately.
                     if self._barge_in_event is not None:
                         self._barge_in_event.set()
+                    await self._send_control_event({"type": "tts_interrupted"})
                     try:
                         await self._gw.clear_output_buffer(self._call_id)
                     except Exception as exc:  # noqa: BLE001
@@ -461,26 +447,13 @@ class RealtimeBridge:
                     # lookup, so the agent goes silent and un-interruptible
                     # mid-turn. Dispatch it detached and keep draining the
                     # socket; send_function_result already sequences the
-                    # follow-up response.create safely (openai_realtime.py:407).
+                    # follow-up response.create safely (app/realtime/openai.py).
                     tool_task = asyncio.create_task(
                         self._handle_function_call(ev.function_call),
                         name=f"rt-tool-{self._call_id}",
                     )
                     self._tool_tasks.add(tool_task)
                     tool_task.add_done_callback(self._tool_tasks.discard)
-
-                elif kind == "agent_transcript" and ev.text:
-                    logger.debug(
-                        "realtime agent transcript call=%s chars=%d final=%s",
-                        self._call_id[:12], len(ev.text),
-                        bool(getattr(ev, "is_final", False)),
-                    )
-                    if getattr(ev, "is_final", False):
-                        # Generated text is not proof the caller heard it. Hold
-                        # contact and opening-identity evidence until
-                        # response.done proves uninterrupted delivery.
-                        self._pending_contact_agent_turn = ev.text
-                        self._record_turn("assistant", ev.text)
 
                 elif kind == "caller_transcript" and ev.text:
                     # Contact values are high-risk transcript content. Log only
@@ -491,6 +464,7 @@ class RealtimeBridge:
                         bool(getattr(ev, "is_final", False)),
                     )
                     if getattr(ev, "is_final", False):
+                        self._repair_attempted = False
                         self._latest_caller_text = ev.text
                         self._live_user_turn_seq += 1
                         evidence = evidence_from_transcript(
@@ -519,36 +493,11 @@ class RealtimeBridge:
                             ):
                                 break
 
-                elif kind == "response_done":
-                    response = (getattr(ev, "raw", None) or {}).get("response") or {}
-                    completed = response.get("status") in {None, "completed"}
-                    if (
-                        completed
-                        and not self._contact_agent_interrupted
-                        and self._pending_contact_agent_turn
-                    ):
-                        if self._identity_opening_pending:
-                            self._live_state = reduce_live_state(
-                                self._live_state,
-                                IdentityEvidence(introduced=True),
-                            )
-                            await self._publish_live_state()
-                        self._observe_contact_agent_turn(
-                            self._pending_contact_agent_turn
-                        )
-                        self._remember_contact_turn(
-                            "assistant",
-                            self._pending_contact_agent_turn,
-                        )
-                    if self._identity_opening_pending:
-                        self._identity_opening_pending = False
-                    self._pending_contact_agent_turn = None
-                    self._contact_agent_interrupted = False
-
                 elif kind == "error":
                     logger.warning("realtime_bridge model error call=%s: %s",
                                    self._call_id, ev.text)
-                    # A hard error ends the call cleanly.
+                    # Report failure through the owning call lifecycle.
+                    self._failure_reason = "Realtime provider reported an error"
                     break
         except asyncio.CancelledError:
             raise
@@ -556,6 +505,51 @@ class RealtimeBridge:
             logger.error("realtime_bridge model pump err call=%s: %s",
                          self._call_id, exc)
         logger.debug("realtime_bridge model pump ended call=%s", self._call_id)
+
+    async def _send_control_event(self, payload):
+        send = getattr(self._gw, "send_control_event", None)
+        if callable(send):
+            await send(self._call_id, payload)
+
+    async def _play_validated_response(self, event) -> None:
+        """Only approved, complete responses reach the shared audio transport."""
+        from app.utils.audio_utils import ulaw_to_pcm, resample_audio
+        try:
+            await self._send_control_event({"type": "llm_response", "text": event.text})
+            start = getattr(self._gw, "start_playback_tracking", None)
+            if callable(start):
+                start(self._call_id)
+            audio = event.audio or b""
+            for offset in range(0, len(audio), 320):
+                if self._stop.is_set() or not self._session_active():
+                    return
+                pcm = ulaw_to_pcm(audio[offset:offset + 320])
+                if self._internal_rate != _WIRE_RATE:
+                    pcm = resample_audio(pcm, from_rate=_WIRE_RATE, to_rate=self._internal_rate,
+                                         channels=1, bit_depth=16, res_type="soxr_mq")
+                await self._gw.send_audio(self._call_id, pcm)
+            flush = getattr(self._gw, "flush_audio_buffer", None) or getattr(self._gw, "flush_tts_buffer", None)
+            if callable(flush):
+                await flush(self._call_id)
+            await self._send_control_event({"type": "tts_audio_complete"})
+            self._record_turn("assistant", event.text)
+            # Generated text and queue acceptance are not contact confirmation.
+            # Only a transport with explicit playback acknowledgement may advance
+            # the contact readback state; other transports retain pending details.
+            wait = getattr(self._gw, "wait_for_playback_complete", None)
+            if callable(wait) and await wait(self._call_id):
+                self._observe_contact_agent_turn(event.text)
+                self._remember_contact_turn("assistant", event.text)
+                if self._identity_opening_pending:
+                    self._live_state = reduce_live_state(self._live_state, IdentityEvidence(introduced=True))
+                    self._identity_opening_pending = False
+                    await self._publish_live_state()
+            await self._send_control_event({"type": "turn_complete"})
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("realtime_playout_failed call=%s", self._call_id)
+            await self._rt.close()
 
     def _remember_contact_turn(self, role: str, text: str) -> None:
         from app.domain.models.conversation import Message, MessageRole
@@ -852,6 +846,15 @@ class RealtimeBridge:
                 exc,
             )
 
+    async def _send_tool_result_after_playback(self, call_id, result):
+        # A lookup may finish while its spoken hold is still playing. Wait in
+        # the detached tool task, never in the event pump, to prevent overlap.
+        playback = self._playback_task
+        if playback is not None and not playback.done():
+            await asyncio.gather(playback, return_exceptions=True)
+        if not self._stop.is_set():
+            await self._rt.send_function_result(call_id, result)
+
     async def _handle_function_call(self, fc: Any) -> None:
         """Fulfil knowledge and deterministic action tools. Never raises."""
         try:
@@ -873,7 +876,7 @@ class RealtimeBridge:
                 # Publish before send_function_result triggers the continuation,
                 # so that response sees the deterministic tool outcome too.
                 await self._publish_live_state()
-                await self._rt.send_function_result(fc.call_id, text)
+                await self._send_tool_result_after_playback(fc.call_id, text)
             else:
                 from app.domain.services.voice_pipeline.action_tools import (
                     ACTION_END_CALL,
@@ -891,7 +894,7 @@ class RealtimeBridge:
                         ),
                     )
                     await self._publish_live_state()
-                    await self._rt.send_function_result(
+                    await self._send_tool_result_after_playback(
                         fc.call_id, {"error": f"unknown tool {fc.name}"}
                     )
                     return
@@ -916,8 +919,10 @@ class RealtimeBridge:
                 # Close the tool round-trip before any completion claim or
                 # end-call side effect. send_function_result is awaited, so the
                 # result is on the provider wire before execution continues.
-                await self._rt.send_function_result(fc.call_id, result)
+                await self._send_tool_result_after_playback(fc.call_id, result)
                 if fc.name == ACTION_END_CALL and result["success"]:
+                    if self._playback_task is not None:
+                        await self._playback_task
                     hangup = getattr(self._gw, "hangup_call", None)
                     if callable(hangup):
                         await hangup(self._call_id, "agent_end_call")
@@ -944,7 +949,7 @@ class RealtimeBridge:
                     if getattr(fc, "name", None) in VOICE_ACTION_NAMES
                     else {"error": "lookup failed"}
                 )
-                await self._rt.send_function_result(
+                await self._send_tool_result_after_playback(
                     fc.call_id, fallback
                 )
             except Exception:  # noqa: BLE001
@@ -964,7 +969,7 @@ class RealtimeBridge:
         ``DATA_ONLY_NOTE`` delimit what survives. The note is carried INLINE here
         (unlike the cascaded tool path, which puts it in its system addendum)
         because this bridge does not author the realtime session instructions —
-        see app/services/scripts/realtime_instructions.py — so the result must be
+        see app/realtime/prompts.py — so the result must be
         self-framing.
 
         BOUNDED: retrieval is capped by the shared per-turn budget. Without it a

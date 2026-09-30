@@ -472,6 +472,13 @@ class BrowserMediaGateway(MediaGateway):
         session.playback_bytes_sent = 0
         session.playback_complete_event.clear()
 
+    async def send_control_event(self, call_id: str, payload: Dict[str, Any]) -> None:
+        """Deliver transport playback controls alongside the binary audio stream."""
+        session = self._sessions.get(call_id)
+        if not session or not session.is_active:
+            raise RuntimeError("Browser audio session is no longer active")
+        await asyncio.wait_for(session.websocket.send_json(payload), timeout=1.0)
+
     def start_playback_tracking(self, call_id: str) -> None:
         """Begin tracking one browser-played utterance."""
         session = self._sessions.get(call_id)

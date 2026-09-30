@@ -20,11 +20,11 @@ from app.domain.services.voice_orchestrator import (
 from app.domain.services.voice_pipeline.machine_detection import (
     handle_machine_interim,
 )
-from app.domain.services.voice_pipeline.realtime_bridge import RealtimeBridge
+from app.realtime.bridge import RealtimeBridge
 from app.domain.services.voice_pipeline.voicemail_detector import (
     detect_and_hang_up_voicemail,
 )
-from app.infrastructure.realtime.openai_realtime import RealtimeEvent
+from app.realtime.openai import RealtimeEvent
 
 
 _VOICEMAIL_GREETING = "Please leave a message after the tone."
@@ -200,19 +200,19 @@ async def test_realtime_orchestrator_pins_direction_on_session_and_bridge(
             return_value=resolver,
         ),
         patch(
-            "app.infrastructure.realtime.openai_realtime.OpenAIRealtimeSession",
+            "app.realtime.openai.OpenAIRealtimeSession",
             return_value=realtime_session,
         ),
         patch(
-            "app.infrastructure.realtime.openai_realtime.knowledge_lookup_tool",
+            "app.realtime.openai.knowledge_lookup_tool",
             return_value={},
         ),
         patch(
-            "app.services.scripts.realtime_instructions.build_realtime_instructions",
+            "app.realtime.prompts.build_realtime_instructions",
             return_value="test instructions",
         ),
         patch(
-            "app.domain.services.voice_pipeline.realtime_bridge.RealtimeBridge"
+            "app.realtime.bridge.RealtimeBridge"
         ) as bridge_cls,
         patch(
             "app.core.container.get_container",

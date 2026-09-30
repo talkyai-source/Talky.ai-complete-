@@ -27,8 +27,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from app.infrastructure.realtime.openai_realtime import OpenAIRealtimeSession
-from app.domain.services.voice_pipeline.realtime_bridge import RealtimeBridge, _WIRE_RATE
+from app.realtime.openai import OpenAIRealtimeSession
+from app.realtime.bridge import RealtimeBridge, _WIRE_RATE
 from app.domain.services.voice_orchestrator import VoiceOrchestrator, VoiceSessionConfig
 from app.utils.audio_utils import pcm_to_ulaw, ulaw_to_pcm
 
@@ -199,12 +199,12 @@ async def test_caller_pump_aborts_when_no_queue():
 async def test_model_pump_decodes_mulaw_to_pcm_for_gateway():
     """The model pump must μ-law-decode OpenAI audio and hand PCM16 (same 8 kHz
     rate) to gateway.send_audio — no resample when internal_rate == 8 kHz."""
-    from app.infrastructure.realtime.openai_realtime import RealtimeEvent
+    from app.realtime.openai import RealtimeEvent
 
     mulaw_audio = bytes(range(160))  # one 20 ms model frame
 
     async def _events():
-        yield RealtimeEvent(kind="audio", audio=mulaw_audio)
+        yield RealtimeEvent(kind="response_candidate", audio=mulaw_audio, text="Hello there")
 
     rt = MagicMock()
     rt.events = _events
@@ -212,6 +212,10 @@ async def test_model_pump_decodes_mulaw_to_pcm_for_gateway():
 
     gw = MagicMock()
     gw.send_audio = AsyncMock()
+    gw.send_control_event = None
+    gw.flush_audio_buffer = None
+    gw.flush_tts_buffer = None
+    gw.wait_for_playback_complete = AsyncMock(return_value=False)
 
     bridge = RealtimeBridge(
         call_id="call-3",
@@ -221,6 +225,8 @@ async def test_model_pump_decodes_mulaw_to_pcm_for_gateway():
     )
     await asyncio.wait_for(bridge._pump_model_events(), timeout=1.0)
 
+    if bridge._playback_task:
+        await bridge._playback_task
     gw.send_audio.assert_awaited_once()
     _, pcm = gw.send_audio.await_args.args
     assert pcm == ulaw_to_pcm(mulaw_audio)   # decoded, not resampled

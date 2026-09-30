@@ -25,10 +25,6 @@ from app.domain.models.ai_config import (
     GOOGLE_TTS_MODELS,
     GROQ_MODELS,
     ProviderListResponse,
-    REALTIME_MODEL,
-    REALTIME_NOISE_REDUCTION,
-    REALTIME_TURN_DETECTION,
-    REALTIME_VOICES,
     STT_ENGINES,
 )
 from app.infrastructure.tts.elevenlabs_catalog import (
@@ -38,6 +34,8 @@ from app.infrastructure.tts.elevenlabs_catalog import (
     get_elevenlabs_tts_models_for_current_key,
 )
 
+from app.realtime.catalog import REALTIME_MODEL, REALTIME_NOISE_REDUCTION, REALTIME_TURN_DETECTION, REALTIME_VOICES
+
 from ._catalog import _find_elevenlabs_voice, _get_all_tts_voices
 
 logger = logging.getLogger(__name__)
@@ -46,13 +44,15 @@ router = APIRouter(tags=["AI Options"])
 
 
 @router.get("/providers", response_model=ProviderListResponse)
-async def list_providers():
+async def list_providers(current_user=Depends(get_current_user)):
     """
     Get all available AI providers and their models.
 
     Returns:
         ProviderListResponse with LLM, STT, and TTS options
     """
+    from app.realtime.credentials import resolve_openai_key
+    realtime_available = bool(await resolve_openai_key(getattr(current_user, "tenant_id", None)))
     elevenlabs_models = (
         await get_elevenlabs_tts_models_for_current_key()
         if elevenlabs_enabled()
@@ -100,13 +100,13 @@ async def list_providers():
         # that 503s at call time because no key can be resolved).
         realtime=(
             {
+                "available": realtime_available,
+                "unavailable_reason": None if realtime_available else "OpenAI is not configured",
                 "model": REALTIME_MODEL,
                 "voices": [dict(v) for v in REALTIME_VOICES],
                 "turn_detection": list(REALTIME_TURN_DETECTION),
                 "noise_reduction": list(REALTIME_NOISE_REDUCTION),
             }
-            if os.getenv("OPENAI_API_KEY")
-            else {}
         ),
     )
 

@@ -57,11 +57,11 @@ from dotenv import load_dotenv  # noqa: E402
 
 load_dotenv()
 
-from app.infrastructure.realtime.openai_realtime import (  # noqa: E402
+from app.realtime.openai import (  # noqa: E402
     OpenAIRealtimeSession,
     knowledge_lookup_tool,
 )
-from app.services.scripts.realtime_instructions import (  # noqa: E402
+from app.realtime.prompts import (  # noqa: E402
     RealtimePersona,
     build_realtime_instructions,
 )

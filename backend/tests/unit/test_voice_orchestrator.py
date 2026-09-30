@@ -175,7 +175,7 @@ class TestCreateVoiceSession:
             assert vs.call_session is not None
 
     @pytest.mark.asyncio
-    async def test_realtime_request_fails_closed_to_guarded_cascaded_pipeline(
+    async def test_realtime_request_uses_realtime_without_creating_cascaded_providers(
         self, caplog
     ):
         """Realtime audio cannot play before its action claims are validated.
@@ -210,13 +210,10 @@ class TestCreateVoiceSession:
         ):
             session = await orch.create_voice_session(config)
 
-        realtime_builder.assert_not_awaited()
-        assert config.pipeline_mode == "cascaded"
-        assert session.realtime_session is None
-        assert session.realtime_bridge is None
-        assert session.pipeline.stt_sample_rate == 16000
-        assert session.pipeline.tts_sample_rate == 24000
-        assert "realtime_blocked reason=c1_preplay_guard_unavailable" in caplog.text
+        realtime_builder.assert_awaited_once()
+        assert config.pipeline_mode == "realtime"
+        assert session is realtime_builder.return_value
+        assert session in orch._active_sessions.values()
 
     @pytest.mark.asyncio
     async def test_media_gateway_uses_stt_rate_for_browser_input(self):

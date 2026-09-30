@@ -10,7 +10,7 @@ import pytest
 from packaging.requirements import Requirement
 from packaging.version import Version
 
-from app.infrastructure.realtime.openai_realtime import OpenAIRealtimeSession
+from app.realtime.openai import OpenAIRealtimeSession
 from app.infrastructure.stt.deepgram_flux import DeepgramFluxSTTProvider
 
 
@@ -51,7 +51,7 @@ def test_container_pins_patched_setuptools_vendor_bundle() -> None:
 
 def test_all_direct_websocket_connections_use_the_v15_header_name() -> None:
     realtime = (
-        BACKEND_ROOT / "app" / "infrastructure" / "realtime" / "openai_realtime.py"
+        BACKEND_ROOT / "app" / "realtime" / "openai.py"
     ).read_text(encoding="utf-8")
     flux = (
         BACKEND_ROOT / "app" / "infrastructure" / "stt" / "deepgram_flux.py"
@@ -98,7 +98,7 @@ async def test_openai_realtime_uses_websockets_15_header_contract(monkeypatch) -
         return socket
 
     monkeypatch.setattr(
-        "app.infrastructure.realtime.openai_realtime.websockets.connect", connect
+        "app.realtime.openai.websockets.connect", connect
     )
     session = OpenAIRealtimeSession(api_key="test-key", call_id="dependency-test")
 

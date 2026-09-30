@@ -1,18 +1,6 @@
-"""Fix 14 — mid-call realtime → cascaded fallback.
+"""Realtime connection-loss notification and orderly bridge teardown.
 
-When the OpenAI Realtime session's websocket drops WHILE the call is still up,
-the call must fall back to the cascaded pipeline instead of dying into dead
-air. Detection lives in RealtimeBridge.run(); recovery wiring lives in the
-telephony lifecycle layer.
-
-Coverage:
-  (a) simulated mid-call socket death → on_connection_lost invoked exactly once,
-      the bridge arms the fallback (does NOT end as a normal 'call over').
-  (b) normal end (socket still open / task cancelled) → callback NOT invoked.
-  (c) recovery: the callback rebuilds the cascaded pipeline, swaps the task in,
-      and the dying realtime task's done-callback does NOT double-tear-down.
-  (d) REALTIME_FALLBACK_ENABLED=false → no recovery (today's behaviour).
-  (e) a second connection-loss after fallback → no second attempt.
+The shared lifecycle reports failures; no alternative voice engine is started.
 """
 from __future__ import annotations
 
@@ -33,7 +21,7 @@ try:  # pragma: no cover - import-ordering shim
 except Exception:  # noqa: BLE001
     pass
 
-from app.domain.services.voice_pipeline.realtime_bridge import RealtimeBridge
+from app.realtime.bridge import RealtimeBridge
 from app.domain.services.telephony import lifecycle
 
 
@@ -192,144 +180,3 @@ async def test_cancelled_run_does_not_invoke_callback():
         await task
 
     assert calls["n"] == 0, "a cancelled (normal-hangup) run never falls back"
-
-
-# ---------------------------------------------------------------------------
-# Lifecycle recovery tests
-# ---------------------------------------------------------------------------
-
-class _FakeOrchestrator:
-    def __init__(self, task):
-        self._task = task
-        self.calls = 0
-        self.last_session = None
-
-    async def start_cascaded_fallback(self, session):
-        self.calls += 1
-        self.last_session = session
-        return self._task
-
-
-def _patch_lifecycle(monkeypatch, *, orchestrator, session, teardown_counter):
-    monkeypatch.setattr(lifecycle, "_get_orchestrator", lambda: orchestrator)
-    monkeypatch.setattr(
-        lifecycle, "_state",
-        lambda: SimpleNamespace(get_voice_session=lambda cid: session),
-    )
-
-    async def _fake_force_end(cid):
-        teardown_counter["n"] += 1
-
-    monkeypatch.setattr(lifecycle, "_force_end_and_hangup", _fake_force_end)
-
-    def _fake_track_task(coro):
-        # Consume the coroutine so pytest doesn't warn; run it to completion.
-        return asyncio.get_event_loop().create_task(coro)
-
-    monkeypatch.setattr(lifecycle, "_track_task", _fake_track_task)
-
-
-# ---------------------------------------------------------------------------
-# (c) recovery swaps the pipeline in with no double teardown
-# ---------------------------------------------------------------------------
-
-@pytest.mark.asyncio
-async def test_recovery_swaps_pipeline_and_no_double_teardown(monkeypatch):
-    monkeypatch.setenv("REALTIME_FALLBACK_ENABLED", "true")
-
-    old_task = asyncio.create_task(asyncio.sleep(0))
-    await old_task  # completed, not cancelled, no exception
-    new_task = asyncio.create_task(asyncio.sleep(0))
-
-    vs = SimpleNamespace(
-        call_id="call-uuid-1",
-        pipeline_task=old_task,
-        realtime_bridge=object(),
-    )
-    orch = _FakeOrchestrator(new_task)
-    teardown = {"n": 0}
-    _patch_lifecycle(monkeypatch, orchestrator=orch, session=vs, teardown_counter=teardown)
-
-    await lifecycle._on_realtime_connection_lost("pbx-call-1", vs)
-
-    assert orch.calls == 1
-    assert vs.pipeline_task is new_task, "the cascaded task must be swapped in"
-    assert vs._realtime_fallback_attempted is True
-    assert teardown["n"] == 0, "successful fallback must NOT force-end the call"
-
-    # The dying realtime task's done-callback fires with the OLD (superseded)
-    # task — it must NOT trigger teardown now that the fallback has taken over.
-    lifecycle._pipeline_done_cb(old_task, "pbx-call-1")
-    assert teardown["n"] == 0, "a superseded task must never double-tear-down"
-
-    await new_task
-
-
-@pytest.mark.asyncio
-async def test_recovery_falls_through_to_teardown_when_build_fails(monkeypatch):
-    monkeypatch.setenv("REALTIME_FALLBACK_ENABLED", "true")
-
-    vs = SimpleNamespace(
-        call_id="call-uuid-1", pipeline_task=None, realtime_bridge=object(),
-    )
-    orch = _FakeOrchestrator(None)  # rebuild produced no pipeline
-    teardown = {"n": 0}
-    _patch_lifecycle(monkeypatch, orchestrator=orch, session=vs, teardown_counter=teardown)
-
-    await lifecycle._on_realtime_connection_lost("pbx-call-1", vs)
-    await asyncio.sleep(0)  # let the tracked teardown task run
-
-    assert orch.calls == 1
-    assert teardown["n"] == 1, "a failed rebuild ends the call — same as today"
-
-
-# ---------------------------------------------------------------------------
-# (d) config gate: disabled → no recovery
-# ---------------------------------------------------------------------------
-
-@pytest.mark.asyncio
-async def test_disabled_gate_does_no_recovery(monkeypatch):
-    monkeypatch.setenv("REALTIME_FALLBACK_ENABLED", "false")
-
-    assert lifecycle._realtime_fallback_enabled() is False
-
-    vs = SimpleNamespace(
-        call_id="call-uuid-1", pipeline_task=None, realtime_bridge=object(),
-    )
-    orch = _FakeOrchestrator(asyncio.create_task(asyncio.sleep(0)))
-    teardown = {"n": 0}
-    _patch_lifecycle(monkeypatch, orchestrator=orch, session=vs, teardown_counter=teardown)
-
-    await lifecycle._on_realtime_connection_lost("pbx-call-1", vs)
-
-    assert orch.calls == 0, "no cascaded rebuild when the gate is off"
-    assert teardown["n"] == 0, "disabled = today's behaviour, not a teardown"
-    await orch._task
-
-
-def test_gate_default_is_enabled(monkeypatch):
-    monkeypatch.delenv("REALTIME_FALLBACK_ENABLED", raising=False)
-    assert lifecycle._realtime_fallback_enabled() is True
-
-
-# ---------------------------------------------------------------------------
-# (e) second connection-loss after fallback → no second attempt
-# ---------------------------------------------------------------------------
-
-@pytest.mark.asyncio
-async def test_second_connection_loss_does_not_reattempt(monkeypatch):
-    monkeypatch.setenv("REALTIME_FALLBACK_ENABLED", "true")
-
-    new_task = asyncio.create_task(asyncio.sleep(0))
-    vs = SimpleNamespace(
-        call_id="call-uuid-1", pipeline_task=None, realtime_bridge=object(),
-    )
-    orch = _FakeOrchestrator(new_task)
-    teardown = {"n": 0}
-    _patch_lifecycle(monkeypatch, orchestrator=orch, session=vs, teardown_counter=teardown)
-
-    await lifecycle._on_realtime_connection_lost("pbx-call-1", vs)
-    await lifecycle._on_realtime_connection_lost("pbx-call-1", vs)
-
-    assert orch.calls == 1, "fallback is attempted at most once per call"
-    await new_task

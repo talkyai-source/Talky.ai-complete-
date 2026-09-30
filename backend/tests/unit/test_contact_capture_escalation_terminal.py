@@ -36,7 +36,7 @@ from app.domain.services.voice_pipeline.contact_capture import (
     MAX_CLARIFICATION_ATTEMPTS,
     capture_mode_directive,
 )
-from app.domain.services.voice_pipeline.realtime_bridge import RealtimeBridge
+from app.realtime.bridge import RealtimeBridge
 from app.services.scripts.call_state_tracker import (
     CallState,
     update_state_from_agent_turn,

@@ -37,7 +37,10 @@ import {
 } from "@/components/campaigns/campaign-lead-fields";
 import { leadDetailsApi } from "@/lib/lead-details-api";
 
+import { CampaignVoiceSettings, type CampaignVoiceSettingsValue } from "@/components/realtime/campaign-settings";
+
 export type CampaignBasicsEditorInitial = {
+    voiceSelection?: CampaignVoiceSettingsValue;
     name: string;
     description?: string;
     companyName: string;
@@ -56,6 +59,8 @@ export function CampaignBasicsEditor({
 }: { campaignId: string; initial: CampaignBasicsEditorInitial }) {
     const router = useRouter();
 
+    const [voiceSelection, setVoiceSelection] = useState<CampaignVoiceSettingsValue>(initial.voiceSelection ?? {});
+    const isRealtime = voiceSelection.pipeline_mode === "realtime";
     const [name, setName] = useState(initial.name);
     const [companyName, setCompanyName] = useState(initial.companyName);
     const [personaType, setPersonaType] = useState<PersonaType>(initial.personaType);
@@ -90,9 +95,9 @@ export function CampaignBasicsEditor({
         name.trim()
         && companyName.trim()
         && agentNames.length >= 1
-        && voiceId
-        && guidance.valid
-        && !briefError
+        && (isRealtime ? voiceSelection.realtime_voice : voiceId)
+        && (isRealtime || guidance.valid)
+        && (isRealtime || !briefError)
         && !leadFields.isLoading
         && !leadFields.isError,
     );
@@ -102,6 +107,7 @@ export function CampaignBasicsEditor({
         setError(null);
         try {
             await dashboardApi.updateCampaign(campaignId, {
+                ...voiceSelection,
                 name: name.trim(),
                 description: initial.description,
                 system_prompt: goal.trim(),
@@ -175,6 +181,8 @@ export function CampaignBasicsEditor({
                     <AgentNameGender names={agentNames} value={agentGenders} onChange={setAgentGenders} voiceGender={voiceGender} />
                 </div>
 
+                <CampaignVoiceSettings value={voiceSelection} onChange={setVoiceSelection} />
+                <div hidden={isRealtime}>
                 <CampaignBriefFields
                     idPrefix="editor-campaign-brief"
                     value={briefDraft}
@@ -211,6 +219,7 @@ export function CampaignBasicsEditor({
                     onVoiceGenderChange={setVoiceGender}
                 />
 
+                </div>
                 <div className="rounded-lg border border-border bg-background/50 p-4">
                     <CallingScheduleEditor value={schedule} onChange={setSchedule} />
                 </div>

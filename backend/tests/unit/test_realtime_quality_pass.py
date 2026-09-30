@@ -15,20 +15,22 @@ Covers the five fixes:
           default and included (clamped) only when configured.
 """
 from __future__ import annotations
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import asyncio
 
 import pytest
 
-from app.domain.services.voice_pipeline.realtime_bridge import (
+from app.realtime.bridge import (
     _NO_KB_INFO,
     RealtimeBridge,
 )
-from app.infrastructure.realtime.openai_realtime import (
+from app.realtime.openai import (
     OpenAIRealtimeSession,
     RealtimeEvent,
 )
-from app.services.scripts.realtime_instructions import (
+from app.realtime.prompts import (
     RealtimePersona,
     build_realtime_instructions,
 )
@@ -75,7 +77,7 @@ def test_instructions_have_opening_and_backchannels():
 def test_instructions_dependency_free():
     # The composer must IMPORT nothing from the cascaded prompt machinery
     # (the docstring may name it — only real import statements matter).
-    import app.services.scripts.realtime_instructions as mod
+    import app.realtime.prompts as mod
     with open(mod.__file__, "r", encoding="utf-8") as fh:
         for line in fh:
             stripped = line.strip()
@@ -185,7 +187,8 @@ async def test_model_pump_accumulates_final_transcripts_in_order():
     async def _events():
         # Agent speaks (deltas then a final), caller replies (delta then final).
         yield RealtimeEvent(kind="agent_transcript", text="Hi ")
-        yield RealtimeEvent(kind="agent_transcript", text="there", is_final=True)
+        yield RealtimeEvent(kind="response_candidate", text="there", audio=b"\xff" * 160)
+        await asyncio.sleep(0.02)
         yield RealtimeEvent(kind="caller_transcript", text="hel")
         yield RealtimeEvent(kind="caller_transcript", text="Hello there", is_final=True)
 
@@ -196,7 +199,7 @@ async def test_model_pump_accumulates_final_transcripts_in_order():
     bridge = RealtimeBridge(
         call_id=call_id,
         realtime_session=_RT(),
-        media_gateway=object(),
+        media_gateway=SimpleNamespace(send_audio=AsyncMock()),
         internal_sample_rate=8000,
         transcript_service=ts,
         talklee_call_id="tk-1",
@@ -393,7 +396,7 @@ async def test_connect_retries_without_reasoning_on_rejection(monkeypatch):
     async def _fake_connect(*a, **k):
         return fake
 
-    import app.infrastructure.realtime.openai_realtime as rt_mod
+    import app.realtime.openai as rt_mod
     monkeypatch.setattr(rt_mod.websockets, "connect", _fake_connect)
 
     sess = OpenAIRealtimeSession(api_key="sk", call_id="retry-test")
@@ -417,7 +420,7 @@ async def test_connect_no_retry_when_first_update_accepted(monkeypatch):
     async def _fake_connect(*a, **k):
         return fake
 
-    import app.infrastructure.realtime.openai_realtime as rt_mod
+    import app.realtime.openai as rt_mod
     monkeypatch.setattr(rt_mod.websockets, "connect", _fake_connect)
 
     sess = OpenAIRealtimeSession(

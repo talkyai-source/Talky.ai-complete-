@@ -94,6 +94,7 @@ export default function EditCampaignPage() {
                 }
 
                 setInitial({
+                    voiceSelection: { pipeline_mode: scriptConfig.pipeline_mode, realtime_model: scriptConfig.realtime_model, realtime_voice: scriptConfig.realtime_voice, realtime_settings: scriptConfig.realtime_settings, realtime_prompt: scriptConfig.realtime_prompt },
                     name: campaign.name ?? "",
                     description: campaign.description ?? "",
                     // The persisted "additional instructions" can live in either
@@ -165,6 +166,7 @@ export default function EditCampaignPage() {
                         <CampaignBasicsEditor
                             campaignId={campaignId}
                             initial={{
+                                voiceSelection: initial.voiceSelection,
                                 name: initial.name,
                                 description: initial.description,
                                 companyName: initial.company_name,

@@ -75,6 +75,8 @@ async def get_config(
         if config is None:
             config = AIProviderConfig()
             await _upsert_tenant_config(conn, tenant_id, config)
+        elif config.pipeline_mode == "realtime":
+            return config
         elif config.tts_provider == "deepgram":
             deepgram_voices = await _get_deepgram_voices_for_current_key()
             valid_voice_ids = {voice.id for voice in deepgram_voices}
@@ -163,6 +165,22 @@ async def save_config(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="User is not associated with a tenant",
         )
+
+    if config.pipeline_mode not in {"cascaded", "realtime"}:
+        raise HTTPException(400, "Invalid voice pipeline")
+    if config.pipeline_mode == "realtime":
+        from app.realtime.config import validate_realtime
+        from app.domain.services.credential_resolver import get_credential_resolver
+        try:
+            validate_realtime(config.realtime_model, config.realtime_voice, config.realtime_settings)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        provider = str((config.realtime_settings or {}).get("provider") or "openai").lower()
+        if not await get_credential_resolver().resolve(provider, tenant_id=tenant_id):
+            raise HTTPException(400, f"{provider} is not configured for Realtime")
+        async with acquire_with_tenant(db_client.pool, tenant_id) as conn:
+            await _upsert_tenant_config(conn, tenant_id, config)
+        return AIProviderConfigWithWarnings(config=config, latency_warnings=[])
 
     if config.tts_provider not in {"cartesia", "google", "deepgram", "elevenlabs"}:
         raise HTTPException(

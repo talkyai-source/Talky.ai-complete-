@@ -66,6 +66,7 @@ export function TestAgentButton({
     // OFF by default: without a carrier's echo cancellation the laptop mic hears
     // the agent and cuts it off every turn. Headphones make barge-in testable.
     const [allowBargeIn, setAllowBargeIn] = useState(false);
+    const [activeEngine, setActiveEngine] = useState("");
     const [phase, setPhase] = useState<Phase>("idle");
     const [error, setError] = useState<string | null>(null);
     const inCall = phase !== "idle";
@@ -280,6 +281,7 @@ export function TestAgentButton({
 
         switch (data.type) {
             case "ready": {
+                setActiveEngine(data.pipeline_mode === "realtime" ? "GPT Realtime" : "Traditional pipeline");
                 playRateRef.current = typeof data.sample_rate === "number" && data.sample_rate > 0
                     ? data.sample_rate : 24000;
                 const inRate = typeof data.input_sample_rate === "number" && data.input_sample_rate > 0
@@ -487,7 +489,8 @@ export function TestAgentButton({
                 </Button>
             )}
 
-            {error && !inCall && (
+            {activeEngine && <p className="text-xs text-muted-foreground">Running: {activeEngine}</p>}
+                {error && !inCall && (
                 <span role="alert" className="text-xs text-red-600 dark:text-red-400 max-w-[220px]">
                     {error}
                 </span>

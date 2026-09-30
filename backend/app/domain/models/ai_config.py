@@ -5,6 +5,7 @@ Defines the configuration structure for LLM, STT, and TTS providers.
 This configuration is used in both the AI Options testing page and actual calls.
 """
 from typing import Any, Optional, List, Dict
+from app.realtime.config import RealtimeProviderConfig
 from pydantic import BaseModel, Field
 from enum import Enum
 
@@ -198,7 +199,7 @@ class VoiceInfo(BaseModel):
     preview_url: Optional[str] = None
 
 
-class AIProviderConfig(BaseModel):
+class AIProviderConfig(RealtimeProviderConfig):
     """
     AI Provider Configuration
     
@@ -254,26 +255,6 @@ class AIProviderConfig(BaseModel):
     #                 code path; does NOT touch the cascaded prompt machinery.
     # NOTE (Phase 1): the field exists and is validated, but the gateway does
     # NOT yet branch on it — wiring lands in Phase 1b once the bridge is proven.
-    pipeline_mode: str = "cascaded"  # "cascaded" | "realtime"
-    # Realtime-only knobs (ignored entirely when pipeline_mode == "cascaded").
-    realtime_model: str = "gpt-realtime-2"
-    realtime_voice: str = "marin"
-    # Optional overrides for turn_detection / noise_reduction etc. Sane
-    # defaults are applied by the session builder, so this may stay None.
-    # Recognised keys: {"turn_detection": {"type","eagerness"},
-    #                   "noise_reduction": {"type"},
-    #                   "transcription_model": str,
-    #                   "provider": "openai" (default) | "xai",
-    #                   "model": str (xai-only model override),
-    #                   "agent_id": str (xai-only: use a console-built agent
-    #                                    instead of a bare model)}
-    # "provider" is the opt-in switch for the xAI Grok Voice adapter (see
-    # app/infrastructure/realtime/xai_realtime.py) — omitted/"openai" keeps
-    # every existing tenant on the OpenAI gpt-realtime-2 path unchanged.
-    realtime_settings: Optional[Dict[str, Any]] = Field(default=None)
-
-    class Config:
-        use_enum_values = True
 
 
 class ProviderListResponse(BaseModel):
@@ -594,24 +575,6 @@ CEREBRAS_MODELS_HIDDEN = [
 # can render the realtime card. Voices are OpenAI's gpt-realtime voice set.
 # marin + cedar are the newest expressive voices; the rest are the standard
 # realtime voices. If OpenAI adds/removes voices, edit this list only.
-REALTIME_MODEL = "gpt-realtime-2"
-
-REALTIME_VOICES = [
-    {"id": "marin", "name": "Marin", "description": "Warm, natural, expressive — recommended default.", "gender": "female"},
-    {"id": "cedar", "name": "Cedar", "description": "Warm, grounded, natural male voice.", "gender": "male"},
-    {"id": "alloy", "name": "Alloy", "description": "Neutral, balanced, general-purpose.", "gender": "neutral"},
-    {"id": "ash", "name": "Ash", "description": "Clear, measured, professional.", "gender": "male"},
-    {"id": "ballad", "name": "Ballad", "description": "Soft, expressive, storytelling tone.", "gender": "male"},
-    {"id": "coral", "name": "Coral", "description": "Bright, friendly, upbeat.", "gender": "female"},
-    {"id": "sage", "name": "Sage", "description": "Calm, reassuring, thoughtful.", "gender": "female"},
-    {"id": "verse", "name": "Verse", "description": "Lively, dynamic, conversational.", "gender": "male"},
-]
-
-# Selectable knobs surfaced to the frontend (map 1:1 to session builder options).
-REALTIME_TURN_DETECTION = ["low", "medium", "high"]
-REALTIME_NOISE_REDUCTION = ["near_field", "far_field", "none"]
-
-
 DEEPGRAM_MODELS = [
     ModelInfo(
         id=DeepgramModel.NOVA_3.value,

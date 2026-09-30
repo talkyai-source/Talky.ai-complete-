@@ -59,7 +59,10 @@ import { motion } from "framer-motion";
  * outbound `/campaigns/new` and the edit routes pass no key, so they are
  * untouched: every read/write below is a no-op without one.
  */
+import { CampaignVoiceSettings, type CampaignVoiceSettingsValue } from "@/components/realtime/campaign-settings";
+
 type CampaignFormDraft = {
+    voiceSelection?: CampaignVoiceSettingsValue;
     name: string;
     description: string;
     system_prompt: string;
@@ -105,6 +108,7 @@ function writeFormDraft(key: string | undefined, draft: CampaignFormDraft): void
 export type CampaignFormMode = "create" | "edit";
 
 export interface CampaignFormInitial {
+    voiceSelection?: CampaignVoiceSettingsValue;
     name: string;
     description: string;
     system_prompt: string;
@@ -179,6 +183,8 @@ export function CampaignForm({ mode, campaignId, initialData, afterCreateHref, d
         // eslint-disable-next-line react-hooks/exhaustive-deps -- one-time restore, deliberately not re-run when leadFields/restoredDraft identity changes
     }, []);
 
+    const [voiceSelection, setVoiceSelection] = useState<CampaignVoiceSettingsValue>(restoredDraft?.voiceSelection ?? initialData?.voiceSelection ?? {});
+    const isRealtime = voiceSelection.pipeline_mode === "realtime";
     const [voices, setVoices] = useState<VoiceInfo[]>([]);
     const [loadingVoices, setLoadingVoices] = useState(true);
     const [previewingVoiceId, setPreviewingVoiceId] = useState<string | null>(null);
@@ -234,6 +240,7 @@ export function CampaignForm({ mode, campaignId, initialData, afterCreateHref, d
     // without `draftStorageKey` (outbound creation and edit mode).
     useEffect(() => {
         writeFormDraft(draftStorageKey, {
+            voiceSelection,
             name: formData.name,
             description: formData.description,
             system_prompt: formData.system_prompt,
@@ -247,7 +254,7 @@ export function CampaignForm({ mode, campaignId, initialData, afterCreateHref, d
             leadFields: leadFields.fields,
             createdCampaignId,
         });
-    }, [draftStorageKey, formData, personaType, companyName, agentNamesRaw, slotValues, briefDraft, leadFields.fields, createdCampaignId]);
+    }, [voiceSelection, draftStorageKey, formData, personaType, companyName, agentNamesRaw, slotValues, briefDraft, leadFields.fields, createdCampaignId]);
 
     // Prompt preview (T4-B4) — backend renders the assembled system
     // prompt + spoken greeting from the current draft. Open the panel
@@ -336,11 +343,11 @@ export function CampaignForm({ mode, campaignId, initialData, afterCreateHref, d
             setPreviewError("Add a company name before previewing.");
             return;
         }
-        if (briefError) {
+        if (!isRealtime && briefError) {
             setPreviewError(briefError);
             return;
         }
-        if (guidance.overBudget) {
+        if (!isRealtime && guidance.overBudget) {
             setPreviewError(guidance.message ?? "Campaign guidance is over budget.");
             return;
         }
@@ -348,6 +355,7 @@ export function CampaignForm({ mode, campaignId, initialData, afterCreateHref, d
         setPreviewError(null);
         try {
             const result = await dashboardApi.previewCampaignPrompt({
+                ...voiceSelection,
                 persona_type: personaType,
                 company_name: companyName.trim(),
                 agent_name: firstAgent,
@@ -507,7 +515,7 @@ export function CampaignForm({ mode, campaignId, initialData, afterCreateHref, d
             setError("Contact-field settings must load successfully before this campaign can be saved.");
             return;
         }
-        if (!formData.voice_id) {
+        if (!isRealtime && !formData.voice_id) {
             setError("Select a voice from the active global TTS provider before saving the campaign.");
             return;
         }
@@ -520,19 +528,19 @@ export function CampaignForm({ mode, campaignId, initialData, afterCreateHref, d
             setError("Add the company or business name your agent represents.");
             return;
         }
-        if (!guidance.valid) {
+        if (!isRealtime && !guidance.valid) {
             // Over budget: the backend refuses this too; say it here so nothing
             // is ever saved and then silently shortened on the call. Too short /
             // empty: a frontend-only rule — a campaign needs a goal.
             setError(guidance.message ?? "Campaign guidance is required.");
             return;
         }
-        if (briefError) {
+        if (!isRealtime && briefError) {
             setError(briefError);
             return;
         }
         const missing = missingRequiredSlots();
-        if (missing.length > 0) {
+        if (!isRealtime && missing.length > 0) {
             setError(`Missing required fields: ${missing.map((s) => s.label).join(", ")}`);
             return;
         }
@@ -541,6 +549,7 @@ export function CampaignForm({ mode, campaignId, initialData, afterCreateHref, d
         setError("");
 
         const payload = {
+            ...voiceSelection,
             name: formData.name,
             description: formData.description || undefined,
             system_prompt: formData.system_prompt,
@@ -600,6 +609,7 @@ export function CampaignForm({ mode, campaignId, initialData, afterCreateHref, d
             >
                 <h3 className="text-lg font-semibold text-foreground mb-6">Campaign Details</h3>
                 <form onSubmit={handleSubmit} className="space-y-6">
+                    <CampaignVoiceSettings value={voiceSelection} onChange={setVoiceSelection} />
                     {/* Name */}
                     <div className="space-y-2">
                         <Label htmlFor="name">Campaign Name</Label>
@@ -630,7 +640,7 @@ export function CampaignForm({ mode, campaignId, initialData, afterCreateHref, d
                     </div>
 
                     {/* Goal */}
-                    <div className="space-y-2">
+                    <div hidden={isRealtime} className="space-y-2">
                         <Label htmlFor="goal">Campaign Goal (optional)</Label>
                         <textarea
                             id="goal"
@@ -648,7 +658,7 @@ export function CampaignForm({ mode, campaignId, initialData, afterCreateHref, d
                     </div>
 
                     {/* Voice picker */}
-                    <div className="space-y-2">
+                    <div hidden={isRealtime} className="space-y-2">
                         <Label>AI Voice ({campaignVoices.length} available)</Label>
                         {globalAiConfig && (
                             <p className="text-xs text-muted-foreground">
@@ -1184,6 +1194,7 @@ export function CampaignForm({ mode, campaignId, initialData, afterCreateHref, d
                         </div>
                     </div>
 
+                    <fieldset hidden={isRealtime} disabled={isRealtime}>
                     <CampaignBriefFields
                         idPrefix="campaign-brief"
                         value={briefDraft}
@@ -1261,6 +1272,7 @@ export function CampaignForm({ mode, campaignId, initialData, afterCreateHref, d
                         )}
                     </div>
 
+                    </fieldset>
                     <div className="border-t border-border pt-6">
                         <CampaignLeadFieldsPicker
                             specs={leadFields.specs}
@@ -1280,7 +1292,7 @@ export function CampaignForm({ mode, campaignId, initialData, afterCreateHref, d
                     )}
 
                     <div className="flex gap-4">
-                        <Button type="submit" disabled={submitting || leadFields.isLoading || leadFields.isError || !formData.voice_id || !guidance.valid || Boolean(briefError)}>
+                        <Button type="submit" disabled={submitting || leadFields.isLoading || leadFields.isError || !(isRealtime ? voiceSelection.realtime_voice : formData.voice_id) || (!isRealtime && (!guidance.valid || Boolean(briefError)))}>
                             {submitting ? (
                                 <>
                                     <Loader2 className="w-4 h-4 animate-spin" />

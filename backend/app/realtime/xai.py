@@ -16,8 +16,7 @@ Source of truth for the wire-protocol claims below: docs.x.ai (verified
     parallel client.
   * Audio: native audio/pcmu (G.711 μ-law) @ 8000 Hz — exactly our
     telephony wire format. Same zero-resample story as OpenAI Realtime; no
-    changes needed to RealtimeBridge (app/domain/services/voice_pipeline/
-    realtime_bridge.py), which only depends on this session's duck-typed
+    changes needed to RealtimeBridge (app/realtime/bridge.py), which only depends on this session's duck-typed
     interface (events()/send_caller_audio()/trigger_greeting()/
     send_function_result()/close()/closed()), never on OpenAI specifically.
 
@@ -68,7 +67,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, List, Optional
 
-from app.infrastructure.realtime.openai_realtime import (
+from app.realtime.openai import (
     OpenAIRealtimeSession,
     RealtimeEvent,
 )

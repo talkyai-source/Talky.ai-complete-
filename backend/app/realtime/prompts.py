@@ -45,8 +45,6 @@ Output shape (one string, labeled blocks):
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Optional
 
 from app.domain.services.voice_pipeline.live_structured_state import (
     LiveConversationState,
@@ -54,27 +52,7 @@ from app.domain.services.voice_pipeline.live_structured_state import (
 )
 
 
-@dataclass
-class RealtimePersona:
-    """Minimal persona/campaign inputs for the realtime instruction string.
-
-    Intentionally small and self-contained — the realtime path does not reuse
-    the cascaded PersonaType / campaign-slot machinery.
-    """
-    agent_name: str = "Alex"
-    company_name: str = "the company"
-    role: str = "a friendly voice assistant"
-    goal: str = "have a helpful, natural conversation with the caller"
-    # Optional extra, operator-supplied freeform guidance (kept short).
-    extra_notes: Optional[str] = None
-    # Direction/opening values are explicit because true inbound campaigns may
-    # be caller-first OR agent-first.  The default preserves every existing
-    # outbound realtime session.
-    call_direction: str = "outbound"
-    opening_greeting: Optional[str] = None
-    message_intake: bool = False
-    campaign_guidance: str = ""
-
+from app.realtime.personas import RealtimePersona, PERSONAS
 
 # ── Block 2: expressive delivery, written for a speech-to-speech model ───────
 _EXPRESSIVE_DELIVERY = """\
@@ -195,6 +173,8 @@ def _opening_note(persona: "RealtimePersona") -> str:
             f"framing.{approved} Answer the caller's direct question first, then "
             "ask at most one relevant question and hand the floor back."
         )
+    if greeting:
+        return "HOW YOU OPEN\nWhen speaking first, use this greeting: " + greeting + "\nThen listen. Never assume the caller identity is confirmed."
     return (
         "HOW YOU OPEN\n"
         f"Greet the caller warmly, briefly say who you are ({persona.agent_name} "
@@ -220,6 +200,7 @@ def build_realtime_instructions(persona: RealtimePersona) -> str:
 
     blocks = [
         identity,
+        "YOUR ROLE\n" + PERSONAS.get(persona.persona_type, PERSONAS["assistant"]),
         _opening_note(persona),
         _EXPRESSIVE_DELIVERY,
         _COMPLIANCE_ESSENTIALS,

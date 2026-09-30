@@ -8,7 +8,7 @@ semantic VAD (turn-taking) and function calling.
 This module is INTENTIONALLY separate from the cascaded pipeline. It does
 NOT import or invoke compose_prompt / compliance_floor / prompt_builder or
 the ElevenLabs/Cartesia audio-tag blocks. The `instructions` string it is
-handed is built by `app.services.scripts.realtime_instructions` — a clean,
+handed is built by `app.realtime.prompts` — a clean,
 voice-appropriate composer written for a speech-to-speech model.
 
 Audio format
@@ -21,8 +21,8 @@ Realtime API carries audio as base64 of the raw μ-law bytes.
 Discipline (we just fixed a class of leaks in the gateway — do not regress)
 --------------------------------------------------------------------------
 * Exactly ONE background task (the receive loop). It is cancelled on close().
-* The outbound audio queue is BOUNDED; on overflow we drop the OLDEST frame
-  (stale audio is worthless on a live call) rather than grow without bound.
+* Audio is quarantined in a bounded per-response buffer until its final
+  transcript is available. Queue overflow ends the session explicitly.
 * Every await is guarded; teardown is wrapped so cleanup can never raise.
 * Fail-soft: any connection/stream error logs and ends the session cleanly.
   A realtime failure must NEVER crash a call.
@@ -67,9 +67,8 @@ logger = logging.getLogger(__name__)
 # ── Wire constants ──────────────────────────────────────────────────────────
 _REALTIME_URL_TMPL = "wss://api.openai.com/v1/realtime?model={model}"
 
-# Bound the outbound (model→gateway) audio queue. At 20 ms/frame, 200 frames
-# is ~4 s of speech buffered ahead of the gateway's playout — generous head
-# room while still bounded. On overflow we evict the OLDEST frame.
+# Bound model events; audio is separately quarantined in RealtimePlayoutBuffer.
+# Overflow fails explicitly instead of silently dropping evidence.
 _OUTBOUND_AUDIO_MAXLEN = 200
 
 # How long connect() waits for session.created / session.updated before it
@@ -234,6 +233,8 @@ class OpenAIRealtimeSession:
         if not api_key:
             raise ValueError("OpenAIRealtimeSession requires an api_key")
         self._api_key = api_key
+        from app.realtime.playout_buffer import RealtimePlayoutBuffer
+        self._playout = RealtimePlayoutBuffer()
         self._model = model or "gpt-realtime-2"
         self._voice = voice or "marin"
         self._instructions = instructions or ""
@@ -359,7 +360,7 @@ class OpenAIRealtimeSession:
 
         Extension point: pulled out of connect() ONLY so a Realtime-compatible
         provider adapter (e.g. xAI Grok Voice — see
-        app/infrastructure/realtime/xai_realtime.py) can subclass and target a
+        app/realtime/xai.py) can subclass and target a
         different host/query shape while reusing connect()'s handshake/retry
         logic byte-for-byte. Behaviour for OpenAI itself is unchanged.
         """
@@ -598,6 +599,14 @@ class OpenAIRealtimeSession:
             logger.debug("realtime response.create send failed call=%s err=%s",
                          self._call_id, exc)
 
+    async def repair_unspoken_response(self, response: dict) -> None:
+        for item in response.get("output") or []:
+            if item.get("type") == "message" and item.get("id"):
+                await self._ws.send(json.dumps({"type": "conversation.item.delete", "item_id": item["id"]}))
+        await self._ws.send(json.dumps({"type": "response.create", "response": {
+            "instructions": "Your previous reply was withheld and was not heard. Give one short honest reply. Do not claim any email, booking, submission or transfer succeeded unless a matching successful tool result explicitly permits confirmation. If unavailable, explain the limitation."
+        }}))
+
     async def trigger_greeting(self) -> None:
         """Make the agent speak first (agent-first outbound): request an
         initial response so the model greets per its instructions, without any
@@ -749,22 +758,14 @@ class OpenAIRealtimeSession:
                     extra={"call_id": self._call_id,
                            "realtime_speech_end_to_first_audio_ms": ms},
                 )
-            self._offer_event(RealtimeEvent(kind="audio", audio=audio, raw=data))
+            self._playout.add_audio(data, audio)
             return
 
         # ---- Agent's spoken words (text) -----------------------------------
         if etype == "response.output_audio_transcript.delta":
-            delta = data.get("delta")
-            if delta:
-                self._offer_event(RealtimeEvent(kind="agent_transcript", text=delta))
-            return
-
-        # Terminal agent transcript for the turn — full text, persisted.
+            return  # text is generated, not yet validated or spoken
         if etype == "response.output_audio_transcript.done":
-            text = data.get("transcript")
-            if text:
-                self._offer_event(RealtimeEvent(
-                    kind="agent_transcript", text=text, is_final=True))
+            self._playout.add_transcript(data)
             return
 
         # ---- Caller transcription (incremental) ----------------------------
@@ -797,6 +798,7 @@ class OpenAIRealtimeSession:
 
         # ---- A new model response begins -----------------------------------
         if etype == "response.created":
+            self._playout.reset((data.get("response") or {}).get("id"))
             # Tag audio deltas that follow to the current epoch so a later
             # barge-in can invalidate exactly this turn's buffered audio.
             self._active_response_epoch = self._response_epoch
@@ -810,15 +812,30 @@ class OpenAIRealtimeSession:
             args = data.get("arguments") or ""
             if call_id and name:
                 self.stats.function_calls += 1
-                self._offer_event(RealtimeEvent(
-                    kind="function_call",
-                    function_call=RealtimeFunctionCall(call_id, name, args),
-                    raw=data,
-                ))
+                if self._playout.owns(data):
+                    self._playout.tools.append(RealtimeEvent(
+                        kind="function_call", function_call=RealtimeFunctionCall(call_id, name, args), raw=data))
             return
 
         # ---- Response finished ---------------------------------------------
         if etype == "response.done":
+            resp = data.get("response") or {}
+            if resp.get("id") != self._playout.response_id:
+                return  # late terminal event from an interrupted response
+            candidate = self._playout.finish(resp)
+            if candidate:
+                audio, transcript = candidate
+                self._offer_event(RealtimeEvent(kind="response_candidate", audio=audio, text=transcript, raw=data))
+            elif resp.get("status") == "completed" and (self._playout.audio or self._playout.invalid):
+                self._offer_event(RealtimeEvent(kind="error", text="Realtime response was incomplete or exceeded the playback limit"))
+            if resp.get("status") == "incomplete" and (resp.get("status_details") or {}).get("reason") not in {"turn_detected", "interruption", "cancelled"}:
+                self._offer_event(RealtimeEvent(kind="error", text="Realtime response did not complete"))
+            if resp.get("status") == "failed":
+                self._offer_event(RealtimeEvent(kind="error", text="Realtime response failed"))
+            if resp.get("status") == "completed" and not self._playout.invalid:
+                for tool in self._playout.tools:
+                    self._offer_event(tool)
+            self._playout.reset()
             self._response_active = False
             resp = data.get("response") or {}
             status = resp.get("status")
@@ -860,6 +877,11 @@ class OpenAIRealtimeSession:
         """Caller took the floor: invalidate the in-flight response and FLUSH
         any model audio still queued, so the agent stops mid-sentence instead
         of talking over the caller."""
+        self._playout.audio.clear()
+        self._playout.parts.clear()
+        self._playout.transcripts.clear()
+        self._playout.tools.clear()
+        self._playout.invalid = True
         during_response = self._response_active
         self._response_epoch += 1
         dropped = self._flush_audio_events()
@@ -882,7 +904,7 @@ class OpenAIRealtimeSession:
                 item = self._event_queue.get_nowait()
             except asyncio.QueueEmpty:
                 break
-            if item is not None and getattr(item, "kind", None) == "audio":
+            if item is not None and getattr(item, "kind", None) in {"audio", "response_candidate"}:
                 dropped += 1
             else:
                 kept.append(item)
@@ -894,28 +916,19 @@ class OpenAIRealtimeSession:
         return dropped
 
     def _offer_event(self, ev: Optional[RealtimeEvent]) -> None:
-        """Enqueue an event without ever blocking the receive loop. On a full
-        queue evict the OLDEST *audio* event (stale audio is worthless live)
-        while preserving function_calls / transcripts / control events. If the
-        queue somehow holds no audio (shouldn't happen), fall back to dropping
-        the oldest item so we never block."""
+        """Enqueue without blocking; overflow ends the session without losing evidence."""
         try:
             self._event_queue.put_nowait(ev)
             return
         except asyncio.QueueFull:
             pass
-        if self._evict_one_audio():
-            self.stats.audio_frames_dropped_overflow += 1
-        else:
-            try:
-                self._event_queue.get_nowait()
-                self.stats.audio_frames_dropped_overflow += 1
-            except asyncio.QueueEmpty:
-                pass
-        try:
-            self._event_queue.put_nowait(ev)
-        except asyncio.QueueFull:
-            logger.warning("realtime event dropped — queue full call=%s", self._call_id)
+        # Losing a transcript/control event would invalidate playback ownership.
+        # Stop the session explicitly instead of silently evicting evidence.
+        while not self._event_queue.empty():
+            self._event_queue.get_nowait()
+        self._closed.set()
+        self._playout.reset()
+        self._event_queue.put_nowait(RealtimeEvent(kind="error", text="Realtime event queue overflow"))
 
     def _evict_one_audio(self) -> bool:
         """Remove the single OLDEST 'audio' event from the queue, preserving
@@ -928,7 +941,7 @@ class OpenAIRealtimeSession:
             except asyncio.QueueEmpty:
                 break
             if (not removed and item is not None
-                    and getattr(item, "kind", None) == "audio"):
+                    and getattr(item, "kind", None) in {"audio", "response_candidate"}):
                 removed = True
                 continue
             items.append(item)
