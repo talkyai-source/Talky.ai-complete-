@@ -78,7 +78,7 @@ def test_real_pinned_builder_separates_direction_and_hashes_final_prompt(mode, a
         text = build_realtime_instructions(VoiceOrchestrator._build_realtime_persona(config))
         assert "Preserve fixture-guidance exactly." not in text
         assert config.system_prompt == text
-        assert config.prompt_version == "realtime@2"
+        assert config.prompt_version == "realtime@3"
         assert "caller contacted the company" in text
         for phrase in FORBIDDEN:
             assert phrase not in text

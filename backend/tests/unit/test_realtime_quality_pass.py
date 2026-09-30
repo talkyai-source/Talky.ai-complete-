@@ -10,7 +10,7 @@ Covers the five fixes:
           transcripts (role-tagged, in order) into a TranscriptService; deltas
           do not double-count.
   FIX 3 — persona/instructions: the built string carries the new AI-disclosure
-          and lookup-filler direction and NOT the old "never as filler".
+          and conditional lookup updates without forced filler.
   FIX 5 — session controls: speed/temperature/max_output_tokens are omitted by
           default and included (clamped) only when configured.
 """
@@ -55,23 +55,20 @@ def test_instructions_ai_disclosure_matches_compliance_floor():
     assert "I'm an AI assistant" in text
 
 
-def test_instructions_have_lookup_filler_and_drop_never_as_filler():
+def test_lookup_updates_are_conditional_and_not_forced_filler():
     text = build_realtime_instructions(RealtimePersona())
-    # The OLD, wrong guidance must be gone.
-    assert "never as filler" not in text
-    # The NEW lookup-hold direction must be present.
-    assert "let me check that for you" in text
-    assert "NEVER sit in dead silence" in text
+    assert "NEVER sit in dead silence" not in text
+    assert "let real emotion through" not in text
+    assert "Give a brief update only for noticeable waits" in text
+    assert "Skip it for quick answers or confirmations" in text
 
 
-def test_instructions_have_opening_and_backchannels():
-    text = build_realtime_instructions(
-        RealtimePersona(agent_name="Sam", company_name="Acme")
-    )
+def test_instructions_keep_opening_and_short_natural_turns():
+    text = build_realtime_instructions(RealtimePersona(agent_name="Sam", company_name="Acme"))
     assert "HOW YOU OPEN" in text
     assert "Sam from Acme" in text
-    # Human backchannels / emotional signals.
-    assert "mm-hmm" in text
+    assert "one or two short sentences" in text
+    assert "without scripted filler or forced laughter" in text
 
 
 def test_instructions_dependency_free():
@@ -435,23 +432,29 @@ async def test_connect_no_retry_when_first_update_accepted(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# TASK 3 — restructured instructions keep the compliance floor + lookup preamble
+# TASK 3 — independent instructions preserve safety and explicit retrieval policy
 # ---------------------------------------------------------------------------
 
-def test_instructions_preserve_compliance_floor_verbatim():
+def test_instructions_preserve_honesty_and_protected_data_rules():
     text = build_realtime_instructions(RealtimePersona())
-    # Honesty floor preserved verbatim (aligned to guardrails.py Rule 1).
+    # Honesty remains explicit while the Realtime wording is independently maintained.
     assert "Be honest about what you are" in text
     assert "never claim or imply you're human" in text
-    assert "that you're an AI" in text
     assert "I'm an AI assistant" in text
+    for protected in ("payment-card", "social-security", "one-time passcodes"):
+        assert protected in text
     # No concealment framing may creep back in.
     assert "Do NOT volunteer" not in text
     assert "don't volunteer" not in text.lower()
 
 
-def test_instructions_keep_lookup_preamble():
+def test_knowledge_tool_and_prompt_require_evidence_not_model_confidence():
+    from app.realtime.openai import knowledge_lookup_tool
     text = build_realtime_instructions(RealtimePersona())
-    # The anti-dead-air preamble (a natural hold before the tool call) stays.
-    assert "NEVER sit in dead silence" in text
-    assert "let me check that for you" in text
+    description = knowledge_lookup_tool()["description"]
+    for fact in ("prices", "policies", "eligibility", "availability", "offers"):
+        assert fact in text and fact in description
+    assert "not certain" not in description
+    assert "verified result from this call" in text and "verified result from this call" in description
+    assert "without asking permission" in text
+    assert "not general knowledge or campaign sales claims" in text

@@ -236,3 +236,35 @@ async def test_browser_playback_controls_flush_before_requesting_acknowledgement
     await bridge._play_validated_response(RealtimeEvent(kind="response_candidate", text="Hello there", audio=b"\xff" * 320))
     assert order == ["llm_response", "audio", "flush", "tts_audio_complete", "ack", "turn_complete"]
     provider.close.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("direction", ["inbound", "outbound"])
+async def test_campaign_preview_matches_independent_runtime_prompt(direction):
+    """The prompt an operator reviews must be the one assembled for that campaign."""
+    import hashlib
+    from app.api.v1.endpoints.campaigns import preview_prompt
+    from app.api.v1.schemas.campaigns import CampaignPromptPreviewRequest
+    from app.domain.services.telephony_session_config import build_telephony_session_config
+    from app.domain.services.voice_orchestrator import Direction
+    from app.realtime.prompts import PROMPT_VERSION
+
+    prompt = {"persona": "support", "goal": "Help with service requests",
+              "instructions": "Ask which service the caller needs.", "opening_greeting": "Welcome to Acme."}
+    config = build_telephony_session_config(
+        ai_config_override=AIProviderConfig(pipeline_mode="realtime"),
+        direction=Direction(direction),
+        campaign={"id": "fixture-campaign", "tenant_id": "fixture-tenant", "script_config": {
+            "company_name": "Acme", "agent_names": ["Sam"], "realtime_prompt": prompt,
+            "additional_instructions": "TRADITIONAL-ONLY-GUIDANCE",
+        }},
+    )
+    preview = await preview_prompt(CampaignPromptPreviewRequest(
+        pipeline_mode="realtime", persona_type="lead_gen", company_name="Acme", agent_name="Sam",
+        campaign_slots={}, realtime_prompt=prompt, direction=direction,
+        additional_instructions="TRADITIONAL-ONLY-GUIDANCE",
+    ), current_user=SimpleNamespace())
+    assert preview.system_prompt == config.system_prompt
+    assert "TRADITIONAL-ONLY-GUIDANCE" not in config.system_prompt
+    assert config.prompt_version == PROMPT_VERSION
+    assert config.prompt_hash == hashlib.sha256(config.system_prompt.encode()).hexdigest()[:16]

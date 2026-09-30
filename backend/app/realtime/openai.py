@@ -1000,15 +1000,12 @@ def knowledge_lookup_tool() -> Dict[str, Any]:
     The gateway fulfils it by calling
     `retrieve_knowledge(...)` and returning the text via send_function_result.
     """
+    from app.realtime.prompts import KNOWLEDGE_TOOL_DESCRIPTION
+
     return {
         "type": "function",
         "name": "knowledge_lookup",
-        "description": (
-            "Look up a specific company fact (pricing, hours, policies, "
-            "product details, service areas) before stating it. Use this "
-            "whenever the caller asks about the company and you are not "
-            "certain of the answer. Never guess company facts — look them up."
-        ),
+        "description": KNOWLEDGE_TOOL_DESCRIPTION,
         "parameters": {
             "type": "object",
             "properties": {

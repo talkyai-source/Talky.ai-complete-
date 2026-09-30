@@ -21,6 +21,31 @@ independent `realtime_prompt`. No database migration is needed. Switching
 engines preserves the other engine's saved settings. Old campaigns without
 an engine selection inherit the account setting; saving explicitly pins it.
 
+## Prompt policy (`realtime@3`)
+
+The essential instruction is: represent the configured company, pursue the
+campaign goal with short natural turns, verify company claims through campaign
+knowledge, confirm exact contact details, and report actions only after backend
+success. Campaign guidance can change the task and style, not these boundaries.
+
+The base prompt keeps identity, opening, conversation, grounding, contact and
+action rules in short sections. Detailed business facts stay in campaign
+knowledge. Lookups do not depend on the model's confidence; a current verified
+result can be reused. Read-only lookups do not need permission, while email,
+callback, form and transfer actions need confirmation. A clear request to end
+the call needs no extra confirmation. Brief wait updates are conditional rather
+than forced filler. Missing facts or unavailable tools receive an honest answer.
+
+Tool descriptions for this engine live in this module, independently of
+traditional prompt wording. Shared action argument schemas and execution remain
+unchanged. The model stays `gpt-realtime-2`, with low reasoning by default; no
+new service, model upgrade or additional inference stage is introduced.
+
+Reference: [OpenAI Realtime prompting guidance](https://developers.openai.com/api/docs/guides/voice-prompting).
+Offline checks verify prompt composition and integration, not guaranteed model
+behavior. Before release, evaluate actual campaign questions, unknown prices,
+unclear/corrected contacts, interruptions and unavailable actions on real calls.
+
 Shared entry points remain in the orchestrator and HTTP handlers. Tenant
 authorization, telephony transport, knowledge retrieval, connector actions,
 transcripts and lead storage remain shared services. The existing xAI adapter
