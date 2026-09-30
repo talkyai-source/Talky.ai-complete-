@@ -541,7 +541,12 @@ class OpenAIRealtimeSession:
                 json.dumps(
                     {
                         "type": "session.update",
-                        "session": {"instructions": updated},
+                        # The GA Realtime API rejects a session.update without
+                        # session.type (browser tests 980a2caa/0457b4b9,
+                        # 2026-09-30: "Missing required parameter:
+                        # 'session.type'" on the first live-state update, which
+                        # then ended the call).
+                        "session": {"type": "realtime", "instructions": updated},
                     }
                 )
             )
@@ -669,7 +674,12 @@ class OpenAIRealtimeSession:
                 json.dumps(
                     {
                         "type": "session.update",
-                        "session": {"instructions": updated},
+                        # The GA Realtime API rejects a session.update without
+                        # session.type (browser tests 980a2caa/0457b4b9,
+                        # 2026-09-30: "Missing required parameter:
+                        # 'session.type'" on the first live-state update, which
+                        # then ended the call).
+                        "session": {"type": "realtime", "instructions": updated},
                     }
                 )
             )
@@ -866,6 +876,13 @@ class OpenAIRealtimeSession:
                 return
             self.stats.errors += 1
             logger.warning("realtime server error call=%s: %s", self._call_id, err)
+            param = str((err or {}).get("param") or "") if isinstance(err, dict) else ""
+            if param.startswith("session."):
+                # The server refused a settings update and kept the session
+                # (and its previous settings). The conversation continues;
+                # ending the call over it is what left the caller talking to
+                # nobody on 980a2caa.
+                return
             self._offer_event(RealtimeEvent(kind="error", text=str(err), raw=data))
             return
 

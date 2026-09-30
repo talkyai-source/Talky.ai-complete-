@@ -3,6 +3,52 @@ from app.domain.models.agent_config import AgentConfig, AgentGoal
 from app.realtime.config import RealtimePrompt, validate_realtime
 
 
+_PERSONA_FOR_CAMPAIGN = {
+    "lead_gen": "sales",
+    "customer_support": "support",
+    "receptionist": "receptionist",
+}
+
+
+def _with_campaign_context(prompt, script, attr):
+    """A campaign with no Realtime-specific instructions runs on its own script.
+
+    Browser tests 980a2caa/0457b4b9 (2026-09-30): Dojo-PC has a full campaign
+    script (who Azian is, why we call, what to ask) but no Realtime prompt, so
+    the Realtime agent was given only "Help the caller using verified company
+    information." and opened with a generic line that had nothing to do with
+    the campaign. Realtime-specific instructions, when set, still win.
+    """
+    if (prompt.instructions or "").strip():
+        return prompt
+    guidance = (
+        script.get("additional_instructions")
+        or attr("system_prompt")
+        or attr("goal")
+        or ""
+    )
+    guidance = str(guidance or "").strip()
+    if not guidance:
+        return prompt
+    from app.domain.services.telephony_session_config import (
+        campaign_guidance_char_budget,
+    )
+
+    budget = campaign_guidance_char_budget()
+    if len(guidance) > budget:
+        guidance = guidance[:budget].rsplit(" ", 1)[0]
+    update = {"instructions": guidance}
+    brief = script.get("campaign_brief") or {}
+    objective = str(brief.get("opening_objective") or "").strip() if isinstance(brief, dict) else ""
+    if objective and prompt.goal == type(prompt)().goal:
+        update["goal"] = objective[:1000]
+    if prompt.persona == type(prompt)().persona:
+        persona = _PERSONA_FOR_CAMPAIGN.get(str(script.get("persona_type") or "").strip())
+        if persona:
+            update["persona"] = persona
+    return prompt.model_copy(update=update)
+
+
 def build_realtime_campaign_config(*, source, campaign, script, gateway_type,
                                    agent_name_override, direction, opening_mode,
                                    lead_first_name=None, lead_last_name=None,
@@ -16,6 +62,7 @@ def build_realtime_campaign_config(*, source, campaign, script, gateway_type,
         return " ".join(str(value or "").replace("{", "").replace("}", "").split())[:160]
 
     prompt = RealtimePrompt.model_validate(script.get("realtime_prompt") or (source.realtime_settings or {}).get("prompt") or {})
+    prompt = _with_campaign_context(prompt, script, attr)
     model = script.get("realtime_model") or source.realtime_model
     voice = script.get("realtime_voice") or source.realtime_voice
     settings = script.get("realtime_settings")
