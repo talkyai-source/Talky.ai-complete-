@@ -236,6 +236,62 @@ def repeats_answered_question(
     return None
 
 
+# A bare no. Browser test cb1b28c3 (2026-09-30): the caller said "Nothing."
+# three times and got four rephrasings of the same question -- only phrases
+# like "not interested" ever counted as a decline.
+_BARE_NO = re.compile(
+    r"^\s*(?:no|nope|nah|nothing|none|not really|no thanks?|no thank you|"
+    r"not at the moment|not right now|nothing (?:else|at all|really|much))"
+    r"\s*[.!?,]*\s*$",
+    re.IGNORECASE,
+)
+
+
+def is_bare_no(text: str) -> bool:
+    return bool(_BARE_NO.match(str(text or "")))
+
+
+def declined_note(history: Iterable[Any]) -> Optional[str]:
+    """What the caller has said a plain no to, for the turn note -- or None.
+
+    Two bare noes in a row at the end of the call mean stop probing.
+    """
+    items = list(history or [])
+
+    def role(m):
+        return str(getattr(getattr(m, "role", None), "value", getattr(m, "role", "")))
+
+    declined: list[str] = []
+    for i, m in enumerate(items[:-1]):
+        if role(m) != "assistant":
+            continue
+        questions = _questions_in(str(getattr(m, "content", "") or ""))
+        nxt = items[i + 1]
+        if questions and role(nxt) == "user" and is_bare_no(getattr(nxt, "content", "")):
+            declined.append(questions[-1])
+    if not declined:
+        return None
+    streak = 0
+    for m in reversed(items):
+        if role(m) != "user":
+            continue
+        if not is_bare_no(getattr(m, "content", "")):
+            break
+        streak += 1
+    quoted = "; ".join(f'"{q[:80]}"' for q in declined[-4:])
+    note = (
+        f"They said no to: {quoted}. Treat each as closed: do not ask it again "
+        "in other words."
+    )
+    if streak >= 2:
+        note += (
+            " They have said no to your last two questions: stop probing. "
+            "Acknowledge it, ask if there is anything they would like to ask, "
+            "or close politely."
+        )
+    return note
+
+
 def answered_note(answered: Iterable[tuple[str, str]]) -> Optional[str]:
     """One short line for the turn note: what is already answered."""
     items = [

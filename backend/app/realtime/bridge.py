@@ -71,6 +71,12 @@ _REALTIME_NODE_CHARS = int(os.getenv("KNOWLEDGE_REALTIME_NODE_CHARS", "2000"))
 _NO_KB_INFO = "I don't have specific information on that."
 
 
+# Sections a realtime knowledge lookup returns. Two left the right one out
+# whenever a catch-all section also matched (Dojo-PC, 2026-09-30); three puts
+# it in on every question measured against the live knowledge.
+_REALTIME_KB_K = 3
+
+
 class RealtimeBridge:
     """Drives one realtime call: gateway <-> OpenAIRealtimeSession.
 
@@ -1023,7 +1029,7 @@ class RealtimeBridge:
                 retrieve_knowledge,
             )
             if pinned_nodes is not None:
-                nodes = retrieve_pinned_knowledge(pinned_nodes, query, k=2)
+                nodes = retrieve_pinned_knowledge(pinned_nodes, query, k=_REALTIME_KB_K)
             else:
                 nodes = await asyncio.wait_for(
                     retrieve_knowledge(
@@ -1031,7 +1037,7 @@ class RealtimeBridge:
                         tenant_id=tenant_id,
                         campaign_id=self._campaign_id,
                         query=query,
-                        k=2,
+                        k=_REALTIME_KB_K,
                         bump_hits=False,
                     ),
                     # The SHARED per-turn budget (kb_budget), the same one the inject
@@ -1053,6 +1059,15 @@ class RealtimeBridge:
         except Exception as exc:  # noqa: BLE001
             logger.debug("realtime_bridge knowledge lookup err: %s", exc)
             return "I couldn't look that up right now."
+        # Every lookup is logged (headings and coverage only, never the
+        # caller's words): until 2026-10-01 a lookup that found nothing, or
+        # found the wrong section, left no trace at all.
+        logger.info(
+            "realtime_kb_lookup call=%s query_chars=%d hits=%d top=%s coverage=%s",
+            self._call_id, len(query), len(nodes or []),
+            [str((n or {}).get("heading") or "")[:40] for n in (nodes or [])],
+            [round(float((n or {}).get("coverage") or 0), 2) for n in (nodes or [])],
+        )
         if not nodes:
             return _NO_KB_INFO
         parts = []

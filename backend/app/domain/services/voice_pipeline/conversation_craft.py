@@ -69,7 +69,8 @@ CRAFT_REANCHOR = """\
   survey.
 - After you ask, wait — a beat of silence is them thinking, not you failing.
 - Know your campaign's one next step and steer gently toward it — after you
-  have answered what they asked, never instead of it.
+  have answered what they asked, never instead of it. A clear "no" or
+  "nothing" closes that topic: never ask it again in other words.
 - Fresh words every time: if they say hello again or ask you to repeat,
   compress to ONE new shorter line — repeating an earlier sentence verbatim
   is the one thing that gives you away.

@@ -278,7 +278,10 @@ def test_realtime_timeout_matches_the_other_paths_budget(monkeypatch):
     assert time.monotonic() - t0 < 0.5     # honoured the (patched) shared budget
 
     # Retrieval behaviour itself is unchanged (same k, still no hit_count write).
-    assert seen["k"] == 2
+    # Three sections since 2026-10-01: two left the right one out whenever a
+    # catch-all section also matched (Dojo-PC).
+    from app.realtime.bridge import _REALTIME_KB_K
+    assert seen["k"] == _REALTIME_KB_K == 3
     assert seen["bump_hits"] is False
 
 

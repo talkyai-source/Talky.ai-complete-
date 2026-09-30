@@ -221,31 +221,10 @@ async def retrieve_knowledge(
                     ORDER BY n.priority DESC, n.hit_count DESC
                     LIMIT 200
                 ),
-                top_k AS (
-                    SELECT c.id, c.heading, c.summary, c.voice_answer, c.content,
-                           c.search_tsv,
-                           ts_rank(c.search_tsv, tq.q_and) AS fts,
-                           word_similarity($2, c.search_text) AS sim,
-                           row_number() OVER (ORDER BY
-                               CASE WHEN c.search_tsv @@ tq.q_and THEN 2
-                                    WHEN tq.q_or IS NOT NULL AND c.search_tsv @@ tq.q_or THEN 1
-                                    ELSE 0 END DESC,
-                               GREATEST(
-                                   ts_rank(c.search_tsv, COALESCE(tq.q_or, tq.q_and)),
-                                   word_similarity($2, c.search_text)
-                               ) DESC,
-                               c.priority DESC,
-                               c.hit_count DESC
-                           ) AS ord
-                    FROM cand c, tq
-                    ORDER BY ord
-                    LIMIT $3
-                ),
-                -- How much of the QUESTION a hit covers, each query word
+                -- How much of the QUESTION a node covers, each query word
                 -- weighted by how rare it is in this campaign's knowledge
-                -- (idf). A hit that only shares a common word ("pay", "work")
-                -- with the question scores low. Ranking is unchanged: this
-                -- only labels the rows returned.
+                -- (idf). "Dojo" is in almost every node and counts for little;
+                -- "plans", "pricing", "cancel" decide.
                 w AS (
                     SELECT l.lexeme,
                            ln((tot.n + 1.0) / (count(d.id) + 0.5)) AS idf
@@ -260,6 +239,44 @@ async def retrieve_knowledge(
                            ON d.campaign_id = $1 AND d.tenant_id = $5 AND d.enabled
                           AND d.search_tsv @@ plainto_tsquery('simple', l.lexeme)
                     GROUP BY l.lexeme, tot.n
+                ),
+                -- RANKING (2026-10-01). It used to sort first by "contains
+                -- EVERY query word", so a catch-all node ("Version Control",
+                -- "Known Gaps", "AI Retrieval Examples") that mentions
+                -- everything outranked the node the question is ABOUT: on
+                -- Dojo-PC "what has changed in the plan" and "pricing
+                -- structure" never reached "2. Dojo Plans" or "20. Commercial
+                -- Pricing", so the agent kept saying it could not verify.
+                -- Now: rare query words in the HEADING count most, then rare
+                -- words anywhere, then the old all-words tier and match
+                -- strength as smaller terms. Measured on the live Dojo-PC and
+                -- Estimation knowledge before shipping.
+                top_k AS (
+                    SELECT c.id, c.heading, c.summary, c.voice_answer, c.content,
+                           c.search_tsv,
+                           ts_rank(c.search_tsv, tq.q_and) AS fts,
+                           word_similarity($2, c.search_text) AS sim,
+                           row_number() OVER (ORDER BY
+                               COALESCE((SELECT sum(w.idf) FROM w
+                                          WHERE to_tsvector('english', coalesce(c.heading, ''))
+                                                @@ plainto_tsquery('simple', w.lexeme)), 0)
+                                 / NULLIF((SELECT sum(w.idf) FROM w), 0) * 3
+                               + COALESCE(COALESCE((SELECT sum(w.idf) FROM w
+                                          WHERE c.search_tsv @@ plainto_tsquery('simple', w.lexeme)), 0)
+                                 / NULLIF((SELECT sum(w.idf) FROM w), 0), 0)
+                               + CASE WHEN c.search_tsv @@ tq.q_and THEN 0.5
+                                      WHEN tq.q_or IS NOT NULL AND c.search_tsv @@ tq.q_or THEN 0.25
+                                      ELSE 0 END
+                               + 2 * GREATEST(
+                                   ts_rank(c.search_tsv, COALESCE(tq.q_or, tq.q_and)),
+                                   word_similarity($2, c.search_text)
+                               ) DESC NULLS LAST,
+                               c.priority DESC,
+                               c.hit_count DESC
+                           ) AS ord
+                    FROM cand c, tq
+                    ORDER BY ord
+                    LIMIT $3
                 )
                 SELECT t.id, t.heading, t.summary, t.voice_answer, t.content,
                        t.fts, t.sim,
