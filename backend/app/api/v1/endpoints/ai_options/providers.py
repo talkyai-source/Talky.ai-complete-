@@ -22,6 +22,7 @@ from app.domain.models.ai_config import (
     DEEPGRAM_TTS_MODELS,
     ELEVENLABS_TTS_MODELS,
     CEREBRAS_MODELS,
+    GEMINI_MODELS,
     GOOGLE_TTS_MODELS,
     GROQ_MODELS,
     ProviderListResponse,
@@ -78,6 +79,14 @@ async def list_providers(current_user=Depends(get_current_user)):
     if os.getenv("CEREBRAS_API_KEY"):
         llm_providers.append("cerebras")
         llm_models.extend(model.model_dump() for model in CEREBRAS_MODELS)
+    # 2026-10-01 (owner decision): Google is offered again, with exactly ONE
+    # model -- Gemini 3.8 Flash. The older Gemini ids stay accepted on save
+    # (a tenant may have one stored) but are never shown.
+    if os.getenv("GEMINI_API_KEY"):
+        gemini_offered = [m for m in GEMINI_MODELS if m.id == "gemini-3.8-flash"]
+        if gemini_offered:
+            llm_providers.append("gemini")
+            llm_models.extend(model.model_dump() for model in gemini_offered)
 
     return ProviderListResponse(
         llm={

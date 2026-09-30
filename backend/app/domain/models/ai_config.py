@@ -106,6 +106,9 @@ class GeminiModel(str, Enum):
     # GA, newest Flash. Google: balances speed with intelligence, fewer output
     # tokens and fewer tool calls than 3.5 Flash, at a lower price.
     GEMINI_3_6_FLASH = "gemini-3.6-flash"
+    # GA 2026-09-02, newest Flash. Google: "our most intelligent Flash model".
+    # Verified on the production key (ListModels) 2026-10-01.
+    GEMINI_3_8_FLASH = "gemini-3.8-flash"
     # gemini-3.5-flash itself stays OFF the menu (removed 2026-06-25): it
     # NATO-spells emails (S for Sierra…) 3/3 even after the read-back guardrail
     # fix — a model-level quirk prompt rules don't beat, voice-unsafe for
@@ -474,6 +477,22 @@ GEMINI_MODELS = [
         ),
         speed="980 ms median (measured)",
         price="Below 3.5 Flash",
+        context_window=1_048_576,
+        is_preview=False,
+        provider="gemini",
+    ),
+    ModelInfo(
+        id=GeminiModel.GEMINI_3_8_FLASH.value,
+        name="Gemini 3.8 Flash — newest, smartest Flash",
+        description=(
+            "Google's newest and most intelligent Flash model (GA 2 Sep 2026). "
+            "Measured from the prod host on 2026-10-01 with a short prompt: "
+            "first text in 818-1213 ms (median 856), a little quicker than 3.6 "
+            "Flash and about 0.3 s slower than 3.5 Flash-Lite. Choose it for "
+            "answer quality; for the fastest replies, 3.5 Flash-Lite."
+        ),
+        speed="~860 ms to first text (measured)",
+        price="$0.75 / $3.75 per 1M tokens",
         context_window=1_048_576,
         is_preview=False,
         provider="gemini",
