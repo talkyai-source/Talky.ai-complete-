@@ -21,6 +21,7 @@ from app.api.v1.dependencies import get_current_user
 from app.domain.models.ai_config import (
     CEREBRAS_MODELS,
     GEMINI_MODELS,
+    OPENAI_MODELS,
     LLMTestRequest,
     LLMTestResponse,
     TTSTestRequest,
@@ -72,6 +73,7 @@ async def test_llm(request: LLMTestRequest, current_user=Depends(get_current_use
     _PROVIDER_BY_MODEL_ID: list[tuple[str, set[str], str]] = [
         ("gemini", {m.id for m in GEMINI_MODELS}, "GEMINI_API_KEY"),
         ("cerebras", {m.id for m in CEREBRAS_MODELS}, "CEREBRAS_API_KEY"),
+        ("openai", {m.id for m in OPENAI_MODELS}, "OPENAI_API_KEY"),
     ]
 
     provider_name = "groq"
@@ -97,6 +99,9 @@ async def test_llm(request: LLMTestRequest, current_user=Depends(get_current_use
         elif provider_name == "cerebras":
             from app.infrastructure.llm.cerebras import CerebrasLLMProvider
             llm = CerebrasLLMProvider()
+        elif provider_name == "openai":
+            from app.infrastructure.llm.openai_chat import OpenAIChatLLMProvider
+            llm = OpenAIChatLLMProvider()
         else:
             llm = GroqLLMProvider()
         await llm.initialize({

@@ -25,6 +25,7 @@ from app.domain.models.ai_config import (
     GEMINI_MODELS,
     GOOGLE_TTS_MODELS,
     GROQ_MODELS,
+    OPENAI_MODELS,
     ProviderListResponse,
     STT_ENGINES,
 )
@@ -87,6 +88,10 @@ async def list_providers(current_user=Depends(get_current_user)):
         if gemini_offered:
             llm_providers.append("gemini")
             llm_models.extend(model.model_dump() for model in gemini_offered)
+    # GPT-6 Luna, on the OpenAI key GPT Realtime already uses.
+    if os.getenv("OPENAI_API_KEY"):
+        llm_providers.append("openai")
+        llm_models.extend(model.model_dump() for model in OPENAI_MODELS)
 
     return ProviderListResponse(
         llm={

@@ -50,3 +50,9 @@ try:
 except ImportError:
     pass  # cerebras-cloud-sdk not installed; Cerebras provider unavailable
 
+try:
+    from app.infrastructure.llm.openai_chat import OpenAIChatLLMProvider
+    LLMFactory.register("openai", OpenAIChatLLMProvider)
+except ImportError:
+    pass  # its base (the Cerebras provider) is unavailable
+

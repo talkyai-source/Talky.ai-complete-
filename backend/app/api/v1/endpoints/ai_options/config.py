@@ -22,6 +22,7 @@ from app.domain.models.ai_config import (
     CEREBRAS_MODELS,
     CEREBRAS_MODELS_HIDDEN,
     GEMINI_MODELS,
+    OPENAI_MODELS,
     GOOGLE_TTS_MODELS,
     GROQ_MODELS,
     GROQ_MODELS_HIDDEN,
@@ -203,6 +204,7 @@ async def save_config(
         "groq": [m.id for m in GROQ_MODELS] + GROQ_MODELS_HIDDEN,
         "gemini": [m.id for m in GEMINI_MODELS],
         "cerebras": [m.id for m in CEREBRAS_MODELS] + CEREBRAS_MODELS_HIDDEN,
+        "openai": [m.id for m in OPENAI_MODELS],
     }
 
     if config.llm_provider not in _llm_models_by_provider:
