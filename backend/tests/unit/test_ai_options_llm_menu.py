@@ -20,7 +20,9 @@ from app.domain.models.ai_config import AIProviderConfig
 
 
 @pytest.mark.asyncio
-async def test_providers_menu_offers_only_cerebras_120b_and_groq_20b(monkeypatch):
+async def test_providers_menu_offers_exactly_the_three_chosen_models(monkeypatch):
+    """Owner decision 2026-10-01: GPT-OSS 120B (Cerebras), GPT-OSS 20B (Groq)
+    and, from Google, Gemini 3.8 Flash only -- no other Gemini id is shown."""
     monkeypatch.setenv("GEMINI_API_KEY", "set-on-prod")
     monkeypatch.setenv("CEREBRAS_API_KEY", "set-on-prod")
     monkeypatch.setenv("GROQ_API_KEY", "set-on-prod")
@@ -28,9 +30,24 @@ async def test_providers_menu_offers_only_cerebras_120b_and_groq_20b(monkeypatch
 
     response = await list_providers()
 
-    assert sorted(response.llm["providers"]) == ["cerebras", "groq"]
+    assert sorted(response.llm["providers"]) == ["cerebras", "gemini", "groq"]
     offered = {(m["provider"], m["id"]) for m in response.llm["models"]}
-    assert offered == {("cerebras", "gpt-oss-120b"), ("groq", "openai/gpt-oss-20b")}
+    assert offered == {
+        ("cerebras", "gpt-oss-120b"),
+        ("groq", "openai/gpt-oss-20b"),
+        ("gemini", "gemini-3.8-flash"),
+    }
+
+
+@pytest.mark.asyncio
+async def test_without_a_gemini_key_google_is_not_offered(monkeypatch):
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.setenv("CEREBRAS_API_KEY", "set-on-prod")
+    from app.api.v1.endpoints.ai_options.providers import list_providers
+
+    response = await list_providers()
+
+    assert "gemini" not in response.llm["providers"]
 
 
 def test_benchmark_uses_cerebras_for_a_cerebras_config(monkeypatch):

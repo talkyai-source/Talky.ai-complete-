@@ -28,13 +28,31 @@ def build_realtime_persona(config):
             "getting into it. Don't recite their details back robotically."
         )
 
+    guidance = (config.realtime_prompt or {}).get("instructions", "") or ""
+    if extra_notes is None and direction_text != "inbound":
+        # Same rule as the cascaded prompt: a script that greets the callee
+        # by name, with no name on file, must not have the agent fill the slot
+        # with its own name ("Hi, is that Alex?" -- browser test 98b83aaf).
+        from app.domain.services.telephony_session_config import (
+            script_greets_callee_by_name,
+        )
+
+        if script_greets_callee_by_name(guidance):
+            extra_notes = (
+                "No name is on file for this call. Where the campaign guidance "
+                'greets them by name (for example "Hi, is that [First Name]?"), '
+                "greet them without a name instead and ask who you're speaking "
+                "with if you need to. Never put your own name or any other name "
+                "in that place."
+            )
+
     return RealtimePersona(
         agent_name=str(agent_name),
         company_name=str(company),
         role="a friendly voice assistant",
         goal=(config.realtime_prompt or {}).get("goal") or "Help the caller using verified company information.",
         extra_notes=extra_notes,
-        campaign_guidance=(config.realtime_prompt or {}).get("instructions", ""),
+        campaign_guidance=guidance,
         persona_type=(config.realtime_prompt or {}).get("persona", "assistant"),
         call_direction=direction_text,
         opening_greeting=getattr(

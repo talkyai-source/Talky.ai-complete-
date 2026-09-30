@@ -949,9 +949,36 @@ async def campaign_test_websocket(
             auth_task = asyncio.create_task(_watch_login_session(
                 websocket, container.db_pool, user_id, payload.get("sid"), tenant_id,
             ))
-            done, _ = await asyncio.wait({receiver_task, auth_task}, return_when=asyncio.FIRST_COMPLETED)
+            waiters = {receiver_task, auth_task}
+            realtime_task = voice_session.pipeline_task if is_realtime else None
+            if realtime_task is not None:
+                waiters.add(realtime_task)
+            done, _ = await asyncio.wait(waiters, return_when=asyncio.FIRST_COMPLETED)
+            if realtime_task is not None and realtime_task in done:
+                # The realtime connection stopped while the browser was still
+                # connected. Say so and end the test, instead of leaving the
+                # tester speaking into a line nobody is listening to
+                # (980a2caa, 0457b4b9: 30-60 s of dropped audio after it ended).
+                reason = None
+                if not realtime_task.cancelled() and realtime_task.exception():
+                    reason = str(realtime_task.exception())
+                logger.warning(
+                    "campaign_test_realtime_ended call=%s reason=%s",
+                    call_id[:8], reason or "ended",
+                )
+                try:
+                    await websocket.send_json({
+                        "type": "error",
+                        "code": "realtime_ended",
+                        "message": "The realtime voice stopped"
+                        + (f": {reason}" if reason else "."),
+                    })
+                    await websocket.close(code=1011, reason="realtime ended")
+                except Exception:  # noqa: BLE001 - the socket may already be gone
+                    pass
             for task in done:
-                await task
+                if task is not realtime_task:
+                    await task
 
         except CampaignPromptValidationError as exc:
             await websocket.send_json({"type": "error", "code": "campaign_prompt_invalid",

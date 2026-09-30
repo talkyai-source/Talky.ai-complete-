@@ -76,7 +76,10 @@ def test_real_pinned_builder_separates_direction_and_hashes_final_prompt(mode, a
         assert phrase not in config.system_prompt
     if pipeline == "realtime":
         text = build_realtime_instructions(VoiceOrchestrator._build_realtime_persona(config))
-        assert "Preserve fixture-guidance exactly." not in text
+        # The campaign's own guidance reaches the Realtime agent when the
+        # campaign has no Realtime-specific prompt (it had been dropped, and
+        # the agent knew nothing about the campaign: 980a2caa, 2026-09-30).
+        assert "Preserve fixture-guidance exactly." in text
         assert config.system_prompt == text
         assert config.prompt_version == "realtime@3"
         assert "caller contacted the company" in text
