@@ -177,10 +177,18 @@ _NOT_A_SCRIPT_QUESTION = re.compile(
 )
 
 
-def answered_questions(history: Iterable[Any], *, limit: int = 4) -> list[tuple[str, str]]:
+# A reply that is only a greeting or a "pardon?" did not answer anything.
+_NOT_AN_ANSWER = frozenset(
+    "hello hi hey hiya sorry what pardon huh hmm um uh er eh okay ok".split()
+)
+
+
+def answered_questions(history: Iterable[Any], *, limit: int = 8) -> list[tuple[str, str]]:
     """(question, answer) pairs: an agent question followed directly by a
-    caller reply of two or more words that is not itself a question. Most
-    recent last, at most ``limit``."""
+    caller reply that is not itself a question or only a greeting. One word
+    is an answer ("Yes.", and on call 2a75a4bb "zero" -- the caller's answer to
+    the tendering question as heard, which was then asked again). Most recent
+    last, at most ``limit``."""
     items = list(history or [])
     pairs: list[tuple[str, str]] = []
     for i, m in enumerate(items[:-1]):
@@ -196,7 +204,8 @@ def answered_questions(history: Iterable[Any], *, limit: int = 4) -> list[tuple[
         if str(getattr(getattr(nxt, "role", None), "value", getattr(nxt, "role", ""))) != "user":
             continue
         answer = str(getattr(nxt, "content", "") or "").strip()
-        if len(re.findall(r"[a-z']+", answer.lower())) < 2 or answer.endswith("?"):
+        words = re.findall(r"[a-z0-9']+", answer.lower())
+        if not words or answer.endswith("?") or all(w in _NOT_AN_ANSWER for w in words):
             continue
         pairs.append((q, answer))
     return pairs[-limit:]
@@ -230,7 +239,7 @@ def repeats_answered_question(
 def answered_note(answered: Iterable[tuple[str, str]]) -> Optional[str]:
     """One short line for the turn note: what is already answered."""
     items = [
-        f'"{q[:90]}" (they said: "{a[:60]}")' for q, a in answered
+        f'"{q[:80]}" (they said: "{a[:40]}")' for q, a in answered
     ]
     if not items:
         return None
