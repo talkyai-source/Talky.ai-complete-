@@ -138,6 +138,22 @@ def _is_platform_default(trunk: TrunkRow, platform_name: str) -> bool:
     return trunk.trunk_name.strip().lower() == platform_name.strip().lower()
 
 
+def _trunk_own_verified_number(
+    trunk_caller_id: Optional[str], dialable_numbers: Sequence[DidRow]
+) -> Optional[str]:
+    """The tenant's verified DID that equals the trunk's configured caller-ID
+    (digits compared, so "17789249977" matches "+17789249977"), or None."""
+    want = "".join(ch for ch in str(trunk_caller_id or "") if ch.isdigit())
+    if not want:
+        return None
+    verified = PhoneNumberStatus.VERIFIED.value
+    for row in dialable_numbers:
+        have = "".join(ch for ch in str(row.e164 or "") if ch.isdigit())
+        if row.status == verified and have == want:
+            return row.e164
+    return None
+
+
 def _select_caller_id(
     dialable_numbers: Sequence[DidRow],
     *,
@@ -221,9 +237,19 @@ def choose_outbound_route(
                 str(t.id),
             ),
         )[-1]
-        # Caller-ID: prefer a verified DID; else the trunk's own configured
-        # caller-ID (metadata.caller_id); else None.
-        caller_id = _select_caller_id(dialable_numbers, is_production=is_production)
+        # Caller-ID: the trunk's own configured caller-ID when the tenant has
+        # VERIFIED that number (the owner pinned it to this trunk and proved
+        # it is theirs); else prefer a verified DID; else the trunk's own
+        # configured caller-ID (metadata.caller_id); else None.
+        #
+        # 2026-09-30: Dojo-PC's trunk "17789249977" is set to present
+        # 17789249977, which is a verified number of the tenant, but only
+        # +442046132300 carries a STIR/SHAKEN token, so every call on the 9977
+        # account presented ...300 -- a number that account does not own --
+        # and was rejected by the carrier within a second.
+        caller_id = _trunk_own_verified_number(own.caller_id, dialable_numbers)
+        if caller_id is None:
+            caller_id = _select_caller_id(dialable_numbers, is_production=is_production)
         if caller_id is None and own.caller_id:
             caller_id = own.caller_id.strip() or None
 

@@ -338,3 +338,33 @@ async def test_pool_assignment_uses_current_health_not_stale_snapshot(monkeypatc
     assert route is not None
     assert route.refused is False
     assert route.endpoint == "trunk-11111111-1111-1111-1111-111111111111"
+
+
+def test_trunk_caller_id_that_is_a_verified_tenant_number_wins():
+    """Dojo-PC, 2026-09-30: the trunk "17789249977" presents 17789249977, a
+    verified number of the tenant, but only +442046132300 has a STIR/SHAKEN
+    token -- so every call on the 9977 account presented ...300 and the
+    carrier rejected it. The number pinned on the trunk, once verified, wins."""
+    trunks = [
+        TrunkRow(id="own", trunk_name="17789249977", is_active=True, caller_id="17789249977"),
+    ]
+    dids = [
+        DidRow("+442046132300", "verified", "tok"),
+        DidRow("+17789249977", "verified", None),
+    ]
+    for shared in (True, False):
+        route = _route(trunks, dids, is_production=True, shared_default_enabled=shared)
+        assert route.endpoint == "trunk-own"
+        assert route.caller_id == "+17789249977"
+
+
+def test_unverified_trunk_caller_id_does_not_beat_an_attested_did():
+    trunks = [
+        TrunkRow(id="own", trunk_name="byo", is_active=True, caller_id="17789249977"),
+    ]
+    dids = [
+        DidRow("+442046132300", "verified", "tok"),
+        DidRow("+17789249977", "pending", None),
+    ]
+    route = _route(trunks, dids, is_production=True, shared_default_enabled=False)
+    assert route.caller_id == "+442046132300"
