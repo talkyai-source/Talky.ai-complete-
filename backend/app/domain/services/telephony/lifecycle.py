@@ -3445,7 +3445,7 @@ def _build_pinned_inbound_config(
     config.realtime_greet_on_start = first_speaker == "agent"
     config.realtime_opening_greeting = pinned_greeting if config.realtime_greet_on_start else None
     config.realtime_message_intake = selected_action == "voicemail"
-    if config.pipeline_mode == "realtime":
+    if getattr(config, "pipeline_mode", None) == "realtime":
         from app.realtime.prompt_config import prepare_realtime_prompt
         prepare_realtime_prompt(config)
     return config, pinned_campaign

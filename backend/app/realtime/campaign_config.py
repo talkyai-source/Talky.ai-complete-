@@ -21,7 +21,20 @@ def build_realtime_campaign_config(*, source, campaign, script, gateway_type,
     settings = script.get("realtime_settings")
     if settings is None:
         settings = source.realtime_settings
-    validate_realtime(model, voice, settings)
+    try:
+        validate_realtime(model, voice, settings)
+    except ValueError as exc:
+        # A saved voice the catalog no longer lists must not stop a call from
+        # starting; saving is where an unsupported voice is refused. Use the
+        # default voice and say so.
+        if "voice" not in str(exc).lower():
+            raise
+        import logging
+        logging.getLogger(__name__).warning(
+            "realtime_voice_unsupported voice=%r -- using the default voice", voice
+        )
+        voice = "marin"
+        validate_realtime(model, voice, settings)
     names = script.get("agent_names") or ["Alex"]
     name = clean(agent_name_override or names[0])
     company = clean(script.get("company_name")) or "the company"
