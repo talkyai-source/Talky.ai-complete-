@@ -447,13 +447,16 @@ export default function AIOptionsPage() {
     // mode) so it scrolls with the page instead of hovering over the fixed
     // bottom-right chat launcher. Sized like the other header actions (see
     // "Run Benchmark"); label, icon, colour and action are unchanged.
-    const saveConfigButton = (
+    // In cascaded mode it renders twice — header (md and up) and inside the
+    // Test LLM card next to Send (below md) — with display-based hiding, so
+    // exactly one instance is in the accessibility tree at any width.
+    const saveConfigButton = (className: string) => (
         <button
             type="button"
             onClick={handleSaveConfig}
             disabled={saving}
             aria-busy={saving}
-            className="ml-auto flex items-center gap-2 rounded-lg bg-emerald-500 px-4 py-2 font-semibold text-white transition hover:bg-emerald-600 disabled:cursor-wait disabled:opacity-70 disabled:hover:bg-emerald-500"
+            className={`${className} items-center gap-2 rounded-lg bg-emerald-500 font-semibold text-white transition hover:bg-emerald-600 disabled:cursor-wait disabled:opacity-70 disabled:hover:bg-emerald-500`}
         >
             {saving ? <RefreshCw className="h-4 w-4 animate-spin" aria-hidden /> : <Save className="h-4 w-4" aria-hidden />}
             <span>{saving ? "Saving…" : "Save Configuration"}</span>
@@ -541,7 +544,7 @@ export default function AIOptionsPage() {
                                 that card doesn't render here and RealtimeControls owns
                                 its own header, so Save sits in a slim right-aligned row
                                 above it (the button carries ml-auto). */}
-                            <div className="flex">{saveConfigButton}</div>
+                            <div className="flex">{saveConfigButton("ml-auto flex px-4 py-2")}</div>
                             <RealtimeControls config={config} catalog={providers?.realtime} onChange={setConfig}
                                 onPreview={(voice) => { void handlePreviewVoiceById(voice, { provider: "realtime" }); }}
                                 previewing={Boolean(previewingVoiceId)} />
@@ -894,11 +897,12 @@ export default function AIOptionsPage() {
 
                     {/* Test LLM */}
                     <Card delay={0.25} className="xl:col-span-12">
-                        <SectionHeader icon={<MessageSquare className="h-5 w-5" />} title="Test LLM" subtitle="Send a message to the selected model" right={saveConfigButton} />
+                        <SectionHeader icon={<MessageSquare className="h-5 w-5" />} title="Test LLM" subtitle="Send a message to the selected model" right={saveConfigButton("ml-auto hidden md:flex px-4 py-2")} />
                         <div className="space-y-4">
                             <div className="flex flex-col gap-3 sm:flex-row">
                                 <input type="text" value={testMessage} onChange={(e) => setTestMessage(e.target.value)} onKeyDown={(e) => e.key === "Enter" && handleTestLLM()} placeholder="Type a message to test the LLM…" className="flex-1 rounded-lg border border-border bg-background px-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground outline-none transition focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/40" />
                                 <button onClick={handleTestLLM} disabled={testing || !testMessage.trim()} className="flex items-center justify-center gap-2 rounded-lg bg-emerald-500 px-6 py-2.5 font-medium text-white transition hover:bg-emerald-600 disabled:opacity-50">{testing ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}<span>Send</span></button>
+                                {saveConfigButton("flex md:hidden w-full sm:w-auto justify-center px-6 py-2.5")}
                             </div>
                             {testResponse && <div className="rounded-lg border border-border bg-muted/40 p-4"><p className="whitespace-pre-wrap text-sm text-foreground">{testResponse}</p></div>}
                         </div>
