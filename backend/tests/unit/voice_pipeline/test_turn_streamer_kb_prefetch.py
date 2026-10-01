@@ -82,9 +82,9 @@ class _FakePipeline:
         return None
 
     @staticmethod
-    def _find_sentence_end(buf, allow_clause=False):
-        idx = buf.find(".")
-        return idx
+    def _find_sentence_end(buf, allow_clause=False, *, known_hosts=()):
+        from app.domain.services.voice_pipeline.sentence_segmentation import find_sentence_end
+        return find_sentence_end(buf, allow_clause=allow_clause, known_hosts=known_hosts)
 
     async def synthesize_and_send_audio(self, session, sentence, websocket, track_latency=False):
         return False  # not interrupted
@@ -94,8 +94,13 @@ async def _slow_knowledge_block(session, messages):
     """Stand-in for _knowledge_block_for_turn: records start/resolve times so
     the test can assert ordering, and sleeps to simulate a cache-miss FTS
     round trip."""
-    t0 = time.monotonic()
     await asyncio.sleep(_KB_DELAY_S)
+    # Mirror the verified-source side effect of the real retrieval boundary.
+    session._knowledge_grounding = ["Our standard rate is $50 per hour."]
+    session._knowledge_evidence = {
+        "status": "matched",
+        "passages": [{"text": session._knowledge_grounding[0], "coverage": 1.0}],
+    }
     session._test_call_log.append(("kb_resolved", time.monotonic()))
     return "COMPANY KNOWLEDGE: rates are $50/hr."
 

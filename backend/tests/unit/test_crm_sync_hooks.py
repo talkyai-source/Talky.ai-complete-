@@ -2,7 +2,6 @@
 resolver's per-provider lookup they depend on."""
 from __future__ import annotations
 
-import asyncio
 import os
 from types import SimpleNamespace
 
@@ -46,7 +45,7 @@ def test_handle_call_status_source_calls_the_crm_hook_after_durable_settlement()
     assert src.index("self._schedule_crm_sync(call_uuid)") < src.index("Day 1: Event logging")
 
 
-def test_persister_runs_the_crm_sync_after_the_summary(monkeypatch):
+async def test_persister_runs_the_crm_sync_after_the_summary(monkeypatch):
     order = []
 
     async def fake_generate(pool, tenant_id, call_id):
@@ -58,11 +57,11 @@ def test_persister_runs_the_crm_sync_after_the_summary(monkeypatch):
 
     monkeypatch.setattr(persister, "generate_and_store", fake_generate)
     monkeypatch.setattr("app.services.crm_sync_service.run_crm_sync", fake_sync)
-    asyncio.get_event_loop().run_until_complete(persister._safe_generate(object(), TENANT, "call-3"))
+    await persister._safe_generate(object(), TENANT, "call-3")
     assert order == [("summary", TENANT, "call-3"), ("crm", TENANT, "call-3", "summary")]
 
 
-def test_persister_still_syncs_when_the_summary_fails(monkeypatch):
+async def test_persister_still_syncs_when_the_summary_fails(monkeypatch):
     seen = []
 
     async def failing_generate(pool, tenant_id, call_id):
@@ -73,7 +72,7 @@ def test_persister_still_syncs_when_the_summary_fails(monkeypatch):
 
     monkeypatch.setattr(persister, "generate_and_store", failing_generate)
     monkeypatch.setattr("app.services.crm_sync_service.run_crm_sync", fake_sync)
-    asyncio.get_event_loop().run_until_complete(persister._safe_generate(object(), TENANT, "call-4"))
+    await persister._safe_generate(object(), TENANT, "call-4")
     assert seen == ["call-4"]
 
 
@@ -133,7 +132,7 @@ class _Connector:
         self.token = token
 
 
-def test_resolver_filters_by_provider_and_applies_persisted_config(monkeypatch):
+async def test_resolver_filters_by_provider_and_applies_persisted_config(monkeypatch):
     from cryptography.fernet import Fernet
 
     from app.infrastructure.connectors import encryption as enc_module
@@ -146,6 +145,7 @@ def test_resolver_filters_by_provider_and_applies_persisted_config(monkeypatch):
         "connectors": [_resp([{"id": "c-sf", "provider": "salesforce", "status": "active",
                                "created_at": "2026-09-07", "config": {"instance_url": "https://acme.my.salesforce.com"}}])],
         "connector_accounts": [_resp([{"id": "acc-1", "access_token_encrypted": enc.encrypt("AT"),
+                                       "external_account_id": "verified-salesforce-org",
                                        "refresh_token_encrypted": enc.encrypt("RT"),
                                        "token_expires_at": "2999-01-01T00:00:00+00:00", "last_refreshed_at": None}])],
     })
@@ -153,12 +153,11 @@ def test_resolver_filters_by_provider_and_applies_persisted_config(monkeypatch):
         connector_resolver.ConnectorFactory, "create",
         classmethod(lambda cls, provider, tenant_id, connector_id: _Connector(tenant_id, connector_id)),
     )
-    connector, cid, provider = asyncio.get_event_loop().run_until_complete(
-        connector_resolver.resolve_active_connector(db, TENANT, "crm", provider="salesforce")
-    )
+    connector, cid, provider = await connector_resolver.resolve_active_connector(db, TENANT, "crm", provider="salesforce")
     assert cid == "c-sf" and provider == "salesforce"
     assert connector.applied == {"instance_url": "https://acme.my.salesforce.com"}
     assert connector.token == "AT"
+    assert connector.external_account_id == "verified-salesforce-org"
     assert ("provider", "salesforce") in db.calls[0][1]
     assert ("type", "crm") in db.calls[0][1]
     enc_module.reset_encryption_service()

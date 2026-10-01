@@ -12,7 +12,7 @@ from urllib.parse import urlencode
 import httpx
 
 from app.infrastructure.connectors.base import ConnectorFactory, OAuthTokens
-from app.infrastructure.connectors.calendar.base import CalendarProvider, CalendarEvent
+from app.infrastructure.connectors.calendar.base import CalendarProvider, CalendarEvent, utc_datetime, available_intervals
 
 logger = logging.getLogger(__name__)
 
@@ -201,12 +201,12 @@ class OutlookCalendarConnector(CalendarProvider):
         event_body = {
             "subject": title,
             "start": {
-                "dateTime": start_time.strftime("%Y-%m-%dT%H:%M:%S"),
-                "timeZone": timezone
+                "dateTime": utc_datetime(start_time).strftime("%Y-%m-%dT%H:%M:%S"),
+                "timeZone": "UTC"
             },
             "end": {
-                "dateTime": end_time.strftime("%Y-%m-%dT%H:%M:%S"),
-                "timeZone": timezone
+                "dateTime": utc_datetime(end_time).strftime("%Y-%m-%dT%H:%M:%S"),
+                "timeZone": "UTC"
             }
         }
         
@@ -293,12 +293,12 @@ class OutlookCalendarConnector(CalendarProvider):
             update_body["location"] = {"displayName": location}
         if start_time is not None:
             update_body["start"] = {
-                "dateTime": start_time.strftime("%Y-%m-%dT%H:%M:%S"),
+                "dateTime": utc_datetime(start_time).strftime("%Y-%m-%dT%H:%M:%S"),
                 "timeZone": "UTC"
             }
         if end_time is not None:
             update_body["end"] = {
-                "dateTime": end_time.strftime("%Y-%m-%dT%H:%M:%S"),
+                "dateTime": utc_datetime(end_time).strftime("%Y-%m-%dT%H:%M:%S"),
                 "timeZone": "UTC"
             }
         if attendees is not None:
@@ -348,8 +348,8 @@ class OutlookCalendarConnector(CalendarProvider):
     ) -> List[CalendarEvent]:
         """List events in a time range."""
         params = {
-            "startDateTime": start_time.isoformat() + "Z",
-            "endDateTime": end_time.isoformat() + "Z",
+            "startDateTime": utc_datetime(start_time).isoformat(),
+            "endDateTime": utc_datetime(end_time).isoformat(),
             "$top": max_results,
             "$orderby": "start/dateTime"
         }
@@ -357,26 +357,26 @@ class OutlookCalendarConnector(CalendarProvider):
         async with httpx.AsyncClient() as client:
             response = await client.get(
                 f"{self.API_BASE_URL}/me/calendarView?{urlencode(params)}",
-                headers=self._get_auth_headers()
+                headers={**self._get_auth_headers(), "Prefer": 'outlook.timezone="UTC"'}
             )
             
             if response.status_code != 200:
                 raise ValueError(f"List events failed: {response.text}")
             
             data = response.json()
+            if max_results >= 1000 and data.get("@odata.nextLink"):
+                raise ValueError("Calendar availability exceeded the complete lookup limit")
             events = []
             
             for item in data.get("value", []):
+                if item.get("isCancelled") or item.get("showAs") == "free":
+                    continue
                 events.append(CalendarEvent(
                     id=item["id"],
                     title=item.get("subject", ""),
                     description=item.get("body", {}).get("content"),
-                    start_time=datetime.fromisoformat(
-                        item["start"]["dateTime"].replace("Z", "")
-                    ),
-                    end_time=datetime.fromisoformat(
-                        item["end"]["dateTime"].replace("Z", "")
-                    ),
+                    start_time=utc_datetime(item["start"]["dateTime"]),
+                    end_time=utc_datetime(item["end"]["dateTime"]),
                     timezone=item["start"].get("timeZone", "UTC"),
                     location=item.get("location", {}).get("displayName"),
                     attendees=[a["emailAddress"]["address"] for a in item.get("attendees", [])]
@@ -395,37 +395,10 @@ class OutlookCalendarConnector(CalendarProvider):
         
         Uses Graph API calendarView to get events and finds gaps.
         """
-        # Get existing events
-        events = await self.list_events(start_time, end_time)
-        
-        # Build busy periods
-        busy_periods = [
-            (event.start_time, event.end_time)
-            for event in events
-            if event.start_time and event.end_time
-        ]
-        busy_periods.sort(key=lambda x: x[0])
-        
-        # Find free slots
-        available = []
-        current = start_time
-        slot_duration = timedelta(minutes=duration_minutes)
-        
-        for busy_start, busy_end in busy_periods:
-            if current + slot_duration <= busy_start:
-                available.append({
-                    "start": current,
-                    "end": busy_start
-                })
-            current = max(current, busy_end)
-        
-        if current + slot_duration <= end_time:
-            available.append({
-                "start": current,
-                "end": end_time
-            })
-        
-        return available
+        events = await self.list_events(start_time, end_time, max_results=1000)
+        return available_intervals(start_time, end_time,
+            [(event.start_time, event.end_time) for event in events if event.start_time and event.end_time],
+            duration_minutes)
 
 
 # Register with factory

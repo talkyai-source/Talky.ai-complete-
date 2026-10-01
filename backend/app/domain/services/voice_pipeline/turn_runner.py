@@ -23,6 +23,7 @@ from app.domain.models.session import CallSession
 from app.domain.services.end_session_action import (
     parse_end_session_action,
     should_honor_end_session,
+    previous_assistant_turn,
 )
 from app.domain.services.voice_pipeline import capture_mode
 from app.services.scripts import (
@@ -40,6 +41,7 @@ from app.services.scripts.spoken_email_normalizer import (
 from app.domain.services.voice_pipeline.confirm_llm import llm_confirmation_verdict
 from app.domain.services.voice_pipeline.identity_disposition import (
     IdentityDisposition,
+    contains_dnc,
     contains_explicit_goodbye,
 )
 
@@ -102,19 +104,15 @@ def _drop_last_message(history, content) -> None:
 def _note_unheard_greeting_bargein(session) -> None:
     """A barge-in cancelled a turn before ANY audio reached the caller (issue #23).
 
-    On the opening turn that leaves ``_has_introduced`` False, so the next turn
-    re-greets from the top — and a caller who keeps talking over the very start
-    makes it loop the intro. Allow one clean re-attempt, then bound it: after a
-    second unheard opening barge-in, mark the agent introduced so it picks up the
-    conversation instead of restarting its greeting forever. No-op once introduced.
+    Keep interruption separate from delivery. The live prompt uses this count
+    to follow the caller's latest words without restarting the opening; an
+    unheard introduction must never become delivered identity evidence.
     """
     if getattr(session, "_has_introduced", False):
         return
     n = getattr(session, "_greeting_bargein_count", 0) + 1
     try:
         session._greeting_bargein_count = n
-        if n >= 2:
-            session._has_introduced = True
     except Exception:  # pragma: no cover - defensive
         pass
 
@@ -567,6 +565,9 @@ class TurnRunner:
         Returns (response_text, llm_latency_ms, tts_latency_ms).
         """
         call_id = session.call_id
+        # The finisher also handles plain goodbye replies. Record when this
+        # runner owns the close so the same turn cannot shut down twice.
+        session._end_session_action_handled = False
         history_snapshot = len(session.conversation_history)
         session.conversation_history.append(
             Message(role=MessageRole.USER, content=full_transcript)
@@ -723,6 +724,8 @@ class TurnRunner:
                 if self._p._supports_llm_end_session_action(session)
                 else None
             )
+            if ask_ai_end_action and ask_ai_end_action.get("do_not_call") and not contains_dnc(full_transcript):
+                ask_ai_end_action = {**ask_ai_end_action, "do_not_call": False}
 
             # Phantom-goodbye guard: the model emitted an end-session action but
             # the caller never actually signalled they were done. Suppress the
@@ -752,6 +755,7 @@ class TurnRunner:
                 )
                 if _wrong_person_block or not should_honor_end_session(
                     ask_ai_end_action, full_transcript, user_turns, declined_count=_declined,
+                    previous_assistant_text=previous_assistant_turn(session.conversation_history),
                 ):
                     logger.info(
                         "phantom_goodbye_suppressed call_id=%s reason=%s user_turns=%d "
@@ -777,7 +781,7 @@ class TurnRunner:
                 # the session so the call-end teardown runs the opt-out purge
                 # (DNC + cancel scheduled jobs + mark lead DNC). We only set
                 # the flag here; the side effects run once, at hangup.
-                if ask_ai_end_action.get("do_not_call"):
+                if ask_ai_end_action.get("do_not_call") and contains_dnc(full_transcript):
                     try:
                         session._caller_opted_out = True
                     except Exception:
@@ -786,6 +790,7 @@ class TurnRunner:
                         "caller_opt_out_detected call_id=%s — will purge at hangup",
                         getattr(session, "call_id", "?"),
                     )
+                session._end_session_action_handled = True
                 await self._p._shutdown_session_for_end_action(
                     session,
                     websocket,

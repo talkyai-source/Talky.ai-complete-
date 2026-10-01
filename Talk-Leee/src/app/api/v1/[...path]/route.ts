@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import nodemailer from "nodemailer";
+import nodemailer, { type Transporter } from "nodemailer";
 import { z } from "zod";
 import { buildResponsiveHtmlDocument } from "@/lib/email-utils";
 import { getWhiteLabelBranding } from "@/lib/white-label/branding";
@@ -367,7 +367,7 @@ function parseBoolEnv(name: string, fallback: boolean) {
     throw new Error(`Invalid boolean for ${name}: ${raw}`);
 }
 
-let cachedTransport: nodemailer.Transporter | undefined;
+let cachedTransport: Transporter | undefined;
 let cachedVerify: Promise<void> | undefined;
 
 function createEmailTransport() {

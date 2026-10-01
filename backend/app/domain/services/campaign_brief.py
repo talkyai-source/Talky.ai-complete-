@@ -10,6 +10,7 @@ from __future__ import annotations
 import re
 from collections.abc import Mapping, Sequence
 from typing import Any
+from app.domain.services.voice_action_config import normalize_action_config
 
 MAX_BRIEF_IDENTITY_CHARS = 120
 MAX_DECISION_MAKER_ROLE_CHARS = 160
@@ -219,6 +220,7 @@ def normalize_campaign_brief(
             max_len=MAX_OPENING_OBJECTIVE_CHARS,
         ),
         "max_objection_attempts": max_objections,
+        **normalize_action_config(raw),
     }
 
 

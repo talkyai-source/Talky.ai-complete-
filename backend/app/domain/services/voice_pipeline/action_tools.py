@@ -5,11 +5,9 @@ imaginary side effect.  Every action in this module returns the same bounded,
 machine-readable result shape.  A model may describe an action as completed
 only when ``confirmation_allowed`` is true in that result.
 
-Callback scheduling, email delivery, form submission, and controlled transfer
-do not currently have a live executor in the voice runtime, so they fail
-closed.  ``end_call`` is the sole executable action: it records an accepted
-request on the existing session flag; the normal turn finisher performs the
-PBX hangup after the model's short closing line has played.
+Campaign-authorized actions use existing business services and durable receipts.
+``end_call`` records an accepted request on the existing session flag; the
+normal turn finisher performs hangup after the short closing line has played.
 """
 
 from __future__ import annotations
@@ -68,8 +66,9 @@ _ACTION_PARAMETERS = {
         "properties": {
             "requested_time": {
                 "type": "string",
-                "description": "The caller's requested callback time, if known.",
-            }
+                "description": "Proposed exact ISO8601 callback datetime, read back before execution.",
+            },
+            "timezone": {"type": "string", "description": "Caller-confirmed IANA timezone, such as Europe/London."},
         },
         "additionalProperties": False,
     },
@@ -128,17 +127,16 @@ _UNAVAILABLE_MESSAGES = {
 
 _SAFE_FAILURE_SPEECH = {
     ACTION_SCHEDULE_CALLBACK: (
-        "I can't schedule a callback from this call, but I can take the details "
-        "for the team."
+        "I can't confirm a scheduled callback from this call."
     ),
     ACTION_SEND_EMAIL: (
-        "I can't send an email from this call, but I can take the address for the team."
+        "I can't confirm that the email was sent."
     ),
     ACTION_SUBMIT_FORM: (
-        "I can't submit that form from this call, but I can take the details for the team."
+        "I can't confirm that the form was submitted."
     ),
     ACTION_TRANSFER_CALL: (
-        "I can't transfer the call right now, but I can take a message for the team."
+        "I can't transfer this call right now."
     ),
     ACTION_END_CALL: "I can't end the line from here; you can hang up whenever you're ready.",
 }
@@ -162,12 +160,6 @@ _INTENT_PATTERNS = {
         r"\b(?:transfer|connect me|put me through|speak (?:to|with)|talk (?:to|with))\b"
         r".{0,35}\b(?:human|person|agent|representative|manager|team|someone)\b|"
         r"\b(?:transfer|put me through)\b",
-        re.IGNORECASE,
-    ),
-    ACTION_END_CALL: re.compile(
-        r"\b(?:goodbye|bye(?: bye)?|hang\s*up|end (?:this |the )?call|"
-        r"stop calling|do not call|don't call|not interested|no thanks|"
-        r"that's all|that is all|we(?:'re| are) done|i(?:'m| am) done)\b",
         re.IGNORECASE,
     ),
 }
@@ -241,9 +233,10 @@ def _record_result(session: Any, result: dict[str, Any]) -> None:
             pass
 
 
-def end_call_intent_present(text: str) -> bool:
+def end_call_intent_present(text: str, *, previous_assistant_text: str | None = None) -> bool:
     """Fail-closed proof that the caller, not the model, ended the conversation."""
-    return bool(_INTENT_PATTERNS[ACTION_END_CALL].search(text or ""))
+    from app.domain.services.end_session_action import caller_signaled_end
+    return caller_signaled_end(text, previous_assistant_text=previous_assistant_text)
 
 
 async def run_voice_action(
@@ -252,24 +245,21 @@ async def run_voice_action(
     arguments: Mapping[str, Any] | None = None,
     *,
     user_text: str = "",
+    previous_assistant_text: str | None = None,
 ) -> dict[str, Any]:
     """Execute one voice action and always return a deterministic result.
 
     The arguments are accepted for a stable provider contract but are not
     persisted or logged while no corresponding action executor exists.
     """
-    del arguments
-
     if action in _UNAVAILABLE_MESSAGES:
-        result = _result(
-            action,
-            success=False,
-            status="unavailable",
-            confirmation_allowed=False,
-            message=_UNAVAILABLE_MESSAGES[action],
-        )
+        from app.domain.services.voice_pipeline.action_execution import execute_connected_voice_action
+        result = await execute_connected_voice_action(session, action, dict(arguments or {}), user_text)
     elif action == ACTION_END_CALL:
-        if not end_call_intent_present(user_text):
+        if previous_assistant_text is None:
+            from app.domain.services.end_session_action import previous_assistant_turn
+            previous_assistant_text = previous_assistant_turn(getattr(session, "conversation_history", ()))
+        if not end_call_intent_present(user_text, previous_assistant_text=previous_assistant_text):
             result = _result(
                 action,
                 success=False,
@@ -328,6 +318,11 @@ def safe_failure_speech(
     result: Mapping[str, Any] | None = None,
 ) -> str:
     """Truthful fixed speech used when the model invents action completion."""
+    if isinstance(result, Mapping) and result.get("status") in {"unknown", "in_progress"}:
+        return "I couldn't confirm the outcome of that request. It needs to be checked before trying again."
+    if (action in {ACTION_SEND_EMAIL, ACTION_SUBMIT_FORM} and isinstance(result, Mapping)
+            and result.get("success") is True and result.get("status") in {"accepted", "provider_accepted"}):
+        return "The provider accepted it for sending, but I can't confirm delivery."
     if (
         action == ACTION_END_CALL
         and isinstance(result, Mapping)
@@ -337,7 +332,7 @@ def safe_failure_speech(
         return "The call will end now. Goodbye."
     return _SAFE_FAILURE_SPEECH.get(
         action,
-        "I can't confirm that action from this call, but I can take the details for the team.",
+        "I can't confirm that action from this call.",
     )
 
 
@@ -345,7 +340,7 @@ def action_from_validation_reason(reason: str | None) -> str | None:
     if not reason:
         return None
     prefix, separator, remainder = reason.partition(":")
-    if separator and prefix in {"unconfirmed_action", "action_failed"}:
+    if separator and prefix in {"unconfirmed_action", "action_failed", "unavailable_action"}:
         return remainder.split(":", 1)[0]
     return None
 
@@ -362,9 +357,8 @@ def _chat_tool_spec(action: str) -> dict[str, Any]:
 
 
 def _provider_supports_action_tools(provider: Any) -> bool:
-    base = getattr(provider, "_primary", provider)
     return (
-        str(getattr(base, "name", "")).lower() in {"groq", "gemini"}
+        getattr(provider, "supports_tools", False) is True
         and callable(getattr(provider, "stream_chat_with_tools", None))
     )
 
@@ -393,7 +387,7 @@ def _last_turn_text(messages: Iterable[Any]) -> tuple[str, str]:
     return user_text, previous_assistant
 
 
-def action_tools_for_turn(messages: Iterable[Any], provider: Any) -> list[dict[str, Any]]:
+def action_tools_for_turn(messages: Iterable[Any], provider: Any, *, session=None) -> list[dict[str, Any]]:
     """Offer only actions relevant to the current exchange.
 
     Tool-enabled turns buffer the model's first pass until it is known whether
@@ -406,18 +400,36 @@ def action_tools_for_turn(messages: Iterable[Any], provider: Any) -> list[dict[s
     context = f"{previous_assistant}\n{user_text}"
     actions = [
         action for action in VOICE_ACTION_NAMES
-        if _INTENT_PATTERNS[action].search(context)
+        if (end_call_intent_present(user_text, previous_assistant_text=previous_assistant) if action == ACTION_END_CALL
+            else _INTENT_PATTERNS[action].search(context))
     ]
+    if session is not None:
+        from app.domain.services.voice_pipeline.action_execution import enabled_voice_actions
+        enabled = enabled_voice_actions(session)
+        actions = [action for action in actions if action in enabled]
     return [_chat_tool_spec(action) for action in actions]
 
 
-def action_tool_system_addendum() -> str:
+def action_tool_system_addendum(available_actions: Iterable[str] | None = None) -> str:
     """Trusted instruction governing every action result."""
+    capabilities = ""
+    if available_actions is not None:
+        names = ", ".join(sorted(set(available_actions))) or "none"
+        capabilities = (
+            f"Available actions for this call: {names}. Offer only those actions; "
+            "an unlisted transfer or team follow-up route is unavailable. "
+        )
     return (
         "## Connected actions\n"
+        + capabilities +
         "When an offered action tool matches the caller's request, call it before "
         "saying the action happened. Wait for its result. A result with success=false "
         "or confirmation_allowed=false must never be described as completed; state "
         "the limitation honestly and offer only the next step the result permits. "
-        "Never replace a failed tool with a promise that the action was done."
+        "Never replace a failed tool with a promise that the action was done. "
+        "Offer a brochure, download link or other resource only when approved "
+        "company facts or a tool result actually provide it; do not invent a "
+        "fallback resource after a failure. You may note a caller-requested "
+        "follow-up for review; recording a request does not arrange or "
+        "guarantee follow-up and does not create a handoff route."
     )

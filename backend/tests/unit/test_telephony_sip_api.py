@@ -669,6 +669,40 @@ def _create_codec_payload(name: str = "codec-main") -> CodecPolicyCreateRequest:
     )
 
 
+@pytest.mark.parametrize("name", ["platform-default", " PLATFORM-DEFAULT ", "Platform-Default"])
+def test_tenant_create_cannot_claim_platform_route_by_name(monkeypatch, name):
+    monkeypatch.delenv("PLATFORM_SIP_TRUNK_NAME", raising=False)
+    with pytest.raises(ValueError, match="reserved for platform provisioning"):
+        _create_payload(name)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("seeded,patch_name", [(False, " PLATFORM-DEFAULT "), (True, "ordinary-trunk")])
+async def test_tenant_rename_cannot_claim_or_repurpose_platform_route(wsf_context, monkeypatch, seeded, patch_name):
+    monkeypatch.delenv("PLATFORM_SIP_TRUNK_NAME", raising=False)
+    conn, pool, user = wsf_context
+    created = await create_sip_trunk(payload=_create_payload(), request=_make_request("/trunks"), idempotency_key="create-reserved-test", current_user=user, db_pool=pool)
+    tid = _json_body(created)["id"]
+    previous = "platform-default" if seeded else "main-trunk"
+    conn.trunks[tid]["trunk_name"] = previous
+    response = await update_sip_trunk(trunk_id=tid, payload=SIPTrunkUpdateRequest(trunk_name=patch_name), request=_make_request(f"/trunks/{tid}"), idempotency_key="rename-reserved-test", current_user=user, db_pool=pool)
+    assert response.status_code == 400
+    assert _json_body(response)["title"] == "Reserved Trunk Name"
+    assert conn.trunks[tid]["trunk_name"] == previous
+
+
+@pytest.mark.asyncio
+async def test_seeded_platform_trunk_allows_existing_non_name_update(wsf_context, monkeypatch):
+    monkeypatch.delenv("PLATFORM_SIP_TRUNK_NAME", raising=False)
+    conn, pool, user = wsf_context
+    created = await create_sip_trunk(payload=_create_payload(), request=_make_request("/trunks"), idempotency_key="create-seeded-test", current_user=user, db_pool=pool)
+    tid = _json_body(created)["id"]
+    conn.trunks[tid]["trunk_name"] = "platform-default"
+    response = await update_sip_trunk(trunk_id=tid, payload=SIPTrunkUpdateRequest(metadata={"region": "test"}), request=_make_request(f"/trunks/{tid}"), idempotency_key="edit-seeded-test", current_user=user, db_pool=pool)
+    assert response.trunk_name == "platform-default"
+    assert response.metadata["region"] == "test"
+
+
 @pytest.mark.asyncio
 async def test_create_trunk_requires_idempotency_key(wsf_context):
     _conn, pool, user = wsf_context

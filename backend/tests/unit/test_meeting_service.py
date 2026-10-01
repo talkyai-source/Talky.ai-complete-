@@ -4,7 +4,7 @@ Day 25: Meeting Booking Feature
 """
 import pytest
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 from cryptography.fernet import Fernet
 
@@ -95,6 +95,8 @@ class TestGetActiveCalendarConnector:
         mock_eq2.eq.return_value = mock_eq3
         mock_execute = MagicMock()
         mock_eq3.execute.return_value = mock_execute
+        mock_eq3.order.return_value.execute.return_value = mock_execute
+        mock_execute.error = None
         mock_execute.data = []
         
         service = MeetingService(mock_supabase)
@@ -102,7 +104,7 @@ class TestGetActiveCalendarConnector:
         with pytest.raises(CalendarNotConnectedError) as exc_info:
             await service._get_active_calendar_connector("tenant-123")
         
-        assert "No calendar connected" in str(exc_info.value)
+        assert "No calendar integration is connected" in str(exc_info.value)
 
 
 class TestCreateMeeting:
@@ -127,6 +129,8 @@ class TestCreateMeeting:
         mock_eq2.eq.return_value = mock_eq3
         mock_execute = MagicMock()
         mock_eq3.execute.return_value = mock_execute
+        mock_eq3.order.return_value.execute.return_value = mock_execute
+        mock_execute.error = None
         mock_execute.data = []
         
         service = MeetingService(mock_supabase)
@@ -135,7 +139,7 @@ class TestCreateMeeting:
             await service.create_meeting(
                 tenant_id="tenant-123",
                 title="Test Meeting",
-                start_time=datetime.utcnow() + timedelta(days=1),
+                start_time=datetime.now(timezone.utc) + timedelta(days=1),
                 duration_minutes=30,
                 attendees=["test@example.com"]
             )
@@ -291,3 +295,25 @@ class TestCancelMeeting:
         
         assert result["success"] is False
         assert "not found" in result["error"].lower()
+
+
+@pytest.mark.asyncio
+async def test_calendar_mutations_use_refreshing_resolver(monkeypatch):
+    from app.services.meeting_service import MeetingService
+    import app.services.connector_resolver as resolver
+    fresh = object()
+    resolve = AsyncMock(return_value=(fresh, "calendar-1", "google_calendar"))
+    monkeypatch.setattr(resolver, "resolve_active_connector", resolve)
+    db = MagicMock()
+    assert await MeetingService(db)._get_active_calendar_connector("tenant-1") == (fresh, "calendar-1", "google_calendar")
+    resolve.assert_awaited_once_with(db, "tenant-1", "calendar")
+    db.table.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_calendar_lookup_failure_is_not_reconnect(monkeypatch):
+    from app.services.meeting_service import MeetingService
+    import app.services.connector_resolver as resolver
+    monkeypatch.setattr(resolver, "resolve_active_connector", AsyncMock(side_effect=resolver.ConnectorLookupError("calendar")))
+    with pytest.raises(resolver.ConnectorLookupError):
+        await MeetingService(MagicMock())._get_active_calendar_connector("tenant-1")

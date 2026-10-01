@@ -14,6 +14,7 @@ and exposed via the AI Options UI at /api/v1/ai-options/providers
 Day 17: Added timeout handling and deterministic mode for QA.
 """
 import os
+from contextlib import aclosing
 import asyncio
 import logging
 from typing import AsyncIterator, Dict, List, Optional
@@ -25,6 +26,13 @@ from app.domain.models.conversation import Message, MessageRole
 from app.infrastructure.providers.key_pool import KeyPool, parse_keys_csv
 from app.infrastructure.providers.provider_concurrency import get_provider_guard
 from app.utils.resilience import CircuitBreaker, CircuitOpenError
+
+from app.infrastructure.llm.streaming import (
+    stream_with_timeout, stream_tool_turn, close_stream,
+    accumulate_tool_calls as _accumulate_tool_call_frags,
+    finalize_tool_calls as _finalize_tool_calls,
+    assistant_tool_message as _assistant_tool_call_message,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -232,88 +240,7 @@ def _emit_usage_log(
         logger.debug("voice_metrics_cache_record_failed err=%s", exc)
 
 
-def _accumulate_tool_call_frags(acc: Dict[int, dict], frags) -> None:
-    """Merge streamed tool-call delta fragments into ``acc`` keyed by index.
-
-    Groq (OpenAI-compatible) streams a tool call across many chunks: the id +
-    function name arrive once, the JSON ``arguments`` come as a string in
-    pieces. We accumulate per call index until the stream ends.
-    """
-    for frag in frags:
-        idx = getattr(frag, "index", 0) or 0
-        slot = acc.setdefault(idx, {"id": None, "name": None, "arguments": ""})
-        if getattr(frag, "id", None):
-            slot["id"] = frag.id
-        fn = getattr(frag, "function", None)
-        if fn is not None:
-            if getattr(fn, "name", None):
-                slot["name"] = fn.name
-            if getattr(fn, "arguments", None):
-                slot["arguments"] += fn.arguments
-
-
-def _finalize_tool_calls(acc: Dict[int, dict]) -> List[dict]:
-    """Turn accumulated fragments into clean call dicts with parsed arguments.
-
-    Each entry: {id, name, arguments_raw (str for the echo-back assistant msg),
-    arguments (parsed dict for the tool runner)}.
-    """
-    import json
-
-    out: List[dict] = []
-    for idx in sorted(acc.keys()):
-        slot = acc[idx]
-        if not slot.get("name"):
-            continue
-        raw_args = slot.get("arguments") or "{}"
-        try:
-            parsed = json.loads(raw_args)
-        except Exception:
-            parsed = {}
-        out.append({
-            "id": slot.get("id") or f"call_{idx}",
-            "name": slot["name"],
-            "arguments_raw": raw_args,
-            "arguments": parsed if isinstance(parsed, dict) else {},
-        })
-    return out
-
-
-def _assistant_tool_call_message(calls: List[dict]) -> dict:
-    """Build the assistant message that echoes the model's tool call(s) back,
-    required by the API before the matching tool-result messages."""
-    return {
-        "role": "assistant",
-        "content": None,
-        "tool_calls": [
-            {
-                "id": c["id"],
-                "type": "function",
-                "function": {"name": c["name"], "arguments": c["arguments_raw"]},
-            }
-            for c in calls
-        ],
-    }
-
-
-class LLMTimeoutError(Exception):
-    """Raised when LLM response times out"""
-    pass
-
-
-class LLMStreamStalled(LLMTimeoutError):
-    """The provider stopped sending tokens AFTER some were already yielded.
-
-    Until 2026-09-07 both timeout wrappers swallowed this and returned as if
-    the stream had ended normally, so a half sentence ("Your appointment is")
-    was indistinguishable from a complete answer and got spoken as one
-    (2026-09-06 audit, F03). It is a subclass of LLMTimeoutError on purpose:
-    the turn streamer's existing handler already does the right thing for a
-    timeout after partial speech — drop the unpunctuated tail, speak no
-    fallback — and for a stall before any sentence was spoken it replaces the
-    fragment with the repeat-request line instead of voicing the fragment.
-    """
-    pass
+from app.infrastructure.llm.streaming import LLMTimeoutError, LLMStreamStalled
 
 
 class GroqLLMProvider(LLMProvider):
@@ -533,228 +460,18 @@ class GroqLLMProvider(LLMProvider):
         else:
             logger.info("Deterministic mode disabled")
     
-    async def stream_chat_with_timeout(
-        self,
-        messages: List[Message],
-        timeout_seconds: float = DEFAULT_LLM_TIMEOUT,
-        **kwargs
-    ) -> AsyncIterator[str]:
-        """
-        Stream chat completion with a true hard deadline on every token.
-
-        Two-layer timeout defence (Groq SDK recommendation + asyncio safety net):
-
-        Layer 1 — httpx.Timeout(read=timeout_seconds) set on AsyncGroq at
-          initialization.  httpx enforces this at the HTTP level: if no bytes
-          arrive within `read` seconds (including TTFT), it raises
-          GroqAPITimeoutError *before* any token is yielded.  This is the primary
-          guard and handles the slow-first-token case the old post-hoc check missed.
-
-        Layer 2 — asyncio.wait_for() per __anext__() call.  Two budgets apply:
-          - Before first token: full `remaining` wall-clock budget (TTFT guard).
-          - After first token: min(remaining, _INTERTOKEN_TIMEOUT) per token.
-            If Groq silently stalls mid-stream (confirmed bug: stream stops
-            without finish_reason or exception), we detect it in 2s and break
-            cleanly rather than waiting up to 9s and then discarding content.
-
-        The `timeout_seconds` budget measures ONLY the time spent *awaiting the
-        next token from Groq* — it is accumulated across the token-fetch awaits
-        and explicitly EXCLUDES the time the consumer holds this generator
-        suspended at `yield` (real-time-paced TTS/playback between token pulls).
-        Counting playback time against the LLM budget was truncating healthy,
-        valid multi-sentence replies mid-sentence: the generator is suspended at
-        its `yield` while audio plays, so a plain wall-clock kept ticking on time
-        we never spent waiting on Groq. Genuine Groq slowness is still caught —
-        the per-await `_INTERTOKEN_TIMEOUT` bounds every single token wait, and
-        the accumulated Groq-wait budget bounds the total.
-
-        Args:
-            messages: Conversation history
-            timeout_seconds: Budget for total time spent WAITING ON GROQ (not
-                downstream playback) across the whole stream
-            **kwargs: Passed to stream_chat
-
-        Yields:
-            str: Token/chunk of response
-
-        Raises:
-            LLMTimeoutError: If no token arrives before TTFT deadline (first token only)
-        """
-        _INTERTOKEN_TIMEOUT = 2.0  # Groq confirmed bug: stream stalls silently mid-stream
-
-        # Time spent INSIDE the awaits that fetch the next token from Groq.
-        # The gap between yielding a token and being asked for the next one
-        # (consumer-side TTS/playback) is NOT added here, so downstream pacing
-        # can never consume the LLM budget.
-        groq_wait_accumulated = 0.0
-        tokens_received = 0
-        gen = self.stream_chat(messages, **kwargs)
-        try:
-            while True:
-                remaining = timeout_seconds - groq_wait_accumulated
-                if remaining <= 0:
-                    if tokens_received > 0:
-                        # Budget of actual Groq-wait time exhausted mid-stream.
-                        # Content already yielded/TTS'd; signal INCOMPLETE so the
-                        # turn streamer drops the unfinished tail instead of
-                        # speaking it as a complete answer.
-                        logger.warning(
-                            "LLM Groq-wait budget expired mid-stream (limit=%.1fs, tokens=%d) — "
-                            "stream incomplete", timeout_seconds, tokens_received
-                        )
-                        raise LLMStreamStalled(
-                            f"Groq stream stalled after {tokens_received} token(s)"
-                        )
-                    logger.error(
-                        "LLM deadline exceeded before first token "
-                        "(limit=%.1fs)", timeout_seconds
-                    )
-                    raise LLMTimeoutError(
-                        f"LLM response timed out after {timeout_seconds}s"
-                    )
-                # Use tight inter-token timeout after first token to catch Groq silent stalls
-                token_timeout = remaining if tokens_received == 0 else min(remaining, _INTERTOKEN_TIMEOUT)
-                _wait_t0 = asyncio.get_event_loop().time()
-                try:
-                    token = await asyncio.wait_for(gen.__anext__(), timeout=token_timeout)
-                except StopAsyncIteration:
-                    break
-                except asyncio.TimeoutError:
-                    # Only the Groq wait counts — a full `token_timeout` elapsed here.
-                    groq_wait_accumulated += asyncio.get_event_loop().time() - _wait_t0
-                    if tokens_received > 0:
-                        # Inter-token stall: Groq stopped sending tokens mid-stream
-                        # silently. Signal INCOMPLETE (see LLMStreamStalled).
-                        logger.warning(
-                            "Groq inter-token stall (groq_wait=%.2fs, tokens=%d) — "
-                            "stream incomplete (Groq silent-stall bug)",
-                            groq_wait_accumulated, tokens_received,
-                        )
-                        raise LLMStreamStalled(
-                            f"Groq stream stalled after {tokens_received} token(s)"
-                        )
-                    logger.error(
-                        "LLM timeout waiting for first token after %.2fs (limit=%.1fs): %s",
-                        groq_wait_accumulated, timeout_seconds, "asyncio.TimeoutError",
-                    )
-                    raise LLMTimeoutError(
-                        f"LLM response timed out after {timeout_seconds}s"
-                    )
-                except GroqAPITimeoutError as exc:
-                    groq_wait_accumulated += asyncio.get_event_loop().time() - _wait_t0
-                    logger.error(
-                        "LLM Groq API timeout after %.2fs (limit=%.1fs, tokens=%d): %s",
-                        groq_wait_accumulated, timeout_seconds, tokens_received, exc,
-                    )
-                    if tokens_received > 0:
-                        break
-                    raise LLMTimeoutError(
-                        f"LLM response timed out after {timeout_seconds}s"
-                    )
-                # Success: charge ONLY the just-measured Groq-wait span to the
-                # budget, then yield. Whatever downstream time the consumer spends
-                # before pulling again lands OUTSIDE this measured span.
-                groq_wait_accumulated += asyncio.get_event_loop().time() - _wait_t0
-                if tokens_received == 0:
-                    ttft_ms = groq_wait_accumulated * 1000
-                    if ttft_ms > 800:
-                        logger.warning(
-                            "High TTFT: %.0fms — likely Groq rate limiting or cold cache. "
-                            "Check Groq console for token bucket status.", ttft_ms
-                        )
-                tokens_received += 1
+    async def stream_chat_with_timeout(self, messages, timeout_seconds=DEFAULT_LLM_TIMEOUT, **kwargs):
+        """Shared provider-wait budget; playback never consumes this allowance."""
+        async with aclosing(stream_with_timeout(
+            self.stream_chat(messages, **kwargs), timeout_seconds
+        )) as stream:
+            async for token in stream:
                 yield token
-        finally:
-            await gen.aclose()
-    
-    async def stream_chat_with_tools(
-        self,
-        messages: List[Message],
-        system_prompt: Optional[str] = None,
-        tools: Optional[List[dict]] = None,
-        tool_runner=None,
-        temperature: Optional[float] = None,
-        max_tokens: Optional[int] = None,
-        timeout_seconds: float = DEFAULT_LLM_TIMEOUT,
-        require_tool_result_before_content: bool = False,
-        **kwargs,
-    ) -> AsyncIterator[str]:
-        """Stream a turn that MAY call a function tool, yielding only spoken
-        content (same str contract as stream_chat_with_timeout, so the voice
-        pipeline's streaming loop is unchanged).
 
-        Round 0: the model decides — it either answers directly (the fast,
-        common path: zero retrieval, small prompt) or emits a tool call.
-        Round 1 (only if it called the tool): run ``tool_runner`` for the
-        requested fact(s), append the tool result, and stream the grounded
-        answer. No tools are offered in round 1, so the model cannot loop.
-
-        ``tool_runner`` is an async callable ``(name, arguments_dict) -> str``.
-        With no tools/runner this degrades to the normal timeout-guarded stream.
-        """
-        if not tools or tool_runner is None:
-            async for tok in self.stream_chat_with_timeout(
-                messages, timeout_seconds=timeout_seconds, system_prompt=system_prompt,
-                temperature=temperature, max_tokens=max_tokens, **kwargs,
-            ):
-                yield tok
-            return
-
-        sink: List[dict] = []
-        produced_content = False
-        round_zero_tokens: List[str] = []
-        # Round 0 — let the model decide. A clean tool-only response ends via
-        # StopAsyncIteration (no content), so the TTFT guard does NOT misfire.
-        async for tok in self.stream_chat_with_timeout(
-            messages, timeout_seconds=timeout_seconds, system_prompt=system_prompt,
-            temperature=temperature, max_tokens=max_tokens,
-            tools=tools, tool_choice="auto", tool_calls_sink=sink, **kwargs,
-        ):
-            produced_content = True
-            if require_tool_result_before_content:
-                round_zero_tokens.append(tok)
-            else:
-                yield tok
-
-        # Normal KB mode preserves its historical streaming semantics. Strict
-        # action mode withholds any round-0 prose when a tool call exists, so a
-        # model cannot say "done" and only then discover the action failed.
-        if not sink:
-            if require_tool_result_before_content and produced_content:
-                yield "".join(round_zero_tokens)
-            return
-        if produced_content and not require_tool_result_before_content:
-            return
-
-        # Round 1 — execute the tool(s) and stream the grounded answer.
-        extra: List[dict] = [_assistant_tool_call_message(sink)]
-        for call in sink:
-            try:
-                result = await tool_runner(call["name"], call["arguments"])
-            except Exception as exc:  # never let a tool failure stall the turn
-                logger.warning("tool_runner failed name=%s: %s", call.get("name"), exc)
-                result = "No specific information found."
-            extra.append({
-                "role": "tool",
-                "tool_call_id": call["id"],
-                "content": result or "No specific information found.",
-            })
-
-        if require_tool_result_before_content:
-            grounded_tokens: List[str] = []
-            async for tok in self.stream_chat_with_timeout(
-                messages, timeout_seconds=timeout_seconds, system_prompt=system_prompt,
-                temperature=temperature, max_tokens=max_tokens, extra_messages=extra, **kwargs,
-            ):
-                grounded_tokens.append(tok)
-            if grounded_tokens:
-                yield "".join(grounded_tokens)
-        else:
-            async for tok in self.stream_chat_with_timeout(
-                messages, timeout_seconds=timeout_seconds, system_prompt=system_prompt,
-                temperature=temperature, max_tokens=max_tokens, extra_messages=extra, **kwargs,
-            ):
-                yield tok
+    async def stream_chat_with_tools(self, messages, **kwargs):
+        async with aclosing(stream_tool_turn(self, messages, **kwargs)) as stream:
+            async for token in stream:
+                yield token
 
     async def stream_chat(
         self,
@@ -981,6 +698,7 @@ class GroqLLMProvider(LLMProvider):
                                 # set, which Groq rejects — see NOTE above);
                                 # _extract_stream_usage checks both, getattr-safe.
                                 token_count = 0
+                                terminal_seen = False
                                 final_usage = None
                                 tc_acc: Dict[int, dict] = {}
                                 # Client-side timing for telemetry only — never
@@ -992,7 +710,15 @@ class GroqLLMProvider(LLMProvider):
                                 try:
                                     async for chunk in stream:
                                         if chunk.choices:
-                                            delta = chunk.choices[0].delta
+                                            choice = chunk.choices[0]
+                                            reason = getattr(choice, "finish_reason", None)
+                                            if reason and reason not in {"stop", "tool_calls"}:
+                                                # A provider-declared truncation is not a
+                                                # complete answer or a completed tool decision.
+                                                raise LLMStreamStalled(f"Groq response incomplete: {reason}")
+                                            if reason in {"stop", "tool_calls"}:
+                                                terminal_seen = True
+                                            delta = choice.delta
                                             if delta.content:
                                                 if _first_content_t is None:
                                                     _first_content_t = asyncio.get_event_loop().time()
@@ -1008,7 +734,14 @@ class GroqLLMProvider(LLMProvider):
                                         chunk_usage = _extract_stream_usage(chunk)
                                         if chunk_usage is not None:
                                             final_usage = chunk_usage
+                                    # The SDK permits clean SSE/HTTP EOF without a
+                                    # final choice. Only a provider completion marker
+                                    # authorizes publishing the accumulated tool calls.
+                                    # Consumer cancellation exits via finally instead.
+                                    if not terminal_seen:
+                                        raise LLMStreamStalled("Groq stream ended without a terminal reason")
                                 finally:
+                                    await close_stream(stream)
                                     # Fail-soft telemetry tail. Runs on normal
                                     # stream completion AND on early close —
                                     # e.g. barge-in causes the consumer
@@ -1070,6 +803,12 @@ class GroqLLMProvider(LLMProvider):
                         except CircuitOpenError:
                             raise  # Don't retry when circuit is open
 
+                        except LLMStreamStalled:
+                            # An incomplete response is never replayed here,
+                            # even when reasoning produced no visible text.
+                            _lease.report_failure(retryable=False)
+                            raise
+
                         except GroqRateLimitError as e:
                             _lease.report_failure(retryable=True)
                             logger.warning(
@@ -1107,6 +846,8 @@ class GroqLLMProvider(LLMProvider):
         except CircuitOpenError as co:
             logger.error(f"Groq circuit breaker open: {co}")
             raise RuntimeError(f"LLM provider unavailable: {co}")
+        except LLMStreamStalled:
+            raise
         except Exception as e:
             if not isinstance(e, RuntimeError):
                 logger.error(f"Groq LLM streaming failed: {str(e)}")
@@ -1142,6 +883,10 @@ class GroqLLMProvider(LLMProvider):
         """Provider name"""
         return "groq"
     
+    @property
+    def supports_tools(self) -> bool:
+        return True
+
     @property
     def supports_streaming(self) -> bool:
         """Groq supports token streaming"""

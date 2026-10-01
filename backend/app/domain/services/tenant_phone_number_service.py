@@ -52,8 +52,10 @@ class TenantPhoneNumberService:
     ) -> bool:
         """True iff the tenant owns this number AND it is in `verified`
         status. When `require_attestation=True`, also requires a non-NULL
-        `stir_shaken_token` — set this in production so un-attested
-        numbers (test-only) cannot dial real carriers.
+        `stir_shaken_token`. That optional legacy filter checks only field
+        presence; it does not validate STIR/SHAKEN and must not be used as a
+        blanket production dialing requirement. Carrier signatures are
+        specific to a call, including its destination and issuance time.
 
         Safe to call on a cold DB: falls through to False on any error so
         origination gets a clean 403 instead of a 500.

@@ -225,12 +225,13 @@ GROQ_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "send_sms",
-            "description": "Send SMS to phone numbers",
+            "description": "Preview SMS for the user to review and apply; never claim sent from a preview.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "to": {"type": "array", "items": {"type": "string"}, "description": "Phone numbers"},
-                    "message": {"type": "string"}
+                    "message": {"type": "string"},
+                    "confirm": {"type": "boolean", "description": "Keep false; the user's Apply action authorizes sending."}
                 },
                 "required": ["to", "message"]
             }
@@ -240,14 +241,15 @@ GROQ_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "report_issue",
-            "description": "File a technical-issue report to the support team. Use when the user is stuck on a technical problem (e.g. calls not going through, voice/provider errors, login/billing/dashboard issues). Gather a clear description first; tenant id, account email and timestamp are added automatically, then it emails support immediately.",
+            "description": "Prepare a technical-issue report to support for review. Tenant id, account email and timestamp are included. The user must apply the preview to send.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "description": {"type": "string", "description": "Clear description of the problem in the user's words plus any specifics/error text"},
                     "category": {"type": "string", "description": "calls | voice | billing | login | dashboard | other"},
                     "severity": {"type": "string", "description": "low | normal | high"},
-                    "contact_email": {"type": "string", "description": "Reporter email for follow-up; omit to use the account email on file"}
+                    "contact_email": {"type": "string", "description": "Reporter email for follow-up; omit to use the account email on file"},
+                    "confirm": {"type": "boolean", "description": "Keep false; the user applies the preview to send."}
                 },
                 "required": ["description"]
             }
@@ -558,6 +560,23 @@ def _make_optional_params_nullable(schemas: list[dict]) -> list[dict]:
                 prop["type"] = [*t, "null"]
     return schemas
 
+
+# Execution tools derive their schemas from the same typed inputs as the
+# registry. A registered action must not disappear from the model's tool list.
+from app.infrastructure.assistant.tools import ACTION_TOOLS
+
+_TYPED_EXECUTION_TOOLS = {
+    "send_email", "send_sms", "report_issue", "check_availability", "book_meeting",
+    "update_meeting", "cancel_meeting", "schedule_reminder", "execute_action_plan", "initiate_call",
+}
+GROQ_TOOL_SCHEMAS = [schema for schema in GROQ_TOOL_SCHEMAS
+                     if schema["function"]["name"] not in _TYPED_EXECUTION_TOOLS]
+for _name in sorted(_TYPED_EXECUTION_TOOLS):
+    _entry = ACTION_TOOLS[_name]
+    GROQ_TOOL_SCHEMAS.append({"type": "function", "function": {
+        "name": _name, "description": _entry["description"],
+        "parameters": _entry["input_schema"].model_json_schema(),
+    }})
 
 # Applied once at import: optional params become nullable so a model passing
 # `null` for an unset optional arg doesn't fail Groq's tool-call validation.

@@ -181,11 +181,15 @@ def test_prompt_blocks_are_not_contradictory_on_wrong_number():
     from app.domain.services.voice_pipeline.end_call import CALL_CONTROL_RULES
     from app.domain.services.voice_pipeline.gatekeeper import GATEKEEPER_RULES
 
-    # end_call now scopes the token to a wrong BUSINESS, not bare "wrong number".
-    assert "wrong business" in CALL_CONTROL_RULES.casefold()
-    assert "wrong person is not this" in CALL_CONTROL_RULES.casefold()
-    # gatekeeper explicitly hands a wrong-BUSINESS off to ENDING THE CALL.
-    assert "exit, not a" in GATEKEEPER_RULES.casefold()
+    # Check the current consolidated policy's distinction, then verify the
+    # actual classifier. Old wording is not a model-quality assertion.
+    control = ' '.join(CALL_CONTROL_RULES.casefold().split())
+    gatekeeper = ' '.join(GATEKEEPER_RULES.casefold().split())
+    assert "confirms a wrong destination" in control
+    assert "wrong person at the right business is a redirect" in control
+    assert "ask once for the relevant person or role" in gatekeeper
+    assert classify_identity_disposition("Wrong company") == IdentityDisposition.WRONG_BUSINESS
+    assert classify_identity_disposition("She's not here") == IdentityDisposition.WRONG_PERSON
 
 
 # --- F-14 (2026-07-20): substring false positives must NOT deterministically

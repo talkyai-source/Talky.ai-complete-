@@ -237,22 +237,24 @@ def test_record_turn_fail_soft_without_service():
 # FIX 5 — optional session controls
 # ---------------------------------------------------------------------------
 
-def test_session_update_omits_optional_controls_by_default():
+def test_session_update_uses_the_same_defaults_displayed_in_ai_options():
     s = OpenAIRealtimeSession(api_key="sk")._build_session_update()["session"]
-    assert "speed" not in s["audio"]["output"]
+    assert s["audio"]["output"]["speed"] == 1.0
     assert "temperature" not in s
-    assert "max_output_tokens" not in s
+    assert s["max_output_tokens"] == 1024
+    assert s["audio"]["input"]["noise_reduction"] == {"type": "near_field"}
 
 
-def test_session_update_includes_and_clamps_controls_when_set():
+def test_session_update_validates_controls_and_removes_legacy_temperature():
     s = OpenAIRealtimeSession(
         api_key="sk",
-        settings={"speed": 3.0, "temperature": 0.8, "max_output_tokens": 512},
+        settings={"speed": 1.5, "temperature": 0.8, "max_output_tokens": 512},
     )._build_session_update()["session"]
-    # Speed clamped to the documented 0.25–1.5 window.
     assert s["audio"]["output"]["speed"] == 1.5
-    assert s["temperature"] == 0.8
+    assert "temperature" not in s
     assert s["max_output_tokens"] == 512
+    with pytest.raises(ValueError):
+        OpenAIRealtimeSession(api_key="sk", settings={"speed": 3.0})
 
 
 # ---------------------------------------------------------------------------

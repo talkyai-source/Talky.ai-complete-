@@ -8,8 +8,14 @@ Day 30: Added log_call() and create_note() abstract methods
 from abc import abstractmethod
 from typing import List, Dict, Any, Optional
 from datetime import datetime
+import re
 
 from app.infrastructure.connectors.base import BaseConnector, ConnectorCapability
+
+
+def call_reference(body: str) -> Optional[str]:
+    match = re.search(r"^Talky\.ai call id: ([0-9a-fA-F-]{36})$", body or "", re.MULTILINE)
+    return match.group(1) if match else None
 
 
 class CRMProvider(BaseConnector):
@@ -112,3 +118,6 @@ class CRMProvider(BaseConnector):
         """
         return False
 
+    async def find_call_by_reference(self, reference: str) -> Optional[str]:
+        """Read-only reconciliation after a create's result was lost."""
+        raise NotImplementedError("This CRM cannot reconcile call creation")

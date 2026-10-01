@@ -277,6 +277,14 @@ class Permission(str, enum.Enum):
     CONNECTORS_UPDATE = "connectors:update"
     CONNECTORS_DELETE = "connectors:delete"
 
+    # Sending and scheduling are separate from configuring a connector.
+    EMAIL_SEND = "email:send"
+    SMS_SEND = "sms:send"
+    CALENDAR_READ = "calendar:read"
+    CALENDAR_MANAGE = "calendar:manage"
+    REMINDERS_MANAGE = "reminders:manage"
+    SUPPORT_REPORT = "support:report"
+
     # Analytics permissions
     ANALYTICS_READ = "analytics:read"
     ANALYTICS_EXPORT = "analytics:export"
@@ -517,6 +525,14 @@ ROLE_DEFAULT_PERMISSIONS: Dict[UserRole, Set[Permission]] = {
 # =============================================================================
 # Permission Aggregation
 # =============================================================================
+
+_ASSISTANT_EXECUTION_PERMISSIONS = {
+    Permission.EMAIL_SEND, Permission.SMS_SEND, Permission.CALENDAR_READ,
+    Permission.CALENDAR_MANAGE, Permission.REMINDERS_MANAGE, Permission.SUPPORT_REPORT,
+}
+for _admin_role in (UserRole.TENANT_ADMIN, UserRole.PARTNER_ADMIN, UserRole.PLATFORM_ADMIN):
+    ROLE_DEFAULT_PERMISSIONS[_admin_role].update(_ASSISTANT_EXECUTION_PERMISSIONS)
+
 
 async def get_user_permissions(
     conn,

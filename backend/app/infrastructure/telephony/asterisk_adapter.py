@@ -5300,6 +5300,40 @@ class AsteriskAdapter(CallControlAdapter):
             # does not crash the audio path. TtsDeliveryError wraps the cause.
             raise TtsDeliveryError(str(exc)) from exc
 
+    async def begin_tts_utterance(self, call_id: str, utterance_id: str) -> None:
+        """Require the additive receipt protocol before using correlated output."""
+        if getattr(self, "_tts_receipt_protocol", None) != 1:
+            health = await self._gateway("GET", "/health")
+            if not isinstance(health, dict) or health.get("tts_receipt_protocol") != 1:
+                raise TtsDeliveryError("Gateway lacks tts_receipt_protocol=1; deploy the compatible gateway first")
+            self._tts_receipt_protocol = 1
+        if call_id not in self._gateway_sessions:
+            raise TtsDeliveryError("No gateway session for Realtime utterance")
+        self._tts_utterances[call_id] = {"utterance_id": utterance_id, "seq": 0}
+
+    async def finish_tts_utterance(self, call_id: str, utterance_id: str) -> Dict[str, Any]:
+        """Finalize and await transmitted frames, never certify remote hearing."""
+        pending = {"utterance_id": utterance_id, "status": "unknown", "evidence": "unknown", "played_ms": 0}
+        try:
+            async with asyncio.timeout(5.0):
+                while True:
+                    utterance = self._tts_utterances.get(call_id) or {}
+                    if utterance.get("utterance_id") != utterance_id:
+                        return {**pending, "status": "interrupted"}
+                    if not utterance.get("seq"):
+                        return {**pending, "status": "failed"}
+                    receipt = await self._gateway("POST", "/v1/sessions/tts/finish", payload={
+                        "session_id": self._gateway_sessions.get(call_id),
+                        "utterance_id": utterance_id, "last_chunk_seq": utterance["seq"] - 1})
+                    if (not isinstance(receipt, dict) or receipt.get("receipt_protocol") != 1
+                            or receipt.get("utterance_id") != utterance_id):
+                        raise TtsDeliveryError("Mismatched gateway transmission receipt")
+                    if receipt.get("status") != "pending":
+                        return {**receipt, "played_ms": 0}
+                    await asyncio.sleep(0.05)
+        except TimeoutError:
+            return {**pending, "reason": "transmission_receipt_timeout"}
+
     async def interrupt_tts(self, call_id: str) -> Dict[str, Any]:
         """
         Stop playing TTS audio via the C++ Gateway interrupt endpoint.

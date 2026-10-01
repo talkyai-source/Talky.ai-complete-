@@ -232,6 +232,7 @@ _RLS_TABLES = (
     "contact_lists",
     "conversation_reviews",
     "conversations",
+    "crm_deliveries",
     "dialer_jobs",
     "dnc_entries",
     "inbound_audit_events",

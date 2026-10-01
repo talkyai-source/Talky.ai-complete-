@@ -3,21 +3,18 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import re
 from typing import Optional
+from app.domain.services.caller_assertions import (
+    assertion_matches, continuation_after,
+)
 
 logger = logging.getLogger(__name__)
 
 END_SESSION_ACTION = "end_session"
 LEGACY_ASK_AI_END_SESSION_ACTION = "end_ask_ai_session"
 
-# Phantom-goodbye guard. The LLM sometimes emits the end-session action when
-# the caller did NOT actually signal they were done ("triggers goodbye while I
-# haven't asked"). We honor the hangup only when the caller's own words show
-# end-intent, OR (for an agent-judged conversation_complete) after enough real
-# exchange. Opt-out ("do not call me") is ALWAYS honored — compliance wins.
-_MIN_COMPLETE_USER_TURNS = int(os.getenv("VOICE_MIN_END_USER_TURNS", "3"))
+# A model's completion label or number of turns is not caller authorization.
 
 # Caller utterances that genuinely mean "I'm ending this." Tight on purpose —
 # we'd rather keep a call alive on a false-negative than hang up on a phantom.
@@ -27,8 +24,8 @@ _CALLER_END_INTENT = re.compile(
         talk\s+(?:to\s+you\s+)?later | catch\s+you\s+later | gotta\s+go |
         got\s+to\s+go | have\s+to\s+go | need\s+to\s+go | i'?m\s+done |
         we'?re\s+done | that'?s\s+(?:all|it) | that\s+is\s+all | nothing\s+else |
-        no\s+thank(?:s|\s+you) | not\s+interested | hang\s+up | stop\s+calling |
-        remove\s+me | take\s+me\s+off | do\s+not\s+call | don'?t\s+call | unsubscribe |
+        no\s+thank(?:s|\s+you) | not\s+interested | hang\s+up |
+        end\s+(?:this\s+|the\s+)?call |
         leave\s+me\s+alone | lose\s+my\s+number
     )\b""",
     re.IGNORECASE | re.VERBOSE,
@@ -89,9 +86,90 @@ def contact_capture_open(call_state) -> bool:
     return False
 
 
-def caller_signaled_end(text: Optional[str]) -> bool:
+def previous_assistant_turn(history) -> str:
+    """Assistant turn before the latest caller, never this turn's new farewell."""
+    items = list(history or ())
+
+    def role(message):
+        value = getattr(message, "role", "")
+        return getattr(value, "value", value)
+
+    user_index = next((i for i in range(len(items) - 1, -1, -1) if role(items[i]) == "user"), len(items))
+    return next((str(getattr(message, "content", "") or "")
+                 for message in reversed(items[:user_index]) if role(message) == "assistant"), "")
+
+
+# These are questions whose negative answer ends the conversation, not business-topic labels.
+# Anything unrecognised stays a question about its own subject, so a short
+# negative reply cannot let a model hang up on an declined optional offer.
+_NEGATIVE_REPLY_ENDS_CALL = re.compile(
+    r"(?:is there |do you need |can (?:i|we) help (?:you )?with )?anything else"
+    r"(?: (?:i|we) can (?:help(?: you)?(?: with)?|do(?: for you)?)| you (?:need|want to (?:ask|discuss)))?"
+    r"(?: today| before (?:we|you) go)?|"
+    r"(?:do you have|have you got|got) (?:a|one|a quick) (?:minute|moment)(?: to (?:talk|chat))?|"
+    r"is (?:now|this) (?:a )?good time(?: to (?:talk|chat))?",
+    re.I,
+)
+
+
+def _reply_scoped_to_question(previous_assistant_text: Optional[str]) -> bool:
+    """A short refusal answers the last question, including unpunctuated speech."""
+    text = str(previous_assistant_text or "").strip()
+    questions = re.findall(r"[^.!?]+\?", text)
+    last = questions[-1] if questions else re.split(r"[.!]", text.rstrip(".!"))[-1]
+    last = " ".join(last.strip(" \t\r\n?\"'“”").lower().split())
+    if not last:
+        return False
+    is_question = bool(questions) or bool(re.match(
+        r"(?:who|what|when|where|why|how|which|would|could|can|do|does|did|are|is|have|has|got|anything else)\b", last))
+    return is_question and not _NEGATIVE_REPLY_ENDS_CALL.fullmatch(last)
+
+
+def _call_end_position(text: Optional[str], pattern: re.Pattern, previous_assistant_text: Optional[str] = None) -> int:
+    """A topic-qualified refusal/completion is not permission to end the call.
+
+    Match grammar, not a list of business topics: "done giving my number" and
+    "not interested in email" concern that activity. Explicit goodbye and DNC
+    remain independent authorizations, including later in the same utterance.
+    "For now" and "with this call" retain their ordinary whole-call meaning.
+    """
+    accepted = []
+    for match in assertion_matches(text, pattern):
+        phrase = match[0].lower()
+        soft = re.fullmatch(r"(?:no\s+thank(?:s|\s+you)|not\s+interested|"
+            r"(?:i'?m|we'?re)\s+done|that'?s\s+(?:all|it)|that\s+is\s+all|nothing\s+else)", phrase)
+        tail = str(text or "")[match.end():]
+        scoped = re.match(r"\s+(?:in|to|for|about|with|[a-z]+ing)\b", tail, re.I)
+        whole_call = re.match(r"\s+(?:for\s+now\b|(?:in|to|for|with|about)\s+"
+            r"(?:(?:this|the|our)\s+)?(?:call|conversation)\b)", tail, re.I)
+        explicit_whole_call = whole_call and not re.match(r"\s+for\s+now\b", tail, re.I)
+        if soft and ((scoped and not whole_call) or
+                     (_reply_scoped_to_question(previous_assistant_text) and not explicit_whole_call)):
+            continue
+        accepted.append(match.start())
+    return accepted[-1] if accepted else -1
+
+
+def caller_signaled_end(text: Optional[str], *, previous_assistant_text: Optional[str] = None) -> bool:
     """True if the caller's own words clearly signal ending the call."""
-    return bool(text and _CALLER_END_INTENT.search(text))
+    from app.domain.services.voice_pipeline.identity_disposition import dnc_assertion_position
+    position = max(_call_end_position(text, _CALLER_END_INTENT, previous_assistant_text), dnc_assertion_position(text))
+    return position >= 0 and not continuation_after(text, position)
+
+
+_CURRENT_DECLINE = re.compile(
+    r"\b(?:not\s+interested|no\s+thanks?|don't\s+want\s+(?:this|that|it)|"
+    r"do\s+not\s+want\s+(?:this|that|it)|not\s+for\s+(?:me|us))\b", re.I)
+
+
+def repeated_decline_allows_end(text: Optional[str], declined_count: int, *, previous_assistant_text: Optional[str] = None) -> bool:
+    """Historical objections cannot authorize a close on a new help request."""
+    if not isinstance(declined_count, int) or isinstance(declined_count, bool) or declined_count < 2:
+        return False
+    if _reply_scoped_to_question(previous_assistant_text):
+        return False
+    position = _call_end_position(text, _CURRENT_DECLINE)
+    return position >= 0 and not continuation_after(text, position)
 
 
 def should_honor_end_session(
@@ -99,30 +177,20 @@ def should_honor_end_session(
     last_user_text: Optional[str],
     user_turn_count: int,
     declined_count: int = 0,
+    *,
+    previous_assistant_text: Optional[str] = None,
 ) -> bool:
     """Decide whether to actually hang up on an LLM end-session action, or treat
     it as a phantom goodbye and keep the call going.
 
-    Honor when:
-      * the caller asked never to be called again (do_not_call) — always, or
-      * the caller's words actually signal an end, or
-      * the caller has DECLINED >= 2 times (issue #16): the persona tells the
-        agent to close politely after two declines, so its end-session there is
-        a legitimate close, not a phantom — honoring it stops the recovery line
-        re-opening a call the agent just ended, or
-      * the model reports the task finished (conversation_complete) AND the call
-        has had real back-and-forth (>= _MIN_COMPLETE_USER_TURNS user turns).
-    Otherwise it's a phantom — suppress the hangup.
+    Honor the caller's end intent or the recorded repeated-decline policy.
+    Model-only completion/DNC labels and conversation length are not evidence.
     """
     if not action:
         return False
-    if action.get("do_not_call"):
+    if caller_signaled_end(last_user_text, previous_assistant_text=previous_assistant_text):
         return True
-    if caller_signaled_end(last_user_text):
-        return True
-    if declined_count >= 2:
-        return True
-    if action.get("reason") == "conversation_complete" and user_turn_count >= _MIN_COMPLETE_USER_TURNS:
+    if repeated_decline_allows_end(last_user_text, declined_count, previous_assistant_text=previous_assistant_text):
         return True
     return False
 
@@ -143,7 +211,9 @@ def build_end_session_tool_instructions(*, action_name: str = END_SESSION_ACTION
         "respond with exactly this JSON and no spoken text outside JSON:\n"
         f'{{"action":"{action_name}","reason":"user_goodbye","farewell":"{DEFAULT_FAREWELL}"}}\n'
         "Use reason user_goodbye for farewells, user_done when the user says they "
-        "are done, and conversation_complete when the task is clearly finished. "
+        "are done with the conversation, and conversation_complete only when the caller "
+        "confirms the whole conversation is finished. A completed task or thanks alone "
+        "does not mean the caller wants to end the call. "
         "Set farewell to one short natural sentence that matches the user's goodbye "
         "style: if they say goodbye, say goodbye; if they say see you, say see you; "
         "if they say take care, answer in that same friendly closing style. "

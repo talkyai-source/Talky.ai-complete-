@@ -120,6 +120,10 @@ class ResilientLLMProvider(LLMProvider):
     def supports_streaming(self) -> bool:
         return self._primary.supports_streaming
 
+    @property
+    def supports_tools(self) -> bool:
+        return self._primary.supports_tools
+
     def __getattr__(self, item):
         """Delegate any un-wrapped attribute (set_deterministic_mode,
         is_deterministic, model introspection, …) to the primary so existing
@@ -296,8 +300,41 @@ class ResilientLLMProvider(LLMProvider):
     # ──────────────────────────────────────────────────────────────────
 
     async def stream_chat_with_tools(self, *args, **kwargs) -> AsyncIterator[str]:
-        async for tok in self._primary.stream_chat_with_tools(*args, **kwargs):
-            yield tok
+        # A tool may commit before it returns or before the model speaks. Never
+        # replay that turn on another model once any execution has started.
+        execution_started = False
+        spoken = False
+        runner = kwargs.get("tool_runner")
+
+        async def tracked_runner(*tool_args, **tool_kwargs):
+            nonlocal execution_started
+            execution_started = True
+            return await runner(*tool_args, **tool_kwargs)
+
+        primary_kwargs = dict(kwargs)
+        if runner is not None:
+            primary_kwargs["tool_runner"] = tracked_runner
+        gen = self._primary.stream_chat_with_tools(*args, **primary_kwargs)
+        try:
+            async with self._breaker:
+                async for tok in gen:
+                    spoken = True
+                    yield tok
+            return
+        except Exception:
+            if spoken or execution_started or self._secondary is None or not self._secondary.supports_tools:
+                raise
+            record_llm_failover("tool_primary_missed")
+        finally:
+            await _safe_aclose(gen)
+        # Provider wait and execution budgets are owned by the tool loop. A
+        # first-text deadline here would cancel healthy in-flight tool writes.
+        secondary = self._secondary.stream_chat_with_tools(*args, **kwargs)
+        try:
+            async for tok in secondary:
+                yield tok
+        finally:
+            await _safe_aclose(secondary)
 
     # ──────────────────────────────────────────────────────────────────
     # Startup / handshake failover (original Phase 4.1 — preserved).

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import os
 import re
+from app.services.scripts.knowledge.passages import content_words, select_passage
 
 _KB_MAX_CHUNKS = int(os.getenv("VOICE_KB_MAX_CHUNKS", "3"))
 # 2026-09-07: 350 -> 600 per node, 1500 -> 2000 total. Measured on the live
@@ -45,7 +46,7 @@ def _trim_kb_body(text: str, limit: int) -> str:
     return (cut or text[:limit]).rstrip() + "…"
 
 
-def fit_kb_body(rendered: str, node: dict, limit: int) -> str:
+def fit_kb_body(rendered: str, node: dict, limit: int, *, query: str = "") -> str:
     """Fit a source-first rendered node into ``limit`` chars WITHOUT losing the
     answer.
 
@@ -62,6 +63,8 @@ def fit_kb_body(rendered: str, node: dict, limit: int) -> str:
     for exactly this node) after the ellipsis, reserving room for it inside
     the same budget. A node without a voice_answer degrades to the plain trim.
     """
+    if query:
+        return select_passage(str(node.get("content") or rendered or ""), query, limit)
     text = (rendered or "").strip()
     if len(text.replace("\n", " ")) <= limit:
         return _trim_kb_body(text, limit)
@@ -129,12 +132,6 @@ _STOPWORDS = frozenset(
 KNOWLEDGE_MIN_COVERAGE = float(os.getenv("KNOWLEDGE_MIN_COVERAGE", "0.5"))
 
 
-def content_words(text: str) -> list[str]:
-    """The words of an utterance that carry meaning for a knowledge search."""
-    tokens = re.findall(r"[a-z0-9]+", (text or "").lower())
-    return [t for t in tokens if len(t) > 1 and t not in _STOPWORDS]
-
-
 def needs_previous_turn_context(text: str) -> bool:
     """True for a follow-up too thin to search on its own ("and the price?").
 
@@ -157,6 +154,38 @@ def knowledge_match_is_weak(hits: list[dict]) -> bool:
     if not known or len(known) < len(coverages):
         return False
     return max(known) < KNOWLEDGE_MIN_COVERAGE
+
+
+def prepare_knowledge_evidence(hits: list[dict], query: str, *,
+                               chunk_chars: int = _KB_CHUNK_CHARS,
+                               total_chars: int = _KB_TOTAL_CHARS) -> dict:
+    """One source/qualification/security boundary for all three voice consumers."""
+    from app.services.scripts.knowledge.retrieval import render_node_answer
+    from app.services.scripts.prompts.prompt_safety import scan_for_injection
+
+    passages = []
+    used = 0
+    for node in hits[:_KB_MAX_CHUNKS]:
+        raw = render_node_answer(node)
+        heading = str(node.get("heading") or "")
+        if scan_for_injection(f"{heading} {raw}"):
+            continue
+        available = min(chunk_chars, total_chars - used - len(heading) - 4)
+        if available <= 0:
+            break
+        body = fit_kb_body(raw, node, available, query=query)
+        if not body:
+            continue
+        text = f"- {heading}: {body}"
+        passages.append({"node_id": str(node.get("id") or ""),
+                         "version": node.get("version"), "text": text,
+                         "coverage": node.get("coverage")})
+        used += len(text) + 1
+    status = "no_match" if not passages else (
+        "weak_match" if knowledge_match_is_weak(passages) else "matched"
+    )
+    return {"status": status, "passages": passages,
+            "text": "\n".join(p["text"] for p in passages)}
 
 
 def should_retrieve_knowledge(text: str) -> bool:

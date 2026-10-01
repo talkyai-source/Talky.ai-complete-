@@ -69,6 +69,8 @@ class TelephonySession:
     # adapter is typed as Any to avoid a circular import with CallControlAdapter.
     # It is expected to implement send_tts_audio(pbx_call_id, pcmu_bytes).
     adapter: Any
+    playback_utterance_id: Optional[str] = None
+    last_playback_receipt: Optional[Dict[str, Any]] = None
     created_at: datetime = field(default_factory=datetime.utcnow)
     input_queue: asyncio.Queue = field(
         default_factory=lambda: asyncio.Queue(maxsize=200)
@@ -179,6 +181,7 @@ class TelephonySession:
 
 
 class TelephonyMediaGateway(MediaGateway):
+    playback_evidence = "transmitted"
     """
     Media gateway for SIP telephony sessions that deliver audio via HTTP
     callbacks from the C++ Voice Gateway (Asterisk path).
@@ -560,6 +563,28 @@ class TelephonyMediaGateway(MediaGateway):
     # ------------------------------------------------------------------
     # Outbound audio (TTS → caller)
     # ------------------------------------------------------------------
+
+    async def begin_playback(self, call_id: str, utterance_id: str) -> None:
+        session = self._sessions.get(call_id)
+        begin = getattr(session.adapter, "begin_tts_utterance", None) if session else None
+        if not callable(begin):
+            raise RuntimeError("Telephony transport lacks correlated transmission receipts")
+        await begin(session.pbx_call_id, utterance_id)
+        session.playback_utterance_id = utterance_id
+        session.last_playback_receipt = None
+
+    async def finish_playback(self, call_id: str, utterance_id: str) -> Dict[str, Any]:
+        session = self._sessions.get(call_id)
+        if not session or session.playback_utterance_id != utterance_id:
+            return {"utterance_id": utterance_id, "status": "unknown", "evidence": "unknown", "played_ms": 0}
+        receipt = await session.adapter.finish_tts_utterance(session.pbx_call_id, utterance_id)
+        session.last_playback_receipt = receipt
+        return receipt
+
+    def playback_receipt(self, call_id: str, utterance_id: str) -> Optional[Dict[str, Any]]:
+        session = self._sessions.get(call_id)
+        receipt = session.last_playback_receipt if session else None
+        return dict(receipt) if receipt and receipt.get("utterance_id") == utterance_id else None
 
     async def send_audio(self, call_id: str, audio_chunk: bytes) -> None:
         """

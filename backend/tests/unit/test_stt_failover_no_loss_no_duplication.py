@@ -1,4 +1,4 @@
-"""Flux goes silent mid-sentence: Nova must take over the caller's words EXACTLY ONCE.
+"""Flux goes silent: hand over buffered audio once; do not trust a truncated turn.
 
 WHY THIS EXISTS
 ---------------
@@ -33,8 +33,8 @@ WHAT THIS TEST DOES NOT CLAIM
 -----------------------------
 The replay buffer holds ``audio_buffer_ms`` (500ms). Caller audio older than
 that was consumed by the deaf primary and is genuinely gone. That is a design
-limit, stated and pinned below, not a defect — recovering it would mean buffering
-the whole call. What must never happen is losing audio the buffer *did* hold.
+limit: recovery invalidates that partial and asks the caller to repeat it once.
+Audio the buffer does hold must reach the secondary in order without duplicates.
 """
 from __future__ import annotations
 
@@ -143,7 +143,7 @@ def _policy() -> ReconnectPolicy:
 async def _run(total_chunks: int):
     primary, secondary = _DeafPrimary(), _RecordingSecondary()
     wrapper = ResilientSTTProvider(primary, secondary, policy=_policy())
-    out = [c.text async for c in wrapper.stream_transcribe(
+    out = [(c.metadata or {}).get("stt_recovery") or c.text async for c in wrapper.stream_transcribe(
         _caller_sentence(total_chunks), call_id="failover-test")]
     return primary, secondary, out
 
@@ -154,11 +154,34 @@ async def _run(total_chunks: int):
 async def test_nova_takes_over_a_silent_flux_stream():
     primary, secondary, out = await _run(_CHUNKS_TO_TRIP + 40)
 
-    assert out == ["rescued"], "the caller's sentence was never transcribed"
+    assert out == ["reset", "repeat_required"], "a truncated utterance must be repeated, not trusted"
     assert secondary.received, "Nova was never fed any audio"
     assert len(primary.received) < _CHUNKS_TO_TRIP + 40, (
         "the deaf primary consumed the whole stream — no failover happened"
     )
+
+
+@pytest.mark.asyncio
+async def test_truncated_turn_is_suppressed_but_next_fresh_turn_is_accepted():
+    eager = []
+
+    class Secondary(_RecordingSecondary):
+        async def stream_transcribe(self, audio_stream, **kwargs):
+            async for chunk in audio_stream:
+                self.received.append(_index_of(chunk))
+            kwargs["on_eager_end_of_turn"]("lost phone prefix")
+            yield TranscriptChunk(text="lost phone prefix", is_final=False)
+            yield TranscriptChunk(text="lost phone prefix", is_final=True)
+            kwargs["on_eager_end_of_turn"]("fresh complete answer")
+            yield TranscriptChunk(text="fresh complete answer", is_final=True)
+
+    secondary = Secondary()
+    wrapper = ResilientSTTProvider(_DeafPrimary(), secondary, policy=_policy())
+    out = [(c.metadata or {}).get("stt_recovery") or c.text async for c in wrapper.stream_transcribe(
+        _caller_sentence(_CHUNKS_TO_TRIP + 40), on_eager_end_of_turn=eager.append,
+    )]
+    assert out == ["reset", "repeat_required", "fresh complete answer"]
+    assert eager == ["fresh complete answer"]
 
 
 @pytest.mark.asyncio
@@ -250,11 +273,11 @@ async def test_order_is_preserved_across_the_handover():
 
 
 @pytest.mark.asyncio
-async def test_the_transcript_is_emitted_once_not_once_per_provider():
-    """Both providers ran over the same sentence. Only the one that could hear
-    it may produce output."""
+async def test_truncated_recovery_requests_repeat_once_without_emitting_partial_fact():
+    """Both providers ran, but the secondary only got an incomplete tail."""
     _, _, out = await _run(_CHUNKS_TO_TRIP + 40)
-    assert out.count("rescued") == 1
+    assert out.count("repeat_required") == 1
+    assert "rescued" not in out
 
 
 # ── the documented limit, pinned so it stays a decision ─────────────────────

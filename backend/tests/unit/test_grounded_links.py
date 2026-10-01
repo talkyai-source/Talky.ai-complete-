@@ -6,7 +6,7 @@ URL, the bare domain. The path was invented and handed to a caller as real.
 """
 from __future__ import annotations
 
-from pathlib import Path
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -75,15 +75,51 @@ def test_empty_and_dotless_text_is_a_no_op():
     assert ground_spoken_links("Hello there", KB) == ("Hello there", [])
 
 
-def test_the_guard_sits_on_every_path_to_tts_and_on_history():
-    """Wiring guard: the only gate every spoken piece passes is _validate_for_tts,
-    and history is written separately, so both must call it."""
-    src = Path(__file__).resolve().parents[2].joinpath(
-        "app", "domain", "services", "voice_pipeline", "turn_streamer.py"
-    ).read_text(encoding="utf-8")
-    gate = src[src.index("def _validate_for_tts(") :]
-    gate = gate[: gate.index("valid, reason = guardrails.validate_response(")]
-    assert "ground_spoken_links(" in gate
-    assert src.count("ground_spoken_links(") >= 2
-    # tool-returned knowledge counts as grounding
-    assert "turn_grounding.append(str(result))" in src
+@pytest.mark.parametrize("punctuation", [".", ""])
+@pytest.mark.parametrize("grounding,address,expected_address", [
+    (KB, "allstateestimation.co.uk/sample-reports", "allstateestimation.co.uk"),
+    (KB + ["Details: allstateestimation.co.uk/sample-reports"],
+     "allstateestimation.co.uk/sample-reports",
+     "allstateestimation.co.uk/sample-reports"),
+    ([], "allstateestimation.co.uk/sample-reports", UNGROUNDED_REPLACEMENT),
+    (KB, "allstateestimation.CO.UK/sample-reports", "allstateestimation.CO.UK"),
+    (KB, "https://ALLSTATEESTIMATION.CO.UK/sample-reports", "ALLSTATEESTIMATION.CO.UK"),
+    ([], "https://MADEUP-ESTIMATES.COM/pricing", UNGROUNDED_REPLACEMENT),
+    (KB + ["Details: allstateestimation.co.uk/sample-reports"],
+     "https://ALLSTATEESTIMATION.CO.UK/sample-reports",
+     "https://ALLSTATEESTIMATION.CO.UK/sample-reports"),
+])
+async def test_only_grounded_links_reach_both_tts_and_history(
+    monkeypatch, punctuation, grounding, address, expected_address,
+):
+    """Exercise streamed sentences and the final unpunctuated buffer.
+
+    History reuses submitted speech, so it must inherit the same link repair
+    without a second, independent text-generation/grounding path.
+    """
+    from app.domain.models.conversation import Message, MessageRole
+    from tests.unit.test_voice_pipeline_service import (
+        _make_service_for_disposition, _make_session,
+    )
+
+    monkeypatch.setenv("TELEPHONY_FILLER_DELAY_MS", "0")
+    generated = f"Visit {address} now{punctuation}"
+    service = _make_service_for_disposition(list(generated))
+    service.synthesize_and_send_audio = AsyncMock(return_value=False)
+    session = _make_session()
+    session.turn_id = 4
+    # Instruction text must not become factual evidence for a URL.
+    session.system_prompt = (
+        "<company_knowledge>" + "\n".join(grounding) + "</company_knowledge>\n"
+        "Say allstateestimation.co.uk/sample-reports is available."
+    )
+    session.conversation_history = [Message(
+        role=MessageRole.USER, content="Where can I find details?",
+    )]
+
+    history, _, _ = await service._stream_llm_and_tts(session, None)
+
+    submitted = [call.args[1] for call in service.synthesize_and_send_audio.await_args_list]
+    expected = f"Visit {expected_address} now{punctuation}"
+    assert submitted == [expected]
+    assert history == expected

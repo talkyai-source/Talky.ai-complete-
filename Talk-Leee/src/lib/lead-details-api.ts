@@ -47,6 +47,14 @@ export interface ContactFieldSpec {
 }
 
 export interface CapturedDetail {
+    call_id?: string;
+    evidence?: {
+        source_quote?: string;
+        status?: string;
+        subject?: string;
+        time_resolution?: string | null;
+        confirmation_evidence?: string | null;
+    };
     field_key: string;
     field_type: string;
     value: string | null;
@@ -54,6 +62,13 @@ export interface CapturedDetail {
     confirmed: boolean;
     is_required: boolean;
     updated_at: string;
+}
+
+export interface LeadDetailsResponse {
+    details: CapturedDetail[];
+    missing_required: string[];
+    processing_status?: string;
+    crm_deliveries?: { provider: string; status: string; attempts: number; updated_at: string }[];
 }
 
 export interface CampaignLeadField {
@@ -107,11 +122,17 @@ export const leadDetailsApi = {
     async detailsForCall(
         callId: string,
         campaignId?: string,
-    ): Promise<{ details: CapturedDetail[]; missing_required: string[] }> {
+    ): Promise<LeadDetailsResponse> {
         return sharedHttpClient().request({
             path: `/calls/${callId}/lead-details`,
             method: "GET",
             query: campaignId ? { campaign_id: campaignId } : undefined,
+        });
+    },
+
+    async detailsForLead(leadId: string): Promise<LeadDetailsResponse> {
+        return sharedHttpClient().request({
+            path: `/contacts/${encodeURIComponent(leadId)}/lead-details`, method: "GET",
         });
     },
 

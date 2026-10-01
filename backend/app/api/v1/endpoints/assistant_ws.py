@@ -633,6 +633,7 @@ async def assistant_chat(
                         current_conversation_id, apply_args,
                         actor_user_id=user_id,
                         trusted_proposal_apply=True,
+                        proposal_id=proposal_id,
                     )
                     # Edit tools return {applied: True}; send_email returns
                     # {success: True}. Either counts as a successful apply.
@@ -641,7 +642,7 @@ async def assistant_chat(
                         and (result.get("applied") is True or result.get("success") is True)
                         and not result.get("error")
                     )
-                    err = result.get("error") if isinstance(result, dict) else "Apply failed"
+                    err = (result.get("error") or result.get("message")) if isinstance(result, dict) and not applied else None
                     # proposal already consumed by pop_proposal above.
                     await manager.send_json(connection_id, {
                         "type": "proposal_result",

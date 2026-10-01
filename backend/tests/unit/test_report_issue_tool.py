@@ -22,7 +22,7 @@ def _install_fake_email_service(monkeypatch, sink: dict):
     class _Svc:
         async def send_email(self, **kwargs):
             sink.update(kwargs)
-            return {"success": True}
+            return {"success": True, "message_id": "provider-receipt"}
 
     mod.get_email_service = lambda db_client: _Svc()
     mod.EmailNotConnectedError = _EmailNotConnectedError
@@ -70,6 +70,7 @@ async def test_report_issue_sends_to_support_with_tenant(monkeypatch):
         category="calls",
         severity="high",
         contact_email="me@acme.com",
+        confirm=True,
     )
 
     assert res["success"] is True

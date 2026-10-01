@@ -1,0 +1,75 @@
+{
+  "candidate_revision": "fa145cf4869800dbca30755d8cf598f670aec30b",
+  "scope": "Actual model provider, production composer and TurnStreamer; synthetic caller text, TTS/media mocked, no external action tools or customer calls.",
+  "provider": "gemini",
+  "python": "3.12.3",
+  "model": "gemini-3.8-flash",
+  "temperature": 0.2,
+  "cases": [
+    {
+      "case": "denial-product-use-1",
+      "wire_token_cap_override": null,
+      "turns": [
+        {
+          "turn": 1,
+          "caller": "I have never heard of Northwind. I am not your customer. Why are you calling?",
+          "provider_request_count": null,
+          "terminal_reasons": null,
+          "provider_stream_invocations": 1,
+          "tools_offered": 0,
+          "sent_prompt_contains_product_use_rule": true,
+          "sent_prompt_contains_benefits_evidence_rule": true,
+          "status": "ok",
+          "returned_history_text": "Thanks for letting me know. I was reaching out to see if you might be interested in our payment terminals, but I must have had the wrong impression. Are you currently looking for payment solutions?",
+          "tts_submissions": [
+            "Thanks for letting me know.",
+            "I was reaching out to see if you might be interested in our payment terminals, but I must have had the wrong impression.",
+            "Are you currently looking for payment solutions?"
+          ],
+          "completed_submission_sentences": [
+            "Thanks for letting me know.",
+            "I was reaching out to see if you might be interested in our payment terminals, but I must have had the wrong impression.",
+            "Are you currently looking for payment solutions?"
+          ],
+          "llm_ms": 1607,
+          "elapsed_ms": 1610,
+          "end_call_requested": false,
+          "raw_provider_text": "Thanks for letting me know. I was reaching out to see if you might be interested in our payment terminals, but I must have had the wrong impression. Are you currently looking for payment solutions?",
+          "history_matches_completed_submissions": true
+        },
+        {
+          "turn": 2,
+          "caller": "You have the right number. I have not said that I use payment terminals. What could your company offer me?",
+          "provider_request_count": null,
+          "terminal_reasons": null,
+          "provider_stream_invocations": 1,
+          "tools_offered": 0,
+          "sent_prompt_contains_product_use_rule": true,
+          "sent_prompt_contains_benefits_evidence_rule": true,
+          "status": "ok",
+          "returned_history_text": "We provide payment terminals and processing solutions for businesses to accept card and contactless payments. Do you currently accept in-person payments?",
+          "tts_submissions": [
+            "We provide payment terminals and processing solutions for businesses to accept card and contactless payments.",
+            "Do you currently accept in-person payments?"
+          ],
+          "completed_submission_sentences": [
+            "We provide payment terminals and processing solutions for businesses to accept card and contactless payments.",
+            "Do you currently accept in-person payments?"
+          ],
+          "llm_ms": 1800,
+          "elapsed_ms": 1801,
+          "end_call_requested": false,
+          "raw_provider_text": "We provide payment terminals and processing solutions for businesses to accept card and contactless payments. Do you currently accept in-person payments?",
+          "history_matches_completed_submissions": true
+        }
+      ]
+    }
+  ],
+  "completed": true,
+  "limitations": [
+    "TTS submissions were intercepted, not rendered or heard.",
+    "The low-token case deliberately overrides only this harness's outgoing request ceiling to exercise an actual provider length finish; production configuration is unchanged.",
+    "A small synthetic conversation spot check is not general model reliability proof.",
+    "Groq SDK requests and finish reasons are directly observed; other providers expose adapter stream invocation and returned text, not raw HTTP request counts or terminal reasons."
+  ]
+}

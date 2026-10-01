@@ -322,3 +322,51 @@ async def test_a_suppressed_turn_keeps_its_prose_and_still_arms_capture_mode():
         assert armed == [session.call_id]
     finally:
         capture_mode.clear(session.call_id)
+
+
+@pytest.mark.asyncio
+async def test_actual_cerebras_thanks_envelope_is_recovered_without_saying_goodbye():
+    """Replay the Oct 2 synthetic model output through the real full turn path."""
+    from app.domain.models.session import CallState
+    from tests.unit.test_voice_pipeline_service import (
+        _make_service_for_disposition,
+        _make_session,
+    )
+
+    envelope = '{"action":"end_session","reason":"user_done","farewell":"Glad I could help. Take care."}'
+    acknowledgment = "You're welcome. Is there anything else you'd like to ask?"
+    responses = iter([envelope, acknowledgment])
+    model_prompts = []
+
+    class ReplayProvider:
+        async def stream_chat_with_timeout(self, *args, **kwargs):
+            model_prompts.append(kwargs)
+            yield next(responses)
+
+    service = _make_service_for_disposition([])
+    service.llm_provider = ReplayProvider()
+    submitted = []
+
+    async def capture_tts(_session, text, *args, **kwargs):
+        submitted.append(text)
+        return False
+
+    service.synthesize_and_send_audio = capture_tts
+    session = _make_session()
+    session.campaign_id = "synthetic-campaign"
+    session._has_introduced = True
+    session._voice_action_context_loaded = True
+    session._voice_action_capabilities = {}
+    session.current_user_input = "Thanks, that answers my question."
+
+    await service.handle_turn_end(session, AsyncMock())
+
+    assert len(model_prompts) == 2  # One bounded recovery, not a silent turn.
+    assert " ".join(submitted) == acknowledgment
+    assistant_history = [m.content for m in session.conversation_history if m.role == MessageRole.ASSISTANT]
+    assert assistant_history == [acknowledgment]
+    assert not getattr(session, "_end_call_requested", False)
+    assert not session._end_session_action_handled
+    assert session.state != CallState.ENDED
+    service.media_gateway.hangup_call.assert_not_awaited()
+    assert _PHANTOM_RETRY_INSTRUCTION not in [m.content for m in session.conversation_history]

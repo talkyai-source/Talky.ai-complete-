@@ -1,6 +1,6 @@
 """Write each SIP trunk's REAL Asterisk registration state into the DB.
 
-Run by talky-trunk-status.timer every ~15s (one-shot). Reads
+Run by talky-trunk-status.timer every ~10s (one-shot). Reads
 `asterisk -rx 'pjsip show registrations'` — the live truth — maps each
 registration to its trunk, and updates tenant_sip_trunks.live_registration_status
 + live_status_checked_at. The Settings trunk card renders this (auto-refresh), so
@@ -9,8 +9,8 @@ the card reflects reality, never a frozen Test snapshot or dummy data.
 Mapping:
   * registration trunk: namespaced registration ``trunk-<id>-reg`` must be
     registered and its endpoint must exist;
-  * IP-auth trunk: there is no registration object, so namespaced endpoint
-    presence is the runtime proof and is stored as ``loaded``;
+  * IP-auth trunk: loaded endpoint proves inbound configuration; outbound
+    readiness separately requires a qualified reachable contact;
   * hand-managed platform default: use its configured registration/endpoint;
   * inactive trunk: ``inactive``.
 """
@@ -95,6 +95,35 @@ def read_endpoints() -> tuple[set[str], bool]:
     return endpoints, ok
 
 
+def read_endpoint_contacts() -> tuple[dict[str, str], bool]:
+    """Read qualified contacts grouped by their actual endpoint, not by login.
+
+    A loaded endpoint, an open socket, and a successful REGISTER are not proof
+    that the current outbound contact is reachable. Asterisk owns OPTIONS and
+    its timeout; this timer only projects that result.
+    """
+    out, ok = _asterisk_cli("pjsip show endpoints")
+    contacts: dict[str, list[str]] = {}
+    endpoint = None
+    for line in out.splitlines():
+        match = re.match(r"^\s*Endpoint:\s+(\S+)", line)
+        if match:
+            name = match.group(1).split("/", 1)[0]
+            endpoint = name if not name.startswith("<") else None
+        elif endpoint and re.match(r"^\s*Contact:\s+", line):
+            match = re.search(r"\s(Avail|Unavail|NonQual|Unknown)\s", line)
+            if match:
+                contacts.setdefault(endpoint, []).append(match.group(1))
+    return {
+        name: (
+            "reachable"
+            if "Avail" in states
+            else "unreachable" if "Unavail" in states else "unknown"
+        )
+        for name, states in contacts.items()
+    }, ok
+
+
 def read_reg_failures() -> dict[str, str]:
     """registered-identity (number/login) -> 'CODE Reason' (e.g. '403 Forbidden')
     parsed from recent Asterisk registration-failure log lines, so the card can
@@ -129,6 +158,8 @@ def status_for(
     *,
     registrations_ok: bool = True,
     endpoints_ok: bool = True,
+    contact_statuses: dict[str, str] | None = None,
+    contacts_ok: bool = True,
 ) -> str:
     tid = trunk["id"]
     if not trunk["is_active"]:
@@ -149,27 +180,41 @@ def status_for(
         else f"trunk-{tid}-reg"
     )
 
-    if endpoints_ok and endpoint_name not in endpoints:
+    if not endpoints_ok:
+        return "unknown"
+    if endpoint_name not in endpoints:
         return "missing_config"
 
+    contact = (contact_statuses or {}).get(endpoint_name, "unknown")
     register_enabled = bool((trunk.get("metadata") or {}).get("register"))
+    ip_auth = not register_enabled and (
+        not is_platform_default or (registrations_ok and registration_name not in reg)
+    )
+    if ip_auth:
+        # Receiving a trusted inbound INVITE does not require the carrier to
+        # answer our outbound OPTIONS. Keep endpoint/config proof separate;
+        # outbound admission rejects loaded and requires reachable instead.
+        return "reachable" if contacts_ok and contact == "reachable" else "loaded"
+    if not contacts_ok:
+        return "unknown"
+    if contact == "unreachable":
+        return "unreachable"
+
     # The platform-default row is hand-managed and its legacy metadata does
     # not carry register=true even though the global upstream may register.
     if register_enabled or is_platform_default:
         live = reg.get(registration_name)
         if live:
-            return live
+            return live if live != "registered" or contact == "reachable" else "unknown"
         if not registrations_ok:
             # Endpoint presence still proves an IP-auth platform trunk is
             # loaded, but it cannot prove a configured registration healthy.
-            return "loaded" if is_platform_default and endpoint_name in endpoints else "unknown"
-        if is_platform_default and endpoint_name in endpoints:
-            return "loaded"
+            return "unknown"
+        if is_platform_default and contact == "reachable":
+            return "reachable"
         return "unregistered"
 
-    if not endpoints_ok:
-        return "unknown"
-    return "loaded"
+    return contact
 
 
 def reconcile_inactive_config_files(rows, endpoints: set[str]) -> int:
@@ -215,6 +260,7 @@ def reconcile_inactive_config_files(rows, endpoints: set[str]) -> int:
 async def main() -> None:
     reg, registrations_ok = read_registrations()
     endpoints, endpoints_ok = read_endpoints()
+    contact_statuses, contacts_ok = read_endpoint_contacts()
     fails = read_reg_failures()
     conn = await asyncpg.connect(load_database_url())
     try:
@@ -261,6 +307,8 @@ async def main() -> None:
                 endpoints,
                 registrations_ok=registrations_ok,
                 endpoints_ok=endpoints_ok,
+                contact_statuses=contact_statuses,
+                contacts_ok=contacts_ok,
             )
             detail = None
             if st in ("rejected", "unregistered"):
@@ -271,7 +319,20 @@ async def main() -> None:
             elif st == "missing_config":
                 detail = "Configured PJSIP endpoint is not loaded by Asterisk"
             elif st == "unknown":
-                detail = "Asterisk runtime query failed; inspect talky-trunk-status logs"
+                detail = "No current qualified SIP contact; inspect Asterisk contact status"
+            elif st == "unreachable":
+                detail = "Asterisk OPTIONS qualification timed out; the SIP contact is unavailable"
+            elif st == "loaded":
+                endpoint = (
+                    os.getenv("TELEPHONY_PJSIP_OUTBOUND_ENDPOINT", DEFAULT_ENDPOINT)
+                    if str(r["trunk_name"] or "").strip().lower() == os.getenv("PLATFORM_SIP_TRUNK_NAME", DEFAULT_PLATFORM_TRUNK_NAME).strip().lower()
+                    else f"trunk-{r['id']}"
+                )
+                detail = (
+                    "Outbound OPTIONS timed out; the inbound IP-auth endpoint remains loaded."
+                    if contacts_ok and contact_statuses.get(endpoint) == "unreachable"
+                    else "Inbound IP-auth endpoint loaded; outbound contact reachability is not confirmed."
+                )
             await conn.execute(
                 "UPDATE tenant_sip_trunks "
                 "SET live_registration_status=$1, live_status_detail=$2, live_status_checked_at=NOW() "

@@ -19,6 +19,7 @@ from app.domain.services.voice_pipeline.contact_capture import (
     CaptureStatus,
     ContactCaptureState,
     advance_capture,
+    contact_value_disowned,
     has_capture_intent,
 )
 
@@ -116,9 +117,15 @@ _CONTACT_OBJECTION_RE = re.compile(
     r"|\b(?:haven'?t|have\s+not|didn'?t|did\s+not|never)\s+ask(?:ed)?\s+"
     r"(?:you\s+)?for\s+(?:that|it|this|any)"
     r"|\bnot\s+interested\s+in\s+(?:sharing|giving)\b"
+    r"|\b(?:no\s+thanks?\s+(?:to|for)|not\s+interested\s+in)\s+"
+    r"(?:e-?mail|sms|phone|(?:my\s+)?(?:number|contact\s+details?))\b"
     r"|\b(?:not|won'?t\s+be)\s+(?:giving|sharing)\b[^.?!]{0,20}"
     r"\b(?:e-?mail|number|details?)\b"
     r"|\b(?:don'?t|do\s+not)\s+want\s+to\s+(?:give|share)\b",
+    re.IGNORECASE,
+)
+_PAUSE_CONTACT_RE = re.compile(
+    r"\b(?:leave|keep)\s+(?:it|that|this|(?:the|my)\s+(?:email|phone|number))\s+unconfirmed\b",
     re.IGNORECASE,
 )
 # "Why are you asking?" with no object only counts straight after a contact ask.
@@ -300,6 +307,9 @@ class CallState:
     # The caller has objected to being asked for contact details. Sticky until
     # they invite the ask themselves (a send request resets it).
     contact_ask_objections: int = 0
+    # Stop prompting without withdrawing a usable caller-stated candidate.
+    # Explicit disowning/cancellation remains a separate per-field transition.
+    contact_capture_paused: bool = False
     # Per turn: the caller just asked us a question.
     caller_asked_question: bool = False
     # The number this call is on (outbound: the number dialled; inbound:
@@ -369,8 +379,10 @@ def update_state_from_user_turn(
     *,
     readback_issued: bool = False,
     confirmation_verdict: Optional[str] = None,
+    independent_confirmation_value: Optional[str] = None,
     phone_readback_issued: bool = False,
     phone_confirmation_verdict: Optional[str] = None,
+    phone_independent_confirmation_value: Optional[str] = None,
     phone_region: Optional[str] = None,
     transcript_confidence: Optional[float] = None,
     transcript_alternatives: Sequence[str] = (),
@@ -406,6 +418,17 @@ def update_state_from_user_turn(
     active_kind = state.active_contact_kind
     email_intent = has_capture_intent("email", utterance)
     phone_intent = has_capture_intent("phone", utterance)
+    from app.domain.services.voice_pipeline.action_tools import end_call_intent_present
+
+    objected = bool(_CONTACT_OBJECTION_RE.search(utterance)) or (
+        state.active_contact_kind is not None
+        and bool(_GENERIC_WHY_ASK_RE.search(utterance))
+    )
+    pause_requested = objected or bool(_PAUSE_CONTACT_RE.search(utterance)) or end_call_intent_present(utterance)
+    contact_capture_paused = bool(pause_requested or (
+        state.contact_capture_paused
+        and not (email_intent or phone_intent or _SEND_REQUEST_RE.search(utterance))
+    ))
     dual_readback = readback_issued and phone_readback_issued
     if dual_readback:
         # The agent may read both pending values in one sentence and ask one
@@ -451,8 +474,11 @@ def update_state_from_user_turn(
     # is serialized, noticing what the caller asked for is not. Test call
     # 5dfa4416: "And note down my mobile number as well?" during the email
     # read-back never reached the phone field and was lost.
-    if not skip_email and (
+    email_disowned = contact_value_disowned("email", utterance)
+    phone_disowned = contact_value_disowned("phone", utterance)
+    if not skip_email and (not contact_capture_paused or email_disowned) and (
         active_kind == "email" or email_intent or dual_readback
+        or email_disowned
     ):
         email_capture = advance_capture(
             email_capture,
@@ -460,6 +486,7 @@ def update_state_from_user_turn(
             utterance=utterance,
             readback_issued=readback_issued,
             confirmation_verdict=email_verdict,
+            independent_confirmation_value=independent_confirmation_value,
             transcript_confidence=transcript_confidence,
             transcript_alternatives=transcript_alternatives,
             explicit_reask=explicit_contact_reask,
@@ -468,8 +495,9 @@ def update_state_from_user_turn(
                 state.agent_asked_kind == "email" or readback_issued
             ),
         )
-    if not skip_phone and (
+    if not skip_phone and (not contact_capture_paused or phone_disowned) and (
         active_kind == "phone" or phone_intent or dual_readback
+        or phone_disowned
     ):
         phone_capture = advance_capture(
             phone_capture,
@@ -477,6 +505,7 @@ def update_state_from_user_turn(
             utterance=utterance,
             readback_issued=phone_readback_issued,
             confirmation_verdict=phone_verdict,
+            independent_confirmation_value=phone_independent_confirmation_value,
             phone_region=phone_region,
             transcript_confidence=transcript_confidence,
             transcript_alternatives=transcript_alternatives,
@@ -548,10 +577,6 @@ def update_state_from_user_turn(
             bidding_active = True
 
     contact_ask_objections = state.contact_ask_objections
-    objected = bool(_CONTACT_OBJECTION_RE.search(utterance)) or (
-        state.active_contact_kind is not None
-        and bool(_GENERIC_WHY_ASK_RE.search(utterance))
-    )
     if objected:
         contact_ask_objections += 1
         # They are not in the middle of giving us an address any more, so the
@@ -563,6 +588,9 @@ def update_state_from_user_turn(
         # the objection lifts and the address they give next is handled
         # normally.
         contact_ask_objections = 0
+
+    if contact_capture_paused:
+        active_kind = None
 
     declined_count = state.declined_count
     # "not interested in sharing my number" objects to the ASK, not the call.
@@ -593,6 +621,7 @@ def update_state_from_user_turn(
         bidding_active=bidding_active,
         declined_count=declined_count,
         contact_ask_objections=contact_ask_objections,
+        contact_capture_paused=contact_capture_paused,
         caller_asked_question=caller_asked_question,
     )
 
@@ -607,6 +636,10 @@ def update_state_from_agent_turn(state: CallState, utterance: str) -> CallState:
     text = str(utterance or "").strip()
     if not text:
         return state
+    if state.contact_capture_paused:
+        # An unwanted model question cannot reopen capture; only the caller's
+        # explicit new contact/request can lift their pause on the next turn.
+        return replace(state, active_contact_kind=None, agent_asked_kind=None)
     reask = bool(_AGENT_REASK_RE.search(text))
     kind: Optional[CaptureKind] = None
     if _AGENT_EMAIL_REQUEST_RE.search(text):

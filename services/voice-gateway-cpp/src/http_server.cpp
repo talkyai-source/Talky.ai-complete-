@@ -1758,7 +1758,7 @@ void HttpServer::handle_client(const int client_fd) {
         const std::string body = std::string("{\"status\":\"") + (is_healthy ? "ok" : "degraded") +
             "\",\"io_loop_healthy\":" + (is_healthy ? "true" : "false") +
             ",\"build_sha\":\"" + escape_json(kBuildSha) +
-            "\",\"protocol_version\":2,\"codecs\":[\"pcmu\"],\"callback_protocol_versions\":[2]}";
+            "\",\"protocol_version\":2,\"tts_receipt_protocol\":1,\"codecs\":[\"pcmu\"],\"callback_protocol_versions\":[2]}";
         write_response(client_fd, is_healthy ? 200 : 503, is_healthy ? "OK" : "Service Unavailable", body);
         return;
     }
@@ -2083,6 +2083,30 @@ void HttpServer::handle_client(const int client_fd) {
             "{\"status\":\"queued\",\"session_id\":\"" + escape_json(session_id.value()) +
                 "\",\"queued_frames\":" + std::to_string(queued_frames) +
                 ",\"tts_queue_depth_frames\":" + std::to_string(snap.tts_queue_depth_frames) + "}");
+        return;
+    }
+
+    if (request->method == "POST" && request->path == "/v1/sessions/tts/finish") {
+        const auto session_id = json_get_string(request->body, "session_id");
+        const auto utterance_id = json_get_string(request->body, "utterance_id");
+        const auto last_seq = json_get_int(request->body, "last_chunk_seq");
+        if (!session_id || !utterance_id || utterance_id->empty() || utterance_id->size() > 64 || !last_seq || *last_seq < 0) {
+            write_response(client_fd, 400, "Bad Request", "{\"error\":\"invalid_utterance_finish\"}");
+            return;
+        }
+        const auto session = registry_.get_session(*session_id);
+        if (!session) {
+            write_response(client_fd, 404, "Not Found", "{\"error\":\"session_not_found\"}");
+            return;
+        }
+        std::string status, error;
+        std::size_t frames = 0;
+        if (!session->finish_tts_utterance(*utterance_id, *last_seq, status, frames, error)) {
+            write_response(client_fd, 409, "Conflict", "{\"error\":\"" + escape_json(error) + "\"}");
+            return;
+        }
+        write_response(client_fd, 200, "OK", "{\"receipt_protocol\":1,\"utterance_id\":\"" + escape_json(*utterance_id) +
+            "\",\"status\":\"" + status + "\",\"evidence\":\"transmitted\",\"transmitted_frames\":" + std::to_string(frames) + "}");
         return;
     }
 

@@ -4,8 +4,8 @@ Reads the transcript from the calls table, calls the summarizer, and
 writes summary_json + headline back — all within a tenant-scoped
 RLS-correct transaction.
 
-Idempotency: if summary_json is already populated and force=False, the
-existing value is returned immediately without re-summarizing.
+Idempotency: reuse a summary only when its evidence revision matches and it
+contains business details. Older/mismatched summaries are regenerated.
 """
 from __future__ import annotations
 
@@ -15,6 +15,7 @@ import os
 from typing import Any, Optional
 
 from app.core.db_utils import acquire_with_tenant
+from app.domain.services.call_summary.business_details import save_summary_details, transcript_revision, summary_snapshot
 from app.domain.services.call_summary.summarizer import (
     SUMMARY_UNAVAILABLE_HEADLINE,
     summarize_transcript,
@@ -103,7 +104,7 @@ async def generate_and_store(
         # 2026-09-23: headline claimed "scheduled root canal appointment" while
         # action_results was `{}` — nothing had actually executed).
         row = await conn.fetchrow(
-            "SELECT transcript, summary_json, action_results FROM calls "
+            "SELECT transcript, transcript_json, campaign_id, lead_id, summary_json, action_results, summary_transcript_hash FROM calls "
             "WHERE id = $1 AND tenant_id = $2::uuid",
             call_id,
             tenant_id,
@@ -112,6 +113,8 @@ async def generate_and_store(
     if row is None:
         logger.warning("call_summary store: call %s not found for tenant %s", call_id, tenant_id)
         return None
+
+    revision = transcript_revision(row)
 
     # --- Idempotency check ---
     existing = row["summary_json"]
@@ -129,13 +132,16 @@ async def generate_and_store(
                 )
         else:
             existing_dict = dict(existing)
-        if existing_dict is not None:
+        if (existing_dict is not None and "business_details" in existing_dict
+                and row.get("summary_transcript_hash") == revision):
             # Self-heal: re-assert the lead flag from the existing summary.
             # Lead-marking shipped after some summaries already existed, and the
             # post-call generate path short-circuits here before reaching the
             # marker — so without this, historical qualified/callback calls never
             # flag their contact. Idempotent + best-effort (only writes leads when
             # the outcome is a lead and the contact isn't already flagged).
+            await save_summary_details(pool, tenant_id, call_id, existing_dict, row)
+            await refresh_latest_analysis(pool, tenant_id, call_id, existing_dict, revision, snapshot=summary_snapshot(row))
             await mark_lead_from_summary(pool, tenant_id, call_id, existing_dict)
             return existing_dict
 
@@ -143,6 +149,11 @@ async def generate_and_store(
     transcript_text: str = row["transcript"] or ""
     if not transcript_text.strip():
         logger.debug("call_summary store: call %s has no transcript — skipping", call_id)
+        async with acquire_with_tenant(pool, tenant_id) as conn:
+            await conn.execute(
+                "UPDATE calls SET lead_details_status = 'no_transcript' WHERE id=$1::uuid AND tenant_id=$2::uuid AND transcript IS NOT DISTINCT FROM $3",
+                call_id, tenant_id, row.get("transcript"),
+            )
         return None
 
     # --- Generate ---
@@ -168,30 +179,73 @@ async def generate_and_store(
             call_id,
             tenant_id,
         )
+        async with acquire_with_tenant(pool, tenant_id) as conn:
+            await conn.execute(
+                "UPDATE calls SET lead_details_status = 'failed' WHERE id=$1::uuid AND tenant_id=$2::uuid AND transcript=$3",
+                call_id, tenant_id, transcript_text,
+            )
         return summary
 
     # --- Persist (tenant-scoped) ---
     async with acquire_with_tenant(pool, tenant_id) as conn:
-        await conn.execute(
+        written = await conn.execute(
             """
             UPDATE calls
                SET summary_json = $2::jsonb,
                    summary      = $3,
-                   updated_at   = NOW()
-             WHERE id = $1 AND tenant_id = $4::uuid
+                   updated_at   = NOW(),
+                   summary_transcript_hash = $6
+             WHERE id = $1 AND tenant_id = $4::uuid AND transcript = $5
+               AND transcript_json IS NOT DISTINCT FROM $7::jsonb
+               AND action_results IS NOT DISTINCT FROM $8::jsonb
             """,
             call_id,
             json.dumps(summary),
             summary.get("headline", ""),
             tenant_id,
+            transcript_text,
+            revision,
+            _json_parameter(row.get("transcript_json")),
+            _json_parameter(row.get("action_results")),
         )
+        if written == "UPDATE 0":
+            return None  # Transcript changed while analysis ran; retry the current revision.
 
     # The AI just judged the call — if it reads as a lead (goal achieved),
     # flag the contact green for follow-up. Best-effort; never blocks the
     # summary return.
+    await save_summary_details(pool, tenant_id, call_id, summary, row)
+    await refresh_latest_analysis(pool, tenant_id, call_id, summary, revision, snapshot=summary_snapshot(row))
     await mark_lead_from_summary(pool, tenant_id, call_id, summary)
 
     return summary
+
+
+def _json_parameter(value):
+    return value if isinstance(value, str) or value is None else json.dumps(value)
+
+
+async def refresh_latest_analysis(pool, tenant_id, call_id, summary, revision, *, snapshot=None) -> None:
+    """Keep the newest call's analysis separate from the operator's note.
+
+    A withdrawal/no-interest call updates this too; qualification is a separate
+    decision below. Old jobs cannot replace newer-call information.
+    """
+    tips = summary.get("follow_up_tips") or []
+    tip = tips[0].strip() if tips and isinstance(tips[0], str) else ""
+    note = (tip or summary.get("next_step") or summary.get("headline") or "").strip()[:2000]
+    async with acquire_with_tenant(pool, tenant_id) as conn:
+        await conn.execute(
+            """UPDATE leads l SET latest_analysis_note=$3, latest_analysis_call_id=c.id,
+                       latest_analysis_at=c.created_at, updated_at=NOW()
+                  FROM calls c WHERE c.id=$1::uuid AND c.tenant_id=$2::uuid
+                    AND l.id=c.lead_id AND l.tenant_id=$2::uuid
+                    AND c.summary_transcript_hash=$4
+                    AND ($5::jsonb IS NULL OR jsonb_build_array(COALESCE(c.transcript,''),c.transcript_json,c.action_results)=$5::jsonb)
+                    AND (l.latest_analysis_at IS NULL OR l.latest_analysis_at <= c.created_at)""",
+            call_id, tenant_id, note, revision,
+            json.dumps(snapshot, default=str) if snapshot is not None else None,
+        )
 
 
 # A "qualified lead" after a call the caller barely took part in is a false
@@ -352,7 +406,7 @@ async def mark_lead_from_summary(
                 """
                 UPDATE leads AS l
                    SET is_lead          = true,
-                       follow_up_note    = $2,
+                       follow_up_note    = COALESCE(NULLIF(l.follow_up_note, ''), $2),
                        qualified_at      = NOW(),
                        qualified_call_id = $1,
                        updated_at        = NOW()

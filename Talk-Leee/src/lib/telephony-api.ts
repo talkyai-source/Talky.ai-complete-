@@ -63,6 +63,9 @@ export interface SipTrunkTestResult {
     target?: string;
     error?: string | null;
     detail?: string | null;
+    sip_code?: string | null;
+    timeout_code?: number | null;
+    inconclusive?: boolean;
 }
 
 export interface SipTrunkRow {
@@ -83,6 +86,8 @@ export interface SipTrunkRow {
     live_status_detail?: string | null;
     live_status_checked_at?: string | null;
     runtime_ready: boolean;
+    /** Missing on older responses; never infer inbound admission from outbound health. */
+    inbound_runtime_ready?: boolean;
     runtime_status_code: string;
     runtime_status_detail: string;
     created_at: string;
@@ -209,9 +214,7 @@ export function useSipTrunks() {
         // regardless — the .trunks-on-a-bare-array bug hid EVERY trunk before.
         queryFn: () => api<SipTrunkRow[] | { trunks: SipTrunkRow[] }>("/telephony/sip/trunks"),
         select: (d) => (Array.isArray(d) ? d : (d?.trunks ?? [])),
-        // Auto-refresh so the live registration status (written by the 15s
-        // server updater) stays current on the card without a manual reload.
-        refetchInterval: 15000,
+        refetchInterval: 10000,
     });
 }
 
@@ -368,7 +371,7 @@ export function useDeleteSipTrunk() {
     const qc = useQueryClient();
     return useMutation({
         mutationFn: (id: string) =>
-            api<{ ok: boolean }>(`/telephony/sip/trunks/${id}`, { method: "DELETE" }),
+            api<{ id: string; deleted: boolean }>(`/telephony/sip/trunks/${id}`, { method: "DELETE", headers: { "Idempotency-Key": newIdempotencyKey() } }),
         onSuccess: () => {
             void qc.invalidateQueries({ queryKey: telephonyKeys.sipTrunks });
         },

@@ -23,6 +23,7 @@ import { Button } from "@/components/ui/button";
 import { dashboardApi, ContactList } from "@/lib/dashboard-api";
 import { isApiClientError } from "@/lib/http-client";
 import { notificationsStore } from "@/lib/notifications";
+import { CampaignReadinessNotice, useCampaignReadiness } from "@/components/campaigns/campaign-readiness";
 
 export const UNGROUPED_LIST_ID = "ungrouped";
 
@@ -65,6 +66,7 @@ export function ContactLists({
     const [error, setError] = useState("");
     const [togglingId, setTogglingId] = useState<string | null>(null);
     const [callingId, setCallingId] = useState<string | null>(null);
+    const readiness = useCampaignReadiness([campaignId], lists.some((list) => list.id !== UNGROUPED_LIST_ID));
 
     // Keep callbacks in refs so they aren't effect dependencies (parents often
     // pass fresh closures each render). Assigning during render reads/writes a
@@ -127,7 +129,7 @@ export function ContactLists({
     }
 
     async function handleCall(list: ContactList) {
-        if (list.id === UNGROUPED_LIST_ID || callingId) return;
+        if (list.id === UNGROUPED_LIST_ID || callingId || !readiness.ready) return;
         const ok = window.confirm(
             `Call all eligible contacts in “${list.name}” now?\n\n` +
             "This places REAL outbound calls immediately — just like starting the campaign.",
@@ -206,6 +208,7 @@ export function ContactLists({
                     </button>
                 )}
             </div>
+            {lists.some((list) => list.id !== UNGROUPED_LIST_ID) && <CampaignReadinessNotice readiness={readiness} />}
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 {lists.map((list) => {
                     const active = list.is_active;
@@ -274,7 +277,7 @@ export function ContactLists({
                                     <Button
                                         size="sm"
                                         variant={active ? "default" : "outline"}
-                                        disabled={callingId === list.id}
+                                        disabled={Boolean(callingId) || !readiness.ready}
                                         onClick={() => void handleCall(list)}
                                     >
                                         {callingId === list.id ? (

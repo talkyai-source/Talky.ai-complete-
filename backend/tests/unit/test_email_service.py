@@ -113,10 +113,12 @@ class TestGetActiveEmailConnector:
         mock_supabase = MagicMock()
         mock_response = MagicMock()
         mock_response.data = []
+        mock_response.error = None
         
         mock_table = MagicMock()
         mock_table.select.return_value = mock_table
         mock_table.eq.return_value = mock_table
+        mock_table.order.return_value = mock_table
         mock_table.execute.return_value = mock_response
         mock_supabase.table.return_value = mock_table
         
@@ -134,33 +136,11 @@ class TestSendEmail:
         """Raises error when no email connector is connected"""
         from app.services.email_service import EmailService, EmailNotConnectedError
         
-        # Mock supabase table calls
-        mock_supabase = MagicMock()
-        
-        # Create separate mock for each table call
-        def table_side_effect(table_name):
-            mock_table = MagicMock()
-            mock_table.select.return_value = mock_table
-            mock_table.eq.return_value = mock_table
-            mock_table.single.return_value = mock_table
-            
-            if table_name == "connectors":
-                # No connectors found
-                mock_table.execute.return_value = MagicMock(data=[])
-            elif table_name == "assistant_actions":
-                # Action insert succeeds
-                mock_table.insert.return_value = mock_table
-                mock_table.insert.return_value.execute.return_value = MagicMock(data=[{"id": "test-action"}])
-                mock_table.update.return_value = mock_table
-                mock_table.update.return_value.eq.return_value = mock_table
-                mock_table.update.return_value.eq.return_value.execute.return_value = MagicMock(data=[])
-            
-            return mock_table
-        
-        mock_supabase.table.side_effect = table_side_effect
-        
-        service = EmailService(mock_supabase)
-        
+        service = EmailService(MagicMock())
+        service._create_action_record = AsyncMock(return_value="recorded-action")
+        service._update_action_status = AsyncMock()
+        service._get_active_email_connector = AsyncMock(side_effect=EmailNotConnectedError())
+
         with pytest.raises(EmailNotConnectedError):
             await service.send_email(
                 tenant_id="test-tenant",

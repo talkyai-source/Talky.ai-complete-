@@ -45,9 +45,9 @@ class TenantPhoneNumber(BaseModel):
     stir_shaken_token: Optional[str] = Field(
         default=None,
         description=(
-            "Attestation token returned by the upstream carrier (Twilio, "
-            "Telnyx, Bandwidth). NULL = test-only — production refuses to "
-            "originate when NULL."
+            "Legacy carrier attestation reference. Optional; it is not a "
+            "per-call SIP Identity signature or a caller-ID ownership proof. "
+            "The originating carrier handles applicable STIR/SHAKEN signing."
         ),
     )
     label: Optional[str] = None
@@ -58,8 +58,9 @@ class TenantPhoneNumber(BaseModel):
     model_config = {"use_enum_values": True}
 
     def is_dialable_in_production(self) -> bool:
-        """True only when the number is verified AND has a real attestation
-        token. Use this at the enforcement layer in prod."""
-        if self.status != PhoneNumberStatus.VERIFIED.value:
-            return False
-        return bool(self.stir_shaken_token)
+        """Whether tenant ownership is verified for production origination.
+
+        Carrier routing and signing are separate checks; a stored token is
+        neither required nor sufficient to prove this call is attested.
+        """
+        return self.status == PhoneNumberStatus.VERIFIED.value

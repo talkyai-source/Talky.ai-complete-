@@ -45,7 +45,7 @@ from app.infrastructure.connectors.base import (
     ConnectorProviderError,
     OAuthTokens,
 )
-from app.infrastructure.connectors.crm.base import CRMProvider
+from app.infrastructure.connectors.crm.base import CRMProvider, call_reference
 
 logger = logging.getLogger(__name__)
 
@@ -549,7 +549,7 @@ class SalesforceConnector(CRMProvider):
         direction = "Inbound" if str(call_direction).upper().startswith("IN") else "Outbound"
         disposition = str(outcome or "COMPLETED")[:255]
         fields: Dict[str, Any] = {
-            "Subject": f"Call - {disposition}"[:255],
+            "Subject": f"Talky.ai call {call_reference(call_body)}" if call_reference(call_body) else f"Call - {disposition}"[:255],
             "Status": "Completed",
             "Priority": "Normal",
             "TaskSubtype": "Call",
@@ -583,11 +583,22 @@ class SalesforceConnector(CRMProvider):
             fields["Description"] = call_body[:_DESCRIPTION_MAX]
         if outcome:
             fields["CallDisposition"] = str(outcome)[:255]
-            fields["Subject"] = f"Call - {str(outcome)[:240]}"
+            if call_body and call_reference(call_body):
+                fields["Subject"] = f"Talky.ai call {call_reference(call_body)}"
         if not fields:
             return False
         await self.update_record("Task", call_log_id, fields)
         return True
+
+    async def find_call_by_reference(self, reference: str) -> Optional[str]:
+        from uuid import UUID
+        safe_reference = str(UUID(reference))
+        rows = await self.query(
+            f"SELECT Id FROM Task WHERE Subject = 'Talky.ai call {safe_reference}' LIMIT 2"
+        )
+        if len(rows) > 1:
+            raise ValueError("Multiple CRM activities match this delivery; review required")
+        return str(rows[0]["Id"]) if rows else None
 
     async def create_note(
         self,

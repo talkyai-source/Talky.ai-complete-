@@ -56,6 +56,17 @@ def test_pop_unknown_id_is_none():
     assert pop_proposal("prop_does_not_exist", "t1", "user-1") is None
 
 
+def test_preview_freezes_resolved_recipient_and_content():
+    resolved = {"to": ["approved@example.com"], "subject": "Approved", "body": "Actual content"}
+    proposal = store_proposal(tool="send_email", args={"lead_id": "mutable-lead"},
+        result={"preview": True, "changes": [{"field": "To"}], "_apply_args": resolved},
+        tenant_id="t1", actor_user_id="user-1")
+    resolved["to"][0] = "changed@example.com"
+    stored = pop_proposal(proposal["proposal_id"], "t1", "user-1")
+    assert stored["args"]["to"] == ["approved@example.com"]
+    assert "lead_id" not in stored["args"]
+
+
 def test_same_tenant_other_actor_cannot_apply_or_reject():
     pid = _store(tenant="t1", actor="owner")
 

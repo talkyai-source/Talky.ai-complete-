@@ -5,7 +5,7 @@ first turn) had no ``session.type``. The GA Realtime API answered
 "Missing required parameter: 'session.type'", the bridge treated that error as
 fatal and stopped, and the browser kept sending audio into nothing for 30-60 s
 (stt_input_queue_overrun). Every session.update must carry the type, and a
-rejected session setting must not end the conversation.
+rejected mid-call instructions must be surfaced to the owning lifecycle.
 """
 from __future__ import annotations
 
@@ -64,7 +64,7 @@ async def test_the_contact_directive_update_carries_session_type():
 
 
 @pytest.mark.asyncio
-async def test_a_rejected_session_setting_does_not_end_the_conversation():
+async def test_a_rejected_session_setting_reaches_the_owning_lifecycle():
     s = _session()
     offered = []
     s._offer_event = offered.append
@@ -77,7 +77,7 @@ async def test_a_rejected_session_setting_does_not_end_the_conversation():
             "param": "session.type",
         },
     })
-    assert not [e for e in offered if getattr(e, "kind", None) == "error"]
+    assert [e for e in offered if getattr(e, "kind", None) == "error"]
 
 
 @pytest.mark.asyncio
@@ -203,14 +203,25 @@ async def test_an_unplayable_reply_is_withheld_not_a_call_ending_error():
     await s._handle_server_event({"type": "response.done",
                                   "response": {"id": "resp_1", "status": "completed", "output": []}})
     kinds = [getattr(e, "kind", None) for e in offered]
-    assert "response_unplayable" in kinds
+    assert "generation_incomplete" in kinds
     assert "error" not in kinds
 
 
-def test_the_bridge_replaces_one_withheld_reply_and_ends_only_on_two():
-    src = Path(__file__).resolve().parents[2].joinpath(
-        "app", "realtime", "bridge.py").read_text(encoding="utf-8")
-    block = src[src.index('elif kind == "response_unplayable":'):]
-    block = block[: block.index("elif kind ==", 10)]
-    assert "repair_unspoken_response" in block
-    assert '_unplayable_streak", 0) >= 1' in block
+@pytest.mark.asyncio
+async def test_the_bridge_replaces_one_withheld_reply_and_ends_only_on_two():
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    from app.realtime.openai import RealtimeEvent
+    from app.realtime.bridge import RealtimeBridge
+
+    async def events():
+        for kind in ("response_unplayable", "generation_incomplete"):
+            yield RealtimeEvent(kind=kind, raw={"response": {"id": "r"}})
+
+    rt = SimpleNamespace(events=events, repair_unspoken_response=AsyncMock())
+    gw = SimpleNamespace(clear_output_buffer=AsyncMock(), send_audio=AsyncMock())
+    bridge = RealtimeBridge(call_id="synthetic", realtime_session=rt, media_gateway=gw)
+    await bridge._pump_model_events()
+    rt.repair_unspoken_response.assert_awaited_once()
+    gw.send_audio.assert_not_awaited()
+    assert "one shorter retry" in bridge._failure_reason

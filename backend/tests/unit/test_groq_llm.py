@@ -16,9 +16,9 @@ from app.infrastructure.llm.groq import (
 )
 
 
-def _fake_chunk(token: str):
+def _fake_chunk(token: str, *, finish_reason=None):
     return SimpleNamespace(
-        choices=[SimpleNamespace(delta=SimpleNamespace(content=token))]
+        choices=[SimpleNamespace(delta=SimpleNamespace(content=token), finish_reason=finish_reason)]
     )
 
 
@@ -30,6 +30,7 @@ class _FakeStream:
         async def _gen():
             for token in self._tokens:
                 yield _fake_chunk(token)
+            yield _fake_chunk("", finish_reason="stop")
 
         return _gen()
 
@@ -285,7 +286,7 @@ async def test_stream_chat_logs_x_groq_usage_with_server_timing_fields(caplog):
     """End-to-end: stream_chat must extract usage from x_groq.usage (the real
     0.37.x shape) and log Groq's server timing fields + client TTFT."""
     provider = GroqLLMProvider()
-    chunks = [_fake_chunk("Hello"), _usage_chunk()]
+    chunks = [_fake_chunk("Hello"), _fake_chunk("", finish_reason="stop"), _usage_chunk()]
     create = AsyncMock(return_value=_RawChunkStream(chunks))
     provider._client = SimpleNamespace(
         chat=SimpleNamespace(completions=SimpleNamespace(create=create))

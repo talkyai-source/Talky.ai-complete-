@@ -12,10 +12,14 @@ _REALTIME_ACTION_DESCRIPTIONS = {
     "end_call": "End the call after a short goodbye when the caller clearly asks to finish. No extra confirmation is needed; do not claim the line is already disconnected.",
 }
 
-def realtime_voice_action_tools() -> list[dict[str, Any]]:
+def realtime_voice_action_tools(session=None) -> list[dict[str, Any]]:
     """All actions in the flattened OpenAI/xAI Realtime tool shape."""
     tools: list[dict[str, Any]] = []
+    from app.domain.services.voice_pipeline.action_execution import enabled_voice_actions
+    enabled = enabled_voice_actions(session) if session is not None else set(VOICE_ACTION_NAMES)
     for action in VOICE_ACTION_NAMES:
+        if action not in enabled:
+            continue
         tools.append(
             {
                 "type": "function",

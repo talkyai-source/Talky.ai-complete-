@@ -49,6 +49,17 @@ def join_split_providers(text: str) -> str:
     return out
 
 
+def separate_sentence_periods(text: str) -> str:
+    """Keep literal sentence punctuation out of an email before joining syntax.
+
+    Spoken ``dot`` and explicitly spaced literal pieces (``example . com``)
+    are joined later. A full stop touching a word and followed by whitespace
+    ends that token; it must never turn ``.com. Please`` into ``.com.please``.
+    Literal addresses, including multi-label domains, remain unchanged.
+    """
+    return re.sub(r"(?<=\S)\.(?=\s|$)", " ", text)
+
+
 # Spoken -> written substitutions, applied in order. Longer phrases first
 # so "at the rate" wins over "at".
 _SUBSTITUTIONS: list[tuple[str, str]] = [
@@ -93,7 +104,7 @@ def extract_email_from_speech(utterance: str) -> Optional[str]:
         return None
 
     original_had_at = "@" in utterance
-    s = f" {join_split_providers(utterance.lower().strip())} "
+    s = f" {join_split_providers(separate_sentence_periods(utterance.lower().strip()))} "
     for pattern, repl in _SUBSTITUTIONS:
         s = re.sub(pattern, repl, s)
 

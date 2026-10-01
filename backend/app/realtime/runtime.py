@@ -53,7 +53,8 @@ async def create_realtime_voice_session(
         # realtime_settings["provider"] = "openai" (default, unchanged) |
         # "xai". Every existing tenant/campaign that has never set this
         # key gets byte-for-byte the same OpenAI path as before.
-        rt_settings = config.realtime_settings or {}
+        from app.realtime.config import normalize_realtime_settings
+        rt_settings = config.realtime_settings = normalize_realtime_settings(config.realtime_settings)
         provider = str(rt_settings.get("provider") or "openai").strip().lower()
 
         if provider == "xai":
@@ -82,6 +83,14 @@ async def create_realtime_voice_session(
         # Persona/company/goal → clean realtime instructions. Pull from the
         # campaign agent_config when present; fall back to sane defaults.
         instructions = prepare_realtime_prompt(config)
+        from types import SimpleNamespace
+        from app.domain.services.voice_pipeline.action_execution import prepare_voice_action_context
+        action_context = SimpleNamespace(tenant_id=config.tenant_id, campaign_id=config.campaign_id,
+                                         call_id=call_id, lead_id=config.lead_id)
+        await prepare_voice_action_context(action_context)
+        from app.domain.services.voice_pipeline.action_execution import enabled_voice_actions
+        from app.domain.services.voice_pipeline.action_tools import action_tool_system_addendum
+        instructions += "\n\n" + action_tool_system_addendum(enabled_voice_actions(action_context))
 
         # Media gateway at 8 kHz internal so the μ-law wire needs NO
         # resampling — only the codec conversion in the bridge.
@@ -110,7 +119,7 @@ async def create_realtime_voice_session(
                 model=xai_model,
                 agent_id=rt_settings.get("agent_id"),
                 instructions=instructions,
-                tools=[knowledge_lookup_tool(), *realtime_voice_action_tools()],
+                tools=[knowledge_lookup_tool(), *realtime_voice_action_tools(action_context)],
                 settings=config.realtime_settings,
                 call_id=call_id,
             )
@@ -120,7 +129,7 @@ async def create_realtime_voice_session(
                 model=config.realtime_model or "gpt-realtime-2",
                 voice=config.realtime_voice or "marin",
                 instructions=instructions,
-                tools=[knowledge_lookup_tool(), *realtime_voice_action_tools()],
+                tools=[knowledge_lookup_tool(), *realtime_voice_action_tools(action_context)],
                 settings=config.realtime_settings,
                 call_id=call_id,
             )
@@ -154,6 +163,7 @@ async def create_realtime_voice_session(
 
         call_session = CallSession(
             call_id=call_id,
+            tenant_id=config.tenant_id,
             campaign_id=config.campaign_id,
             lead_id=config.lead_id,
             provider_call_id=f"{config.session_type}-realtime",
@@ -177,6 +187,9 @@ async def create_realtime_voice_session(
         call_session.talklee_call_id = talklee_call_id
         call_session.barge_in_event = asyncio.Event()
         call_session._call_direction = config.direction.value
+        call_session._voice_action_context = action_context._voice_action_context
+        call_session._voice_action_capabilities = action_context._voice_action_capabilities
+        call_session._voice_action_context_loaded = True
 
         # Transcript accumulation for the realtime path. The speech-to-speech
         # model emits no transcript on its own, so the bridge feeds the

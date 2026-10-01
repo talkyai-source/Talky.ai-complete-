@@ -58,6 +58,11 @@ _EMAIL_READBACK = re.compile(
 _active_calls: set[str] = set()
 
 
+def is_capture_active(call_id: str) -> bool:
+    """Call-owned state, also used when replacing a failed STT connection."""
+    return call_id in _active_calls
+
+
 def detect_email_ask(text: Optional[str]) -> bool:
     """True if the agent line is asking the caller for an email / to spell."""
     return bool(text and _EMAIL_ASK.search(text))

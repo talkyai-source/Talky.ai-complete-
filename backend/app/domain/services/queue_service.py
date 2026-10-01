@@ -143,6 +143,38 @@ class DialerQueueService:
             logger.error(f"Failed to connect to Redis: {e}")
             raise
     
+    async def schedule_job_once(self, job: DialerJob, *, idempotency_key: str) -> bool:
+        """Publish an already-persisted callback with exact time and attempt 1.
+
+        The durable assistant action retries this handoff using the same key;
+        the marker and delayed member become visible in one Redis transaction.
+        """
+        if not self._initialized:
+            await self.initialize()
+        if not idempotency_key:
+            return False
+        script = """
+            local marker_type = redis.call('TYPE', KEYS[1]).ok
+            local schedule_type = redis.call('TYPE', KEYS[2]).ok
+            if marker_type ~= 'none' and marker_type ~= 'string' then
+                return redis.error_reply('callback marker has wrong type')
+            end
+            if schedule_type ~= 'none' and schedule_type ~= 'zset' then
+                return redis.error_reply('callback schedule has wrong type')
+            end
+            if redis.call('EXISTS', KEYS[1]) == 1 then return 0 end
+            redis.call('ZADD', KEYS[2], ARGV[1], ARGV[2])
+            redis.call('SET', KEYS[1], ARGV[2])
+            return 1
+        """
+        try:
+            await self._redis.eval(script, 2, self.RETRY_IDEMPOTENCY_PREFIX + idempotency_key,
+                self.SCHEDULED_ZSET, job.scheduled_at.timestamp(), json.dumps(job.to_redis_dict()))
+            return True
+        except Exception:
+            logger.warning("callback_schedule_handoff_failed job=%s", job.job_id)
+            return False
+
     async def enqueue_job(self, job: DialerJob) -> bool:
         """
         Enqueue a dialer job.

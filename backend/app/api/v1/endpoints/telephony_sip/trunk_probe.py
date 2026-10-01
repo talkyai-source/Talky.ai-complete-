@@ -48,6 +48,12 @@ async def resolve_sip_target(
     Private PBXs require the explicit platform-wide escape hatch
     ``TELEPHONY_ALLOW_PRIVATE_SIP_TARGETS=on`` plus network-level controls.
     """
+    try:
+        literal_address = ipaddress.ip_address(host)
+    except ValueError:
+        literal_address = None
+    if literal_address is not None and not _address_is_allowed(str(literal_address)):
+        raise PermissionError("SIP target resolves to a non-public network address")
     loop = asyncio.get_running_loop()
     infos = await loop.getaddrinfo(
         host,
@@ -71,11 +77,20 @@ async def probe_sip_endpoint(
     start = time.perf_counter()
 
     try:
-        family, sockaddr = await resolve_sip_target(
-            host=host,
-            port=port,
-            socktype=socket.SOCK_STREAM if transport in ("tcp", "tls") else socket.SOCK_DGRAM,
+        family, sockaddr = await asyncio.wait_for(
+            resolve_sip_target(
+                host=host,
+                port=port,
+                socktype=socket.SOCK_STREAM if transport in ("tcp", "tls") else socket.SOCK_DGRAM,
+            ),
+            timeout=timeout,
         )
+    except asyncio.TimeoutError:
+        return {
+            "ok": False, "latency_ms": int(timeout * 1000), "transport": transport,
+            "target": f"{host}:{port}", "error": "timeout", "timeout_code": 408,
+            "detail": f"DNS resolution timed out after {timeout}s (local timeout; no SIP status received).",
+        }
     except PermissionError as exc:
         return {
             "ok": False,
@@ -145,6 +160,7 @@ async def probe_sip_endpoint(
                 "transport": transport,
                 "target": f"{host}:{port}",
                 "error": "timeout",
+                "timeout_code": 408,
                 "detail": f"{transport.upper()} connect timed out after {timeout}s",
             }
         except OSError as exc:
@@ -194,51 +210,44 @@ async def probe_sip_endpoint(
             s.settimeout(timeout)
             s.sendto(options, sockaddr)
             try:
-                data, _ = s.recvfrom(4096)
-                latency_ms = int((time.perf_counter() - start) * 1000)
-                first_line = (
-                    data.split(b"\r\n", 1)[0].decode("ascii", errors="replace") if data else ""
-                )
-                # ANY SIP reply proves the server is alive and reachable. A 4xx/5xx
-                # to an ANONYMOUS OPTIONS ping (404/403/405/501 …) is normal and does
-                # NOT mean the trunk is unhealthy — the carrier just has no user/route
-                # for a bare ping. The live registration status is the real credential
-                # check. So classify the code and phrase it so a 404 doesn't read as a
-                # failure (that was the confusing "Test returns 404" report).
-                m = re.search(r"SIP/2\.0\s+(\d{3})", first_line)
-                code = m.group(1) if m else None
-                if code == "200":
-                    detail = "Reachable — SIP server answered 200 OK"
-                elif code:
-                    detail = (
-                        f"Reachable — SIP server answered {code} to the OPTIONS ping "
-                        "(normal for a carrier; the live registration status is the real check)"
-                    )
-                else:
-                    detail = "Reachable — SIP server answered"
-                return {
-                    "ok": True,
-                    "latency_ms": latency_ms,
-                    "transport": "udp",
-                    "target": f"{host}:{port}",
-                    "sip_code": code,
-                    "detail": detail,
-                }
+                deadline = time.monotonic() + timeout
+                while True:
+                    s.settimeout(max(0.001, deadline - time.monotonic()))
+                    data, peer = s.recvfrom(4096)
+                    response = data.decode("ascii", errors="replace")
+                    first_line = response.split("\r\n", 1)[0]
+                    match = re.fullmatch(r"SIP/2\.0\s+(\d{3})(?:\s+.*)?", first_line)
+                    # Ignore unrelated/spoofed traffic: only this OPTIONS reply
+                    # from the pinned DNS peer proves SIP reachability.
+                    headers = {
+                        key.strip().lower(): value.strip()
+                        for line in response.split("\r\n")[1:] if ":" in line
+                        for key, value in [line.split(":", 1)]
+                    }
+                    if (
+                        peer[:2] == sockaddr[:2]
+                        and match
+                        and headers.get("call-id", headers.get("i")) == call_id
+                        and headers.get("cseq", "").upper() == "1 OPTIONS"
+                        and branch in headers.get("via", headers.get("v", ""))
+                    ):
+                        code = match.group(1)
+                        return {
+                            "ok": True,
+                            "latency_ms": int((time.perf_counter() - start) * 1000),
+                            "transport": "udp", "target": f"{host}:{port}",
+                            "sip_code": code,
+                            "detail": f"SIP server answered {code} to OPTIONS; this does not verify call authorization.",
+                        }
+                    if time.monotonic() >= deadline:
+                        raise socket.timeout()
             except socket.timeout:
-                # Carriers (Blaze included) may ignore OPTIONS from an unregistered
-                # source; silence when the host resolved + the datagram sent is
-                # inconclusive, not failure. The registration status is the real check.
                 return {
-                    "ok": True,
+                    "ok": False,
                     "latency_ms": int(timeout * 1000),
-                    "transport": "udp",
-                    "target": f"{host}:{port}",
-                    "inconclusive": True,
-                    "detail": (
-                        "Host resolved and OPTIONS sent, but the carrier did not reply "
-                        "(normal for providers that don't answer OPTIONS). Registration "
-                        "status is the real check."
-                    ),
+                    "transport": "udp", "target": f"{host}:{port}",
+                    "error": "timeout", "timeout_code": 408,
+                    "detail": f"No SIP response within {timeout}s (local timeout; no SIP status received).",
                 }
         except socket.gaierror as exc:
             return {

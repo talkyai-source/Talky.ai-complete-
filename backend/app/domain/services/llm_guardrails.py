@@ -110,27 +110,44 @@ _ACTION_NEGATED_COMPLETION_PATTERNS = {
     ),
 }
 
+_TRANSFER_OFFER = re.compile(
+    r"\b(?:(?:i|we)(?:\s+(?:can|could|will)|'ll)|would\s+you\s+like\s+me\s+to|"
+    r"shall\s+i|let\s+me)\s+(?:transfer\s+(?:you|this\s+call|the\s+call)|"
+    r"connect\s+you\s+(?:with|to)|put\s+you\s+through)\b",
+    re.IGNORECASE,
+)
+
 
 def _completed_action_claims(response: str) -> list[str]:
     """Return action names claimed as completed, excluding explicit failures."""
+    response = response.replace("’", "'")
+    clauses = re.split(r"(?<=[.!?;])\s+", response)
     claims: list[str] = []
     for action, pattern in _ACTION_COMPLETION_PATTERNS.items():
-        negated_spans = [
-            negated.span()
-            for negated in _ACTION_NEGATED_COMPLETION_PATTERNS[action].finditer(response)
-        ]
-        for match in pattern.finditer(response):
-            # Exempt only an explicit negation whose span overlaps THIS exact
-            # completion predicate. An unrelated "didn't" (or an earlier
-            # failed attempt followed by a later success claim) is not a
-            # blanket bypass for the action.
-            if any(
-                match.start() < negated_end and negated_start < match.end()
-                for negated_start, negated_end in negated_spans
-            ):
-                continue
-            claims.append(action)
-            break
+        for clause in clauses:
+            negated_spans = [
+                negated.span()
+                for negated in _ACTION_NEGATED_COMPLETION_PATTERNS[action].finditer(clause)
+            ]
+            for match in pattern.finditer(clause):
+                # Limit each search to one sentence. A greedy match must not
+                # swallow a later positive claim into an earlier limitation.
+                if re.search(
+                    r"\b(?:i|we)\s+(?:can't|cannot|couldn't|can not|could not)\s+"
+                    r"confirm\s+(?:that\s+)?(?:(?:the|a|your)\s+)?$",
+                    clause[:match.start()], re.IGNORECASE,
+                ):
+                    continue
+                # Only the negation of this predicate can exempt it.
+                if any(
+                    match.start() < end and start < match.end()
+                    for start, end in negated_spans
+                ):
+                    continue
+                claims.append(action)
+                break
+            if action in claims:
+                break
     return claims
 
 
@@ -319,6 +336,7 @@ class LLMGuardrails:
         rules: ConversationRule = None,
         *,
         action_results: Optional[Mapping[str, Mapping[str, Any]]] = None,
+        available_actions: Optional[set[str]] = None,
     ) -> Tuple[bool, Optional[str]]:
         """
         Validate response doesn't contain forbidden phrases.
@@ -336,6 +354,12 @@ class LLMGuardrails:
         if not response:
             return False, "empty_response"
 
+        # Capability, unlike completion, is known before execution. Do not
+        # offer an unconfigured live transfer even as a polite question.
+        if (available_actions is not None and "transfer_call" not in available_actions
+                and _TRANSFER_OFFER.search(response.replace("’", "'"))):
+            return False, "unavailable_action:transfer_call"
+
         # Enforce HARD RULE 10 even when a campaign has no custom ConversationRule.
         # This runs before the historical ``if not rules`` fast-path because an
         # absent tenant rule must never mean "imaginary side effects are allowed".
@@ -345,6 +369,10 @@ class LLMGuardrails:
             if not isinstance(result, Mapping):
                 logger.warning("Blocked unconfirmed voice action claim: %s", action)
                 return False, f"unconfirmed_action:{action}"
+            if (action in {"send_email", "submit_form"}
+                    and result.get("status") in {"accepted", "provider_accepted"}
+                    and re.search(r"\b(?:delivered|received|arrived)\b|\bin (?:your|their|the) inbox\b", response, re.I)):
+                return False, f"action_failed:{action}:delivery_unconfirmed"
             if not (
                 result.get("success") is True
                 and result.get("confirmation_allowed") is True

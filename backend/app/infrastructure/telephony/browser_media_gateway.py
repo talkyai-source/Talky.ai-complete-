@@ -57,6 +57,9 @@ class BrowserSession:
     playback_complete_event: asyncio.Event = field(default_factory=asyncio.Event)
     playback_tracking_active: bool = False
     playback_bytes_sent: int = 0
+    playback_utterance_id: Optional[str] = None
+    playback_outcome: str = "unknown"
+    last_playback_receipt: Optional[Dict[str, Any]] = None
     is_active: bool = True
 
     # Audio metrics
@@ -466,6 +469,10 @@ class BrowserMediaGateway(MediaGateway):
             except Exception:
                 pass
 
+        if session.playback_utterance_id:
+            session.last_playback_receipt = {"utterance_id": session.playback_utterance_id,
+                "status": "interrupted", "evidence": "unknown", "played_ms": 0}
+        session.playback_outcome = "interrupted"
         session.output_buffer = bytearray()
         session.pending_byte = b""
         session.playback_tracking_active = False
@@ -479,7 +486,38 @@ class BrowserMediaGateway(MediaGateway):
             raise RuntimeError("Browser audio session is no longer active")
         await asyncio.wait_for(session.websocket.send_json(payload), timeout=1.0)
 
-    def start_playback_tracking(self, call_id: str) -> None:
+    async def begin_playback(self, call_id: str, utterance_id: str) -> None:
+        self.start_playback_tracking(call_id, utterance_id=utterance_id)
+        await self.send_control_event(call_id, {"type": "playback_start", "utterance_id": utterance_id})
+
+    async def finish_playback(self, call_id: str, utterance_id: str) -> Dict[str, Any]:
+        session = self._sessions.get(call_id)
+        if not session or session.playback_utterance_id != utterance_id:
+            return {"utterance_id": utterance_id, "status": "unknown", "evidence": "unknown", "played_ms": 0}
+        duration_ms = int(session.playback_bytes_sent * 1000 / max(1, self._sample_rate * self._frame_bytes))
+        await self.send_control_event(call_id, {"type": "tts_audio_complete", "utterance_id": utterance_id})
+        completed = await self.wait_for_playback_complete(call_id, maximum_timeout_ms=35000)
+        receipt = {"utterance_id": utterance_id,
+            "status": "completed" if completed and session.playback_outcome == "completed" else session.playback_outcome,
+            "evidence": "transport_played" if completed and session.playback_outcome == "completed" else "unknown",
+            "played_ms": duration_ms if completed and session.playback_outcome == "completed" else 0}
+        session.last_playback_receipt = receipt
+        return receipt
+
+    def playback_receipt(self, call_id: str, utterance_id: str) -> Optional[Dict[str, Any]]:
+        session = self._sessions.get(call_id)
+        receipt = session.last_playback_receipt if session else None
+        return dict(receipt) if receipt and receipt.get("utterance_id") == utterance_id else None
+
+    async def hangup_call(self, call_id: str, reason: str = "agent_end_call") -> bool:
+        session = self._sessions.get(call_id)
+        if not session:
+            return False
+        await session.websocket.close(code=1000, reason=reason)
+        await self.on_call_ended(call_id, reason)
+        return True
+
+    def start_playback_tracking(self, call_id: str, *, utterance_id: Optional[str] = None) -> None:
         """Begin tracking one browser-played utterance."""
         session = self._sessions.get(call_id)
         if not session or not session.is_active:
@@ -487,13 +525,16 @@ class BrowserMediaGateway(MediaGateway):
         session.playback_complete_event.clear()
         session.playback_tracking_active = True
         session.playback_bytes_sent = 0
+        session.playback_utterance_id = utterance_id
+        session.playback_outcome = "unknown"
 
-    def mark_playback_complete(self, call_id: str) -> None:
+    def mark_playback_complete(self, call_id: str, utterance_id: Optional[str] = None) -> None:
         """Mark the current browser utterance as fully played."""
         session = self._sessions.get(call_id)
         if not session or not session.is_active:
             return
-        if session.playback_tracking_active:
+        if session.playback_tracking_active and session.playback_utterance_id == utterance_id:
+            session.playback_outcome = "completed"
             session.playback_complete_event.set()
 
     async def wait_for_playback_complete(

@@ -5,6 +5,7 @@ import re
 from typing import Dict, List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from app.domain.services.voice_action_config import VoiceEmailAction, VoiceFormAction
 
 
 CampaignNextAction = Literal[
@@ -35,6 +36,8 @@ class CampaignBriefInput(BaseModel):
     decision_maker_role: Optional[str] = Field(default=None, max_length=160)
     approved_next_actions: List[CampaignNextAction] = Field(default_factory=list, max_length=5)
     transfer_destination: Optional[str] = Field(default=None, max_length=255)
+    email_action: Optional[VoiceEmailAction] = None
+    form_action: Optional[VoiceFormAction] = None
     required_lead_fields: List[CampaignBriefLeadField] = Field(default_factory=list, max_length=20)
     opening_objective: Optional[str] = Field(default=None, max_length=500)
     max_objection_attempts: int = Field(default=2, ge=1, le=5)

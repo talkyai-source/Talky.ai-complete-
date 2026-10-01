@@ -22,6 +22,7 @@ from typing import List, Optional
 
 from app.core.db_utils import acquire_with_tenant
 from app.services.scripts.knowledge.budget import INLINE_BAKE_MAX_CHARS
+from app.services.scripts.knowledge.passages import content_words
 
 logger = logging.getLogger(__name__)
 _TOKEN_RE = re.compile(r"[a-z0-9]+")
@@ -320,7 +321,7 @@ def retrieve_pinned_knowledge(
     q = str(query or "").strip().lower()
     if not q or not isinstance(nodes, list):
         return []
-    q_tokens = {token for token in _TOKEN_RE.findall(q) if len(token) > 1}
+    q_tokens = set(content_words(q)) - _NUMBER_WORDS
     if not q_tokens:
         return []
 
@@ -340,7 +341,7 @@ def retrieve_pinned_knowledge(
         exact = len(q_tokens & doc_tokens)
         fuzzy = 0.0
         if exact < len(q_tokens):
-            candidates = [word for word in doc_tokens if len(word) >= 3][:400]
+            candidates = sorted(word for word in doc_tokens if len(word) >= 3)[:400]
             for token in q_tokens - doc_tokens:
                 if len(token) < 3:
                     continue

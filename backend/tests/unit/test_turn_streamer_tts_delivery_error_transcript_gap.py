@@ -155,8 +155,9 @@ class _FakePipeline:
         return None
 
     @staticmethod
-    def _find_sentence_end(buf, allow_clause=False):
-        return buf.find(".")
+    def _find_sentence_end(buf, allow_clause=False, *, known_hosts=()):
+        from app.domain.services.voice_pipeline.sentence_segmentation import find_sentence_end
+        return find_sentence_end(buf, allow_clause=allow_clause, known_hosts=known_hosts)
 
     def _record_silent_turn(self, call_id, reason):
         self.silent_turns.append(reason)

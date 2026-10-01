@@ -111,6 +111,7 @@ export function VoiceAgentPopup() {
     const nextPlaybackTimeRef = useRef<number>(0);
     const ttsSampleRateRef = useRef<number>(24000);
     const awaitingPlaybackCompleteRef = useRef<boolean>(false);
+    const playbackUtteranceRef = useRef<string | undefined>(undefined);
     const dropIncomingAudioRef = useRef<boolean>(false);
     // Generation counter: incremented on every barge-in/reset. Async audio
     // handlers capture this value before awaiting arrayBuffer() and discard
@@ -194,17 +195,17 @@ export function VoiceAgentPopup() {
     // Queue PCM16 audio for sample-accurate playback with jitter buffering.
     // Collects chunks into a buffer before starting playback to absorb network
     // variance and prevent stutter from irregular chunk arrival timing.
-    const queueAudioChunk = useCallback((buffer: ArrayBuffer, sampleRate: number = 24000) => {
+    const queueAudioChunk = useCallback((buffer: ArrayBuffer, sampleRate: number = 24000, flush = false) => {
         if (!isMountedRef.current) return;
 
         const ctx = audioContextRef.current;
         if (!ctx) return;
 
         const pcm16 = new Int16Array(buffer);
-        if (pcm16.length === 0) return;
+        if (pcm16.length === 0 && !flush) return;
 
         // Add to jitter buffer
-        jitterBufferRef.current.push(buffer);
+        if (buffer.byteLength) jitterBufferRef.current.push(buffer);
 
         // Calculate total buffered duration
         const totalSamples = jitterBufferRef.current.reduce(
@@ -215,7 +216,7 @@ export function VoiceAgentPopup() {
 
         // Only start playback once we have enough buffered audio
         if (!playbackStartedRef.current) {
-            if (bufferedMs < JITTER_BUFFER_TARGET_MS) {
+            if (bufferedMs < JITTER_BUFFER_TARGET_MS && !flush) {
                 return; // Still buffering
             }
             playbackStartedRef.current = true;
@@ -247,7 +248,10 @@ export function VoiceAgentPopup() {
                 nextPlaybackTimeRef.current || 0,
             );
 
+            const generation = audioGenerationRef.current;
+            const utterance = playbackUtteranceRef.current;
             source.onended = () => {
+                if (generation !== audioGenerationRef.current || utterance !== playbackUtteranceRef.current) return;
                 playbackSourcesRef.current.delete(source);
                 if (
                     awaitingPlaybackCompleteRef.current &&
@@ -255,7 +259,7 @@ export function VoiceAgentPopup() {
                     wsRef.current?.readyState === WebSocket.OPEN
                 ) {
                     awaitingPlaybackCompleteRef.current = false;
-                    wsRef.current.send(JSON.stringify({ type: "playback_complete" }));
+                    wsRef.current.send(JSON.stringify({ type: "playback_complete", utterance_id: utterance }));
                 }
             };
 
@@ -268,6 +272,7 @@ export function VoiceAgentPopup() {
     // Stop queued playback immediately on barge-in without closing the context.
     const resetAudioPlayer = useCallback(() => {
         awaitingPlaybackCompleteRef.current = false;
+        playbackUtteranceRef.current = undefined;
         // Advance generation so in-flight async handlers discard stale audio
         audioGenerationRef.current += 1;
         playbackSourcesRef.current.forEach((source) => {
@@ -603,14 +608,21 @@ export function VoiceAgentPopup() {
             case "turn_complete":
                 setAiState("listening");
                 break;
+            case "playback_start":
+                resetAudioPlayer();
+                playbackUtteranceRef.current = typeof data.utterance_id === "string" ? data.utterance_id : undefined;
+                dropIncomingAudioRef.current = false;
+                break;
             case "tts_audio_complete":
+                if (data.utterance_id !== playbackUtteranceRef.current) break;
+                queueAudioChunk(new ArrayBuffer(0), ttsSampleRateRef.current, true);
                 awaitingPlaybackCompleteRef.current = true;
                 if (
                     playbackSourcesRef.current.size === 0 &&
                     wsRef.current?.readyState === WebSocket.OPEN
                 ) {
                     awaitingPlaybackCompleteRef.current = false;
-                    wsRef.current.send(JSON.stringify({ type: "playback_complete" }));
+                    wsRef.current.send(JSON.stringify({ type: "playback_complete", utterance_id: playbackUtteranceRef.current }));
                 }
                 break;
             case "barge_in":

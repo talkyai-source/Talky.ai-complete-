@@ -24,6 +24,7 @@ Models are declared in app/domain/models/ai_config.py (CEREBRAS_MODELS).
 import asyncio
 import logging
 import os
+from contextlib import aclosing
 from typing import AsyncIterator, Dict, List, Optional
 
 from app.domain.interfaces.llm_provider import LLMProvider
@@ -35,6 +36,13 @@ from app.domain.models.ai_config import (
 from app.domain.models.conversation import Message
 from app.infrastructure.providers.provider_concurrency import get_provider_guard
 from app.utils.resilience import CircuitBreaker
+
+from app.infrastructure.llm.streaming import (
+    stream_with_timeout, stream_tool_turn, close_stream, execute_tool_call,
+    accumulate_tool_calls as _accumulate_tool_call_frags,
+    finalize_tool_calls as _finalize_tool_calls,
+    assistant_tool_message as _assistant_tool_call_message,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -92,27 +100,6 @@ def _log_cache_stats(usage_obj, model: str, cache_key: Optional[str]) -> None:
         )
     except Exception:  # noqa: BLE001 — see docstring
         pass
-
-
-def _accumulate_tool_call_frags(sink: Dict[int, dict], frags) -> None:
-    """Reassemble streamed tool-call fragments.
-
-    OpenAI-compatible streaming splits a single tool call across many chunks:
-    the function name arrives once, then ``arguments`` arrives as a series of
-    string slices that must be concatenated in order. Keyed by ``index`` because
-    a model may emit several tool calls in one turn, interleaved.
-    """
-    for frag in frags or []:
-        idx = getattr(frag, "index", 0) or 0
-        slot = sink.setdefault(idx, {"id": None, "name": None, "arguments": ""})
-        if getattr(frag, "id", None):
-            slot["id"] = frag.id
-        fn = getattr(frag, "function", None)
-        if fn is not None:
-            if getattr(fn, "name", None):
-                slot["name"] = fn.name
-            if getattr(fn, "arguments", None):
-                slot["arguments"] += fn.arguments
 
 
 class CerebrasLLMProvider(LLMProvider):
@@ -307,6 +294,11 @@ class CerebrasLLMProvider(LLMProvider):
             cache_key=cache_key,
         )
 
+        if kwargs.get("extra_messages"):
+            request["messages"].extend(kwargs["extra_messages"])
+        if tools:
+            request["tool_choice"] = kwargs.get("tool_choice", "auto")
+
         last_err: Optional[Exception] = None
         tokens_yielded = 0
 
@@ -316,28 +308,34 @@ class CerebrasLLMProvider(LLMProvider):
                     async with self._circuit:
                         stream = await self._client.chat.completions.create(**request)
                         tc_acc: Dict[int, dict] = {}
-                        async for chunk in stream:
-                            # The usage block rides the FINAL frame, which has
-                            # an empty `choices` list — so it has to be read
-                            # before the skip below, or cache stats are silently
-                            # thrown away on every call.
-                            _usage = getattr(chunk, "usage", None)
-                            if _usage is not None:
-                                _log_cache_stats(_usage, model, cache_key)
-                            choices = getattr(chunk, "choices", None)
-                            if not choices:
-                                continue
-                            delta = choices[0].delta
-                            content = getattr(delta, "content", None)
-                            if content:
-                                tokens_yielded += 1
-                                yield content
-                            if tool_calls_sink is not None:
-                                frags = getattr(delta, "tool_calls", None)
-                                if frags:
-                                    _accumulate_tool_call_frags(tc_acc, frags)
+                        try:
+                            async for chunk in stream:
+                                # The usage block rides the FINAL frame, which has
+                                # an empty `choices` list — so it has to be read
+                                # before the skip below, or cache stats are silently
+                                # thrown away on every call.
+                                _usage = getattr(chunk, "usage", None)
+                                if _usage is not None:
+                                    _log_cache_stats(_usage, model, cache_key)
+                                choices = getattr(chunk, "choices", None)
+                                if not choices:
+                                    continue
+                                delta = choices[0].delta
+                                content = getattr(delta, "content", None)
+                                if content:
+                                    tokens_yielded += 1
+                                    yield content
+                                if tool_calls_sink is not None:
+                                    frags = getattr(delta, "tool_calls", None)
+                                    if frags:
+                                        _accumulate_tool_call_frags(tc_acc, frags)
+                        finally:
+                            await close_stream(stream)
                         if tool_calls_sink is not None and tc_acc:
-                            tool_calls_sink.update(tc_acc)
+                            if isinstance(tool_calls_sink, list):
+                                tool_calls_sink.extend(_finalize_tool_calls(tc_acc))
+                            else:  # compatibility for direct SDK callers
+                                tool_calls_sink.update(tc_acc)
                     return
                 except Exception as exc:  # noqa: BLE001 - classified below
                     last_err = exc
@@ -362,115 +360,18 @@ class CerebrasLLMProvider(LLMProvider):
         logger.error("Cerebras LLM streaming failed after retries: %s", last_err)
         raise RuntimeError(f"Cerebras LLM streaming failed: {last_err}")
 
-    async def stream_chat_with_timeout(
-        self,
-        messages: List[Message],
-        timeout_seconds: float = DEFAULT_LLM_TIMEOUT,
-        **kwargs,
-    ) -> AsyncIterator[str]:
-        """Stream with a hard wall-clock deadline and inter-token stall detection.
+    async def stream_chat_with_tools(self, messages, **kwargs):
+        async with aclosing(stream_tool_turn(self, messages, **kwargs)) as stream:
+            async for token in stream:
+                yield token
 
-        THIS METHOD IS NOT OPTIONAL. The voice pipeline calls
-        ``stream_chat_with_timeout`` — never ``stream_chat`` — on every turn
-        (turn_streamer.py, llm_response.py, confirm_llm.py). It is absent from
-        the ``LLMProvider`` ABC, so a provider that omits it type-checks and
-        imports fine and then raises ``AttributeError`` on the first turn of
-        every call. That is exactly what happened when Cerebras shipped without
-        it: AI Options' "Test" button worked (it calls ``stream_chat``
-        directly) while the campaign Test agent and real calls produced no
-        reply at all.
-
-        Logic mirrors ``GeminiLLMProvider.stream_chat_with_timeout``, which is
-        provider-agnostic — it wraps ``stream_chat`` in per-token asyncio
-        timeouts and adds nothing vendor-specific.
-
-        The exception type matters: the pipeline catches
-        ``app.infrastructure.llm.groq.LLMTimeoutError`` specifically, so we
-        raise that one rather than defining another class it would not catch.
-
-        Raises:
-            LLMTimeoutError: no token arrived before the TTFT deadline.
-        """
-        from app.infrastructure.llm.groq import LLMStreamStalled, LLMTimeoutError
-
-        _INTERTOKEN_TIMEOUT = 2.0
-
-        # Budgets ONLY time spent awaiting Cerebras — never consumer-side TTS
-        # playback. See GeminiLLMProvider.stream_chat_with_timeout for the full
-        # explanation: the voice pipeline pulls tokens between real-time-paced
-        # audio sends, so a wall-clock budget charged the caller's own playback
-        # against the LLM allowance and truncated healthy multi-sentence replies
-        # mid-thought with no error and no fallback line. Fixed 2026-08-06.
-        cerebras_wait_accumulated = 0.0
-        tokens_received = 0
-        gen = self.stream_chat(messages, **kwargs)
-        try:
-            while True:
-                remaining = timeout_seconds - cerebras_wait_accumulated
-                if remaining <= 0:
-                    if tokens_received > 0:
-                        logger.warning(
-                            "Cerebras-wait budget expired mid-stream "
-                            "(limit=%.1fs, tokens=%d) — stream incomplete",
-                            timeout_seconds, tokens_received,
-                        )
-                        raise LLMStreamStalled(
-                            f"Cerebras stream stalled after {tokens_received} token(s)"
-                        )
-                    logger.error(
-                        "Cerebras deadline exceeded before first token "
-                        "(limit=%.1fs)", timeout_seconds,
-                    )
-                    raise LLMTimeoutError(
-                        f"LLM response timed out after {timeout_seconds}s"
-                    )
-                token_timeout = (
-                    remaining if tokens_received == 0
-                    else min(remaining, _INTERTOKEN_TIMEOUT)
-                )
-                _wait_t0 = asyncio.get_event_loop().time()
-                try:
-                    token = await asyncio.wait_for(
-                        gen.__anext__(), timeout=token_timeout
-                    )
-                    # Charge ONLY the measured Cerebras-wait span, then yield.
-                    cerebras_wait_accumulated += (
-                        asyncio.get_event_loop().time() - _wait_t0
-                    )
-                    tokens_received += 1
-                    yield token
-                except StopAsyncIteration:
-                    break
-                except asyncio.TimeoutError:
-                    cerebras_wait_accumulated += (
-                        asyncio.get_event_loop().time() - _wait_t0
-                    )
-                    elapsed = cerebras_wait_accumulated
-                    if tokens_received > 0:
-                        logger.warning(
-                            "Cerebras inter-token stall after %.2fs (tokens=%d) "
-                            "— stream incomplete", elapsed, tokens_received,
-                        )
-                        raise LLMStreamStalled(
-                            f"Cerebras stream stalled after {tokens_received} token(s)"
-                        )
-                    logger.error(
-                        "Cerebras timeout waiting for first token after %.2fs "
-                        "(limit=%.1fs)", elapsed, timeout_seconds,
-                    )
-                    raise LLMTimeoutError(
-                        f"LLM response timed out after {timeout_seconds}s"
-                    )
-        finally:
-            # Close the underlying stream so the HTTP connection is released
-            # even when the caller stops iterating early (barge-in does this
-            # on almost every turn).
-            aclose = getattr(gen, "aclose", None)
-            if aclose is not None:
-                try:
-                    await aclose()
-                except Exception:  # noqa: BLE001
-                    pass
+    async def stream_chat_with_timeout(self, messages, timeout_seconds=DEFAULT_LLM_TIMEOUT, **kwargs):
+        """Shared provider-wait budget; playback never consumes this allowance."""
+        async with aclosing(stream_with_timeout(
+            self.stream_chat(messages, **kwargs), timeout_seconds
+        )) as stream:
+            async for token in stream:
+                yield token
 
     async def cleanup(self) -> None:
         """Close the SDK client (its httpx pool) exactly once, then drop it."""
@@ -488,6 +389,10 @@ class CerebrasLLMProvider(LLMProvider):
     @property
     def name(self) -> str:
         return "cerebras"
+
+    @property
+    def supports_tools(self) -> bool:
+        return True
 
     @property
     def supports_streaming(self) -> bool:

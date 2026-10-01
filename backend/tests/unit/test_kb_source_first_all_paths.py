@@ -85,7 +85,8 @@ def test_every_delivery_path_uses_the_shared_renderer(module_path):
     from pathlib import Path
 
     src = (Path(__file__).resolve().parents[2] / module_path).read_text(encoding="utf-8")
-    assert "render_node_answer" in src, f"{module_path} must use the shared renderer"
+    renderer = "prepare_knowledge_evidence" if module_path == "app/realtime/bridge.py" else "render_node_answer"
+    assert renderer in src, f"{module_path} must use the shared source renderer"
     assert 'voice_answer") or h.get("summary")' not in src, (
         f"{module_path} has reverted to the old voice_answer-first precedence, "
         "which silently drops any fact below the first sentence of a node"

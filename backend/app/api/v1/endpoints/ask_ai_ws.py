@@ -223,7 +223,7 @@ async def ask_ai_websocket(websocket: WebSocket, session_id: str):
                                 gateway, "mark_playback_complete", None
                             )
                             if callable(mark_playback_complete):
-                                mark_playback_complete(call_id)
+                                mark_playback_complete(call_id, data.get("utterance_id"))
                             continue
 
                     except asyncio.TimeoutError:

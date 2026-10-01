@@ -5,6 +5,7 @@ SMS implementation using Vonage SMS API.
 Day 27: Timed Communication System
 """
 import os
+import asyncio
 import logging
 from typing import Optional, Dict, Any
 from datetime import datetime
@@ -74,8 +75,7 @@ class VonageSMSProvider(SMSProvider):
                 self._sms = self._client.sms
                 logger.info("VonageSMSProvider initialized (SDK v4.x)")
             else:
-                # SDK not available - will simulate sends
-                logger.warning("Vonage SDK not available - SMS sends will be simulated")
+                logger.warning("Vonage SDK not available - SMS is unavailable")
             
             self._initialized = True
         except Exception as e:
@@ -116,18 +116,9 @@ class VonageSMSProvider(SMSProvider):
             )
         
         if not self._sms:
-            # Simulate send if SDK not available
-            import uuid
-            logger.warning(f"Simulating SMS send to {to_number[:6]}... (SDK not available)")
-            return SMSResult(
-                success=True,
-                message_id=f"sim-{uuid.uuid4().hex[:12]}",
-                provider=self.provider_name,
-                to_number=to_number,
-                sent_at=datetime.utcnow(),
-                metadata={"simulated": True, **(metadata or {})}
-            )
-        
+            return SMSResult(success=False, provider=self.provider_name, to_number=to_number,
+                error="Vonage SMS SDK is unavailable", metadata={**(metadata or {}), "status": "failed"})
+
         logger.info(f"Sending SMS via Vonage: {from_number} -> {to_number[:6]}...")
         
         try:
@@ -138,13 +129,16 @@ class VonageSMSProvider(SMSProvider):
                     from_=from_number,
                     text=message
                 )
-                response = self._sms.send(sms_message)
+                response = await asyncio.wait_for(asyncio.to_thread(self._sms.send, sms_message), timeout=20)
                 
                 # v4.x response structure
                 if hasattr(response, 'messages') and response.messages:
                     msg = response.messages[0]
                     if hasattr(msg, 'status') and str(msg.status) == "0":
-                        message_id = getattr(msg, 'message_id', None) or getattr(msg, 'message-id', 'unknown')
+                        message_id = getattr(msg, 'message_id', None) or getattr(msg, 'message-id', None)
+                        if not message_id:
+                            return SMSResult(success=False, provider=self.provider_name, to_number=to_number,
+                                error="No provider message ID", metadata={**(metadata or {}), "status": "unknown"})
                         cost = float(getattr(msg, 'message_price', 0) or 0)
                         
                         logger.info(f"SMS sent successfully: {message_id}")
@@ -176,7 +170,7 @@ class VonageSMSProvider(SMSProvider):
                         provider=self.provider_name,
                         to_number=to_number,
                         error="Unexpected response format from Vonage",
-                        metadata=metadata
+                        metadata={**(metadata or {}), "status": "unknown"}
                     )
             else:
                 # Legacy SDK (shouldn't reach here but just in case)
@@ -194,8 +188,8 @@ class VonageSMSProvider(SMSProvider):
                 success=False,
                 provider=self.provider_name,
                 to_number=to_number,
-                error=str(e),
-                metadata=metadata
+                error=type(e).__name__,
+                metadata={**(metadata or {}), "status": "unknown"}
             )
 
 

@@ -256,8 +256,9 @@ class _Pipeline:
         return None
 
     @staticmethod
-    def _find_sentence_end(buf, allow_clause=False):
-        return buf.find(".")
+    def _find_sentence_end(buf, allow_clause=False, *, known_hosts=()):
+        from app.domain.services.voice_pipeline.sentence_segmentation import find_sentence_end
+        return find_sentence_end(buf, allow_clause=allow_clause, known_hosts=known_hosts)
 
     async def synthesize_and_send_audio(self, _session, _sentence, _websocket, track_latency=False):
         return False
@@ -460,13 +461,17 @@ async def test_realtime_identity_requires_uninterrupted_opening_delivery(
             blocks.append(block)
 
     class _Gateway:
+        async def begin_playback(self, _call_id, _utterance_id):
+            return None
+
         async def send_audio(self, *_args):
             started.set()
             if interrupted:
                 await asyncio.Event().wait()
 
-        async def wait_for_playback_complete(self, _call_id):
-            return True
+        async def finish_playback(self, _call_id, utterance_id):
+            return {"utterance_id": utterance_id, "status": "completed",
+                    "evidence": "transport_played", "played_ms": 40}
 
         async def clear_output_buffer(self, _call_id):
             return None
@@ -480,7 +485,8 @@ async def test_realtime_identity_requires_uninterrupted_opening_delivery(
     if expects_identity:
         assert blocks and "identity_introduced=yes" in blocks[-1]
     else:
-        assert not blocks
+        assert blocks and "identity_introduced=unknown" in blocks[-1]
+        assert "opening was interrupted" in blocks[-1]
         assert bridge._live_state.identity_introduced is None
 
 

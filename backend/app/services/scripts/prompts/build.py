@@ -122,6 +122,7 @@ def build_turn_prompt(
     accent_block: Optional[str] = None,
     trailing_block: Optional[str] = None,
     captured_slots=None,
+    has_callback_executor: bool = False,
     cache_friendly_order: Optional[bool] = None,
 ) -> str:
     """Assemble the final per-turn system prompt from the base + resolved
@@ -163,7 +164,7 @@ def build_turn_prompt(
                 parts.append(block)
         prompt = "\n\n".join(parts)
         if captured_slots is not None:
-            prompt = compose_system_prompt(prompt, captured_slots)
+            prompt = compose_system_prompt(prompt, captured_slots, has_callback_executor=has_callback_executor)
         if live_state_block:
             prompt = live_state_block + "\n\n" + prompt
         return _append_floor(prompt, floor_tail)
@@ -188,7 +189,7 @@ def build_turn_prompt(
         # line is appended unconditionally (has_callback_executor defaults to
         # False) -- so an empty tail now always comes back carrying at least
         # that line.
-        tail = compose_system_prompt(tail, captured_slots)
+        tail = compose_system_prompt(tail, captured_slots, has_callback_executor=has_callback_executor)
     if live_state_block:
         tail = f"{tail}\n\n{live_state_block}" if tail else live_state_block
 

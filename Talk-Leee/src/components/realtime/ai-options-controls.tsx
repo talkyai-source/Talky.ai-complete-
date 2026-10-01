@@ -10,6 +10,8 @@ export function RealtimeControls({ config, catalog, onChange, onPreview, preview
     previewing: boolean;
 }) {
     const settings = config.realtime_settings ?? {};
+    const vad = settings.turn_detection;
+    const vadSelection = typeof vad === "object" ? (vad.type === "server_vad" ? "server_vad" : vad.eagerness || "medium") : vad || "medium";
     const set = (patch: Partial<NonNullable<AIProviderConfig["realtime_settings"]>>) => onChange({ ...config, realtime_settings: { ...settings, ...patch } });
     const cls = "mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm";
     return <section aria-label="Realtime configuration" className="space-y-5 rounded-xl border bg-card p-5">
@@ -28,7 +30,8 @@ export function RealtimeControls({ config, catalog, onChange, onPreview, preview
             <button type="button" className="rounded-md border px-3 py-2 text-sm" disabled={previewing || !config.realtime_voice} onClick={() => onPreview(config.realtime_voice!)}>{previewing ? "Generating sample…" : "Preview Realtime voice"}</button>
             <p className="text-xs text-muted-foreground">The sample uses the actual Realtime model. A sample verifies voice generation, not a complete campaign call.</p>
             <div className="grid gap-4 sm:grid-cols-2">
-                <label className="text-sm font-medium">Turn detection<select className={cls} value={settings.turn_detection || "medium"} onChange={(e) => set({ turn_detection: e.target.value })}>
+                <label className="text-sm font-medium">Turn detection<select className={cls} value={vadSelection} onChange={(e) => { if (e.target.value !== "server_vad") set({ turn_detection: e.target.value }); }}>
+                    {vadSelection === "server_vad" && <option value="server_vad">Server VAD · saved settings</option>}
                     {(catalog?.turn_detection || []).map((v) => <option key={v} value={v}>{v}</option>)}
                 </select></label>
                 <label className="text-sm font-medium">Noise reduction<select className={cls} value={settings.noise_reduction || "near_field"} onChange={(e) => set({ noise_reduction: e.target.value })}>

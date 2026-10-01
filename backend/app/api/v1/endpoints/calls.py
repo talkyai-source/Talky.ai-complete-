@@ -15,6 +15,8 @@ from app.core.postgres_adapter import Client
 from app.api.v1.dependencies import get_db_client, get_current_user, CurrentUser
 from app.core.db_utils import acquire_with_tenant
 from app.core.security.rbac import require_permission, Permission
+from app.core.security.api_security import rate_limit_dependency
+from app.domain.services.call_redial_service import RedialError, preview_redial, request_redial
 from app.domain.services.telephony.termination import (
     finalize_proven_inbound_termination,
     mark_termination_pending_and_load_context,
@@ -834,13 +836,15 @@ async def list_live_calls(
                c.status, c.started_at, c.answered_at, c.ended_at,
                c.duration_seconds, c.outcome, c.campaign_id, c.lead_id,
                camp.name AS campaign_name,
-               t.calling_rules->>'caller_id' AS caller_id,
+               (SELECT leg.from_number FROM call_legs leg
+                 WHERE leg.call_id = c.id AND leg.direction = 'outbound'
+                   AND NULLIF(BTRIM(leg.from_number), '') IS NOT NULL
+                 ORDER BY leg.created_at, leg.id LIMIT 1) AS caller_id,
                c.direction, c.caller_ani, c.caller_ani_private,
                c.called_did, c.admission_status, c.consent_status,
                c.processing_status, c.updated_at
         FROM   calls c
         LEFT   JOIN campaigns camp ON camp.id = c.campaign_id
-        LEFT   JOIN tenants   t    ON t.id    = c.tenant_id
         WHERE  c.tenant_id = ${len(_LIVE_STATUSES) + 1}
           AND  (
                   (c.status IN ({placeholders})
@@ -1422,6 +1426,75 @@ async def list_calls(
     except Exception as e:
         logger.error(f"Failed to fetch calls: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to fetch calls")
+
+
+class CallRedialPreview(BaseModel):
+    eligible: bool
+    reason: Optional[str] = None
+    reason_code: Optional[str] = None
+    caller_id: Optional[str] = None
+    trunk_id: Optional[str] = None
+    campaign_id: str
+    lead_id: str
+    phone_number: str
+    job_id: str
+
+
+class CallRedialReceipt(BaseModel):
+    status: str
+    job_id: str
+    campaign_id: str
+    lead_id: str
+    phone_number: str
+    message: str
+
+
+@router.get(
+    "/{call_id}/redial", response_model=CallRedialPreview,
+    dependencies=[Depends(_require_calls_read), Depends(require_permission(Permission.CALLS_CREATE))],
+)
+async def get_call_redial(
+    call_id: UUID,
+    current_user: CurrentUser = Depends(get_current_user),
+    db_client: Client = Depends(get_db_client),
+):
+    """Read current single-contact eligibility without scheduling a call."""
+    if not current_user.tenant_id:
+        raise HTTPException(status_code=403, detail="No tenant context")
+    try:
+        return await preview_redial(db_client.pool, tenant_id=str(current_user.tenant_id), call_id=str(call_id))
+    except RedialError as exc:
+        raise HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": exc.message}) from exc
+    except Exception as exc:
+        logger.warning("redial_readiness_unavailable call=%s error=%s", call_id, type(exc).__name__)
+        raise HTTPException(status_code=503, detail={"code": "redial_readiness_unavailable", "message": "Call readiness could not be checked. Please try again."}) from exc
+
+
+@router.post(
+    "/{call_id}/redial", response_model=CallRedialReceipt, status_code=202,
+    dependencies=[Depends(_require_calls_read), Depends(require_permission(Permission.CALLS_CREATE)), Depends(rate_limit_dependency)],
+)
+async def redial_call(
+    call_id: UUID,
+    current_user: CurrentUser = Depends(get_current_user),
+    db_client: Client = Depends(get_db_client),
+):
+    """Request one durable redial; repeating the request reuses its job."""
+    if not current_user.tenant_id:
+        raise HTTPException(status_code=403, detail="No tenant context")
+    try:
+        from app.core.container import get_container
+
+        return await request_redial(
+            db_client.pool, get_container().queue_service,
+            tenant_id=str(current_user.tenant_id), call_id=str(call_id),
+            user_id=str(current_user.id),
+        )
+    except RedialError as exc:
+        raise HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": exc.message}) from exc
+    except Exception as exc:
+        logger.warning("redial_request_unavailable call=%s error=%s", call_id, type(exc).__name__)
+        raise HTTPException(status_code=503, detail={"code": "redial_request_unavailable", "message": "Redial could not be confirmed. Retry this same call to check the existing request."}) from exc
 
 
 @router.get(

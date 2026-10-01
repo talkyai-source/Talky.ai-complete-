@@ -1,0 +1,98 @@
+{
+  "model": "gpt-realtime-2",
+  "voice": "ash",
+  "settings_label": "fixture based on earlier saved config",
+  "synthetic_gateway": true,
+  "no_customer_call": true,
+  "input_mode": "synthetic_text",
+  "prompt_builder": "app.realtime.prompts.build_realtime_instructions with synthetic persona and actual capability addendum",
+  "instruction_sha256": "4307773af398eab7729728caa1223daf257614460e28ce55e3778a79c30503d7",
+  "connected": true,
+  "handshake_seconds": 1.33,
+  "accepted_settings": {
+    "model": "gpt-realtime-2",
+    "output_modalities": [
+      "audio"
+    ],
+    "audio": {
+      "input": {
+        "format": {
+          "type": "audio/pcmu"
+        },
+        "transcription": {
+          "model": "gpt-realtime-whisper",
+          "language": null,
+          "prompt": null
+        },
+        "noise_reduction": {
+          "type": "far_field"
+        },
+        "turn_detection": {
+          "type": "semantic_vad",
+          "eagerness": "high",
+          "create_response": true,
+          "interrupt_response": true
+        }
+      },
+      "output": {
+        "format": {
+          "type": "audio/pcmu"
+        },
+        "voice": "ash",
+        "speed": 1.0
+      }
+    },
+    "reasoning": {
+      "effort": "low"
+    },
+    "max_output_tokens": 1024
+  },
+  "first_validated_submission_seconds": 2.662,
+  "provider_truncation_ack_ms": 120,
+  "first_receipt_was_simulated_partial": true,
+  "recovered_playback_receipt": {
+    "utterance_id": "rt-2",
+    "status": "completed",
+    "evidence": "transport_played",
+    "played_ms": 2800
+  },
+  "goodbye_completed": true,
+  "hangup_count": 1,
+  "closed": true,
+  "functions": [
+    "end_call"
+  ],
+  "response_audio": [
+    {
+      "mulaw_bytes": 22400,
+      "duration_ms": 2800,
+      "text_chars": 41
+    },
+    {
+      "mulaw_bytes": 22400,
+      "duration_ms": 2800,
+      "text_chars": 42
+    },
+    {
+      "mulaw_bytes": 7200,
+      "duration_ms": 900,
+      "text_chars": 7
+    }
+  ],
+  "provider_errors": [],
+  "wire_event_counts": {
+    "response.output_audio.delta": 17,
+    "response.done": 4,
+    "conversation.item.truncated": 1
+  },
+  "bridge_failure": null,
+  "pass": true,
+  "elapsed_seconds": 7.147,
+  "source_sha256": {
+    "app/realtime/openai.py": "acb4a65626793634e57ff5e3a73630cac8f07265626b449649d504b844dddb87",
+    "app/realtime/bridge.py": "73c5b8c04384fb05cb182e77793a6ad4285f47871ac762c56f929e9c0892d0b0",
+    "app/realtime/prompts.py": "f9dd2682a3d5e76c9cdc547adc222ecdabc5ed505dabdf666f7adccfe2e12b06",
+    "app/domain/services/voice_pipeline/action_tools.py": "217181d9157efe07a39ca69ac6cd367c82049cee5fda4abac33b893e3b6aad1e",
+    "app/domain/services/end_session_action.py": "8050c44d1d94351f022d1f5c4077673b1c18e055de60ce6fe79a62d06baeaa3c"
+  }
+}

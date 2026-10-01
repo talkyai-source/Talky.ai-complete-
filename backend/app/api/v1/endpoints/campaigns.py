@@ -25,6 +25,7 @@ from app.domain.services.campaign_service import (
     CampaignDirectionError,
     CampaignError,
     CampaignNotFoundError,
+    CampaignReadinessError,
     CampaignService,
     CampaignStateError,
 )
@@ -838,6 +839,28 @@ async def list_campaign_calls_with_transcripts(
     return result
 
 
+@router.get("/{campaign_id}/readiness", dependencies=[Depends(require_permission(Permission.CAMPAIGNS_READ))])
+async def get_campaign_readiness(
+    campaign_id: uuid.UUID,
+    current_user: CurrentUser = Depends(get_current_user),
+    db_client: Client = Depends(get_db_client),
+):
+    """Current outbound telephony readiness; no state changes or carrier probes."""
+    if not current_user.tenant_id:
+        raise HTTPException(status_code=403, detail="No tenant context")
+    try:
+        return await _get_campaign_service(db_client).get_outbound_readiness(
+            str(campaign_id), str(current_user.tenant_id),
+        )
+    except CampaignNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Campaign not found") from exc
+    except CampaignDirectionError as exc:
+        raise HTTPException(status_code=409, detail="Use the inbound campaign readiness controls.") from exc
+    except Exception as exc:
+        logger.warning("campaign_readiness_unavailable campaign=%s error=%s", campaign_id, type(exc).__name__)
+        raise HTTPException(status_code=503, detail="Campaign readiness could not be checked. Retry shortly.") from exc
+
+
 @router.post("/{campaign_id}/start", dependencies=[Depends(rate_limit_dependency), Depends(require_permission(Permission.CAMPAIGNS_UPDATE))])
 async def start_campaign(
     campaign_id: str,
@@ -1019,6 +1042,10 @@ async def start_campaign(
         if idempotency_key:
             await release_idempotency_lock(request)
         raise HTTPException(status_code=400, detail=e.message)
+    except CampaignReadinessError as e:
+        if idempotency_key:
+            await release_idempotency_lock(request)
+        raise HTTPException(status_code=409, detail={"error": "campaign_not_ready", "reason_code": e.reason_code, "message": e.message})
     except CampaignError as e:
         if idempotency_key:
             await release_idempotency_lock(request)

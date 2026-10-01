@@ -33,6 +33,7 @@ from app.domain.services.voice_pipeline.identity_disposition import (
 from app.domain.services.voice_pipeline.lead_slot_capture import (
     capture_turn_slots,
 )
+from app.domain.services.voice_pipeline.end_call import model_end_call_allowed
 from app.domain.services.end_session_action import (
     agent_left_a_question_open,
     contact_capture_open,
@@ -967,7 +968,13 @@ class TurnEnder:
                 # already played via the streamed sentences, so hang up now
                 # with no extra farewell. Real capability replacing the
                 # role-played "[hangs up]" the audit found.
-                if getattr(session, "_end_call_requested", False):
+                # An explicit caller close is sufficient even if the model
+                # forgets its tool/sentinel. Reuse the same playback/interrupt
+                # gates below; a topic refusal alone does not arm this path.
+                end_already_handled = getattr(session, "_end_session_action_handled", False) is True
+                if not end_already_handled and contains_explicit_goodbye(full_transcript):
+                    session._end_call_requested = True
+                if not end_already_handled and getattr(session, "_end_call_requested", False):
                     # Reverse enforcement gate (Case 1): a model-issued END_CALL
                     # on a turn the deterministic classifier judged WRONG_PERSON
                     # is the other half of the coin flip — the business is right
@@ -984,7 +991,10 @@ class TurnEnder:
                     # changes classify()'s WRONG_PERSON return (person-mismatch
                     # alone still never auto-hangs-up) and goodbye alone
                     # (disposition NONE) never reaches this branch at all.
-                    if (
+                    if not model_end_call_allowed(session, full_transcript):
+                        logger.info("end_call_stripped_no_caller_intent call_id=%s", call_id[:12])
+                        session._end_call_requested = False
+                    elif (
                         getattr(session, "_turn_disposition", IdentityDisposition.NONE) == IdentityDisposition.WRONG_PERSON
                         and not contains_explicit_goodbye(full_transcript)
                     ):

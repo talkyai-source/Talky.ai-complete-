@@ -106,6 +106,24 @@ _EXPECTED_HASHES: dict[str, str] = {
     "lead_gen@7": "9e7af81f15dd8d44",
     "customer_support@6": "ee88d242cec19b86",
     "receptionist@6": "7ddbe9ea1800b829",
+    # Shared concise voice contract and evidence-bound action/identity rules.
+    "lead_gen@8": "2ed57dabb046cd4c",
+    "customer_support@7": "52703d334b9ca05a",
+    "receptionist@7": "8528ef8851e7f88b",
+    # Explicit source requirement for product benefits and eligibility.
+    "lead_gen@9": "fb023abb70552cc4",
+    "customer_support@8": "c86464b2339b762d",
+    "receptionist@8": "5fd559d79a7c5c31",
+    # Unverified caller product use must be asked, not assumed.
+    "lead_gen@10": "8e7c9dbed675c9ee",
+    "customer_support@9": "67a176798ef4c5f5",
+    "receptionist@9": "67ebb32ba3850f0e",
+    # Caller-paced repair, new prospects, small talk and topic-scoped refusals.
+    "lead_gen@11": "e044bc9b16a50253",
+    # The closing example includes caller goodbye; a bare offer refusal is not a close.
+    "lead_gen@12": "1d8b1ab80d34acc4",
+    "customer_support@10": "2939404a68d68cd6",
+    "receptionist@10": "350e0cc2d186686f",
 }
 
 

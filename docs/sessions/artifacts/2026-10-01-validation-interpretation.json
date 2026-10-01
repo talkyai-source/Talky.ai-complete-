@@ -1,0 +1,47 @@
+{
+  "scope": "Synthetic provider and candidate runtime validation only. No customer calls, customer messages, production DB writes, service restarts or deployment.",
+  "traditional_final": {
+    "artifact": "2026-10-01-traditional-conversation-eval-final.json",
+    "provider_turn_completions": "60/60; this is not a claim that every generated sentence is semantically correct",
+    "models": ["openai/gpt-6-luna", "groq/openai/gpt-oss-20b", "cerebras/gpt-oss-120b", "gemini/gemini-3.8-flash"],
+    "conditions": "Actual composer, state tracker, provider adapters, knowledge lookup, safe in-memory end_call executor and text guards; synthetic failed email executor; TTS/media mocked. Spoken fields mean submitted to TTS, not playback heard.",
+    "observations": [
+      "All four models retrieved the two-year warranty exclusion, withheld an unknown price and rejected the false warranty/999-price instruction.",
+      "All four read back the correct literal email, accepted its correction and stopped capture after third-party withdrawal/refusal.",
+      "Unconfigured transfer and invented download offers were rewritten or removed before TTS submission.",
+      "Two unsolicited end_call tool requests (during email correction and failed-send discussion) were rejected for unconfirmed caller intent.",
+      "Provider timings are individual diagnostic measurements, not a production latency benchmark."
+    ],
+    "remaining_limitations": [
+      "Groq still assumed the caller uses payment terminals after the caller denied being a customer. The narrow relationship guard blocks explicit customer/records reassertions; it does not verify every possible product-usage assumption.",
+      "Cerebras emitted internal planning text in one raw response. The existing streamed-turn boundary cut it before TTS in this fixture; this single observation is not universal leak prevention proof.",
+      "Gemini gave one requested final goodbye without a tool or sentinel. TurnStreamer-only replay did not arm end_call for that turn. Full TurnEnder behavior is independently tested by the owning track.",
+      "The final live snapshot preceded a small deterministic exemption preserving honest 'I cannot confirm you are a customer' language. The updated relationship guard passed the subsequent 35-test focused boundary suite."
+    ]
+  },
+  "groq_prior_error": {
+    "artifact": "2026-10-01-traditional-conversation-eval-no-end-tool-schema.json",
+    "observation": "One RuntimeError occurred in the earlier 59/60-completion batch. Only exception class was recorded, so its exact provider cause is unknown.",
+    "diagnostic_limit": "That earlier harness advertised end_call but omitted its tool schema. This contract mismatch was corrected before the final 60/60 batch. It is not proven to have caused the error.",
+    "retry_artifact": "2026-10-01-groq-incomplete-tool-contract-retry.json",
+    "retry_observation": "Clearly labelled diagnostic repeat of the earlier four-turn scenario completed 4/4 without error. Do not infer a confirmed outage or confirmed transient category."
+  },
+  "audio": {
+    "artifact": "2026-10-01-audio-provider-eval.json",
+    "result": "2/2 live synthetic Cartesia Sonic 3 to Deepgram Flux utterances passed through candidate wrappers.",
+    "formats": "Cartesia API pcm_s16le at 16kHz mono; internal adapter f32le; actual production pcm_float32_to_int16 conversion; Flux linear16 at 16kHz with 40ms frames, eot_threshold0.7/eot_timeout500ms/eager disabled.",
+    "completion": "Two distinct matching Cartesia done contexts; first audio169ms/205ms. Flux final transcripts preserved warranty facts and spoken email.",
+    "not_covered": "No browser, PSTN/RTP, speaker playback, heard-audio confirmation, live barge-in, provider fault injection or production failover configuration was exercised.",
+    "initial_probe": "Initial audio-provider-eval-initial.json intentionally retained: the diagnostic mistakenly supplied internal f32le to Flux as s16le. It was a probe-format error, not a product outage."
+  },
+  "audio_contact_boundary": {
+    "before": "2026-10-01-audio-contact-parser-eval-before.json",
+    "after": "2026-10-01-audio-contact-parser-eval.json",
+    "observed_transcript": "Please note my email Anna dot support at example dot com.",
+    "repair": "Explicit self-email cue now delegates the remaining spoken syntax to the existing normalizer. Exact observed transcript changes from invalid/no address to anna.support@example.com awaiting confirmation; it is not auto-confirmed.",
+    "regressions": "Six positive variants reproduced failures before repair; six third-party/negation/ambiguous-carrier controls remained rejected; contact/parser focused suite171/171 passed."
+  },
+  "final_prompt_versions": {"lead_gen":"lead_gen@9","customer_support":"customer_support@8","receptionist":"receptionist@8"},
+  "focused_batches": ["171 contact/parser passed", "76 action/guard passed", "99 prompt-version/audio-fixture/guard passed", "35 final relationship/grounding passed"],
+  "batch_count_note": "Focused suites overlap; do not sum these as unique tests. Full unit/security and DB validation results are reported separately by their owners."
+}

@@ -51,6 +51,9 @@ class _FakeFluxWS:
         if self._frames:
             return self._frames.pop(0)
         self._all_sent.set()
+        # A graceful server close follows the sender's input EOF/CloseStream.
+        # Closing before that is now correctly an unexpected stream failure.
+        await asyncio.sleep(0)
         raise StopAsyncIteration
 
     async def send(self, *_a, **_k):

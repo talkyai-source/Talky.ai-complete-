@@ -35,15 +35,15 @@ def test_silence_check_never_raises_on_bad_session():
     _record_silence_check(types.SimpleNamespace(), types.SimpleNamespace(), "Still there?")
 
 
-# ── #16: end-session is honored after two declines (not treated as phantom) ──
+# ── #16: repeated declines need current caller evidence before closing ──
 
-def test_end_session_honored_after_two_declines():
+def test_end_session_after_two_declines_still_requires_a_current_refusal():
     from app.domain.services.end_session_action import should_honor_end_session
     action = {"reason": "conversation_complete", "do_not_call": False}
-    # soft decline wording the regex doesn't catch + few turns -> phantom today
+    # An ambiguous acknowledgment does not inherit old permission to hang up.
     assert should_honor_end_session(action, "we're good", 1) is False
-    # ...but after two declines the close is legitimate
-    assert should_honor_end_session(action, "we're good", 1, declined_count=2) is True
+    assert should_honor_end_session(action, "we're good", 1, declined_count=2) is False
+    assert should_honor_end_session(action, "I don't want this", 1, declined_count=2) is True
 
 
 def test_one_decline_does_not_force_close():
@@ -59,9 +59,12 @@ def test_greeting_bargein_loop_is_bounded():
 
     s = types.SimpleNamespace()  # not yet introduced
     _note_unheard_greeting_bargein(s)            # 1st unheard opening barge-in
-    assert getattr(s, "_has_introduced", False) is False   # one clean re-attempt allowed
-    _note_unheard_greeting_bargein(s)            # 2nd -> stop looping the intro
-    assert s._has_introduced is True
+    assert getattr(s, "_has_introduced", False) is False
+    _note_unheard_greeting_bargein(s)
+    # Runtime prompt skips the opening using interruption evidence, without
+    # falsely claiming that the caller received an introduction.
+    assert s._greeting_bargein_count == 2
+    assert getattr(s, "_has_introduced", False) is False
 
 
 def test_note_bargein_noop_once_introduced():

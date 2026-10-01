@@ -106,7 +106,7 @@ async def test_a_decimal_split_across_tokens_is_not_a_boundary(monkeypatch):
         ["The rate is 1.", "5 percent on card payments.", " Does that work for you?"],
         monkeypatch,
         # A real rate comes from what the model was given (grounded_figures).
-        prompt="Use plain spoken text only. The card rate is 1.5 percent.",
+        prompt="Use plain spoken text only. <company_knowledge>The card rate is 1.5 percent.</company_knowledge>",
     )
     # The decimal is spoken whole -- not "The rate is 1." then "5 percent".
     # The old assertion ("5 percent" somewhere) passed while it WAS split.

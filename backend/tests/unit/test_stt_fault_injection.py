@@ -285,10 +285,10 @@ async def test_the_deaf_wrapper_consumes_audio_and_says_nothing():
 # ── the end-to-end rescue ───────────────────────────────────────────────────
 
 def _policy() -> ReconnectPolicy:
-    """Trip after 1.2s of voiced audio (30 chunks) with a 200ms replay buffer
-    (5 chunks). Deliberately buffer-SHORTER-than-trip so the test proves the
-    buffer's contents rather than accidentally replaying the whole call."""
-    return ReconnectPolicy(silent_stream_voiced_seconds=1.2, audio_buffer_ms=200)
+    """Trip after 1.2s of voiced audio (30 chunks), retaining the whole turn.
+    Production also keeps its replay budget longer than the watchdog window;
+    overflow instead requires a repeat and is covered by the overflow tests."""
+    return ReconnectPolicy(silent_stream_voiced_seconds=1.2, audio_buffer_ms=2000)
 
 
 @pytest.mark.asyncio
@@ -297,8 +297,8 @@ async def test_injected_fault_promotes_the_secondary_and_keeps_the_utterance():
 
     A caller speaks 40 chunks. The primary — deafened exactly as production
     Flux was — answers none of them. The watchdog trips at chunk 30, the
-    secondary is promoted, and the assertion is on CONTENT: the five chunks
-    the caller had already spoken into the dead stream (26-30) come back out
+    secondary is promoted, and the assertion is on CONTENT: every chunk
+    the caller had already spoken into the dead stream (1-30) comes back out
     of the secondary, in order, followed by the rest of the call.
     """
     primary = DeafSTTProvider(_RealisticFlux())
@@ -325,12 +325,12 @@ async def test_injected_fault_promotes_the_secondary_and_keeps_the_utterance():
 
     # The in-flight utterance survived: the last words spoken BEFORE the
     # failover are the first words the secondary reports.
-    assert heard[:5] == [26, 27, 28, 29, 30], (
-        f"buffered utterance was not replayed intact: got {heard[:5]}"
+    assert heard[:30] == list(range(1, 31)), (
+        f"buffered utterance was not replayed intact: got {heard[:30]}"
     )
 
     # ...and the call continues uninterrupted from there.
-    assert heard == list(range(26, 41)), f"gap or reorder after failover: {heard}"
+    assert heard == list(range(1, 41)), f"gap or reorder after failover: {heard}"
 
 
 @pytest.mark.asyncio

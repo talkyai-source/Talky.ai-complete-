@@ -219,6 +219,43 @@ async def test_ownership_enforce_allows_verified(monkeypatch):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("caller_id", ["+14155551234", "+14165550123", "+442079460123"])
+@pytest.mark.parametrize("legacy_reference", [None, "", "legacy-reference"])
+async def test_production_ownership_does_not_require_static_carrier_token(
+    monkeypatch, caller_id, legacy_reference
+):
+    """US, Canadian and UK ownership uses the same verified tenant record.
+
+    A stored reference cannot sign this call's destination/time; neither its
+    absence nor its presence changes ownership. Carrier signing is separate.
+    """
+    from app.domain.services.telephony import caller_id_guard
+
+    monkeypatch.delenv("CALLER_ID_ENFORCEMENT_MODE", raising=False)
+    pool = _FakePool({"status": "verified", "stir_shaken_token": legacy_reference})
+    decision = await caller_id_guard.check_caller_id_ownership(
+        pool, tenant_id=_TENANT_ID, caller_id=caller_id, environment="production"
+    )
+    assert decision.allowed is True
+    assert decision.enforcement_mode == "enforce"
+    assert decision.require_attestation is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", ["pending_verification", "suspended", "revoked"])
+async def test_carrier_reference_never_bypasses_production_ownership(monkeypatch, status):
+    from app.domain.services.telephony import caller_id_guard
+
+    monkeypatch.delenv("CALLER_ID_ENFORCEMENT_MODE", raising=False)
+    pool = _FakePool({"status": status, "stir_shaken_token": "legacy-reference"})
+    decision = await caller_id_guard.check_caller_id_ownership(
+        pool, tenant_id=_TENANT_ID, caller_id="+14165550123", environment="production"
+    )
+    assert decision.allowed is False
+    assert decision.enforcement_mode == "enforce"
+
+
+@pytest.mark.asyncio
 async def test_ownership_failclosed_on_db_error(monkeypatch):
     """A DB error during lookup denies cleanly under enforce (no 500)."""
     from app.domain.services.telephony import caller_id_guard
@@ -230,7 +267,7 @@ async def test_ownership_failclosed_on_db_error(monkeypatch):
         environment="production",
     )
     assert decision.allowed is False
-    assert decision.require_attestation is True
+    assert decision.require_attestation is False
 
 
 # ────────────────────────────────────────────────────────────────────────────
@@ -273,7 +310,7 @@ def test_model_is_dialable_in_production():
         status=PhoneNumberStatus.VERIFIED,
         stir_shaken_token=None,
     )
-    assert no_token.is_dialable_in_production() is False
+    assert no_token.is_dialable_in_production() is True
 
     not_verified = TenantPhoneNumber(
         id="1", tenant_id="t",

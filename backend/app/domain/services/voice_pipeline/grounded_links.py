@@ -19,9 +19,9 @@ TTS, and to what is stored in history:
 * only its host does                                       -> the host alone
 * the host was never given at all                          -> "our website"
 
-"What the model was given" is the fully assembled per-turn prompt (base prompt,
-inline knowledge, retrieved facts, company details) plus anything the knowledge
-tool returned this turn. Email addresses and the major mail providers are left
+Grounding consists of the factual company-knowledge passages and knowledge
+tool results supplied this turn. Instructions and policies are not evidence
+that a resource exists. Email addresses and the major mail providers are left
 alone: a read-back of the caller's own address is not a claim about the
 company.
 """
@@ -59,6 +59,12 @@ _MAIL_PROVIDERS = {
 }
 
 UNGROUNDED_REPLACEMENT = "our website"
+UNAVAILABLE_RESOURCE = "I can't confirm an available download link."
+_RESOURCE_OFFER = re.compile(
+    r"\b(?:(?:i|we)(?:\s+(?:can|could|will)|'ll)|would\s+you\s+like\s+me\s+to)"
+    r"\s+(?:give|provide|share|send|read)\b[^.!?]{0,90}\b(?:link|download)\b",
+    re.IGNORECASE,
+)
 
 
 def _norm(text: str) -> str:
@@ -74,16 +80,45 @@ def _clean(host: str, path: str) -> tuple[str, str]:
     return host, path
 
 
+def grounded_url_hosts(grounding: Iterable[str]) -> frozenset[str]:
+    """Extract factual URL hosts using the same parser as speech validation.
+
+    These hosts only disambiguate streaming punctuation. They never approve a
+    generated path or replace the full address check in ``ground_spoken_links``.
+    """
+    return frozenset(
+        _clean(match.group("host"), "")[0]
+        for passage in grounding or ()
+        for match in _URL_RE.finditer(str(passage or ""))
+    )
+
+
 def ground_spoken_links(text: str, grounding: Iterable[str]) -> tuple[str, list[str]]:
     """Rewrite every ungrounded web address in ``text``.
 
     Returns the text to speak and a list of the addresses that were changed, so
-    the caller can log them. ``grounding`` is every piece of text the model was
-    given this turn.
+    the caller can log them. ``grounding`` contains supplied factual passages,
+    never the assembled system prompt or policy instructions.
     """
-    if not text or "." not in text:
+    if not text:
         return text, []
-    source = _norm(" ".join(g for g in grounding if g))
+    passages = [_norm(g) for g in grounding if g]
+    source = " ".join(passages)
+    # A model can invent an available resource without spelling a URL yet.
+    # An offer to download must have both a supplied address and download
+    # context; a bare company homepage does not prove a brochure exists.
+    if _RESOURCE_OFFER.search(text.replace("’", "'")):
+        resources = [word for word in ("download", "brochure", "sample", "report")
+                     if re.search(r"\b" + word + r"\b", text, re.I)]
+        supplied_resource = any(
+            _URL_RE.search(passage)
+            and all(re.search(r"\b" + word + r"\b", passage) for word in resources)
+            for passage in passages
+        )
+        if not supplied_resource:
+            return UNAVAILABLE_RESOURCE, ["unavailable_resource_offer"]
+    if "." not in text:
+        return text, []
     changed: list[str] = []
 
     def _replace(match: re.Match) -> str:

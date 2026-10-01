@@ -122,7 +122,7 @@ const PHONE_GROUPS: Array<[string, number[]]> = [
 export function formatPhoneForDisplay(value: string | null | undefined): string {
     const raw = (value ?? "").trim();
     if (!raw.startsWith("+")) return raw;
-    const digits = raw.slice(1).replace(/D/g, "");
+    const digits = raw.slice(1).replace(/\D/g, "");
     if (digits.length < 7) return raw;
     for (const [code, groups] of PHONE_GROUPS) {
         const national = digits.slice(code.length);

@@ -1,65 +1,14 @@
-"""Resilient STT wrapper (T1.3).
+"""Bounded STT failover with cancellation-safe call-owned input.
 
-Wraps a primary STT provider with reconnect + secondary-provider
-failover so a mid-call WebSocket drop doesn't kill the call.
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-DESIGN CHOICES
-
-- **Single quick reconnect, then swap.** On primary failure we attempt
-  exactly one reconnect with a 500 ms budget. If that fails the
-  wrapper promotes the secondary for the remainder of the call.
-  Rationale: flapping between providers mid-call produces duplicate
-  partials, confuses turn-detection, and is usually a symptom the
-  primary is genuinely down.
-
-- **Ring-buffer audio replay.** A small sliding buffer (default
-  500 ms) keeps the last chunks of audio so a freshly-connected STT
-  (reconnect OR secondary) can transcribe the utterance that was
-  in-flight when the drop happened. Worst-case double-transcription
-  is bounded at the buffer size.
-
-- **No mid-stream merging.** When we swap to the secondary we DROP
-  any pending partials from the primary and restart transcription.
-  Merging partials across providers is a losing game — different
-  models segment words differently and the result is word salad.
-
-- **Circuit-breaker tied to primary, not secondary.** If the primary
-  keeps failing we stop attempting it entirely until the breaker's
-  recovery window elapses; new calls go straight to secondary. One
-  breaker per primary-provider instance.
-
-- **Fail-through, not fail-closed.** If BOTH providers fail, the
-  wrapper yields no transcripts. The pipeline's existing watchdog
-  already tears down silent calls after the inactivity timeout —
-  this wrapper doesn't invent a new hangup path.
-
-- **Silence is a failure mode too (2026-08-13).** Every trigger above
-  is an *exception*. A socket that connects, accepts audio and simply
-  never answers raises nothing, so it fell straight through all of
-  them. On 2 of 36 answered calls that day Flux was pre-connected,
-  took 400+ chunks, and returned zero events — not one StartOfTurn —
-  while the caller talked at RMS 3504 (peak 28988). Nothing failed
-  over, because from here a dead stream and a quiet room are the same
-  observation: no transcripts.
-
-  They are only distinguishable acoustically, so the wrapper now
-  measures the one thing that separates them — VOICED audio going in
-  with nothing coming out. That check belongs here rather than in any
-  one caller: this is the component whose whole job is keeping
-  transcripts flowing, and fixing it here covers telephony, browser
-  and ask-AI at once. See ``_SilentStreamWatchdog``.
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-Integration — DO NOT wire into the live pipeline as part of the
-T1.3 sprint. This file ships the mechanism; the follow-up pass
-wires it into `voice_orchestrator` / `media_gateway` after a
-dry-run on a staging call.
+Each provider owns one connection. This wrapper promotes the secondary once on
+unexpected failure, replays only buffered uncommitted speech, and propagates a
+terminal error if recovery is unavailable. Caller cancellation never retries.
 """
 from __future__ import annotations
 
 import asyncio
 import collections
+from contextlib import aclosing
 import logging
 import os
 from dataclasses import dataclass, field
@@ -111,6 +60,53 @@ class ReconnectPolicy:
     )
 
 
+class _CallAudioInput:
+    """A provider cancellation must not close the caller's live input iterator.
+
+    Exactly one shielded read may be in flight. A replacement sender receives
+    its result, including a frame which arrived during the handover. The owning
+    wrapper cancels/closes it once the call stream itself ends.
+    """
+    def __init__(self, source):
+        self.source = source.__aiter__()
+        self.pending = None
+        self.exhausted = False
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        if self.exhausted:
+            raise StopAsyncIteration
+        if self.pending is None:
+            self.pending = asyncio.ensure_future(self.source.__anext__())
+        pending = self.pending
+        try:
+            result = await asyncio.shield(pending)
+        except asyncio.CancelledError:
+            # Retain the read for the next provider; only aclose owns it.
+            raise
+        except StopAsyncIteration:
+            self.exhausted = True
+            self.pending = None
+            raise
+        except Exception:
+            self.pending = None
+            raise
+        else:
+            self.pending = None
+            return result
+
+    async def aclose(self):
+        if self.pending is not None:
+            self.pending.cancel()
+            await asyncio.gather(self.pending, return_exceptions=True)
+            self.pending = None
+        close = getattr(self.source, "aclose", None)
+        if close is not None:
+            await close()
+
+
 @dataclass
 class _ReplayBuffer:
     """Sliding buffer of recent audio. Holds at most `capacity_ms`
@@ -118,6 +114,7 @@ class _ReplayBuffer:
     capacity_ms: int
     chunks: collections.deque = field(default_factory=collections.deque)
     _total_ms: float = 0.0
+    truncated: bool = False
 
     def add(self, chunk: AudioChunk) -> None:
         duration_ms = _chunk_duration_ms(chunk)
@@ -126,11 +123,13 @@ class _ReplayBuffer:
         while self._total_ms > self.capacity_ms and self.chunks:
             _, dropped_ms = self.chunks.popleft()
             self._total_ms -= dropped_ms
+            self.truncated = True
 
     def drain(self) -> list[AudioChunk]:
         out = [c for c, _ in self.chunks]
         self.chunks.clear()
         self._total_ms = 0.0
+        self.truncated = False
         return out
 
 
@@ -472,6 +471,21 @@ class ResilientSTTProvider(STTProvider):
         return bool(fn(call_id)) if fn is not None else False
 
     async def stream_transcribe(
+        self, audio_stream, language="en", context=None, call_id=None,
+        on_eager_end_of_turn=None, on_barge_in=None,
+    ) -> AsyncIterator[TranscriptChunk]:
+        source = _CallAudioInput(audio_stream)
+        try:
+            async with aclosing(self._stream_with_recovery(
+                source, language=language, context=context, call_id=call_id,
+                on_eager_end_of_turn=on_eager_end_of_turn, on_barge_in=on_barge_in,
+            )) as stream:
+                async for chunk in stream:
+                    yield chunk
+        finally:
+            await source.aclose()
+
+    async def _stream_with_recovery(
         self,
         audio_stream: AsyncIterator[AudioChunk],
         language: str = "en",
@@ -480,10 +494,7 @@ class ResilientSTTProvider(STTProvider):
         on_eager_end_of_turn: Optional[Callable[[str], None]] = None,
         on_barge_in: Optional[Callable[[], None]] = None,
     ) -> AsyncIterator[TranscriptChunk]:
-        """Forward audio to the active STT. On provider failure, try
-        one reconnect; if that fails, fall through to the secondary.
-        The caller sees a single continuous AsyncIterator of chunks.
-        """
+        """Promote the secondary once; both failed is a terminal error."""
         policy = self._policy
         buffer = _ReplayBuffer(capacity_ms=policy.audio_buffer_ms)
 
@@ -652,14 +663,19 @@ class ResilientSTTProvider(STTProvider):
                 on_barge_in=on_barge_in,
             ):
                 watchdog.observe_transcript()
+                if getattr(out, "is_final", False):
+                    # Completed caller speech must never be replayed as a new turn.
+                    buffer.drain()
                 yield out
             # A provider that swallowed the watchdog's exception ends its
             # stream cleanly instead of raising. Without this re-check that
             # would look like a normal end-of-call and return silently — the
             # exact failure this watchdog exists to stop.
-            if not watchdog.tripped:
+            if not watchdog.tripped and audio_stream.exhausted:
                 _emit_audit("healthy")
                 return
+            if not watchdog.tripped:
+                raise RuntimeError(f"{chosen.name} ended before caller input exhausted")
         except CircuitOpenError:
             logger.info("resilient_stt_circuit_open_at_start", extra={"call_id": call_id})
             # fallthrough to failover
@@ -676,25 +692,40 @@ class ResilientSTTProvider(STTProvider):
         # holds the tail-end of the utterance so we re-transcribe
         # instead of losing it.
         if self._secondary is None:
-            logger.error("resilient_stt_no_secondary — transcripts will be empty")
-            return
+            raise RuntimeError("STT failed and no secondary provider is available")
 
+        was_muted = _provider_muted(self._active)
         self._active = self._secondary
+        if was_muted and call_id:
+            await self.mute(call_id)
+        # Capture mode is call-owned; apply it to a Flux replacement as well.
+        if call_id:
+            from app.domain.services.voice_pipeline.capture_mode import is_capture_active
+            if is_capture_active(call_id):
+                enter = getattr(self._secondary, "enter_capture_mode", None)
+                if callable(enter):
+                    enter(call_id)
         logger.info(
             "resilient_stt_failed_over_to=%s buffered_chunks=%d",
             self._secondary.name, len(buffer.chunks),
             extra={"call_id": call_id},
         )
 
-        # The secondary gets a watchdog too, but a LOGGING one: there is no
-        # third provider to fail over to, so tripping it must not raise and
-        # kill the stream. Its value is diagnostic — "both engines went deaf"
-        # and "the caller genuinely said nothing" produce identical transcripts
-        # and, without this line, identical logs.
+        # The final provider must fail visibly too; there is no third attempt.
         secondary_watchdog = _SilentStreamWatchdog(
             voiced_seconds=policy.silent_stream_voiced_seconds,
         )
         secondary_reported = False
+        repeat_required = buffer.truncated
+        if repeat_required:
+            # Invalidate any primary partial immediately. The secondary still
+            # consumes the bounded tail to find the lost turn's ending, but its
+            # incomplete text must never reach extraction or the LLM.
+            yield TranscriptChunk(text="", is_final=False, metadata={"stt_recovery": "reset"})
+
+        def _recovery_eager(text: str) -> None:
+            if not repeat_required and on_eager_end_of_turn is not None:
+                on_eager_end_of_turn(text)
 
         async def _replay_then_live() -> AsyncIterator[AudioChunk]:
             nonlocal secondary_reported
@@ -715,6 +746,11 @@ class ResilientSTTProvider(STTProvider):
                     )
                     and not secondary_reported
                 ):
+                    age = _provider_message_age(self._secondary)
+                    if age is not None and age < _LIVENESS_WINDOW_S:
+                        secondary_watchdog.clear_trip()
+                        yield chunk
+                        continue
                     secondary_reported = True
                     logger.error(
                         "resilient_stt_secondary_also_silent provider=%s "
@@ -724,6 +760,7 @@ class ResilientSTTProvider(STTProvider):
                         secondary_watchdog.voiced_ms / 1000.0,
                         extra={"call_id": call_id},
                     )
+                    raise STTStreamSilentError("Secondary STT accepted speech without responding")
                 yield chunk
 
         async for out in self._stream_with_provider(
@@ -732,11 +769,18 @@ class ResilientSTTProvider(STTProvider):
             language=language,
             context=context,
             call_id=call_id,
-            on_eager_end_of_turn=on_eager_end_of_turn,
+            on_eager_end_of_turn=_recovery_eager,
             on_barge_in=on_barge_in,
         ):
             secondary_watchdog.observe_transcript()
+            if repeat_required:
+                if getattr(out, "is_final", False):
+                    repeat_required = False
+                    yield TranscriptChunk(text="", is_final=False, metadata={"stt_recovery": "repeat_required"})
+                continue
             yield out
+        if secondary_watchdog.tripped or not audio_stream.exhausted:
+            raise RuntimeError("Secondary STT ended before caller input exhausted")
 
     # ──────────────────────────────────────────────────────────────────
 

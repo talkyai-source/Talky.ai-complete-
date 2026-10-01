@@ -341,7 +341,18 @@ async def get_lead_details(
     missing: list[str] = []
     if campaign_id:
         missing = await svc.missing_required(tenant_id, call_id, campaign_id)
-    return {"details": details, "missing_required": missing}
+    return {"details": details, "missing_required": missing,
+            "processing_status": await svc.processing_status(tenant_id, call_id=call_id),
+            "crm_deliveries": await svc.crm_deliveries(tenant_id, call_id=call_id)}
+
+
+@router.get("/contacts/{lead_id}/lead-details", dependencies=[Depends(require_permission(Permission.CALLS_READ))])
+async def get_contact_lead_details(lead_id: str, current_user=Depends(get_current_user)):
+    tenant_id = _tenant(current_user)
+    svc = _service()
+    return {"details": await svc.details_for_lead(tenant_id, lead_id), "missing_required": [],
+            "processing_status": await svc.processing_status(tenant_id, lead_id=lead_id),
+            "crm_deliveries": await svc.crm_deliveries(tenant_id, lead_id=lead_id)}
 
 
 class ManualEdit(BaseModel):

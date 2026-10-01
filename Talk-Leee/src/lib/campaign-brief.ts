@@ -10,12 +10,23 @@ export interface CampaignBriefLeadField {
     label: string;
 }
 
+export interface CampaignEmailAction { subject: string; body: string }
+export type CampaignFormField = "email" | "phone" | "follow_up" | "project_type" | "bidding_active";
+export interface CampaignFormAction {
+    name: string;
+    recipient: string;
+    subject: string;
+    fields: CampaignFormField[];
+}
+
 export interface CampaignBriefDraft {
     decision_maker_role: string;
     approved_next_actions: CampaignNextAction[];
     transfer_destination: string;
     opening_objective: string;
     max_objection_attempts: number;
+    email_action?: CampaignEmailAction;
+    form_action?: CampaignFormAction;
 }
 
 export interface CampaignBrief {
@@ -27,6 +38,8 @@ export interface CampaignBrief {
     required_lead_fields: CampaignBriefLeadField[];
     opening_objective: string | null;
     max_objection_attempts: number;
+    email_action?: CampaignEmailAction | null;
+    form_action?: CampaignFormAction | null;
 }
 
 export const EMPTY_CAMPAIGN_BRIEF_DRAFT: CampaignBriefDraft = {
@@ -98,6 +111,8 @@ export function campaignBriefDraft(value?: Partial<CampaignBrief> | null): Campa
         transfer_destination: value?.transfer_destination?.trim() ?? "",
         opening_objective: value?.opening_objective?.trim() ?? "",
         max_objection_attempts: value?.max_objection_attempts ?? 2,
+        ...(value?.email_action ? { email_action: { ...value.email_action } } : {}),
+        ...(value?.form_action ? { form_action: { ...value.form_action, fields: [...value.form_action.fields] } } : {}),
     };
 }
 
@@ -124,6 +139,8 @@ export function buildCampaignBrief({
         })),
         opening_objective: normalizeStructuredText(draft.opening_objective),
         max_objection_attempts: draft.max_objection_attempts,
+        ...(draft.email_action ? { email_action: { subject: draft.email_action.subject.trim(), body: draft.email_action.body.trim() } } : {}),
+        ...(draft.form_action ? { form_action: { ...draft.form_action, name: draft.form_action.name.trim(), subject: draft.form_action.subject.trim(), recipient: draft.form_action.recipient.trim(), fields: [...draft.form_action.fields] } } : {}),
     };
 }
 
@@ -148,6 +165,13 @@ export function campaignBriefValidation(draft: CampaignBriefDraft): string | nul
     }
     if (!transferApproved && draft.transfer_destination.trim()) {
         return "Select Transfer as an approved next action or clear the transfer destination.";
+    }
+    if (draft.email_action && (!draft.email_action.subject.trim() || !draft.email_action.body.trim())) {
+        return "Add the approved email subject and message, or remove its configuration.";
+    }
+    if (draft.form_action && (!draft.form_action.name.trim() || !draft.form_action.subject.trim()
+        || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(draft.form_action.recipient.trim()) || !draft.form_action.fields.length)) {
+        return "Add the form name, destination email, subject and at least one field.";
     }
     return null;
 }

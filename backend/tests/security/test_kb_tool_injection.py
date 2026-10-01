@@ -167,6 +167,9 @@ class _FakeBridge:
     # branch these tests exercise.
     _knowledge_snapshot_nodes = None
 
+    def __init__(self):
+        self._verified_knowledge = []
+
 
 def _run_realtime(query="how much is it"):
     return asyncio.run(RealtimeBridge._lookup_knowledge(_FakeBridge(), query))

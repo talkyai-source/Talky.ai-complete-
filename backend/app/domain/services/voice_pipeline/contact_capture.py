@@ -87,6 +87,7 @@ class ContactCaptureState:
     # those). Only a caller-parsed value may be stored before the caller
     # confirms it (lead_slot_capture, 2026-09-28).
     from_caller: bool = True
+    confirmation_evidence: Optional[str] = None
 
     def __post_init__(self) -> None:
         # Status is the source of truth; keep the audit string impossible to
@@ -246,7 +247,7 @@ def _clarification_progress(
     fallback_status: CaptureStatus,
     default_prompt: str,
 ) -> tuple[CaptureStatus, int, Optional[str]]:
-    """Bump the re-ask counter; escalate once, then give up for good.
+    """Bump the re-ask counter; give one honest move-on directive, then stop.
 
     Every NEEDS_CLARIFICATION/INVALID branch used to hand the caller the
     identical "please spell/repeat it" instruction forever (call 6aaeb4dd,
@@ -279,11 +280,9 @@ def _clarification_progress(
         return fallback_status, attempts, (
             f"You have already asked for the {field} "
             f"{MAX_CLARIFICATION_ATTEMPTS} times without success; do not ask "
-            "them to say it again in any form. If you have formed any "
-            "understanding of it, read back your best understanding once, "
-            "plainly, and ask for a clear yes or no. Otherwise say the team "
-            "will follow up to confirm it, and move on with the rest of the "
-            "call."
+            "them to say it again in any form. Leave it unconfirmed, explain "
+            "briefly that you could not verify it, and move on. Do not guess "
+            "or promise follow-up."
         )
     return fallback_status, attempts, default_prompt
 
@@ -415,12 +414,27 @@ def _extract_lead_in_email(text: str) -> Optional[str]:
     the agent to have the caller spell "bob" one letter at a time: the exact
     spell-it-out reflex the caller on 2427af7e objected to.
 
-    Only whole LEADING tokens from a fixed set of function words are removed,
+    An explicit self-email cue defines the boundary even if STT drops its
+    colon or copula. The remaining address still needs unambiguous syntax;
+    ordinary multi-word local parts are never guessed or joined.
+
+    Otherwise only whole LEADING tokens from a fixed set of function words are removed,
     and only when exactly one token is left. The set deliberately excludes
     words that are real local parts ("me", "info", "sales"); the normaliser's
     own notes record a carrier-word list that mangled "me@" and "yes2024@".
     """
     body = str(text or "").lower()
+    explicit_cue = re.match(
+        r"^\s*(?:(?:please\s+)?(?:note|use|take\s+down)\s+)?"
+        r"my\s+e-?mail(?:\s+address)?\b(?:\s+(?:is|should\s+be))?"
+        r"\s*[:,]?\s*(?P<address>.+)$", body,
+    )
+    if explicit_cue:
+        from app.services.scripts.spoken_email_normalizer import extract_email_from_speech
+
+        candidate = extract_email_from_speech(explicit_cue.group("address"))
+        if candidate:
+            return _validated_email(candidate)
     separators = list(re.finditer(r"\b(?:at\s+the\s+rate|at\s+sign|at)\b", body))
     if len(separators) != 1:
         return None
@@ -437,9 +451,11 @@ def _extract_lead_in_email(text: str) -> Optional[str]:
 
 
 def _clean_domain(spoken: str) -> Optional[str]:
-    from app.services.scripts.spoken_email_normalizer import join_split_providers
+    from app.services.scripts.spoken_email_normalizer import (
+        join_split_providers, separate_sentence_periods,
+    )
 
-    text = join_split_providers(str(spoken or "").lower().strip(" .?!,;:"))
+    text = join_split_providers(separate_sentence_periods(str(spoken or "").lower()).strip(" .?!,;:"))
     text = re.sub(r"\b(?:dot|period)\b", " . ", text)
     text = re.sub(r"\b(?:dash|hyphen)\b", " - ", text)
     text = re.sub(r"\s*\.\s*", ".", text)
@@ -780,6 +796,21 @@ def _has_explicit_confirmed_cancellation(
     return bool(_CANCEL_RE.search(utterance) and field.search(utterance))
 
 
+def contact_value_disowned(kind: CaptureKind, utterance: str) -> bool:
+    """A named contact explicitly belongs to someone other than this caller.
+
+    Merely mentioning a colleague or another address must not erase a known
+    caller contact. Require the field and an explicit denial of ownership in
+    the same clause, so an email correction cannot withdraw the phone too.
+    """
+    field = _EMAIL_FIELD_RE if kind == "email" else _PHONE_FIELD_RE
+    text = str(utterance or "").replace("’", "'")
+    return bool(
+        re.search(field.pattern + r"[^.!?;]{0,70}\b(?:not\s+mine|isn't\s+mine)\b", text, re.I)
+        or re.search(r"\b(?:not|isn't)\s+my\s+(?:own\s+)?" + field.pattern, text, re.I)
+    )
+
+
 def capture_mode_directive(capture: ContactCaptureState) -> Optional[str]:
     """A provider-neutral instruction for the realtime audible response."""
     if capture.status in {
@@ -815,6 +846,48 @@ def capture_mode_directive(capture: ContactCaptureState) -> Optional[str]:
     return None
 
 
+def _low_recognition_confidence(score: Optional[float]) -> bool:
+    try:
+        return score is not None and float(score) < _LOW_CONFIDENCE
+    except (TypeError, ValueError):
+        return False
+
+
+def _checked_segment_correction(
+    previous: ContactCaptureState,
+    text: str,
+    phone_region: Optional[str],
+    confidence: Optional[float],
+    alternatives: Sequence[str],
+    explicit_reask: bool,
+) -> Optional[ContactCaptureState]:
+    """Segment repairs obey the same recognition evidence gates as whole values."""
+    def parse(value):
+        return (_email_correction(previous, value) if previous.kind == "email"
+                else _phone_correction(previous, value, phone_region))
+
+    correction = parse(text)
+    if correction is None:
+        return None
+    conflict = False
+    for alternative in alternatives or ():
+        other = parse(str(alternative))
+        other_value = other.normalized_value if other else _extract_normalized(
+            previous.kind, str(alternative), phone_region)[1]
+        if other_value and other_value != correction.normalized_value:
+            conflict = True
+            break
+    if _low_recognition_confidence(confidence) or explicit_reask or conflict:
+        if previous.status is CaptureStatus.CANCELLED:
+            return previous
+        status, attempts, prompt = _clarification_progress(
+            previous.kind, previous, CaptureStatus.NEEDS_CLARIFICATION,
+            "Please repeat only the unclear part of that correction; do not guess or read back a changed value yet.")
+        return _state(previous.kind, status, raw=text, segments=previous.segments,
+            attempts=attempts, prompt=prompt)
+    return correction
+
+
 def advance_capture(
     previous: Optional[ContactCaptureState],
     *,
@@ -822,6 +895,7 @@ def advance_capture(
     utterance: str,
     readback_issued: bool = False,
     confirmation_verdict: Optional[str] = None,
+    independent_confirmation_value: Optional[str] = None,
     phone_region: Optional[str] = None,
     transcript_confidence: Optional[float] = None,
     transcript_alternatives: Sequence[str] = (),
@@ -842,6 +916,9 @@ def advance_capture(
     if not text:
         return previous
 
+    if contact_value_disowned(kind, text):
+        return _state(kind, CaptureStatus.CANCELLED, raw=text)
+
     # A confirmed fact is sticky. Generic cancellations, a low-confidence
     # repeat, or a later address merely mentioned in conversation cannot
     # demote/replace it. Only an explicit whole-value correction or one of the
@@ -849,11 +926,8 @@ def advance_capture(
     if previous is not None and previous.status is CaptureStatus.CONFIRMED:
         if _has_explicit_confirmed_cancellation(kind, text):
             return _state(kind, CaptureStatus.CANCELLED, raw=text)
-        correction = (
-            _email_correction(previous, text)
-            if kind == "email"
-            else _phone_correction(previous, text, phone_region)
-        )
+        correction = _checked_segment_correction(previous, text, phone_region,
+            transcript_confidence, transcript_alternatives, explicit_reask)
         if correction is not None:
             return correction
         _raw, replacement = _extract_normalized(kind, text, phone_region)
@@ -876,11 +950,8 @@ def advance_capture(
         return _state(kind, CaptureStatus.CANCELLED, raw=text)
 
     if previous is not None:
-        correction = (
-            _email_correction(previous, text)
-            if kind == "email"
-            else _phone_correction(previous, text, phone_region)
-        )
+        correction = _checked_segment_correction(previous, text, phone_region,
+            transcript_confidence, transcript_alternatives, explicit_reask)
         if correction is not None:
             return correction
 
@@ -936,35 +1007,25 @@ def advance_capture(
 
     if normalized:
         segments = _email_segments(normalized) if kind == "email" else (normalized,)
-        if _alternatives_conflict(
-            kind, text, transcript_alternatives, phone_region
-        ):
-            return _state(
-                kind,
-                CaptureStatus.NEEDS_CLARIFICATION,
-                raw=audit_raw,
-                normalized=normalized,
-                segments=segments,
-                prompt="I heard two different versions. Please repeat just that contact detail.",
-            )
+        conflict = _alternatives_conflict(kind, text, transcript_alternatives, phone_region)
         # None is not below a threshold. Only an actual numeric score can trip
         # this evidence gate; providers without the signal use alternatives or
         # explicit_reask instead.
-        try:
-            low_confidence = (
-                transcript_confidence is not None
-                and float(transcript_confidence) < _LOW_CONFIDENCE
-            )
-        except (TypeError, ValueError):
-            low_confidence = False
-        if low_confidence or explicit_reask:
+        if conflict or _low_recognition_confidence(transcript_confidence) or explicit_reask:
+            if previous is not None and previous.status is CaptureStatus.CANCELLED:
+                return previous
+            status, attempts, prompt = _clarification_progress(
+                kind, previous, CaptureStatus.NEEDS_CLARIFICATION,
+                "I heard two different versions. Please repeat just that contact detail."
+                if conflict else "Please repeat that contact detail slowly so I can verify it.")
             return _state(
                 kind,
-                CaptureStatus.NEEDS_CLARIFICATION,
+                status,
                 raw=audit_raw,
                 normalized=normalized,
                 segments=segments,
-                prompt="Please repeat that contact detail slowly so I can verify it.",
+                attempts=attempts,
+                prompt=prompt,
             )
         if (
             previous is None
@@ -1065,6 +1126,22 @@ def advance_capture(
 
     if (
         previous.status is CaptureStatus.AWAITING_CONFIRMATION
+        and previous.from_caller
+        and independent_confirmation_value == previous.normalized_value
+        and normalized == previous.normalized_value
+        and normalized is not None
+        and re.search(r"\b(?:yes|i\s+confirm|that(?:'s|\s+is)\s+correct)\b", text, re.I)
+        and not re.search(r"\b(?:no|not|wrong|instead|actually|change|cancel|never)\b", text, re.I)
+    ):
+        # This confirms the value independently. It is NOT evidence that the
+        # agent's readback was heard. Parsing/confidence/conflict gates above
+        # have already checked the complete caller-repeated value.
+        return replace(previous, status=CaptureStatus.CONFIRMED,
+                       confirmed_at=now or datetime.now(timezone.utc),
+                       clarification_prompt=None, confirmation_evidence="caller_repeatback")
+
+    if (
+        previous.status is CaptureStatus.AWAITING_CONFIRMATION
         and readback_issued
     ):
         verdict = str(confirmation_verdict or "unclear").lower()
@@ -1076,6 +1153,7 @@ def advance_capture(
                 validation_status=CaptureStatus.CONFIRMED.value,
                 confirmed_at=stamp,
                 clarification_prompt=None,
+                confirmation_evidence="readback_and_caller_affirmation",
             )
         if verdict == "reject":
             return replace(

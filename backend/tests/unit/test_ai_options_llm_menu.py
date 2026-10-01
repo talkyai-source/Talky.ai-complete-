@@ -1,16 +1,7 @@
-"""The AI Options LLM menu is exactly two entries, and the benchmark drives the
-provider the tenant actually selected.
+"""The four-model menu, hidden legacy IDs and correct provider routing.
 
-Product decision 2026-09-02: the ONLY selectable LLMs are GPT-OSS 120B on
-Cerebras (primary) and GPT-OSS 20B on Groq (fallback). Gemini is not offered
-even when GEMINI_API_KEY is configured. Gemini ids already stored by a tenant
-remain *accepted* by save_config (hidden, not forbidden) — they are just never
-offered.
-
-Live failure the same evening: "Benchmark failed: Groq LLM streaming failed:
-Error code: 404 - The model `gpt-oss-120b` does not exist". The benchmark only
-knew Gemini-or-Groq, so a Cerebras config was sent to Groq with the Cerebras
-model id.
+The benchmark previously sent Cerebras model IDs to Groq and failed with 404.
+Provider identity must be preserved across catalog, save, test and benchmark.
 """
 from __future__ import annotations
 
@@ -32,6 +23,7 @@ async def test_providers_menu_offers_exactly_the_chosen_models(monkeypatch):
     response = await list_providers()
 
     assert sorted(response.llm["providers"]) == ["cerebras", "gemini", "groq", "openai"]
+    assert len(response.llm["models"]) == 4
     offered = {(m["provider"], m["id"]) for m in response.llm["models"]}
     assert offered == {
         ("cerebras", "gpt-oss-120b"),

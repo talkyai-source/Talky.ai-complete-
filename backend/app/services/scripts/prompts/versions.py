@@ -117,9 +117,15 @@ _VERSIONS: Final[Mapping[str, str]] = {
     # knowledge-driven lead_gen body reuses the shared opening for its
     # opening mode instead of a private agent-first copy. customer_support
     # and receptionist move only because the shared guardrails text changed.
-    "lead_gen": "lead_gen@7",
-    "customer_support": "customer_support@6",
-    "receptionist": "receptionist@6",
+    # @8 / @7: concise shared voice contract, evidence-bound actions and
+    # contact capture, caller corrections before campaign relationship claims.
+    # @9 / @8: product benefits and eligibility require supplied facts.
+    # @10 / @9: unverified caller product use is a question, not a fact.
+    # @11 / @10: caller-paced repair, new prospects, small talk and topic refusals.
+    # @12: the sales closing example requires an explicit caller goodbye.
+    "lead_gen": "lead_gen@12",
+    "customer_support": "customer_support@10",
+    "receptionist": "receptionist@10",
 }
 
 #: Fallback for a persona that is not in the registry yet. Deliberately visible

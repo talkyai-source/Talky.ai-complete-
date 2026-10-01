@@ -15,6 +15,7 @@ from app.domain.models.conversation import Message, MessageRole
 from app.infrastructure.llm.cerebras import CerebrasLLMProvider
 from app.infrastructure.llm.gemini import GeminiLLMProvider
 from app.infrastructure.llm.groq import GroqLLMProvider
+from app.infrastructure.llm.openai import OpenAILLMProvider
 from app.infrastructure.tts.deepgram_tts import DeepgramTTSProvider
 from app.infrastructure.tts.elevenlabs_tts import ElevenLabsTTSProvider
 from app.infrastructure.tts.google_tts_streaming import GoogleTTSStreamingProvider
@@ -33,7 +34,7 @@ class LatencyBenchmarkResponse(BaseModel):
     total_pipeline_ms: float
 
 
-def _select_benchmark_llm(config: AIProviderConfig):
+def _select_benchmark_llm(config: AIProviderConfig, *, openai_key=None):
     """Pick the LLM provider the benchmark must drive, plus its API key.
 
     Decided by the config's provider (falling back to the model id's catalog
@@ -43,6 +44,11 @@ def _select_benchmark_llm(config: AIProviderConfig):
     """
     provider = (config.llm_provider or "").strip().lower()
     model = config.llm_model
+    if provider == "openai" or model in {m.id for m in OPENAI_MODELS}:
+        key = openai_key or os.getenv("OPENAI_API_KEY")
+        if not key:
+            raise HTTPException(status_code=503, detail="OpenAI API key not configured")
+        return OpenAILLMProvider(), key
     if provider == "gemini" or model in {m.id for m in GEMINI_MODELS}:
         key = os.getenv("GEMINI_API_KEY")
         if not key:
@@ -59,15 +65,6 @@ def _select_benchmark_llm(config: AIProviderConfig):
                 detail="Cerebras API key not configured. Set CEREBRAS_API_KEY in .env.",
             )
         return CerebrasLLMProvider(), key
-    if provider == "openai" or model in {m.id for m in OPENAI_MODELS}:
-        key = os.getenv("OPENAI_API_KEY")
-        if not key:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="OpenAI API key not configured. Set OPENAI_API_KEY in .env.",
-            )
-        from app.infrastructure.llm.openai_chat import OpenAIChatLLMProvider
-        return OpenAIChatLLMProvider(), key
     key = os.getenv("GROQ_API_KEY")
     if not key:
         raise HTTPException(
@@ -92,7 +89,13 @@ async def run_benchmark(config: AIProviderConfig, current_user=Depends(get_curre
     """
     import os as _os
 
-    llm, llm_key = _select_benchmark_llm(config)
+    openai_key = None
+    if config.llm_provider == "openai":
+        from app.domain.services.credential_resolver import get_credential_resolver
+        openai_key = await get_credential_resolver().resolve(
+            "openai", tenant_id=getattr(current_user, "tenant_id", None),
+        )
+    llm, llm_key = _select_benchmark_llm(config, openai_key=openai_key)
 
     voice_id = config.tts_voice_id
     sample_rate = config.tts_sample_rate

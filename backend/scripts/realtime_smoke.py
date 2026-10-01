@@ -95,7 +95,7 @@ async def run() -> int:
     if not api_key:
         print("ERROR: OPENAI_API_KEY not set in environment / .env")
         return 2
-    print(f"OPENAI_API_KEY loaded ({api_key[:5]}...{api_key[-4:]})")
+    print("OPENAI_API_KEY configured: yes")
 
     audio_in_path = sys.argv[1] if len(sys.argv) > 1 else None
     mode = "AUDIO-IN" if audio_in_path else "TEXT-IN"

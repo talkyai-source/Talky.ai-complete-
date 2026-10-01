@@ -10,6 +10,8 @@ inter-token stall guard to expire — shaving perceived latency.
 """
 from __future__ import annotations
 
+from collections.abc import Iterable
+
 # Coordinating conjunctions that mark a clause boundary right after a comma.
 # Trailing space avoids matching "and" inside a word.
 CLAUSE_CONJUNCTIONS = ("and ", "but ", "so ", "or ", "yet ", "nor ")
@@ -72,7 +74,32 @@ def _is_missing_space_boundary(text: str, index: int) -> bool:
     return "." not in token
 
 
-def find_sentence_end(text: str, allow_clause: bool = False) -> int:
+def _period_has_address_context(text: str, index: int, known_hosts: tuple[str, ...]) -> bool:
+    """Disambiguate ``.Upper`` only with a URL marker or a factual host.
+
+    A bare, unknown ``word.Upper`` is indistinguishable from the model's
+    fabricated turn boundary. Preserve that existing defense, without a TLD
+    catalog or a general URI parser. Prefix matching keeps a host together
+    while its uppercase suffix is still arriving; the complete address must
+    still pass the independent grounding check before speech.
+    """
+    start = index
+    while start and not text[start - 1].isspace() and text[start - 1] not in "\"'“”‘’()[]{}<>,;":
+        start -= 1
+    prefix = text[start:index + 2].casefold()
+    if prefix.startswith(("http://", "https://", "www.")):
+        return True
+    return any(
+        host.startswith(prefix)
+        or prefix.startswith(host + ".")
+        or prefix.startswith(host + "/")
+        for host in known_hosts
+    )
+
+
+def find_sentence_end(
+    text: str, allow_clause: bool = False, *, known_hosts: Iterable[str] = (),
+) -> int:
     """
     Return the index of the first sentence-ending character.
 
@@ -92,7 +119,14 @@ def find_sentence_end(text: str, allow_clause: bool = False) -> int:
 
         Only activates when the buffer is long enough that we know we are
         stuck waiting — short responses still flush on hard punctuation.
+
+    known_hosts:
+        Factual URL hosts, refreshed from current knowledge evidence by the
+        caller. Together with explicit URL markers, these prevent an uppercase
+        address suffix from being mistaken for a fabricated caller turn.
+        Unknown bare ``word.Upper`` keeps the existing ambiguity defense.
     """
+    protected_hosts = tuple(str(host).casefold().strip(".") for host in known_hosts or () if host)
     clause_candidate = -1
     i = 0
     while i < len(text):
@@ -120,7 +154,9 @@ def find_sentence_end(text: str, allow_clause: bool = False) -> int:
                 and is_terminal_period_boundary(text, i)
             ):
                 return i
-            elif _is_missing_space_boundary(text, i):
+            elif _is_missing_space_boundary(text, i) and not _period_has_address_context(
+                text, i, protected_hosts,
+            ):
                 return i
         elif (
             allow_clause

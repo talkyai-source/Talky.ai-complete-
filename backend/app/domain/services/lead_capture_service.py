@@ -149,6 +149,10 @@ class LeadCaptureService:
         normalized_value: Any = None,
         validation_status: Optional[str] = None,
         confirmed_at: Optional[datetime] = None,
+        evidence: Optional[dict] = None,
+        expected_transcript: Optional[str] = None,
+        expected_summary_hash: Optional[str] = None,
+        expected_summary_snapshot: Optional[list] = None,
     ) -> bool:
         """Store one captured field. Returns True if it was written.
 
@@ -256,9 +260,13 @@ class LeadCaptureService:
                 INSERT INTO call_lead_details
                     (tenant_id, call_id, campaign_id, lead_id, field_key,
                      field_type, value, source, confirmed, is_required,
-                     raw_value, normalized_value, validation_status, confirmed_at)
-                VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, $6, $7, $8, $9, $10,
-                        $11, $12, $13, $14)
+                     raw_value, normalized_value, validation_status, confirmed_at, evidence)
+                SELECT $1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, $6, $7, $8, $9, $10,
+                        $11, $12, $13, $14, $16::jsonb
+                 WHERE EXISTS (SELECT 1 FROM calls WHERE id = $2::uuid AND tenant_id = $1::uuid
+                               AND ($17::text IS NULL OR transcript = $17)
+                               AND ($18::text IS NULL OR summary_transcript_hash = $18)
+                               AND ($19::jsonb IS NULL OR jsonb_build_array(COALESCE(transcript,''), transcript_json, action_results) = $19::jsonb))
                 ON CONFLICT (call_id, field_key) DO UPDATE
                    SET value      = EXCLUDED.value,
                        source     = EXCLUDED.source,
@@ -278,6 +286,9 @@ class LeadCaptureService:
                            )
                            ELSE call_lead_details.confirmed_at
                        END,
+                       evidence = CASE WHEN EXCLUDED.source = 'manual_edit'
+                                  THEN EXCLUDED.evidence || '{"status":"manually_verified"}'::jsonb
+                                  ELSE EXCLUDED.evidence END,
                        updated_at = NOW()
                  -- BOTH ranks are computed HERE, against the row actually
                  -- present at write time. Comparing against a rank read a
@@ -295,6 +306,10 @@ class LeadCaptureService:
                    -- this upsert cannot cross tenants under any privileged
                    -- maintenance context.
                    AND call_lead_details.tenant_id = $1::uuid
+                   AND (EXCLUDED.source = 'manual_edit'
+                        OR NOT (call_lead_details.evidence ? 'turn_index')
+                        OR NOT (EXCLUDED.evidence ? 'turn_index')
+                        OR (EXCLUDED.evidence->>'turn_index')::int >= (call_lead_details.evidence->>'turn_index')::int)
                 RETURNING id
                 """,
                 str(tenant_id), str(call_id),
@@ -302,7 +317,9 @@ class LeadCaptureService:
                 str(lead_id) if lead_id else None,
                 key, field_type, stored, source, bool(confirmed), bool(is_required),
                 audit_raw, audit_normalized, audit_status, audit_confirmed_at,
-                list(TRUST_ORDER),
+                list(TRUST_ORDER), json.dumps(evidence or {}), expected_transcript,
+                expected_summary_hash,
+                json.dumps(expected_summary_snapshot, default=str) if expected_summary_snapshot is not None else None,
             )
 
         if row is None:
@@ -405,14 +422,68 @@ class LeadCaptureService:
                 """
                 SELECT field_key, field_type, value, source, confirmed,
                        is_required, raw_value, normalized_value,
-                       validation_status, confirmed_at, updated_at
+                       validation_status, confirmed_at, evidence, updated_at
                   FROM call_lead_details
                  WHERE call_id = $1::uuid
                  ORDER BY is_required DESC, field_key
                 """,
                 str(call_id),
             )
-        return [dict(r) for r in rows]
+        return [self._detail_row(r) for r in rows]
+
+    @staticmethod
+    def _detail_row(row) -> dict:
+        result = dict(row)
+        if isinstance(result.get("evidence"), str):
+            try:
+                result["evidence"] = json.loads(result["evidence"])
+            except ValueError:
+                result["evidence"] = {}
+        return result
+
+    async def details_for_lead(self, tenant_id: str, lead_id: str) -> list[dict]:
+        from app.core.db_utils import acquire_with_tenant
+        async with acquire_with_tenant(self._pool, str(tenant_id)) as conn:
+            rows = await conn.fetch(
+                """SELECT DISTINCT ON (d.field_key) d.field_key, d.field_type,
+                          d.value, d.source, d.confirmed, d.is_required, d.updated_at,
+                          d.validation_status, d.evidence, d.call_id
+                     FROM call_lead_details d
+                     JOIN calls c ON c.id=d.call_id AND c.tenant_id=d.tenant_id
+                    WHERE d.tenant_id=$1::uuid AND c.lead_id=$2::uuid
+                    ORDER BY d.field_key, (d.source='manual_edit') DESC,
+                             c.created_at DESC, d.updated_at DESC""",
+                str(tenant_id), str(lead_id),
+            )
+        return [self._detail_row(r) for r in rows]
+
+    async def crm_deliveries(self, tenant_id: str, *, call_id=None, lead_id=None) -> list[dict]:
+        """Current receipts for this call, or the contact's latest call."""
+        from app.core.db_utils import acquire_with_tenant
+        async with acquire_with_tenant(self._pool, str(tenant_id)) as conn:
+            rows = await conn.fetch(
+                """SELECT provider, status, attempts, updated_at
+                     FROM crm_deliveries WHERE tenant_id=$1::uuid
+                     AND call_id=(SELECT id FROM calls WHERE tenant_id=$1::uuid
+                       AND (($2::uuid IS NOT NULL AND id=$2::uuid)
+                            OR ($2::uuid IS NULL AND lead_id=$3::uuid))
+                       ORDER BY created_at DESC LIMIT 1)
+                     ORDER BY provider""",
+                str(tenant_id), call_id, lead_id,
+            )
+        return [dict(row) for row in rows]
+
+    async def processing_status(self, tenant_id: str, *, call_id=None, lead_id=None) -> str:
+        from app.core.db_utils import acquire_with_tenant
+        async with acquire_with_tenant(self._pool, str(tenant_id)) as conn:
+            result = await conn.fetchval(
+                """SELECT lead_details_status FROM calls WHERE tenant_id=$1::uuid
+                     AND (($2::uuid IS NOT NULL AND id=$2::uuid)
+                          OR ($2::uuid IS NULL AND lead_id=$3::uuid))
+                     ORDER BY created_at DESC LIMIT 1""",
+                str(tenant_id), call_id, lead_id,
+            )
+        return result or "no_calls"
 
     async def missing_required(
         self, tenant_id: str, call_id: str, campaign_id: str

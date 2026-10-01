@@ -345,6 +345,9 @@ export interface Contact {
     follow_up_note?: string | null;
     qualified_at?: string | null;
     qualified_call_id?: string | null;
+    latest_analysis_note?: string | null;
+    latest_analysis_call_id?: string | null;
+    latest_analysis_at?: string | null;
 }
 
 export interface ContactMutation {

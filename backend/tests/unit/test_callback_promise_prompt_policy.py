@@ -43,8 +43,8 @@ def test_prompt_tells_the_model_not_to_promise_a_callback_by_default():
     present, campaign-neutral, no campaign data touched."""
     out = compose_system_prompt(BASE, CallState())
     lowered = out.lower()
-    assert "never say a callback or booking has been scheduled, booked, or confirmed" in lowered
-    assert "pass the caller's details to the team" in lowered
+    assert "never as a scheduled callback" in lowered
+    assert "only if the runtime provides that route" in lowered
 
 
 def test_prompt_rule_survives_alongside_a_realistic_call_state():
@@ -58,7 +58,7 @@ def test_prompt_rule_survives_alongside_a_realistic_call_state():
         confirmation_verdict="affirm",
     )
     out = compose_system_prompt(BASE, state)
-    assert "never say a callback or booking has been scheduled, booked, or confirmed" in out.lower()
+    assert "never as a scheduled callback" in out.lower()
 
 
 def test_policy_still_allows_asking_for_and_noting_a_preferred_callback_time():
@@ -86,7 +86,7 @@ def test_policy_wording_does_not_itself_promise_a_call_back():
     out = compose_system_prompt(BASE, CallState())
     lowered = out.lower()
     assert "so they can call back" not in lowered
-    assert "so the team can follow up" in lowered
+    assert "do not promise that details will be passed on or that someone will follow up" in lowered
 
 
 def test_policy_line_is_irrelevant_once_a_real_executor_exists():
@@ -99,14 +99,11 @@ def test_policy_line_is_irrelevant_once_a_real_executor_exists():
 
 
 def test_the_honest_fallback_line_the_policy_points_to_is_never_blocked():
-    """Cross-check with the (unchanged) enforcement layer: the phrasing the
-    new prompt rule steers the model toward -- action_tools.py's own
-    SAFE_FAILURE_SPEECH, the honest "I'll pass your details to the team"
-    line -- must never itself trip llm_guardrails.py's completion-claim gate,
-    or the fix would just move the retraction earlier instead of removing it.
-    """
+    """The fixed failure sentence must pass its own completion-claim gate
+    and must not invent a team handoff as a substitute for a failed action."""
     honest_line = safe_failure_speech(ACTION_SCHEDULE_CALLBACK)
-    assert "team" in honest_line.lower()
+    assert "can't confirm a scheduled callback" in honest_line.lower()
+    assert "team" not in honest_line.lower()  # no invented handoff route
 
     valid, reason = LLMGuardrails().validate_response(
         honest_line, None, action_results={}

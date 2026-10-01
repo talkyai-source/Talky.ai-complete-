@@ -53,8 +53,11 @@ def test_a_real_answer_is_not_a_decline():
     assert declined_note([_a("Are you still with Dojo?"), _u("No, I use Square now.")]) is None
 
 
-def test_the_trailing_block_says_a_no_closes_the_topic():
-    assert "closes that topic" in CRAFT_REANCHOR
+def test_the_trailing_block_scopes_refusal_without_treating_every_no_as_goodbye():
+    text = " ".join(CRAFT_REANCHOR.split())
+    assert "A refusal closes that offer, not every topic" in text
+    assert 'A factual "no" describes their situation; it is not a refusal' in text
+    assert "thanks alone is not goodbye" in text
 
 
 # ── realtime: no narration, one reply, one offer, no invented claims ──────
@@ -76,9 +79,10 @@ def test_realtime_says_one_reply_then_listens():
 
 
 def test_realtime_offers_a_next_step_once():
-    text = _realtime_text()
-    assert "Offer that only once in the call" in text
-    assert "do not ask it again in other words" in text  # sales persona
+    text = " ".join(_realtime_text().split())
+    assert "Offer one available next step when it fits their stated need" in text
+    assert "If they decline it, do not repackage the same offer" in text
+    assert "Offer a team handoff only if the runtime explicitly supplies that capability" in text
 
 
 def test_realtime_claims_nothing_beyond_what_was_confirmed():

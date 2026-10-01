@@ -10,13 +10,14 @@ Tests verify:
 from __future__ import annotations
 
 import json
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, contextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from app.domain.services.call_summary.store import generate_and_store
+from app.domain.services.call_summary.business_details import transcript_revision
 from app.domain.services.call_summary.summarizer import SUMMARY_UNAVAILABLE_HEADLINE
 
 # ---------------------------------------------------------------------------
@@ -28,6 +29,7 @@ _CALL_ID = "00000000-0000-0000-0000-000000000002"
 
 _EXISTING_SUMMARY = {
     "headline": "Already summarized",
+    "business_details": [],
     "outcome": "qualified",
     "what_happened": "Quick intro call",
     "key_points": [],
@@ -41,6 +43,7 @@ _EXISTING_SUMMARY = {
 
 _FAKE_SUMMARY = {
     "headline": "Fresh summary",
+    "business_details": [],
     "outcome": "qualified",
     "what_happened": "Discussed the product features.",
     "key_points": ["interested in API"],
@@ -70,6 +73,8 @@ _FAILED_SUMMARY = {
 
 def _make_conn(row):
     """Return a minimal async-compatible connection fake."""
+    if row and row.get("summary_json"):
+        row.setdefault("summary_transcript_hash", transcript_revision(row))
     conn = MagicMock()
     conn.fetchrow = AsyncMock(return_value=row)
     conn.execute = AsyncMock(return_value=None)
@@ -113,12 +118,13 @@ async def _fake_acquire(conn):
     yield conn
 
 
+@contextmanager
 def _patch_acquire(conn):
-    """Return a patch context for acquire_with_tenant that yields *conn*."""
-    return patch(
-        "app.domain.services.call_summary.store.acquire_with_tenant",
-        side_effect=lambda pool, tenant_id: _fake_acquire(conn),
-    )
+    factory = lambda pool, tenant_id: _fake_acquire(conn)
+    with patch("app.domain.services.call_summary.store.acquire_with_tenant", side_effect=factory), patch(
+        "app.core.db_utils.acquire_with_tenant", side_effect=factory,
+    ):
+        yield
 
 
 # ---------------------------------------------------------------------------
@@ -145,7 +151,7 @@ class TestGenerateAndStore:
         mock_summarize.assert_not_called()
         # Idempotent: the summary row is NOT re-written. (Lead-marking self-heal
         # may run a leads UPDATE — assert only that no summary write happened.)
-        assert not any("UPDATE calls" in c.args[0] for c in conn.execute.await_args_list)
+        assert not any("SET summary_json" in c.args[0] for c in conn.execute.await_args_list)
 
     async def test_idempotent_str_summary_json(self):
         """summary_json already set as JSON string (no codec) → parse + return."""
@@ -164,7 +170,7 @@ class TestGenerateAndStore:
 
         assert result == _EXISTING_SUMMARY
         mock_summarize.assert_not_called()
-        assert not any("UPDATE calls" in c.args[0] for c in conn.execute.await_args_list)
+        assert not any("SET summary_json" in c.args[0] for c in conn.execute.await_args_list)
 
     async def test_force_re_summarizes_even_if_summary_exists(self):
         """force=True → summarizer called + UPDATE issued even when summary_json set."""
@@ -247,7 +253,10 @@ class TestGenerateAndStore:
 
         assert result == _FAILED_SUMMARY      # caller still gets a dict to show
         mock_summarize.assert_awaited_once()  # it DID attempt summarization
-        conn.execute.assert_not_called()      # but NO UPDATE was issued
+        # Keep the summary retryable while exposing failed detail processing.
+        assert conn.execute.call_count == 1
+        assert "lead_details_status = 'failed'" in conn.execute.call_args.args[0]
+        assert "summary_json" not in conn.execute.call_args.args[0]
 
     async def test_empty_transcript_returns_none(self):
         """transcript is empty string → return None, no summarizer call."""

@@ -344,10 +344,18 @@ def test_a_real_byo_trunk_still_wins_over_the_platform_default():
     assert route.reason == "own_trunk"
 
 
-def test_an_extension_only_tenant_falls_back_to_the_platform_default():
+def test_an_extension_only_tenant_cannot_use_an_unprovisioned_platform_default():
+    """An inbound extension proves neither PSTN access nor default readiness.
+
+    The environment endpoint alone grants no route. A tenant-owned, ready
+    platform-default row is required, as the positive routing control above
+    demonstrates; the extension must never manufacture that provisioning.
+    """
     route = _route([_trunk("blaze-pbx-940003", extension=True)])
-    assert route.is_default is True
-    assert route.endpoint == "blazedigitel-endpoint"
+    assert route.refused is True
+    assert route.reason == "no_ready_trunk"
+    assert route.is_default is False
+    assert route.endpoint is None
 
 
 def test_extension_flag_defaults_off_so_no_existing_trunk_changes():

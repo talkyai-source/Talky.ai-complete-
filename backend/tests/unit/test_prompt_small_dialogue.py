@@ -314,41 +314,26 @@ def test_a_fragment_is_licensed_as_a_whole_turn(persona, slots):
 
 @pytest.mark.parametrize("persona,slots", ALL_PERSONAS)
 def test_acknowledge_then_ask_is_named_as_the_move(persona, slots):
-    """HARD RULE 3 used to be purely subtractive — "an answer, then the
-    reasoning, then a question is one part too many — cut the middle". That
-    says what to delete, not what to say. The replacement shape is now named,
-    which is what makes the deletion actionable."""
     out = _composed(persona, slots)
-    assert "Acknowledge in a word or two, then ask" in out
-    # ...and the subtractive half is still there — this replaced nothing.
-    assert "one part too many" in out
+    # Do not force a question after every answer; that was the repeated
+    # qualification reflex when callers were asking direct questions.
+    assert "lead with the answer" in out
+    assert "add a question only when useful" in out
 
 
 @pytest.mark.parametrize("persona,slots", ALL_PERSONAS)
 def test_the_agent_is_told_to_hand_the_floor_back(persona, slots):
-    """Measured voice dialogues are ~14 turns / ~800 words TOTAL — the natural
-    shape is many short exchanges. "Be brief" describes one turn; this
-    describes the CALL, which is the thing the owner was actually complaining
-    about ("small dialogues nature")."""
     out = _composed(persona, slots)
-    assert "many quick exchanges traded back and forth" in out
-    assert "hand the floor back early and often" in out
+    assert "hand the floor back" in out
+    assert "then stop talking" in out
 
 
 def test_the_recency_slot_names_the_sub_sentence_turn():
-    """FINAL RESPONSE CONTRACT is the last turn-shape text before the tenant
-    block and the compliance floor. It said "fewest sentences" — but a model
-    reading "sentence" writes a full clause, so the unit itself was the
-    ceiling. All three turn-shape blocks now name the smaller unit."""
-    contract = _flat(FINAL_RESPONSE_CONTRACT)
-    hard = _flat(GENERIC_GUARDRAILS_HARD)
-    rest = _flat(GENERIC_GUARDRAILS_REST)
-
-    assert "often just a few words" in contract
-    assert "a few words is often the whole sentence" in hard
-    # ...and none of them re-opens the door by naming a bigger allowance.
-    for name, block in (("contract", contract), ("hard", hard), ("rest", rest)):
-        assert "a full sentence every turn" not in block.lower(), name
+    from app.services.scripts.prompts.guardrails import COMMUNICATION_PRINCIPLES
+    assert "often just a few words" in COMMUNICATION_PRINCIPLES
+    assert "communication principles above" in FINAL_RESPONSE_CONTRACT
+    for block in (FINAL_RESPONSE_CONTRACT, GENERIC_GUARDRAILS_HARD, GENERIC_GUARDRAILS_REST):
+        assert "a full sentence every turn" not in block.lower()
 
 
 # ---------------------------------------------------------------------------

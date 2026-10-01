@@ -559,14 +559,29 @@ def test_normal_agent_readback_with_again_does_not_create_false_ambiguity():
     assert state.email_capture.attempts == 0
 
 
-def test_both_live_pipelines_consume_agent_contact_mode_signal():
+@pytest.mark.asyncio
+@pytest.mark.parametrize("evidence,expected_mode", [("transport_played", "phone"), ("transmitted", None)])
+async def test_both_live_pipelines_consume_agent_contact_mode_signal(evidence, expected_mode):
     from app.realtime.bridge import RealtimeBridge
+    from app.realtime.openai import RealtimeEvent
     from app.domain.services.voice_pipeline.turn_runner import TurnRunner
+    from unittest.mock import AsyncMock
 
-    assert "update_state_from_agent_turn" in inspect.getsource(TurnRunner.run)
-    assert "update_state_from_agent_turn" in inspect.getsource(
-        RealtimeBridge._observe_contact_agent_turn
+    # Inspect the loaded callable rather than source offsets which can move
+    # while a long test run is using an already-imported module.
+    assert "update_state_from_agent_turn" in TurnRunner.run.__code__.co_names
+    contact = SimpleNamespace(captured_slots=CallState())
+    gateway = SimpleNamespace(
+        send_audio=AsyncMock(), begin_playback=AsyncMock(),
+        finish_playback=AsyncMock(return_value={"utterance_id": "rt-1", "status": "completed", "evidence": evidence}),
     )
+    bridge = RealtimeBridge(call_id="fixture", realtime_session=SimpleNamespace(update_live_state=AsyncMock(), close=AsyncMock()),
+                            media_gateway=gateway, contact_session=contact)
+    await bridge._play_validated_response(RealtimeEvent(kind="response_candidate",
+        text="What is the best phone number to call you back on?", audio=b"\xff" * 320))
+    assert contact.captured_slots.agent_asked_kind == expected_mode
+    assert contact.captured_slots.active_contact_kind == expected_mode
+    assert contact.captured_slots.phone_capture is None
 
 
 def test_cancelled_capture_is_not_reasked_or_rendered_as_a_fact():

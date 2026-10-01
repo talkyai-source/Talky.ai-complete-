@@ -16,6 +16,11 @@ import { ensureDom } from "@/test-utils/dom";
 
 ensureDom();
 
+test("formatted international numbers discard separators before regrouping", () => {
+    assert.equal(formatPhoneForDisplay("+44 (7700) 900-123"), "+44 7700 900123");
+    assert.equal(formatPhoneForDisplay("+1 (416) 555-0123"), "+1 416 555 0123");
+});
+
 afterEach(() => {
     window.localStorage.clear();
 });

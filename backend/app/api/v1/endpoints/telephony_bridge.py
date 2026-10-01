@@ -80,6 +80,7 @@ from app.domain.services.telephony.config import (  # noqa: E402
 )
 from app.domain.services.telephony.adapter_registry import (  # noqa: E402
     register_adapter_getter,
+    register_transfer_executor,
 )
 from app.domain.services.event_emitter import emit_event_via_pool  # noqa: E402
 from app.core.security.internal_auth import (  # noqa: E402
@@ -1831,67 +1832,52 @@ async def make_call(request: Request, body: MakeCallRequest):
                 }
             )
 
-    # Shared-pool allotment (resolved up-front). If this tenant is allotted a
-    # pool account, that account's DID is inherently trusted — the pool trunk is
-    # registered with the carrier and OWNS the number — so it satisfies caller-ID
-    # ownership WITHOUT a per-tenant verified DID (the pool DID is globally unique
-    # and can't be verified per-tenant anyway). Resolving it here lets us (a) skip
-    # the ownership gate for a pool route and (b) reuse the route below without a
-    # second lookup. Fail-safe: any error → no pool route → normal path.
-    _pool_route = None
-    if getattr(_adapter, "name", "") == "asterisk" and effective_tenant_id:
-        try:
-            from app.domain.services.telephony.trunk_resolver import (
-                _resolve_campaign_trunk,
-                _resolve_pool_assignment,
-            )
+    # Resolve the final route and caller ID before ownership, guards, or costly
+    # provider warmup. Never validate one DID and originate with another.
+    _outbound_route = None
+    if getattr(_adapter, "name", "") == "asterisk":
+        from app.domain.services.telephony.trunk_resolver import resolve_outbound_trunk
 
-            # Campaign-level trunk override first: two campaigns of the same
-            # tenant may be allotted different PBX accounts / caller-IDs.
-            # Same trust model as the pool route (operator-assigned snapshot),
-            # so it also satisfies the caller-ID ownership gate below.
-            if campaign_id:
-                _pool_route = await _resolve_campaign_trunk(
-                    container.db_pool,
-                    campaign_id=str(campaign_id),
-                    tenant_id=str(effective_tenant_id),
-                )
-            if _pool_route is None:
-                _pool_route = await _resolve_pool_assignment(
-                    container.db_pool,
-                    tenant_id=str(effective_tenant_id),
-                    is_production=(environment == "production"),
-                )
-        except Exception:  # noqa: BLE001 — never block a call on this
-            _pool_route = None
-
-    # T0.1 — Caller-ID ownership enforcement. The check itself (env-mode
-    # resolution, DID verification, fail-closed lookup) lives in the
-    # telephony package; the endpoint only translates a denial into the
-    # 403. See caller_id_guard.check_caller_id_ownership for the ramp-in
-    # knob (CALLER_ID_ENFORCEMENT_MODE = enforce | log | off).
-    # Skipped for a pool route — the pool account is the trusted caller-ID owner.
-    if _pool_route is None:
-        caller_id_decision = await check_caller_id_ownership(
+        _outbound_route = await resolve_outbound_trunk(
             container.db_pool,
             tenant_id=str(effective_tenant_id),
-            caller_id=caller_id,
             environment=environment,
+            campaign_id=str(campaign_id) if campaign_id else None,
         )
-        if not caller_id_decision.allowed:
+        if _outbound_route.refused:
             raise HTTPException(
-                status_code=403,
+                status_code=422,
                 detail={
-                    "error": "caller_id_not_verified",
-                    "message": (
-                        "The caller_id is not registered and verified under "
-                        "this tenant. Register it at POST /api/v1/"
-                        "tenant-phone-numbers and verify before dialing."
-                    ),
-                    "caller_id": caller_id,
-                    "require_attestation": caller_id_decision.require_attestation,
+                    "error": "tenant_pbx_required",
+                    "reason": _outbound_route.reason,
+                    "message": "The selected SIP trunk or caller ID is not ready. Check its live status before dialing.",
                 },
             )
+        if _outbound_route.caller_id:
+            caller_id = _outbound_route.caller_id
+
+    # Assignment metadata is not proof of number ownership; validate the final
+    # selected DID for own, campaign and shared-pool routes alike.
+    caller_id_decision = await check_caller_id_ownership(
+        container.db_pool,
+        tenant_id=str(effective_tenant_id),
+        caller_id=caller_id,
+        environment=environment,
+    )
+    if not caller_id_decision.allowed:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error": "caller_id_not_verified",
+                "message": (
+                    "The caller_id is not registered and verified under "
+                    "this tenant. Register it at POST /api/v1/"
+                    "tenant-phone-numbers and verify before dialing."
+                ),
+                "caller_id": caller_id,
+                "require_attestation": caller_id_decision.require_attestation,
+            },
+        )
 
     guard = CallGuard(
         db_pool=container.db_pool,
@@ -2036,83 +2022,9 @@ async def make_call(request: Request, body: MakeCallRequest):
             detail_msg = f"{detail_msg} (cause: {prewarm.failure_reason})"
         raise HTTPException(status_code=503, detail=detail_msg)
 
-    # Per-tenant SIP-trunk resolution (isolation). Resolve which PJSIP
-    # endpoint this tenant's outbound leg must go through and, for an
-    # own/BYO trunk, which of their verified numbers to present as caller-ID.
-    # Fail-safe: on any resolver issue this returns the platform default
-    # (env endpoint, caller-ID unchanged) so today's default-trunk tenants
-    # are byte-for-byte identical. Only Asterisk consumes trunk_endpoint;
-    # other adapters keep their existing signature.
-    trunk_endpoint: Optional[str] = None
-    if getattr(_adapter, "name", "") == "asterisk":
-        try:
-            # Reuse the pool route resolved up-front (for the ownership-gate
-            # skip); only hit the full resolver when there's no pool allotment.
-            route = _pool_route
-            if route is None:
-                from app.domain.services.telephony.trunk_resolver import (
-                    resolve_outbound_trunk,
-                )
-
-                route = await resolve_outbound_trunk(
-                    container.db_pool,
-                    tenant_id=str(effective_tenant_id),
-                    environment=environment,
-                )
-            if route.refused:
-                # Own-trunk-only production model: the tenant has no usable
-                # own trunk / caller-ID and there is NO shared upstream to
-                # fall back on. Refuse cleanly (permanent 4xx — the dialer
-                # treats non-503 as a permanent failure and surfaces the
-                # structured error) rather than silently mis-routing.
-                logger.warning(
-                    "outbound_refused_no_pbx tenant=%s dest=%s reason=%s",
-                    str(effective_tenant_id)[:8],
-                    destination,
-                    route.reason,
-                )
-                # Warmup owns live STT/TTS/LLM resources. This refusal occurs
-                # before the originate cleanup try/finally below, so release
-                # the session here rather than leaking it on every retry.
-                try:
-                    await _get_orchestrator().end_session(pre_warm_session)
-                except Exception:  # noqa: BLE001 - preserve refusal semantics
-                    logger.exception("refused_outbound_prewarm_cleanup_failed")
-                raise HTTPException(
-                    status_code=422,
-                    detail={
-                        "error": "tenant_pbx_required",
-                        "reason": route.reason,
-                        "message": (
-                            "This tenant has no active SIP trunk / verified "
-                            "caller-ID. Set up your PBX (add + activate a SIP "
-                            "trunk and verify a phone number) before dialing."
-                        ),
-                    },
-                )
-            if not route.is_default:
-                trunk_endpoint = route.endpoint
-                # Own-trunk routes carry the tenant's own dialable number
-                # (or the trunk's configured caller-ID); present it. Default
-                # routes leave caller_id untouched (back-compat).
-                if route.caller_id:
-                    caller_id = route.caller_id
-                logger.info(
-                    "outbound_trunk_route dest=%s tenant=%s endpoint=%s reason=%s",
-                    destination,
-                    str(effective_tenant_id)[:8],
-                    route.endpoint,
-                    route.reason,
-                )
-        except HTTPException:
-            raise
-        except Exception as exc:  # noqa: BLE001 — never block a call on this
-            logger.error(
-                "outbound_trunk_route_failed tenant=%s err=%s — using default endpoint",
-                str(effective_tenant_id)[:8],
-                exc,
-            )
-            trunk_endpoint = None
+    trunk_endpoint: Optional[str] = (
+        _outbound_route.endpoint if _outbound_route is not None else None
+    )
 
     planned_call_id = None
     if getattr(_adapter, "name", "") == "asterisk":
@@ -3331,6 +3243,9 @@ async def _execute_transfer(
         raise
     await _complete_transfer_attempt(attempt, result)
     return result
+
+
+register_transfer_executor(_execute_transfer)
 
 
 def _transfer_request_metadata(request: Request) -> dict[str, Optional[str]]:

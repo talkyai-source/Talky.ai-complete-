@@ -59,7 +59,7 @@ async def _spoken(chunks, monkeypatch, *, history=(), prompt=DOJO_FACTS, slots=N
         campaign_id="campaign-1",
         lead_id="lead-1",
         provider_call_id="provider-1",
-        system_prompt=prompt,
+        system_prompt=f"<company_knowledge>{prompt}</company_knowledge>",
         voice_id="voice-1",
     )
     session.captured_slots = slots if slots is not None else CallState()

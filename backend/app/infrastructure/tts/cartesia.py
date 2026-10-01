@@ -419,6 +419,9 @@ class CartesiaTTSProvider(TTSProvider):
                 ):
                     logger.warning("[Cartesia WS] Connection closed: %s", msg)
                     raise RuntimeError("Cartesia WS closed mid-generation")
+            # aiohttp converts CLOSE/CLOSED to StopAsyncIteration before this
+            # loop sees them. Only our context's done certifies synthesis EOF.
+            raise RuntimeError("Cartesia WS ended without generation completion")
         finally:
             # Reached whenever this generation ends WITHOUT its own `done`:
             # an error/closed-WS above, OR — the barge-in case — the caller

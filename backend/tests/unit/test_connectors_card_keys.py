@@ -2,7 +2,6 @@
 sharing its rows: card keys, provider-scoped disconnect, callback redirects."""
 from __future__ import annotations
 
-import asyncio
 import os
 from types import SimpleNamespace
 
@@ -102,7 +101,7 @@ def _user():
     return SimpleNamespace(tenant_id=TENANT, id="user-1")
 
 
-def test_status_lists_hubspot_and_salesforce_as_separate_cards(monkeypatch):
+async def test_status_lists_hubspot_and_salesforce_as_separate_cards(monkeypatch):
     monkeypatch.setenv("SALESFORCE_CLIENT_ID", "x")
     monkeypatch.setenv("SALESFORCE_CLIENT_SECRET", "y")
     db = FakeDB({
@@ -111,26 +110,24 @@ def test_status_lists_hubspot_and_salesforce_as_separate_cards(monkeypatch):
             {"id": "c-hs", "type": "crm", "provider": "hubspot", "status": "expired", "created_at": "2026-09-06T10:00:00Z"},
         ])],
     })
-    out = asyncio.get_event_loop().run_until_complete(ce.list_connector_statuses(current_user=_user(), db_client=db))
+    out = await ce.list_connector_statuses(current_user=_user(), db_client=db)
     by_type = {item.type: item for item in out.items}
     assert set(by_type) == {"calendar", "email", "crm", "drive", "salesforce"}
     assert by_type["crm"].provider == "hubspot" and by_type["crm"].status == "expired"
     assert by_type["salesforce"].provider == "salesforce" and by_type["salesforce"].status == "error"
 
 
-def test_status_hides_the_salesforce_card_when_the_server_is_not_configured(monkeypatch):
+async def test_status_hides_the_salesforce_card_when_the_server_is_not_configured(monkeypatch):
     monkeypatch.delenv("SALESFORCE_CLIENT_ID", raising=False)
     monkeypatch.delenv("SALESFORCE_CLIENT_SECRET", raising=False)
     db = FakeDB({("connectors", "select"): [_resp([])]})
-    out = asyncio.get_event_loop().run_until_complete(ce.list_connector_statuses(current_user=_user(), db_client=db))
+    out = await ce.list_connector_statuses(current_user=_user(), db_client=db)
     assert [i.type for i in out.items] == ["calendar", "email", "crm", "drive"]
 
 
-def test_disconnect_crm_card_only_removes_hubspot_rows():
+async def test_disconnect_crm_card_only_removes_hubspot_rows():
     db = FakeDB({("connectors", "select"): [_resp([{"id": "c-hs", "provider": "hubspot"}])]})
-    out = asyncio.get_event_loop().run_until_complete(
-        ce.disconnect_connector_by_type("crm", current_user=_user(), db_client=db)
-    )
+    out = await ce.disconnect_connector_by_type("crm", current_user=_user(), db_client=db)
     assert out["removed"] == 1
     select = db.calls[0]
     assert ("type", "crm") in select[2] and ("provider", "hubspot") in select[2]
@@ -139,39 +136,33 @@ def test_disconnect_crm_card_only_removes_hubspot_rows():
     assert ("connector_id", "c-hs") in deleted[0][2] and ("id", "c-hs") in deleted[1][2]
 
 
-def test_disconnect_salesforce_card_targets_salesforce_rows_only():
+async def test_disconnect_salesforce_card_targets_salesforce_rows_only():
     db = FakeDB({("connectors", "select"): [_resp([])]})
-    out = asyncio.get_event_loop().run_until_complete(
-        ce.disconnect_connector_by_type("salesforce", current_user=_user(), db_client=db)
-    )
+    out = await ce.disconnect_connector_by_type("salesforce", current_user=_user(), db_client=db)
     assert out["removed"] == 0
     assert ("type", "crm") in db.calls[0][2] and ("provider", "salesforce") in db.calls[0][2]
 
 
-def test_unknown_card_key_is_a_400():
+async def test_unknown_card_key_is_a_400():
     with pytest.raises(HTTPException) as exc:
-        asyncio.get_event_loop().run_until_complete(
-            ce.disconnect_connector_by_type("zoho", current_user=_user(), db_client=FakeDB())
-        )
+        await ce.disconnect_connector_by_type("zoho", current_user=_user(), db_client=FakeDB())
     assert exc.value.status_code == 400
 
 
-def test_authorize_salesforce_without_server_credentials_is_a_503(monkeypatch):
+async def test_authorize_salesforce_without_server_credentials_is_a_503(monkeypatch):
     monkeypatch.delenv("SALESFORCE_CLIENT_ID", raising=False)
     monkeypatch.delenv("SALESFORCE_CLIENT_SECRET", raising=False)
     request = SimpleNamespace(base_url="http://testserver/")
     with pytest.raises(HTTPException) as exc:
-        asyncio.get_event_loop().run_until_complete(
-            ce.authorize_connector_by_type(
-                "salesforce", request, redirect_uri="http://app/connectors/salesforce/callback",
-                current_user=_user(), db_client=FakeDB(),
-            )
+        await ce.authorize_connector_by_type(
+            "salesforce", request, redirect_uri="http://app/connectors/salesforce/callback",
+            current_user=_user(), db_client=FakeDB(),
         )
     assert exc.value.status_code == 503
     assert "SALESFORCE_CLIENT_ID" in str(exc.value.detail)
 
 
-def test_authorize_salesforce_inserts_a_crm_row_for_the_salesforce_provider(monkeypatch):
+async def test_authorize_salesforce_inserts_a_crm_row_for_the_salesforce_provider(monkeypatch):
     monkeypatch.setenv("SALESFORCE_CLIENT_ID", "cid")
     monkeypatch.setenv("SALESFORCE_CLIENT_SECRET", "sec")
 
@@ -182,11 +173,9 @@ def test_authorize_salesforce_inserts_a_crm_row_for_the_salesforce_provider(monk
     monkeypatch.setattr(ce, "get_oauth_state_manager", lambda: FakeStateManager())
     db = FakeDB({("connectors", "insert"): [_resp([{"id": "new-sf"}])]})
     request = SimpleNamespace(base_url="http://testserver/")
-    out = asyncio.get_event_loop().run_until_complete(
-        ce.authorize_connector_by_type(
-            "salesforce", request, redirect_uri="http://app/connectors/salesforce/callback",
-            current_user=_user(), db_client=db,
-        )
+    out = await ce.authorize_connector_by_type(
+        "salesforce", request, redirect_uri="http://app/connectors/salesforce/callback",
+        current_user=_user(), db_client=db,
     )
     inserted = db.calls[0][3]
     assert inserted["type"] == "crm" and inserted["provider"] == "salesforce" and inserted["name"] == "Salesforce"

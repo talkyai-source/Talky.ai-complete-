@@ -56,8 +56,9 @@ def extract_end_call(text: str) -> tuple[str, bool]:
 
 def strip_and_flag(session, text: str) -> str:
     """Extract the END_CALL sentinel from RAW model text and, if present,
-    flag ``session`` so the turn finisher hangs up once this reply's audio
-    has played. Returns the sentinel-free text.
+    flag ``session`` only with independent caller/call-state authorization.
+    The turn finisher rechecks before hanging up after this reply's audio.
+    Returns the sentinel-free text even when the request is rejected.
 
     Callers MUST invoke this on text as soon as it leaves the model —
     before any TTS-directed cleaning (audio-tag stripping etc.) touches it.
@@ -74,12 +75,37 @@ def strip_and_flag(session, text: str) -> str:
     unchanged and never clears a flag a prior slice already set.
     """
     clean, requested = extract_end_call(text)
-    if requested:
+    if requested and model_end_call_allowed(session):
         try:
             session._end_call_requested = True
         except Exception:
             pass
     return clean
+
+
+def model_end_call_allowed(session, user_text=None) -> bool:
+    """Bind every model hangup request to caller or deterministic call evidence."""
+    from app.domain.services.end_session_action import caller_signaled_end, repeated_decline_allows_end, previous_assistant_turn
+    from app.domain.services.caller_assertions import continuation_after
+    from app.domain.services.voice_pipeline.identity_disposition import IdentityDisposition
+
+    if user_text is None:
+        user_text = next((
+            getattr(message, "content", "")
+            for message in reversed(getattr(session, "conversation_history", ()) or ())
+            if getattr(getattr(message, "role", None), "value", getattr(message, "role", None)) == "user"
+        ), "")
+    previous = previous_assistant_turn(getattr(session, "conversation_history", ()))
+    if caller_signaled_end(user_text, previous_assistant_text=previous):
+        return True
+    if continuation_after(user_text):
+        return False
+    if getattr(session, "_amd_voicemail", False) is True or getattr(session, "_machine_screening", False) is True:
+        return True
+    if getattr(session, "_turn_disposition", None) in {IdentityDisposition.WRONG_BUSINESS, IdentityDisposition.DNC}:
+        return True
+    declined = getattr(getattr(session, "captured_slots", None), "declined_count", 0)
+    return repeated_decline_allows_end(user_text, declined, previous_assistant_text=previous)
 
 
 # Appended by the prompt composer for every campaign (before the compliance
@@ -119,35 +145,20 @@ def strip_and_flag(session, text: str) -> str:
 # SPECIFIC TURN must name which turn, or recency makes it describe every turn.
 CALL_CONTROL_RULES = f"""\
 ## ENDING THE CALL
-- Call genuinely over — a clear goodbye, a WRONG BUSINESS (they've never heard
-  of the company, it's a private residence, or plainly not a business line), or
-  a voicemail/answering machine — say at most ONE short warm closing line. If an
-  `end_call` tool is offered this turn, call it; otherwise end that reply with
-  the exact token {END_CALL_TOKEN} . The system hangs up.
-- WRONG PERSON is NOT this: if the business is right but your contact isn't
-  here / isn't available / "no one by that name", do NOT end — that's a pivot,
-  see WRONG PERSON / GATEKEEPER below. Only a wrong DESTINATION ends the call.
-- A tool result or the token is required; words like "hangs up" do nothing.
-- Voicemail/answering machine: reply with {END_CALL_TOKEN} alone — we call
-  back another time instead of leaving a recording.
-
-## HOW YOU SELL
-- ONCE they have spoken back, your first real reply introduces you and the
-  company in one short line, then asks ONE question. If you have already
-  introduced yourself, never do it again — LIVE STATE tells you which.
-  A few words is usually the whole turn — earn the next line by letting
-  them talk.
-- Discover before you pitch: learn how they handle it today before mentioning
-  what we offer.
-- Drive to ONE concrete next step — their email for a sample, or a callback
-  at a time THEY pick — and confirm it back before closing.
+- When the caller clearly stops, says goodbye, or confirms a wrong destination,
+  give one brief closing line. Use `end_call` when offered; otherwise finish
+  with {END_CALL_TOKEN}. Words like "hangs up" do not end a call.
+- VOICEMAIL or an answering machine: use `end_call` or {END_CALL_TOKEN} alone;
+  do not leave a message. Do not promise a later callback.
+- WRONG PERSON at the right business is a redirect, not a wrong destination.
+  Not knowing your company or not being its customer is not a wrong number.
 """
 
 
 INBOUND_CALL_CONTROL_RULES = f"""\
 ## ENDING THE CALL
-- When the caller clearly says goodbye, asks to end, or confirms their request
-  is resolved, say at most one short closing line. If an `end_call` tool is
+- When the caller clearly says goodbye, asks to end, or confirms they want no
+  further help, say at most one short closing line. If an `end_call` tool is
   offered this turn, call it; otherwise finish with the exact token {END_CALL_TOKEN} .
 - A tool result or the token is required; words like "hangs up" do nothing.
 - A request for support, a different department, or a human is not a reason to

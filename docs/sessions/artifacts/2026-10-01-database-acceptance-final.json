@@ -1,0 +1,95 @@
+{
+  "task_date": "2026-10-01",
+  "candidate_commit": "30faff4840db9ebb2803e0bbdce4b9ce1cb6d9a7",
+  "result": "passed",
+  "scope": "Fresh disposable localhost database with synthetic fixtures; no production database or external action",
+  "bootstrap": [
+    "create a new empty *_test database on the existing isolated localhost PostgreSQL process",
+    "psql -v ON_ERROR_STOP=1 -f database/complete_schema.sql",
+    "alembic stamp 0008_tenant_voice_tuning",
+    "alembic upgrade head"
+  ],
+  "schema": {
+    "head_after_tests": "0051_crm_destination_identity",
+    "postgresql": "16.1",
+    "bootstrap_role": {
+      "superuser": true,
+      "bypassrls": true
+    },
+    "new_columns": [
+      {
+        "table_name": "calls",
+        "column_name": "lead_details_status",
+        "data_type": "text"
+      },
+      {
+        "table_name": "calls",
+        "column_name": "summary_json",
+        "data_type": "jsonb"
+      },
+      {
+        "table_name": "calls",
+        "column_name": "summary_transcript_hash",
+        "data_type": "text"
+      },
+      {
+        "table_name": "crm_deliveries",
+        "column_name": "destination_account_id",
+        "data_type": "text"
+      },
+      {
+        "table_name": "crm_deliveries",
+        "column_name": "destination_connector_id",
+        "data_type": "uuid"
+      }
+    ]
+  },
+  "tests": {
+    "passed": 39,
+    "failed": 0,
+    "errors": 0,
+    "skipped": 0,
+    "per_module": {
+      "tests.integration.test_crm_deliveries": 11,
+      "tests.integration.test_lead_detail_revisions": 5,
+      "tests.integration.test_action_execution_receipts": 7,
+      "tests.integration.test_reminder_recipients": 1,
+      "tests.integration.test_bootstrap_contract_repair": 14,
+      "tests.integration.test_inbound_hold_resolution": 1
+    },
+    "pytest_report_seconds": 28.9,
+    "warnings": "3 existing datetime.utcnow deprecation warnings"
+  },
+  "verified_behaviors": [
+    "Structured summary column exists before CRM trigger creation; original bootstrap schemas need no manual SQL prerequisite.",
+    "Permission seed executes through SQLAlchemy/asyncpg and is idempotent; administrative grants do not widen agent/viewer/custom connector-manager permissions.",
+    "Historical terminal calls are not falsely reported as queued analysis; active calls remain pending.",
+    "Caller evidence, manual edits, transcript revisions, cache regeneration, latest qualified-lead analysis and tenant boundaries remain protected.",
+    "Action receipts prevent duplicate sends after retries/restarts; callback dispatch respects current scope and policy.",
+    "Independent CRM delivery leases, source revisions, destination identity ownership and tenant-scoped projection remain durable.",
+    "Meeting-derived reminders retain the reviewed recipient and reject cross-tenant recipient joins.",
+    "CLI downgrade crossing 0048 refuses atomically; schema marker and CRM remote/contact/connector/account identities survive.",
+    "Current-head billing ledger append-only and role constraints execute without obsolete revision skips."
+  ],
+  "runtime": {
+    "os": "Windows",
+    "python": "3.12.12",
+    "sqlalchemy": "2.0.25",
+    "asyncpg": "0.29.0",
+    "alembic": "1.13.1",
+    "psycopg2": "2.9.11"
+  },
+  "limits": [
+    "This run uses the existing local Python environment, not the separate fresh Linux requirements environment; final Linux unit/security evidence is separate.",
+    "The preserved historical dump requires psql 16.14 and was not restored by the local 16.1 client. That path passed separately in backend CI run 36803596538.",
+    "Schema bootstrap/migration runs as a disposable PostgreSQL administrator. Tenant-isolation tests explicitly use NOSUPERUSER/NOBYPASSRLS roles; this is not a production deployment-role or permission audit.",
+    "The schema-only historical 0019 tenant data move is intentionally skipped for empty tenant_ai_configs; this run does not validate transformations of customer records.",
+    "Email, queue and CRM side effects in application acceptance use synthetic receipts/mocks; no live customer action or hearing/playback proof is claimed."
+  ],
+  "separate_ci_evidence": {
+    "backend_run_id": "36803596538",
+    "result": "passed",
+    "coverage": "Preserved historical baseline bootstrap and migration upgrade using psql 16.14",
+    "attribution": "Backend CI evidence; separate from the 39 local acceptance tests and local runtime described above."
+  }
+}

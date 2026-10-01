@@ -187,6 +187,7 @@ async def test_tts_no_failover_returns_primary(monkeypatch):
 @pytest.mark.asyncio
 async def test_tts_failover_enabled_cartesia_wraps_with_elevenlabs_default(monkeypatch):
     monkeypatch.setenv("TTS_FAILOVER_ENABLED", "1")
+    monkeypatch.setenv("TTS_SECONDARY_VOICE_MAP", "v=eleven-secondary-voice")
     monkeypatch.delenv("TTS_SECONDARY_PROVIDER", raising=False)
     cfg = VoiceSessionConfig(tts_provider_type="cartesia", voice_id="v")
 
@@ -210,6 +211,7 @@ async def test_tts_failover_enabled_cartesia_wraps_with_elevenlabs_default(monke
     assert isinstance(result, ResilientTTSProvider)
     cart_instance.initialize.assert_awaited_once()
     eleven_instance.initialize.assert_awaited_once()
+    assert eleven_instance.initialize.await_args.args[0]["voice_id"] == "eleven-secondary-voice"
 
 
 @pytest.mark.asyncio
@@ -218,6 +220,7 @@ async def test_tts_secondary_provider_override_honoured(monkeypatch):
     Cartesia→ElevenLabs pairing."""
     monkeypatch.setenv("TTS_FAILOVER_ENABLED", "yes")
     monkeypatch.setenv("TTS_SECONDARY_PROVIDER", "deepgram")
+    monkeypatch.setenv("TTS_SECONDARY_VOICE_MAP", "v=deepgram-secondary-voice")
     cfg = VoiceSessionConfig(tts_provider_type="cartesia", voice_id="v")
 
     cart_instance = MagicMock(initialize=AsyncMock())
@@ -239,6 +242,7 @@ async def test_tts_secondary_provider_override_honoured(monkeypatch):
 
     assert isinstance(result, ResilientTTSProvider)
     dg_instance.initialize.assert_awaited_once()
+    assert dg_instance.initialize.await_args.args[0]["voice_id"] == "deepgram-secondary-voice"
 
 
 @pytest.mark.asyncio
