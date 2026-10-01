@@ -74,7 +74,7 @@ from app.domain.services.voice_pipeline.conversation_guards import (
     unbacked_contact_claim,
 )
 from app.domain.services.voice_pipeline.grounded_figures import ground_spoken_figures
-from app.domain.services.voice_pipeline.grounded_links import ground_spoken_links
+from app.domain.services.voice_pipeline.grounded_links import ground_spoken_links, grounded_url_hosts
 from app.domain.services.voice_pipeline.readback_guard import phone_readback_guard
 from app.services.scripts.prompts.live_state import build_live_state_block
 from app.domain.services.voice_pipeline.knowledge_tool import (
@@ -1130,8 +1130,18 @@ class TurnStreamer:
                 while cap_allows_another(
                     sentences_done, max_sentences, buf, grace_used=question_grace_used
                 ):
-                    idx = self._p._find_sentence_end(buf, allow_clause=len(buf) >= 80)
+                    grounded_hosts = grounded_url_hosts([
+                        *getattr(session, "_knowledge_grounding", []), *turn_grounding,
+                    ]) if "." in buf else ()
+                    idx = self._p._find_sentence_end(
+                        buf, allow_clause=len(buf) >= 80, known_hosts=grounded_hosts,
+                    )
                     if idx < 0:
+                        break
+                    # A final dot may be the middle of a streamed domain or
+                    # address. Wait for one token of lookahead (or normal
+                    # stream completion) before link validation and playback.
+                    if idx + 1 == len(buf) and buf[idx] == ".":
                         break
 
                     # A terminator with no space after it is where the model
@@ -1216,7 +1226,9 @@ class TurnStreamer:
                     # Early comma flushes reduce latency; they are playback
                     # chunks, not completed sentences. Counting them toward
                     # the cap can stop an otherwise valid reply mid-sentence.
-                    if self._p._find_sentence_end(sentence, allow_clause=False) >= 0:
+                    if self._p._find_sentence_end(
+                        sentence, allow_clause=False, known_hosts=grounded_hosts,
+                    ) >= 0:
                         if max_sentences and sentences_done >= max_sentences:
                             question_grace_used = True
                         sentences_done += 1

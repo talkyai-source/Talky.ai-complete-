@@ -753,6 +753,40 @@ claimed complete without actual access.
   Sanitized comparison and raw synthetic responses are preserved in artifacts
   named `2026-10-01-*-fa145cf4.json`.
 
+### Final link-boundary and operational evidence
+
+- The `fff1dbe8` actual-provider follow-up passed 4/4 Groq/Luna turns for
+  complete compound speech and matching submitted/history text. Its full CI
+  suite passed 10,187 cases with one obsolete source-count assertion requiring
+  the deliberately removed duplicate history grounding call. Docker was
+  skipped after that prerequisite failure; the preceding `fa145cf4` image,
+  security scan and Compose build all passed with the patched OS packages.
+- Replacing the source-count assertion with actual TTS/history checks exposed
+  a token-boundary bug: a dot at the end of a chunk could split a domain before
+  link validation saw it. Streaming now waits for lookahead or normal
+  completion at an ambiguous trailing dot. Verified host context or explicit
+  URL syntax also keeps uppercase address suffixes intact. The full address
+  still passes the existing grounding check; a verified host never approves
+  an invented path. Unknown bare `word.Upper` retains the existing fabricated
+  caller-turn defense rather than introducing a TLD catalog or guessing.
+  Four test pipeline stubs now delegate to the real sentence segmenter.
+  The local full unit/security run passed 10,217 tests with 16 environment/
+  platform skips; exact fresh-Linux CI remains required. Host extraction is
+  limited to buffers containing a dot so ordinary tokens do not repeatedly
+  scan the knowledge passages; the affected regression batch is rerun after
+  this behavior-preserving hot-path condition.
+- Read-only systemd/journal evidence confirms today's repository backup job
+  succeeded at 02:31:51 UTC: 539,199,689 bytes and 112 table-data entries, with
+  the nightly timer active. The root-owned backup directory is not readable
+  by this SSH account, so independent archive inspection, restore rehearsal
+  and candidate migrations on a production-data copy remain unverified.
+  Those last two items are documented pre-production checklist requirements
+  in DEPLOYMENT.md, not predicates enforced by the deploy script. They require
+  the existing operator access; no dump content was read or exported here.
+- The deployment also enables the hourly carrier-hairpin test timer. Its
+  configured DID/trunk must be a designated test route; a syntax-valid but
+  unreadable configuration does not establish that ownership or routing.
+
 - [x] Audit reconciled with current production revision.
 - [x] Separate integration branch/worktree prepared.
 - [x] Detailed design, ownership, failure cases and acceptance plan recorded.

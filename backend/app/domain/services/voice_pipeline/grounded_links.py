@@ -80,6 +80,19 @@ def _clean(host: str, path: str) -> tuple[str, str]:
     return host, path
 
 
+def grounded_url_hosts(grounding: Iterable[str]) -> frozenset[str]:
+    """Extract factual URL hosts using the same parser as speech validation.
+
+    These hosts only disambiguate streaming punctuation. They never approve a
+    generated path or replace the full address check in ``ground_spoken_links``.
+    """
+    return frozenset(
+        _clean(match.group("host"), "")[0]
+        for passage in grounding or ()
+        for match in _URL_RE.finditer(str(passage or ""))
+    )
+
+
 def ground_spoken_links(text: str, grounding: Iterable[str]) -> tuple[str, list[str]]:
     """Rewrite every ungrounded web address in ``text``.
 

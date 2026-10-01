@@ -121,8 +121,9 @@ class _FakePipeline:
         return None
 
     @staticmethod
-    def _find_sentence_end(buf, allow_clause=False):
-        return buf.find(".")
+    def _find_sentence_end(buf, allow_clause=False, *, known_hosts=()):
+        from app.domain.services.voice_pipeline.sentence_segmentation import find_sentence_end
+        return find_sentence_end(buf, allow_clause=allow_clause, known_hosts=known_hosts)
 
     async def synthesize_and_send_audio(self, session, sentence, websocket, track_latency=False):
         self._calls += 1
