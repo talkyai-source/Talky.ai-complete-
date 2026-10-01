@@ -56,8 +56,9 @@ def extract_end_call(text: str) -> tuple[str, bool]:
 
 def strip_and_flag(session, text: str) -> str:
     """Extract the END_CALL sentinel from RAW model text and, if present,
-    flag ``session`` so the turn finisher hangs up once this reply's audio
-    has played. Returns the sentinel-free text.
+    flag ``session`` only with independent caller/call-state authorization.
+    The turn finisher rechecks before hanging up after this reply's audio.
+    Returns the sentinel-free text even when the request is rejected.
 
     Callers MUST invoke this on text as soon as it leaves the model —
     before any TTS-directed cleaning (audio-tag stripping etc.) touches it.
@@ -74,12 +75,36 @@ def strip_and_flag(session, text: str) -> str:
     unchanged and never clears a flag a prior slice already set.
     """
     clean, requested = extract_end_call(text)
-    if requested:
+    if requested and model_end_call_allowed(session):
         try:
             session._end_call_requested = True
         except Exception:
             pass
     return clean
+
+
+def model_end_call_allowed(session, user_text=None) -> bool:
+    """Bind every model hangup request to caller or deterministic call evidence."""
+    from app.domain.services.end_session_action import caller_signaled_end, repeated_decline_allows_end
+    from app.domain.services.caller_assertions import continuation_after
+    from app.domain.services.voice_pipeline.identity_disposition import IdentityDisposition
+
+    if user_text is None:
+        user_text = next((
+            getattr(message, "content", "")
+            for message in reversed(getattr(session, "conversation_history", ()) or ())
+            if getattr(getattr(message, "role", None), "value", getattr(message, "role", None)) == "user"
+        ), "")
+    if caller_signaled_end(user_text):
+        return True
+    if continuation_after(user_text):
+        return False
+    if getattr(session, "_amd_voicemail", False) is True or getattr(session, "_machine_screening", False) is True:
+        return True
+    if getattr(session, "_turn_disposition", None) in {IdentityDisposition.WRONG_BUSINESS, IdentityDisposition.DNC}:
+        return True
+    declined = getattr(getattr(session, "captured_slots", None), "declined_count", 0)
+    return repeated_decline_allows_end(user_text, declined)
 
 
 # Appended by the prompt composer for every campaign (before the compliance

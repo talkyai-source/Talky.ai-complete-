@@ -12,6 +12,7 @@ from urllib.parse import parse_qs, urlparse
 
 import httpx
 import pytest
+import pytest_asyncio
 
 import app.infrastructure.connectors.crm.salesforce as sf_module
 from app.infrastructure.connectors.base import ConnectorFactory, ConnectorProviderError
@@ -167,11 +168,10 @@ async def test_api_call_without_instance_url_fails_closed(connector):
         await connector.query("SELECT Id FROM Task LIMIT 1")
 
 
-@pytest.fixture
-def ready(connector):
+@pytest_asyncio.fixture
+async def ready(connector):
     connector.apply_config({"instance_url": "https://acme.my.salesforce.com"})
-    import asyncio
-    asyncio.get_event_loop().run_until_complete(connector.set_access_token("AT"))
+    await connector.set_access_token("AT")
     return connector
 
 

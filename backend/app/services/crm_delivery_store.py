@@ -10,11 +10,17 @@ class CRMDeliveryStore:
     def __init__(self, pool):
         self.pool = pool
 
-    async def enqueue(self, tenant_id, call_id, provider, desired_key, *, legacy_id=None):
+    async def enqueue(self, tenant_id, call_id, provider, desired_key, *, legacy_id=None, source_revision=None):
         # A historical shared ID has no durable owner. Preserve it for review;
         # never reuse it for either destination or repeat an uncertain create.
         async with acquire_with_tenant(self.pool, tenant_id) as conn:
-            return dict(await conn.fetchrow("""
+            source_current = await self._source_current(conn, tenant_id, call_id, source_revision)
+            # A summary can commit after the caller reads it but before this
+            # enqueue. Keep that work dirty instead of clearing the trigger's
+            # invalidation with a hash of an obsolete body.
+            if not source_current:
+                desired_key = None
+            row = dict(await conn.fetchrow("""
                 INSERT INTO crm_deliveries (tenant_id, call_id, provider, desired_key, status, phase, last_error)
                 VALUES ($1::uuid,$2::uuid,$3,$4,
                     CASE WHEN $5::text IS NULL THEN 'pending' ELSE 'unknown' END,
@@ -23,6 +29,7 @@ class CRMDeliveryStore:
                 ON CONFLICT (tenant_id,call_id,provider) DO UPDATE SET
                     desired_key = EXCLUDED.desired_key,
                     status = CASE WHEN crm_deliveries.status IN ('processing','unknown') THEN crm_deliveries.status
+                        WHEN EXCLUDED.desired_key IS NULL THEN 'pending'
                         WHEN crm_deliveries.completed_key = EXCLUDED.desired_key THEN 'succeeded'
                         WHEN crm_deliveries.desired_key IS DISTINCT FROM EXCLUDED.desired_key THEN 'pending'
                         ELSE crm_deliveries.status END,
@@ -33,10 +40,28 @@ class CRMDeliveryStore:
                     updated_at = NOW()
                 RETURNING *
             """, tenant_id, call_id, provider, desired_key, str(legacy_id) if legacy_id else None))
+            row['source_current'] = source_current
+            return row
 
-    async def claim(self, tenant_id, call_id, provider):
+    @staticmethod
+    async def _source_current(conn, tenant_id, call_id, source_revision):
+        if source_revision is None:
+            return True
+        current = await conn.fetchval("""
+            SELECT xmin::text FROM calls WHERE tenant_id=$1::uuid AND id=$2::uuid FOR SHARE
+        """, tenant_id, call_id)
+        if current is None:
+            raise RuntimeError('CRM source call is unavailable')
+        return current == source_revision
+
+    async def claim(self, tenant_id, call_id, provider, *, source_revision=None, expected_key=None):
         async with acquire_with_tenant(self.pool, tenant_id) as conn:
             async with conn.transaction():
+                # Lock order matches the call trigger (call, then receipt).
+                # After this transaction, a newer summary invalidates the
+                # claimed hash, so save(succeeded) leaves it pending again.
+                if not await self._source_current(conn, tenant_id, call_id, source_revision):
+                    return None
                 row = await conn.fetchrow("""
                     SELECT * FROM crm_deliveries
                      WHERE tenant_id=$1::uuid AND call_id=$2::uuid AND provider=$3
@@ -44,7 +69,7 @@ class CRMDeliveryStore:
                        AND (status IN ('pending','unknown') OR (status='processing' AND lease_expires_at < NOW()))
                      FOR UPDATE SKIP LOCKED
                 """, tenant_id, call_id, provider, MAX_ATTEMPTS)
-                if row is None:
+                if row is None or (expected_key is not None and row['desired_key'] != expected_key):
                     return None
                 receipt = dict(row)
                 receipt['reconcile'] = receipt['status'] == 'unknown' or (
@@ -83,6 +108,24 @@ class CRMDeliveryStore:
             receipt['remote_contact_id'] = contact_id
         if call_id:
             receipt['remote_call_id'] = call_id
+
+    async def bind_destination(self, receipt, connector_id, account_id):
+        """Pin before the first effect; never adopt unowned historical IDs."""
+        async with acquire_with_tenant(self.pool, receipt['tenant_id']) as conn:
+            result = await conn.execute("""
+                UPDATE crm_deliveries SET destination_connector_id=$5::uuid,
+                    destination_account_id=$6, updated_at=NOW()
+                WHERE tenant_id=$1::uuid AND call_id=$2::uuid AND provider=$3 AND lease_token=$4::uuid
+                  AND ((destination_connector_id=$5::uuid AND destination_account_id=$6)
+                    OR (destination_connector_id IS NULL AND destination_account_id IS NULL
+                        AND remote_contact_id IS NULL AND remote_call_id IS NULL
+                        AND phase NOT IN ('creating_contact','creating_call','legacy_unverified')))
+            """, str(receipt['tenant_id']), str(receipt['call_id']), receipt['provider'],
+                receipt['lease_token'], connector_id, account_id)
+        if result != 'UPDATE 1':
+            return False
+        receipt.update(destination_connector_id=connector_id, destination_account_id=account_id)
+        return True
 
     async def due(self, limit=20):
         # Worker is the only cross-tenant reader; delivery writes remain scoped.

@@ -37,6 +37,7 @@ from app.services.scripts.prompts.personas.lead_gen import (
     LEAD_GEN_OPENINGS,
     LEAD_GEN_PLAYBOOK,
 )
+from app.services.scripts.prompts.guardrails import COMMUNICATION_PRINCIPLES
 
 # ── the exact pre-fix text, kept verbatim as positive-control fixtures ──────
 
@@ -87,7 +88,7 @@ def _section(text: str, heading: str) -> str:
 
 _INTRO_INSTRUCTION_PATTERNS = (
     r"\bwho you are\b",          # "open with / lead with who you are"
-    r"your name,\s*your company",
+    r"your name,\s*(?:your )?company",
     r"give your name",
     r"introduce yourself",
     r"reason you called",
@@ -178,27 +179,24 @@ def _fresh_greeting_rung_indexes(phrases: list[str]) -> list[int]:
 # ── #2: the every-turn section must not re-assert the opener ───────────────
 
 def test_every_turn_section_has_no_opening_instruction():
-    every_turn = _section(LEAD_GEN_PLAYBOOK, "HOW YOU SOUND (every turn)")
+    every_turn = COMMUNICATION_PRINCIPLES
     assert _introduction_instructions(every_turn) == []
 
 
 def test_every_turn_section_control_flags_the_old_bullet():
     """POSITIVE CONTROL — the deleted bullet, re-inserted, IS detected."""
-    every_turn = _section(LEAD_GEN_PLAYBOOK, "HOW YOU SOUND (every turn)")
+    every_turn = COMMUNICATION_PRINCIPLES
     assert _introduction_instructions(every_turn + _OLD_EVERY_TURN_BULLET)
 
 
 def test_every_turn_section_is_real_and_still_intact():
-    """Non-vacuity — the section exists, was actually parsed, and the bullets
-    that are supposed to survive are still there (we deleted two lines, not
-    the section)."""
-    every_turn = _section(LEAD_GEN_PLAYBOOK, "HOW YOU SOUND (every turn)")
-    assert every_turn.count("\n- ") >= 4, every_turn
-    assert "Ask at most ONE question per turn" in every_turn
-    assert "Read the room and match your length to it" in every_turn
-    assert "Acknowledge what they just said" in every_turn
-    # ...and the parse stopped at the right place.
-    assert "EXAMPLES" not in every_turn
+    """Shared communication rules still teach brevity without reintroducing
+    a duplicate persona-specific every-turn style section."""
+    every_turn = COMMUNICATION_PRINCIPLES
+    assert "Ask at most ONE question" in every_turn
+    assert "Match their pace" in every_turn
+    assert "lead with the answer" in every_turn
+    assert "WHO YOU ARE" not in every_turn
 
 
 # ── the opener instruction must still live where it belongs (Stage 1) ──────
@@ -234,26 +232,27 @@ def test_stage_one_still_covers_reason_first_and_the_easy_out():
     holds; only its exact position relative to the permission ask moved.
     """
     outbound = LEAD_GEN_OPENINGS["outbound"]
-    assert "FIRST breath" in outbound
-    assert "Lead with your name, then the permission ask, then the reason" in outbound
-    assert "easy way to say no" in outbound
+    assert "one breath, under twenty words" in outbound
+    assert "your name, company, reason" in outbound
+    assert "light permission question" in outbound
+    assert "Stop and let them answer" in outbound
     # The knowledge-driven body now IS the shared opening + playbook (its
     # private agent-first copy was removed 2026-09-02), so it carries the same
     # two ideas in the same words.
-    assert "first breath" in LEAD_GEN_KD_BODY
-    assert "easy way to say no" in LEAD_GEN_KD_BODY
+    assert "one breath, under twenty words" in LEAD_GEN_KD_BODY
+    assert "Respect refusal immediately" in LEAD_GEN_KD_BODY
 
 
 # ── #3: the few-shot must not key on a bare "Hello?" ───────────────────────
 
 def test_few_shot_does_not_key_on_a_bare_hello():
-    examples = _section(LEAD_GEN_PLAYBOOK, "EXAMPLES")
+    examples = _section(LEAD_GEN_PLAYBOOK, "BRIEF EXAMPLES")
     assert _bare_greeting_user_lines(examples) == []
 
 
 def test_few_shot_has_no_reintroducing_agent_line():
     """No exemplar may model saying name + company again mid-call."""
-    examples = _section(LEAD_GEN_PLAYBOOK, "EXAMPLES")
+    examples = _section(LEAD_GEN_PLAYBOOK, "BRIEF EXAMPLES")
     assert _reintroducing_agent_lines(examples) == []
 
 
@@ -264,19 +263,16 @@ def test_few_shot_controls_flag_the_old_exemplar():
 
 
 def test_few_shot_keeps_its_teaching_value():
-    """Non-vacuity — the block still exists and still teaches tone + brevity:
-    the same number of exemplar pairs as before, the little spoken sounds, and
-    a short acknowledge-then-one-question turn."""
-    examples = _section(LEAD_GEN_PLAYBOOK, "EXAMPLES")
+    """The shorter example block still teaches correction, refusal, repair
+    and one-question replies without scripted greeting repetition."""
+    examples = _section(LEAD_GEN_PLAYBOOK, "BRIEF EXAMPLES")
     users = re.findall(r"^\s*USER:", examples, re.MULTILINE)
     agents = re.findall(r"^\s*AGENT:", examples, re.MULTILINE)
-    assert len(users) == 7 and len(agents) == 7
-    # the spoken-sound palette the block exists to demonstrate
-    for sound in ("Oh", "Hmm", "Ah", "Mm", "Right", "yeah"):
-        assert sound in examples, sound
-    # the replacement exemplar: mid-call, acknowledges, asks exactly one thing
-    assert "Right, yeah — what's kept it sitting on the list?" in examples
-    assert examples.count("?") >= 5
+    assert len(users) == 4 and len(agents) == 4
+    assert "Thanks for correcting me." in examples
+    assert "No problem. Take care." in examples
+    assert "Sorry — which part?" in examples
+    assert "Understood. Happy with them?" in examples
 
 
 # ── #4: the opening silence ladder must not stack greetings ────────────────

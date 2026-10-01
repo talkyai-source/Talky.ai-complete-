@@ -125,14 +125,15 @@ def test_the_line_number_is_only_used_when_it_is_a_real_number():
 
 # ── 2 + 3. provider first, ask only the unclear part ──────────────────────
 
-def test_the_shared_rules_ask_provider_first_and_only_the_unclear_part():
+def test_the_shared_rules_accept_complete_contacts_and_clarify_only_unclear_parts():
     text = guardrails.GUARDRAILS if hasattr(guardrails, "GUARDRAILS") else "".join(
         v for k, v in vars(guardrails).items() if isinstance(v, str)
     )
-    assert "Gmail, Outlook, Hotmail, Yahoo or a work address" in text
-    assert '"one word, or with a dot?"' in text
-    assert '"B as in Bravo?"' in text
-    assert '"Is this number the best one to reach you on?"' in text
+    text = " ".join(text.split())
+    assert "Accept a complete email as given" in text
+    assert "ask only for the unclear part" in text
+    assert "using its provider/domain and spelling if helpful" in text
+    assert "Use a known callback number from runtime state" in text
 
 
 def test_provider_first_then_name_then_yes_is_captured():
@@ -191,7 +192,7 @@ class _NoteConn:
         return None
 
     async def fetchrow(self, sql, *args):
-        if "FROM calls" in sql:
+        if "FROM calls" in sql and "INSERT INTO" not in sql:
             return {"is_test": self.is_test}
         self.writes.append(args)
         return {"id": "row"}

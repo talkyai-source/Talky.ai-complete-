@@ -14,6 +14,7 @@ import asyncio
 import pytest
 
 from app.domain.models.session import CallSession
+from app.domain.models.conversation import Message, MessageRole
 from app.domain.services.llm_guardrails import get_guardrails
 from app.domain.services.voice_pipeline_service import VoicePipelineService
 
@@ -37,6 +38,7 @@ def _make_session() -> CallSession:
         voice_id="voice-123",
     )
     session.barge_in_event = asyncio.Event()
+    session.conversation_history = [Message(role=MessageRole.USER, content="Goodbye.")]
     return session
 
 

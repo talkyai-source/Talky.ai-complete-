@@ -3,21 +3,18 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import re
 from typing import Optional
+from app.domain.services.caller_assertions import (
+    continuation_after, last_asserted_position,
+)
 
 logger = logging.getLogger(__name__)
 
 END_SESSION_ACTION = "end_session"
 LEGACY_ASK_AI_END_SESSION_ACTION = "end_ask_ai_session"
 
-# Phantom-goodbye guard. The LLM sometimes emits the end-session action when
-# the caller did NOT actually signal they were done ("triggers goodbye while I
-# haven't asked"). We honor the hangup only when the caller's own words show
-# end-intent, OR (for an agent-judged conversation_complete) after enough real
-# exchange. Opt-out ("do not call me") is ALWAYS honored — compliance wins.
-_MIN_COMPLETE_USER_TURNS = int(os.getenv("VOICE_MIN_END_USER_TURNS", "3"))
+# A model's completion label or number of turns is not caller authorization.
 
 # Caller utterances that genuinely mean "I'm ending this." Tight on purpose —
 # we'd rather keep a call alive on a false-negative than hang up on a phantom.
@@ -27,8 +24,8 @@ _CALLER_END_INTENT = re.compile(
         talk\s+(?:to\s+you\s+)?later | catch\s+you\s+later | gotta\s+go |
         got\s+to\s+go | have\s+to\s+go | need\s+to\s+go | i'?m\s+done |
         we'?re\s+done | that'?s\s+(?:all|it) | that\s+is\s+all | nothing\s+else |
-        no\s+thank(?:s|\s+you) | not\s+interested | hang\s+up | stop\s+calling |
-        remove\s+me | take\s+me\s+off | do\s+not\s+call | don'?t\s+call | unsubscribe |
+        no\s+thank(?:s|\s+you) | not\s+interested | hang\s+up |
+        end\s+(?:this\s+|the\s+)?call |
         leave\s+me\s+alone | lose\s+my\s+number
     )\b""",
     re.IGNORECASE | re.VERBOSE,
@@ -91,7 +88,22 @@ def contact_capture_open(call_state) -> bool:
 
 def caller_signaled_end(text: Optional[str]) -> bool:
     """True if the caller's own words clearly signal ending the call."""
-    return bool(text and _CALLER_END_INTENT.search(text))
+    from app.domain.services.voice_pipeline.identity_disposition import dnc_assertion_position
+    position = max(last_asserted_position(text, _CALLER_END_INTENT), dnc_assertion_position(text))
+    return position >= 0 and not continuation_after(text, position)
+
+
+_CURRENT_DECLINE = re.compile(
+    r"\b(?:not\s+interested|no\s+thanks?|don't\s+want\s+(?:this|that|it)|"
+    r"do\s+not\s+want\s+(?:this|that|it)|not\s+for\s+(?:me|us))\b", re.I)
+
+
+def repeated_decline_allows_end(text: Optional[str], declined_count: int) -> bool:
+    """Historical objections cannot authorize a close on a new help request."""
+    if not isinstance(declined_count, int) or isinstance(declined_count, bool) or declined_count < 2:
+        return False
+    position = last_asserted_position(text, _CURRENT_DECLINE)
+    return position >= 0 and not continuation_after(text, position)
 
 
 def should_honor_end_session(
@@ -103,26 +115,14 @@ def should_honor_end_session(
     """Decide whether to actually hang up on an LLM end-session action, or treat
     it as a phantom goodbye and keep the call going.
 
-    Honor when:
-      * the caller asked never to be called again (do_not_call) — always, or
-      * the caller's words actually signal an end, or
-      * the caller has DECLINED >= 2 times (issue #16): the persona tells the
-        agent to close politely after two declines, so its end-session there is
-        a legitimate close, not a phantom — honoring it stops the recovery line
-        re-opening a call the agent just ended, or
-      * the model reports the task finished (conversation_complete) AND the call
-        has had real back-and-forth (>= _MIN_COMPLETE_USER_TURNS user turns).
-    Otherwise it's a phantom — suppress the hangup.
+    Honor the caller's end intent or the recorded repeated-decline policy.
+    Model-only completion/DNC labels and conversation length are not evidence.
     """
     if not action:
         return False
-    if action.get("do_not_call"):
-        return True
     if caller_signaled_end(last_user_text):
         return True
-    if declined_count >= 2:
-        return True
-    if action.get("reason") == "conversation_complete" and user_turn_count >= _MIN_COMPLETE_USER_TURNS:
+    if repeated_decline_allows_end(last_user_text, declined_count):
         return True
     return False
 

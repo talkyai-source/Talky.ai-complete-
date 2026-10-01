@@ -88,6 +88,10 @@ class CRMNotConnectedWarning:
     )
 
 
+class CRMDestinationMismatch(RuntimeError):
+    """A saved remote ID cannot safely be used with the current connection."""
+
+
 # ---------------------------------------------------------------------------
 # Outcome / body shaping
 # ---------------------------------------------------------------------------
@@ -256,12 +260,17 @@ class CRMSyncService:
             # Persist intent before any external request. A trigger also queues
             # this in the call's transaction if the teardown hook never runs.
             desired = hashlib.sha256((body + provider_outcome(provider, call.get("outcome"), summary)).encode()).hexdigest()
-            receipt = await self.deliveries.enqueue(tenant_id, call_id, provider, desired, legacy_id=call.get("crm_call_id"))
+            receipt = await self.deliveries.enqueue(tenant_id, call_id, provider, desired,
+                legacy_id=call.get("crm_call_id"), source_revision=call["source_revision"])
+            if not receipt.get("source_current", True):
+                errors.append(f"{provider}: newer call details queued for delivery")
+                continue
             if receipt["status"] == "succeeded":
                 successful.append(provider)
                 first_log = first_log or receipt.get("remote_call_id")
                 continue
-            receipt = await self.deliveries.claim(tenant_id, call_id, provider)
+            receipt = await self.deliveries.claim(tenant_id, call_id, provider,
+                source_revision=call["source_revision"], expected_key=desired)
             if receipt is None:
                 errors.append(f"{provider}: delivery pending, held for review, or already processing")
                 continue
@@ -279,7 +288,8 @@ class CRMSyncService:
                 # not: even an HTTP 5xx can follow a committed provider write.
                 code = getattr(exc, "status_code", None)
                 rejected = code is not None and 400 <= code < 500 and code != 408
-                unknown = phase in ("creating_contact", "creating_call", "legacy_unverified") and not rejected
+                unknown = isinstance(exc, CRMDestinationMismatch) or (
+                    phase in ("creating_contact", "creating_call", "legacy_unverified") and not rejected)
                 permanent = rejected and getattr(exc, "category", None) not in ("authentication", "rate_limit")
                 state = "unknown" if unknown else "failed" if permanent or receipt["attempts"] >= MAX_ATTEMPTS else "pending"
                 category = getattr(exc, "category", type(exc).__name__)
@@ -297,7 +307,10 @@ class CRMSyncService:
         tenant_id, provider = str(receipt["tenant_id"]), receipt["provider"]
         if receipt["phase"] == "legacy_unverified":
             raise RuntimeError("Legacy shared CRM ID requires provider ownership review")
-        connector = await self._connector(tenant_id, provider)
+        connector = await self._connector(tenant_id, provider,
+            connector_id=str(receipt['destination_connector_id']) if receipt.get('destination_connector_id') else None)
+        if not await self.deliveries.bind_destination(receipt, str(connector.connector_id), str(connector.external_account_id)):
+            raise CRMDestinationMismatch("CRM account changed or remote ID ownership is unverified; review required")
         settings = getattr(connector, "config", None) or {}
         if not self._provider_wants_this_call(provider, settings, call):
             await self.deliveries.save(receipt, status="skipped", error="Disabled by connector settings")
@@ -358,10 +371,20 @@ class CRMSyncService:
             return False
         return True
 
-    async def _connector(self, tenant_id: str, provider: str, *, force_refresh: bool = False):
-        connector, _connector_id, _provider = await resolve_active_connector(
-            self.db_client, tenant_id, "crm", provider=provider, force_refresh=force_refresh,
-        )
+    async def _connector(self, tenant_id: str, provider: str, *, force_refresh: bool = False, connector_id=None):
+        try:
+            connector, _connector_id, _provider = await resolve_active_connector(
+                self.db_client, tenant_id, "crm", provider=provider, force_refresh=force_refresh, connector_id=connector_id,
+            )
+        except ConnectorNotConnectedError as exc:
+            if connector_id:
+                raise CRMDestinationMismatch("The saved CRM connection is no longer usable; review required") from exc
+            raise
+        if not connector.external_account_id:
+            identity = await connector.fetch_account_identity()
+            connector.external_account_id = str((identity or {}).get('external_account_id') or '') or None
+        if not connector.external_account_id:
+            raise CRMDestinationMismatch("CRM account identity could not be verified; review required")
         return connector
 
     async def _with_auth_retry(self, tenant_id: str, provider: str, connector, op):
@@ -373,7 +396,9 @@ class CRMSyncService:
             if exc.category != "authentication":
                 raise
             logger.info("crm_sync provider=%s auth failure — forcing token refresh once", provider)
-            fresh = await self._connector(tenant_id, provider, force_refresh=True)
+            fresh = await self._connector(tenant_id, provider, force_refresh=True, connector_id=str(connector.connector_id))
+            if (str(fresh.connector_id), fresh.external_account_id) != (str(connector.connector_id), connector.external_account_id):
+                raise CRMDestinationMismatch("CRM account changed during token refresh; no write retried")
             return await op(fresh)
 
     async def _resolve_contact(
@@ -390,12 +415,14 @@ class CRMSyncService:
         allow_create=True,
     ) -> Optional[str]:
         ids = _crm_ids(lead)
-        if ids.get(provider):
-            return ids[provider]
-        # Legacy single-column id: trust it only when this is the sole CRM.
-        legacy = (lead or {}).get("crm_contact_id")
-        if legacy and len(list_active_connector_providers(self.db_client, tenant_id, "crm")) == 1:
-            return str(legacy)
+        custom = _coerce_json((lead or {}).get('custom_fields')) or {}
+        destinations = custom.get('crm_destinations') or {}
+        saved = destinations.get(provider) if isinstance(destinations, dict) else None
+        if (isinstance(saved, dict) and saved.get('account_id') == connector.external_account_id
+                and saved.get('contact_id')):
+            return str(saved['contact_id'])
+        # Provider-only/legacy IDs carry no account proof. Resolve the contact
+        # in the verified current account instead of attaching an old ID.
 
         email = (lead or {}).get("email") or None
         phone = (lead or {}).get("phone_number") or call.get("phone_number")
@@ -431,7 +458,8 @@ class CRMSyncService:
                 logger.info("crm_sync provider=%s created record %s for lead %s", provider, contact_id, (lead or {}).get("id"))
 
         if contact_id and lead and lead.get("id"):
-            await self._remember_contact_id(tenant_id, str(lead["id"]), provider, contact_id, ids)
+            await self._remember_contact_id(tenant_id, str(lead["id"]), provider, contact_id, ids,
+                account_id=connector.external_account_id, connector_id=str(connector.connector_id))
         return contact_id
 
     @staticmethod
@@ -470,7 +498,7 @@ class CRMSyncService:
         async with acquire_with_tenant(self.db_pool, tenant_id) as conn:
             row = await conn.fetchrow(
                 """
-                SELECT id, tenant_id, campaign_id, lead_id, phone_number, direction,
+                SELECT xmin::text AS source_revision, id, tenant_id, campaign_id, lead_id, phone_number, direction,
                        status, outcome, duration_seconds, transcript, summary,
                        summary_json, recording_url, crm_call_id, crm_synced_at,
                        started_at, answered_at, ended_at, created_at
@@ -510,6 +538,7 @@ class CRMSyncService:
 
     async def _remember_contact_id(
         self, tenant_id: str, lead_id: str, provider: str, contact_id: str, existing_ids: Dict[str, str],
+        *, account_id: str, connector_id: str,
     ) -> None:
         if self.db_pool is None:
             return
@@ -522,11 +551,13 @@ class CRMSyncService:
                     UPDATE leads
                        SET crm_contact_id = $3,
                            custom_fields = COALESCE(custom_fields, '{}'::jsonb)
-                                           || jsonb_build_object('crm_ids', COALESCE(custom_fields->'crm_ids','{}'::jsonb) || $4::jsonb),
+                                           || jsonb_build_object('crm_ids', COALESCE(custom_fields->'crm_ids','{}'::jsonb) || $4::jsonb)
+                                           || jsonb_build_object('crm_destinations', COALESCE(custom_fields->'crm_destinations','{}'::jsonb) || $5::jsonb),
                            updated_at = NOW()
                      WHERE id = $1::uuid AND tenant_id = $2::uuid
                     """,
                     lead_id, tenant_id, contact_id, json.dumps({provider: contact_id}),
+                    json.dumps({provider: {'account_id': account_id, 'connector_id': connector_id, 'contact_id': contact_id}}),
                 )
         except Exception as exc:  # noqa: BLE001 — the CRM write already succeeded
             logger.warning("crm_sync: could not remember %s id for lead %s: %s", provider, lead_id, exc)

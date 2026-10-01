@@ -110,6 +110,10 @@ _EXPECTED_HASHES: dict[str, str] = {
     "lead_gen@8": "2ed57dabb046cd4c",
     "customer_support@7": "52703d334b9ca05a",
     "receptionist@7": "8528ef8851e7f88b",
+    # Explicit source requirement for product benefits and eligibility.
+    "lead_gen@9": "fb023abb70552cc4",
+    "customer_support@8": "c86464b2339b762d",
+    "receptionist@8": "5fd559d79a7c5c31",
 }
 
 

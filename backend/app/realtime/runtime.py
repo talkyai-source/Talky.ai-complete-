@@ -88,6 +88,9 @@ async def create_realtime_voice_session(
         action_context = SimpleNamespace(tenant_id=config.tenant_id, campaign_id=config.campaign_id,
                                          call_id=call_id, lead_id=config.lead_id)
         await prepare_voice_action_context(action_context)
+        from app.domain.services.voice_pipeline.action_execution import enabled_voice_actions
+        from app.domain.services.voice_pipeline.action_tools import action_tool_system_addendum
+        instructions += "\n\n" + action_tool_system_addendum(enabled_voice_actions(action_context))
 
         # Media gateway at 8 kHz internal so the μ-law wire needs NO
         # resampling — only the codec conversion in the bridge.

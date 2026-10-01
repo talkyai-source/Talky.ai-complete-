@@ -439,7 +439,7 @@ async def test_turn_disposition_does_not_go_stale_across_turns():
     assert session._turn_disposition == IdentityDisposition.WRONG_PERSON
     service.media_gateway.hangup_call.assert_not_awaited()
 
-    session.current_user_input = "Sounds good, thanks a lot!"
+    session.current_user_input = "Sounds good, goodbye!"
     await service.handle_turn_end(session, websocket)
     assert session._turn_disposition == IdentityDisposition.NONE
     service.media_gateway.hangup_call.assert_awaited_once_with(
@@ -763,22 +763,20 @@ async def test_json_end_on_wrong_person_turn_is_suppressed():
 
 
 @pytest.mark.asyncio
-async def test_json_do_not_call_still_ends_even_on_identity_turn():
-    # F-15 exemption: do_not_call is a real opt-out and must ALWAYS end +
-    # persist, never suppressed by the wrong-person gate.
+async def test_json_do_not_call_cannot_turn_ordinary_goodbye_into_opt_out():
+    # The model flag cannot override what the caller actually requested.
     service = _make_service_for_disposition(
         ['{"action":"end_ask_ai_session","reason":"user_request","do_not_call":true,"farewell":"Understood."}']
     )
     session = _make_session()
     session.campaign_id = "campaign-123"
-    # A non-identity transcript so disposition is NONE (do_not_call must end
-    # regardless of disposition anyway).
+    # This ends the current conversation; it does not revoke future contact.
     session.current_user_input = "yeah whatever, I'm done."
     websocket = AsyncMock()
 
     await service.handle_turn_end(session, websocket)
 
-    assert getattr(session, "_caller_opted_out", False) is True
+    assert getattr(session, "_caller_opted_out", False) is False
     assert session.state == CallState.ENDED
 
 

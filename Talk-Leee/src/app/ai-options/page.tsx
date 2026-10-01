@@ -596,7 +596,8 @@ export default function AIOptionsPage() {
                                                 <strong>Higher</strong> is more varied, but more likely to
                                                 improvise something wrong.
                                                 <br />
-                                                For lead generation, around <strong>0.4–0.6</strong> works well.
+                                                Validate the selected model with your campaign. Knowledge checks
+                                                and caller confirmation remain required at every setting.
                                                 Nothing is changed for you — the dial stays where you put it.
                                             </>
                                         }

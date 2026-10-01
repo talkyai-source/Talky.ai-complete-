@@ -416,12 +416,27 @@ def _extract_lead_in_email(text: str) -> Optional[str]:
     the agent to have the caller spell "bob" one letter at a time: the exact
     spell-it-out reflex the caller on 2427af7e objected to.
 
-    Only whole LEADING tokens from a fixed set of function words are removed,
+    An explicit self-email cue defines the boundary even if STT drops its
+    colon or copula. The remaining address still needs unambiguous syntax;
+    ordinary multi-word local parts are never guessed or joined.
+
+    Otherwise only whole LEADING tokens from a fixed set of function words are removed,
     and only when exactly one token is left. The set deliberately excludes
     words that are real local parts ("me", "info", "sales"); the normaliser's
     own notes record a carrier-word list that mangled "me@" and "yes2024@".
     """
     body = str(text or "").lower()
+    explicit_cue = re.match(
+        r"^\s*(?:(?:please\s+)?(?:note|use|take\s+down)\s+)?"
+        r"my\s+e-?mail(?:\s+address)?\b(?:\s+(?:is|should\s+be))?"
+        r"\s*[:,]?\s*(?P<address>.+)$", body,
+    )
+    if explicit_cue:
+        from app.services.scripts.spoken_email_normalizer import extract_email_from_speech
+
+        candidate = extract_email_from_speech(explicit_cue.group("address"))
+        if candidate:
+            return _validated_email(candidate)
     separators = list(re.finditer(r"\b(?:at\s+the\s+rate|at\s+sign|at)\b", body))
     if len(separators) != 1:
         return None
@@ -438,9 +453,11 @@ def _extract_lead_in_email(text: str) -> Optional[str]:
 
 
 def _clean_domain(spoken: str) -> Optional[str]:
-    from app.services.scripts.spoken_email_normalizer import join_split_providers
+    from app.services.scripts.spoken_email_normalizer import (
+        join_split_providers, separate_sentence_periods,
+    )
 
-    text = join_split_providers(str(spoken or "").lower().strip(" .?!,;:"))
+    text = join_split_providers(separate_sentence_periods(str(spoken or "").lower()).strip(" .?!,;:"))
     text = re.sub(r"\b(?:dot|period)\b", " . ", text)
     text = re.sub(r"\b(?:dash|hyphen)\b", " - ", text)
     text = re.sub(r"\s*\.\s*", ".", text)
@@ -781,6 +798,21 @@ def _has_explicit_confirmed_cancellation(
     return bool(_CANCEL_RE.search(utterance) and field.search(utterance))
 
 
+def contact_value_disowned(kind: CaptureKind, utterance: str) -> bool:
+    """A named contact explicitly belongs to someone other than this caller.
+
+    Merely mentioning a colleague or another address must not erase a known
+    caller contact. Require the field and an explicit denial of ownership in
+    the same clause, so an email correction cannot withdraw the phone too.
+    """
+    field = _EMAIL_FIELD_RE if kind == "email" else _PHONE_FIELD_RE
+    text = str(utterance or "").replace("’", "'")
+    return bool(
+        re.search(field.pattern + r"[^.!?;]{0,70}\b(?:not\s+mine|isn't\s+mine)\b", text, re.I)
+        or re.search(r"\b(?:not|isn't)\s+my\s+(?:own\s+)?" + field.pattern, text, re.I)
+    )
+
+
 def capture_mode_directive(capture: ContactCaptureState) -> Optional[str]:
     """A provider-neutral instruction for the realtime audible response."""
     if capture.status in {
@@ -843,6 +875,9 @@ def advance_capture(
     text = str(utterance or "").strip()
     if not text:
         return previous
+
+    if contact_value_disowned(kind, text):
+        return _state(kind, CaptureStatus.CANCELLED, raw=text)
 
     # A confirmed fact is sticky. Generic cancellations, a low-confidence
     # repeat, or a later address merely mentioned in conversation cannot

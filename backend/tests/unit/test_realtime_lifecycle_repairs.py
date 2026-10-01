@@ -131,8 +131,9 @@ async def test_end_call_waits_for_new_goodbye_then_uses_termination_capability()
     ended = AsyncMock()
     rt = SimpleNamespace(close=AsyncMock(), update_live_state=AsyncMock())
     bridge = RealtimeBridge(call_id="call", realtime_session=rt, media_gateway=gateway, on_end_call=ended)
-    bridge._closing_after_generation = 0
-    closing = asyncio.create_task(bridge._finish_end_call())
+    bridge._latest_caller_text = "Goodbye."
+    assert bridge._arm_caller_end_call()
+    closing = bridge._termination_task
     await asyncio.sleep(0)
     ended.assert_not_awaited()
     await bridge._play_validated_response(RealtimeEvent(kind="response_candidate", audio=b"\xff" * 320, text="Goodbye."))
@@ -173,3 +174,66 @@ def test_repeatback_cannot_confirm_an_old_revision_or_ambiguous_transcript():
                     {"independent_confirmation_value": pending.normalized_value, "transcript_alternatives": ["Yes, other@example.com"]}]:
         result = advance_capture(pending, kind="email", utterance="Yes, person@example.com", mode_active=True, **options)
         assert result.status != CaptureStatus.CONFIRMED
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("text", [
+    "I can transfer you to our sales team.",
+    "I can share a download link for the brochure.",
+    "The brochure is at https://invented.example.test/brochure.",
+])
+async def test_unavailable_actions_or_resources_are_withheld_before_realtime_playback(text):
+    async def events():
+        yield RealtimeEvent(kind="response_candidate", text=text, audio=b"\xff" * 320)
+    provider = SimpleNamespace(events=events, repair_unspoken_response=AsyncMock())
+    bridge = RealtimeBridge(call_id="fixture", realtime_session=provider, media_gateway=SimpleNamespace())
+    bridge._play_validated_response = AsyncMock()
+    await bridge._pump_model_events()
+    bridge._play_validated_response.assert_not_awaited()
+    provider.repair_unspoken_response.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("text,capabilities,knowledge", [
+    ("I can transfer you to our sales team.", {"transfer_call": "configured"}, []),
+    ("I can share the download link https://example.test/brochure.", {},
+     ["Download the brochure at https://example.test/brochure."]),
+])
+async def test_configured_action_or_verified_resource_offer_passes_realtime_gate(text, capabilities, knowledge):
+    async def events():
+        yield RealtimeEvent(kind="response_candidate", text=text, audio=b"\xff" * 320)
+    provider = SimpleNamespace(events=events, repair_unspoken_response=AsyncMock())
+    session = SimpleNamespace(_voice_action_capabilities=capabilities)
+    bridge = RealtimeBridge(call_id="fixture", realtime_session=provider, media_gateway=SimpleNamespace(), action_session=session)
+    bridge._verified_knowledge = knowledge
+    bridge._play_validated_response = AsyncMock()
+    await bridge._pump_model_events()
+    assert bridge._playback_task is not None
+    await bridge._playback_task
+    bridge._play_validated_response.assert_awaited_once()
+    provider.repair_unspoken_response.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("caller_turns,should_block", [
+    (["I am not your customer."], True),
+    (["I don't use your company."], True),
+    (["Tell me about your products."], False),
+    (["I am not your customer.", "Actually I am your customer."], False),
+])
+async def test_caller_relationship_correction_is_checked_before_realtime_playback(caller_turns, should_block):
+    async def events():
+        yield RealtimeEvent(kind="response_candidate", text="Our records show you are an existing customer.", audio=b"\xff" * 320)
+    provider = SimpleNamespace(events=events, repair_unspoken_response=AsyncMock())
+    bridge = RealtimeBridge(call_id="fixture", realtime_session=provider, media_gateway=SimpleNamespace())
+    for text in caller_turns:
+        bridge._remember_contact_turn("user", text)
+    bridge._play_validated_response = AsyncMock()
+    await bridge._pump_model_events()
+    if should_block:
+        bridge._play_validated_response.assert_not_awaited()
+        provider.repair_unspoken_response.assert_awaited_once()
+    else:
+        await bridge._playback_task
+        bridge._play_validated_response.assert_awaited_once()
+        provider.repair_unspoken_response.assert_not_awaited()

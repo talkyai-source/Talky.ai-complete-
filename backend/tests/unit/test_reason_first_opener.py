@@ -1,56 +1,6 @@
-"""The call reason ("cutting your energy bill") must still reach the callee —
-just not on the FIRST turn anymore.
-
-WHY THIS FILE CHANGED (2026-08-11)
------------------------------------
-Until 2026-08-11 the spoken PRE-SYNTH opener packed identity + the honest
-reason + a time-ask into turn 1 ("Hi, it's Sarah at Acme — cold call, about
-cutting your energy bill. Thirty seconds?"), and this file pinned that
-shape (word budget, "cold call" present, ends in "?", etc.) directly against
-``_PERSONA_GREETINGS_WITH_REASON`` / ``_PERSONA_GREETINGS``.
-
-The owner's direction was to stop opening with that monologue: the FIRST
-thing the callee hears is now a bare pickup greeting ("Hi there." /
-"Hello?") with no identity, no reason, and no time-ask at all — see
-``telephony_session_config.build_telephony_greeting`` and the OPENER
-REDESIGN note above ``_PERSONA_GREETINGS`` in that module. Identity + the
-reason are NOT gone — they moved to the model's own first generated reply,
-once the callee has actually spoken (LIVE STATE's ``has_introduced=False``
-path in prompts/live_state.py, and the STAGE 1 / OPENING blocks in
-prompts/personas/lead_gen.py, customer_support.py, receptionist.py, which
-still carry this exact shape and the same evidence base below).
-
-WHAT THIS FILE NOW COVERS
---------------------------
-1. ``_call_reason_for`` extraction/caps — UNCHANGED, still exercised as
-   before (the caps now bound what reaches ``agent_config.call_reason``,
-   consumed by the flag-gated LLM-authored opener in telephony/llm_opener.py
-   and available to the persona prompt via the campaign's own
-   ``call_reason`` slot).
-2. The RELOCATED turn: ``compose_prompt`` for lead_gen still puts the
-   reason, the "own the cold call" structure, the "?" ending, and the
-   bad-time ban into the system prompt — just framed as the model's first
-   REAL turn (after the callee replies) rather than "you speak first".
-3. A regression pin that the SPOKEN pickup greeting (turn 1) no longer
-   states the reason, identity, or a time-ask at all — the direct inverse
-   of what this file asserted before 2026-08-11, and the point of the
-   change. (Bare-greeting shape itself is pinned more broadly in
-   test_telephony_session_config.py; this file only checks that the
-   reason specifically does not leak back into it.)
-
-ORIGINAL EVIDENCE (kept for context — still governs the relocated turn)
--------------------------------------------------------------------------
-Gong, 300M+ calls / 90,380-call study:
-
-    "Did I catch you at a bad time?"            2.15%   <- worst
-    "How's your day going?"                     7.6%
-    context -> own the cold call -> permission  11.18%
-    context-first                              11.24%   <- best
-plus a 2.1x lift for stating the reason for calling, and the word budget
-below (8s decision window - 4.0s recording notice = 4.0s / 2.8 words per
-second = 12 words), derived from a real call that hung up on 2026-08-05
-after 11.7s of unbroken agent monologue with ``interrupted=False`` — the
-callee never tried to cut in, they waited it out and quit.
+"""Keep the campaign reason in the short first model reply, after pickup.
+The prerecorded pickup remains a bare greeting; the generated introduction
+identifies the agent, explains the call and asks permission to continue.
 """
 from __future__ import annotations
 
@@ -159,13 +109,14 @@ def test_the_reason_still_reaches_the_system_prompt():
     assert "Sarah" in flat and "All-state" in flat
 
 
-def test_relocated_turn_still_follows_the_measured_structure():
-    """Structure is evidence-based, not taste (see module docstring)."""
+def test_relocated_turn_gives_identity_reason_and_permission():
+    """The shortened introduction still explains the call and yields the floor."""
     flat = _flat(compose_prompt(
         "lead_gen", "Sarah", "All-state", LEAD_GEN_SLOTS, direction="outbound",
     )).lower()
-    assert "cold call" in flat, "must still own the cold call"
-    assert "thirty seconds" in flat, "must still hand the floor back with the ask"
+    introduction = f"sarah from all-state, calling about {REASON}. got a minute?"
+    assert introduction in flat
+    assert "stop and let them answer" in flat
 
 
 def test_relocated_turn_still_bans_the_bad_time_question():

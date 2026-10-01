@@ -43,6 +43,8 @@ def test_contact_correction_changes_action_parameters_and_revision():
 @pytest.mark.parametrize("arguments", [
     {"requested_time":"Thursday","timezone":"Europe/London"},
     {"requested_time":"2026-10-25T01:30:00","timezone":"Europe/London"},
+    {"requested_time":"2026-10-25T01:30:00+01:00","timezone":"Europe/London"},
+    {"requested_time":"2026-10-25T01:30:00+00:00","timezone":"Europe/London"},
     {"requested_time":"2026-10-25T01:30:00+05:00","timezone":"Europe/London"},
     {"requested_time":"2026-10-25T01:30:00","timezone":"unknown"},
     {"requested_time":"2000-01-01T13:00:00+00:00","timezone":"UTC"},
@@ -78,3 +80,19 @@ def test_form_destination_and_supported_fields_are_validated():
         normalize_action_config({"form_action":{"name":"Form","recipient":"https://example.test/hook","subject":"Details","fields":["email"]}})
     with pytest.raises(ValueError):
         normalize_action_config({"form_action":{"name":"Form","recipient":"forms@example.test","subject":"Details","fields":["invented_payment"]}})
+
+
+@pytest.mark.asyncio
+async def test_transfer_registry_preserves_policy_boundary_and_fails_closed(monkeypatch):
+    from unittest.mock import AsyncMock
+    from app.domain.services.telephony import adapter_registry
+    monkeypatch.setattr(adapter_registry, "_transfer_executor", None)
+    with pytest.raises(RuntimeError, match="unavailable"):
+        await adapter_registry.execute_transfer("call", "+14155552671", "blind")
+    policy_executor = AsyncMock(return_value={"status": "success", "attempt_id": "attempt"})
+    adapter_registry.register_transfer_executor(policy_executor)
+    result = await adapter_registry.execute_transfer("call", "+14155552671", "blind",
+        idempotency_key="voice-proposal", actor_type="service", actor_role="campaign_voice")
+    policy_executor.assert_awaited_once_with("call", "+14155552671", "blind",
+        idempotency_key="voice-proposal", actor_type="service", actor_role="campaign_voice")
+    assert result == {"status": "success", "attempt_id": "attempt"}

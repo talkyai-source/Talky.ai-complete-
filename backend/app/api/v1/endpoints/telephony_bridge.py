@@ -80,6 +80,7 @@ from app.domain.services.telephony.config import (  # noqa: E402
 )
 from app.domain.services.telephony.adapter_registry import (  # noqa: E402
     register_adapter_getter,
+    register_transfer_executor,
 )
 from app.domain.services.event_emitter import emit_event_via_pool  # noqa: E402
 from app.core.security.internal_auth import (  # noqa: E402
@@ -3331,6 +3332,9 @@ async def _execute_transfer(
         raise
     await _complete_transfer_attempt(attempt, result)
     return result
+
+
+register_transfer_executor(_execute_transfer)
 
 
 def _transfer_request_metadata(request: Request) -> dict[str, Optional[str]]:

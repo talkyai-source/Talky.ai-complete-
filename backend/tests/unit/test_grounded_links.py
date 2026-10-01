@@ -86,4 +86,5 @@ def test_the_guard_sits_on_every_path_to_tts_and_on_history():
     assert "ground_spoken_links(" in gate
     assert src.count("ground_spoken_links(") >= 2
     # tool-returned knowledge counts as grounding
-    assert "turn_grounding.append(str(result))" in src
+    assert 'turn_grounding.extend(getattr(session, "_knowledge_grounding", []))' in src
+    assert "turn_grounding.append(str(result))" not in src  # raw tool status/instructions are not factual evidence

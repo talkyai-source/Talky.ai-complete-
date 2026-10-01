@@ -31,6 +31,9 @@ from __future__ import annotations
 import re
 from enum import Enum
 from typing import Optional
+from app.domain.services.caller_assertions import (
+    continuation_after, last_asserted_position, phrase_pattern,
+)
 
 
 class IdentityDisposition(str, Enum):
@@ -153,10 +156,9 @@ _CLARIFY_BUSINESS_SIGNALS = (
     "wrong organization",
 )
 
-# Explicit, unambiguous conversation-ending phrases (Defect 6). Deliberately
-# NARROW: this only feeds the reverse gate's decision to let a model-issued
-# END_CALL stand on a WRONG_PERSON turn ("she's not here — goodbye"), never
-# the classify() precedence itself (person evidence still always pivots).
+# Explicit conversation-ending phrases authorize a close even when the model
+# omits its end-call control, and exempt an actual goodbye on a WRONG_PERSON
+# turn. They never change the classifier's person/destination distinction.
 # Bare "bye" is intentionally EXCLUDED — it's one STT substitution away from
 # "hi"/"by"/mid-word noise ("by the way", "buy") and is common as a soft
 # filler ("bye now" IS included below because "now" anchors it as a genuine
@@ -169,7 +171,11 @@ _EXPLICIT_GOODBYE_PHRASES = (
     "bye now", "bye bye",
     "im hanging up", "i am hanging up",
     "i have to go", "ive got to go", "i gotta go", "gotta go",
+    "hang up", "end the call", "end this call", "end call",
 )
+
+_DNC_PATTERN = phrase_pattern(_DNC_PHRASES)
+_EXPLICIT_GOODBYE_PATTERN = phrase_pattern(_EXPLICIT_GOODBYE_PHRASES)
 
 
 def _contains_any(hay: str, needles) -> bool:
@@ -183,17 +189,21 @@ def contains_dnc(transcript: str) -> bool:
     me" is >50% one word, so the guard rejected it BEFORE the DNC classifier
     ran — the caller's opt-out was silently dropped. Mirrors classify()'s DNC
     precedence check exactly."""
-    return _contains_any(_norm(transcript), _DNC_PHRASES)
+    return dnc_assertion_position(transcript) >= 0
+
+
+def dnc_assertion_position(transcript: str) -> int:
+    """Position of the last actual opt-out, excluding quoted or negated uses."""
+    return last_asserted_position(transcript, _DNC_PATTERN)
 
 
 def contains_explicit_goodbye(transcript: str) -> bool:
     """True when the utterance carries an unambiguous, explicit conversation-
-    ending phrase (see ``_EXPLICIT_GOODBYE_PHRASES``). Pure/stateless — used by
-    the reverse enforcement gate to decide whether a model-issued END_CALL on a
-    WRONG_PERSON turn should be honored ("she's not here — goodbye") rather
-    than stripped. Does NOT affect ``classify_identity_disposition``'s
-    precedence or return value."""
-    return _contains_any(_norm(transcript), _EXPLICIT_GOODBYE_PHRASES)
+    ending phrase (see ``_EXPLICIT_GOODBYE_PHRASES``). This authorizes the
+    finisher's close and the WRONG_PERSON exception ("she's not here — goodbye").
+    It does not affect the identity classifier's precedence or return value."""
+    position = last_asserted_position(transcript, _EXPLICIT_GOODBYE_PATTERN)
+    return position >= 0 and not continuation_after(transcript, position)
 
 
 def classify_identity_disposition(
@@ -212,7 +222,7 @@ def classify_identity_disposition(
     if not t:
         return IdentityDisposition.NONE
 
-    if _contains_any(t, _DNC_PHRASES):
+    if contains_dnc(transcript):
         return IdentityDisposition.DNC
 
     # A caller answering the clarify question. Polarity FIRST (F-14 fix): a

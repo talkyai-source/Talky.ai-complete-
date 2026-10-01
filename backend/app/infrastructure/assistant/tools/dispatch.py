@@ -167,7 +167,7 @@ async def _authorize_action_tool(
 
     required_permissions = list(policy.required_permissions)
     if func_name == "schedule_reminder":
-        channel = call_args.get("reminder_type") or "sms"
+        channel = call_args.get("reminder_type")
         if channel not in {"sms", "email"}:
             return _authorization_failure("invalid_arguments", "Reminder type must be sms or email.")
         required_permissions.append(Permission.SMS_SEND if channel == "sms" else Permission.EMAIL_SEND)

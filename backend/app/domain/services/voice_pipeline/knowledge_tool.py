@@ -239,7 +239,7 @@ async def run_knowledge_lookup(session: CallSession, query: str) -> str:
         from app.services.scripts.prompts.guardrails import KNOWLEDGE_PRICE_GUARD
 
         return (
-            f"{fence_kb_result(evidence["text"], with_note=False)}\n"
+            f"{fence_kb_result(evidence['text'], with_note=False)}\n"
             f"{KNOWLEDGE_PRICE_GUARD}"
         )
     except Exception as exc:

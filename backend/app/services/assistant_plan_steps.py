@@ -130,7 +130,7 @@ async def schedule_reminder(
         "tenant_id": tenant_id,
         "meeting_id": chained_result.get("meeting_id") or params.get("meeting_id"),
         "lead_id": params.get("lead_id"),
-        "type": params.get("reminder_type", "sms"),
+        "type": params.get("reminder_type"),
         "scheduled_at": scheduled_at.isoformat(),
         "status": "pending",
         "content": {
@@ -145,13 +145,29 @@ async def schedule_reminder(
         return {"success": False, "error": "Reminder type must be sms or email."}
     if not reminder_data["meeting_id"] and not reminder_data["lead_id"]:
         return {"success": False, "error": "Choose the meeting or contact for this reminder."}
-    for table, key in (("meetings", "meeting_id"), ("leads", "lead_id")):
-        if reminder_data[key]:
-            found = db_client.table(table).select("id").eq("tenant_id", tenant_id).eq("id", reminder_data[key]).limit(1).execute()
-            if not found.data:
-                return {"success": False, "error": f"{key} is not available in this account."}
+    if reminder_data["meeting_id"]:
+        found = db_client.table("meetings").select("id, lead_id").eq("tenant_id", tenant_id).eq("id", reminder_data["meeting_id"]).limit(1).execute()
+        if not found.data:
+            return {"success": False, "error": "meeting_id is not available in this account."}
+        meeting_lead = found.data[0].get("lead_id")
+        if meeting_lead and reminder_data["lead_id"] and str(meeting_lead) != str(reminder_data["lead_id"]):
+            return {"success": False, "error": "The meeting contact changed; preview the reminder again."}
+        reminder_data["lead_id"] = reminder_data["lead_id"] or meeting_lead
+    if not reminder_data["lead_id"]:
+        return {"success": False, "error": "This meeting has no linked contact. Choose a contact for the reminder."}
+    found = db_client.table("leads").select("id, email, phone_number").eq("tenant_id", tenant_id).eq("id", reminder_data["lead_id"]).limit(1).execute()
+    if not found.data:
+        return {"success": False, "error": "lead_id is not available in this account."}
+    contact_field = "phone_number" if reminder_data["type"] == "sms" else "email"
+    recipient = found.data[0].get(contact_field)
+    if not recipient:
+        return {"success": False, "error": f"The selected contact has no {contact_field} for this reminder."}
+    if not preview and params.get('_expected_recipient') and params['_expected_recipient'] != recipient:
+        return {"success": False, "error": "The contact address changed; preview the reminder again."}
+    reminder_data['content']['recipient'] = recipient
     if preview:
         return {"preview": True, "changes": [
+            {"field": "Recipient", "before": None, "after": recipient},
             {"field": "Time", "before": None, "after": scheduled_at.isoformat()},
             {"field": "Channel", "before": None, "after": reminder_data["type"]},
             {"field": "Message", "before": None, "after": reminder_data["content"]["message"]},
@@ -159,6 +175,7 @@ async def schedule_reminder(
             "meeting_id": reminder_data["meeting_id"], "lead_id": reminder_data["lead_id"],
             "scheduled_at": scheduled_at.isoformat(), "message": reminder_data["content"]["message"],
             "reminder_type": reminder_data["type"],
+            "_expected_recipient": recipient,
         }, "note": "Reminder not scheduled yet."}
 
     try:

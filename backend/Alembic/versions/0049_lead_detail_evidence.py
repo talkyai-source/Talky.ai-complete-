@@ -14,7 +14,7 @@ def upgrade():
     op.execute("ALTER TABLE calls ADD COLUMN IF NOT EXISTS summary_transcript_hash TEXT")
     op.execute("""UPDATE calls SET lead_details_status='not_processed'
                   WHERE summary_transcript_hash IS NULL AND lead_details_status='pending'
-                    AND status IN ('completed','failed','no_answer','busy','cancelled')""")
+                    AND status IN ('ended','completed','failed','no_answer','busy','cancelled','canceled','rejected')""")
     op.execute("ALTER TABLE leads ADD COLUMN IF NOT EXISTS latest_analysis_note TEXT")
     op.execute("ALTER TABLE leads ADD COLUMN IF NOT EXISTS latest_analysis_call_id UUID")
     op.execute("ALTER TABLE leads ADD COLUMN IF NOT EXISTS latest_analysis_at TIMESTAMPTZ")

@@ -209,6 +209,7 @@ async def test_model_pump_decodes_mulaw_to_pcm_for_gateway():
     rt = MagicMock()
     rt.events = _events
     rt.closed = MagicMock(return_value=False)
+    rt.close = AsyncMock()
 
     gw = MagicMock()
     gw.send_audio = AsyncMock()
@@ -216,6 +217,11 @@ async def test_model_pump_decodes_mulaw_to_pcm_for_gateway():
     gw.flush_audio_buffer = None
     gw.flush_tts_buffer = None
     gw.wait_for_playback_complete = AsyncMock(return_value=False)
+    gw.begin_playback = AsyncMock()
+    gw.finish_playback = AsyncMock(return_value={
+        "utterance_id": "rt-1", "status": "completed",
+        "evidence": "transport_played", "played_ms": 20,
+    })
 
     bridge = RealtimeBridge(
         call_id="call-3",

@@ -94,7 +94,7 @@ async def _spoken(monkeypatch, chunks, caller, *, turn_id=3, last_filler_turn=No
     service.synthesize_and_send_audio = AsyncMock(return_value=False)
     session = CallSession(
         call_id="call-filler-1", campaign_id="c1", lead_id="l1",
-        provider_call_id="p1", system_prompt="Dojo Plus is £11.99 per location per month.",
+        provider_call_id="p1", system_prompt="<company_knowledge>Dojo Plus is £11.99 per location per month.</company_knowledge>",
         voice_id="voice-1",
     )
     session.turn_id = turn_id

@@ -149,6 +149,10 @@ class RealtimeBridge:
         self._closing_after_generation = None
         self._goodbye_completed = asyncio.Event()
         self._termination_task = None
+        self._caller_activity_revision = 0
+        self._pending_end_call_revision = None
+        self._caller_transcript_pending = False
+        self._hangup_started = False
         if transcript_service is not None and talklee_call_id:
             try:
                 transcript_service.bind_call_identity(call_id, talklee_call_id)
@@ -415,12 +419,21 @@ class RealtimeBridge:
                 if kind == "response_candidate":
                     from app.domain.services.llm_guardrails import get_guardrails
                     from app.domain.services.voice_pipeline.action_tools import action_results_for_session
+                    from app.domain.services.voice_pipeline.action_execution import enabled_voice_actions
                     valid, reason = get_guardrails().validate_response(
-                        ev.text or "", action_results=action_results_for_session(self._action_session))
+                        ev.text or "", action_results=action_results_for_session(self._action_session),
+                        available_actions=set(enabled_voice_actions(self._action_session)))
                     from app.domain.services.voice_pipeline.grounded_figures import ground_spoken_figures
                     grounded, unsupported = ground_spoken_figures(ev.text or "", self._verified_knowledge)
                     if grounded != (ev.text or "") or unsupported:
                         valid, reason = False, "unsupported_company_figure"
+                    from app.domain.services.voice_pipeline.grounded_links import ground_spoken_links
+                    grounded_links, unsupported_links = ground_spoken_links(ev.text or "", self._verified_knowledge)
+                    if grounded_links != (ev.text or "") or unsupported_links:
+                        valid, reason = False, "unsupported_company_resource"
+                    from app.domain.services.voice_pipeline.conversation_guards import contradicted_customer_claim
+                    if contradicted_customer_claim(ev.text or "", self._contact_history):
+                        valid, reason = False, "contradicted_customer_relationship"
                     if not valid:
                         logger.warning("realtime_playout_rejected call=%s reason=%s", self._call_id, reason)
                         if self._repair_attempted:
@@ -443,6 +456,9 @@ class RealtimeBridge:
                     self._playback_task = asyncio.create_task(self._play_validated_response(ev))
 
                 elif kind == "interrupted":
+                    # Revoke the timer immediately, before ASR supplies the new
+                    # words. A delayed tool from the old turn cannot rearm it.
+                    self._revoke_pending_end_call(awaiting_transcript=True)
                     await self._cancel_playback(getattr(ev, "raw", None))
                     if bool((getattr(ev, "raw", None) or {}).get("during_response")):
                         self._contact_agent_interrupted = True
@@ -471,10 +487,14 @@ class RealtimeBridge:
                         bool(getattr(ev, "is_final", False)),
                     )
                     if getattr(ev, "is_final", False):
+                        self._revoke_pending_end_call()
                         self._repair_attempted = False
                         self._latest_caller_text = ev.text
                         self._live_user_turn_seq += 1
                         self._action_session._voice_action_user_turn = self._live_user_turn_seq
+                        # The caller owns close/DNC intent even when the model
+                        # produces only a plain goodbye and omits its tool.
+                        self._arm_caller_end_call(require_explicit=True)
                         evidence = evidence_from_transcript(
                             role="user",
                             text=ev.text,
@@ -798,7 +818,8 @@ class RealtimeBridge:
 
             active_kind = getattr(updated, "active_contact_kind", None)
             active_capture = getattr(updated, f"{active_kind}_capture", None)
-            if active_capture is not None and active_capture not in directive_captures:
+            paused = bool(getattr(updated, "contact_capture_paused", False))
+            if not paused and active_capture is not None and active_capture not in directive_captures:
                 directive_captures.append(active_capture)
 
             directives = [
@@ -808,6 +829,12 @@ class RealtimeBridge:
             ]
             if getattr(self._gw, "playback_evidence", None) == "transmitted":
                 directives = [d.replace("ask for a clear yes or no", "ask the caller to say 'yes' and repeat the complete value, including the country code for a phone number") for d in directives]
+            if paused:
+                directives.append(
+                    "The caller paused or declined contact confirmation. Do not ask for or read back "
+                    "contact details unless the caller explicitly offers or resumes them. Retained "
+                    "candidates remain unconfirmed. Respect the caller's goodbye."
+                )
             if directives:
                 # One provider interruption, ordered resolution first. This
                 # retires stale persistent system items before advancing to a
@@ -828,7 +855,8 @@ class RealtimeBridge:
                 capture.clarification_prompt,
             )
 
-        return (getattr(slots, "active_contact_kind", None), one("email"), one("phone"))
+        return (getattr(slots, "active_contact_kind", None),
+                bool(getattr(slots, "contact_capture_paused", False)), one("email"), one("phone"))
 
     async def _enforce_contact_directive(self, directive: str) -> None:
         """Replace the provider's speculative reply with backend-owned mode."""
@@ -985,12 +1013,19 @@ class RealtimeBridge:
                     )
                     return
 
+                caller_revision = self._caller_activity_revision
                 result = await run_voice_action(
                     self._action_session,
                     fc.name,
                     fc.parsed_arguments(),
-                    user_text=self._latest_caller_text,
+                    user_text=("" if fc.name == ACTION_END_CALL and self._caller_transcript_pending
+                               else self._latest_caller_text),
                 )
+                if fc.name == ACTION_END_CALL and result["success"]:
+                    if caller_revision != self._caller_activity_revision or not self._arm_caller_end_call():
+                        # Keep the shared action evidence consistent with a
+                        # caller who resumed while the tool was in flight.
+                        result = await run_voice_action(self._action_session, ACTION_END_CALL, user_text="")
                 self._live_state = reduce_live_state(
                     self._live_state,
                     ToolResultEvidence(
@@ -1005,12 +1040,7 @@ class RealtimeBridge:
                 # Close the tool round-trip before any completion claim or
                 # end-call side effect. send_function_result is awaited, so the
                 # result is on the provider wire before execution continues.
-                if fc.name == ACTION_END_CALL and result["success"]:
-                    self._closing_after_generation = self._playback_generation
-                    self._goodbye_completed.clear()
                 await self._send_tool_result_after_playback(fc.call_id, result)
-                if fc.name == ACTION_END_CALL and result["success"] and self._termination_task is None:
-                    self._termination_task = asyncio.create_task(self._finish_end_call())
         except Exception as exc:  # noqa: BLE001
             logger.debug("realtime_bridge function-call err call=%s: %s",
                          self._call_id, exc)
@@ -1040,11 +1070,59 @@ class RealtimeBridge:
             except Exception:  # noqa: BLE001
                 pass
 
-    async def _finish_end_call(self):
+    def _revoke_pending_end_call(self, *, awaiting_transcript=False):
+        # Once transport termination has started it is an external effect; do
+        # not cancel its coroutine halfway through sending the request.
+        if self._hangup_started:
+            return
+        self._caller_activity_revision += 1
+        self._caller_transcript_pending = awaiting_transcript
+        self._pending_end_call_revision = None
+        self._closing_after_generation = None
+        self._goodbye_completed.clear()
+        self._action_session._end_call_requested = False
+        task, self._termination_task = self._termination_task, None
+        if task is not None and not task.done():
+            task.cancel()
+
+    def _arm_caller_end_call(self, *, require_explicit=False):
+        from app.domain.services.end_session_action import caller_signaled_end
+        from app.domain.services.voice_pipeline.identity_disposition import contains_dnc, contains_explicit_goodbye
+        if self._caller_transcript_pending or self._hangup_started:
+            return False
+        # DNC survives a canceled immediate hangup. Shared telephony teardown
+        # reads this CallSession flag and runs the existing durable opt-out.
+        opted_out = contains_dnc(self._latest_caller_text)
+        if opted_out:
+            self._action_session._caller_opted_out = True
+        if not caller_signaled_end(self._latest_caller_text):
+            return False
+        # A topic-level "no thanks" is not an automatic instruction to hang
+        # up. The transcript-only fallback requires an explicit close or DNC.
+        if require_explicit and not (opted_out or contains_explicit_goodbye(self._latest_caller_text)):
+            return False
+        if self._pending_end_call_revision == self._caller_activity_revision:
+            return True
+        self._pending_end_call_revision = self._caller_activity_revision
+        self._closing_after_generation = self._playback_generation
+        self._goodbye_completed.clear()
+        self._action_session._end_call_requested = True
+        self._termination_task = asyncio.create_task(
+            self._finish_end_call(self._caller_activity_revision))
+        return True
+
+    async def _finish_end_call(self, caller_revision):
         try:
             await asyncio.wait_for(self._goodbye_completed.wait(), timeout=15.0)
         except asyncio.TimeoutError:
             logger.warning("realtime_goodbye_timeout call=%s", self._call_id)
+        from app.domain.services.end_session_action import caller_signaled_end
+        if (self._caller_transcript_pending
+                or caller_revision != self._pending_end_call_revision
+                or caller_revision != self._caller_activity_revision
+                or not caller_signaled_end(self._latest_caller_text)):
+            return
+        self._hangup_started = True
         if self._on_end_call is not None:
             await self._on_end_call()
         else:

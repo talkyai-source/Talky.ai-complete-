@@ -127,17 +127,16 @@ _UNAVAILABLE_MESSAGES = {
 
 _SAFE_FAILURE_SPEECH = {
     ACTION_SCHEDULE_CALLBACK: (
-        "I can't schedule a callback from this call, but I can take the details "
-        "for the team."
+        "I can't confirm a scheduled callback from this call."
     ),
     ACTION_SEND_EMAIL: (
-        "I can't send an email from this call, but I can take the address for the team."
+        "I can't confirm that the email was sent."
     ),
     ACTION_SUBMIT_FORM: (
-        "I can't submit that form from this call, but I can take the details for the team."
+        "I can't confirm that the form was submitted."
     ),
     ACTION_TRANSFER_CALL: (
-        "I can't transfer the call right now, but I can take a message for the team."
+        "I can't transfer this call right now."
     ),
     ACTION_END_CALL: "I can't end the line from here; you can hang up whenever you're ready.",
 }
@@ -161,12 +160,6 @@ _INTENT_PATTERNS = {
         r"\b(?:transfer|connect me|put me through|speak (?:to|with)|talk (?:to|with))\b"
         r".{0,35}\b(?:human|person|agent|representative|manager|team|someone)\b|"
         r"\b(?:transfer|put me through)\b",
-        re.IGNORECASE,
-    ),
-    ACTION_END_CALL: re.compile(
-        r"\b(?:goodbye|bye(?: bye)?|hang\s*up|end (?:this |the )?call|"
-        r"stop calling|do not call|don't call|not interested|no thanks|"
-        r"that's all|that is all|we(?:'re| are) done|i(?:'m| am) done)\b",
         re.IGNORECASE,
     ),
 }
@@ -242,7 +235,8 @@ def _record_result(session: Any, result: dict[str, Any]) -> None:
 
 def end_call_intent_present(text: str) -> bool:
     """Fail-closed proof that the caller, not the model, ended the conversation."""
-    return bool(_INTENT_PATTERNS[ACTION_END_CALL].search(text or ""))
+    from app.domain.services.end_session_action import caller_signaled_end
+    return caller_signaled_end(text)
 
 
 async def run_voice_action(
@@ -334,7 +328,7 @@ def safe_failure_speech(
         return "The call will end now. Goodbye."
     return _SAFE_FAILURE_SPEECH.get(
         action,
-        "I can't confirm that action from this call, but I can take the details for the team.",
+        "I can't confirm that action from this call.",
     )
 
 
@@ -342,7 +336,7 @@ def action_from_validation_reason(reason: str | None) -> str | None:
     if not reason:
         return None
     prefix, separator, remainder = reason.partition(":")
-    if separator and prefix in {"unconfirmed_action", "action_failed"}:
+    if separator and prefix in {"unconfirmed_action", "action_failed", "unavailable_action"}:
         return remainder.split(":", 1)[0]
     return None
 
@@ -402,7 +396,8 @@ def action_tools_for_turn(messages: Iterable[Any], provider: Any, *, session=Non
     context = f"{previous_assistant}\n{user_text}"
     actions = [
         action for action in VOICE_ACTION_NAMES
-        if _INTENT_PATTERNS[action].search(context)
+        if (end_call_intent_present(user_text) if action == ACTION_END_CALL
+            else _INTENT_PATTERNS[action].search(context))
     ]
     if session is not None:
         from app.domain.services.voice_pipeline.action_execution import enabled_voice_actions
@@ -411,13 +406,26 @@ def action_tools_for_turn(messages: Iterable[Any], provider: Any, *, session=Non
     return [_chat_tool_spec(action) for action in actions]
 
 
-def action_tool_system_addendum() -> str:
+def action_tool_system_addendum(available_actions: Iterable[str] | None = None) -> str:
     """Trusted instruction governing every action result."""
+    capabilities = ""
+    if available_actions is not None:
+        names = ", ".join(sorted(set(available_actions))) or "none"
+        capabilities = (
+            f"Available actions for this call: {names}. Offer only those actions; "
+            "an unlisted transfer or team follow-up route is unavailable. "
+        )
     return (
         "## Connected actions\n"
+        + capabilities +
         "When an offered action tool matches the caller's request, call it before "
         "saying the action happened. Wait for its result. A result with success=false "
         "or confirmation_allowed=false must never be described as completed; state "
         "the limitation honestly and offer only the next step the result permits. "
-        "Never replace a failed tool with a promise that the action was done."
+        "Never replace a failed tool with a promise that the action was done. "
+        "Offer a brochure, download link or other resource only when approved "
+        "company facts or a tool result actually provide it; do not invent a "
+        "fallback resource after a failure. You may note a caller-requested "
+        "follow-up for review; recording a request does not arrange or "
+        "guarantee follow-up and does not create a handoff route."
     )

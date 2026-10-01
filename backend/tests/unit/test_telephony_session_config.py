@@ -913,10 +913,11 @@ class TestPipelineModeThreading:
         assert config.pipeline_mode == "realtime"
         assert config.realtime_voice == "cedar"
         assert config.realtime_model == "gpt-realtime-2"
-        assert config.realtime_settings == {
+        from app.realtime.config import normalize_realtime_settings
+        assert config.realtime_settings == normalize_realtime_settings({
             "turn_detection": "high",
             "noise_reduction": "far_field",
-        }
+        })
 
     def test_per_campaign_script_config_overrides_tenant_default(self):
         """A cascaded tenant can still run a SINGLE campaign on realtime by

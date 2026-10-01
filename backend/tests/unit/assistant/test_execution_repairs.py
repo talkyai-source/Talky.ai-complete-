@@ -45,11 +45,11 @@ async def test_booking_preview_and_ambiguous_time_never_create_event(monkeypatch
 @pytest.mark.asyncio
 async def test_reminder_requires_explicit_time_and_preview_writes_nothing():
     db = MagicMock()
-    db.table.return_value.select.return_value.eq.return_value.eq.return_value.limit.return_value.execute.return_value.data = [{"id": "lead"}]
+    db.table.return_value.select.return_value.eq.return_value.eq.return_value.limit.return_value.execute.return_value.data = [{"id": "lead", "phone_number": "+15555550100"}]
     missing = await schedule_reminder(db, "tenant", {"lead_id": "lead"}, {})
     assert missing["success"] is False
     when = (datetime.now(timezone.utc) + timedelta(hours=3)).isoformat()
-    preview = await schedule_reminder(db, "tenant", {"lead_id": "lead", "scheduled_at": when}, {}, preview=True)
+    preview = await schedule_reminder(db, "tenant", {"lead_id": "lead", "scheduled_at": when, "reminder_type": "sms"}, {}, preview=True)
     assert preview["preview"] is True
     assert preview["_apply_args"]["scheduled_at"] == when
     db.table.return_value.insert.assert_not_called()

@@ -40,6 +40,7 @@ from app.services.scripts.spoken_email_normalizer import (
 from app.domain.services.voice_pipeline.confirm_llm import llm_confirmation_verdict
 from app.domain.services.voice_pipeline.identity_disposition import (
     IdentityDisposition,
+    contains_dnc,
     contains_explicit_goodbye,
 )
 
@@ -567,6 +568,9 @@ class TurnRunner:
         Returns (response_text, llm_latency_ms, tts_latency_ms).
         """
         call_id = session.call_id
+        # The finisher also handles plain goodbye replies. Record when this
+        # runner owns the close so the same turn cannot shut down twice.
+        session._end_session_action_handled = False
         history_snapshot = len(session.conversation_history)
         session.conversation_history.append(
             Message(role=MessageRole.USER, content=full_transcript)
@@ -723,6 +727,8 @@ class TurnRunner:
                 if self._p._supports_llm_end_session_action(session)
                 else None
             )
+            if ask_ai_end_action and ask_ai_end_action.get("do_not_call") and not contains_dnc(full_transcript):
+                ask_ai_end_action = {**ask_ai_end_action, "do_not_call": False}
 
             # Phantom-goodbye guard: the model emitted an end-session action but
             # the caller never actually signalled they were done. Suppress the
@@ -777,7 +783,7 @@ class TurnRunner:
                 # the session so the call-end teardown runs the opt-out purge
                 # (DNC + cancel scheduled jobs + mark lead DNC). We only set
                 # the flag here; the side effects run once, at hangup.
-                if ask_ai_end_action.get("do_not_call"):
+                if ask_ai_end_action.get("do_not_call") and contains_dnc(full_transcript):
                     try:
                         session._caller_opted_out = True
                     except Exception:
@@ -786,6 +792,7 @@ class TurnRunner:
                         "caller_opt_out_detected call_id=%s — will purge at hangup",
                         getattr(session, "call_id", "?"),
                     )
+                session._end_session_action_handled = True
                 await self._p._shutdown_session_for_end_action(
                     session,
                     websocket,

@@ -118,7 +118,7 @@ async def _run_until_silence_tick(session: CallSession, pipeline: MagicMock) -> 
                 "VOICE_NUDGE_MIN_GAP_S": "0.03",
             },
         ),
-        patch("asyncio.sleep", new=AsyncMock(return_value=None)),
+        patch("asyncio.sleep", new=_instant_yield),
     ):
         task = asyncio.ensure_future(ingest.process(session))
         try:
@@ -324,6 +324,22 @@ async def test_opening_nudge_waits_for_caller_audio():
     assert "Hello?" not in spoken, (
         "nudged a caller whose audio had not reached us yet"
     )
+
+
+@pytest.mark.asyncio
+async def test_no_audio_nudge_gate_does_not_remove_terminal_silence_timeout():
+    session = _make_session("user")
+    del session._caller_audio_started_at
+    pipeline = _make_pipeline()
+    pipeline._shutdown_session_for_end_action = AsyncMock()
+    # Simulate the clock gap from a delayed monitor tick making a nudge due,
+    # then the existing terminal timeout on the next tick. No audio permits
+    # the latter but never the former.
+    with patch("app.domain.services.voice_pipeline.audio_ingest.silence_action",
+               side_effect=["nudge", "hangup"]):
+        await _run_until_silence_tick(session, pipeline)
+    pipeline.synthesize_and_send_audio.assert_not_awaited()
+    pipeline._shutdown_session_for_end_action.assert_awaited_once()
 
 
 @pytest.mark.asyncio

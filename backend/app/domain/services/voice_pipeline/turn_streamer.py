@@ -60,6 +60,7 @@ from app.domain.services.voice_pipeline.sentence_segmentation import (
     _is_missing_space_boundary,
 )
 from app.domain.services.voice_pipeline.conversation_guards import (
+    contradicted_customer_claim,
     CALLBACK_PREFERENCE,
     PHONE_REASK,
     answered_note,
@@ -498,13 +499,9 @@ class TurnStreamer:
                 # to this line and the await down to build_turn_prompt()).
                 knowledge_block = await _knowledge_block_for_turn(session, messages) or None
 
-        end_session_block = (
-            action_tool_system_addendum()
-            if action_tools
-            else _END_SESSION_TOOL_INSTRUCTIONS
-            if legacy_end_action
-            else None
-        )
+        end_session_block = action_tool_system_addendum(enabled_voice_actions(session))
+        if legacy_end_action:
+            end_session_block += "\n" + _END_SESSION_TOOL_INSTRUCTIONS
 
         # Emotional audio tags — driven by the capability registry (single
         # source of truth). Only voices that actually PERFORM bracket tags
@@ -716,9 +713,8 @@ class TurnStreamer:
         # space fell BETWEEN tokens, so the whole-buffer check below never saw
         # it and the agent confirmed the caller's number for them.
         terminator_at_edge: Optional[str] = None
-        # Everything the model was GIVEN this turn -- the assembled prompt plus
-        # any knowledge the tool returned. A web address the agent speaks must
-        # appear here or it is rewritten (see grounded_links.py).
+        # Factual knowledge supplied this turn. Prompt instructions cannot
+        # establish a price or resource merely by naming one.
         turn_grounding: list[str] = []
         if session.knowledge_mode not in ("retrieve", "map_retrieve"):
             session._knowledge_grounding = re.findall(
@@ -795,8 +791,9 @@ class TurnStreamer:
 
         def _validate_for_tts(text: str, *, speaking: bool = True) -> tuple[str, Optional[str]]:
             """Validate cleaned model text before any byte reaches TTS."""
-            text, _links = ground_spoken_links(text, [system_prompt, *turn_grounding])
+            text, _links = ground_spoken_links(text, [*getattr(session, "_knowledge_grounding", []), *turn_grounding])
             if _links:
+                speech_rewrites.append("unavailable_resource")
                 logger.warning(
                     "ungrounded_link_rewritten call=%s links=%s",
                     call_id[:12],
@@ -821,6 +818,12 @@ class TurnStreamer:
             else:
                 text = _fig_text  # at most a corrected currency sign
             if speaking:
+                _relationship_repair = contradicted_customer_claim(text, session.conversation_history)
+                if _relationship_repair:
+                    if "customer_relationship" in speech_rewrites:
+                        return "", None
+                    speech_rewrites.append("customer_relationship")
+                    return _relationship_repair, None
                 _open_ask = closing_while_contact_open(
                     text,
                     getattr(session, "captured_slots", None),
@@ -935,6 +938,7 @@ class TurnStreamer:
                 # politely" falsely blocks those exact allowed words).
                 None,
                 action_results=results,
+                available_actions=enabled_voice_actions(session),
             )
             if valid:
                 return text, None
@@ -1365,16 +1369,20 @@ class TurnStreamer:
         # whole token budget on internal thinking, or an empty completion).
         # That is NOT an error path, so nothing above caught it — without this
         # the caller just hears dead air. Speak a short recovery line instead.
+        from app.domain.services.end_session_action import caller_signaled_end
+        caller_finished = caller_signaled_end(last_user_text_for_limit)
         if (
             not tts_was_interrupted
             and sentences_done == 0
             and t_tts_first is None
             and not ask_ai_end_action
-            and not suppressed_for_action
+            and (not suppressed_for_action or caller_finished)
             and not getattr(session, "_tts_delivery_failed", False)
             and not _barged()
         ):
-            recovery = "Sorry, I didn't quite catch that — could you say it again?"
+            recovery = "Goodbye." if caller_finished else "Sorry, I didn't quite catch that — could you say it again?"
+            if caller_finished:
+                session._end_call_requested = True
             logger.warning(
                 "zero_token_turn call=%s — LLM produced no speech; spoke recovery line",
                 call_id,
@@ -1388,6 +1396,9 @@ class TurnStreamer:
             )
             _record_action_playback(recovery, tts_was_interrupted)
             t_tts_end = time.monotonic()
+            if not tts_was_interrupted:
+                session._spoken_sentences.append(recovery)
+                speech_rewrites.append("empty_response_recovery")
 
         llm_latency_ms = (t_llm_done - t_llm_start) * 1000
         tts_latency_ms = (
@@ -1405,7 +1416,7 @@ class TurnStreamer:
                 protected_values=_protected_readback,
             )
             full_text, _ = ground_spoken_links(
-                full_text, [system_prompt, *turn_grounding]
+                full_text, [*getattr(session, "_knowledge_grounding", []), *turn_grounding]
             )
 
         if model_wrote_caller_turn or ungrounded_figures or speech_rewrites:

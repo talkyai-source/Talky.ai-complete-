@@ -99,14 +99,11 @@ def test_policy_line_is_irrelevant_once_a_real_executor_exists():
 
 
 def test_the_honest_fallback_line_the_policy_points_to_is_never_blocked():
-    """Cross-check with the (unchanged) enforcement layer: the phrasing the
-    new prompt rule steers the model toward -- action_tools.py's own
-    SAFE_FAILURE_SPEECH, the honest "I'll pass your details to the team"
-    line -- must never itself trip llm_guardrails.py's completion-claim gate,
-    or the fix would just move the retraction earlier instead of removing it.
-    """
+    """The fixed failure sentence must pass its own completion-claim gate
+    and must not invent a team handoff as a substitute for a failed action."""
     honest_line = safe_failure_speech(ACTION_SCHEDULE_CALLBACK)
-    assert "team" in honest_line.lower()
+    assert "can't confirm a scheduled callback" in honest_line.lower()
+    assert "team" not in honest_line.lower()  # no invented handoff route
 
     valid, reason = LLMGuardrails().validate_response(
         honest_line, None, action_results={}

@@ -54,3 +54,24 @@ async def test_hubspot_ambiguous_reconciliation_never_selects_first(monkeypatch)
     connector, _ = await install(monkeypatch, [(200, {'results': [{'id': 'one'}, {'id': 'two'}]})])
     with pytest.raises(ValueError, match='Multiple'):
         await connector.find_call_by_reference(REFERENCE)
+
+
+async def test_hubspot_identity_uses_stable_hub_id_and_never_puts_token_in_url(monkeypatch):
+    monkeypatch.setenv('HUBSPOT_CLIENT_ID', 'fixture-client')
+    monkeypatch.setenv('HUBSPOT_CLIENT_SECRET', 'fixture-secret')
+    connector, requests = await install(monkeypatch, [(200, {'active': True, 'hub_id': 12345, 'user': 'user@example.invalid'})])
+    identity = await connector.fetch_account_identity()
+    assert identity['external_account_id'] == '12345'
+    request = requests[0]
+    assert request.method == 'POST' and request.url.path == '/oauth/2026-03/token/introspect'
+    assert 'test-token' not in str(request.url) and 'fixture-secret' not in str(request.url)
+    assert b'token=test-token' in request.content and b'token_type_hint=access_token' in request.content
+
+
+@pytest.mark.parametrize('body', [{'active': False, 'hub_id': 12345}, {'active': True}])
+async def test_hubspot_identity_requires_active_token_and_stable_account(monkeypatch, body):
+    monkeypatch.setenv('HUBSPOT_CLIENT_ID', 'fixture-client')
+    monkeypatch.setenv('HUBSPOT_CLIENT_SECRET', 'fixture-secret')
+    connector, _ = await install(monkeypatch, [(200, body)])
+    with pytest.raises(ConnectorProviderError, match='account identity'):
+        await connector.fetch_account_identity()

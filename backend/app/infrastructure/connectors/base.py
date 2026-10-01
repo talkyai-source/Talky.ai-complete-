@@ -95,6 +95,7 @@ class BaseConnector(ABC):
             raise ValueError("connector_id is required")
         self.tenant_id = tenant_id
         self.connector_id = connector_id
+        self.external_account_id: Optional[str] = None
         self._access_token: Optional[str] = None
 
     # ------------------------------------------------------------------

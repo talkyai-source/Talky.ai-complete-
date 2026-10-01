@@ -119,9 +119,10 @@ _VERSIONS: Final[Mapping[str, str]] = {
     # and receptionist move only because the shared guardrails text changed.
     # @8 / @7: concise shared voice contract, evidence-bound actions and
     # contact capture, caller corrections before campaign relationship claims.
-    "lead_gen": "lead_gen@8",
-    "customer_support": "customer_support@7",
-    "receptionist": "receptionist@7",
+    # @9 / @8: product benefits and eligibility require supplied facts.
+    "lead_gen": "lead_gen@9",
+    "customer_support": "customer_support@8",
+    "receptionist": "receptionist@8",
 }
 
 #: Fallback for a persona that is not in the registry yet. Deliberately visible

@@ -957,6 +957,14 @@ class AudioIngest:
                                 logger.debug("[SilenceMonitor] close-on-silence failed: %s", _close_exc)
                             break
 
+                        # Missing input is not measured caller silence. Do not
+                        # rely on two monotonic reads being close enough: a
+                        # stalled event loop could otherwise make a nudge due
+                        # after resetting the clock above. The timeout still
+                        # closes a line whose audio never arrives.
+                        if not isinstance(_audio_from, (int, float)):
+                            continue
+
                         # Never nudge a MACHINE. Once screening/voicemail wording
                         # was heard (machine_detection flags), "Sorry, did I lose
                         # you?" at a recording or a screening hold is pure waste

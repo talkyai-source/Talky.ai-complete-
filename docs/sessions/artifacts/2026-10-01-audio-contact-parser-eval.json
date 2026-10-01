@@ -1,0 +1,13 @@
+{
+  "scope": "Actual candidate contact parser receiving the exact synthetic Flux final from audio-provider-eval",
+  "transcript": "Please note my email Anna dot support at example dot com.",
+  "email": "anna.support@example.com",
+  "confirmed": false,
+  "capture_status": "awaiting_confirmation",
+  "status": "passed",
+  "candidate_source_hashes": {
+    "backend/app/domain/services/voice_pipeline/contact_capture.py": "97b0285a09877d640d669503f57c35a7f19561c2c578e2514c2f2ff76eaa9707",
+    "backend/app/services/scripts/call_state_tracker.py": "6d828201897aad4284e5322ceced4ec1cd422da0ca786be5f8b80e8d54e565bd",
+    "backend/app/services/scripts/spoken_email_normalizer.py": "109c737f2c6d105d8557fb1a3a1891a00ca316a54587e31162bd3b5e6647a3ce"
+  }
+}

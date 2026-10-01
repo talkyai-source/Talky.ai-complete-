@@ -77,7 +77,8 @@ def test_realtime_says_one_reply_then_listens():
 
 def test_realtime_offers_a_next_step_once():
     text = _realtime_text()
-    assert "Offer that only once in the call" in text
+    assert "Offer your next step when the conversation reaches it — once." in text
+    assert "Offer a team handoff only if the runtime explicitly supplies that capability" in text
     assert "do not ask it again in other words" in text  # sales persona
 
 

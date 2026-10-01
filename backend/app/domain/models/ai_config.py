@@ -582,20 +582,18 @@ CEREBRAS_MODELS = [
 ]
 
 # OpenAI chat models, on the same OPENAI_API_KEY as GPT Realtime (owner
-# request 2026-10-01). Verified on the production key (GET /v1/models) and
-# measured from the prod host: see app/infrastructure/llm/openai.py.
+# request 2026-10-01). Capabilities and context verified against:
+# https://developers.openai.com/api/docs/models/gpt-6-luna
 OPENAI_MODELS = [
     ModelInfo(
         id="gpt-6-luna",
         name="GPT-6 Luna (OpenAI)",
         description=(
-            "OpenAI's fast, cost-efficient GPT-6 model. Runs with reasoning "
-            "off (the fastest setting, and the only one that allows the "
-            "knowledge-lookup tool on this API). Measured from the prod host "
-            "on 2026-10-01 with a short prompt: first text in 758-968 ms."
+            "OpenAI text model for the traditional voice pipeline, with streaming "
+            "responses and function calling. Uses reasoning disabled for knowledge "
+            "and action tools."
         ),
-        speed="~0.8-1.0 s to first text (measured)",
-        price="$0.10 in / $0.50 out per 1M tokens",
+        speed="Varies with the prompt and network",
         context_window=1_050_000,
         is_preview=False,
         provider="openai",

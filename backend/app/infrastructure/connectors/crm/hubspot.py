@@ -150,6 +150,25 @@ class HubSpotConnector(CRMProvider):
             raise ValueError("Access token not set. Call set_access_token() first.")
         return {"Authorization": f"Bearer {self._access_token}"}
 
+    async def fetch_account_identity(self) -> Dict[str, Any]:
+        """Resolve the stable Hub ID without putting an access token in a URL."""
+        client_id, client_secret = self._get_client_credentials()
+        if not self._access_token:
+            raise ValueError("Access token is required for account verification")
+        async with httpx.AsyncClient(timeout=15) as client:
+            response = await client.post(
+                f"{self.API_BASE_URL}/oauth/2026-03/token/introspect",
+                data={"client_id": client_id, "client_secret": client_secret,
+                      "token_type_hint": "access_token", "token": self._access_token},
+            )
+        self._check_response(response, "account_identity")
+        data = response.json()
+        account = data.get("hub_id")
+        if data.get("active") is not True or not account:
+            raise ConnectorProviderError(provider="hubspot", operation="account_identity",
+                category="invalid_response", message="HubSpot did not verify an active account identity")
+        return {"external_account_id": str(account), "email": data.get("user")}
+
     # ------------------------------------------------------------------
     # CRM-specific methods
     # ------------------------------------------------------------------

@@ -37,9 +37,10 @@ def test_knowledge_block_respects_total_budget(monkeypatch):
     """Five huge nodes must be trimmed + budgeted to a small block, not dumped."""
     from app.domain.models.conversation import Message, MessageRole
 
-    big = "word " * 4000  # ~20k chars each — simulates a full feature-list node
+    big = "The product includes scheduled reports. " * 600
     hits = [
-        {"heading": f"Node {i}", "voice_answer": None, "summary": None, "content": big}
+        {"id": f"node-{i}", "heading": f"Product {i}", "coverage": 1.0,
+         "voice_answer": None, "summary": None, "content": big}
         for i in range(5)
     ]
 
@@ -67,5 +68,6 @@ def test_knowledge_block_respects_total_budget(monkeypatch):
     assert "company knowledge" in block.lower()
     # Untrusted KB is delimited (Spotlighting fence) — guard against regression.
     assert "<company_knowledge>" in block and "</company_knowledge>" in block
-    # Each injected fact is trimmed (ellipsis present on the huge bodies).
-    assert "…" in block
+    # Select complete relevant facts rather than cutting a fact mid-sentence.
+    assert "The product includes scheduled reports." in block
+    assert big not in block

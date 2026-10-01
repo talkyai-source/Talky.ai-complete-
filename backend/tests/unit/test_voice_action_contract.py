@@ -450,7 +450,7 @@ async def test_normal_cascaded_stream_blocks_unproved_claim_before_tts(monkeypat
     spoken = [call.args[1] for call in service.synthesize_and_send_audio.await_args_list]
     assert all("scheduled your callback" not in text.lower() for text in spoken)
     assert spoken == [
-        "I can't schedule a callback from this call, but I can take the details for the team."
+        "I can't confirm a scheduled callback from this call."
     ]
     assert response == spoken[0]
 
@@ -536,7 +536,7 @@ async def test_action_turn_feeds_failed_result_before_guarded_reply(monkeypatch)
     assert llm.require_strict is True
     assert llm.seen_result["success"] is False
     assert llm.seen_result["status"] == "unavailable"
-    assert response == "I can't send an email from this call, but I can take the address for the team."
+    assert response == "I can't confirm that the email was sent."
     service.synthesize_and_send_audio.assert_awaited_once_with(
         session,
         response,

@@ -248,7 +248,7 @@ async def resolve_active_connector(
         cid = str(row["id"])
         acc = (
             db_client.table("connector_accounts")
-            .select("id, access_token_encrypted, refresh_token_encrypted, token_expires_at, last_refreshed_at")
+            .select("id, access_token_encrypted, refresh_token_encrypted, token_expires_at, last_refreshed_at, external_account_id")
             .eq("connector_id", cid)
             .eq("status", "active")
             .order("last_refreshed_at", desc=True)
@@ -322,6 +322,7 @@ async def resolve_active_connector(
         )
 
     connector = ConnectorFactory.create(provider=provider, tenant_id=tenant_id, connector_id=connector_id)
+    connector.external_account_id = str(acc_data.get("external_account_id") or "") or None
     row_config = _coerce_config(rows[0].get("config") if isinstance(rows[0], dict) else None)
     if row_config is not None:
         connector.apply_config(row_config)

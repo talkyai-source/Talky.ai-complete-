@@ -79,8 +79,9 @@ async def _context(session, pool):
     context["transfer_connected"] = False
     if "transfer" in allowed:
         try:
-            from app.api.v1.endpoints import telephony_bridge
-            context["transfer_connected"] = bool(telephony_bridge._adapter and telephony_bridge._adapter.connected)
+            from app.domain.services.telephony.adapter_registry import get_adapter
+            adapter = get_adapter()
+            context["transfer_connected"] = bool(adapter and adapter.connected)
         except Exception:
             pass
     return context
@@ -146,12 +147,14 @@ def _callback_time(arguments):
         tz = ZoneInfo(zone)
     except (ValueError, KeyError):
         raise ValueError("Ask for a specific date, time and IANA timezone before scheduling.") from None
+    # The spoken confirmation names a city and clock time, not a DST fold.
+    # Even a model-supplied offset cannot establish which repeated clock time
+    # the caller meant. Ask for an unambiguous time rather than guessing.
+    wall = parsed.replace(tzinfo=None)
+    if wall.replace(tzinfo=tz, fold=0).utcoffset() != wall.replace(tzinfo=tz, fold=1).utcoffset():
+        raise ValueError("That local time is ambiguous or nonexistent; choose an unambiguous callback time.")
     if parsed.tzinfo is None:
-        # DST repeated and missing wall-clock times need an explicit offset.
-        a, b = parsed.replace(tzinfo=tz, fold=0), parsed.replace(tzinfo=tz, fold=1)
-        if a.utcoffset() != b.utcoffset():
-            raise ValueError("That local time is ambiguous or nonexistent; confirm an explicit UTC offset.")
-        parsed = a
+        parsed = parsed.replace(tzinfo=tz)
     if parsed.astimezone(tz).utcoffset() != parsed.utcoffset():
         raise ValueError("The supplied time offset does not match the requested timezone.")
     if not datetime.now(timezone.utc) + timedelta(minutes=1) < parsed < datetime.now(timezone.utc) + timedelta(days=90):
@@ -217,7 +220,11 @@ def _confirmed(session, proposal, user_text):
         return False
     # Independent full repeatback works when a PSTN transport can prove only
     # transmission. A bare yes needs correlated completed readback evidence.
-    if _normalize(user_text) == _normalize("yes, " + proposal["summary"]):
+    literal = re.sub(r"^yes\s*,?\s+", "", user_text, flags=re.I)
+    if literal != user_text and _normalize(literal) == _normalize(proposal["summary"]):
+        return True
+    from app.domain.services.voice_pipeline.action_confirmation import explicit_action_matches
+    if explicit_action_matches(proposal.get("action"), proposal.get("payload") or {}, user_text):
         return True
     delivered = getattr(session, "_voice_action_delivered_text", "")
     return bool(re.fullmatch(r"\s*(?:yes|yes please|correct|confirm|i confirm|go ahead)[.!\s]*", user_text, re.I)
@@ -241,12 +248,16 @@ async def execute_connected_voice_action(session, action, arguments, user_text):
     proposals = getattr(session, "_voice_action_proposals", {})
     proposal = proposals.get(action)
     if not proposal or proposal["payload"] != payload:
-        proposal = {"id": str(uuid4()), "turn": _turn(session), "payload": payload, "summary": summary}
+        proposal = {"id": str(uuid4()), "turn": _turn(session), "action": action, "payload": payload, "summary": summary}
         proposals[action] = proposal
         session._voice_action_proposals = proposals
     if not _confirmed(session, proposal, user_text):
         return _result(action, "needs_confirmation",
-            f"Read this exact request to the caller: {summary}. Ask them to say: yes, {summary}. "
+            f"Read this request to the caller: {summary}. Ask them to confirm the action and repeat "
+            "its complete address/number and, for a callback, the date including year, time with AM or PM, "
+            "and timezone city. They may use ordinary spoken digits, dates, 'at' and 'dot'; "
+            "do not ask them to recite a JSON value or IANA timezone identifier. For a form, ask them "
+            "to name the form and repeat its captured values, not the internal inbox or subject. "
             "Do not execute until a later caller turn confirms it.", request_id=proposal["id"], confirmation_summary=summary)
     request = {"parameters": payload, "confirmation": {"request_id": proposal["id"],
                "turn": str(_turn(session)), "caller_text_hash": hashlib.sha256(user_text.encode()).hexdigest()}}
@@ -274,8 +285,8 @@ async def execute_connected_voice_action(session, action, arguments, user_text):
             return _result(action, "provider_accepted", "The provider accepted the email for sending. Recipient delivery is unconfirmed.",
                            success=True, confirmation_allowed=True, provider=receipt.get("provider"), message_id=receipt["message_id"])
         if action == "transfer_call":
-            from app.api.v1.endpoints.telephony_bridge import _execute_transfer
-            receipt = await _execute_transfer(str(context["provider_call_id"]), payload["destination"], "blind",
+            from app.domain.services.telephony.adapter_registry import execute_transfer
+            receipt = await execute_transfer(str(context["provider_call_id"]), payload["destination"], "blind",
                 idempotency_key="voice-" + proposal["id"], actor_type="service", actor_role="campaign_voice")
             connected = receipt.get("status") in {"connected", "completed", "transferred"}
             if receipt.get("status") == "success":

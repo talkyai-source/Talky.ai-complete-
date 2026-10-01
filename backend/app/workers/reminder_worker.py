@@ -226,8 +226,8 @@ class ReminderWorker:
                     m.id as meeting_id, m.title as meeting_title, m.start_time, m.end_time, m.join_link,
                     l.id as lead_id, l.first_name, l.last_name, l.phone_number, l.email
                 FROM reminders r
-                LEFT JOIN meetings m ON r.meeting_id = m.id
-                LEFT JOIN leads l ON r.lead_id = l.id
+                LEFT JOIN meetings m ON r.meeting_id = m.id AND r.tenant_id = m.tenant_id
+                LEFT JOIN leads l ON r.lead_id = l.id AND r.tenant_id = l.tenant_id
                 WHERE r.status = 'pending' 
                 AND r.scheduled_at <= NOW()
                 LIMIT $1
@@ -285,6 +285,15 @@ class ReminderWorker:
         requested_channel = reminder.get("type")
         # Legacy rows without a channel retain their original contact preference.
         requested_channel = requested_channel or ("sms" if phone_number else "email")
+        # New reviewed reminders carry the approved address. A later lead edit
+        # must not redirect an already scheduled message. Still require the
+        # tenant-qualified lead join, so a removed/foreign contact is not used.
+        approved_recipient = content.get('recipient') if isinstance(content, dict) else None
+        if lead_id and approved_recipient:
+            if requested_channel == 'email':
+                email = approved_recipient
+            elif requested_channel == 'sms':
+                phone_number = approved_recipient
 
         # Determine reminder type from content or timing
         reminder_type = self._determine_reminder_type(reminder)

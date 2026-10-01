@@ -58,6 +58,49 @@ def _plain(text: str) -> str:
     return (text or "").replace("’", "'").replace("‘", "'")
 
 
+_CUSTOMER_DENIAL = re.compile(
+    r"\b(?:i(?:'m|\s+am)|we(?:'re|\s+are))\s+not\s+(?:your|an?)\s+"
+    r"(?:existing\s+)?(?:customer|client|merchant)s?\b|"
+    r"\b(?:i|we)\s+(?:don't|do not)\s+use\s+(?:your\s+(?:company|services|products)|you)\b",
+    re.I,
+)
+_CUSTOMER_AFFIRMATION = re.compile(
+    r"\b(?:i(?:'m|\s+am)|we(?:'re|\s+are))\s+(?:your|an?)\s+"
+    r"(?:existing\s+)?(?:customer|client|merchant)s?\b", re.I,
+)
+_CUSTOMER_REASSERTION = re.compile(
+    r"\b(?:our|the)\s+(?:records|system|list)\s+(?:show|shows|say|says|indicate|indicates)\b|"
+    r"\byou(?:'re|\s+are)\s+(?:an?\s+|our\s+)?(?:existing\s+)?(?:customer|client|merchant)\b|"
+    r"\byour\s+(?:account|subscription)\s+with\s+us\b", re.I,
+)
+
+
+def contradicted_customer_claim(text: str, history: Iterable[Any]) -> Optional[str]:
+    """Respect the latest explicit caller correction of their relationship.
+
+    Campaign lists never overrule it. A later caller affirmation clears the
+    denial; ordinary product questions and statements remain untouched.
+    """
+    plain = _plain(text)
+    assertions = [match for match in _CUSTOMER_REASSERTION.finditer(plain) if not re.search(
+        r"\b(?:can't|cannot|won't|will not|don't|do not)\s+(?:confirm|assume|say)\s+(?:that\s+)?$|"
+        r"\b(?:if|whether)\s*$", plain[:match.start()], re.I,
+    )]
+    if not assertions:
+        return None
+    denied = False
+    for message in history or ():
+        role = getattr(message, "role", "")
+        if getattr(role, "value", role) != "user":
+            continue
+        caller = _plain(getattr(message, "content", ""))
+        corrections = [(match.start(), True) for match in _CUSTOMER_DENIAL.finditer(caller)]
+        corrections += [(match.start(), False) for match in _CUSTOMER_AFFIRMATION.finditer(caller)]
+        if corrections:
+            denied = max(corrections)[1]
+    return "Thanks for correcting me. I won't assume you're a customer." if denied else None
+
+
 def _digitish_count(text: str) -> int:
     words = re.findall(r"[a-z]+|\d", (text or "").lower())
     return sum(1 for w in words if w.isdigit() or w in _DIGIT_WORDS)
@@ -87,6 +130,8 @@ def unbacked_contact_claim(
     """
     if not text or not _CLAIM.search(_plain(text)):
         return None
+    if getattr(call_state, "contact_capture_paused", False):
+        return "That contact detail is still unconfirmed."
     phone = _capture(call_state, "phone_capture")
     email = _capture(call_state, "email_capture")
     if _confirmed(phone) or _confirmed(email):
@@ -423,7 +468,7 @@ def pending_contact_ask(call_state: Any) -> Optional[str]:
     The one being worked on comes first; a read-back is the exact sentence the
     confirm gate recognises, so the caller's yes to it counts.
     """
-    if call_state is None:
+    if call_state is None or getattr(call_state, "contact_capture_paused", False):
         return None
     from app.services.scripts.spoken_email_normalizer import (
         natural_email_readback,

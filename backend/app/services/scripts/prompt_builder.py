@@ -34,6 +34,8 @@ _NO_CALLBACK_EXECUTOR_POLICY = (
 def _pending_actions(state: CallState) -> tuple[list[str], list[str]]:
     """The contact actions still open this turn, and call details to keep
     in hand. Shared by the prompt header and the trailing turn directive."""
+    if state.contact_capture_paused:
+        return [], []
     pending: list[str] = []
     # Facts to use only when the moment comes -- not an action for this turn.
     call_details: list[str] = []
@@ -290,6 +292,13 @@ def compose_system_prompt(
             "- The caller objected to being asked for contact details. Do NOT "
             "ask for their email or phone number again. Only take one if they "
             "offer it or ask you to send them something."
+        )
+    elif state.contact_capture_paused:
+        conduct.append(
+            "- Contact confirmation is paused at the caller's request. Do not "
+            "read back or ask for contact details unless they volunteer them "
+            "or explicitly resume. Existing candidates remain unconfirmed. "
+            "If they said goodbye, close without another question."
         )
     contact_given = bool(state.email or state.phone)
     if state.caller_asked_question and not contact_given:

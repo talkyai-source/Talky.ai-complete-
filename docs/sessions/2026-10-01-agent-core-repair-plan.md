@@ -541,6 +541,102 @@ claimed complete without actual access.
 
 ## Progress and definition of done
 
+### Integration checkpoint (1 October, not a release)
+
+- Core repairs committed as `e01d449c`; current production changes through
+  `b93b23de` merged as `4a36eda4`. One OpenAI text adapter remains; Luna is a
+  selectable traditional model, with native Realtime kept separate.
+- Traditional prompt reduced from 5,107 to 1,591 words before the final concise
+  capability clarifications. Model/provider settings remain explicit.
+- Live synthetic provider checks exercised all four traditional adapters with
+  a read-only lookup. These timings include tool continuation and are not a
+  voice-latency or fastest-model ranking.
+- Live GPT Realtime 2 accepted the configured voice/VAD/audio settings, handled
+  actual truncation acknowledgement, recovered, and closed after a new goodbye.
+  The harness used text input and simulated media receipts: no telephone
+  hearing claim follows from this test. See the sanitized provider artifacts.
+- Real PostgreSQL checks covered action receipts, lead revision protection,
+  independent CRM deliveries, tenant-scoped CRM display, and migration 0050's
+  admin-only permission grants. Further race/recipient/account checks are in
+  progress; the schema has not been applied to production.
+- Frontend type checking, lint on changed files, and eight updated lead-detail /
+  campaign-brief tests pass. Local browser compilation hit memory pressure;
+  visual and production-build acceptance remain open.
+- Initial broad unit/security run: 2,724 passed, 11 skipped, stopped after eight
+  failures. This is not a passing full suite. Failures include outdated prompt
+  fixtures and an opening-silence boundary requiring investigation.
+- Synthetic conversations exposed additional real issues: email punctuation
+  swallowed the next sentence, contact confirmation restarted after withdrawal,
+  unconfigured transfer/resource offers, empty goodbye fallback, and an
+  unsolicited end-call sentinel after failed email. Focused corrections and
+  actual runtime-boundary regressions are in progress.
+- Production remains at `b93b23de`, database revision 0047. Its healthy gateway
+  does not advertise the new playback-receipt capability. Release must install
+  the compatible gateway before the Python changes. Non-interactive sudo is
+  unavailable; the configured synthetic target and an approved drain artifact
+  have not been verified. No customer call, email, CRM write or deployment has
+  been performed during these checks.
+
+### Follow-up validation checkpoint (1 October, still unreleased)
+
+- Draft integration PR: https://github.com/talkyai-source/Talky.ai-complete-/pull/18.
+  The initial CI run exposed stale fixtures and Python-version-sensitive test
+  setup. It was not a passing release: the full unit/security job recorded
+  9,899 passed, 47 failed, 9 errors and 13 skipped. Repairs are followed by a
+  fresh run against the committed candidate and clean dependency installation.
+- Quoted, reported, hypothetical and negated call-control phrases now share one
+  assertion boundary. Actual TurnEnder checks cover unsolicited model hangups,
+  quoted DNC, current requests to stay, and the observed Gemini plain goodbye
+  without a tool/sentinel. A structured close executes shutdown once. The
+  final caller/connector regression batch passed 310 tests; root knowledge and
+  shortened-prompt fixture checks passed 48.
+- CRM now pins the destination connector and verified external account before
+  writing. Migration 0051 preserves that identity. A real PostgreSQL race test
+  verifies that stale summary work cannot clear a newer delivery request.
+  Meeting reminders resolve tenant-owned recipients and retain the explicitly
+  approved channel/address through execution.
+- The final traditional simulation completed 60 provider turns across four
+  models. Completion is not a semantic pass for every answer: the recorded
+  interpretation retains a Groq terminal-usage assumption and the limitations
+  of deterministic claim guards. A subsequent real TurnEnder regression covers
+  the Gemini close omitted by that TurnStreamer-only harness.
+- Actual Cartesia audio converted through the production float32-to-linear16
+  boundary was recognized by Flux in both synthetic audio checks. The spoken
+  email parser was corrected for the actual recognized form. Initial harness
+  format errors remain labeled in the evidence rather than counted as product
+  failures or silently discarded.
+- On the first pushed candidate, gateway production CTest and the complete
+  warnings/TSan/ASan/shutdown gate passed. Vercel built a preview successfully;
+  preview browser access requires authentication. Local isolated component QA
+  uses synthetic API responses and is distinct from full deployed UI acceptance.
+- Current backend requirements passed pip-audit (155 resolved dependencies,
+  zero known vulnerabilities), and the exact CI Ruff 0.16.9 gate passed after
+  a Python 3.11-compatible f-string correction. Frontend and Admin audits also
+  report zero known vulnerabilities after minimal dependency repairs. Clean
+  install, full frontend typecheck, mail generation and actual Storybook
+  middleware compile/serve/close checks passed. The original lock reproduces
+  Storybook's missing TypeScript compiler setup; that unrelated configuration
+  remains unchanged. CI severity gates remain enabled.
+- Isolated real-component browser checks passed Luna provider/model save and
+  reload, separate Realtime persona/prompt save and reload, preservation of
+  the traditional model, and lead evidence/independent CRM outcome display.
+  Desktop and 390px mobile views were inspected with no horizontal overflow
+  or uncaught page errors. API responses were synthetic; this is not proof of
+  deployed backend persistence. Temperature guidance no longer promises that
+  a particular value makes facts or contact details correct.
+- Independent review reproduced three native Realtime close defects: stale
+  close after caller resumption, missing durable DNC flag, and plain goodbye
+  without a model tool. The repair binds a pending close to caller activity,
+  revokes it at interruption, preserves actual opt-out evidence, and permits
+  explicit caller goodbye to close without the model tool. A declined topic
+  does not independently arm automatic hangup.
+- Migration 0049 also recognizes existing ended/canceled/rejected terminal
+  rows when marking historical calls not processed. Its real PostgreSQL
+  regression reproduced false pending before the correction and then passed.
+- Production, database schema and services are unchanged. Controlled call and
+  action acceptance still needs designated test destinations, connected test
+  accounts and the existing deployment procedure's real drain attestation.
+
 - [x] Audit reconciled with current production revision.
 - [x] Separate integration branch/worktree prepared.
 - [x] Detailed design, ownership, failure cases and acceptance plan recorded.

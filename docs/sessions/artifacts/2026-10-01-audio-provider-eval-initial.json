@@ -1,0 +1,63 @@
+{
+  "scope": "Live provider adapter + wrapper test using synthetic generated PCM. No telephone, speaker, browser, customer, DB mutation, or failover fault injection.",
+  "tts": {
+    "provider": "cartesia",
+    "model": "sonic-3",
+    "voice_id": "6ccbfb76-1fc6-48f7-b71d-91ac6298247b",
+    "encoding": "pcm_s16le",
+    "sample_rate": 16000
+  },
+  "stt": {
+    "provider": "deepgram",
+    "model": "flux-general-en",
+    "encoding": "linear16",
+    "sample_rate": 16000,
+    "chunk_ms": 40,
+    "eot_threshold": 0.7,
+    "eot_timeout_ms": 500,
+    "eager_eot_threshold": null
+  },
+  "results": [
+    {
+      "fixture": "Hello. The warranty lasts two years and excludes water damage.",
+      "turn": 1,
+      "tts_status": "completed",
+      "tts_first_audio_ms": 107,
+      "tts_total_ms": 759,
+      "tts_chunks": 22,
+      "pcm_bytes": 249660,
+      "pcm_duration_ms": 7802,
+      "pcm_sha256": "23808a44c883e22b580823c1f575d069e6bd27aae4a0fb30b80be3056310578d",
+      "cartesia_done_count": 1,
+      "stt_status": "completed",
+      "stt_total_ms": 10590,
+      "partial_events": 0,
+      "final_transcripts": [],
+      "status": "failed",
+      "error_type": "AssertionError",
+      "http_status": null
+    },
+    {
+      "fixture": "Please note my email: anna dot support at example dot com.",
+      "turn": 2,
+      "tts_status": "completed",
+      "tts_first_audio_ms": 105,
+      "tts_total_ms": 693,
+      "tts_chunks": 21,
+      "pcm_bytes": 228856,
+      "pcm_duration_ms": 7152,
+      "pcm_sha256": "66338b3e6255a1b32b1d490714b753c846f766252bdc283e27cfd5458ef288f1",
+      "cartesia_done_count": 1,
+      "stt_status": "completed",
+      "stt_total_ms": 10019,
+      "partial_events": 0,
+      "final_transcripts": [],
+      "status": "failed",
+      "error_type": "AssertionError",
+      "http_status": null
+    }
+  ],
+  "cartesia_distinct_done_contexts": 2,
+  "status": "failed",
+  "interpretation": "Invalid initial probe: internal Cartesia f32le was mistaken for s16le. Superseded by audio-provider-eval.json using the production conversion. Retained to disclose the investigation, not as a product failure."
+}

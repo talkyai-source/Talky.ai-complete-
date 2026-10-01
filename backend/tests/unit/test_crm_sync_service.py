@@ -12,6 +12,7 @@ import os
 from datetime import datetime, timezone
 
 import pytest
+from unittest.mock import AsyncMock
 
 from app.infrastructure.connectors.base import ConnectorProviderError  # noqa: E402
 from app.services import crm_sync_service as svc  # noqa: E402
@@ -38,6 +39,8 @@ class FakeConnector:
 
     def __init__(self, provider="salesforce", *, found=None, config=None, fail_first_with=None):
         self.provider = provider
+        self.connector_id = '11111111-1111-1111-1111-111111111111'
+        self.external_account_id = provider + '-account'
         self.found = found
         self.config = config or {}
         self.calls = []
@@ -66,7 +69,7 @@ class FakeConnector:
 
 def _call_row(**over):
     row = {
-        "id": CALL, "tenant_id": TENANT, "campaign_id": "camp-1", "lead_id": LEAD,
+        "id": CALL, "source_revision": "1", "tenant_id": TENANT, "campaign_id": "camp-1", "lead_id": LEAD,
         "phone_number": "+15550100100", "direction": "outbound", "status": "completed",
         "outcome": "answered", "duration_seconds": 95, "transcript": "Agent: hi\nUser: hello",
         "summary": None, "summary_json": None, "recording_url": None, "crm_call_id": None,
@@ -90,7 +93,7 @@ class MemoryDeliveries:
     def __init__(self):
         self.rows = {}
 
-    async def enqueue(self, tenant_id, call_id, provider, desired_key, *, legacy_id=None):
+    async def enqueue(self, tenant_id, call_id, provider, desired_key, *, legacy_id=None, source_revision=None):
         key = (tenant_id, call_id, provider)
         row = self.rows.get(key)
         if row is None:
@@ -105,7 +108,7 @@ class MemoryDeliveries:
                 row.update(status='pending', attempts=0)
         return dict(row)
 
-    async def claim(self, tenant_id, call_id, provider):
+    async def claim(self, tenant_id, call_id, provider, *, source_revision=None, expected_key=None):
         row = self.rows[(tenant_id,call_id,provider)]
         if row['status'] not in ('pending','unknown') or row['attempts'] >= 6:
             return None
@@ -127,6 +130,16 @@ class MemoryDeliveries:
             if row['desired_key'] != receipt['desired_key']:
                 row['status'] = 'pending'
 
+    async def bind_destination(self, receipt, connector_id, account_id):
+        row = self.rows[(receipt['tenant_id'], receipt['call_id'], receipt['provider'])]
+        saved = (row.get('destination_connector_id'), row.get('destination_account_id'))
+        if saved != (connector_id, account_id):
+            if saved != (None, None) or row.get('remote_call_id') or row.get('remote_contact_id'):
+                return False
+        row.update(destination_connector_id=connector_id, destination_account_id=account_id)
+        receipt.update(destination_connector_id=connector_id, destination_account_id=account_id)
+        return True
+
 
 @pytest.fixture
 def harness(monkeypatch):
@@ -141,7 +154,7 @@ def harness(monkeypatch):
 
     monkeypatch.setattr(svc, "list_active_connector_providers", lambda db, t, typ: list(state["providers"]))
 
-    async def _connector(tenant_id, provider, *, force_refresh=False):
+    async def _connector(tenant_id, provider, *, force_refresh=False, connector_id=None):
         state["resolved"].append((provider, force_refresh))
         return state["connectors"][provider]
 
@@ -154,7 +167,7 @@ def harness(monkeypatch):
     async def _campaign_name(tenant_id, campaign_id):
         return "Spring promo"
 
-    async def _remember(tenant_id, lead_id, provider, contact_id, existing_ids):
+    async def _remember(tenant_id, lead_id, provider, contact_id, existing_ids, **destination):
         state["remembered"].append((lead_id, provider, contact_id))
 
     async def _mark(tenant_id, call_id, crm_call_id):
@@ -223,7 +236,8 @@ def test_no_crm_connected_is_a_skip_with_operator_guidance(harness):
 def test_known_salesforce_id_on_the_lead_is_used_without_searching(harness):
     conn = FakeConnector()
     harness["connectors"]["salesforce"] = conn
-    harness["lead"] = _lead_row(custom_fields={"crm_ids": {"salesforce": "00Qknown"}})
+    harness["lead"] = _lead_row(custom_fields={"crm_ids": {"salesforce": "00Qknown"},
+        "crm_destinations": {"salesforce": {"account_id": conn.external_account_id, "contact_id": "00Qknown"}}})
     out = _run(harness["service"].sync_call(TENANT, CALL))
     assert out.success and out.providers == ["salesforce"]
     assert out.crm_contact_id == "00Qknown" and out.crm_call_id == "00Ttask"
@@ -325,6 +339,65 @@ def test_authentication_failure_forces_one_refresh_and_retries(harness):
     assert out.success and out.crm_call_id == "00Ttask"
     # resolved once normally, then once with force_refresh=True
     assert harness["resolved"] == [("salesforce", False), ("salesforce", True)]
+
+
+@pytest.mark.parametrize('switch', ['connector', 'account'])
+def test_account_switch_during_auth_retry_never_replays_the_remote_write(harness, monkeypatch, switch):
+    original = FakeConnector(found={'id': 'original-contact'}, fail_first_with=ConnectorProviderError(
+        provider='salesforce', operation='log_call', category='authentication', message='expired', status_code=401))
+    replacement = FakeConnector(found={'id': 'different-contact'})
+    if switch == 'connector': replacement.connector_id = '22222222-2222-2222-2222-222222222222'
+    else: replacement.external_account_id = 'different-org'
+    async def resolve(tenant, provider, *, force_refresh=False, connector_id=None):
+        if force_refresh:
+            assert connector_id == original.connector_id
+        return replacement if force_refresh else original
+    monkeypatch.setattr(harness['service'], '_connector', resolve)
+    result = _run(harness['service'].sync_call(TENANT, CALL))
+    assert not result.success and not replacement.calls
+    row = harness['deliveries'].rows[(TENANT, CALL, 'salesforce')]
+    assert row['status'] == 'unknown' and row['destination_account_id'] == original.external_account_id
+
+
+def test_account_switch_between_summary_updates_does_not_touch_old_remote_id(harness):
+    original = FakeConnector(found={'id': 'old-contact'})
+    harness['connectors']['salesforce'] = original
+    assert _run(harness['service'].sync_call(TENANT, CALL)).success
+    replacement = FakeConnector(found={'id': 'new-contact'})
+    replacement.external_account_id = 'new-org'
+    harness['connectors']['salesforce'] = replacement
+    harness['call']['summary_json'] = {'headline': 'new summary'}
+    assert not _run(harness['service'].sync_call(TENANT, CALL)).success
+    assert replacement.calls == []
+    row = harness['deliveries'].rows[(TENANT, CALL, 'salesforce')]
+    assert row['status'] == 'unknown' and row['remote_call_id'] == '00Ttask'
+
+
+@pytest.mark.asyncio
+async def test_legacy_connection_without_saved_identity_is_verified_before_binding(monkeypatch):
+    connector = FakeConnector()
+    connector.external_account_id = None
+    connector.fetch_account_identity = AsyncMock(return_value={'external_account_id': 'verified-org'})
+    resolver = AsyncMock(return_value=(connector, connector.connector_id, 'salesforce'))
+    monkeypatch.setattr(svc, 'resolve_active_connector', resolver)
+    service = CRMSyncService(object(), object())
+    resolved = await service._connector(TENANT, 'salesforce', connector_id=connector.connector_id)
+    assert resolved.external_account_id == 'verified-org'
+    connector.fetch_account_identity.assert_awaited_once()
+    assert resolver.await_args.kwargs['connector_id'] == connector.connector_id
+
+
+@pytest.mark.parametrize('custom', [
+    {'crm_ids': {'salesforce': 'unowned-id'}},
+    {'crm_destinations': {'salesforce': {'account_id': 'different-org', 'contact_id': 'wrong-id'}}},
+])
+def test_unowned_or_other_account_lead_ids_are_resolved_in_current_account(harness, custom):
+    connector = FakeConnector(found={'id': 'verified-current-contact'})
+    harness['connectors']['salesforce'] = connector
+    harness['lead'] = _lead_row(custom_fields=custom, crm_contact_id='legacy-unowned-id')
+    result = _run(harness['service'].sync_call(TENANT, CALL))
+    assert result.success and result.crm_contact_id == 'verified-current-contact'
+    assert [call[0] for call in connector.calls] == ['search', 'log']
 
 
 def test_non_auth_provider_error_is_reported_not_retried(harness):

@@ -16,7 +16,7 @@ class ScheduleReminderInput(BaseModel):
     offset: Optional[str] = Field(None, description="Time offset from meeting like '-1h', '-30m', '-10m'")
     scheduled_at: Optional[str] = Field(None, description="Absolute scheduled time if no offset")
     message: Optional[str] = Field(None, description="Custom reminder message")
-    reminder_type: str = Field("sms", description="Reminder type: 'sms' or 'email'")
+    reminder_type: str = Field(..., description="Explicitly selected reminder type: 'sms' or 'email'")
     confirm: bool = Field(False, description="Preview first; Apply confirms.")
 
 
@@ -42,15 +42,16 @@ async def schedule_reminder(
     offset: Optional[str] = None,
     scheduled_at: Optional[str] = None,
     message: Optional[str] = None,
-    reminder_type: str = "sms",
+    reminder_type: Optional[str] = None,
     conversation_id: Optional[str] = None,
     confirm: bool = False,
+    _expected_recipient: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Schedule a reminder for a meeting or lead.
 
     Inserts a row into `reminders`, which the background reminder_worker picks up
-    and delivers (SMS to the lead's number if present, else email). When a
+    and delivers through the explicitly selected SMS or email channel. When a
     meeting_id is given, an `offset` is relative to the meeting start time;
     otherwise an explicit time with UTC offset is required.
 
@@ -90,6 +91,7 @@ async def schedule_reminder(
                 "scheduled_at": scheduled_at,
                 "message": message,
                 "reminder_type": reminder_type,
+                "_expected_recipient": _expected_recipient,
             },
             chained_result=chained_result,
             conversation_id=conversation_id,

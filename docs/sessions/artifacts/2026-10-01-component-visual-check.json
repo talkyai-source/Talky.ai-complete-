@@ -1,0 +1,32 @@
+{
+  "date": "2026-10-01",
+  "scope": "Isolated real React components bundled with esbuild, dashboard/navigation test adapters, and synthetic API responses; no customer data or live writes",
+  "source_sha256": {
+    "Talk-Leee/src/app/ai-options/page.tsx": "f18d1f7dd65db0e96716be73ce6e7bb7ff860c9581c072bb77cd0eac6b75a84e",
+    "Talk-Leee/src/lib/temperature-advice.ts": "877cb7e1500c5928da775f279ec274e415c31468651b613c7d06ee519a59841a",
+    "Talk-Leee/src/components/realtime/ai-options-controls.tsx": "0970cebed12b9df194a87896e3a06c2999a9d06cdb36fe4575f44a28e8e9f0a8",
+    "Talk-Leee/src/components/calls/lead-details-panel.tsx": "ec23bf451dfa1711674f238590de777f0a9f8900e1c67a7690573febde5936af"
+  },
+  "checks": {
+    "lead_source_quote_and_unconfirmed_status_visible": true,
+    "independent_crm_success_and_unknown_states_visible": true,
+    "realtime_prompt_and_persona_saved_and_reloaded": true,
+    "uncaught_page_errors": 0,
+    "traditional_luna_selection_preserved_during_realtime_switch": true,
+    "mobile_390px_horizontal_overflow": false,
+    "luna_saved_as_openai_and_reloaded": true
+  },
+  "screenshots": [
+    "Talk-Leee/output/playwright/luna-desktop.png",
+    "Talk-Leee/output/playwright/realtime-desktop.png",
+    "Talk-Leee/output/playwright/realtime-mobile.png",
+    "Talk-Leee/output/playwright/leads-desktop.png",
+    "Talk-Leee/output/playwright/leads-mobile.png"
+  ],
+  "limitations": [
+    "API persistence was simulated in a browser route handler; this does not prove backend persistence.",
+    "Dashboard/navigation used test adapters; full deployed UI acceptance remains separate.",
+    "Vercel preview built at initial commit4a36eda4 but browser access requires authentication.",
+    "The isolated component bundle used the existing local dependencies; clean updated-dependency typecheck and final CI build are separate checks."
+  ]
+}
