@@ -612,6 +612,7 @@ def test_billing_ledger_is_append_only_for_tenant_service_and_owner_contexts() -
                     text("SELECT version_num FROM alembic_version")
                 ).scalar_one_or_none()
                 if current not in {
+                    CURRENT_HEAD,
                     "0033_bootstrap_contract_repair",
                     "0034_inbound_billing_four_eye",
                     "0035_user_profiles_role_widen",
@@ -846,26 +847,48 @@ def test_0035_role_check_accepts_exact_new_roles_and_rejects_unknown() -> None:
 
 
 @pytest.mark.integration
-def test_current_head_cli_downgrade_refuses_without_moving_marker() -> None:
+def test_crm_receipt_cli_downgrade_refuses_without_moving_marker_or_losing_identity() -> None:
     dsn = _dsn_or_skip()
     engine = _engine_or_fail()
+    tenant, campaign, call, connector = (str(uuid.uuid4()) for _ in range(4))
     try:
-        with engine.connect() as connection:
+        with engine.begin() as connection:
+            connection.execute(text("SET LOCAL app.bypass_rls = 'on'"))
             before = connection.execute(
                 text("SELECT version_num FROM alembic_version")
             ).scalar_one()
+            connection.execute(text("INSERT INTO tenants(id,business_name) VALUES(:id,'Rollback fixture')"), {"id": tenant})
+            connection.execute(text("INSERT INTO campaigns(id,tenant_id,name) VALUES(:id,:tenant,'Rollback campaign')"), {"id": campaign, "tenant": tenant})
+            connection.execute(text("INSERT INTO calls(id,tenant_id,campaign_id,phone_number,status) VALUES(:id,:tenant,:campaign,'+15555550100','completed')"), {"id": call, "tenant": tenant, "campaign": campaign})
+            connection.execute(text("""INSERT INTO crm_deliveries(tenant_id,call_id,provider,status,
+                remote_contact_id,remote_call_id,destination_connector_id,destination_account_id)
+                VALUES(:tenant,:call,'hubspot','succeeded','fixture-contact','fixture-call',:connector,'fixture-account')"""),
+                {"tenant": tenant, "call": call, "connector": connector})
         assert before == CURRENT_HEAD
 
-        result = _run_alembic(dsn, "downgrade", "-1")
+        # Newer additive migrations may retain their columns on downgrade.
+        # Crossing the durable receipt boundary must fail atomically.
+        result = _run_alembic(dsn, "downgrade", "0047_protect_ai_config_backup")
         assert result.returncode != 0
-        assert "Refusing to downgrade" in result.stderr
+        assert "Refusing to downgrade 0048" in result.stderr
 
         with engine.connect() as connection:
+            connection.execute(text("SET LOCAL app.bypass_rls = 'on'"))
             assert (
                 connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
                 == before
             )
+            receipt = connection.execute(text("""SELECT remote_contact_id,remote_call_id,
+                destination_connector_id::text,destination_account_id FROM crm_deliveries
+                WHERE tenant_id=:tenant AND call_id=:call"""), {"tenant": tenant, "call": call}).one()
+            assert tuple(receipt) == ("fixture-contact", "fixture-call", connector, "fixture-account")
     finally:
+        with engine.begin() as connection:
+            connection.execute(text("SET LOCAL app.bypass_rls = 'on'"))
+            connection.execute(text("DELETE FROM crm_deliveries WHERE tenant_id=:tenant"), {"tenant": tenant})
+            connection.execute(text("DELETE FROM calls WHERE id=:call"), {"call": call})
+            connection.execute(text("DELETE FROM campaigns WHERE id=:campaign"), {"campaign": campaign})
+            connection.execute(text("DELETE FROM tenants WHERE id=:tenant"), {"tenant": tenant})
         engine.dispose()
 
 

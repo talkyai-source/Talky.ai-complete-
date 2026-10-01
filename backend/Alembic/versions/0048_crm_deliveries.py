@@ -10,6 +10,10 @@ depends_on = None
 
 def upgrade():
     op.execute(text("SET LOCAL lock_timeout = '5s'"))
+    # Both supported bootstrap schemas predate structured call summaries.
+    # The trigger below and summary writer require this column; retain any
+    # already populated production column instead of assuming it was added.
+    op.execute(text("ALTER TABLE calls ADD COLUMN IF NOT EXISTS summary_json JSONB"))
     op.execute(text("""
         CREATE TABLE crm_deliveries (
             tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -84,6 +88,6 @@ def upgrade():
 
 
 def downgrade():
-    op.execute(text("DROP TRIGGER IF EXISTS calls_queue_crm_deliveries ON calls"))
-    op.execute(text("DROP FUNCTION IF EXISTS queue_call_crm_deliveries()"))
-    op.execute(text("DROP TABLE IF EXISTS crm_deliveries"))
+    raise RuntimeError(
+        "Refusing to downgrade 0048: durable CRM receipts must survive application rollback"
+    )

@@ -17,6 +17,8 @@ def upgrade():
             ('reminders:manage', 'Schedule communications reminders', 'reminders', 'manage', true),
             ('support:report', 'Submit a report to configured support', 'support', 'report', true)
         ON CONFLICT (name) DO UPDATE SET description=EXCLUDED.description;
+    """)
+    op.execute("""
         INSERT INTO role_permissions (role_id, permission_id)
         SELECT r.id, p.id FROM roles r CROSS JOIN permissions p
         WHERE r.name IN ('tenant_admin','partner_admin','platform_admin')

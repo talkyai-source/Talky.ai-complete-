@@ -9,6 +9,8 @@ from uuid import uuid4
 import asyncpg
 import pytest
 import pytest_asyncio
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import create_async_engine
 
 from app.core.db_utils import acquire_with_tenant
 from app.services.crm_delivery_store import CRMDeliveryStore
@@ -33,7 +35,7 @@ async def crm_db(monkeypatch):
         await admin.execute('''
             CREATE TABLE tenants (id UUID PRIMARY KEY);
             CREATE TABLE calls (id UUID PRIMARY KEY, tenant_id UUID, status TEXT, outcome TEXT,
-                duration_seconds INTEGER, transcript TEXT, summary_json JSONB, recording_url TEXT,
+                duration_seconds INTEGER, transcript TEXT, recording_url TEXT,
                 ended_at TIMESTAMPTZ, crm_call_id TEXT);
             CREATE TABLE connectors (tenant_id UUID, provider TEXT, type TEXT, status TEXT);
         ''')
@@ -282,10 +284,19 @@ async def test_execution_permission_migration_grants_only_admins_and_is_idempote
     statements = []
     monkeypatch.setattr(migration, 'op', SimpleNamespace(execute=lambda sql: statements.append(str(sql))))
     migration.upgrade()
-    for _ in range(2):
-        async with admin.transaction():
-            for statement in statements:
-                await admin.execute(statement)
+    # Match Alembic's SQLAlchemy/asyncpg prepared-statement boundary: raw
+    # asyncpg.execute accepts multiple SQL commands and would hide a broken
+    # production migration if both INSERTs were passed in one op.execute.
+    dsn = os.environ['TALKY_CRM_TEST_DATABASE_URL'].replace('postgresql://', 'postgresql+asyncpg://', 1).replace('postgres://', 'postgresql+asyncpg://', 1)
+    schema = await admin.fetchval('SELECT current_schema()')
+    engine = create_async_engine(dsn, connect_args={'server_settings': {'search_path': schema}})
+    try:
+        for _ in range(2):
+            async with engine.begin() as conn:
+                for statement in statements:
+                    await conn.execute(text(statement))
+    finally:
+        await engine.dispose()
     expected = {'email:send', 'sms:send', 'calendar:read', 'calendar:manage', 'reminders:manage', 'support:report'}
     permissions = await admin.fetch('SELECT name,resource,action,is_system FROM permissions WHERE is_system')
     assert {row['name'] for row in permissions} == expected

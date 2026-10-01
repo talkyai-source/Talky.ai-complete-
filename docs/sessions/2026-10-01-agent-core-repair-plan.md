@@ -633,6 +633,39 @@ claimed complete without actual access.
 - Migration 0049 also recognizes existing ended/canceled/rejected terminal
   rows when marking historical calls not processed. Its real PostgreSQL
   regression reproduced false pending before the correction and then passed.
+- Candidate `2b3a570b` reached 10,162 passing unit/security cases in GitHub CI
+  with one stale ambiguous-decline expectation (13 skipped). The isolated Linux
+  run reached 10,163 passing with the same single failure (12 skipped). The
+  fixture now requires a current refusal instead of allowing old declines to
+  authorize hangup; the 78-case caller/behavior delta passes. Both gateway CTest
+  and sanitizer/shutdown gates passed on the pushed candidate.
+- The complete current-schema bootstrap exposed two defects hidden by minimal
+  database fixtures: 0048 assumed `calls.summary_json` existed, and 0050 put
+  two commands into one SQLAlchemy/asyncpg prepared statement. Adding the
+  missing column without altering existing data and separating the statements
+  fixes the actual upgrade. Current-schema bootstrap now reaches 0051 and 39
+  integration checks pass with no skips. The protected downgrade refuses to
+  erase CRM receipts and leaves the schema marker and account/remote IDs intact.
+- Gitleaks flagged 81 source-file digests in three synthetic evidence artifacts.
+  Each value was verified against the exact committed source bytes. Only those
+  commit/path/rule/line fingerprints are excepted. The original history scan
+  passes, and new synthetic key values at the same paths still trigger both
+  rules. No artifact-directory or token-pattern exemption was added.
+- One pre-existing keepalived script stored CRLF despite the LF Git attributes,
+  making a fresh Linux checkout appear dirty. The blob is normalized without
+  changing shell instructions so release clean-tree validation can succeed.
+- A separate read-only audit of the installed production environment found
+  16 advisory records across PyJWT 2.13.0 and urllib3 2.7.0. This is distinct
+  from the clean declared-requirements audit. Pin the exercised candidate
+  versions, PyJWT 2.15.1 and urllib3 2.8.0; the candidate audit reports zero
+  known vulnerabilities and `pip check` succeeds. This does not establish an
+  application exploit. The current production FastAPI/Starlette versions do
+  match their pins; an older requirements comment was corrected.
+  `deploy_to_server.sh` does not install Python dependencies, so the controlled
+  drain/restart window also requires the operator to run
+  `/opt/talky/backend/venv/bin/python -m pip install 'PyJWT==2.15.1' 'urllib3==2.8.0'`,
+  then verify installed versions, `pip check`, and the installed-environment
+  audit before restarting services. No production package was changed here.
 - Production, database schema and services are unchanged. Controlled call and
   action acceptance still needs designated test destinations, connected test
   accounts and the existing deployment procedure's real drain attestation.

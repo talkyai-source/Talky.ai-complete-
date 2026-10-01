@@ -1,11 +1,11 @@
-# .gitleaksignore — findings that are KNOWN, RECORDED, and REMEDIATED.
+# .gitleaksignore — explicitly reviewed, fingerprint-scoped findings.
 #
-# An entry here does NOT mean 'false positive'. It means: this was a real leak,
-# the credential has been rotated, and the finding remains in git history where
-# gitleaks will keep seeing it. Rewriting public history is the alternative, and
-# it is worse — it breaks every clone and un-publishes nothing.
+# Historical credential findings are not false positives. Enable an exception
+# only after rotation is confirmed; otherwise keep it commented out. The finding
+# remains in git history where gitleaks will keep seeing it. Rewriting public
+# history breaks existing clones and does not undo disclosure.
 #
-# Do not add an entry until the credential is actually rotated. An ignore rule on
+# Do not add a credential finding until it is actually rotated. An ignore rule on
 # a live credential makes a leak permanent and invisible at the same time.
 #
 # === F-14 - production Postgres password in tmp_query*.sh ===================
@@ -33,3 +33,101 @@
 # that a live credential is sitting in public history, and suppressing it
 # while the credential is still live would be the worst of both worlds:
 # the leak persists and the alarm is off.
+
+# === 2026-10-01: verified evaluation source hashes (81 false positives) =====
+# These are exact source-file SHA-256 values in three evaluation manifests.
+# Verified every value against SHA256(git show <commit>:backend/<source path>)
+# at commit 2b3a570b84e2dfd8598c6c0959932ee4387fde75: all 81 match.
+# 78 generic-api-key findings are security-related source filenames followed
+# by their file digest; the 3 sentry-access-token findings are the digest of
+# backend/app/core/sentry_init.py. None is a provider credential or token.
+# Each exception pins commit, artifact path, rule, and line. Future artifacts,
+# different lines/commits, and actual credentials remain scanned normally.
+# The historical real-credential entries above remain commented out.
+
+# docs/sessions/artifacts/2026-10-01-groq-incomplete-tool-contract-retry.json
+2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-groq-incomplete-tool-contract-retry.json:generic-api-key:229
+2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-groq-incomplete-tool-contract-retry.json:generic-api-key:238
+2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-groq-incomplete-tool-contract-retry.json:generic-api-key:239
+2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-groq-incomplete-tool-contract-retry.json:generic-api-key:240
+2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-groq-incomplete-tool-contract-retry.json:generic-api-key:267
+2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-groq-incomplete-tool-contract-retry.json:generic-api-key:280
+2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-groq-incomplete-tool-contract-retry.json:generic-api-key:291
+2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-groq-incomplete-tool-contract-retry.json:generic-api-key:315
+2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-groq-incomplete-tool-contract-retry.json:generic-api-key:346
+2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-groq-incomplete-tool-contract-retry.json:generic-api-key:352
+2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-groq-incomplete-tool-contract-retry.json:generic-api-key:356
+2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-groq-incomplete-tool-contract-retry.json:generic-api-key:358
+2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-groq-incomplete-tool-contract-retry.json:generic-api-key:360
+2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-groq-incomplete-tool-contract-retry.json:generic-api-key:361
+2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-groq-incomplete-tool-contract-retry.json:generic-api-key:364
+2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-groq-incomplete-tool-contract-retry.json:generic-api-key:370
+2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-groq-incomplete-tool-contract-retry.json:generic-api-key:372
+2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-groq-incomplete-tool-contract-retry.json:generic-api-key:375
+2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-groq-incomplete-tool-contract-retry.json:generic-api-key:376
+2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-groq-incomplete-tool-contract-retry.json:generic-api-key:442
+2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-groq-incomplete-tool-contract-retry.json:generic-api-key:448
+2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-groq-incomplete-tool-contract-retry.json:generic-api-key:489
+2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-groq-incomplete-tool-contract-retry.json:generic-api-key:627
+2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-groq-incomplete-tool-contract-retry.json:generic-api-key:644
+2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-groq-incomplete-tool-contract-retry.json:generic-api-key:689
+2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-groq-incomplete-tool-contract-retry.json:generic-api-key:753
+2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-groq-incomplete-tool-contract-retry.json:sentry-access-token:379
+
+# docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-final.json
+2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-final.json:generic-api-key:2695
+2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-final.json:generic-api-key:2704
+2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-final.json:generic-api-key:2705
+2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-final.json:generic-api-key:2706
+2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-final.json:generic-api-key:2733
+2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-final.json:generic-api-key:2746
+2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-final.json:generic-api-key:2757
+2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-final.json:generic-api-key:2781
+2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-final.json:generic-api-key:2812
+2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-final.json:generic-api-key:2818
+2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-final.json:generic-api-key:2822
+2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-final.json:generic-api-key:2824
+2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-final.json:generic-api-key:2826
+2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-final.json:generic-api-key:2827
+2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-final.json:generic-api-key:2830
+2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-final.json:generic-api-key:2836
+2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-final.json:generic-api-key:2838
+2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-final.json:generic-api-key:2841
+2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-final.json:generic-api-key:2842
+2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-final.json:generic-api-key:2908
+2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-final.json:generic-api-key:2914
+2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-final.json:generic-api-key:2955
+2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-final.json:generic-api-key:3093
+2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-final.json:generic-api-key:3110
+2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-final.json:generic-api-key:3155
+2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-final.json:generic-api-key:3219
+2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-final.json:sentry-access-token:2845
+
+# docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-no-end-tool-schema.json
+2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-no-end-tool-schema.json:generic-api-key:2505
+2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-no-end-tool-schema.json:generic-api-key:2514
+2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-no-end-tool-schema.json:generic-api-key:2515
+2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-no-end-tool-schema.json:generic-api-key:2516
+2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-no-end-tool-schema.json:generic-api-key:2543
+2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-no-end-tool-schema.json:generic-api-key:2556
+2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-no-end-tool-schema.json:generic-api-key:2567
+2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-no-end-tool-schema.json:generic-api-key:2591
+2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-no-end-tool-schema.json:generic-api-key:2622
+2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-no-end-tool-schema.json:generic-api-key:2628
+2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-no-end-tool-schema.json:generic-api-key:2632
+2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-no-end-tool-schema.json:generic-api-key:2634
+2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-no-end-tool-schema.json:generic-api-key:2636
+2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-no-end-tool-schema.json:generic-api-key:2637
+2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-no-end-tool-schema.json:generic-api-key:2640
+2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-no-end-tool-schema.json:generic-api-key:2646
+2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-no-end-tool-schema.json:generic-api-key:2648
+2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-no-end-tool-schema.json:generic-api-key:2651
+2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-no-end-tool-schema.json:generic-api-key:2652
+2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-no-end-tool-schema.json:generic-api-key:2718
+2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-no-end-tool-schema.json:generic-api-key:2724
+2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-no-end-tool-schema.json:generic-api-key:2765
+2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-no-end-tool-schema.json:generic-api-key:2903
+2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-no-end-tool-schema.json:generic-api-key:2920
+2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-no-end-tool-schema.json:generic-api-key:2965
+2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-no-end-tool-schema.json:generic-api-key:3029
+2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-no-end-tool-schema.json:sentry-access-token:2655
