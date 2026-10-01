@@ -247,7 +247,7 @@ def _clarification_progress(
     fallback_status: CaptureStatus,
     default_prompt: str,
 ) -> tuple[CaptureStatus, int, Optional[str]]:
-    """Bump the re-ask counter; escalate once, then give up for good.
+    """Bump the re-ask counter; give one honest move-on directive, then stop.
 
     Every NEEDS_CLARIFICATION/INVALID branch used to hand the caller the
     identical "please spell/repeat it" instruction forever (call 6aaeb4dd,
@@ -280,11 +280,9 @@ def _clarification_progress(
         return fallback_status, attempts, (
             f"You have already asked for the {field} "
             f"{MAX_CLARIFICATION_ATTEMPTS} times without success; do not ask "
-            "them to say it again in any form. If you have formed any "
-            "understanding of it, read back your best understanding once, "
-            "plainly, and ask for a clear yes or no. Otherwise say the team "
-            "will follow up to confirm it, and move on with the rest of the "
-            "call."
+            "them to say it again in any form. Leave it unconfirmed, explain "
+            "briefly that you could not verify it, and move on. Do not guess "
+            "or promise follow-up."
         )
     return fallback_status, attempts, default_prompt
 
@@ -848,6 +846,48 @@ def capture_mode_directive(capture: ContactCaptureState) -> Optional[str]:
     return None
 
 
+def _low_recognition_confidence(score: Optional[float]) -> bool:
+    try:
+        return score is not None and float(score) < _LOW_CONFIDENCE
+    except (TypeError, ValueError):
+        return False
+
+
+def _checked_segment_correction(
+    previous: ContactCaptureState,
+    text: str,
+    phone_region: Optional[str],
+    confidence: Optional[float],
+    alternatives: Sequence[str],
+    explicit_reask: bool,
+) -> Optional[ContactCaptureState]:
+    """Segment repairs obey the same recognition evidence gates as whole values."""
+    def parse(value):
+        return (_email_correction(previous, value) if previous.kind == "email"
+                else _phone_correction(previous, value, phone_region))
+
+    correction = parse(text)
+    if correction is None:
+        return None
+    conflict = False
+    for alternative in alternatives or ():
+        other = parse(str(alternative))
+        other_value = other.normalized_value if other else _extract_normalized(
+            previous.kind, str(alternative), phone_region)[1]
+        if other_value and other_value != correction.normalized_value:
+            conflict = True
+            break
+    if _low_recognition_confidence(confidence) or explicit_reask or conflict:
+        if previous.status is CaptureStatus.CANCELLED:
+            return previous
+        status, attempts, prompt = _clarification_progress(
+            previous.kind, previous, CaptureStatus.NEEDS_CLARIFICATION,
+            "Please repeat only the unclear part of that correction; do not guess or read back a changed value yet.")
+        return _state(previous.kind, status, raw=text, segments=previous.segments,
+            attempts=attempts, prompt=prompt)
+    return correction
+
+
 def advance_capture(
     previous: Optional[ContactCaptureState],
     *,
@@ -886,11 +926,8 @@ def advance_capture(
     if previous is not None and previous.status is CaptureStatus.CONFIRMED:
         if _has_explicit_confirmed_cancellation(kind, text):
             return _state(kind, CaptureStatus.CANCELLED, raw=text)
-        correction = (
-            _email_correction(previous, text)
-            if kind == "email"
-            else _phone_correction(previous, text, phone_region)
-        )
+        correction = _checked_segment_correction(previous, text, phone_region,
+            transcript_confidence, transcript_alternatives, explicit_reask)
         if correction is not None:
             return correction
         _raw, replacement = _extract_normalized(kind, text, phone_region)
@@ -913,11 +950,8 @@ def advance_capture(
         return _state(kind, CaptureStatus.CANCELLED, raw=text)
 
     if previous is not None:
-        correction = (
-            _email_correction(previous, text)
-            if kind == "email"
-            else _phone_correction(previous, text, phone_region)
-        )
+        correction = _checked_segment_correction(previous, text, phone_region,
+            transcript_confidence, transcript_alternatives, explicit_reask)
         if correction is not None:
             return correction
 
@@ -973,35 +1007,25 @@ def advance_capture(
 
     if normalized:
         segments = _email_segments(normalized) if kind == "email" else (normalized,)
-        if _alternatives_conflict(
-            kind, text, transcript_alternatives, phone_region
-        ):
-            return _state(
-                kind,
-                CaptureStatus.NEEDS_CLARIFICATION,
-                raw=audit_raw,
-                normalized=normalized,
-                segments=segments,
-                prompt="I heard two different versions. Please repeat just that contact detail.",
-            )
+        conflict = _alternatives_conflict(kind, text, transcript_alternatives, phone_region)
         # None is not below a threshold. Only an actual numeric score can trip
         # this evidence gate; providers without the signal use alternatives or
         # explicit_reask instead.
-        try:
-            low_confidence = (
-                transcript_confidence is not None
-                and float(transcript_confidence) < _LOW_CONFIDENCE
-            )
-        except (TypeError, ValueError):
-            low_confidence = False
-        if low_confidence or explicit_reask:
+        if conflict or _low_recognition_confidence(transcript_confidence) or explicit_reask:
+            if previous is not None and previous.status is CaptureStatus.CANCELLED:
+                return previous
+            status, attempts, prompt = _clarification_progress(
+                kind, previous, CaptureStatus.NEEDS_CLARIFICATION,
+                "I heard two different versions. Please repeat just that contact detail."
+                if conflict else "Please repeat that contact detail slowly so I can verify it.")
             return _state(
                 kind,
-                CaptureStatus.NEEDS_CLARIFICATION,
+                status,
                 raw=audit_raw,
                 normalized=normalized,
                 segments=segments,
-                prompt="Please repeat that contact detail slowly so I can verify it.",
+                attempts=attempts,
+                prompt=prompt,
             )
         if (
             previous is None

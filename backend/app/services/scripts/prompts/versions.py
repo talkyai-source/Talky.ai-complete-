@@ -121,9 +121,10 @@ _VERSIONS: Final[Mapping[str, str]] = {
     # contact capture, caller corrections before campaign relationship claims.
     # @9 / @8: product benefits and eligibility require supplied facts.
     # @10 / @9: unverified caller product use is a question, not a fact.
-    "lead_gen": "lead_gen@10",
-    "customer_support": "customer_support@9",
-    "receptionist": "receptionist@9",
+    # @11 / @10: caller-paced repair, new prospects, small talk and topic refusals.
+    "lead_gen": "lead_gen@11",
+    "customer_support": "customer_support@10",
+    "receptionist": "receptionist@10",
 }
 
 #: Fallback for a persona that is not in the registry yet. Deliberately visible

@@ -97,7 +97,9 @@ def test_email_clarification_stops_asking_to_spell_after_three_asks():
     # spelling request.
     escalated_prompt = prompts[MAX_CLARIFICATION_ATTEMPTS]
     assert "spell" not in escalated_prompt.lower()
-    assert "yes or no" in escalated_prompt.lower() or "team" in escalated_prompt.lower()
+    assert "leave it unconfirmed" in escalated_prompt.lower()
+    assert "team will" not in escalated_prompt.lower()
+    assert "best understanding" not in escalated_prompt.lower()
 
     # The escalation is sticky: it does not revert to asking to spell again.
     assert "spell" not in prompts[-1].lower()
@@ -135,7 +137,7 @@ def test_phone_clarification_stops_asking_after_three_asks():
     repeat_asks = [p for p in prompts if "repeat" in p.lower() and "team" not in p.lower()]
     assert len(repeat_asks) <= MAX_CLARIFICATION_ATTEMPTS
     escalated_prompt = prompts[MAX_CLARIFICATION_ATTEMPTS]
-    assert "team" in escalated_prompt.lower() or "yes or no" in escalated_prompt.lower()
+    assert "leave it unconfirmed" in escalated_prompt.lower()
     for later in range(MAX_CLARIFICATION_ATTEMPTS + 1, 5):
         assert statuses[later] is CaptureStatus.CANCELLED, statuses
         assert prompts[later] == ""

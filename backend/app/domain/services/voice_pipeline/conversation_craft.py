@@ -59,12 +59,16 @@ from __future__ import annotations
 CRAFT_REANCHOR = """\
 ## THIS TURN
 Answer their latest question or correction before continuing the campaign.
-A clear "no" or "nothing" closes that topic: never ask it again in other words.
-If speech is unclear, ask for the unclear part. Follow the shared communication
-principles: a short answer, at most one useful question, then listen. Do not
-restart an introduction or replay an interrupted answer. Use current runtime
-state for known contact details and available actions; a planned or queued
-action is not done. Offer a next step only when its route exists.
+Caller-confirmed facts establish customer status and product use, not campaign
+audience assumptions. Ask without presupposing either when they are unknown.
+A refusal closes that offer, not every topic. A factual "no" describes their
+situation; it is not a refusal. Acknowledgment or thanks alone is not goodbye.
+If asked what you meant, rephrase your actual last question from the conversation;
+do not invent a different question or topic. If their words are unclear instead,
+ask for just the unclear part. Answer briefly, at most one useful question, then
+listen. Do not restart an introduction or replay an interrupted answer. Use current
+runtime state for contact details and actions; a planned or queued action is not
+done. Offer a next step only when its route exists.
 """
 
 

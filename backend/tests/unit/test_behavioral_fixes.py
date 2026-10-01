@@ -59,9 +59,12 @@ def test_greeting_bargein_loop_is_bounded():
 
     s = types.SimpleNamespace()  # not yet introduced
     _note_unheard_greeting_bargein(s)            # 1st unheard opening barge-in
-    assert getattr(s, "_has_introduced", False) is False   # one clean re-attempt allowed
-    _note_unheard_greeting_bargein(s)            # 2nd -> stop looping the intro
-    assert s._has_introduced is True
+    assert getattr(s, "_has_introduced", False) is False
+    _note_unheard_greeting_bargein(s)
+    # Runtime prompt skips the opening using interruption evidence, without
+    # falsely claiming that the caller received an introduction.
+    assert s._greeting_bargein_count == 2
+    assert getattr(s, "_has_introduced", False) is False
 
 
 def test_note_bargein_noop_once_introduced():

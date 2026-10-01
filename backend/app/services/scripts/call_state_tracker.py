@@ -117,6 +117,8 @@ _CONTACT_OBJECTION_RE = re.compile(
     r"|\b(?:haven'?t|have\s+not|didn'?t|did\s+not|never)\s+ask(?:ed)?\s+"
     r"(?:you\s+)?for\s+(?:that|it|this|any)"
     r"|\bnot\s+interested\s+in\s+(?:sharing|giving)\b"
+    r"|\b(?:no\s+thanks?\s+(?:to|for)|not\s+interested\s+in)\s+"
+    r"(?:e-?mail|sms|phone|(?:my\s+)?(?:number|contact\s+details?))\b"
     r"|\b(?:not|won'?t\s+be)\s+(?:giving|sharing)\b[^.?!]{0,20}"
     r"\b(?:e-?mail|number|details?)\b"
     r"|\b(?:don'?t|do\s+not)\s+want\s+to\s+(?:give|share)\b",

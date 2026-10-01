@@ -95,6 +95,7 @@ async def generate_llm_response(llm_provider, latency_tracker, session, user_inp
             agent_name=(getattr(_agent_cfg, "agent_name", "") or ""),
             company_name=(getattr(_agent_cfg, "company_name", "") or ""),
             has_introduced=bool(getattr(session, "_has_introduced", False)),
+            opening_interrupted=bool(getattr(session, "_greeting_bargein_count", 0)),
             structured_state_block=render_live_state_block(_structured),
             direction=(getattr(session, "_call_direction", None)
                        or getattr(getattr(session, "config", None), "direction", "outbound")),

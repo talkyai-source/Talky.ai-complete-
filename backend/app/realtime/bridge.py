@@ -139,6 +139,7 @@ class RealtimeBridge:
         # is a safe in-memory fallback for fail-closed unavailable results.
         self._action_session = action_session or self
         self._latest_caller_text = ""
+        self._previous_assistant_text = ""
         self._playback_task = None
         self._repair_attempted = False
         self._failure_reason = None
@@ -213,6 +214,7 @@ class RealtimeBridge:
         # Identity is delivery evidence, not generated-text evidence. Consume
         # this exactly once when the opening response completes uninterrupted.
         self._identity_opening_pending = bool(greet_on_start)
+        self._opening_interrupted = False
 
     # ── Lifecycle ────────────────────────────────────────────────────────
     def set_on_connection_lost(
@@ -458,8 +460,16 @@ class RealtimeBridge:
                 elif kind == "interrupted":
                     # Revoke the timer immediately, before ASR supplies the new
                     # words. A delayed tool from the old turn cannot rearm it.
+                    if not self._caller_transcript_pending:
+                        self._snapshot_caller_question()
                     self._revoke_pending_end_call(awaiting_transcript=True)
                     await self._cancel_playback(getattr(ev, "raw", None))
+                    if self._identity_opening_pending:
+                        # A later completed answer need not contain the identity
+                        # from this cancelled opening. Do not mark it delivered.
+                        self._identity_opening_pending = False
+                        self._opening_interrupted = True
+                        await self._publish_live_state()
                     if bool((getattr(ev, "raw", None) or {}).get("during_response")):
                         self._contact_agent_interrupted = True
 
@@ -487,6 +497,8 @@ class RealtimeBridge:
                         bool(getattr(ev, "is_final", False)),
                     )
                     if getattr(ev, "is_final", False):
+                        if not self._caller_transcript_pending:
+                            self._snapshot_caller_question()
                         self._revoke_pending_end_call()
                         self._repair_attempted = False
                         self._latest_caller_text = ev.text
@@ -952,7 +964,12 @@ class RealtimeBridge:
             )
             return
         try:
-            await publish(render_live_state_block(self._live_state))
+            block = render_live_state_block(self._live_state)
+            if self._opening_interrupted:
+                block += ("\nThe opening was interrupted before delivery was confirmed. "
+                    "Follow the caller's latest words; do not restart the greeting or "
+                    "permission question. Identify yourself briefly only if still needed.")
+            await publish(block)
         except Exception as exc:  # noqa: BLE001 - state steering is fail-soft
             logger.warning(
                 "realtime_bridge live-state publish err call=%s: %s",
@@ -1020,6 +1037,7 @@ class RealtimeBridge:
                     fc.parsed_arguments(),
                     user_text=("" if fc.name == ACTION_END_CALL and self._caller_transcript_pending
                                else self._latest_caller_text),
+                    previous_assistant_text=self._previous_assistant_text,
                 )
                 if fc.name == ACTION_END_CALL and result["success"]:
                     if caller_revision != self._caller_activity_revision or not self._arm_caller_end_call():
@@ -1070,6 +1088,14 @@ class RealtimeBridge:
             except Exception:  # noqa: BLE001
                 pass
 
+    def _snapshot_caller_question(self):
+        # Take the boundary at speech start when available: provider output
+        # can arrive before delayed final transcription of that same reply.
+        self._previous_assistant_text = next((
+            message.content for message in reversed(self._contact_history)
+            if getattr(message.role, "value", message.role) == "assistant"
+        ), "")
+
     def _revoke_pending_end_call(self, *, awaiting_transcript=False):
         # Once transport termination has started it is an external effect; do
         # not cancel its coroutine halfway through sending the request.
@@ -1095,7 +1121,7 @@ class RealtimeBridge:
         opted_out = contains_dnc(self._latest_caller_text)
         if opted_out:
             self._action_session._caller_opted_out = True
-        if not caller_signaled_end(self._latest_caller_text):
+        if not caller_signaled_end(self._latest_caller_text, previous_assistant_text=self._previous_assistant_text):
             return False
         # A topic-level "no thanks" is not an automatic instruction to hang
         # up. The transcript-only fallback requires an explicit close or DNC.
@@ -1120,7 +1146,7 @@ class RealtimeBridge:
         if (self._caller_transcript_pending
                 or caller_revision != self._pending_end_call_revision
                 or caller_revision != self._caller_activity_revision
-                or not caller_signaled_end(self._latest_caller_text)):
+                or not caller_signaled_end(self._latest_caller_text, previous_assistant_text=self._previous_assistant_text)):
             return
         self._hangup_started = True
         if self._on_end_call is not None:

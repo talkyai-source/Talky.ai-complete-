@@ -557,6 +557,7 @@ class TurnStreamer:
             agent_name=(getattr(_agent_cfg, "agent_name", "") or ""),
             company_name=(getattr(_agent_cfg, "company_name", "") or ""),
             has_introduced=bool(getattr(session, "_has_introduced", False)),
+            opening_interrupted=bool(getattr(session, "_greeting_bargein_count", 0)),
             direction=getattr(session, "_call_direction", "outbound"),
             time_of_day_line=_tod,
             structured_state_block=render_live_state_block(_structured),
@@ -1388,8 +1389,9 @@ class TurnStreamer:
         # whole token budget on internal thinking, or an empty completion).
         # That is NOT an error path, so nothing above caught it — without this
         # the caller just hears dead air. Speak a short recovery line instead.
-        from app.domain.services.end_session_action import caller_signaled_end
-        caller_finished = caller_signaled_end(last_user_text_for_limit)
+        from app.domain.services.end_session_action import caller_signaled_end, previous_assistant_turn
+        caller_finished = caller_signaled_end(last_user_text_for_limit,
+            previous_assistant_text=previous_assistant_turn(messages))
         if (
             not tts_was_interrupted
             and sentences_done == 0

@@ -106,6 +106,37 @@ async def test_topic_refusal_without_end_tool_does_not_automatically_hang_up(tex
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("text", ["No thanks to email.", "I'm not interested in SMS.",
+    "That's all for my email.", "I'm done giving my number.", "Thanks, I have no card setup."])
+async def test_model_end_tool_cannot_turn_topic_completion_into_call_completion(text):
+    bridge, provider, _, ended, session = _fixture()
+    await _events(bridge, provider, RealtimeEvent(kind="caller_transcript", text=text, is_final=True))
+    await _end_tool(bridge)
+    bridge._goodbye_completed.set()
+    await asyncio.sleep(0)
+    assert bridge._termination_task is None
+    assert not session._end_call_requested
+    ended.assert_not_awaited()
+    await bridge.stop()
+
+
+@pytest.mark.asyncio
+async def test_interrupted_opening_does_not_mark_later_answer_as_delivered_identity():
+    bridge, provider, _, ended, _ = _fixture()
+    await _events(bridge, provider,
+        RealtimeEvent(kind="interrupted", raw={"during_response": True}),
+        RealtimeEvent(kind="caller_transcript", text="Wait, what is this about?", is_final=True),
+        RealtimeEvent(kind="response_candidate", text="This is about your inquiry.", audio=b"\xff" * 320))
+    assert bridge._opening_interrupted
+    assert not bridge._identity_opening_pending
+    assert bridge._live_state.identity_introduced is not True
+    assert "do not restart the greeting" in provider.update_live_state.call_args.args[0]
+    provider.truncate_response.assert_awaited()
+    ended.assert_not_awaited()
+    await bridge.stop()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("text,dnc", [
     ("Please stop calling me.", True), ("Goodbye.", False),
     ("Stop calling me, but I need help first.", True),

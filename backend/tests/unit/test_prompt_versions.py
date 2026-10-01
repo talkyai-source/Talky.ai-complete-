@@ -118,6 +118,10 @@ _EXPECTED_HASHES: dict[str, str] = {
     "lead_gen@10": "8e7c9dbed675c9ee",
     "customer_support@9": "67a176798ef4c5f5",
     "receptionist@9": "67ebb32ba3850f0e",
+    # Caller-paced repair, new prospects, small talk and topic-scoped refusals.
+    "lead_gen@11": "e044bc9b16a50253",
+    "customer_support@10": "2939404a68d68cd6",
+    "receptionist@10": "350e0cc2d186686f",
 }
 
 

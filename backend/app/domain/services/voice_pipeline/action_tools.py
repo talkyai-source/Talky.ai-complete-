@@ -233,10 +233,10 @@ def _record_result(session: Any, result: dict[str, Any]) -> None:
             pass
 
 
-def end_call_intent_present(text: str) -> bool:
+def end_call_intent_present(text: str, *, previous_assistant_text: str | None = None) -> bool:
     """Fail-closed proof that the caller, not the model, ended the conversation."""
     from app.domain.services.end_session_action import caller_signaled_end
-    return caller_signaled_end(text)
+    return caller_signaled_end(text, previous_assistant_text=previous_assistant_text)
 
 
 async def run_voice_action(
@@ -245,6 +245,7 @@ async def run_voice_action(
     arguments: Mapping[str, Any] | None = None,
     *,
     user_text: str = "",
+    previous_assistant_text: str | None = None,
 ) -> dict[str, Any]:
     """Execute one voice action and always return a deterministic result.
 
@@ -255,7 +256,10 @@ async def run_voice_action(
         from app.domain.services.voice_pipeline.action_execution import execute_connected_voice_action
         result = await execute_connected_voice_action(session, action, dict(arguments or {}), user_text)
     elif action == ACTION_END_CALL:
-        if not end_call_intent_present(user_text):
+        if previous_assistant_text is None:
+            from app.domain.services.end_session_action import previous_assistant_turn
+            previous_assistant_text = previous_assistant_turn(getattr(session, "conversation_history", ()))
+        if not end_call_intent_present(user_text, previous_assistant_text=previous_assistant_text):
             result = _result(
                 action,
                 success=False,
@@ -396,7 +400,7 @@ def action_tools_for_turn(messages: Iterable[Any], provider: Any, *, session=Non
     context = f"{previous_assistant}\n{user_text}"
     actions = [
         action for action in VOICE_ACTION_NAMES
-        if (end_call_intent_present(user_text) if action == ACTION_END_CALL
+        if (end_call_intent_present(user_text, previous_assistant_text=previous_assistant) if action == ACTION_END_CALL
             else _INTENT_PATTERNS[action].search(context))
     ]
     if session is not None:

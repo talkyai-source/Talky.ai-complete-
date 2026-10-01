@@ -23,6 +23,7 @@ from app.domain.models.session import CallSession
 from app.domain.services.end_session_action import (
     parse_end_session_action,
     should_honor_end_session,
+    previous_assistant_turn,
 )
 from app.domain.services.voice_pipeline import capture_mode
 from app.services.scripts import (
@@ -103,19 +104,15 @@ def _drop_last_message(history, content) -> None:
 def _note_unheard_greeting_bargein(session) -> None:
     """A barge-in cancelled a turn before ANY audio reached the caller (issue #23).
 
-    On the opening turn that leaves ``_has_introduced`` False, so the next turn
-    re-greets from the top — and a caller who keeps talking over the very start
-    makes it loop the intro. Allow one clean re-attempt, then bound it: after a
-    second unheard opening barge-in, mark the agent introduced so it picks up the
-    conversation instead of restarting its greeting forever. No-op once introduced.
+    Keep interruption separate from delivery. The live prompt uses this count
+    to follow the caller's latest words without restarting the opening; an
+    unheard introduction must never become delivered identity evidence.
     """
     if getattr(session, "_has_introduced", False):
         return
     n = getattr(session, "_greeting_bargein_count", 0) + 1
     try:
         session._greeting_bargein_count = n
-        if n >= 2:
-            session._has_introduced = True
     except Exception:  # pragma: no cover - defensive
         pass
 
@@ -758,6 +755,7 @@ class TurnRunner:
                 )
                 if _wrong_person_block or not should_honor_end_session(
                     ask_ai_end_action, full_transcript, user_turns, declined_count=_declined,
+                    previous_assistant_text=previous_assistant_turn(session.conversation_history),
                 ):
                     logger.info(
                         "phantom_goodbye_suppressed call_id=%s reason=%s user_turns=%d "

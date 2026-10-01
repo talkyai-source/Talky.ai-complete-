@@ -85,7 +85,7 @@ def strip_and_flag(session, text: str) -> str:
 
 def model_end_call_allowed(session, user_text=None) -> bool:
     """Bind every model hangup request to caller or deterministic call evidence."""
-    from app.domain.services.end_session_action import caller_signaled_end, repeated_decline_allows_end
+    from app.domain.services.end_session_action import caller_signaled_end, repeated_decline_allows_end, previous_assistant_turn
     from app.domain.services.caller_assertions import continuation_after
     from app.domain.services.voice_pipeline.identity_disposition import IdentityDisposition
 
@@ -95,7 +95,8 @@ def model_end_call_allowed(session, user_text=None) -> bool:
             for message in reversed(getattr(session, "conversation_history", ()) or ())
             if getattr(getattr(message, "role", None), "value", getattr(message, "role", None)) == "user"
         ), "")
-    if caller_signaled_end(user_text):
+    previous = previous_assistant_turn(getattr(session, "conversation_history", ()))
+    if caller_signaled_end(user_text, previous_assistant_text=previous):
         return True
     if continuation_after(user_text):
         return False
@@ -104,7 +105,7 @@ def model_end_call_allowed(session, user_text=None) -> bool:
     if getattr(session, "_turn_disposition", None) in {IdentityDisposition.WRONG_BUSINESS, IdentityDisposition.DNC}:
         return True
     declined = getattr(getattr(session, "captured_slots", None), "declined_count", 0)
-    return repeated_decline_allows_end(user_text, declined)
+    return repeated_decline_allows_end(user_text, declined, previous_assistant_text=previous)
 
 
 # Appended by the prompt composer for every campaign (before the compliance
@@ -156,8 +157,8 @@ CALL_CONTROL_RULES = f"""\
 
 INBOUND_CALL_CONTROL_RULES = f"""\
 ## ENDING THE CALL
-- When the caller clearly says goodbye, asks to end, or confirms their request
-  is resolved, say at most one short closing line. If an `end_call` tool is
+- When the caller clearly says goodbye, asks to end, or confirms they want no
+  further help, say at most one short closing line. If an `end_call` tool is
   offered this turn, call it; otherwise finish with the exact token {END_CALL_TOKEN} .
 - A tool result or the token is required; words like "hangs up" do nothing.
 - A request for support, a different department, or a human is not a reason to

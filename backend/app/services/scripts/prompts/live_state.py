@@ -7,6 +7,7 @@ def build_live_state_block(
     agent_name: str,
     company_name: str,
     has_introduced: bool = False,
+    opening_interrupted: bool = False,
     time_of_day_line: str = "",
     structured_state_block: str = "",
     direction: str = "outbound",
@@ -26,6 +27,12 @@ def build_live_state_block(
         lines.append(
             "- You have ALREADY introduced yourself. Do NOT introduce yourself again "
             "unless asked who you are; continue from the caller's latest words."
+        )
+    elif opening_interrupted:
+        lines.append(
+            "- The opening was interrupted before delivery was confirmed. Follow the "
+            "caller's latest words; do not restart the greeting or permission question. "
+            "Identify yourself briefly only if still needed, without delaying their answer."
         )
     elif inbound:
         lines.append(
