@@ -670,6 +670,33 @@ claimed complete without actual access.
   action acceptance still needs designated test destinations, connected test
   accounts and the existing deployment procedure's real drain attestation.
 
+### Exact candidate validation checkpoint (still unreleased)
+
+- Candidate `30faff4840db9ebb2803e0bbdce4b9ce1cb6d9a7` passed the complete
+  GitHub unit/security suite: 10,163 passed, 13 skipped, 18 subtests passed.
+  The main Backend job also passed lint, dependency audit, SAST, both current
+  and preserved-dump bootstrap paths, migration checks and OpenAPI export.
+- Frontend and Admin audit, lint, tests and production builds passed, together
+  with SQL validation, ingress checks, secret scanning and the Vercel build.
+  Both gateway production CTest and the warnings/TSan/ASan/shutdown gate passed.
+- A fresh disposable database at the exact candidate passed 39 integration
+  tests with no skips, reaching schema revision 0051. The fresh isolated Linux
+  environment passed 1,182 focused checks and all four C++ CTests. A new actual
+  Realtime provider smoke also passed; playback receipts were simulated.
+  The exact-version evidence and package inventory are in the adjacent
+  `2026-10-01-agent-validation-30faff48.json` and database acceptance artifact.
+- The final Docker image scan still failed on six HIGH advisory records in
+  three inherited OpenSSL OS packages. The existing apt layer now explicitly
+  refreshes `libssl3t64`, `openssl` and `openssl-provider-legacy` to available
+  repository patches; rebuilt-image and final CI verification remain required.
+  No security gate was relaxed. This image finding is separate from the clean
+  Python requirements audit and the installed production Python audit above.
+- Application source validation is complete for this checkpoint; deployment
+  and controlled browser, telephone and real connector acceptance remain open.
+  In particular, the synthetic model run still contains a Groq product-usage
+  assumption: passing runtime tests does not establish perfect conversation
+  behavior. Preserve this limitation when reporting readiness.
+
 - [x] Audit reconciled with current production revision.
 - [x] Separate integration branch/worktree prepared.
 - [x] Detailed design, ownership, failure cases and acceptance plan recorded.
