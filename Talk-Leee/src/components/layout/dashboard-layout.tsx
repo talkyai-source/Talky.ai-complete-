@@ -194,7 +194,10 @@ export function DashboardLayout({ children, title, description, requireAuth = tr
 
                 {/* Main Content */}
                 <main className="flex-1 overflow-y-auto overflow-x-hidden scroll-smooth p-4 md:p-8 transition-colors duration-300">
-                    <div className="mx-auto flex w-full max-w-7xl flex-col gap-4">
+                    {/* pb-16: keeps every page's last content clear of the fixed
+                        bottom-right chat launcher (its top edge sits 72px above
+                        the viewport bottom; main's own padding is only 16-32px). */}
+                    <div className="mx-auto flex w-full max-w-7xl flex-col gap-4 pb-16">
                         <SuspensionBanner />
                         <div className="relative">
                             {suspensionState.suspended ? (

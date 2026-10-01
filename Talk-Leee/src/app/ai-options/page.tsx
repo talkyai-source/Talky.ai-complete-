@@ -442,6 +442,24 @@ export default function AIOptionsPage() {
     const ttsModelInfo = ttsModelsForSelectedProvider.find((model) => model.id === config?.tts_model);
     const selectCls = "w-full rounded-lg border border-border bg-background px-4 py-2.5 text-sm text-foreground outline-none transition focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/40";
 
+    // Compact Save button — rendered in a card header's `right` slot (top-right
+    // of the Test LLM card in cascaded mode, beside the model badge in realtime
+    // mode) so it scrolls with the page instead of hovering over the fixed
+    // bottom-right chat launcher. Sized like the other header actions (see
+    // "Run Benchmark"); label, icon, colour and action are unchanged.
+    const saveConfigButton = (
+        <button
+            type="button"
+            onClick={handleSaveConfig}
+            disabled={saving}
+            aria-busy={saving}
+            className="ml-auto flex items-center gap-2 rounded-lg bg-emerald-500 px-4 py-2 font-semibold text-white transition hover:bg-emerald-600 disabled:cursor-wait disabled:opacity-70 disabled:hover:bg-emerald-500"
+        >
+            {saving ? <RefreshCw className="h-4 w-4 animate-spin" aria-hidden /> : <Save className="h-4 w-4" aria-hidden />}
+            <span>{saving ? "Saving…" : "Save Configuration"}</span>
+        </button>
+    );
+
     return (
         <DashboardLayout title="AI Options" description="Configure LLM, STT, and TTS providers">
             {loading || (!config && !loadFailed) ? (
@@ -518,9 +536,16 @@ export default function AIOptionsPage() {
 
                     <AnimatePresence mode="wait">
                     {pipelineMode === "realtime" ? (
-                        <RealtimeControls config={config} catalog={providers?.realtime} onChange={setConfig}
-                            onPreview={(voice) => { void handlePreviewVoiceById(voice, { provider: "realtime" }); }}
-                            previewing={Boolean(previewingVoiceId)} />
+                        <div key="realtime" className="space-y-4">
+                            {/* Save lives in the Test LLM card header in cascaded mode;
+                                that card doesn't render here and RealtimeControls owns
+                                its own header, so Save sits in a slim right-aligned row
+                                above it (the button carries ml-auto). */}
+                            <div className="flex">{saveConfigButton}</div>
+                            <RealtimeControls config={config} catalog={providers?.realtime} onChange={setConfig}
+                                onPreview={(voice) => { void handlePreviewVoiceById(voice, { provider: "realtime" }); }}
+                                previewing={Boolean(previewingVoiceId)} />
+                        </div>
                     ) : (
                         <motion.div key="cascaded" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.25 }}>
                     {/* Configuration grid — balanced 12-col so small cards pair up
@@ -869,7 +894,7 @@ export default function AIOptionsPage() {
 
                     {/* Test LLM */}
                     <Card delay={0.25} className="xl:col-span-12">
-                        <SectionHeader icon={<MessageSquare className="h-5 w-5" />} title="Test LLM" subtitle="Send a message to the selected model" />
+                        <SectionHeader icon={<MessageSquare className="h-5 w-5" />} title="Test LLM" subtitle="Send a message to the selected model" right={saveConfigButton} />
                         <div className="space-y-4">
                             <div className="flex flex-col gap-3 sm:flex-row">
                                 <input type="text" value={testMessage} onChange={(e) => setTestMessage(e.target.value)} onKeyDown={(e) => e.key === "Enter" && handleTestLLM()} placeholder="Type a message to test the LLM…" className="flex-1 rounded-lg border border-border bg-background px-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground outline-none transition focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/40" />
@@ -883,19 +908,6 @@ export default function AIOptionsPage() {
                     )}
                     </AnimatePresence>
 
-                    {/* Save */}
-                    <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }} className="sticky bottom-4 z-10 flex justify-end">
-                        <button
-                            type="button"
-                            onClick={handleSaveConfig}
-                            disabled={saving}
-                            aria-busy={saving}
-                            className="flex items-center gap-2 rounded-xl bg-emerald-500 px-8 py-3 font-semibold text-white shadow-lg shadow-emerald-500/30 transition hover:scale-[1.02] hover:bg-emerald-600 active:scale-[0.98] disabled:cursor-wait disabled:opacity-70 disabled:hover:scale-100 disabled:hover:bg-emerald-500"
-                        >
-                            {saving ? <RefreshCw className="h-5 w-5 animate-spin" aria-hidden /> : <Save className="h-5 w-5" aria-hidden />}
-                            <span>{saving ? "Saving…" : "Save Configuration"}</span>
-                        </button>
-                    </motion.div>
                 </div>
             )}
             <ApplyToCampaignsModal open={!!applyModal} provider={applyModal?.provider ?? ""} voiceId={applyModal?.voiceId ?? ""} voiceLabel={applyModal?.voiceLabel} onClose={() => setApplyModal(null)} />

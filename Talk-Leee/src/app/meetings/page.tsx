@@ -452,6 +452,10 @@ function MeetingsContent() {
                 size={520}
                 margin={10}
                 ariaLabel="Meeting details"
+                // z-[60]: the fixed chat launcher is z-50 and mounted after this
+                // drawer, so at z-50 it painted over the drawer's bottom-right
+                // (Close / Cancel meeting). One tier up keeps them clickable.
+                className="z-[60]"
                 panelClassName="bg-background/90 border border-border"
             >
                 {selected ? (
