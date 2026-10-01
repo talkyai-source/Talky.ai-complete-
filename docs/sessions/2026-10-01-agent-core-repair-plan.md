@@ -723,6 +723,36 @@ claimed complete without actual access.
   unchanged production SHA `b93b23de`. This does not replace the required real
   ingress/origination freeze, drain manifest or controlled call acceptance.
 
+### Actual-provider follow-up and shared speech boundary
+
+- The actual `fa145cf4` Groq token-exhaustion probe produced one request and
+  one safe fallback, with matching submitted/history text and no hangup.
+  Ordinary responses exposed a further provider-independent defect: early
+  comma playback chunks counted as entire sentences, while history separately
+  recounted full stops. This could cut speech mid-sentence and retain unsent
+  clauses. The same defect reproduced with Luna.
+- The shared boundary now counts completed grammatical sentences for its
+  existing cap, preserving early comma playback and the bounded extra-question
+  allowance. Normal history comes from the existing submitted-sentence list;
+  the duplicate punctuation-based history truncation is removed. Action JSON,
+  interruption handling and correlated playback evidence remain separate.
+  The affected 290-case streaming/history/action/capture batch passes and an
+  independent review found no material correction. Exact pushed CI and a
+  focused actual-provider follow-up remain required.
+- The deliberately empty-knowledge spot check gave both factuality rules to
+  the models. Groq made unsupported qualitative benefit claims in 5 of 6 turns,
+  Gemini in 1 of 2, and Luna in 0 of 2. These tiny unequal samples support a
+  cautious Luna-first controlled check, not comparative reliability claims.
+  No saved model choice or default was changed.
+- That fixture had `knowledge_mode=None`, no approved product facts and no KB
+  tool; it did not run campaign knowledge preparation. It therefore tests the
+  no-KB branch, not the configured inline/map/retrieve path exercised in the
+  earlier source-grounded checks. The deterministic guards do not verify every
+  qualitative benefit claim. No broad regex claim detector was added, and this
+  observed limitation must remain visible in release/readiness reporting.
+  Sanitized comparison and raw synthetic responses are preserved in artifacts
+  named `2026-10-01-*-fa145cf4.json`.
+
 - [x] Audit reconciled with current production revision.
 - [x] Separate integration branch/worktree prepared.
 - [x] Detailed design, ownership, failure cases and acceptance plan recorded.

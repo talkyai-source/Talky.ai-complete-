@@ -160,3 +160,93 @@ async def test_partial_error_discards_unsubmitted_end_token_before_aggregate_par
     assert response == "I can explain that."
     assert not getattr(session, "_end_call_requested", False)
     assert create.await_count == 1
+
+
+@pytest.mark.parametrize("tail,expected_chunks", [
+    ("There is more detail available.", 3),
+    ("Would you like more detail?", 4),
+    ("Would you like us to work through the information together, and check which details are relevant?", 4),
+])
+async def test_normal_clause_chunk_cap_history_matches_only_completed_submissions(monkeypatch, tail, expected_chunks):
+    from tests.unit.test_voice_pipeline_service import _make_service_for_disposition, _make_session
+    monkeypatch.setenv("TELEPHONY_FILLER_DELAY_MS", "0")
+    # Real token pacing flushes the long clause before the first full stop.
+    # Counting full stops again for history grants text an extra, unsaid turn.
+    paragraph = (
+        "We can discuss the information you want to review, and work through the details together. "
+        "The next step depends on your preference. "
+        + tail
+    )
+    provider, create = _provider([*(_chunk(char) for char in paragraph), _chunk(reason="stop")])
+    service = _make_service_for_disposition([])
+    service.llm_provider = provider
+    service.synthesize_and_send_audio = AsyncMock(return_value=False)
+    session = _make_session()
+    session.turn_id = 4
+    session.conversation_history = [Message(role=MessageRole.USER, content="Please explain.")]
+    response, _, _ = await service._stream_llm_and_tts(session, None)
+    submitted = [call.args[1] for call in service.synthesize_and_send_audio.await_args_list]
+    assert len(submitted) == expected_chunks
+    assert submitted[0].endswith(",")
+    assert response == " ".join(submitted)
+    assert (tail in response) == (expected_chunks == 4)  # Existing one-question grace still works.
+    assert create.await_count == 1
+    assert not getattr(session, "_tts_playout_completed", False)
+    assert not getattr(session, "_voice_action_delivered_text", "")
+
+
+@pytest.mark.parametrize("paragraph,expected_chunks,expected", [
+    (
+        "Sorry for the mix-up. I don't have information about why your number was called, and I won't assume you're a customer.",
+        3,
+        "Sorry for the mix-up. I don't have information about why your number was called, and I won't assume you're a customer.",
+    ),
+    ("First answer. Second detail. Extra material.", 2, "First answer. Second detail."),
+])
+async def test_cap_counts_complete_sentences_instead_of_playback_chunks(monkeypatch, paragraph, expected_chunks, expected):
+    from tests.unit.test_voice_pipeline_service import _make_service_for_disposition, _make_session
+    monkeypatch.setenv("TELEPHONY_FILLER_DELAY_MS", "0")
+    provider, create = _provider([*(_chunk(char) for char in paragraph), _chunk(reason="stop")])
+    service = _make_service_for_disposition([])
+    service.llm_provider = provider
+    service.synthesize_and_send_audio = AsyncMock(return_value=False)
+    session = _make_session()
+    session.turn_id = 4
+    session.conversation_history = [Message(role=MessageRole.USER, content="Please explain.")]
+    response, _, _ = await service._stream_llm_and_tts(session, None)
+    submitted = [call.args[1] for call in service.synthesize_and_send_audio.await_args_list]
+    assert len(submitted) == expected_chunks
+    assert response == " ".join(submitted) == expected
+    assert create.await_count == 1
+
+
+@pytest.mark.parametrize("failure", ["provider", "barge_in"])
+async def test_early_clause_submission_survives_failure_before_sentence_completes(monkeypatch, failure):
+    from tests.unit.test_voice_pipeline_service import _make_service_for_disposition, _make_session
+    monkeypatch.setenv("TELEPHONY_FILLER_DELAY_MS", "0")
+    paragraph = "We can discuss the information you want to review, and work through the details together"
+    chunks = [*(_chunk(char) for char in paragraph)]
+    chunks += [_chunk(reason="length")] if failure == "provider" else [_chunk("."), _chunk(reason="stop")]
+    provider, create = _provider(chunks)
+    service = _make_service_for_disposition([])
+    service.llm_provider = provider
+    session = _make_session()
+    session.turn_id = 4
+    session.conversation_history = [Message(role=MessageRole.USER, content="Please explain.")]
+    service._barge_in_events[session.call_id] = session.barge_in_event
+    submitted = []
+
+    async def synthesize(_session, text, *_args, **_kwargs):
+        submitted.append(text)
+        if failure == "barge_in" and len(submitted) == 2:
+            session.barge_in_event.set()
+            return True
+        return False
+
+    service.synthesize_and_send_audio = synthesize
+    response, _, _ = await service._stream_llm_and_tts(session, None)
+    assert submitted[0] == "We can discuss the information you want to review,"
+    expected = submitted[0] + (" [interrupted by caller]" if failure == "barge_in" else "")
+    assert response == expected
+    assert session._spoken_sentences == [submitted[0]]
+    assert create.await_count == 1

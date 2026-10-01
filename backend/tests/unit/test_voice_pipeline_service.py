@@ -620,21 +620,22 @@ async def test_handle_barge_in_cancels_active_turn_task_immediately():
 async def test_run_turn_commits_partial_assistant_reply_on_barge_in():
     """Barge-in with a non-empty LLM response: both user and assistant are committed
     to preserve user→assistant alternation in history (prevents consecutive user messages)."""
-    service = VoicePipelineService(
-        stt_provider=AsyncMock(),
-        llm_provider=AsyncMock(),
-        tts_provider=AsyncMock(),
-        media_gateway=AsyncMock(),
-        mute_during_tts=False,
-    )
-    service.latency_tracker = MagicMock()
-    service.latency_tracker.get_metrics.return_value = None
-    service.get_llm_response = AsyncMock(return_value="Hello there.")
-    service.synthesize_and_send_audio = AsyncMock(return_value=True)
+    service = _make_service_for_disposition(["Hello there. ", "More details."])
     service.transcript_service = MagicMock()
     service.transcript_service.flush_to_database = AsyncMock()
 
     session = _make_session()
+    service._barge_in_events[session.call_id] = session.barge_in_event
+    submitted = []
+
+    async def synthesize(_session, text, *_args, **_kwargs):
+        submitted.append(text)
+        if len(submitted) == 2:
+            session.barge_in_event.set()
+            return True
+        return False
+
+    service.synthesize_and_send_audio = synthesize
     websocket = AsyncMock()
 
     await service._run_turn(session, "Tell me about Talky.", websocket, turn_id=2)
@@ -643,6 +644,8 @@ async def test_run_turn_commits_partial_assistant_reply_on_barge_in():
         MessageRole.USER,
         MessageRole.ASSISTANT,
     ]
+    assert submitted == ["Hello there.", "More details."]
+    assert session.conversation_history[-1].content == "Hello there. [interrupted by caller]"
     service.transcript_service.accumulate_turn.assert_called_once()
 
 

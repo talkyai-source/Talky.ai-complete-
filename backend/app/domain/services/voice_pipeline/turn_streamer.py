@@ -54,7 +54,6 @@ from app.services.scripts.prompts.build import build_turn_prompt
 from app.services.scripts.prompt_builder import turn_directive, with_turn_directive
 from app.domain.services.voice_pipeline.sentence_cap import (
     cap_allows_another,
-    truncate_to_cap,
 )
 from app.domain.services.voice_pipeline.sentence_segmentation import (
     _is_missing_space_boundary,
@@ -724,8 +723,7 @@ class TurnStreamer:
         # Prices/percentages with no source this turn (see grounded_figures.py).
         # A list so the nested validator can record into it.
         ungrounded_figures: list[str] = []
-        # Sentences replaced or dropped by the conversation guards; when any
-        # were, history keeps only what was actually spoken.
+        # Keep track of conversation repairs to avoid repeating them in a turn.
         speech_rewrites: list[str] = []
         _earlier_agent_turns = [
             str(m.content or "")
@@ -751,11 +749,10 @@ class TurnStreamer:
             if v
         ]
 
-        # P3: track sentences ACTUALLY delivered to TTS, so on a barge-in we
-        # commit to history only what the caller really heard — not the full
-        # (longer) LLM response. Committing unheard text makes the model think
-        # it already said things it never spoke → garbled "absurd" replies after
-        # a few interruptions.
+        # Canonical history source: TTS submissions that returned without
+        # interruption. Raw generation can include unsent text after a cap,
+        # rewrite or provider error. Submission is not a heard/playback receipt;
+        # action confirmation separately requires correlated playout below.
         session._spoken_sentences = []
         _action_delivered_sentences = []
 
@@ -1133,8 +1130,6 @@ class TurnStreamer:
                 while cap_allows_another(
                     sentences_done, max_sentences, buf, grace_used=question_grace_used
                 ):
-                    if max_sentences and sentences_done >= max_sentences:
-                        question_grace_used = True
                     idx = self._p._find_sentence_end(buf, allow_clause=len(buf) >= 80)
                     if idx < 0:
                         break
@@ -1218,7 +1213,13 @@ class TurnStreamer:
                     _record_action_playback(sentence, tts_was_interrupted)
                     first_sentence = False
                     t_tts_end = time.monotonic()
-                    sentences_done += 1
+                    # Early comma flushes reduce latency; they are playback
+                    # chunks, not completed sentences. Counting them toward
+                    # the cap can stop an otherwise valid reply mid-sentence.
+                    if self._p._find_sentence_end(sentence, allow_clause=False) >= 0:
+                        if max_sentences and sentences_done >= max_sentences:
+                            question_grace_used = True
+                        sentences_done += 1
                     if not tts_was_interrupted:
                         session._spoken_sentences.append(sentence)
 
@@ -1413,31 +1414,17 @@ class TurnStreamer:
             else 0.0
         )
 
-        # Build the full response for history / logging.
+        # Build normal history from the same chunks used by the spoken path.
+        # Recounting sentence punctuation here loses early comma/clause flushes
+        # and can retain a tail that the live chunk cap never submitted.
+        # Legacy action JSON is a control result consumed by the turn finisher.
         if ask_ai_end_action:
             full_text = raw_response_text.strip()
         else:
-            full_text = guardrails.clean_response(
-                raw_response_text, tts_model_id=_tts_model_id,
-                protected_values=_protected_readback,
-            )
-            full_text, _ = ground_spoken_links(
-                full_text, [*getattr(session, "_knowledge_grounding", []), *turn_grounding]
-            )
-
-        if model_wrote_caller_turn or ungrounded_figures or speech_rewrites:
-            # History must hold what was spoken. Keeping the fabricated caller
-            # line (or a made-up price) would feed the model its own invention
-            # as established fact on every later turn.
-            full_text = " ".join(session._spoken_sentences).strip() or full_text
-
-        if not ask_ai_end_action and max_sentences and full_text:
-            # Same rule as the spoken path: the cap never falls between a
-            # statement and the question that immediately follows it.
-            full_text = truncate_to_cap(full_text, max_sentences)
+            full_text = " ".join(session._spoken_sentences).strip()
 
         # P3: if the caller actually BARGED IN, the history entry must be ONLY
-        # what they heard (delivered sentences) + an interruption marker — never
+        # completed submissions + an interruption marker — never
         # the full (longer) response, which is what made the model think it said
         # things it never spoke. Gated on _barged() so the LLM-error fallback
         # path (synthesize failure, no real barge-in) still commits normally.

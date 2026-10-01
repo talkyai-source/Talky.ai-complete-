@@ -1,0 +1,73 @@
+{
+  "candidate_revision": "fa145cf4869800dbca30755d8cf598f670aec30b",
+  "scope": "Actual model provider, production composer and TurnStreamer; synthetic caller text, TTS/media mocked, no external action tools or customer calls.",
+  "provider": "openai",
+  "python": "3.12.3",
+  "model": "gpt-6-luna",
+  "temperature": 0.2,
+  "cases": [
+    {
+      "case": "denial-product-use-1",
+      "wire_token_cap_override": null,
+      "turns": [
+        {
+          "turn": 1,
+          "caller": "I have never heard of Northwind. I am not your customer. Why are you calling?",
+          "provider_request_count": null,
+          "terminal_reasons": null,
+          "provider_stream_invocations": 1,
+          "tools_offered": 0,
+          "sent_prompt_contains_product_use_rule": true,
+          "sent_prompt_contains_benefits_evidence_rule": true,
+          "status": "ok",
+          "returned_history_text": "Sorry for the mix-up. I don\u2019t have information about why your number was called, and I won\u2019t assume you\u2019re a customer.",
+          "tts_submissions": [
+            "Sorry for the mix-up.",
+            "I don\u2019t have information about why your number was called,"
+          ],
+          "completed_submission_sentences": [
+            "Sorry for the mix-up.",
+            "I don\u2019t have information about why your number was called,"
+          ],
+          "llm_ms": 1586,
+          "elapsed_ms": 1721,
+          "end_call_requested": false,
+          "raw_provider_text": "Sorry for the mix-up. I don\u2019t have information about why your number was called, and I won\u2019t assume you\u2019re a customer.",
+          "history_matches_completed_submissions": false
+        },
+        {
+          "turn": 2,
+          "caller": "You have the right number. I have not said that I use payment terminals. What could your company offer me?",
+          "provider_request_count": null,
+          "terminal_reasons": null,
+          "provider_stream_invocations": 1,
+          "tools_offered": 0,
+          "sent_prompt_contains_product_use_rule": true,
+          "sent_prompt_contains_benefits_evidence_rule": true,
+          "status": "ok",
+          "returned_history_text": "I can\u2019t confirm what Northwind Systems could offer without knowing your business needs. Are you interested in hearing about payment terminal upgrades?",
+          "tts_submissions": [
+            "I can\u2019t confirm what Northwind Systems could offer without knowing your business needs.",
+            "Are you interested in hearing about payment terminal upgrades?"
+          ],
+          "completed_submission_sentences": [
+            "I can\u2019t confirm what Northwind Systems could offer without knowing your business needs.",
+            "Are you interested in hearing about payment terminal upgrades?"
+          ],
+          "llm_ms": 1085,
+          "elapsed_ms": 1086,
+          "end_call_requested": false,
+          "raw_provider_text": "I can\u2019t confirm what Northwind Systems could offer without knowing your business needs. Are you interested in hearing about payment terminal upgrades?",
+          "history_matches_completed_submissions": true
+        }
+      ]
+    }
+  ],
+  "completed": true,
+  "limitations": [
+    "TTS submissions were intercepted, not rendered or heard.",
+    "The low-token case deliberately overrides only this harness's outgoing request ceiling to exercise an actual provider length finish; production configuration is unchanged.",
+    "A small synthetic conversation spot check is not general model reliability proof.",
+    "Groq SDK requests and finish reasons are directly observed; other providers expose adapter stream invocation and returned text, not raw HTTP request counts or terminal reasons."
+  ]
+}
