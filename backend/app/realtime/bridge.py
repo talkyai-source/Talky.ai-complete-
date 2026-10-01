@@ -72,6 +72,12 @@ _REALTIME_NODE_CHARS = int(os.getenv("KNOWLEDGE_REALTIME_NODE_CHARS", "2000"))
 _NO_KB_INFO = "I don't have specific information on that."
 
 
+# Sections a realtime knowledge lookup returns. Two left the right one out
+# whenever a catch-all section also matched (Dojo-PC, 2026-09-30); three puts
+# it in on every question measured against the live knowledge.
+_REALTIME_KB_K = 3
+
+
 class RealtimeBridge:
     """Drives one realtime call: gateway <-> OpenAIRealtimeSession.
 
@@ -501,7 +507,10 @@ class RealtimeBridge:
                     # Report failure through the owning call lifecycle.
                     self._failure_reason = "Realtime provider reported an error"
                     break
-                elif kind == "generation_incomplete":
+                elif kind in {"generation_incomplete", "response_unplayable"}:
+                    # Both provider adapters share one retry budget. A reply
+                    # withheld for missing text/overflow is not fatal once,
+                    # but alternating event names cannot reset that budget.
                     if self._repair_attempted:
                         self._failure_reason = "Realtime generation did not complete after one shorter retry"
                         break
@@ -1099,7 +1108,7 @@ class RealtimeBridge:
                 retrieve_knowledge,
             )
             if pinned_nodes is not None:
-                nodes = retrieve_pinned_knowledge(pinned_nodes, query, k=3)
+                nodes = retrieve_pinned_knowledge(pinned_nodes, query, k=_REALTIME_KB_K)
             else:
                 nodes = await asyncio.wait_for(
                     retrieve_knowledge(
@@ -1107,7 +1116,7 @@ class RealtimeBridge:
                         tenant_id=tenant_id,
                         campaign_id=self._campaign_id,
                         query=query,
-                        k=3,
+                        k=_REALTIME_KB_K,
                         bump_hits=False,
                     ),
                     # The SHARED per-turn budget (kb_budget), the same one the inject

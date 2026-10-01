@@ -266,7 +266,8 @@ def test_the_answered_note_and_the_drop_are_wired():
     src = Path(__file__).resolve().parents[2].joinpath(
         "app", "domain", "services", "voice_pipeline", "turn_streamer.py"
     ).read_text(encoding="utf-8")
-    assert "answered_note(_answered)" in src
+    # Plain noes are reported as declined (declined_note), not as answered.
+    assert "answered_note([qa for qa in _answered if not is_bare_no(qa[1])])" in src
     gate = src[src.index("def _validate_for_tts(") :]
     gate = gate[: gate.index("valid, reason = guardrails.validate_response(")]
     assert "repeats_answered_question(" in gate

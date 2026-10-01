@@ -131,7 +131,10 @@ def test_the_sql_labels_coverage_and_ignores_spoken_numbers():
     assert "NOT (lexeme = ANY($6::text[]))" in src
     assert "list(_COVERAGE_IGNORED_LEXEMES)" in src
     # Ranking is untouched: the same tiered ORDER BY feeds top_k.
-    assert "THEN 2" in src and "ORDER BY ord" in src
+    # Ranking (2026-10-01): rare query words in the HEADING count most, then
+    # rare words anywhere; the all-words tier is only a small bonus.
+    assert "to_tsvector('english', coalesce(c.heading, ''))" in src
+    assert "ORDER BY ord" in src
     assert "nineti" in retrieval._COVERAGE_IGNORED_LEXEMES
 
 

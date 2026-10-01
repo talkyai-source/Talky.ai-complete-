@@ -64,6 +64,8 @@ from app.domain.services.voice_pipeline.conversation_guards import (
     PHONE_REASK,
     answered_note,
     answered_questions,
+    declined_note,
+    is_bare_no,
     closing_while_contact_open,
     is_repeated_question,
     repeats_answered_question,
@@ -957,7 +959,9 @@ class TurnStreamer:
         _directive = " ".join(
             part for part in (
                 turn_directive(getattr(session, "captured_slots", None)),
-                answered_note(_answered),
+                # A plain no is reported as declined, not as "answered".
+                answered_note([qa for qa in _answered if not is_bare_no(qa[1])]),
+                declined_note(messages),
             ) if part
         ) or None
         llm_messages = with_turn_directive(messages, _directive)

@@ -188,16 +188,6 @@ class ModelInfo(BaseModel):
     provider: Optional[str] = None
 
 
-OPENAI_MODELS = [
-    ModelInfo(
-        id="gpt-6-luna",
-        name="GPT-6 Luna",
-        description="OpenAI text model for the traditional voice pipeline. Reasoning disabled for streaming tools.",
-        provider="openai",
-    ),
-]
-
-
 class VoiceInfo(BaseModel):
     """TTS Voice metadata with preview support"""
     id: str
@@ -588,6 +578,27 @@ CEREBRAS_MODELS = [
         context_window=65536,
         is_preview=False,
         provider="cerebras",
+    ),
+]
+
+# OpenAI chat models, on the same OPENAI_API_KEY as GPT Realtime (owner
+# request 2026-10-01). Verified on the production key (GET /v1/models) and
+# measured from the prod host: see app/infrastructure/llm/openai.py.
+OPENAI_MODELS = [
+    ModelInfo(
+        id="gpt-6-luna",
+        name="GPT-6 Luna (OpenAI)",
+        description=(
+            "OpenAI's fast, cost-efficient GPT-6 model. Runs with reasoning "
+            "off (the fastest setting, and the only one that allows the "
+            "knowledge-lookup tool on this API). Measured from the prod host "
+            "on 2026-10-01 with a short prompt: first text in 758-968 ms."
+        ),
+        speed="~0.8-1.0 s to first text (measured)",
+        price="$0.10 in / $0.50 out per 1M tokens",
+        context_window=1_050_000,
+        is_preview=False,
+        provider="openai",
     ),
 ]
 

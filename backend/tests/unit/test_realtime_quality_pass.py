@@ -59,8 +59,13 @@ def test_lookup_updates_are_conditional_and_not_forced_filler():
     text = build_realtime_instructions(RealtimePersona())
     assert "NEVER sit in dead silence" not in text
     assert "let real emotion through" not in text
-    assert "Give a brief update only for noticeable waits" in text
-    assert "Skip it for quick answers or confirmations" in text
+    # The old stall template ("Give a brief update ... 'I'll check the
+    # details.'") was spoken back as "Let me think about the best next
+    # question here." (realtime test 1ddf8844, 2026-09-30). At most "One
+    # moment." before a lookup, and never narrated thinking.
+    assert "I'll check the details." not in text
+    assert 'say at most "One moment."' in text
+    assert "Never say that you are thinking" in text
 
 
 def test_instructions_keep_opening_and_short_natural_turns():

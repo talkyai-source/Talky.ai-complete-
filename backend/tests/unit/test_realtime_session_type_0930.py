@@ -5,7 +5,7 @@ first turn) had no ``session.type``. The GA Realtime API answered
 "Missing required parameter: 'session.type'", the bridge treated that error as
 fatal and stopped, and the browser kept sending audio into nothing for 30-60 s
 (stt_input_queue_overrun). Every session.update must carry the type, and a
-rejected session setting must not end the conversation.
+rejected mid-call instructions must be surfaced to the owning lifecycle.
 """
 from __future__ import annotations
 
@@ -64,7 +64,7 @@ async def test_the_contact_directive_update_carries_session_type():
 
 
 @pytest.mark.asyncio
-async def test_a_rejected_session_setting_does_not_end_the_conversation():
+async def test_a_rejected_session_setting_reaches_the_owning_lifecycle():
     s = _session()
     offered = []
     s._offer_event = offered.append
@@ -77,7 +77,7 @@ async def test_a_rejected_session_setting_does_not_end_the_conversation():
             "param": "session.type",
         },
     })
-    assert not [e for e in offered if getattr(e, "kind", None) == "error"]
+    assert [e for e in offered if getattr(e, "kind", None) == "error"]
 
 
 @pytest.mark.asyncio
@@ -157,3 +157,71 @@ def test_with_a_name_on_file_realtime_greets_them_by_it():
     )
     assert "You are calling Uzair Khan" in cfg.system_prompt
     assert "No name is on file" not in cfg.system_prompt
+
+
+# ── browser tests cb1b28c3 / 94f47f14 (2026-09-30, after the first fix) ─────
+
+def test_gemini_3_8_is_sent_its_lowest_supported_thinking_level():
+    """cb1b28c3: every turn got 400 "Thinking level MINIMAL is not supported
+    for this model" and failed over to Groq."""
+    from app.infrastructure.llm.gemini import GeminiLLMProvider as G
+
+    assert str(G._build_thinking_config("gemini-3.8-flash", 0).thinking_level).lower().endswith("low")
+    assert str(G._build_thinking_config("gemini-3.6-flash", 0).thinking_level).lower().endswith("minimal")
+
+
+def test_account_wide_realtime_notes_are_added_to_the_campaign_script():
+    """94f47f14: the account note "be precise and specific and to the point"
+    replaced Dojo-PC's whole script."""
+    from app.domain.models.ai_config import AIProviderConfig
+    from app.domain.services.telephony_session_config import build_telephony_session_config
+    from app.domain.services.voice_orchestrator import Direction
+
+    cfg = build_telephony_session_config(
+        gateway_type="browser",
+        campaign={"id": "c", "tenant_id": "11111111-1111-4111-8111-111111111111",
+                  "script_config": {"company_name": "Dojo", "agent_names": ["Alex"],
+                                    "additional_instructions": _SCRIPT}},
+        direction=Direction.OUTBOUND,
+        ai_config_override=AIProviderConfig(
+            pipeline_mode="realtime", realtime_voice="ash",
+            realtime_settings={"prompt": {"persona": "sales",
+                                          "instructions": "be precise and specific and to the point"}},
+        ),
+    )
+    assert "helping Azian" in cfg.system_prompt
+    assert "be precise and specific and to the point" in cfg.system_prompt
+
+
+@pytest.mark.asyncio
+async def test_an_unplayable_reply_is_withheld_not_a_call_ending_error():
+    s = _session()
+    offered = []
+    s._offer_event = offered.append
+    s._playout.reset("resp_1")
+    s._playout.add_audio({"response_id": "resp_1", "item_id": "i1"}, b"\x7f" * 160)
+    await s._handle_server_event({"type": "response.done",
+                                  "response": {"id": "resp_1", "status": "completed", "output": []}})
+    kinds = [getattr(e, "kind", None) for e in offered]
+    assert "generation_incomplete" in kinds
+    assert "error" not in kinds
+
+
+@pytest.mark.asyncio
+async def test_the_bridge_replaces_one_withheld_reply_and_ends_only_on_two():
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    from app.realtime.openai import RealtimeEvent
+    from app.realtime.bridge import RealtimeBridge
+
+    async def events():
+        for kind in ("response_unplayable", "generation_incomplete"):
+            yield RealtimeEvent(kind=kind, raw={"response": {"id": "r"}})
+
+    rt = SimpleNamespace(events=events, repair_unspoken_response=AsyncMock())
+    gw = SimpleNamespace(clear_output_buffer=AsyncMock(), send_audio=AsyncMock())
+    bridge = RealtimeBridge(call_id="synthetic", realtime_session=rt, media_gateway=gw)
+    await bridge._pump_model_events()
+    rt.repair_unspoken_response.assert_awaited_once()
+    gw.send_audio.assert_not_awaited()
+    assert "one shorter retry" in bridge._failure_reason

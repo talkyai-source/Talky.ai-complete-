@@ -87,7 +87,6 @@ async def list_providers(current_user=Depends(get_current_user)):
         if gemini_offered:
             llm_providers.append("gemini")
             llm_models.extend(model.model_dump() for model in gemini_offered)
-
     return ProviderListResponse(
         llm={
             "providers": llm_providers,

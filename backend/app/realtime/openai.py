@@ -929,13 +929,9 @@ class OpenAIRealtimeSession:
                 return
             self.stats.errors += 1
             logger.warning("realtime server error call=%s: %s", self._call_id, err)
-            param = str((err or {}).get("param") or "") if isinstance(err, dict) else ""
-            if param.startswith("session."):
-                # The server refused a settings update and kept the session
-                # (and its previous settings). The conversation continues;
-                # ending the call over it is what left the caller talking to
-                # nobody on 980a2caa.
-                return
+            # Rejected mid-call instructions can leave stale contact/policy
+            # state active. Let the owning lifecycle end visibly instead of
+            # pretending the update was applied and continuing silently.
             self._offer_event(RealtimeEvent(kind="error", text=str(err), raw=data))
             return
 
