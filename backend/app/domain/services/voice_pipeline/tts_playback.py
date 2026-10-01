@@ -431,6 +431,13 @@ class TtsPlayback:
                             await websocket.send_json({"type": "tts_interrupted", "reason": "barge_in"})
                         except Exception as _exc:
                             logger.debug("tts_interrupted WS send failed: %s", _exc)
+                    # Release the voice provider's stream and concurrency slot,
+                    # as the stall and retry exits above already do (stability
+                    # audit 2026-10-02) -- after the caller is already silenced.
+                    try:
+                        await _tts_iter.aclose()
+                    except Exception:  # noqa: BLE001
+                        pass
                     break
                 if first_chunk:
                     if track_latency:
@@ -534,6 +541,9 @@ class TtsPlayback:
                     # Browser/non-telephony gateways do not carry raw PCMU.
                     # Preserve their existing last-resort provider fallback.
                     session._tts_fallback_attempted = True
+                    _browser_failures = int(getattr(session, "_browser_tts_failures", 0) or 0) + 1
+                    session._browser_tts_failures = _browser_failures
+                    _fallback_failed = False
                     try:
                         await self.synthesize_and_send(
                             session,
@@ -542,8 +552,23 @@ class TtsPlayback:
                             barge_in_event=barge_in_event,
                             track_latency=False,
                         )
-                    except Exception:
-                        pass
+                    except Exception as _fb_exc:  # noqa: BLE001
+                        _fallback_failed = True
+                        logger.error(
+                            "tts_last_resort_failed call=%s err=%s", call_id[:12], _fb_exc,
+                        )
+                    # No voice at all: tell the browser instead of leaving a
+                    # silent session (stability audit 2026-10-02). The Test
+                    # agent shows an "error" message and stops cleanly.
+                    if websocket and (_fallback_failed or _browser_failures >= 2):
+                        try:
+                            await websocket.send_json({
+                                "type": "error",
+                                "code": "voice_unavailable",
+                                "message": "The agent's voice is unavailable right now. Please try again in a moment.",
+                            })
+                        except Exception as _ws_exc:  # noqa: BLE001
+                            logger.debug("voice_unavailable WS send failed: %s", _ws_exc)
 
             if provider_exhausted and not interrupted:
                 # Normal completion (not interrupted by barge-in) — flush any
