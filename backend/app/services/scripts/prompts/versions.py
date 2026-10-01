@@ -122,7 +122,8 @@ _VERSIONS: Final[Mapping[str, str]] = {
     # @9 / @8: product benefits and eligibility require supplied facts.
     # @10 / @9: unverified caller product use is a question, not a fact.
     # @11 / @10: caller-paced repair, new prospects, small talk and topic refusals.
-    "lead_gen": "lead_gen@11",
+    # @12: the sales closing example requires an explicit caller goodbye.
+    "lead_gen": "lead_gen@12",
     "customer_support": "customer_support@10",
     "receptionist": "receptionist@10",
 }

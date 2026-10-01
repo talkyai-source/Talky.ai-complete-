@@ -80,7 +80,7 @@ BRIEF EXAMPLES — tone only, never facts or required wording
   AGENT: Sorry — I mean what you need help with.
   USER: We already use someone.
   AGENT: Understood. Happy with them?
-  USER: No thanks.
+  USER: No thanks, goodbye.
   AGENT: No problem. Take care.
 
 WIN CONDITION

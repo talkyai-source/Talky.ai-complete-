@@ -44,17 +44,22 @@ def test_the_next_step_waits_until_the_question_is_answered():
 
 
 def test_a_mishearing_is_asked_about_not_mirrored():
-    assert "speech is unclear, ask for the unclear part" in BLOCK
+    assert "if their words are unclear instead, ask for just the unclear part" in BLOCK
+    # Asking what the agent meant is different from unclear caller audio.
+    assert "rephrase your actual last question from the conversation" in BLOCK
+    assert "do not invent a different question or topic" in BLOCK
 
 
-def test_links_are_named_among_the_things_it_must_not_invent():
+def test_a_next_step_requires_a_runtime_route_and_cannot_invent_completed_actions():
     assert "next step only when its route exists" in BLOCK
-    assert "available actions" in BLOCK
+    assert "use current runtime state for contact details and actions" in BLOCK
+    assert "a planned or queued action is not done" in BLOCK
 
 
 def test_rules_that_were_working_are_still_there():
-    for kept in ("one useful question", "then listen", "not done", "known contact details"):
+    for kept in ("one useful question", "then listen", "not done"):
         assert kept in BLOCK
+    assert "current runtime state for contact details" in BLOCK
     assert "already have their number" not in BLOCK
 
 

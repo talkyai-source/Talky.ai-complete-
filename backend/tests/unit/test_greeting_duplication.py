@@ -270,8 +270,20 @@ def test_few_shot_keeps_its_teaching_value():
     agents = re.findall(r"^\s*AGENT:", examples, re.MULTILINE)
     assert len(users) == 4 and len(agents) == 4
     assert "Thanks for correcting me." in examples
-    assert "No problem. Take care." in examples
-    assert "Sorry — which part?" in examples
+    closing = re.search(
+        r"USER:\s*([^\n]+)\s*\n\s*AGENT:\s*No problem\. Take care\.", examples,
+    )
+    assert closing is not None
+    assert "goodbye" in closing.group(1).lower(), "A bare refusal must not teach ending the whole call"
+    repair = re.search(
+        r"USER:\s*What do you mean\?\s*\n\s*AGENT:\s*([^\n]+)", examples,
+    )
+    assert repair is not None, "Keep a caller request to rephrase in the examples"
+    # Teach explaining the agent's own words, not bouncing the clarification
+    # back to the caller or restarting the greeting.
+    assert "I mean" in repair.group(1)
+    assert "?" not in repair.group(1)
+    assert "which part" not in repair.group(1).lower()
     assert "Understood. Happy with them?" in examples
 
 
