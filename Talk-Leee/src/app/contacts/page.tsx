@@ -726,8 +726,16 @@ export default function ContactsPage() {
                             )}
 
                             <Button
-                                onClick={handleUpload}
-                                disabled={!canUpload}
+                                onClick={() => {
+                                    // No file yet: open the same picker as the drop area
+                                    // instead of sitting inert with no feedback.
+                                    if (!file) {
+                                        fileInputRef.current?.click();
+                                        return;
+                                    }
+                                    void handleUpload();
+                                }}
+                                disabled={file ? !canUpload : uploading}
                                 className="w-full hover:scale-[1.02] hover:shadow-md active:scale-[0.99]"
                             >
                                 {uploading ? (
