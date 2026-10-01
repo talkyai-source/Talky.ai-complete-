@@ -861,8 +861,20 @@ async def warm_llm_stream(pre_warm_session) -> None:
     from app.domain.models.conversation import Message, MessageRole
 
     config = getattr(pre_warm_session, "config", None)
-    real_prompt = (getattr(config, "system_prompt", "") or "").strip()
+    call_session = getattr(pre_warm_session, "call_session", None)
+    # The prompt the turns actually send (knowledge already injected) and the
+    # same cache key they pass. 2026-10-01: GPT-6 Luna's first request on a
+    # cold cache took 8.5 s, later ones 0.7-1.3 s -- a warm-up on a different
+    # prompt or cache key leaves turn 0 cold.
+    real_prompt = (
+        getattr(call_session, "system_prompt", "")
+        or getattr(config, "system_prompt", "")
+        or ""
+    ).strip()
     system_prompt = real_prompt or "Reply with a single word only."
+    campaign_id = getattr(config, "campaign_id", None) or getattr(
+        call_session, "campaign_id", None
+    )
 
     msgs = [Message(role=MessageRole.USER, content="hi")]
     try:
@@ -870,6 +882,7 @@ async def warm_llm_stream(pre_warm_session) -> None:
             msgs,
             system_prompt=system_prompt,
             max_tokens=2,
+            campaign_id=campaign_id,
         ):
             pass  # discard
         logger.info(

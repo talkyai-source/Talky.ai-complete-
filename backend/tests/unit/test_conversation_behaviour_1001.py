@@ -92,3 +92,27 @@ def test_the_declined_note_is_sent_last_to_the_model():
         "app", "domain", "services", "voice_pipeline", "turn_streamer.py"
     ).read_text(encoding="utf-8")
     assert "declined_note(messages)" in src
+
+
+# ── browser test 3d1ee091 (2026-10-01) ─────────────────────────────────────
+
+def test_a_cut_off_or_filler_reply_does_not_answer_a_question():
+    from app.domain.services.voice_pipeline.conversation_guards import answered_questions
+
+    q = "Are you still using Dojo for payments, or another provider?"
+    assert answered_questions([_a(q), _u("Uh, Yeah. Actually,")]) == []
+    assert answered_questions([_a(q), _u("Uh, um.")]) == []
+    assert answered_questions([_a(q), _u("Yes")]) == [(q, "Yes")]
+
+
+def test_the_test_agent_warms_the_model_with_the_real_prompt_and_cache_key():
+    """GPT-6 Luna: 8.5 s on a cold cache, 0.7-1.3 s warm (measured from the
+    prod host). The Test agent skipped the warm-up phone calls get."""
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[2] / "app"
+    ws = (root / "api" / "v1" / "endpoints" / "campaign_test_ws.py").read_text(encoding="utf-8")
+    assert "await warm_llm_stream(voice_session)" in ws
+    af = (root / "domain" / "services" / "telephony" / "modes" / "agent_first.py").read_text(encoding="utf-8")
+    assert "campaign_id=campaign_id," in af
+    assert 'getattr(call_session, "system_prompt", "")' in af

@@ -183,6 +183,9 @@ _NOT_AN_ANSWER = frozenset(
 )
 
 
+_FILLER_ONLY = frozenset("uh um er erm ah hmm actually so well like yeah i mean".split())
+
+
 def answered_questions(history: Iterable[Any], *, limit: int = 8) -> list[tuple[str, str]]:
     """(question, answer) pairs: an agent question followed directly by a
     caller reply that is not itself a question or only a greeting. One word
@@ -206,6 +209,12 @@ def answered_questions(history: Iterable[Any], *, limit: int = 8) -> list[tuple[
         answer = str(getattr(nxt, "content", "") or "").strip()
         words = re.findall(r"[a-z0-9']+", answer.lower())
         if not words or answer.endswith("?") or all(w in _NOT_AN_ANSWER for w in words):
+            continue
+        # Cut off mid-thought ("Uh, Yeah. Actually," -- browser test 3d1ee091,
+        # 2026-10-01) or only filler: the question is still open.
+        if answer.rstrip().endswith((",", "...", "…")) or all(
+            w in _FILLER_ONLY for w in words
+        ):
             continue
         pairs.append((q, answer))
     return pairs[-limit:]
