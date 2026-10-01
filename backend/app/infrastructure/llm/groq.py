@@ -698,6 +698,7 @@ class GroqLLMProvider(LLMProvider):
                                 # set, which Groq rejects — see NOTE above);
                                 # _extract_stream_usage checks both, getattr-safe.
                                 token_count = 0
+                                terminal_seen = False
                                 final_usage = None
                                 tc_acc: Dict[int, dict] = {}
                                 # Client-side timing for telemetry only — never
@@ -709,7 +710,15 @@ class GroqLLMProvider(LLMProvider):
                                 try:
                                     async for chunk in stream:
                                         if chunk.choices:
-                                            delta = chunk.choices[0].delta
+                                            choice = chunk.choices[0]
+                                            reason = getattr(choice, "finish_reason", None)
+                                            if reason and reason not in {"stop", "tool_calls"}:
+                                                # A provider-declared truncation is not a
+                                                # complete answer or a completed tool decision.
+                                                raise LLMStreamStalled(f"Groq response incomplete: {reason}")
+                                            if reason in {"stop", "tool_calls"}:
+                                                terminal_seen = True
+                                            delta = choice.delta
                                             if delta.content:
                                                 if _first_content_t is None:
                                                     _first_content_t = asyncio.get_event_loop().time()
@@ -725,6 +734,12 @@ class GroqLLMProvider(LLMProvider):
                                         chunk_usage = _extract_stream_usage(chunk)
                                         if chunk_usage is not None:
                                             final_usage = chunk_usage
+                                    # The SDK permits clean SSE/HTTP EOF without a
+                                    # final choice. Only a provider completion marker
+                                    # authorizes publishing the accumulated tool calls.
+                                    # Consumer cancellation exits via finally instead.
+                                    if not terminal_seen:
+                                        raise LLMStreamStalled("Groq stream ended without a terminal reason")
                                 finally:
                                     await close_stream(stream)
                                     # Fail-soft telemetry tail. Runs on normal
@@ -788,6 +803,12 @@ class GroqLLMProvider(LLMProvider):
                         except CircuitOpenError:
                             raise  # Don't retry when circuit is open
 
+                        except LLMStreamStalled:
+                            # An incomplete response is never replayed here,
+                            # even when reasoning produced no visible text.
+                            _lease.report_failure(retryable=False)
+                            raise
+
                         except GroqRateLimitError as e:
                             _lease.report_failure(retryable=True)
                             logger.warning(
@@ -825,6 +846,8 @@ class GroqLLMProvider(LLMProvider):
         except CircuitOpenError as co:
             logger.error(f"Groq circuit breaker open: {co}")
             raise RuntimeError(f"LLM provider unavailable: {co}")
+        except LLMStreamStalled:
+            raise
         except Exception as e:
             if not isinstance(e, RuntimeError):
                 logger.error(f"Groq LLM streaming failed: {str(e)}")

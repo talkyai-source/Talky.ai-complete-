@@ -109,15 +109,12 @@ providers:
       # warm-up so loading this config can never reintroduce the dead model.
       model: "openai/gpt-oss-20b"
 
-      # LATENCY FIX 7: temperature 0.7 → 0.4
-      # Lower temperature = faster token selection + more predictable dental
-      # responses. No creative variation needed for "confirm/reschedule/cancel".
+      # Legacy fallback settings. Voice sessions supply the effective saved
+      # AI/campaign settings; temperature controls response variation.
       temperature: 0.4
 
-      # LATENCY FIX 8: max_tokens 150 → 60
-      # Dental answers are short: "Your appointment is confirmed for Tuesday
-      # at 2 PM. See you then!" = 15 tokens. 60 tokens is ample headroom.
-      # Lower ceiling = Groq returns faster (less buffering before stream end).
+      # Preserve the legacy fallback budget. A lower ceiling may truncate an
+      # answer; it does not guarantee faster first-token delivery.
       max_tokens: 60
 
   # ──────────────────────────────────────────────────────────────

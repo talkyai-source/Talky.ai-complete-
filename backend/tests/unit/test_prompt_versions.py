@@ -114,6 +114,10 @@ _EXPECTED_HASHES: dict[str, str] = {
     "lead_gen@9": "fb023abb70552cc4",
     "customer_support@8": "c86464b2339b762d",
     "receptionist@8": "5fd559d79a7c5c31",
+    # Unverified caller product use must be asked, not assumed.
+    "lead_gen@10": "8e7c9dbed675c9ee",
+    "customer_support@9": "67a176798ef4c5f5",
+    "receptionist@9": "67ebb32ba3850f0e",
 }
 
 

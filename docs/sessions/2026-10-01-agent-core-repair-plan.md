@@ -697,6 +697,32 @@ claimed complete without actual access.
   assumption: passing runtime tests does not establish perfect conversation
   behavior. Preserve this limitation when reporting readiness.
 
+### Final stream and image follow-up
+
+- Review of Groq's actual SDK showed that both a provider-declared token cutoff
+  and an HTTP stream ending without a terminal reason could look successful.
+  The adapter now rejects both before publishing tool calls, without retrying
+  the same provider request. When speech was already submitted, the shared
+  error path retains only those submitted sentences and discards the unsent
+  tail before history or end-call token parsing. Submission still does not
+  count as a playback receipt.
+- The concise shared prompt now explicitly asks about unverified product use
+  instead of assuming it. Prompt versions advance to lead_gen@10,
+  customer_support@9 and receptionist@9, retaining prior version digests.
+  This addresses the observed Groq wording but still requires repeated actual
+  conversation checks; it is not a universal semantic guarantee.
+- Saved AI/campaign settings supply actual voice-session model, temperature
+  and token values. The legacy YAML budget was not the live cutoff source;
+  only its misleading speed/accuracy commentary was corrected.
+- The `c7ea774c` Docker build installed the three patched OpenSSL packages and
+  cleared their findings. Its scan then found one HIGH advisory in inherited
+  `libpcre2-8-0`; that package is now explicitly refreshed in the same apt layer.
+  The next candidate must pass the rebuilt image scan and Compose build as
+  well as the application regressions. No scan exception was introduced.
+- The server was rechecked read-only: healthy, zero API-reported active sessions,
+  unchanged production SHA `b93b23de`. This does not replace the required real
+  ingress/origination freeze, drain manifest or controlled call acceptance.
+
 - [x] Audit reconciled with current production revision.
 - [x] Separate integration branch/worktree prepared.
 - [x] Detailed design, ownership, failure cases and acceptance plan recorded.

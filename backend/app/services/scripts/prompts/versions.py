@@ -120,9 +120,10 @@ _VERSIONS: Final[Mapping[str, str]] = {
     # @8 / @7: concise shared voice contract, evidence-bound actions and
     # contact capture, caller corrections before campaign relationship claims.
     # @9 / @8: product benefits and eligibility require supplied facts.
-    "lead_gen": "lead_gen@9",
-    "customer_support": "customer_support@8",
-    "receptionist": "receptionist@8",
+    # @10 / @9: unverified caller product use is a question, not a fact.
+    "lead_gen": "lead_gen@10",
+    "customer_support": "customer_support@9",
+    "receptionist": "receptionist@9",
 }
 
 #: Fallback for a persona that is not in the registry yet. Deliberately visible

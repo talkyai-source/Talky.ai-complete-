@@ -1264,6 +1264,11 @@ class TurnStreamer:
                     "dropping remaining buffer, no fallback", call_id, sentences_done
                 )
                 buf = ""
+                # Retain only submitted, non-interrupted sentences. The raw
+                # tail was never submitted; it must not enter history or arm
+                # a control token in the aggregate pass below. This does not
+                # upgrade submission into a heard/playback receipt.
+                all_tokens[:] = [" ".join(session._spoken_sentences)]
             else:
                 logger.warning(f"LLM timeout for call {call_id} (no TTS yet), using fallback")
                 buf = "I'm sorry, could you repeat that?"
@@ -1274,6 +1279,7 @@ class TurnStreamer:
             if sentences_done > 0 or t_tts_first is not None:
                 logger.warning("LLM error for %s after partial TTS — dropping buffer", call_id)
                 buf = ""
+                all_tokens[:] = [" ".join(session._spoken_sentences)]
             else:
                 buf = "I'm sorry, I had trouble processing that. Could you say it again?"
                 all_tokens.clear()
