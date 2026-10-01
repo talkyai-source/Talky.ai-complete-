@@ -27,6 +27,7 @@ import { cn } from "@/lib/utils";
 import { ChevronDown, ChevronRight, Copy, Ellipsis, Pause, Play, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { createPortal } from "react-dom";
+import { CampaignStartControl } from "@/components/campaigns/campaign-readiness";
 
 type ColumnDef = { key: CampaignSortKey; label: string; numeric?: boolean };
 
@@ -590,8 +591,9 @@ export function CampaignPerformanceTable({
         setSelected(new Set());
     };
 
+    const resumableSelectedIds = campaigns.filter((campaign) => selected.has(campaign.id) && ["Paused", "Draft", "Failed"].includes(normalizeCampaignStatus(campaign.status))).map((campaign) => campaign.id);
     const bulkResume = async () => {
-        const ids = Array.from(selected);
+        const ids = resumableSelectedIds;
         for (const id of ids) await onResume(id);
         setSelected(new Set());
     };
@@ -868,10 +870,7 @@ export function CampaignPerformanceTable({
                             <Pause className="h-4 w-4" />
                             Pause Selected
                         </Button>
-                        <Button type="button" variant="outline" size="sm" onClick={bulkResume}>
-                            <Play className="h-4 w-4" />
-                            Resume Selected
-                        </Button>
+                        <CampaignStartControl campaignIds={resumableSelectedIds} onStart={bulkResume} label="Resume Selected" />
                         <Button type="button" variant="secondary" size="sm" onClick={() => setExportOpen(true)}>
                             Export Selected
                         </Button>
@@ -1062,7 +1061,7 @@ export function CampaignPerformanceTable({
                                                             >
                                                                 View Details
                                                             </button>
-                                                            <button
+                                                            {canResume ? <CampaignStartControl campaignIds={[campaign.id]} menu label="Resume Campaign" onStart={async () => { await onResume(campaign.id); setMenuOpenFor(null); }} /> : <button
                                                                 type="button"
                                                                 role="menuitem"
                                                                 className={cn(
@@ -1085,7 +1084,7 @@ export function CampaignPerformanceTable({
                                                                         <Play className="h-4 w-4" /> Resume Campaign
                                                                     </>
                                                                 )}
-                                                            </button>
+                                                            </button>}
                                                             <button
                                                                 type="button"
                                                                 role="menuitem"
@@ -1347,7 +1346,7 @@ export function CampaignPerformanceTable({
                                     Open Page
                                 </Button>
                             </Link>
-                            {detailsCanPause || detailsCanResume ? (
+                            {detailsCanResume ? <CampaignStartControl campaignIds={[detailsCampaign.id]} onStart={() => onResume(detailsCampaign.id)} label="Resume" /> : detailsCanPause ? (
                                 <Button
                                     type="button"
                                     variant="outline"

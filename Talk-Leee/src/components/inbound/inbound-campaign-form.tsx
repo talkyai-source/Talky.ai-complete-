@@ -346,7 +346,7 @@ export function InboundCampaignForm({ mode, initialValue, initialCampaignId, loc
                 <div className="grid gap-5 md:grid-cols-2">
                     <Field label="Inbound SIP trunk" htmlFor="inbound-sip_trunk_id" error={errors.sip_trunk_id} hint="Only trunks with fresh Asterisk endpoint or registration proof can be selected; the server rechecks this before every admitted call.">
                         <select id="inbound-sip_trunk_id" value={value.sip_trunk_id} onChange={(event) => update("sip_trunk_id", event.target.value)} disabled={dependenciesLoading || eligibleInboundTrunks.length === 0 || (mode === "edit" && !canAssignNumber)} aria-invalid={Boolean(errors.sip_trunk_id)} className={selectClass}>
-                            <option value="">Choose an inbound trunk</option>{inboundTrunks.map((trunk) => <option key={trunk.id} value={trunk.id} disabled={!isEligibleInboundTrunk(trunk)}>{trunk.trunk_name} · {trunk.runtime_ready ? "runtime ready" : trunk.runtime_status_detail}</option>)}
+                            <option value="">Choose an inbound trunk</option>{inboundTrunks.map((trunk) => <option key={trunk.id} value={trunk.id} disabled={!isEligibleInboundTrunk(trunk)}>{trunk.trunk_name} · {isEligibleInboundTrunk(trunk) ? "inbound ready" : "inbound not ready"}</option>)}
                         </select>
                     </Field>
                     <Field label="Business timezone" htmlFor="inbound-timezone" error={errors.timezone}>

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { CallTimestamp } from "@/components/calls/call-timestamp";
+import { DialAgainButton } from "@/components/calls/dial-again-button";
 import { Phone, PhoneOff, PhoneIncoming, PhoneOutgoing, Clock, CalendarClock, ChevronRight, ChevronDown, FileText, Megaphone, Loader2, Sparkles, Play, Pause, Search, Mic, ThumbsUp } from "lucide-react";
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
@@ -163,7 +164,7 @@ function CallParties({ call }: { call: Call }) {
     if (call.direction === "inbound") {
         return <><span className="truncate text-sm font-semibold text-foreground">{call.from_number || "Private caller"}</span><span className="truncate text-xs text-muted-foreground">to {call.to_number || "assigned DID"}</span><CapturedContact call={call} /><CallHighlight call={call} /></>;
     }
-    return <><span className="truncate text-sm font-semibold text-foreground">{call.phone_number}</span><CapturedContact call={call} /><CallHighlight call={call} /></>;
+    return <><span className="truncate text-sm font-semibold text-foreground">{call.phone_number}</span><span className="truncate text-xs text-muted-foreground">From {call.from_number || "not recorded"}</span><CapturedContact call={call} /><CallHighlight call={call} /></>;
 }
 
 function SummaryPreview({
@@ -350,6 +351,7 @@ function CallRow({
                     callLabel={callLabel}
                 />
                 <div className="flex flex-wrap items-center gap-2 border-t border-border pt-3">
+                    <DialAgainButton call={call} />
                     <TooltipProvider delayDuration={250}>
                         <Tooltip onOpenChange={setSummaryPreviewOpen}>
                             <TooltipTrigger asChild>
@@ -500,7 +502,8 @@ function CallRow({
                         callLabel={callLabel}
                     />
                 </div>
-                <div className="flex items-center justify-end gap-1">
+                <div className="flex flex-wrap items-center justify-end gap-1">
+                    <DialAgainButton call={call} compact />
                     {call.recording_id && canPlayMedia ? (
                         <button
                             type="button"

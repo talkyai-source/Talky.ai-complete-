@@ -94,6 +94,7 @@ def _row_to_response(row: asyncpg.Record) -> SIPTrunkResponse:
             row["live_status_checked_at"] if "live_status_checked_at" in keys else None
         ),
         runtime_ready=runtime.ready,
+        inbound_runtime_ready=evaluate_trunk_runtime(dict(row), require_inbound=True).ready,
         runtime_status_code=runtime.code,
         runtime_status_detail=runtime.detail,
         created_at=row["created_at"],
@@ -612,6 +613,13 @@ async def update_sip_trunk(
                 )
 
             trunk_name = patch_payload.get("trunk_name", existing["trunk_name"])
+            from app.domain.services.telephony.trunk_resolver import platform_default_trunk_name
+
+            reserved = platform_default_trunk_name().strip().lower()
+            previous_name = str(existing["trunk_name"]).strip().lower()
+            proposed_name = str(trunk_name).strip().lower()
+            if proposed_name != previous_name and reserved in {previous_name, proposed_name}:
+                return _problem(request, 400, "Reserved Trunk Name", "The platform trunk name cannot be claimed or changed through tenant settings.", "reserved-trunk-name")
             sip_domain = _canonical_domain(patch_payload.get("sip_domain", existing["sip_domain"]))
             port = patch_payload.get("port", existing["port"])
             transport = patch_payload.get("transport", existing["transport"])
@@ -634,6 +642,14 @@ async def update_sip_trunk(
                         )
                     else:
                         auth_password_encrypted = None
+
+            metadata = _coerce_jsonb(metadata) or {}
+            if metadata.get("pool") != (_coerce_jsonb(existing["metadata"]) or {}).get("pool"):
+                return _problem(request, 400, "Platform Metadata Reserved", "Shared-pool membership is managed by the platform operator.", "reserved-trunk-metadata")
+            if payload.clear_auth:
+                metadata = {**metadata, "register": False}
+            if metadata.get("register") and not (auth_username and auth_password_encrypted):
+                return _problem(request, 400, "Invalid Registration", "REGISTER requires credentials. IP authentication uses register=false.", "invalid-registration")
 
             if bool(auth_username) != bool(auth_password_encrypted):
                 return _problem(
@@ -827,7 +843,7 @@ async def _set_trunk_active_state(
             # the sandboxed api service) and the gate created a trap: a trunk you
             # turned off couldn't be turned back on. The REAL verification now is
             # the real-time registration status (live_registration_status, refreshed
-            # ~15s by the trunk-status updater): activate → config applied → the card
+            # ~10s by the trunk-status updater): activate → config applied → the card
             # shows Registered / Rejected / Unregistered live. Deactivation was, and
             # remains, always allowed.
 
@@ -1035,8 +1051,7 @@ async def test_sip_trunk(
             """
             UPDATE tenant_sip_trunks
             SET last_tested_at = $1,
-                last_test_result = $2::jsonb,
-                updated_at = NOW()
+                last_test_result = $2::jsonb
             WHERE id = $3 AND tenant_id = $4
             """,
             tested_at,
@@ -1054,6 +1069,8 @@ async def test_sip_trunk(
         error=result.get("error"),
         detail=result.get("detail"),
         tested_at=tested_at,
+        sip_code=result.get("sip_code"),
+        timeout_code=result.get("timeout_code"),
     )
 
 
@@ -1085,10 +1102,19 @@ class PoolAssignmentResponse(BaseModel):
     caller_id: Optional[str] = None
 
 
-async def _fetch_pool_trunk(conn, pool_trunk_id: str):
-    """Read one active pool trunk (RLS bypassed — pool trunks are platform-shared,
-    owned by the pool tenant). Caller must be inside a transaction."""
-    await conn.execute("SET LOCAL app.bypass_rls = 'on'")
+async def _current_assignment_projection(db_pool, tenant_id: str, trunk_id: str):
+    """Display the current assigned trunk, not a stale assignment-time number."""
+    async with acquire_with_tenant(db_pool, tenant_id) as conn:
+        return await conn.fetchrow(
+            "SELECT trunk_name, metadata->>'caller_id' AS caller_id FROM tenant_sip_trunks "
+            "WHERE id=$1::uuid AND tenant_id=$2::uuid",
+            trunk_id,
+            str(tenant_id),
+        )
+
+
+async def _fetch_pool_trunk(conn, pool_trunk_id: str, tenant_id: str):
+    """Read and lock an active pool-labeled trunk owned by this tenant."""
     return await conn.fetchrow(
         """
         SELECT id, auth_username, metadata->>'caller_id' AS caller_id,
@@ -1096,14 +1122,17 @@ async def _fetch_pool_trunk(conn, pool_trunk_id: str):
                live_status_detail, is_active, direction, metadata
         FROM tenant_sip_trunks
         WHERE id = $1::uuid
+          AND tenant_id = $3::uuid
           AND is_active = TRUE
           AND direction IN ('outbound', 'both')
           AND metadata->>'pool' = 'true'
-          AND live_registration_status = 'registered'
+          AND live_registration_status IN ('registered', 'reachable')
           AND live_status_checked_at >= NOW() - ($2 * INTERVAL '1 second')
+        FOR SHARE
         """,
         pool_trunk_id,
         trunk_status_freshness_seconds(),
+        str(tenant_id),
     )
 
 
@@ -1121,16 +1150,15 @@ async def list_pool_trunks(
         db_pool, current_user.tenant_id, user_id=current_user.id
     ) as conn:
         async with conn.transaction():
-            await conn.execute("SET LOCAL app.bypass_rls = 'on'")
             rows = await conn.fetch(
                 """
                 SELECT id, auth_username, metadata->>'caller_id' AS caller_id,
                        live_registration_status, live_status_detail,
                        live_status_checked_at, is_active, direction, metadata
                 FROM tenant_sip_trunks
-                WHERE metadata->>'pool' = 'true' AND is_active = TRUE
+                WHERE metadata->>'pool' = 'true' AND is_active = TRUE AND tenant_id=$1::uuid
                 ORDER BY auth_username
-                """
+                """, current_user.tenant_id,
             )
     result: list[PoolTrunkItem] = []
     for row in rows:
@@ -1173,8 +1201,11 @@ async def get_pool_assignment(
     if not raw:
         return PoolAssignmentResponse()
     pt = raw if isinstance(raw, dict) else json.loads(raw)
+    current = await _current_assignment_projection(db_pool, current_user.tenant_id, pt.get("id"))
     return PoolAssignmentResponse(
-        pool_trunk_id=pt.get("id"), label=pt.get("label"), caller_id=pt.get("caller_id")
+        pool_trunk_id=pt.get("id"),
+        label=current["trunk_name"] if current else None,
+        caller_id=current["caller_id"] if current else None,
     )
 
 
@@ -1203,34 +1234,24 @@ async def set_pool_assignment(
             )
         return PoolAssignmentResponse()
 
-    async with acquire_with_tenant(db_pool, None, user_id=current_user.id) as conn:
-        pool = await _fetch_pool_trunk(conn, pid)
-    if pool is None:
-        return _problem(
-            request=request,
-            status_code=400,
-            title="Invalid Pool Account",
-            detail=(
-                "That shared-pool account is unavailable, not registered, "
-                "or its Asterisk status is stale."
-            ),
-            type_suffix="invalid-pool-trunk",
-        )
-    snapshot = {
-        "id": str(pool["id"]),
-        "endpoint": f"trunk-{pool['id']}",
-        "caller_id": pool["caller_id"],
-        "label": pool["auth_username"],
-    }
-    async with acquire_with_tenant(
-        db_pool, current_user.tenant_id, user_id=current_user.id
-    ) as conn:
+    # Keep the trunk share lock through assignment so deletion cannot leave
+    # behind a new dangling JSON reference after checking existing users.
+    async with acquire_with_tenant(db_pool, current_user.tenant_id, user_id=current_user.id) as conn:
+        pool = await _fetch_pool_trunk(conn, pid, current_user.tenant_id)
+        if pool is None or not evaluate_trunk_runtime(dict(pool), require_inbound=False).ready:
+            return _problem(
+                request=request, status_code=400, title="Invalid Pool Account",
+                detail="That shared-pool account is unavailable or its live status is stale.",
+                type_suffix="invalid-pool-trunk",
+            )
+        snapshot = {
+            "id": str(pool["id"]), "endpoint": f"trunk-{pool['id']}",
+            "caller_id": pool["caller_id"], "label": pool["auth_username"],
+        }
         await conn.execute(
             "UPDATE tenants SET calling_rules = COALESCE(calling_rules,'{}'::jsonb) "
             "|| jsonb_build_object('pool_trunk', $2::jsonb), updated_at = NOW() WHERE id = $1",
-            current_user.tenant_id,
-            # Raw dict — see create-path comment above.
-            snapshot,
+            current_user.tenant_id, snapshot,
         )
     return PoolAssignmentResponse(
         pool_trunk_id=snapshot["id"], label=snapshot["label"], caller_id=snapshot["caller_id"]
@@ -1281,10 +1302,7 @@ def _campaign_assignment_boundary_problem(request: Request, campaign) -> Optiona
 
 
 async def _fetch_assignable_trunk(conn, trunk_id: str, tenant_id):
-    """Read one active trunk this tenant may dial on: their OWN trunk or a
-    shared-pool account. RLS bypassed inside a transaction (pool rows live
-    under the pool tenant), with the ownership check done explicitly in SQL."""
-    await conn.execute("SET LOCAL app.bypass_rls = 'on'")
+    """Read and lock an active trunk owned by this tenant."""
     return await conn.fetchrow(
         """
         SELECT id, trunk_name, auth_username,
@@ -1294,7 +1312,7 @@ async def _fetch_assignable_trunk(conn, trunk_id: str, tenant_id):
                live_status_checked_at
         FROM tenant_sip_trunks
         WHERE id = $1::uuid AND is_active = TRUE
-          AND (tenant_id = $2::uuid OR metadata->>'pool' = 'true')
+          AND tenant_id = $2::uuid
         FOR SHARE
         """,
         trunk_id,
@@ -1354,11 +1372,12 @@ async def get_campaign_trunk_assignment(
     if not raw:
         return CampaignTrunkResponse(campaign_id=campaign_id)
     ct = raw if isinstance(raw, dict) else json.loads(raw)
+    current = await _current_assignment_projection(db_pool, current_user.tenant_id, ct.get("id"))
     return CampaignTrunkResponse(
         campaign_id=campaign_id,
         trunk_id=ct.get("id"),
-        label=ct.get("label"),
-        caller_id=ct.get("caller_id"),
+        label=current["trunk_name"] if current else None,
+        caller_id=current["caller_id"] if current else None,
     )
 
 
@@ -1380,14 +1399,12 @@ async def set_campaign_trunk_assignment(
     tid = str(body.trunk_id) if body.trunk_id is not None else None
 
     try:
-        # One transaction holds a row lock from direction verification through
-        # mutation.  The bypass is necessary only because an assignable shared
-        # trunk can belong to the pool tenant; every campaign statement still
-        # carries an explicit tenant predicate.
+        # One tenant-scoped transaction holds row locks through mutation.
+        # A pool label is not permission to use another tenant's carrier account.
         async with asyncio.timeout(_CAMPAIGN_ASSIGNMENT_DB_TIMEOUT_S):
             async with acquire_with_tenant(
                 db_pool,
-                None,
+                current_user.tenant_id,
                 user_id=current_user.id,
                 timeout=_CAMPAIGN_ASSIGNMENT_DB_TIMEOUT_S,
             ) as conn:
@@ -1491,3 +1508,162 @@ async def set_campaign_trunk_assignment(
         label=snapshot["label"],
         caller_id=snapshot["caller_id"],
     )
+
+
+@router.delete("/trunks/{trunk_id}")
+async def delete_sip_trunk(
+    trunk_id: UUID,
+    request: Request,
+    idempotency_key: Optional[str] = Header(default=None, alias="Idempotency-Key"),
+    current_user: CurrentUser = Depends(get_current_user),
+    db_pool: asyncpg.Pool = Depends(get_db_pool),
+):
+    """Remove an unused, disabled tenant trunk without cascading routing history."""
+    tenant_problem = _require_tenant(request, current_user)
+    if tenant_problem:
+        return tenant_problem
+    if not idempotency_key:
+        return _problem(
+            request,
+            400,
+            "Idempotency Key Required",
+            "Mutating operations require Idempotency-Key header.",
+            "idempotency-key-required",
+        )
+    operation = f"sip_trunks:delete:{trunk_id}"
+    async with acquire_with_tenant(
+        db_pool, current_user.tenant_id, user_id=current_user.id
+    ) as conn:
+        async with conn.transaction():
+            state, cached, code = await _claim_idempotency(
+                conn,
+                tenant_id=current_user.tenant_id,
+                operation=operation,
+                idempotency_key=idempotency_key,
+                request_hash=_stable_hash({"trunk_id": str(trunk_id)}),
+            )
+            if state == "replay":
+                return JSONResponse(status_code=code or 200, content=cached)
+            if state != "new":
+                return _problem(
+                    request,
+                    409,
+                    "Idempotency Conflict",
+                    "This request is already in progress or conflicts with an earlier request.",
+                    "idempotency-conflict",
+                )
+            quota_problem = await _enforce_ws_i_quota(
+                conn=conn,
+                request=request,
+                tenant_id=current_user.tenant_id,
+                user_id=current_user.id,
+                policy_scope="api_mutation",
+                metric_key="sip_trunks:delete",
+                request_id=request.headers.get("x-request-id"),
+            )
+            if quota_problem:
+                await _store_error_idempotency_result(
+                    conn,
+                    tenant_id=current_user.tenant_id,
+                    operation=operation,
+                    idempotency_key=idempotency_key,
+                    response=quota_problem,
+                )
+                return quota_problem
+            row = await conn.fetchrow(
+                "SELECT * FROM tenant_sip_trunks WHERE tenant_id=$1 AND id=$2 FOR UPDATE",
+                current_user.tenant_id,
+                trunk_id,
+            )
+            problem = None
+            if not row:
+                problem = _problem(
+                    request,
+                    404,
+                    "Trunk Not Found",
+                    "Requested trunk does not exist for tenant.",
+                    "trunk-not-found",
+                )
+            elif row["is_active"]:
+                problem = _problem(
+                    request,
+                    409,
+                    "Disable Trunk First",
+                    "Disable this trunk before deleting it.",
+                    "trunk-active",
+                )
+            else:
+                from app.domain.services.telephony.trunk_resolver import platform_default_trunk_name
+
+                if row["trunk_name"].strip().lower() == platform_default_trunk_name().lower():
+                    problem = _problem(
+                        request,
+                        409,
+                        "Managed Platform Trunk",
+                        "This shared platform trunk is managed by the platform operator.",
+                        "platform-trunk-managed",
+                    )
+            if not problem:
+                from app.domain.services.call_status import TERMINAL_CALL_STATUSES
+
+                # Pool assignments may be owned by another tenant. Return only
+                # a boolean, never their identities or campaign data.
+                await conn.execute("SET LOCAL app.bypass_rls = 'on'")
+                used = await conn.fetchval(
+                    """SELECT EXISTS (
+                        SELECT 1 FROM campaigns WHERE calling_config->'trunk'->>'id'=$1
+                        UNION ALL SELECT 1 FROM tenants WHERE calling_rules->'pool_trunk'->>'id'=$1
+                        UNION ALL SELECT 1 FROM tenant_route_policies WHERE target_trunk_id=$1::uuid
+                        UNION ALL SELECT 1 FROM inbound_did_assignments WHERE sip_trunk_id=$1::uuid
+                        UNION ALL SELECT 1 FROM calls WHERE tenant_id=$2::uuid
+                            AND (status IS NULL OR status <> ALL($3::text[]))
+                    )""",
+                    str(trunk_id),
+                    current_user.tenant_id,
+                    list(TERMINAL_CALL_STATUSES),
+                )
+                if used:
+                    problem = _problem(
+                        request,
+                        409,
+                        "Trunk In Use",
+                        "Finish active calls and remove this trunk's campaign, pool or route-policy assignments before deleting it. Historical inbound bindings must be retained.",
+                        "trunk-in-use",
+                    )
+            if problem:
+                await _store_error_idempotency_result(
+                    conn,
+                    tenant_id=current_user.tenant_id,
+                    operation=operation,
+                    idempotency_key=idempotency_key,
+                    response=problem,
+                )
+                return problem
+            from app.infrastructure.telephony.pjsip_config_generator import remove_trunk_config
+
+            try:
+                await remove_trunk_config(
+                    str(trunk_id), require_reload=_requires_confirmed_pjsip_apply()
+                )
+            except Exception as exc:
+                raise HTTPException(
+                    503,
+                    "Asterisk configuration cleanup was not confirmed; the disabled trunk was retained.",
+                ) from exc
+            await conn.execute(
+                "DELETE FROM tenant_sip_trunks WHERE tenant_id=$1 AND id=$2",
+                current_user.tenant_id,
+                trunk_id,
+            )
+            result = {"id": str(trunk_id), "deleted": True}
+            await _store_idempotency_result(
+                conn,
+                tenant_id=current_user.tenant_id,
+                operation=operation,
+                idempotency_key=idempotency_key,
+                response_body=result,
+                status_code=200,
+                resource_type="sip_trunk",
+                resource_id=trunk_id,
+            )
+            return result

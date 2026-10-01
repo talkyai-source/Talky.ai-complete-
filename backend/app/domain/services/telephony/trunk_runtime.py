@@ -2,7 +2,7 @@
 
 ``tenant_sip_trunks.is_active`` records operator intent.  It is not proof
 that Asterisk loaded the endpoint or that a registration is healthy.  The
-15-second trunk-status updater writes that independent runtime evidence and
+10-second trunk-status updater writes that independent runtime evidence and
 all inbound activation/admission paths evaluate it through this module.
 """
 from __future__ import annotations
@@ -16,7 +16,7 @@ from typing import Any, Mapping, Optional
 
 DEFAULT_FRESHNESS_SECONDS = 60
 _READY_REGISTERED = {"registered"}
-_READY_IP_AUTH = {"loaded", "registered"}
+_READY_IP_AUTH = {"reachable", "registered"}
 
 
 @dataclass(frozen=True)
@@ -29,7 +29,7 @@ class TrunkRuntimeReadiness:
 def trunk_status_freshness_seconds() -> int:
     """Maximum age of Asterisk evidence accepted by call admission.
 
-    The updater normally runs every 15 seconds.  Values below 30 seconds are
+    The updater normally runs every 10 seconds.  Values below 30 seconds are
     unsafe under ordinary timer jitter; values above five minutes hide a dead
     updater for too long, so configuration is bounded deliberately.
     """
@@ -74,8 +74,8 @@ def evaluate_trunk_runtime(
     """Return whether a trunk has fresh, type-appropriate Asterisk proof.
 
     Registration trunks must be ``registered``.  IP-auth trunks do not have a
-    registration object, so the updater proves their namespaced endpoint is
-    actually loaded and reports ``loaded``.  ``registered`` is also accepted
+    registration object, so outbound admission requires a qualified reachable
+    contact (``reachable``), not merely a loaded endpoint. ``registered`` is also accepted
     for the hand-managed platform-default endpoint.
     """
     if not bool(trunk.get("trunk_active", trunk.get("is_active"))):
@@ -88,6 +88,8 @@ def evaluate_trunk_runtime(
             "outbound_only",
             "SIP trunk is not configured to accept inbound traffic.",
         )
+    if not require_inbound and direction not in {"outbound", "both"}:
+        return TrunkRuntimeReadiness(False, "inbound_only", "SIP trunk is not configured for outbound calls.")
 
     checked_at = _aware_utc(
         trunk.get("trunk_live_status_checked_at", trunk.get("live_status_checked_at"))
@@ -121,12 +123,14 @@ def evaluate_trunk_runtime(
     ).strip().lower()
     register = bool(_metadata(trunk.get("trunk_metadata", trunk.get("metadata"))).get("register"))
     allowed = _READY_REGISTERED if register else _READY_IP_AUTH
+    if require_inbound and not register:
+        allowed = allowed | {"loaded"}
     if status not in allowed:
         reason = str(
             trunk.get("trunk_live_status_detail", trunk.get("live_status_detail")) or ""
         ).strip()
         suffix = f" ({reason})" if reason else ""
-        expectation = "registered" if register else "loaded in Asterisk"
+        expectation = "registered and reachable" if register else "reachable from Asterisk"
         return TrunkRuntimeReadiness(
             False,
             f"runtime_{status}",
@@ -138,5 +142,7 @@ def evaluate_trunk_runtime(
         "ready",
         "Asterisk reports a healthy registration."
         if status == "registered"
+        else "Asterisk reports a reachable SIP contact."
+        if status == "reachable"
         else "Asterisk reports the inbound endpoint is loaded.",
     )

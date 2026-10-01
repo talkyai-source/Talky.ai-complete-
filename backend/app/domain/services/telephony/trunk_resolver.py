@@ -1,35 +1,8 @@
-"""Per-tenant outbound SIP-trunk resolution (Phase A).
+"""Resolve tenant outbound routing without silently changing a selected trunk.
 
-Given a tenant, decide which Asterisk PJSIP endpoint an outbound call must
-be dialed through and which caller-ID (E.164) to present. This is the piece
-that turns the per-tenant ``tenant_sip_trunks`` data model into an actual
-routing decision — today every outbound call is hard-wired to a single
-global endpoint (``TELEPHONY_PJSIP_OUTBOUND_ENDPOINT``), which means BYO /
-own-trunk tenants share the platform upstream. This resolver keeps the
-platform-default path byte-for-byte identical while giving own-trunk
-tenants their isolated ``trunk-<trunkid>`` endpoint + their own number.
-
-Design (matches the orchestrator's namespacing scheme):
-
-  * platform-default trunk (seeded ``platform-default`` row) → the existing
-    env global endpoint (``blazedigitel-endpoint`` by default). is_default.
-  * tenant-owned active trunk → PJSIP objects named ``trunk-<trunkid>``.
-  * caller-id: for an own-trunk route we present the tenant's own dialable
-    number (``is_dialable_in_production`` in prod; graceful fallback to any
-    verified / any number outside prod). For the default path we return
-    ``None`` so the caller keeps whatever caller-ID it already validated —
-    that is what keeps today's tenants unchanged.
-
-The decision core (:func:`choose_outbound_route`) is a **pure** function so
-it can be unit-tested offline with no DB; :func:`resolve_outbound_trunk` is
-the thin async wrapper that fetches the two row-sets under the tenant's RLS
-context and delegates to it. Both are fail-safe: any error resolves to the
-platform default (env endpoint, unchanged caller-ID) so a resolver problem
-can never block or mis-route a call.
-
-NOTE: this module never decrypts or logs trunk passwords — it only needs
-the trunk id + name to name the PJSIP endpoint. Rendering the actual
-credentials into Asterisk config is Phase B.
+Campaign assignment wins, then tenant pool assignment, then the most recently
+activated own trunk. A down/missing route or failed lookup is a refusal. Caller
+IDs come from the current trunk record; assignment snapshots are display caches.
 """
 from __future__ import annotations
 
@@ -159,15 +132,7 @@ def _select_caller_id(
     *,
     is_production: bool,
 ) -> Optional[str]:
-    """Pick the tenant's own caller-ID from their verified DID rows.
-
-    Production honours the same gate as
-    ``TenantPhoneNumber.is_dialable_in_production`` — verified AND a real
-    STIR/SHAKEN attestation token. Outside production we fall back
-    gracefully: prefer a verified number, else any number on file, so
-    local/staging BYO testing isn't blocked by the attestation requirement.
-    Deterministic (sorted by E.164) so the choice is stable across calls.
-    """
+    """Select a verified tenant DID; stored static STIR tokens are not per-call proof."""
     verified = PhoneNumberStatus.VERIFIED.value
 
     def _sorted(rows: Sequence[DidRow]) -> list[DidRow]:
@@ -176,7 +141,7 @@ def _select_caller_id(
     if is_production:
         eligible = [
             r for r in dialable_numbers
-            if r.status == verified and bool(r.stir_shaken_token)
+            if r.status == verified
         ]
         chosen = _sorted(eligible)
         return chosen[0].e164 if chosen else None
@@ -212,7 +177,7 @@ def choose_outbound_route(
     refused (prefer verified DID, else the trunk's configured caller-ID,
     else refuse).
     """
-    actives = [t for t in active_trunks if t.is_active and t.runtime_ready]
+    actives = [t for t in active_trunks if t.is_active]
 
     # An internal PBX extension trunk is an ADDRESS, not a PSTN route: it can
     # be rung, but it cannot carry an outbound call to a real number and has no
@@ -237,21 +202,17 @@ def choose_outbound_route(
                 str(t.id),
             ),
         )[-1]
-        # Caller-ID: the trunk's own configured caller-ID when the tenant has
-        # VERIFIED that number (the owner pinned it to this trunk and proved
-        # it is theirs); else prefer a verified DID; else the trunk's own
-        # configured caller-ID (metadata.caller_id); else None.
-        #
-        # 2026-09-30: Dojo-PC's trunk "17789249977" is set to present
-        # 17789249977, which is a verified number of the tenant, but only
-        # +442046132300 carries a STIR/SHAKEN token, so every call on the 9977
-        # account presented ...300 -- a number that account does not own --
-        # and was rejected by the carrier within a second.
+        if not own.runtime_ready:
+            return OutboundTrunkRoute(None, None, str(own.id), False, "selected_trunk_not_ready", True)
+        # An explicitly configured number must never be replaced by a different
+        # tenant DID merely because that other number sorts first or has a token.
         caller_id = _trunk_own_verified_number(own.caller_id, dialable_numbers)
-        if caller_id is None:
-            caller_id = _select_caller_id(dialable_numbers, is_production=is_production)
-        if caller_id is None and own.caller_id:
+        if own.caller_id and caller_id is None:
+            if is_production:
+                return OutboundTrunkRoute(None, None, str(own.id), False, "trunk_caller_id_not_verified", True)
             caller_id = own.caller_id.strip() or None
+        if not own.caller_id:
+            caller_id = _select_caller_id(dialable_numbers, is_production=is_production)
 
         # Own-trunk-only mode requires a presentable caller-ID; refuse when
         # neither a verified DID nor the trunk's configured caller-ID exists.
@@ -289,7 +250,10 @@ def choose_outbound_route(
         )
 
     # Shared default ON → shared platform endpoint, caller-ID unchanged.
-    reason = "platform_default" if actives else "no_active_trunk"
+    ready_defaults = [t for t in actives if t.runtime_ready and _is_platform_default(t, platform_default_trunk_name)]
+    if not ready_defaults:
+        return OutboundTrunkRoute(None, None, None, False, "no_ready_trunk", True)
+    reason = "platform_default"
     return OutboundTrunkRoute(
         endpoint=env_default_endpoint,
         caller_id=None,
@@ -300,28 +264,8 @@ def choose_outbound_route(
 
 
 def _fallback_route(reason: str, *, shared_default_enabled: bool) -> OutboundTrunkRoute:
-    """Fail-safe route used when the resolver can't complete.
-
-    With the shared default ON we fall back to the platform endpoint (never
-    block a call). With it OFF (own-trunk-only) we must NOT mis-route onto a
-    non-existent shared upstream, so we refuse cleanly instead.
-    """
-    if shared_default_enabled:
-        return OutboundTrunkRoute(
-            endpoint=env_default_endpoint(),
-            caller_id=None,
-            trunk_id=None,
-            is_default=True,
-            reason=reason,
-        )
-    return OutboundTrunkRoute(
-        endpoint=None,
-        caller_id=None,
-        trunk_id=None,
-        is_default=False,
-        reason=reason,
-        refused=True,
-    )
+    """A failed lookup cannot establish permission or a healthy default route."""
+    return OutboundTrunkRoute(None, None, None, False, reason, True)
 
 
 def _coerce_metadata(metadata) -> dict:
@@ -361,6 +305,61 @@ def _extract_trunk_caller_id(metadata) -> Optional[str]:
     return None
 
 
+async def requires_sip_readiness(db_pool, *, tenant_id: str, campaign: dict) -> bool:
+    """Gate selected SIP inventory in auto mode without probing a PBX at start.
+
+    Explicit cloud-provider tenants keep their provider's admission contract.
+    A configured Asterisk deployment always checks, including an empty inventory.
+    """
+    from app.infrastructure.telephony.adapter_factory import CallControlAdapterFactory
+
+    adapter = (
+        os.getenv("TELEPHONY_ADAPTER")
+        or CallControlAdapterFactory._read_pbx_backend_config()
+        or "auto"
+    ).lower()
+    if adapter == "freeswitch":
+        return False
+    if db_pool is None:
+        return adapter == "asterisk"
+    from app.core.db_utils import acquire_with_tenant
+
+    async with acquire_with_tenant(db_pool, tenant_id) as conn:
+        row = await conn.fetchrow(
+            """SELECT active_telephony_provider,
+                      calling_rules->'pool_trunk' AS pool_trunk,
+                      EXISTS (SELECT 1 FROM tenant_sip_trunks WHERE tenant_id=$1::uuid) AS has_trunks
+               FROM tenants WHERE id=$1::uuid""",
+            tenant_id,
+        )
+    if not row:
+        # A missing tenant cannot establish a permitted route.
+        return True
+    provider = str(row["active_telephony_provider"] or "none").lower()
+    if provider in {"twilio", "vonage"}:
+        return False
+    if provider != "sip":
+        from app.infrastructure.telephony.provider_factory import TelephonyProviderFactory
+
+        # Match the existing factory: the tenant's explicit SIP choice wins
+        # over platform defaults; otherwise env takes precedence over YAML.
+        default_provider = (
+            os.getenv("TELEPHONY_PROVIDER")
+            or TelephonyProviderFactory._read_config_active()
+            or "auto"
+        ).lower()
+        if default_provider in {"twilio", "vonage"}:
+            return False
+    config = _coerce_metadata(campaign.get("calling_config"))
+    return bool(
+        adapter == "asterisk"
+        or provider == "sip"
+        or config.get("trunk")
+        or row["pool_trunk"]
+        or row["has_trunks"]
+    )
+
+
 async def _resolve_campaign_trunk(
     db_pool, *, campaign_id: str, tenant_id: str
 ) -> Optional[OutboundTrunkRoute]:
@@ -371,8 +370,7 @@ async def _resolve_campaign_trunk(
     ``campaigns.calling_config.trunk`` as ``{"id","endpoint","caller_id","label"}``
     (snapshotted at assignment time, same shape as the tenant pool allotment).
     Takes precedence over BOTH the tenant pool allotment and own-trunk
-    resolution. Returns None when there's no assignment or on any error
-    (fail-safe → fall through to the tenant-level paths).
+    resolution. Returns None only when there is no assignment. Errors refuse.
     """
     try:
         from app.core.db_utils import acquire_with_tenant
@@ -392,7 +390,6 @@ async def _resolve_campaign_trunk(
                 reason="campaign_assigned_trunk_invalid", refused=True,
             )
         async with acquire_with_tenant(db_pool, str(tenant_id)) as conn:
-            await conn.execute("SET LOCAL app.bypass_rls = 'on'")
             row = await conn.fetchrow(
                 """
                 SELECT id, tenant_id, trunk_name, is_active, direction, metadata,
@@ -400,11 +397,13 @@ async def _resolve_campaign_trunk(
                        live_status_checked_at
                 FROM tenant_sip_trunks
                 WHERE id = $1::uuid
-                  AND (tenant_id = $2::uuid OR metadata->>'pool' = 'true')
+                  AND tenant_id = $2::uuid
                 """,
                 trunk_id,
                 str(tenant_id),
             )
+        if row and str(row["tenant_id"]) != str(tenant_id):
+            return OutboundTrunkRoute(None, None, trunk_id, False, "trunk_not_authorized", True)
         runtime = (
             evaluate_trunk_runtime(dict(row), require_inbound=False) if row else None
         )
@@ -427,7 +426,7 @@ async def _resolve_campaign_trunk(
             platform_default_trunk_name(),
         )
         endpoint = env_default_endpoint() if is_platform_default else f"trunk-{row['id']}"
-        caller_id = (ct.get("caller_id") or "").strip() or None
+        caller_id = _extract_trunk_caller_id(row["metadata"])
         return OutboundTrunkRoute(
             endpoint=endpoint,
             caller_id=caller_id,
@@ -452,13 +451,11 @@ async def _resolve_pool_assignment(
 ) -> Optional[OutboundTrunkRoute]:
     """If this tenant has been allotted a SHARED-POOL trunk, route to it.
 
-    The allotment is stored on the tenant's OWN ``tenants.calling_rules.pool_trunk``
-    as ``{"id","endpoint","caller_id","label"}`` — the endpoint + DID are
-    snapshotted at assignment time, so this per-call read touches only the
-    tenant's own row (no cross-tenant lookup, no RLS bypass on the hot path).
+    The allotment stores a trunk ID on ``tenants.calling_rules.pool_trunk``.
+    The referenced trunk must belong to this tenant. ``metadata.pool`` is not
+    permission to use another tenant's carrier account.
     Takes precedence over the tenant's own trunks (explicit operator intent).
-    Returns None when there's no assignment or on any error (fail-safe → fall
-    through to normal own-trunk resolution).
+    Returns None only when there is no assignment. Errors refuse.
     """
     try:
         from app.core.db_utils import acquire_with_tenant
@@ -477,17 +474,19 @@ async def _resolve_pool_assignment(
                 reason="pool_assigned_trunk_invalid", refused=True,
             )
         async with acquire_with_tenant(db_pool, str(tenant_id)) as conn:
-            await conn.execute("SET LOCAL app.bypass_rls = 'on'")
             row = await conn.fetchrow(
                 """
-                SELECT id, is_active, direction, metadata,
+                SELECT id, tenant_id, is_active, direction, metadata,
                        live_registration_status, live_status_detail,
                        live_status_checked_at
                 FROM tenant_sip_trunks
-                WHERE id = $1::uuid AND metadata->>'pool' = 'true'
+                WHERE id = $1::uuid AND tenant_id = $2::uuid AND metadata->>'pool' = 'true'
                 """,
                 trunk_id,
+                str(tenant_id),
             )
+        if row and str(row["tenant_id"]) != str(tenant_id):
+            return OutboundTrunkRoute(None, None, trunk_id, False, "trunk_not_authorized", True)
         runtime = (
             evaluate_trunk_runtime(dict(row), require_inbound=False) if row else None
         )
@@ -502,7 +501,7 @@ async def _resolve_pool_assignment(
                 reason="pool_assigned_trunk_not_ready", refused=True,
             )
         endpoint = f"trunk-{row['id']}"
-        caller_id = (pt.get("caller_id") or "").strip() or None
+        caller_id = _extract_trunk_caller_id(row["metadata"])
         return OutboundTrunkRoute(
             endpoint=endpoint,
             caller_id=caller_id,

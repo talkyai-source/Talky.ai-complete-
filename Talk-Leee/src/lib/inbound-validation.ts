@@ -33,9 +33,9 @@ export function isEligibleInboundBaseCampaign(campaign: Pick<Campaign, "directio
     return campaign.direction === "outbound" && status === "draft";
 }
 
-export function isEligibleInboundTrunk(trunk: Pick<SipTrunkRow, "direction" | "is_active" | "runtime_ready">): boolean {
+export function isEligibleInboundTrunk(trunk: Pick<SipTrunkRow, "direction" | "is_active" | "inbound_runtime_ready">): boolean {
     return trunk.is_active
-        && trunk.runtime_ready
+        && trunk.inbound_runtime_ready === true
         && (trunk.direction === "inbound" || trunk.direction === "both");
 }
 

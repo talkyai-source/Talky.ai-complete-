@@ -8,6 +8,7 @@ import type { Campaign } from "@/lib/dashboard-api";
 import { parseCommandInput, CommandResultCategory } from "@/lib/campaign-performance";
 import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
+import { CampaignReadinessNotice, useCampaignReadiness } from "@/components/campaigns/campaign-readiness";
 
 type Result = {
     id: string;
@@ -16,6 +17,7 @@ type Result = {
     subtitle?: string;
     href?: string;
     action?: () => void;
+    disabled?: boolean;
 };
 
 function matchScore(text: string, query: string) {
@@ -42,6 +44,7 @@ export function CommandBar({
     const [value, setValue] = useState("");
     const [activeIndex, setActiveIndex] = useState(0);
     const inputRef = useRef<HTMLInputElement | null>(null);
+    const runningAction = useRef(false);
 
     const openBar = () => {
         setOpen(true);
@@ -69,8 +72,11 @@ export function CommandBar({
     }, [open]);
 
     const parsed = useMemo(() => parseCommandInput(value), [value]);
+    const pausedIds = campaigns.filter((campaign) => campaign.status.toLowerCase() === "paused").map((campaign) => campaign.id);
+    const resumeVisible = open && parsed.prefix === "/" && "resume all paused campaigns".includes(parsed.query.trim().toLowerCase());
+    const resumeReadiness = useCampaignReadiness(pausedIds, resumeVisible);
 
-    const results = useMemo(() => {
+    const results = useMemo<Result[]>(() => {
         const q = parsed.query.trim();
         const users: Array<{ id: string; name: string; role: string }> = [
             { id: "usr-001", name: "Alex Operator", role: "Ops" },
@@ -140,8 +146,10 @@ export function CommandBar({
                     id: "action-resume-paused",
                     category: "Campaigns",
                     title: "Resume all paused campaigns",
-                    subtitle: "Prototype action",
+                    subtitle: resumeReadiness.reason || "Calling routes are ready",
+                    disabled: !resumeReadiness.ready,
                     action: async () => {
+                        if (!resumeReadiness.ready) return;
                         for (const c of campaigns) {
                             if ((c.status || "").toLowerCase() === "paused") await onResume(c.id);
                         }
@@ -203,13 +211,16 @@ export function CommandBar({
             .map((x) => x.r);
 
         return scored;
-    }, [campaigns, onPause, onResume, parsed.prefix, parsed.query, router]);
+    }, [campaigns, onPause, onResume, parsed.prefix, parsed.query, router, resumeReadiness.ready, resumeReadiness.reason]);
 
     const runResult = async (r: Result) => {
+        if (r.disabled || runningAction.current) return;
         setOpen(false);
         setValue("");
         if (r.action) {
-            await r.action();
+            runningAction.current = true;
+            try { await r.action(); }
+            finally { runningAction.current = false; }
             return;
         }
         if (r.href) router.push(r.href);
@@ -287,6 +298,7 @@ export function CommandBar({
                                     <button
                                         key={r.id}
                                         type="button"
+                                        disabled={r.disabled}
                                         className={cn(
                                             "flex w-full items-start justify-between gap-3 rounded-lg px-3 py-2 text-left transition-colors duration-150 ease-out",
                                             idx === activeIndex ? "bg-accent text-accent-foreground" : "hover:bg-accent hover:text-accent-foreground text-foreground"
@@ -304,6 +316,7 @@ export function CommandBar({
                             </div>
                         )}
                     </div>
+                    {resumeVisible && <CampaignReadinessNotice readiness={resumeReadiness} />}
                     <div className="text-xs font-semibold text-muted-foreground">
                         Prefixes: <span className="text-foreground">/</span> actions, <span className="text-foreground">&gt;</span> navigation, <span className="text-foreground">@</span> users, <span className="text-foreground">#</span> tags
                     </div>

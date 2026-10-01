@@ -60,19 +60,20 @@ def test_platform_default_name_match_is_case_insensitive():
     assert route.endpoint == ENV_ENDPOINT
 
 
-def test_no_active_trunk_falls_back_to_default():
+def test_no_active_trunk_refuses_unproven_default():
     # inactive own trunk must NOT be routed to.
     trunks = [TrunkRow(id="t9", trunk_name="my-byo", is_active=False)]
     route = _route(trunks, [DidRow("+15550000000", "verified", "tok")])
-    assert route.endpoint == ENV_ENDPOINT
-    assert route.is_default is True
-    assert route.reason == "no_active_trunk"
+    assert route.endpoint is None
+    assert route.refused is True
+    assert route.reason == "no_ready_trunk"
 
 
-def test_empty_trunk_list_falls_back_to_default():
+def test_empty_trunk_list_refuses_unproven_default():
     route = _route([])
-    assert route.endpoint == ENV_ENDPOINT
-    assert route.reason == "no_active_trunk"
+    assert route.endpoint is None
+    assert route.refused is True
+    assert route.reason == "no_ready_trunk"
 
 
 # --- own-trunk path ----------------------------------------------------
@@ -123,18 +124,18 @@ def test_own_trunk_with_no_dialable_number_yields_no_caller_id_override():
 
 # --- caller-ID selection gate ------------------------------------------
 
-def test_caller_id_prod_requires_verified_and_attestation():
+def test_caller_id_prod_requires_verified_without_static_token_preference():
     numbers = [
         DidRow("+1111", "pending_verification", "tok"),
         DidRow("+2222", "verified", None),          # verified but no token
         DidRow("+3333", "verified", "tok"),          # dialable
     ]
-    assert _select_caller_id(numbers, is_production=True) == "+3333"
+    assert _select_caller_id(numbers, is_production=True) == "+2222"
 
 
-def test_caller_id_prod_none_when_no_attested_number():
+def test_caller_id_prod_accepts_verified_without_static_token():
     numbers = [DidRow("+2222", "verified", None)]
-    assert _select_caller_id(numbers, is_production=True) is None
+    assert _select_caller_id(numbers, is_production=True) == "+2222"
 
 
 def test_caller_id_nonprod_prefers_verified_without_token():
@@ -191,14 +192,15 @@ def test_flag_off_empty_trunks_is_refused():
     assert route.reason == "no_own_trunk"
 
 
-def test_flag_off_own_trunk_no_did_falls_back_to_trunk_caller_id():
+def test_flag_off_unverified_trunk_caller_id_is_refused():
     trunks = [
         TrunkRow(id="own", trunk_name="byo", is_active=True, caller_id="+441234567890"),
     ]
     route = _route(trunks, [], is_production=True, shared_default_enabled=False)
-    assert route.refused is False
-    assert route.endpoint == "trunk-own"
-    assert route.caller_id == "+441234567890"
+    assert route.refused is True
+    assert route.endpoint is None
+    assert route.caller_id is None
+    assert route.reason == "trunk_caller_id_not_verified"
 
 
 def test_flag_off_own_trunk_no_did_no_trunk_caller_id_is_refused():
@@ -210,7 +212,7 @@ def test_flag_off_own_trunk_no_did_no_trunk_caller_id_is_refused():
     assert route.reason == "no_caller_id"
 
 
-def test_flag_off_did_preferred_over_trunk_caller_id():
+def test_verified_alternative_did_does_not_replace_selected_trunk_caller_id():
     trunks = [
         TrunkRow(id="own", trunk_name="byo", is_active=True, caller_id="+440000000000"),
     ]
@@ -220,7 +222,10 @@ def test_flag_off_did_preferred_over_trunk_caller_id():
         is_production=True,
         shared_default_enabled=False,
     )
-    assert route.caller_id == "+15559998888"
+    assert route.refused is True
+    assert route.endpoint is None
+    assert route.caller_id is None
+    assert route.reason == "trunk_caller_id_not_verified"
 
 
 def test_flag_on_own_trunk_no_caller_id_still_routes_not_refused():
@@ -254,7 +259,7 @@ def test_unhealthy_own_trunk_is_never_selected():
     route = _route(trunks, shared_default_enabled=False)
     assert route.refused is True
     assert route.endpoint is None
-    assert route.reason == "no_own_trunk"
+    assert route.reason == "selected_trunk_not_ready"
 
 
 class _AssignedConn:
@@ -358,7 +363,7 @@ def test_trunk_caller_id_that_is_a_verified_tenant_number_wins():
         assert route.caller_id == "+17789249977"
 
 
-def test_unverified_trunk_caller_id_does_not_beat_an_attested_did():
+def test_unverified_canadian_caller_id_is_not_silently_replaced_by_uk_number():
     trunks = [
         TrunkRow(id="own", trunk_name="byo", is_active=True, caller_id="17789249977"),
     ]
@@ -367,4 +372,37 @@ def test_unverified_trunk_caller_id_does_not_beat_an_attested_did():
         DidRow("+17789249977", "pending", None),
     ]
     route = _route(trunks, dids, is_production=True, shared_default_enabled=False)
-    assert route.caller_id == "+442046132300"
+    assert route.refused is True
+    assert route.endpoint is None
+    assert route.caller_id is None
+    assert route.reason == "trunk_caller_id_not_verified"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("assignment", ["campaign", "pool"])
+@pytest.mark.parametrize("foreign", [False, True])
+async def test_assigned_route_uses_current_number_and_requires_trunk_ownership(monkeypatch, assignment, foreign):
+    from app.core import db_utils
+
+    tenant = "22222222-2222-2222-2222-222222222222"
+    row = _runtime_row(metadata={"register": True, "pool": True, "caller_id": "+14165550123"})
+    if foreign:
+        row["tenant_id"] = "44444444-4444-4444-4444-444444444444"
+    conn = _AssignedConn({"id": row["id"], "caller_id": "+442055501234"}, row)
+
+    @asynccontextmanager
+    async def acquire(*_args, **_kwargs):
+        yield conn
+
+    monkeypatch.setattr(db_utils, "acquire_with_tenant", acquire)
+    if assignment == "campaign":
+        route = await _resolve_campaign_trunk(object(), tenant_id=tenant, campaign_id="33333333-3333-3333-3333-333333333333")
+    else:
+        route = await _resolve_pool_assignment(object(), tenant_id=tenant, is_production=True)
+    assert route is not None
+    assert route.refused is foreign
+    if foreign:
+        assert route.reason == "trunk_not_authorized"
+        assert route.endpoint is None
+    else:
+        assert route.caller_id == "+14165550123"

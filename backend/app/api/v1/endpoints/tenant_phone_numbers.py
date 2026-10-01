@@ -84,7 +84,10 @@ class PhoneNumberVerifyRequest(BaseModel):
     )
     stir_shaken_token: Optional[str] = Field(
         default=None,
-        description="Attestation token from the upstream provider. Required for production dialing.",
+        description=(
+            "Optional legacy carrier attestation reference. Caller-ID ownership "
+            "must be verified; per-call STIR/SHAKEN signing is handled by the carrier."
+        ),
         max_length=1024,
     )
     notes: Optional[str] = Field(default=None, max_length=512)

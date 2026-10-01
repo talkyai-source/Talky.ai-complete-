@@ -251,6 +251,15 @@ class SIPTrunkCreateRequest(BaseModel):
     auth_password: Optional[str] = Field(default=None, max_length=255)
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
+    @field_validator("trunk_name")
+    @classmethod
+    def reject_reserved_platform_name(cls, value: str) -> str:
+        from app.domain.services.telephony.trunk_resolver import platform_default_trunk_name
+
+        if value.strip().lower() == platform_default_trunk_name().strip().lower():
+            raise ValueError("This trunk name is reserved for platform provisioning")
+        return value
+
     @field_validator("sip_domain")
     @classmethod
     def validate_sip_domain(cls, value: str) -> str:
@@ -265,6 +274,10 @@ class SIPTrunkCreateRequest(BaseModel):
     @model_validator(mode="after")
     def normalize_metadata(self) -> "SIPTrunkCreateRequest":
         self.metadata = normalize_trunk_metadata(self.metadata)
+        if "pool" in self.metadata:
+            raise ValueError("Shared-pool membership is managed by the platform operator")
+        if self.metadata.get("register") and not (self.auth_username and self.auth_password):
+            raise ValueError("REGISTER requires credentials; IP authentication uses register=false")
         return self
 
 
@@ -308,7 +321,7 @@ class SIPTrunkResponse(BaseModel):
     last_tested_at: Optional[datetime] = None
     last_test_result: Optional[Dict[str, Any]] = None
     # Real-time Asterisk registration state (registered/rejected/unregistered/
-    # inactive/unknown), refreshed ~15s by the trunk-status updater. NOT the
+    # inactive/unknown), refreshed ~10s by the trunk-status updater. NOT the
     # frozen Test snapshot — this is the live truth the card renders.
     live_registration_status: Optional[str] = None
     live_status_detail: Optional[str] = None  # e.g. "403 Forbidden" — the real reason
@@ -316,6 +329,8 @@ class SIPTrunkResponse(BaseModel):
     # Derived server-side from active/direction + fresh Asterisk evidence.
     # Clients use this instead of treating is_active as proof of operation.
     runtime_ready: bool = False
+    # Inbound IP-auth needs loaded configuration; outbound needs qualification.
+    inbound_runtime_ready: bool = False
     runtime_status_code: str = "status_missing"
     runtime_status_detail: str = "Asterisk runtime status is unavailable."
     created_at: datetime
@@ -335,6 +350,8 @@ class SIPTrunkTestResponse(BaseModel):
     error: Optional[str] = None
     detail: Optional[str] = None
     tested_at: datetime
+    sip_code: Optional[str] = None
+    timeout_code: Optional[int] = None
 
 
 # --- codec policies -----------------------------------------------------

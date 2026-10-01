@@ -18,10 +18,12 @@ import logging
 import secrets
 import uuid
 
+from asyncpg import UniqueViolationError
 from fastapi import APIRouter, Body, Depends, HTTPException, Request, Response, status
 
 from app.api.v1.dependencies import get_audit_logger, get_db_client
 from app.core.db_utils import acquire_with_tenant
+from app.core.errors import ApiError
 from app.core.postgres_adapter import Client
 from app.core.security.password import (
     PasswordValidationError,
@@ -36,8 +38,8 @@ from ._shared import (
     create_jwt,
     get_client_ip,
     get_user_agent,
-    limiter,
     issue_cookie_auth,
+    limiter,
     set_session_cookie,
 )
 from .schemas import (
@@ -55,6 +57,14 @@ router = APIRouter(tags=["auth"])
 
 _SIGNUP_CODE_TTL_SECONDS = 15 * 60   # 15 minutes
 _SIGNUP_REDIS_KEY_PREFIX = "signup:pending:"
+
+
+def _already_registered() -> ApiError:
+    return ApiError(
+        status=status.HTTP_409_CONFLICT,
+        code="email_already_registered",
+        message="You are already registered. Please sign in or try another email address.",
+    )
 
 
 def _hash_signup_code(code: str) -> str:
@@ -98,15 +108,10 @@ async def signup_start(
     # Signup starts with an email, before a tenant identity exists.
     async with acquire_with_tenant(db_client.pool, None) as conn:
         existing = await conn.fetchrow(
-            "SELECT id FROM user_profiles WHERE email = $1", email
+            "SELECT id FROM user_profiles WHERE LOWER(email) = $1", email
         )
     if existing:
-        # Generic message — don't confirm/deny enumeration. Match
-        # /register's behaviour at line 322.
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Registration failed. Please check your details.",
-        )
+        raise _already_registered()
 
     # 6-digit numeric code, zero-padded.
     code = f"{secrets.randbelow(1_000_000):06d}"
@@ -182,7 +187,7 @@ async def signup_verify_code(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Signup record corrupted. Please request a new code.",
-        )
+        ) from None
 
     if not secrets.compare_digest(
         _hash_signup_code(body.code.strip()),
@@ -250,7 +255,7 @@ async def signup_complete(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Signup record corrupted. Please request a new code.",
-        )
+        ) from None
 
     # Constant-time-ish comparison via secrets.compare_digest.
     if not secrets.compare_digest(
@@ -288,13 +293,10 @@ async def signup_complete(
         # Race: someone may have registered with the same email between
         # /signup/start and /signup/complete. Re-check.
         existing = await conn.fetchrow(
-            "SELECT id FROM user_profiles WHERE email = $1", email
+            "SELECT id FROM user_profiles WHERE LOWER(email) = $1", email
         )
         if existing:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Registration failed. Please check your details.",
-            )
+            raise _already_registered()
 
         # Wrap tenant + user_profile + session in a single transaction so a
         # failed user INSERT (e.g. constraint violation) rolls back the
@@ -324,19 +326,26 @@ async def signup_complete(
             # (day4_rbac_tenant_isolation.sql renamed the legacy 'owner' role
             # and added chk_user_profiles_role_valid restricting role to
             # {platform_admin, partner_admin, tenant_admin, user, readonly}).
-            await conn.execute(
-                """
-                INSERT INTO user_profiles
-                    (id, email, name, tenant_id, role, password_hash,
-                     is_verified, email_verified_at)
-                VALUES ($1, $2, $3, $4, 'tenant_admin', $5, TRUE, NOW())
-                """,
-                user_id,
-                email,
-                pending["name"],
-                tenant["id"],
-                pw_hash,
-            )
+            try:
+                await conn.execute(
+                    """
+                    INSERT INTO user_profiles
+                        (id, email, name, tenant_id, role, password_hash,
+                         is_verified, email_verified_at)
+                    VALUES ($1, $2, $3, $4, 'tenant_admin', $5, TRUE, NOW())
+                    """,
+                    user_id,
+                    email,
+                    pending["name"],
+                    tenant["id"],
+                    pw_hash,
+                )
+            except UniqueViolationError as exc:
+                # Concurrent completions can pass the pre-check. Exiting this
+                # transaction also rolls back the tenant created above.
+                if exc.constraint_name == "user_profiles_email_key":
+                    raise _already_registered() from exc
+                raise
 
             # RBAC reads membership from tenant_users (role_permissions and
             # active tenant_users rows drive every DB-backed permission

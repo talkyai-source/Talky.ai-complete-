@@ -132,11 +132,12 @@ test("only server-visible eligible campaigns and runtime-ready inbound trunks ca
     assert.equal(isEligibleInboundBaseCampaign({ direction: "inbound", status: "completed" }), false);
     assert.equal(isEligibleInboundBaseCampaign({ direction: undefined, status: "draft" }), false);
 
-    assert.equal(isEligibleInboundTrunk({ direction: "inbound", is_active: true, runtime_ready: true }), true);
-    assert.equal(isEligibleInboundTrunk({ direction: "both", is_active: true, runtime_ready: true }), true);
-    assert.equal(isEligibleInboundTrunk({ direction: "inbound", is_active: true, runtime_ready: false }), false);
-    assert.equal(isEligibleInboundTrunk({ direction: "inbound", is_active: false, runtime_ready: true }), false);
-    assert.equal(isEligibleInboundTrunk({ direction: "outbound", is_active: true, runtime_ready: true }), false);
+    assert.equal(isEligibleInboundTrunk({ direction: "inbound", is_active: true, inbound_runtime_ready: true }), true);
+    assert.equal(isEligibleInboundTrunk({ direction: "both", is_active: true, inbound_runtime_ready: true }), true);
+    assert.equal(isEligibleInboundTrunk({ direction: "inbound", is_active: true, inbound_runtime_ready: false }), false);
+    assert.equal(isEligibleInboundTrunk({ direction: "inbound", is_active: false, inbound_runtime_ready: true }), false);
+    assert.equal(isEligibleInboundTrunk({ direction: "outbound", is_active: true, inbound_runtime_ready: true }), false);
+    assert.equal(isEligibleInboundTrunk({ direction: "both", is_active: true }), false);
 });
 
 test("inbound-specific overrides start neutral and inherit the base campaign", () => {

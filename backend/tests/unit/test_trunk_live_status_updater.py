@@ -27,7 +27,7 @@ def test_registration_trunk_requires_loaded_endpoint_and_registration():
     endpoint = f"trunk-{tid}"
     registration = f"trunk-{tid}-reg"
     assert updater.status_for(
-        _trunk(), {registration: "registered"}, {endpoint}
+        _trunk(), {registration: "registered"}, {endpoint}, contact_statuses={endpoint: "reachable"}
     ) == "registered"
     assert updater.status_for(
         _trunk(), {registration: "registered"}, set()
@@ -37,10 +37,12 @@ def test_registration_trunk_requires_loaded_endpoint_and_registration():
     ) == "unregistered"
 
 
-def test_ip_auth_trunk_uses_endpoint_presence_as_runtime_proof():
+def test_ip_auth_trunk_requires_qualified_contact_not_registration():
     tid = _trunk()["id"]
     row = _trunk(metadata={"register": False})
     assert updater.status_for(row, {}, {f"trunk-{tid}"}) == "loaded"
+    assert updater.status_for(row, {}, {f"trunk-{tid}"}, contact_statuses={f"trunk-{tid}": "reachable"}) == "reachable"
+    assert updater.status_for(row, {}, {f"trunk-{tid}"}, contact_statuses={f"trunk-{tid}": "unreachable"}) == "loaded"
     assert updater.status_for(row, {}, set()) == "missing_config"
     assert updater.status_for(
         row, {}, set(), endpoints_ok=False
@@ -54,6 +56,7 @@ def test_platform_default_uses_hand_managed_registration_and_endpoint(monkeypatc
         row,
         {"blazedigitel-reg": "registered"},
         {"blazedigitel-endpoint"},
+        contact_statuses={"blazedigitel-endpoint": "reachable"},
     ) == "registered"
 
 
@@ -89,3 +92,41 @@ def test_inactive_cleanup_never_touches_platform_default(tmp_path, monkeypatch):
     )
     assert count == 0
     assert target.exists()
+
+
+def test_contact_parser_uses_endpoint_and_qualified_state(monkeypatch):
+    output = """
+ Endpoint:  <Endpoint/CID.....................................>  <State.....>
+ Contact:   <Aor/ContactUri..............................> <Hash....> <Status> <RTT(ms)..>
+ Endpoint:  trunk-one/15551234567                         Not in use
+     Contact:  trunk-one-aor/sip:sip.example.com:5060  1234567890 Avail  2.134
+ Endpoint:  trunk-two/15557654321                         Unavailable
+     Contact:  trunk-two-aor/sip:dead.example.com:5060 abcdef0123 Unavail nan
+ Endpoint:  trunk-three                                 Unavailable
+     Contact:  trunk-three-aor/sip:unqualified.example.com 0123456789 NonQual nan
+"""
+    monkeypatch.setattr(updater, "_asterisk_cli", lambda _command: (output, True))
+    states, ok = updater.read_endpoint_contacts()
+    assert ok is True
+    assert states == {"trunk-one": "reachable", "trunk-two": "unreachable", "trunk-three": "unknown"}
+
+
+def test_registration_does_not_hide_contact_timeout_or_failed_runtime_query():
+    tid = _trunk()["id"]
+    endpoint = f"trunk-{tid}"
+    reg = {f"trunk-{tid}-reg": "registered"}
+    assert updater.status_for(_trunk(), reg, {endpoint}, contact_statuses={endpoint: "unreachable"}) == "unreachable"
+    assert updater.status_for(_trunk(), reg, {endpoint}, endpoints_ok=False, contact_statuses={endpoint: "reachable"}) == "unknown"
+
+
+def test_ip_auth_without_options_preserves_inbound_but_blocks_outbound():
+    from datetime import datetime, timezone
+    from app.domain.services.telephony.trunk_runtime import evaluate_trunk_runtime
+
+    row = _trunk(metadata={"register": False}, direction="both")
+    endpoint = f"trunk-{row['id']}"
+    for contacts, present in (({}, True), ({endpoint: "unreachable"}, True), ({}, False)):
+        status = updater.status_for(row, {}, {endpoint} if present else set(), contact_statuses=contacts)
+        projection = {**row, "live_registration_status": status, "live_status_checked_at": datetime.now(timezone.utc)}
+        assert evaluate_trunk_runtime(projection, require_inbound=True).ready is present
+        assert evaluate_trunk_runtime(projection, require_inbound=False).ready is False

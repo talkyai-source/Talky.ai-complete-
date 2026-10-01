@@ -781,7 +781,7 @@ async def test_no_provider_attempt_leaves_worker_intent_actionable(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_trunk_refusal_releases_prewarmed_session_before_return(monkeypatch):
+async def test_trunk_refusal_happens_before_provider_warmup(monkeypatch):
     path = _install_call_path(
         monkeypatch,
         campaign_rows=[_campaign()],
@@ -791,8 +791,33 @@ async def test_trunk_refusal_releases_prewarmed_session_before_return(monkeypatc
     error = await _assert_call_error(path, 422)
 
     assert error.detail["error"] == "tenant_pbx_required"
-    assert path.events.index("prewarm") < path.events.index("end_session")
-    assert path.ended_sessions == [path.session]
+    assert "prewarm" not in path.events
+    assert path.ended_sessions == []
+    assert "originate" not in path.events
+
+
+@pytest.mark.asyncio
+async def test_campaign_assignment_validates_final_caller_id_before_warmup(monkeypatch):
+    from app.domain.services.telephony import trunk_resolver
+
+    path = _install_call_path(monkeypatch, campaign_rows=[_campaign()])
+    selected = "+14165550123"
+
+    async def resolve(*_args, **kwargs):
+        assert kwargs["campaign_id"] == CAMPAIGN_ID
+        return SimpleNamespace(refused=False, endpoint="trunk-selected", caller_id=selected)
+
+    checked = []
+
+    async def deny(*_args, **kwargs):
+        checked.append(kwargs["caller_id"])
+        return SimpleNamespace(allowed=False, require_attestation=False)
+
+    monkeypatch.setattr(trunk_resolver, "resolve_outbound_trunk", resolve)
+    monkeypatch.setattr(telephony_bridge, "check_caller_id_ownership", deny)
+    await _assert_call_error(path, 403)
+    assert checked == [selected]
+    assert "prewarm" not in path.events
     assert "originate" not in path.events
 
 

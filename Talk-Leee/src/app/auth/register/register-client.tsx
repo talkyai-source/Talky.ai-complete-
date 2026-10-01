@@ -57,7 +57,9 @@ export default function RegisterClientPage() {
     function extractError(err: unknown, fallback: string): string {
         if (err instanceof Error) return err.message;
         if (typeof err === "object" && err !== null) {
-            return (err as { detail?: string }).detail || fallback;
+            const detail = (err as { detail?: unknown }).detail;
+            if (typeof detail === "string") return detail;
+            if (typeof detail === "object" && detail !== null && "message" in detail && typeof detail.message === "string") return detail.message;
         }
         return fallback;
     }

@@ -62,6 +62,14 @@ class CampaignDirectionError(CampaignStateError):
         CampaignError.__init__(self, message, status_code=409)
 
 
+class CampaignReadinessError(CampaignError):
+    """The current outbound telephony route cannot safely start."""
+
+    def __init__(self, readiness: dict):
+        super().__init__(readiness["reason"], status_code=409)
+        self.reason_code = readiness["reason_code"]
+
+
 class CampaignDispatchError(CampaignError):
     """A durable dialer job could not be confirmed in the queue.
 
@@ -210,9 +218,26 @@ class CampaignService:
         if scoped_tenant:
             query = query.eq("tenant_id", scoped_tenant)
         response = query.execute()
+        if getattr(response, "error", None):
+            raise CampaignError("Campaign lookup is unavailable", status_code=503)
         if not response.data:
             raise CampaignNotFoundError(campaign_id)
         return response.data[0]
+
+    async def get_outbound_readiness(self, campaign_id: str, tenant_id: str) -> dict:
+        """Read current telephony eligibility without enqueueing or probing carriers."""
+        campaign = await self.get_campaign(campaign_id, tenant_id=tenant_id)
+        return await self._evaluate_outbound_readiness(campaign, campaign_id, tenant_id)
+
+    async def _evaluate_outbound_readiness(self, campaign: dict, campaign_id: str, tenant_id: str) -> dict:
+        from app.domain.services.telephony.outbound_readiness import evaluate_outbound_readiness
+
+        if campaign.get("direction", "outbound") != "outbound":
+            raise CampaignDirectionError()
+        return await evaluate_outbound_readiness(
+            getattr(self.db_client, "pool", None), tenant_id=str(tenant_id),
+            campaign_id=str(campaign_id), campaign=campaign,
+        )
 
     # =========================================================================
     # Start Campaign
@@ -284,6 +309,12 @@ class CampaignService:
 
             # 2. Resolve tenant_id
             tenant_id = tenant_id or campaign.get("tenant_id") or "default-tenant"
+
+            # Reject before resetting leads or creating jobs. The bridge repeats
+            # this same admission at originate time because health can change.
+            readiness = await self._evaluate_outbound_readiness(campaign, campaign_id, str(tenant_id))
+            if not readiness["ready"]:
+                raise CampaignReadinessError(readiness)
 
             # 3. Get pending leads (optionally scoped to a single contact list)
             leads = await self._get_pending_leads(

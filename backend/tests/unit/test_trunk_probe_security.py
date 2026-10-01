@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import socket
+from types import SimpleNamespace
 
 import pytest
 
@@ -59,3 +60,42 @@ async def test_private_target_escape_hatch_is_explicit(monkeypatch):
         host="pbx.internal", port=5060, socktype=socket.SOCK_DGRAM
     )
     assert peer == ("10.0.0.9", 5060)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reply", ["404", "200", "timeout", "unrelated"])
+async def test_udp_reports_real_response_or_local_timeout(monkeypatch, reply):
+    from app.api.v1.endpoints.telephony_sip import trunk_probe
+
+    _patch_resolution(monkeypatch, ["8.8.8.8"])
+
+    class Socket:
+        def settimeout(self, _timeout):
+            pass
+
+        def sendto(self, data, peer):
+            self.data, self.peer = data, peer
+
+        def recvfrom(self, _size):
+            if reply == "timeout" or getattr(self, "replied", False):
+                raise socket.timeout()
+            self.replied = True
+            body = self.data.decode().split("\r\n", 1)[1]
+            if reply == "unrelated":
+                body = body.replace("Call-ID:", "Unrelated-ID:")
+            return (f"SIP/2.0 {reply if reply != 'unrelated' else '200'} Reply\r\n" + body).encode(), self.peer
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(trunk_probe, "socket", SimpleNamespace(**{**vars(socket), "socket": lambda *_args: Socket()}))
+    result = await probe_sip_endpoint(host="sip.example.com", port=5060, transport="udp", timeout=.01)
+    if reply in {"timeout", "unrelated"}:
+        assert result["ok"] is False
+        assert result["error"] == "timeout"
+        assert result["timeout_code"] == 408
+        assert result.get("sip_code") is None
+    else:
+        assert result["ok"] is True
+        assert result["sip_code"] == reply
+        assert result.get("timeout_code") is None

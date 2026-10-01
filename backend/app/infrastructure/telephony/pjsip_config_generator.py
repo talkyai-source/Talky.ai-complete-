@@ -227,7 +227,9 @@ def render_trunk_conf(inp: TrunkConfigInput) -> str:
     lines.append(f"[{ep}-aor]")
     lines.append("type=aor")
     lines.append(f"contact=sip:{domain}:{port}")
-    lines.append("qualify_frequency=60")
+    # Platform-managed OPTIONS health checks; independent of REGISTER expiry.
+    lines.append("qualify_frequency=10")
+    lines.append("qualify_timeout=3.0")
     lines.append("")
 
     # --- registration (only when register enabled + auth present) ---

@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { Modal } from "@/components/ui/modal";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import {
     Plus,
     Power,
@@ -17,7 +18,6 @@ import {
     Activity,
     Pencil,
     CheckCircle2,
-    XCircle,
     AlertCircle,
     ChevronDown,
     ChevronUp,
@@ -130,65 +130,23 @@ function formToMeta(form: TrunkForm, base: Record<string, unknown>): Record<stri
 type ModalMode = "create" | "edit";
 
 function TestStatusBadge({ trunk }: { trunk: SipTrunkRow }) {
-    // Prefer the REAL-TIME Asterisk registration status (refreshed ~15s by the
-    // server updater) over the frozen Test snapshot — this is the live truth.
-    const live = trunk.live_registration_status;
-    if (live) {
-        const cls =
-            trunk.runtime_ready
-                ? "text-emerald-700 dark:text-emerald-400"
-                : live === "rejected" || live === "failed" || live === "missing_config"
-                    ? "text-red-700 dark:text-red-400"
-                    : live === "unregistered" || live === "registering" || live === "checking"
-                        ? "text-amber-700 dark:text-amber-400"
-                        : "text-gray-700 dark:text-gray-400";
-        const label = live.charAt(0).toUpperCase() + live.slice(1);
-        // Show the REAL backend reason (e.g. "403 Forbidden") right in the badge.
-        const detail = trunk.runtime_status_detail ? ` · ${trunk.runtime_status_detail}` : "";
-        const checked = trunk.live_status_checked_at
-            ? ` · ${new Date(trunk.live_status_checked_at).toLocaleTimeString()}`
-            : "";
-        return (
-            <span
-                title={`Live Asterisk registration: ${live}${detail}${checked}`}
-                className={`inline-flex items-start gap-1 text-xs font-bold ${cls}`}
-            >
-                {live === "registered" ? (
-                    <CheckCircle2 className="mt-0.5 h-3 w-3 shrink-0" aria-hidden />
-                ) : live === "rejected" ? (
-                    <XCircle className="mt-0.5 h-3 w-3 shrink-0" aria-hidden />
-                ) : (
-                    <AlertCircle className="mt-0.5 h-3 w-3 shrink-0" aria-hidden />
-                )}
-                <span>{label}{detail}</span>
-            </span>
-        );
-    }
-    if (!trunk.last_test_result || !trunk.last_tested_at) {
-        return (
-            <span
-                title="Live status pending — the updater refreshes every ~15s"
-                className="inline-flex items-center gap-1 text-xs font-bold text-gray-700 dark:text-gray-400"
-            >
-                <AlertCircle className="h-3 w-3 shrink-0" aria-hidden /> Checking…
-            </span>
-        );
-    }
-    const ok = trunk.last_test_result.ok;
+    // Only current runtime evidence grants readiness; a saved probe or REGISTER
+    // response alone does not prove the outbound contact can accept a call.
+    const inboundOnly = trunk.direction === "inbound";
+    const ready = trunk.is_active && (inboundOnly ? trunk.inbound_runtime_ready === true : trunk.runtime_ready);
+    const detail = inboundOnly
+        ? (ready ? "Inbound configuration is ready." : "Waiting for fresh inbound runtime evidence.")
+        : trunk.runtime_status_detail || "Waiting for a live status check.";
     return (
-        <span
-            title={`${ok ? "OK" : trunk.last_test_result.error || "Failed"} · ${new Date(trunk.last_tested_at).toLocaleString()}`}
-            className={`inline-flex items-center gap-1 text-xs font-bold ${ok
-                ? "text-emerald-700 dark:text-emerald-400"
-                : "text-red-700 dark:text-red-400"
-                }`}
-        >
-            {ok ? (
-                <><CheckCircle2 className="h-3 w-3 shrink-0" aria-hidden /> Reachable</>
-            ) : (
-                <><XCircle className="h-3 w-3 shrink-0" aria-hidden /> Unreachable</>
-            )}
-        </span>
+        <div className="space-y-1">
+            <span className={`inline-flex items-start gap-1 text-xs font-bold ${ready ? "text-emerald-700 dark:text-emerald-400" : "text-amber-700 dark:text-amber-400"}`}>
+                {ready ? <CheckCircle2 className="mt-0.5 h-3 w-3 shrink-0" aria-hidden /> : <AlertCircle className="mt-0.5 h-3 w-3 shrink-0" aria-hidden />}
+                <span>{inboundOnly ? "Inbound" : "Outbound"} {ready ? "ready" : "not ready"} · {detail}</span>
+            </span>
+            {trunk.direction === "both" && <div className="text-xs text-muted-foreground">Inbound {trunk.is_active && trunk.inbound_runtime_ready === true ? "ready" : "not ready"}</div>}
+            {trunk.live_status_checked_at && <div className="text-xs text-muted-foreground">Checked {new Date(trunk.live_status_checked_at).toLocaleTimeString()}</div>}
+            {trunk.last_test_result && <div className="text-xs text-muted-foreground">Last probe: {trunk.last_test_result.detail || (trunk.last_test_result.ok ? "Host responded" : trunk.last_test_result.error || "Failed")}</div>}
+        </div>
     );
 }
 
@@ -280,7 +238,9 @@ export function SipTrunksList() {
     const [editingId, setEditingId] = useState<string | null>(null);
     const [form, setForm] = useState<TrunkForm>(EMPTY_FORM);
     const [formError, setFormError] = useState<string | null>(null);
-    const [clearAuth, setClearAuth] = useState(false);
+    const [authMode, setAuthMode] = useState<"ip" | "credentials">("ip");
+    const [originalAuth, setOriginalAuth] = useState({ configured: false, username: "" });
+    const [deletingTrunk, setDeletingTrunk] = useState<SipTrunkRow | null>(null);
     const [testingId, setTestingId] = useState<string | null>(null);
     const [showAdvanced, setShowAdvanced] = useState(false);
     // Existing metadata of the row being edited, so we preserve keys this
@@ -295,7 +255,8 @@ export function SipTrunksList() {
         setForm(EMPTY_FORM);
         setBaseMeta({});
         setFormError(null);
-        setClearAuth(false);
+        setAuthMode("ip");
+        setOriginalAuth({ configured: false, username: "" });
         setShowAdvanced(false);
         setIsOpen(true);
     }
@@ -317,7 +278,8 @@ export function SipTrunksList() {
         });
         setBaseMeta(meta);
         setFormError(null);
-        setClearAuth(false);
+        setAuthMode(t.auth_configured ? "credentials" : "ip");
+        setOriginalAuth({ configured: t.auth_configured, username: t.auth_username || "" });
         // Auto-expand Advanced if this trunk already has any advanced values set.
         setShowAdvanced(
             Boolean(advanced.caller_id || advanced.outbound_proxy || advanced.auth_realm || advanced.register || advanced.srtp),
@@ -340,6 +302,13 @@ export function SipTrunksList() {
             return;
         }
 
+        const username = form.auth_username.trim();
+        const preserveAuth = mode === "edit" && originalAuth.configured && username === originalAuth.username && !form.auth_password;
+        if (authMode === "credentials" && !preserveAuth && (!username || !form.auth_password)) {
+            setFormError("Provide both username and password to set or change authentication.");
+            return;
+        }
+        const metadata = formToMeta({ ...form, register: authMode === "credentials" && form.register }, mode === "edit" ? baseMeta : {});
         try {
             if (mode === "create") {
                 const payload: SipTrunkInput = {
@@ -348,9 +317,8 @@ export function SipTrunksList() {
                     port: form.port,
                     transport: form.transport,
                     direction: form.direction,
-                    auth_username: form.auth_username,
-                    auth_password: form.auth_password,
-                    metadata: formToMeta(form, {}),
+                    ...(authMode === "credentials" ? { auth_username: username, auth_password: form.auth_password } : {}),
+                    metadata,
                 };
                 if (!payload.auth_username && !payload.auth_password) {
                     delete payload.auth_username;
@@ -363,7 +331,7 @@ export function SipTrunksList() {
                 notificationsStore.create({
                     type: "success",
                     title: "SIP trunk added",
-                    message: `${form.trunk_name} is saved (inactive). Click Test to verify reachability before activating.`,
+                    message: `${form.trunk_name} is saved disabled. Enable it and wait for Ready before calling.`,
                 });
             } else {
                 if (!editingId) return;
@@ -373,16 +341,13 @@ export function SipTrunksList() {
                     port: form.port,
                     transport: form.transport,
                     direction: form.direction,
-                    metadata: formToMeta(form, baseMeta),
+                    metadata,
                 };
-                if (clearAuth) {
+                if (authMode === "ip" && originalAuth.configured) {
                     patch.clear_auth = true;
-                } else if (form.auth_username && form.auth_password) {
-                    patch.auth_username = form.auth_username;
+                } else if (authMode === "credentials" && !preserveAuth) {
+                    patch.auth_username = username;
                     patch.auth_password = form.auth_password;
-                } else if (form.auth_username && !form.auth_password) {
-                    setFormError("Re-enter the password to overwrite, or toggle Clear Auth.");
-                    return;
                 }
                 await updateMutation.mutateAsync({ id: editingId, patch });
                 notificationsStore.create({
@@ -411,7 +376,7 @@ export function SipTrunksList() {
             } else {
                 notificationsStore.create({
                     type: "error",
-                    title: `${t.trunk_name} unreachable`,
+                    title: r.inconclusive ? `${t.trunk_name}: probe inconclusive` : `${t.trunk_name}: probe failed`,
                     message: r.detail || r.error || "Probe failed",
                 });
             }
@@ -449,20 +414,10 @@ export function SipTrunksList() {
     }
 
     async function handleDelete(t: SipTrunkRow) {
-        if (!confirm(`Delete SIP trunk "${t.trunk_name}"? This cannot be undone.`)) return;
-        try {
-            await deleteMutation.mutateAsync(t.id);
-            notificationsStore.create({
-                type: "success",
-                title: "SIP trunk deleted",
-                message: t.trunk_name,
-            });
-        } catch (e: unknown) {
-            const msg = e instanceof Error ? e.message : "Delete failed";
-            notificationsStore.create({ type: "error", title: "Delete failed", message: msg });
-        }
+        if (t.is_active) await deactivateMutation.mutateAsync(t.id);
+        await deleteMutation.mutateAsync(t.id);
+        notificationsStore.create({ type: "success", title: "SIP trunk deleted", message: t.trunk_name });
     }
-
     return (
         <Card>
             <CardHeader>
@@ -477,10 +432,9 @@ export function SipTrunksList() {
                         <ServerCog className="h-4 w-4 sm:h-5 sm:w-5" aria-hidden /> Local PBX / SIP Trunks
                     </CardTitle>
                     <CardDescription className="lg:col-span-2 lg:row-start-2">
-                        Point Talk-Lee at your own Asterisk / FreeSWITCH / Kamailio trunk. Set a caller ID and tune
-                        DTMF, registration, proxy and SRTP under <strong>Advanced options</strong>. <strong>Test</strong>{" "}
-                        is an optional reachability probe; inbound service remains blocked until fresh live Asterisk
-                        endpoint or registration evidence appears.
+                        Connect your SIP provider or PBX using an IP allowlist or credentials. Enable the trunk,
+                        then wait for <strong>Ready</strong> before calling. <strong>Test</strong> checks the host;
+                        it does not enable calling. Live readiness refreshes automatically.
                     </CardDescription>
                     <Button
                         onClick={openCreate}
@@ -497,6 +451,8 @@ export function SipTrunksList() {
                     <div className="flex items-center justify-center py-8 text-muted-foreground">
                         <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden /> Loading trunks…
                     </div>
+                ) : trunksQuery.isError ? (
+                    <div role="alert" className="py-4 text-sm text-destructive">Could not load SIP trunks. <Button variant="outline" size="sm" onClick={() => void trunksQuery.refetch()}>Retry</Button></div>
                 ) : trunks.length === 0 ? (
                     <div className="py-8 text-center text-sm text-muted-foreground">
                         No SIP trunks configured yet. Click <strong>Add trunk</strong> to connect your PBX.
@@ -554,7 +510,7 @@ export function SipTrunksList() {
                                     <th className="border-b border-border px-2 py-3">Direction</th>
                                     <th className="border-b border-border px-2 py-3">Auth</th>
                                     <th className="border-b border-border px-2 py-3">Live status</th>
-                                    <th className="border-b border-border px-2 py-3">Active</th>
+                                    <th className="border-b border-border px-2 py-3">Enabled</th>
                                     <th className="border-b border-border px-2 py-3 text-center">Test</th>
                                     <th className="border-b border-border px-2 py-3 text-center">Edit</th>
                                     <th className="border-b border-border px-2 py-3 text-center">Status</th>
@@ -568,7 +524,7 @@ export function SipTrunksList() {
                                             {t.trunk_name}
                                             {typeof t.metadata?.caller_id === "string" && t.metadata.caller_id ? (
                                                 <div className="text-[10px] font-normal text-muted-foreground">
-                                                    CID {t.metadata.caller_id as string}
+                                                    Caller ID: {t.metadata.caller_id as string}
                                                 </div>
                                             ) : null}
                                         </td>
@@ -577,7 +533,7 @@ export function SipTrunksList() {
                                         </td>
                                         <td className="px-2 py-4 capitalize text-muted-foreground wrap-anywhere">{t.direction}</td>
                                         <td className="px-2 py-4 text-muted-foreground wrap-anywhere">
-                                            {t.auth_configured ? t.auth_username || "configured" : "—"}
+                                            {t.auth_configured ? `Credentials${t.auth_username ? ` · ${t.auth_username}` : ""}` : "IP allowlist"}
                                         </td>
                                         <td className="px-2 py-4 wrap-anywhere">
                                             <TestStatusBadge trunk={t} />
@@ -585,11 +541,11 @@ export function SipTrunksList() {
                                         <td className="px-2 py-4">
                                             <span
                                                 className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-semibold ${t.is_active
-                                                    ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+                                                    ? "border-blue-500/30 bg-blue-500/10 text-blue-700 dark:text-blue-400"
                                                     : "border-gray-500/30 bg-gray-500/10 text-gray-700 dark:text-gray-400"
                                                     }`}
                                             >
-                                                {t.is_active ? "Active" : "Inactive"}
+                                                {t.is_active ? "Yes" : "No"}
                                             </span>
                                         </td>
                                         <td className="px-2 py-4">
@@ -616,6 +572,7 @@ export function SipTrunksList() {
                                                     variant="ghost"
                                                     onClick={() => openEdit(t)}
                                                     title="Edit trunk"
+                                                    aria-label={`Edit ${t.trunk_name}`}
                                                 >
                                                     <Pencil className="h-3 w-3" aria-hidden />
                                                 </Button>
@@ -627,13 +584,9 @@ export function SipTrunksList() {
                                                     size="sm"
                                                     variant={t.is_active ? "outline" : "default"}
                                                     onClick={() => handleToggle(t)}
-                                                    title={
-                                                        t.is_active
-                                                            ? "Deactivate"
-                                                            : t.last_test_result?.ok
-                                                                ? "Activate"
-                                                                : "Run a successful Test first"
-                                                    }
+                                                    title={t.is_active ? "Disable trunk" : "Enable trunk and check readiness"}
+                                                    aria-label={`${t.is_active ? "Disable" : "Enable"} ${t.trunk_name}`}
+                                                    disabled={activateMutation.isPending || deactivateMutation.isPending || deleteMutation.isPending}
                                                 >
                                                     {t.is_active ? (
                                                         <><PowerOff className="mr-1 h-3 w-3" aria-hidden /> Off</>
@@ -648,8 +601,10 @@ export function SipTrunksList() {
                                                 <Button
                                                     size="sm"
                                                     variant="ghost"
-                                                    onClick={() => handleDelete(t)}
+                                                    onClick={() => setDeletingTrunk(t)}
                                                     title="Delete"
+                                                    aria-label={`Delete ${t.trunk_name}`}
+                                                    disabled={deleteMutation.isPending}
                                                 >
                                                     <Trash2 className="h-3 w-3" aria-hidden />
                                                 </Button>
@@ -663,13 +618,22 @@ export function SipTrunksList() {
                 )}
             </CardContent>
 
+            <ConfirmDialog
+                open={Boolean(deletingTrunk)}
+                onOpenChange={(open) => { if (!open) setDeletingTrunk(null); }}
+                title="Delete SIP trunk"
+                description={deletingTrunk?.trunk_name}
+                warningText="The trunk will be disabled and removed. If a campaign, phone number or active call still uses it, remove that assignment or finish the call first. You can also disable it without deleting it."
+                confirmLabel={deletingTrunk?.is_active ? "Disable and delete" : "Delete trunk"}
+                onConfirm={async () => { if (deletingTrunk) await handleDelete(deletingTrunk); }}
+            />
+
             <Modal
                 open={isOpen}
                 onOpenChange={(next) => {
                     setIsOpen(next);
                     if (!next) {
                         setFormError(null);
-                        setClearAuth(false);
                         setShowAdvanced(false);
                     }
                 }}
@@ -745,24 +709,21 @@ export function SipTrunksList() {
                             </Select>
                         </div>
                     </div>
-                    {mode === "edit" && (
-                        <div className="flex items-center gap-2">
-                            <input
-                                id="clear-auth"
-                                type="checkbox"
-                                checked={clearAuth}
-                                onChange={(e) => setClearAuth(e.target.checked)}
-                                className="h-4 w-4"
-                            />
-                            <Label htmlFor="clear-auth" className="cursor-pointer">
-                                Remove current authentication (IP-based trunk)
-                            </Label>
-                        </div>
-                    )}
-                    {!clearAuth && (
+                    <div>
+                        <Label>Authentication</Label>
+                        <Select ariaLabel="Authentication" value={authMode} onChange={(value) => {
+                            setAuthMode(value as "ip" | "credentials");
+                            if (value === "ip") setForm({ ...form, register: false });
+                        }}>
+                            <option value="ip">IP allowlist (no password)</option>
+                            <option value="credentials">Username and password</option>
+                        </Select>
+                        <p className="mt-1 text-xs text-muted-foreground">{authMode === "ip" ? "Allowlist the platform's outbound IP with your provider. SIP registration and credentials are not required." : "Leave the saved password blank to keep it. Changing the username requires a new password."}</p>
+                    </div>
+                    {authMode === "credentials" && (
                         <div className="grid grid-cols-2 gap-3">
                             <div>
-                                <Label htmlFor="auth_username">Auth username {mode === "edit" ? "(blank = keep)" : "(optional)"}</Label>
+                                <Label htmlFor="auth_username">Auth username</Label>
                                 <Input
                                     id="auth_username"
                                     value={form.auth_username || ""}
@@ -770,7 +731,7 @@ export function SipTrunksList() {
                                 />
                             </div>
                             <div>
-                                <Label htmlFor="auth_password">Auth password {mode === "edit" ? "(blank = keep)" : "(optional)"}</Label>
+                                <Label htmlFor="auth_password">Auth password {mode === "edit" && originalAuth.configured ? "(blank = keep)" : ""}</Label>
                                 <Input
                                     id="auth_password"
                                     type="password"
@@ -791,7 +752,7 @@ export function SipTrunksList() {
                             placeholder="+15551234567"
                         />
                         <p className="mt-1 text-xs text-muted-foreground">
-                            Number presented on outbound calls. Many PBXs reject calls with no valid caller ID.
+                            Authorized number in international format, for example +442079460000. The selected route and caller ID are checked before dialing.
                         </p>
                     </div>
 
@@ -869,6 +830,7 @@ export function SipTrunksList() {
                                     id="register"
                                     type="checkbox"
                                     checked={form.register}
+                                    disabled={authMode === "ip"}
                                     onChange={(e) => setForm({ ...form, register: e.target.checked })}
                                     className="h-4 w-4"
                                 />

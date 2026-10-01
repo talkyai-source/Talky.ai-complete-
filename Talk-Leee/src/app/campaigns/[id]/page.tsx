@@ -18,6 +18,7 @@ import { CallIssuesPanel } from "@/components/campaigns/call-issues-panel";
 import { ContactCapturedDetails } from "@/components/calls/lead-details-panel";
 import { KnowledgePanel } from "@/components/campaigns/knowledge-panel";
 import { TestAgentButton } from "@/components/campaigns/test-agent-button";
+import { CampaignReadinessNotice, useCampaignReadiness } from "@/components/campaigns/campaign-readiness";
 import { Modal } from "@/components/ui/modal";
 import { checkCallingWindow } from "@/lib/calling-window";
 import { inboundCampaignHrefForBase, isOutboundCampaign } from "@/lib/campaign-direction";
@@ -102,6 +103,8 @@ function CampaignDetailScope({ campaignId }: { campaignId: string }) {
     // Why the last Start attempt was refused, in the server's own words.
     // Empty until something is actually refused; never pre-populated.
     const [startError, setStartError] = useState("");
+    const canStart = Boolean(campaign && ["draft", "paused", "stopped"].includes(campaign.status));
+    const readiness = useCampaignReadiness([campaignId], canStart);
 
     // Out of plan minutes ⇒ the backend will 402 a Start, so we disable the
     // button up front and explain why. `unlimited` plans are never blocked.
@@ -241,6 +244,7 @@ function CampaignDetailScope({ campaignId }: { campaignId: string }) {
     }, [campaign?.status, campaignId, router]);
 
     function handleStartClick() {
+        if (!readiness.ready) return;
         // Out of plan minutes — don't even open the modal; the backend
         // would 402 anyway. The banner above the button explains why.
         if (outOfMinutes) {
@@ -266,6 +270,7 @@ function CampaignDetailScope({ campaignId }: { campaignId: string }) {
     }
 
     async function handleConfirmStart() {
+        if (!readiness.ready || actionLoading) return;
         try {
             setActionLoading(true);
             setStartModalOpen(false);
@@ -450,7 +455,7 @@ function CampaignDetailScope({ campaignId }: { campaignId: string }) {
                             {campaign.status === "draft" || campaign.status === "paused" || campaign.status === "stopped" ? (
                                 <Button
                                     onClick={handleStartClick}
-                                    disabled={actionLoading || outOfMinutes}
+                                    disabled={actionLoading || outOfMinutes || !readiness.ready}
                                     title={outOfMinutes ? "Out of plan minutes — add minutes to start" : undefined}
                                 >
                                     <Play className="w-4 h-4" />
@@ -470,6 +475,7 @@ function CampaignDetailScope({ campaignId }: { campaignId: string }) {
                             ) : null}
                         </div>
                     </motion.div>
+                    {canStart && <CampaignReadinessNotice readiness={readiness} />}
 
                     {/* Out-of-minutes banner — the campaign can't be started
                         until the tenant has plan minutes again. */}
@@ -924,7 +930,7 @@ function CampaignDetailScope({ campaignId }: { campaignId: string }) {
                         >
                             Cancel
                         </Button>
-                        <Button onClick={handleConfirmStart} disabled={actionLoading}>
+                        <Button onClick={handleConfirmStart} disabled={actionLoading || !readiness.ready}>
                             {actionLoading ? (
                                 <Loader2 className="w-4 h-4 animate-spin" />
                             ) : (
@@ -936,6 +942,7 @@ function CampaignDetailScope({ campaignId }: { campaignId: string }) {
                 }
             >
                 <div className="space-y-2">
+                    <CampaignReadinessNotice readiness={readiness} />
                     {(() => {
                         const sched = campaign?.calling_config;
                         if (!sched) return null;
