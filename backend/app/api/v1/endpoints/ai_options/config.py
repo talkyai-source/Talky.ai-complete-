@@ -22,6 +22,7 @@ from app.domain.models.ai_config import (
     CEREBRAS_MODELS,
     CEREBRAS_MODELS_HIDDEN,
     GEMINI_MODELS,
+    OPENAI_MODELS,
     GOOGLE_TTS_MODELS,
     GROQ_MODELS,
     GROQ_MODELS_HIDDEN,
@@ -76,6 +77,8 @@ async def get_config(
             config = AIProviderConfig()
             await _upsert_tenant_config(conn, tenant_id, config)
         elif config.pipeline_mode == "realtime":
+            from app.realtime.config import normalize_realtime_settings
+            config.realtime_settings = normalize_realtime_settings(config.realtime_settings)
             return config
         elif config.tts_provider == "deepgram":
             deepgram_voices = await _get_deepgram_voices_for_current_key()
@@ -172,7 +175,7 @@ async def save_config(
         from app.realtime.config import validate_realtime
         from app.domain.services.credential_resolver import get_credential_resolver
         try:
-            validate_realtime(config.realtime_model, config.realtime_voice, config.realtime_settings)
+            config.realtime_settings = validate_realtime(config.realtime_model, config.realtime_voice, config.realtime_settings)
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
         provider = str((config.realtime_settings or {}).get("provider") or "openai").lower()
@@ -200,6 +203,7 @@ async def save_config(
     # change. Hidden means "you cannot pick this any more", not "you cannot
     # save".
     _llm_models_by_provider: dict[str, list[str]] = {
+        "openai": [m.id for m in OPENAI_MODELS],
         "groq": [m.id for m in GROQ_MODELS] + GROQ_MODELS_HIDDEN,
         "gemini": [m.id for m in GEMINI_MODELS],
         "cerebras": [m.id for m in CEREBRAS_MODELS] + CEREBRAS_MODELS_HIDDEN,
@@ -229,6 +233,11 @@ async def save_config(
 
     # Refuse to save a Gemini config if the API key isn't present — caught
     # here gives a clear 503 instead of a confusing pipeline error mid-call.
+    if config.llm_provider == "openai":
+        from app.domain.services.credential_resolver import get_credential_resolver
+        key = await get_credential_resolver().resolve("openai", tenant_id=str(current_user.tenant_id))
+        if not key:
+            raise HTTPException(status_code=503, detail="OpenAI API key not configured")
     if config.llm_provider == "gemini" and not os.getenv("GEMINI_API_KEY"):
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -339,7 +348,7 @@ async def save_config(
             "Expected TTFT: 300–600ms vs ~100ms for openai/gpt-oss-20b. "
             "Recommended for quality use cases, not real-time voice."
         )
-    elif config.llm_model not in FAST_MODELS:
+    elif config.llm_model not in FAST_MODELS and config.llm_provider != "openai":
         latency_warnings.append(
             f"'{config.llm_model}' has moderate latency (~150–250ms TTFT). "
             "For lowest latency, use openai/gpt-oss-20b on Groq or gpt-oss-120b on Cerebras."

@@ -17,11 +17,8 @@ def test_not_introduced_tells_agent_to_open():
 
 def test_introduced_forbids_reintroduction():
     out = build_live_state_block(agent_name="Sarah", company_name="Dojo", has_introduced=True)
-    assert "ALREADY introduced" in out
-    assert "Do NOT introduce yourself again" in out
-    # Anti-drift: forbids switching name/title, but does NOT declare a role title
-    # (the persona is the single source of the role).
-    assert "never switch to a different name or job title" in out
+    assert "ALREADY introduced" in out and "Do NOT introduce yourself again" in out
+    assert "same role throughout" in out
     assert "representative" not in out and "consultant" not in out
 
 
@@ -45,8 +42,6 @@ def test_name_only_still_renders():
 
 def test_turn_priority_puts_compliance_and_open_questions_before_qualification():
     out = build_live_state_block(agent_name="Sarah", company_name="Dojo", has_introduced=True)
-
-    assert "stop or opt-out request" in out
-    assert "urgent safety issue first" in out
+    assert "clear stop or urgent safety need first" in out
     assert "unanswered direct question" in out
-    assert out.index("stop or opt-out request") < out.index("continue discovery, qualification")
+    assert out.index("clear stop") < out.index("discovery, qualification")

@@ -6,6 +6,7 @@ import {
     campaignBriefGuidanceText,
     campaignBriefValidation,
     type CampaignBriefDraft,
+    campaignBriefDraft,
 } from "@/lib/campaign-brief";
 
 const draft: CampaignBriefDraft = {
@@ -15,6 +16,19 @@ const draft: CampaignBriefDraft = {
     opening_objective: "Confirm whether the operations lead owns vendor selection.",
     max_objection_attempts: 4,
 };
+
+test("operator-approved messages and form destination survive editing and save", () => {
+    const configured = { ...draft,
+        email_action: { subject: "Follow-up", body: "First line\nSecond line" },
+        form_action: { name: "Enquiry", recipient: "sales@example.com", subject: "New enquiry", fields: ["email", "phone"] as const },
+    };
+    const saved = buildCampaignBrief({ draft: { ...configured, form_action: { ...configured.form_action, fields: [...configured.form_action.fields] } }, brand: "Acme", representativeNames: ["Alex"], requiredLeadFields: [] });
+    const restored = campaignBriefDraft(saved);
+    assert.deepEqual(restored.email_action, configured.email_action);
+    assert.deepEqual(restored.form_action, configured.form_action);
+    assert.equal(campaignBriefValidation(restored), null);
+    assert.match(campaignBriefValidation({ ...restored, form_action: { ...saved.form_action!, recipient: "invalid" } }) ?? "", /destination email/);
+});
 
 test("buildCampaignBrief creates the saved nested contract from canonical UI state", () => {
     const brief = buildCampaignBrief({

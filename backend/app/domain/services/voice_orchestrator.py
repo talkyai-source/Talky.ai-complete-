@@ -716,7 +716,7 @@ class VoiceOrchestrator:
         invoking this method — ``TelephonyMediaGateway`` does not need a
         WebSocket and is initialised directly by the telephony bridge.
         """
-        if not session.pipeline:
+        if not session.pipeline and not session.realtime_bridge:
             raise RuntimeError("Pipeline not initialised")
 
         if websocket is not None:
@@ -729,7 +729,10 @@ class VoiceOrchestrator:
 
         async def _pipeline_with_error_handling():
             try:
-                await session.pipeline.start_pipeline(session.call_session, websocket=websocket)
+                if session.realtime_bridge is not None:
+                    await session.realtime_bridge.run()
+                else:
+                    await session.pipeline.start_pipeline(session.call_session, websocket=websocket)
             except Exception as e:
                 logger.error(f"Pipeline error for {session.call_id[:8]}: {e}")
                 raise
@@ -1197,6 +1200,7 @@ class VoiceOrchestrator:
     # Map provider type → env var holding its API key. Keep this small and
     # explicit; if it grows past ~5 entries, move it to a config object.
     _LLM_API_KEY_ENV = {
+        "openai": "OPENAI_API_KEY",
         "groq": "GROQ_API_KEY",
         "gemini": "GEMINI_API_KEY",
         "cerebras": "CEREBRAS_API_KEY",
@@ -1533,6 +1537,16 @@ class VoiceOrchestrator:
         if not secondary_provider_name or secondary_provider_name == primary_name:
             return None
 
+        secondary_voice = _parse_voice_map(
+            os.getenv("TTS_SECONDARY_VOICE_MAP", "")
+        ).get(config.voice_id)
+        if not secondary_voice:
+            logger.warning(
+                "tts_secondary_unavailable reason=missing_voice_mapping primary=%s secondary=%s",
+                primary_name, secondary_provider_name,
+            )
+            return None
+
         resolver = get_credential_resolver()
         api_key = await resolver.resolve(
             secondary_provider_name, tenant_id=config.tenant_id,
@@ -1544,7 +1558,7 @@ class VoiceOrchestrator:
                 provider = CartesiaTTSProvider()
                 await provider.initialize({
                     "api_key": api_key,
-                    "voice_id": config.voice_id,
+                    "voice_id": secondary_voice,
                     "model_id": "sonic-3",
                     "sample_rate": config.tts_sample_rate,
                 })
@@ -1555,7 +1569,7 @@ class VoiceOrchestrator:
                 provider = ElevenLabsTTSProvider()
                 await provider.initialize({
                     "api_key": api_key,
-                    "voice_id": config.voice_id,
+                    "voice_id": secondary_voice,
                     "model_id": "eleven_flash_v2_5",
                     "sample_rate": config.tts_sample_rate,
                 })
@@ -1564,7 +1578,7 @@ class VoiceOrchestrator:
                 provider = DeepgramTTSProvider()
                 await provider.initialize({
                     "api_key": api_key,
-                    "voice_id": config.voice_id,
+                    "voice_id": secondary_voice,
                     "sample_rate": config.tts_sample_rate,
                 })
             else:

@@ -15,6 +15,7 @@ import { ContactLists, ActiveContactsSummary } from "@/components/campaigns/cont
 import { ScriptCard } from "@/components/campaigns/script-card";
 import { LiveCallsPanel } from "@/components/campaigns/live-calls-panel";
 import { CallIssuesPanel } from "@/components/campaigns/call-issues-panel";
+import { ContactCapturedDetails } from "@/components/calls/lead-details-panel";
 import { KnowledgePanel } from "@/components/campaigns/knowledge-panel";
 import { TestAgentButton } from "@/components/campaigns/test-agent-button";
 import { Modal } from "@/components/ui/modal";
@@ -834,6 +835,7 @@ function CampaignDetailScope({ campaignId }: { campaignId: string }) {
                                                     {contact.first_name || contact.last_name
                                                         ? `${contact.first_name || ""} ${contact.last_name || ""}`.trim()
                                                         : "--"}
+                                                    <ContactCapturedDetails leadId={contact.id} />
                                                 </td>
                                                 <td className="px-4 py-3 text-sm whitespace-nowrap">
                                                     {contact.is_lead ? (
@@ -854,6 +856,11 @@ function CampaignDetailScope({ campaignId }: { campaignId: string }) {
                                                         <span className={`px-2 py-0.5 text-xs font-medium rounded-full ${getContactStatusStyle(contact.last_call_result)}`}>
                                                             {contact.last_call_result}
                                                         </span>
+                                                    )}
+                                                    {contact.latest_analysis_note && (
+                                                        <p className="mt-1 max-w-xs whitespace-normal text-xs text-muted-foreground">
+                                                            Latest call analysis: {contact.latest_analysis_note}
+                                                        </p>
                                                     )}
                                                 </td>
                                                 <td className="px-4 py-3 text-right text-sm text-muted-foreground tabular-nums whitespace-nowrap">{contact.call_attempts}</td>

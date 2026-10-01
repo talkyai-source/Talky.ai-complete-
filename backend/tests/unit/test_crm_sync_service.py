@@ -30,7 +30,7 @@ LEAD = "88888888-8888-8888-8888-888888888888"
 
 
 def _run(coro):
-    return asyncio.get_event_loop().run_until_complete(coro)
+    return asyncio.run(coro)
 
 
 class FakeConnector:
@@ -85,6 +85,49 @@ def _lead_row(**over):
     return row
 
 
+class MemoryDeliveries:
+    """The delivery persistence seam, retained when service instances restart."""
+    def __init__(self):
+        self.rows = {}
+
+    async def enqueue(self, tenant_id, call_id, provider, desired_key, *, legacy_id=None):
+        key = (tenant_id, call_id, provider)
+        row = self.rows.get(key)
+        if row is None:
+            row = dict(tenant_id=tenant_id, call_id=call_id, provider=provider,
+                desired_key=desired_key, completed_key=None, remote_contact_id=None,
+                remote_call_id=None, status='unknown' if legacy_id else 'pending',
+                phase='legacy_unverified' if legacy_id else 'pending', attempts=0)
+            self.rows[key] = row
+        elif row['desired_key'] != desired_key:
+            row['desired_key'] = desired_key
+            if row['status'] not in ('processing','unknown'):
+                row.update(status='pending', attempts=0)
+        return dict(row)
+
+    async def claim(self, tenant_id, call_id, provider):
+        row = self.rows[(tenant_id,call_id,provider)]
+        if row['status'] not in ('pending','unknown') or row['attempts'] >= 6:
+            return None
+        receipt = dict(row)
+        receipt['reconcile'] = row['status'] == 'unknown'
+        row.update(status='processing', attempts=row['attempts']+1, lease_token='lease')
+        receipt.update(attempts=row['attempts'], lease_token='lease')
+        return receipt
+
+    async def save(self, receipt, *, phase=None, status=None, contact_id=None, call_id=None, error=None):
+        row = self.rows[(receipt['tenant_id'],receipt['call_id'],receipt['provider'])]
+        for key, value in [('phase',phase),('status',status),('remote_contact_id',contact_id),('remote_call_id',call_id)]:
+            if value is not None:
+                row[key] = value
+                receipt[key] = value
+        row['last_error'] = error
+        if status == 'succeeded':
+            row['completed_key'] = receipt['desired_key']
+            if row['desired_key'] != receipt['desired_key']:
+                row['status'] = 'pending'
+
+
 @pytest.fixture
 def harness(monkeypatch):
     """A CRMSyncService with every DB/resolver seam replaced."""
@@ -93,6 +136,8 @@ def harness(monkeypatch):
         "marked": [], "remembered": [], "resolved": [],
     }
     service = CRMSyncService(db_client=object(), db_pool=object())
+    service.deliveries = MemoryDeliveries()
+    state["deliveries"] = service.deliveries
 
     monkeypatch.setattr(svc, "list_active_connector_providers", lambda db, t, typ: list(state["providers"]))
 
@@ -218,7 +263,8 @@ def test_create_leads_disabled_skips_unknown_callees(harness):
     conn = FakeConnector(found=None, config={"create_leads": False})
     harness["connectors"]["salesforce"] = conn
     out = _run(harness["service"].sync_call(TENANT, CALL))
-    assert out.success is False and "creation disabled" in (out.error_message or "")
+    assert out.success is False and "invalid_request" in (out.error_message or "")
+    assert harness["deliveries"].rows[(TENANT, CALL, "salesforce")]["status"] == "failed"
     assert [c[0] for c in conn.calls] == ["search"]
 
 
@@ -235,26 +281,27 @@ def test_log_calls_disabled_and_inbound_opt_out_are_honoured(harness):
     assert conn2.calls == []
 
 
-def test_settlement_pass_is_idempotent_once_a_log_exists(harness):
-    conn = FakeConnector()
+def test_settlement_pass_is_idempotent_once_a_provider_receipt_exists(harness):
+    conn = FakeConnector(found={"id": "003c"})
     harness["connectors"]["salesforce"] = conn
-    harness["call"] = _call_row(crm_call_id="00Talready")
-    out = _run(harness["service"].sync_call(TENANT, CALL, reason="settlement"))
-    assert out.success and out.skipped and out.skipped_reason == "already_synced"
-    assert conn.calls == [] and harness["marked"] == []
+    first = _run(harness["service"].sync_call(TENANT, CALL))
+    second = _run(harness["service"].sync_call(TENANT, CALL))
+    assert first.success and second.success
+    assert len([c for c in conn.calls if c[0] == "log"]) == 1
 
 
-def test_summary_pass_amends_the_existing_log_with_the_ai_summary(harness):
-    conn = FakeConnector()
+def test_summary_pass_amends_only_its_provider_receipt(harness):
+    conn = FakeConnector(found={"id": "003c"})
     harness["connectors"]["salesforce"] = conn
-    harness["call"] = _call_row(crm_call_id="00Tfirst", summary_json={"headline": "Qualified", "outcome": "qualified | demo", "next_step": "Send deck"})
+    _run(harness["service"].sync_call(TENANT, CALL))
+    conn.calls.clear()
+    harness["call"]["summary_json"] = {"headline": "Qualified", "outcome": "qualified | demo", "next_step": "Send deck"}
     out = _run(harness["service"].sync_call(TENANT, CALL, reason="summary"))
-    assert out.success and out.updated_existing and out.crm_call_id == "00Tfirst"
+    assert out.success and out.updated_existing and out.crm_call_id == "00Ttask"
     assert len(conn.calls) == 1 and conn.calls[0][0] == "update"
     _, log_id, body, outcome = conn.calls[0]
-    assert log_id == "00Tfirst" and outcome == "Qualified"
+    assert log_id == "00Ttask" and outcome == "Qualified"
     assert "Summary: Qualified" in body and "Next step: Send deck" in body
-    assert harness["marked"] == [(CALL, "00Tfirst")]
 
 
 def test_summary_pass_creates_the_log_when_settlement_never_ran(harness):
@@ -329,3 +376,113 @@ def test_get_crm_sync_service_returns_one_instance_per_client():
     s1 = svc.get_crm_sync_service(a)
     assert svc.get_crm_sync_service(a) is s1
     assert svc.get_crm_sync_service(object()) is not s1
+
+
+def test_both_destinations_keep_their_own_ids_across_summary_and_restart(harness):
+    class Destination(FakeConnector):
+        async def log_call(self, *args, **kwargs):
+            await super().log_call(*args, **kwargs)
+            return self.provider + '-call'
+    harness['providers'] = ['salesforce', 'hubspot']
+    sf = Destination('salesforce', found={'id': 'sf-contact'})
+    hs = Destination('hubspot', found={'id': 'hs-contact'})
+    harness['connectors'] = {'salesforce': sf, 'hubspot': hs}
+    assert _run(harness['service'].sync_call(TENANT, CALL)).success
+    harness['call']['crm_call_id'] = 'salesforce-call'  # legacy column cannot route HubSpot
+    harness['call']['summary_json'] = {'headline': 'A new summary'}
+    # Restart loses all per-instance state except the durable store.
+    restarted = CRMSyncService(object(), object())
+    for name in ('_connector', '_load_call', '_load_lead', '_campaign_name', '_remember_contact_id', '_mark_call_synced'):
+        setattr(restarted, name, getattr(harness['service'], name))
+    restarted.deliveries = harness['deliveries']
+    assert _run(restarted.sync_call(TENANT, CALL, reason='summary')).success
+    assert [c[1] for c in sf.calls if c[0] == 'update'] == ['salesforce-call']
+    assert [c[1] for c in hs.calls if c[0] == 'update'] == ['hubspot-call']
+    assert len([c for c in sf.calls if c[0] == 'log']) == 1
+    assert len([c for c in hs.calls if c[0] == 'log']) == 1
+
+
+def test_one_failed_provider_retries_independently_without_recreating_success(harness):
+    harness['providers'] = ['salesforce', 'hubspot']
+    sf = FakeConnector(found={'id': 'sf'})
+    hs = FakeConnector('hubspot', found={'id': 'hs'}, fail_first_with=ConnectorProviderError(
+        provider='hubspot', operation='log_call', category='rate_limit', message='limited', status_code=429))
+    harness['connectors'] = {'salesforce': sf, 'hubspot': hs}
+    first = _run(harness['service'].sync_call(TENANT, CALL))
+    assert not first.success and first.providers == ['salesforce']
+    second = _run(harness['service'].sync_call(TENANT, CALL))
+    assert second.success
+    assert len([c for c in sf.calls if c[0] == 'log']) == 1
+    assert len([c for c in hs.calls if c[0] == 'log']) == 1
+
+
+def test_lost_remote_success_reconciles_without_repeating_create(harness):
+    class LostResponse(FakeConnector):
+        async def log_call(self, *args, **kwargs):
+            await super().log_call(*args, **kwargs)
+            raise TimeoutError('response lost after remote write')
+        async def find_call_by_reference(self, reference):
+            self.calls.append(('reconcile', reference))
+            return 'recovered-call'
+    connector = LostResponse(found={'id': 'contact'})
+    harness['connectors']['salesforce'] = connector
+    assert not _run(harness['service'].sync_call(TENANT, CALL)).success
+    row = harness['deliveries'].rows[(TENANT, CALL, 'salesforce')]
+    assert row['status'] == 'unknown' and row['phase'] == 'creating_call'
+    second = _run(harness['service'].sync_call(TENANT, CALL))
+    assert second.success and second.crm_call_id == 'recovered-call'
+    assert len([c for c in connector.calls if c[0] == 'log']) == 1
+    assert ('reconcile', CALL) in connector.calls
+
+
+def test_unknown_create_without_reconciliation_evidence_is_never_resent(harness):
+    class Unknown(FakeConnector):
+        async def log_call(self, *args, **kwargs):
+            await super().log_call(*args, **kwargs)
+            raise TimeoutError('lost response')
+        async def find_call_by_reference(self, reference):
+            return None
+    connector = Unknown(found={'id': 'contact'})
+    harness['connectors']['salesforce'] = connector
+    for _ in range(8):
+        assert not _run(harness['service'].sync_call(TENANT, CALL)).success
+    row = harness['deliveries'].rows[(TENANT, CALL, 'salesforce')]
+    assert row['attempts'] == 6 and row['status'] == 'unknown'
+    assert len([c for c in connector.calls if c[0] == 'log']) == 1
+
+
+def test_legacy_shared_id_is_held_instead_of_guessed_or_duplicated(harness):
+    harness['providers'] = ['salesforce', 'hubspot']
+    harness['connectors'] = {name: FakeConnector(name) for name in harness['providers']}
+    harness['call']['crm_call_id'] = 'legacy-owner-unknown'
+    out = _run(harness['service'].sync_call(TENANT, CALL, reason='summary'))
+    assert not out.success
+    assert all(c.calls == [] for c in harness['connectors'].values())
+    assert all(row['status'] == 'unknown' for row in harness['deliveries'].rows.values())
+
+
+def test_false_update_is_failure_and_does_not_publish_success_receipt(harness):
+    connector = FakeConnector(found={'id': 'contact'})
+    harness['connectors']['salesforce'] = connector
+    assert _run(harness['service'].sync_call(TENANT, CALL)).success
+    async def noop(*args, **kwargs):
+        return False
+    connector.update_call_log = noop
+    harness['call']['summary_json'] = {'headline': 'new'}
+    result = _run(harness['service'].sync_call(TENANT, CALL, reason='summary'))
+    assert not result.success and not result.updated_existing
+    row = harness['deliveries'].rows[(TENANT, CALL, 'salesforce')]
+    assert row['status'] == 'pending' and row['completed_key'] != row['desired_key']
+
+
+def test_retry_exhaustion_is_visible_and_bounded(harness):
+    connector = FakeConnector(found={'id': 'contact'})
+    async def unavailable(*args, **kwargs):
+        raise ConnectorProviderError(provider='salesforce', operation='log_call',
+            category='rate_limit', message='limited', status_code=429)
+    connector.log_call = unavailable
+    harness['connectors']['salesforce'] = connector
+    for _ in range(8):
+        assert not _run(harness['service'].sync_call(TENANT, CALL)).success
+    row = harness['deliveries'].rows[(TENANT, CALL, 'salesforce')]
+    assert row['status'] == 'failed' and row['attempts'] == 6

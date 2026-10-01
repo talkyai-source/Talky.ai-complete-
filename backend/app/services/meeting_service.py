@@ -6,7 +6,8 @@ Day 25: Meeting Booking Feature
 """
 import logging
 from typing import Optional, List, Dict, Any
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone as dt_timezone
+import asyncio
 from app.core.postgres_adapter import Client
 
 from app.infrastructure.connectors.base import ConnectorFactory
@@ -46,7 +47,8 @@ class MeetingService:
     
     async def _get_active_calendar_connector(
         self,
-        tenant_id: str
+        tenant_id: str,
+        connector_id: Optional[str] = None,
     ) -> tuple[Any, str, str]:
         """
         Get active calendar connector for tenant.
@@ -57,50 +59,17 @@ class MeetingService:
         Raises:
             CalendarNotConnectedError: If no active calendar connector
         """
-        # Find active calendar connector for tenant
-        response = self.db_client.table("connectors").select(
-            "id, provider, status"
-        ).eq("tenant_id", tenant_id).eq(
-            "type", "calendar"
-        ).eq("status", "active").execute()
-        
-        if not response.data:
-            raise CalendarNotConnectedError(
-                "No calendar connected. Please connect Google Calendar or Microsoft Outlook "
-                "from Settings > Integrations to book meetings."
-            )
-        
-        connector_data = response.data[0]
-        connector_id = connector_data["id"]
-        provider = connector_data["provider"]
-        
-        # Get decrypted access token
-        account_response = self.db_client.table("connector_accounts").select(
-            "access_token_encrypted, token_expires_at"
-        ).eq("connector_id", connector_id).eq("status", "active").single().execute()
-        
-        if not account_response.data:
-            raise CalendarNotConnectedError(
-                "Calendar connection expired. Please reconnect your calendar from Settings > Integrations."
-            )
-        
-        # Decrypt token
-        encrypted_token = account_response.data.get("access_token_encrypted")
-        if not encrypted_token:
-            raise CalendarNotConnectedError("Calendar credentials are missing. Please reconnect.")
-        
-        access_token = self._encryption.decrypt(encrypted_token)
-        
-        # Create connector instance
-        connector = ConnectorFactory.create(
-            provider=provider,
-            tenant_id=tenant_id,
-            connector_id=connector_id
+        from app.services.connector_resolver import (
+            ConnectorNotConnectedError, resolve_active_connector,
         )
-        await connector.set_access_token(access_token)
-        
-        return connector, connector_id, provider
-    
+        try:
+            return await resolve_active_connector(
+                self.db_client, tenant_id, "calendar",
+                **({"connector_id": connector_id} if connector_id else {}),
+            )
+        except ConnectorNotConnectedError as exc:
+            raise CalendarNotConnectedError(exc.message) from exc
+
     async def get_availability(
         self,
         tenant_id: str,
@@ -144,279 +113,194 @@ class MeetingService:
             for slot in available_slots
         ]
     
+    @staticmethod
+    def _required_row(response, operation):
+        if getattr(response, "error", None) or not getattr(response, "data", None):
+            raise RuntimeError(f"{operation} was not persisted")
+        data = response.data
+        row = data[0] if isinstance(data, list) else data
+        if not isinstance(row, dict) or not row.get("id"):
+            raise RuntimeError(f"{operation} has no receipt ID")
+        return row
+
+    @staticmethod
+    def _validate_start(start_time):
+        if start_time.tzinfo is None or start_time.utcoffset() is None:
+            raise ValueError("The meeting time needs an explicit UTC offset")
+        if start_time <= datetime.now(dt_timezone.utc):
+            raise ValueError("The meeting time must be in the future")
+
+    def _start_action(self, tenant_id, action, connector_id, parameters, *,
+                      triggered_by="assistant", lead_id=None, call_id=None):
+        row = self._required_row(self.db_client.table("assistant_actions").insert({
+            "tenant_id": tenant_id, "type": action, "status": "running",
+            "connector_id": connector_id, "input_data": parameters,
+            "triggered_by": triggered_by, "lead_id": lead_id, "call_id": call_id,
+            "started_at": datetime.now(dt_timezone.utc).isoformat(),
+        }).execute(), "Calendar action")
+        return row["id"]
+
+    def _finish_action(self, tenant_id, action_id, status, result):
+        self._required_row(self.db_client.table("assistant_actions").update({
+            "status": status, "output_data": result,
+            "completed_at": datetime.now(dt_timezone.utc).isoformat(),
+        }).eq("id", action_id).eq("tenant_id", tenant_id).execute(), "Calendar receipt")
+
+    def _unconfirmed(self, tenant_id, action_id, receipt, exc):
+        code = getattr(exc, "status_code", None) or getattr(getattr(exc, "response", None), "status_code", None)
+        rejected = code is not None and 400 <= code < 500 and code != 408
+        state = "failed" if rejected else "unknown"
+        result = {"success": False, "status": state, "confirmation_allowed": False,
+                  "action_id": action_id, **receipt,
+                  "error": "Calendar action was rejected." if rejected else
+                           "Calendar outcome is unconfirmed; review the saved receipt before retrying."}
+        try:
+            self._finish_action(tenant_id, action_id, state, result)
+        except Exception:
+            logger.error("Calendar receipt could not be updated action=%s", action_id)
+        return result
+
     async def create_meeting(
-        self,
-        tenant_id: str,
-        title: str,
-        start_time: datetime,
-        duration_minutes: int,
-        attendees: List[str],
-        lead_id: Optional[str] = None,
-        call_id: Optional[str] = None,
-        description: Optional[str] = None,
-        add_video_conference: bool = True,
-        timezone: str = "UTC",
-        triggered_by: str = "api"  # api, voice_agent, assistant, dashboard
+        self, tenant_id: str, title: str, start_time: datetime, duration_minutes: int,
+        attendees: List[str], lead_id: Optional[str] = None, call_id: Optional[str] = None,
+        description: Optional[str] = None, add_video_conference: bool = True,
+        timezone: str = "UTC", triggered_by: str = "api",
     ) -> Dict[str, Any]:
-        """
-        Create a meeting end-to-end.
-        
-        Flow:
-        1. Get active calendar connector
-        2. Create event in calendar provider (Google Calendar / Outlook)
-        3. Save meeting record to database
-        4. Create action audit record
-        5. Return meeting with join_link
-        
-        Args:
-            tenant_id: Tenant ID
-            title: Meeting title
-            start_time: Meeting start time
-            duration_minutes: Meeting duration
-            attendees: List of attendee email addresses
-            lead_id: Optional lead ID if meeting is with a lead
-            call_id: Optional call ID if triggered from call outcome
-            description: Optional meeting description
-            add_video_conference: Create video conference link (Google Meet/Teams)
-            timezone: Meeting timezone
-            triggered_by: Trigger source for audit
-            
-        Returns:
-            Meeting dict with id, join_link, calendar_link, etc.
-            
-        Raises:
-            CalendarNotConnectedError: If no calendar is connected
-        """
+        """Create the provider event only after a durable intent, then save its receipt."""
+        self._validate_start(start_time)
+        if not title.strip() or not 1 <= duration_minutes <= 480:
+            raise ValueError("Provide a title and a duration between 1 and 480 minutes")
+        for table, reference in (("leads", lead_id), ("calls", call_id)):
+            if reference:
+                found = self.db_client.table(table).select("id").eq("tenant_id", tenant_id).eq("id", reference).limit(1).execute()
+                self._required_row(found, f"Linked {table} record")
         connector, connector_id, provider = await self._get_active_calendar_connector(tenant_id)
-        
         end_time = start_time + timedelta(minutes=duration_minutes)
-        
-        logger.info(
-            f"Creating meeting '{title}' for tenant {tenant_id[:8]}... "
-            f"via {provider} at {start_time}"
-        )
-        
-        # Step 1: Create calendar event
-        calendar_event = await connector.create_event(
-            title=title,
-            start_time=start_time,
-            end_time=end_time,
-            description=description,
-            attendees=attendees,
-            add_video_conference=add_video_conference,
-            timezone=timezone
-        )
-        
-        # Step 2: Save meeting record to database
-        meeting_data = {
-            "tenant_id": tenant_id,
-            "lead_id": lead_id,
-            "call_id": call_id,
-            "connector_id": connector_id,
-            "external_event_id": calendar_event.id,
-            "title": title,
-            "description": description,
-            "start_time": start_time.isoformat(),
-            "end_time": end_time.isoformat(),
-            "timezone": timezone,
-            "join_link": calendar_event.video_link,
-            "status": "scheduled",
-            "attendees": [{"email": email, "status": "pending"} for email in attendees],
-            "metadata": {
-                "provider": provider,
-                "calendar_link": calendar_event.metadata.get("htmlLink") if calendar_event.metadata else None,
-                "triggered_by": triggered_by
-            }
-        }
-        
-        meeting_response = self.db_client.table("meetings").insert(meeting_data).execute()
-        meeting_record = meeting_response.data[0] if meeting_response.data else {}
-        meeting_id = meeting_record.get("id")
-        
-        # Step 3: Create action audit record
-        action_data = {
-            "tenant_id": tenant_id,
-            "type": "book_meeting",
-            "status": "completed",
-            "triggered_by": triggered_by,
-            "lead_id": lead_id,
-            "call_id": call_id,
-            "connector_id": connector_id,
-            "input_data": {
-                "title": title,
-                "start_time": start_time.isoformat(),
-                "duration_minutes": duration_minutes,
-                "attendees": attendees
-            },
-            "output_data": {
-                "meeting_id": meeting_id,
-                "external_event_id": calendar_event.id,
-                "join_link": calendar_event.video_link
-            },
-            "completed_at": datetime.utcnow().isoformat()
-        }
-        
-        action_response = self.db_client.table("assistant_actions").insert(action_data).execute()
-        action_id = action_response.data[0]["id"] if action_response.data else None
-        
-        # Update meeting with action_id
-        if meeting_id and action_id:
-            self.db_client.table("meetings").update(
-                {"action_id": action_id}
-            ).eq("id", meeting_id).execute()
-        
-        # Day 27: Create meeting reminders (T-24h, T-1h, T-10m)
-        await self._create_meeting_reminders(
-            meeting_id=meeting_id,
-            tenant_id=tenant_id,
-            lead_id=lead_id,
-            start_time=start_time,
-            title=title,
-            join_link=calendar_event.video_link
-        )
-        
-        logger.info(f"Meeting created: {meeting_id} with join link: {calendar_event.video_link}")
-        
-        return {
-            "success": True,
-            "meeting_id": meeting_id,
-            "external_event_id": calendar_event.id,
-            "title": title,
-            "start_time": start_time.isoformat(),
-            "end_time": end_time.isoformat(),
-            "duration_minutes": duration_minutes,
-            "join_link": calendar_event.video_link,
-            "calendar_link": calendar_event.metadata.get("htmlLink") if calendar_event.metadata else None,
-            "attendees": attendees,
-            "provider": provider,
-            "reminders_created": 3
-        }
-    
+        action_id = self._start_action(tenant_id, "book_meeting", connector_id,
+            {"title": title, "start_time": start_time.isoformat(), "duration_minutes": duration_minutes,
+             "attendees": attendees}, triggered_by=triggered_by, lead_id=lead_id, call_id=call_id)
+        receipt = {"connector_id": connector_id, "provider": provider}
+        try:
+            event = await connector.create_event(title=title, start_time=start_time, end_time=end_time,
+                description=description, attendees=attendees, add_video_conference=add_video_conference,
+                timezone=timezone)
+            if not getattr(event, "id", None):
+                raise RuntimeError("Calendar provider returned no event receipt")
+            receipt["external_event_id"] = event.id
+            metadata = getattr(event, "metadata", None) or {}
+            join_link = getattr(event, "video_link", None)
+            row = self._required_row(self.db_client.table("meetings").insert({
+                "tenant_id": tenant_id, "lead_id": lead_id, "call_id": call_id,
+                "connector_id": connector_id, "action_id": action_id, "external_event_id": event.id,
+                "title": title, "description": description, "start_time": start_time.isoformat(),
+                "end_time": end_time.isoformat(), "timezone": timezone, "join_link": join_link,
+                "status": "scheduled", "attendees": [{"email": email, "status": "pending"} for email in attendees],
+                "metadata": {"provider": provider, "calendar_link": metadata.get("htmlLink"),
+                             "triggered_by": triggered_by},
+            }).execute(), "Meeting")
+            result = {"success": True, "status": "created", "confirmation_allowed": True,
+                      **receipt, "meeting_id": row["id"], "action_id": action_id, "title": title,
+                      "start_time": start_time.isoformat(), "end_time": end_time.isoformat(),
+                      "duration_minutes": duration_minutes, "join_link": join_link,
+                      "calendar_link": metadata.get("htmlLink"), "attendees": attendees,
+                      "reminders_created": 0}
+            # Messaging requires its own preview and permission. Booking itself
+            # never silently queues three SMS messages.
+            self._finish_action(tenant_id, action_id, "completed", result)
+            return result
+        except asyncio.CancelledError as exc:
+            self._unconfirmed(tenant_id, action_id, receipt, exc)
+            raise
+        except Exception as exc:
+            return self._unconfirmed(tenant_id, action_id, receipt, exc)
+
     async def update_meeting(
-        self,
-        tenant_id: str,
-        meeting_id: str,
-        new_start_time: Optional[datetime] = None,
-        new_title: Optional[str] = None,
-        new_description: Optional[str] = None,
-        new_attendees: Optional[List[str]] = None
+        self, tenant_id: str, meeting_id: str, new_start_time: Optional[datetime] = None,
+        new_title: Optional[str] = None, new_description: Optional[str] = None,
+        new_attendees: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
-        """
-        Update/reschedule an existing meeting.
-        
-        Updates both the calendar event and database record.
-        """
-        # Get meeting from database
-        meeting_response = self.db_client.table("meetings").select(
-            "*, connectors(provider)"
-        ).eq("id", meeting_id).eq("tenant_id", tenant_id).single().execute()
-        
-        if not meeting_response.data:
-            return {"success": False, "error": "Meeting not found"}
-        
-        meeting = meeting_response.data
-        external_event_id = meeting.get("external_event_id")
-        connector_id = meeting.get("connector_id")
-        
-        if not external_event_id or not connector_id:
-            return {"success": False, "error": "Meeting has no linked calendar event"}
-        
-        # Get connector
-        connector, _, provider = await self._get_active_calendar_connector(tenant_id)
-        
-        # Calculate new end time if start time is changing
-        new_end_time = None
-        if new_start_time:
-            original_duration = (
-                datetime.fromisoformat(meeting["end_time"].replace("Z", "+00:00")) -
-                datetime.fromisoformat(meeting["start_time"].replace("Z", "+00:00"))
-            )
-            new_end_time = new_start_time + original_duration
-        
-        # Update calendar event
-        updated_event = await connector.update_event(
-            event_id=external_event_id,
-            title=new_title,
-            start_time=new_start_time,
-            end_time=new_end_time,
-            description=new_description,
-            attendees=new_attendees
-        )
-        
-        # Update database record
-        update_data = {}
-        if new_start_time:
-            update_data["start_time"] = new_start_time.isoformat()
-            update_data["end_time"] = new_end_time.isoformat()
-        if new_title:
-            update_data["title"] = new_title
-        if new_description:
-            update_data["description"] = new_description
-        if new_attendees:
-            update_data["attendees"] = [{"email": email, "status": "pending"} for email in new_attendees]
-        
-        if update_data:
-            self.db_client.table("meetings").update(update_data).eq("id", meeting_id).execute()
-        
-        logger.info(f"Meeting updated: {meeting_id}")
-        
-        return {
-            "success": True,
-            "meeting_id": meeting_id,
-            "message": "Meeting updated successfully"
-        }
-    
-    async def cancel_meeting(
-        self,
-        tenant_id: str,
-        meeting_id: str,
-        reason: Optional[str] = None
-    ) -> Dict[str, Any]:
-        """
-        Cancel a meeting.
-        
-        Deletes the calendar event and updates database status.
-        """
-        # Get meeting from database
-        meeting_response = self.db_client.table("meetings").select(
-            "*"
-        ).eq("id", meeting_id).eq("tenant_id", tenant_id).single().execute()
-        
-        if not meeting_response.data:
-            return {"success": False, "error": "Meeting not found"}
-        
-        meeting = meeting_response.data
-        external_event_id = meeting.get("external_event_id")
-        
-        if external_event_id:
-            try:
-                # Get connector and delete calendar event
-                connector, _, _ = await self._get_active_calendar_connector(tenant_id)
-                await connector.delete_event(external_event_id)
-            except CalendarNotConnectedError:
-                # Calendar disconnected but we can still cancel in DB
-                logger.warning("Calendar disconnected, cancelling in database only")
-            except Exception as e:
-                logger.error(f"Error deleting calendar event: {e}")
-        
-        # Update database status
-        self.db_client.table("meetings").update({
-            "status": "cancelled",
-            "metadata": {
-                **meeting.get("metadata", {}),
-                "cancelled_at": datetime.utcnow().isoformat(),
-                "cancellation_reason": reason
-            }
-        }).eq("id", meeting_id).execute()
-        
-        logger.info(f"Meeting cancelled: {meeting_id}")
-        
-        return {
-            "success": True,
-            "meeting_id": meeting_id,
-            "message": "Meeting cancelled successfully"
-        }
-    
+        meeting = await self.get_meeting(tenant_id, meeting_id)
+        if not meeting:
+            return {"success": False, "status": "failed", "error": "Meeting not found"}
+        external_id, connector_id = meeting.get("external_event_id"), meeting.get("connector_id")
+        if not external_id or not connector_id:
+            return {"success": False, "status": "failed", "error": "Meeting has no linked calendar event"}
+        updates = {}
+        new_end = None
+        if new_start_time is not None:
+            self._validate_start(new_start_time)
+            original_start = datetime.fromisoformat(str(meeting["start_time"]).replace("Z", "+00:00"))
+            original_end = datetime.fromisoformat(str(meeting["end_time"]).replace("Z", "+00:00"))
+            new_end = new_start_time + (original_end - original_start)
+            updates.update(start_time=new_start_time.isoformat(), end_time=new_end.isoformat())
+        if new_title is not None:
+            if not new_title.strip():
+                raise ValueError("The meeting title cannot be empty")
+            updates["title"] = new_title
+        if new_description is not None:
+            updates["description"] = new_description
+        if new_attendees is not None:
+            updates["attendees"] = [{"email": email, "status": "pending"} for email in new_attendees]
+        if not updates:
+            return {"success": False, "status": "failed", "error": "No meeting changes provided"}
+        connector, _, provider = await self._get_active_calendar_connector(tenant_id, connector_id=connector_id)
+        action_id = self._start_action(tenant_id, "update_meeting", connector_id,
+            {"meeting_id": meeting_id, **updates})
+        receipt = {"meeting_id": meeting_id, "external_event_id": external_id,
+                   "connector_id": connector_id, "provider": provider}
+        try:
+            event = await connector.update_event(event_id=external_id, title=new_title,
+                start_time=new_start_time, end_time=new_end, description=new_description,
+                attendees=new_attendees)
+            if getattr(event, "id", None) != external_id:
+                raise RuntimeError("Calendar provider did not confirm the event update")
+            self._required_row(self.db_client.table("meetings").update(updates).eq("id", meeting_id).eq(
+                "tenant_id", tenant_id).execute(), "Meeting update")
+            result = {"success": True, "status": "updated", "confirmation_allowed": True,
+                      "action_id": action_id, **receipt, "message": "Meeting updated."}
+            self._finish_action(tenant_id, action_id, "completed", result)
+            return result
+        except asyncio.CancelledError as exc:
+            self._unconfirmed(tenant_id, action_id, receipt, exc)
+            raise
+        except Exception as exc:
+            return self._unconfirmed(tenant_id, action_id, receipt, exc)
+
+    async def cancel_meeting(self, tenant_id: str, meeting_id: str,
+                             reason: Optional[str] = None) -> Dict[str, Any]:
+        meeting = await self.get_meeting(tenant_id, meeting_id)
+        if not meeting:
+            return {"success": False, "status": "failed", "error": "Meeting not found"}
+        external_id, connector_id = meeting.get("external_event_id"), meeting.get("connector_id")
+        if not external_id or not connector_id:
+            return {"success": False, "status": "failed", "error": "Meeting has no linked calendar event"}
+        connector, _, provider = await self._get_active_calendar_connector(tenant_id, connector_id=connector_id)
+        action_id = self._start_action(tenant_id, "cancel_meeting", connector_id,
+            {"meeting_id": meeting_id, "reason": reason})
+        receipt = {"meeting_id": meeting_id, "external_event_id": external_id,
+                   "connector_id": connector_id, "provider": provider}
+        try:
+            if await connector.delete_event(external_id) is not True:
+                raise RuntimeError("Calendar provider did not confirm cancellation")
+            self._required_row(self.db_client.table("meetings").update({
+                "status": "cancelled", "metadata": {**(meeting.get("metadata") or {}),
+                    "cancelled_at": datetime.now(dt_timezone.utc).isoformat(), "cancellation_reason": reason},
+            }).eq("id", meeting_id).eq("tenant_id", tenant_id).execute(), "Meeting cancellation")
+            # Existing unsent reminders belong to the cancelled event too.
+            reminders = self.db_client.table("reminders").update({"status": "cancelled"}).eq(
+                "tenant_id", tenant_id).eq("meeting_id", meeting_id).eq("status", "pending").execute()
+            if getattr(reminders, "error", None):
+                raise RuntimeError("Meeting reminder cancellation was not persisted")
+            result = {"success": True, "status": "cancelled", "confirmation_allowed": True,
+                      "action_id": action_id, **receipt, "message": "Meeting cancelled."}
+            self._finish_action(tenant_id, action_id, "completed", result)
+            return result
+        except asyncio.CancelledError as exc:
+            self._unconfirmed(tenant_id, action_id, receipt, exc)
+            raise
+        except Exception as exc:
+            return self._unconfirmed(tenant_id, action_id, receipt, exc)
+
     async def get_meeting(
         self,
         tenant_id: str,
@@ -453,88 +337,12 @@ class MeetingService:
         
         return response.data or []
     
-    async def _create_meeting_reminders(
-        self,
-        meeting_id: str,
-        tenant_id: str,
-        lead_id: Optional[str],
-        start_time: datetime,
-        title: str,
-        join_link: Optional[str] = None
-    ) -> List[str]:
-        """
-        Create reminders for a meeting at T-24h, T-1h, and T-10m.
-        
-        Day 27: Timed Communication System
-        
-        Args:
-            meeting_id: Meeting ID to link reminders to
-            tenant_id: Tenant ID
-            lead_id: Lead ID (used for contact info lookup)
-            start_time: Meeting start time
-            title: Meeting title
-            join_link: Video conference join link
-            
-        Returns:
-            List of created reminder IDs
-        """
-        reminder_offsets = [
-            ("24h", timedelta(hours=24)),
-            ("1h", timedelta(hours=1)),
-            ("10m", timedelta(minutes=10))
-        ]
-        
-        created_ids = []
-        
-        for reminder_type, offset in reminder_offsets:
-            scheduled_at = start_time - offset
-            
-            # Don't create reminders in the past
-            if scheduled_at <= datetime.utcnow():
-                logger.info(f"Skipping {reminder_type} reminder - already past")
-                continue
-            
-            # Generate idempotency key
-            idempotency_key = f"meeting-{meeting_id}-{reminder_type}"
-            
-            reminder_data = {
-                "tenant_id": tenant_id,
-                "meeting_id": meeting_id,
-                "lead_id": lead_id,
-                "type": "sms",  # Default to SMS, worker will fallback to email if needed
-                "scheduled_at": scheduled_at.isoformat(),
-                "status": "pending",
-                "idempotency_key": idempotency_key,
-                "max_retries": 3,
-                "content": {
-                    "reminder_type": reminder_type,
-                    "title": title,
-                    "join_link": join_link,
-                    "template": f"meeting_reminder_{reminder_type}"
-                }
-            }
-            
-            try:
-                response = self.db_client.table("reminders").insert(reminder_data).execute()
-                
-                if response.data:
-                    reminder_id = response.data[0]["id"]
-                    created_ids.append(reminder_id)
-                    logger.info(f"Created {reminder_type} reminder: {reminder_id} for meeting {meeting_id}")
-            except Exception as e:
-                logger.error(f"Failed to create {reminder_type} reminder: {e}")
-        
-        logger.info(f"Created {len(created_ids)} reminders for meeting {meeting_id}")
-        return created_ids
-
-
-
 # Singleton instance helper
 _meeting_service: Optional[MeetingService] = None
 
 def get_meeting_service(db_client: Client) -> MeetingService:
     """Get or create MeetingService instance."""
     global _meeting_service
-    if _meeting_service is None:
+    if _meeting_service is None or _meeting_service.db_client is not db_client:
         _meeting_service = MeetingService(db_client)
     return _meeting_service

@@ -71,6 +71,7 @@ function DetailRow({
                 detail.field_type),
         onSuccess: () => {
             void queryClient.invalidateQueries({ queryKey: leadDetailsQueryKey(callId) });
+            void queryClient.invalidateQueries({ queryKey: ["contact-lead-details"] });
             setEditing(false);
             setError(null);
         },
@@ -144,7 +145,9 @@ function DetailRow({
                 >
                     {SOURCE_LABEL[detail.source]}
                 </span>
-                {detail.confirmed ? (
+                {detail.source === "manual_edit" ? (
+                    <span className="text-[10px] text-blue-600">Verified by a person</span>
+                ) : detail.confirmed ? (
                     <span className="inline-flex items-center gap-1 text-[10px] font-medium text-emerald-600 dark:text-emerald-400">
                         <Check className="h-3 w-3" /> confirmed on the call
                     </span>
@@ -154,27 +157,63 @@ function DetailRow({
                     </span>
                 )}
             </div>
+            {detail.evidence?.status && (
+                <p className="text-xs text-muted-foreground">
+                    {humanise(detail.evidence.status)}
+                    {detail.evidence.time_resolution === "needs_review" ? " · Confirm the date and timezone before scheduling" : ""}
+                </p>
+            )}
+            {detail.evidence?.source_quote && (
+                <blockquote className="border-l-2 border-border pl-2 text-xs text-muted-foreground">
+                    Caller: “{detail.evidence.source_quote}”
+                </blockquote>
+            )}
+        </div>
+    );
+}
+
+export function ContactCapturedDetails({ leadId, latestNote }: { leadId: string; latestNote?: string | null }) {
+    const [open, setOpen] = useState(false);
+    return (
+        <div className="mt-2 whitespace-normal">
+            {latestNote && <p className="mb-1 max-w-sm text-xs text-muted-foreground">Latest call analysis: {latestNote}</p>}
+            <button type="button" onClick={() => setOpen(!open)} aria-expanded={open}
+                className="text-xs font-medium text-primary hover:underline">
+                {open ? "Hide captured details" : "View captured details"}
+            </button>
+            {open && <div className="mt-2 min-w-64"><LeadDetailsPanel leadId={leadId} /></div>}
         </div>
     );
 }
 
 export function LeadDetailsPanel({
-    callId,
+    callId = "",
+    leadId,
     campaignId,
     leadOutcome,
 }: {
-    callId: string;
+    callId?: string;
+    leadId?: string;
     campaignId?: string;
     leadOutcome?: string | null;
 }) {
     const query = useQuery({
-        queryKey: leadDetailsQueryKey(callId),
-        queryFn: () => leadDetailsApi.detailsForCall(callId, campaignId),
-        enabled: Boolean(callId),
+        queryKey: leadId ? ["contact-lead-details", leadId] : leadDetailsQueryKey(callId),
+        queryFn: () => leadId ? leadDetailsApi.detailsForLead(leadId) : leadDetailsApi.detailsForCall(callId, campaignId),
+        enabled: Boolean(callId || leadId),
+        refetchInterval: (state) => state.state.data?.processing_status === "pending"
+            || state.state.data?.crm_deliveries?.some((item) => ["pending", "processing"].includes(item.status)) ? 5_000 : false,
     });
 
     const details = query.data?.details ?? [];
     const missing = query.data?.missing_required ?? [];
+    const processing = query.data?.processing_status;
+    const deliveries = query.data?.crm_deliveries ?? [];
+    const processingMessage = processing === "failed"
+        ? "Some call details could not be processed. Saved details remain available."
+        : processing === "pending" ? "Call details are awaiting analysis."
+        : processing === "not_processed" ? "This older call has not been analyzed for captured details. Open its summary in call history to process it."
+        : processing === "no_transcript" ? "No usable transcript was recorded for this call." : null;
 
     // The badge comes from the post-call verdict, never from "some fields were
     // captured". A caller can give their name and still explicitly decline.
@@ -206,11 +245,11 @@ export function LeadDetailsPanel({
         );
     }
 
-    if (!details.length && !missing.length) {
+    if (!details.length && !missing.length && !deliveries.length) {
         return (
             <Panel>
                 <p className="text-sm text-muted-foreground">
-                    Nothing structured was captured on this call.
+                    {processingMessage || (processing === "no_calls" ? "No calls recorded for this contact." : "No supported details were provided in the recorded conversation.")}
                 </p>
             </Panel>
         );
@@ -236,6 +275,16 @@ export function LeadDetailsPanel({
                 )}
             </div>
 
+            {processingMessage && <p role="status" className="mb-3 text-sm text-muted-foreground">{processingMessage}</p>}
+            {deliveries.length > 0 && (
+                <div className="mb-3 space-y-1 text-xs text-muted-foreground" aria-label="CRM delivery status">
+                    {deliveries.map((delivery) => (
+                        <p key={delivery.provider}>
+                            {humanise(delivery.provider)}: {({ succeeded: "Synced", pending: "Waiting to sync", processing: "Syncing", failed: "Sync failed", unknown: "Outcome uncertain — review before retrying", skipped: "Not synced" } as Record<string, string>)[delivery.status] ?? humanise(delivery.status)}
+                        </p>
+                    ))}
+                </div>
+            )}
             {missing.length > 0 && (
                 <div className="mb-3 flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2">
                     <X className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600 dark:text-amber-400" />
@@ -249,7 +298,7 @@ export function LeadDetailsPanel({
 
             <div>
                 {details.map((d) => (
-                    <DetailRow key={d.field_key} detail={d} callId={callId} />
+                    <DetailRow key={d.field_key} detail={d} callId={d.call_id || callId} />
                 ))}
             </div>
         </Panel>

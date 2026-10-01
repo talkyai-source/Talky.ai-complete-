@@ -17,6 +17,7 @@ class ScheduleReminderInput(BaseModel):
     scheduled_at: Optional[str] = Field(None, description="Absolute scheduled time if no offset")
     message: Optional[str] = Field(None, description="Custom reminder message")
     reminder_type: str = Field("sms", description="Reminder type: 'sms' or 'email'")
+    confirm: bool = Field(False, description="Preview first; Apply confirms.")
 
 
 class ExecuteActionPlanInput(BaseModel):
@@ -30,6 +31,7 @@ class ExecuteActionPlanInput(BaseModel):
         None,
         description="Context data like lead_id, campaign_id"
     )
+    confirm: bool = Field(False, description="Preview all steps first; Apply confirms.")
 
 
 async def schedule_reminder(
@@ -41,15 +43,16 @@ async def schedule_reminder(
     scheduled_at: Optional[str] = None,
     message: Optional[str] = None,
     reminder_type: str = "sms",
-    conversation_id: Optional[str] = None
+    conversation_id: Optional[str] = None,
+    confirm: bool = False,
 ) -> Dict[str, Any]:
     """
     Schedule a reminder for a meeting or lead.
 
     Inserts a row into `reminders`, which the background reminder_worker picks up
     and delivers (SMS to the lead's number if present, else email). When a
-    meeting_id is given, an `offset` like '-1h'/'-10m' is applied relative to the
-    meeting's start_time; otherwise `scheduled_at` (absolute) or a 1h default.
+    meeting_id is given, an `offset` is relative to the meeting start time;
+    otherwise an explicit time with UTC offset is required.
 
     Delegates to the SAME module-level `schedule_reminder` used by
     execute_action_plan (assistant_plan_steps), so the tool path and the
@@ -90,6 +93,7 @@ async def schedule_reminder(
             },
             chained_result=chained_result,
             conversation_id=conversation_id,
+            preview=not confirm,
         )
 
     except Exception as e:
@@ -103,7 +107,9 @@ async def execute_action_plan(
     intent: str,
     actions: List[Dict[str, Any]],
     context: Optional[Dict[str, Any]] = None,
-    conversation_id: Optional[str] = None
+    conversation_id: Optional[str] = None,
+    confirm: bool = False,
+    actor_user_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Execute a multi-step action plan.
@@ -112,6 +118,19 @@ async def execute_action_plan(
     """
     try:
         from app.services.assistant_agent_service import get_assistant_agent_service
+        from app.infrastructure.assistant.tools.dispatch import _authorize_action_tool
+
+        async def authorize(action_type, parameters):
+            return await _authorize_action_tool(action_type, tenant_id, db_client, actor_user_id, parameters)
+
+        failure = await _authorize_action_tool(
+            "execute_action_plan", tenant_id, db_client, actor_user_id, {"actions": actions},
+        )
+        if failure:
+            return failure
+        if not confirm:
+            return await _preview_plan(tenant_id, db_client, intent, actions, context,
+                                       conversation_id, actor_user_id)
 
         service = get_assistant_agent_service(db_client)
 
@@ -120,15 +139,18 @@ async def execute_action_plan(
             intent=intent,
             context=context or {},
             actions=actions,
-            conversation_id=conversation_id
+            conversation_id=conversation_id,
+            user_id=actor_user_id,
         )
 
-        result = await service.execute_plan(plan)
+        result = await service.execute_plan(plan, authorize_action=authorize)
 
+        unknown = any((step.result or {}).get("status") in {"unknown", "in_progress", "outcome_unknown"}
+                      for step in result.step_results)
         return {
-            "success": result.status in ["completed", "partially_completed"],
+            "success": result.status == "completed",
             "plan_id": result.id,
-            "status": result.status if isinstance(result.status, str) else result.status.value,
+            "status": "unknown" if unknown else result.status if isinstance(result.status, str) else result.status.value,
             "steps_completed": result.successful_steps,
             "total_steps": len(result.actions),
             "results": [r.model_dump() for r in result.step_results],
@@ -141,3 +163,57 @@ async def execute_action_plan(
     except Exception as e:
         logger.error(f"Error executing action plan: {e}")
         return {"success": False, "error": str(e)}
+
+
+async def _preview_plan(tenant_id, db_client, intent, actions, context, conversation_id, actor):
+    """Resolve each preview once so Apply executes the reviewed destinations/content."""
+    import json
+    from app.infrastructure.assistant.tools import ACTION_TOOLS
+    from app.infrastructure.assistant.tools.dispatch import dispatch_tool
+    from app.infrastructure.assistant.proposals import PROPOSAL_TOOLS
+    from app.services.assistant_plan_steps import apply_offset
+    from datetime import datetime
+
+    frozen, changes = [], []
+    for index, step in enumerate(actions):
+        name = step["type"]
+        parameters = {**(context or {}), **{k: v for k, v in step.items()
+                      if k not in {"type", "use_result_from", "condition"}}}
+        if "time" in parameters and "start_time" not in parameters:
+            parameters["start_time"] = parameters.pop("time")
+        if "template" in parameters and "template_name" not in parameters:
+            parameters["template_name"] = parameters.pop("template")
+        reference = step.get("use_result_from")
+        if reference is not None:
+            if isinstance(reference, bool) or not isinstance(reference, int) or not 0 <= reference < index:
+                return {"success": False, "error": f"Step {index + 1} refers to an invalid earlier step."}
+            if name == "send_email" and parameters.get("template_name"):
+                return {"success": False, "error": "Preview the booking first, then create its templated confirmation email. A plan can send an explicit reviewed message."}
+            if name == "schedule_reminder" and parameters.get("offset"):
+                start = frozen[reference].get("start_time")
+                if start:
+                    parameters["scheduled_at"] = apply_offset(datetime.fromisoformat(start.replace("Z", "+00:00")), parameters.pop("offset")).isoformat()
+        schema = ACTION_TOOLS[name]["input_schema"]
+        parameters = schema.model_validate(parameters).model_dump(exclude_none=True)
+        parameters.pop("confirm", None)
+        if name in PROPOSAL_TOOLS:
+            preview = await dispatch_tool(name, tenant_id, db_client, conversation_id,
+                                          {**parameters, "confirm": False}, actor_user_id=actor)
+            if preview.get("preview") is not True:
+                return {"success": False, "error": f"Step {index + 1}: " + str(preview.get("error") or preview.get("message") or "Cannot prepare this action.")}
+            parameters = dict(preview.get("_apply_args") or parameters)
+            changes.extend({**change, "field": f"Step {index + 1} · {change['field']}"}
+                           for change in preview.get("changes", []))
+        else:
+            # Read-only availability and campaign-start arguments are explicit.
+            # Do not call start_campaign during preview.
+            changes.append({"field": f"Step {index + 1}: {name}", "before": None,
+                            "after": json.dumps(parameters, ensure_ascii=False, default=str)})
+        condition = step.get("condition", "always" if index == 0 else "if_previous_success")
+        if condition not in {"always", "if_previous_success", "if_previous_failed"}:
+            return {"success": False, "error": f"Step {index + 1} has an invalid condition."}
+        frozen.append({"type": name, **parameters, "condition": condition,
+                       **({"use_result_from": reference} if reference is not None else {})})
+    return {"preview": True, "changes": changes,
+            "_apply_args": {"intent": intent, "actions": frozen, "context": {}},
+            "note": "No steps executed. An uncertain result stops the plan. Permissions are rechecked on Apply."}

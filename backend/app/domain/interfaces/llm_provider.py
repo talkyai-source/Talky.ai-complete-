@@ -50,6 +50,11 @@ class LLMProvider(ABC):
         pass
     
     @property
+    def supports_tools(self) -> bool:
+        """Whether the adapter implements the bounded tool-turn contract."""
+        return False
+
+    @property
     @abstractmethod
     def supports_streaming(self) -> bool:
         """Whether provider supports token streaming"""

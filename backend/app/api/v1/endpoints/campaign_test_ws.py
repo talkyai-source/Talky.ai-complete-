@@ -862,7 +862,7 @@ async def campaign_test_websocket(
                         if data.get("type") == "playback_complete":
                             mark = getattr(gateway, "mark_playback_complete", None)
                             if callable(mark):
-                                mark(call_id)
+                                mark(call_id, data.get("utterance_id"))
                             continue
                         # {"type":"auth"} frames (sent by cookie-mode clients that
                         # also send a bearer frame) are ignored here.

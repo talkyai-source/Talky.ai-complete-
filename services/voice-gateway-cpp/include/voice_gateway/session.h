@@ -212,6 +212,9 @@ public:
     // already committed to send (passed its generation check) has finished its
     // send (bounded wait) — the VG-24 send-completion barrier.
     bool interrupt_tts(const std::string& reason, std::size_t& dropped_frames, std::size_t& interrupted_segments);
+    // Receipt v1 certifies RTP transmission only, never remote playback.
+    bool finish_tts_utterance(const std::string& utterance_id, int64_t last_chunk_seq,
+                             std::string& status, std::size_t& transmitted_frames, std::string& error);
 
     // Register a callback that fires with each received audio batch.
     // Called from the receiver thread; keep it non-blocking.
@@ -247,6 +250,7 @@ private:
     struct TtsSegmentState {
         std::size_t remaining_frames{0};
         bool interrupted{false};
+        std::string utterance_id;
     };
 
     void receiver_loop();
@@ -308,6 +312,12 @@ private:
     std::string tts_current_utterance_id_;
     std::string tts_retired_utterance_id_;
     int64_t tts_last_chunk_seq_{-1};
+    std::string tts_receipt_utterance_id_;
+    std::size_t tts_receipt_accepted_{0};
+    std::size_t tts_receipt_sent_{0};
+    bool tts_receipt_final_{false};
+    bool tts_receipt_failed_{false};
+    bool tts_receipt_cancelled_{false};
 
     // Latches on the first start() call. RtpSession is single-use (its worker
     // std::threads are one-shot); a second start() would assign over joinable

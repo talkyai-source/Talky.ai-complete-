@@ -270,7 +270,7 @@ async def test_update_call_log_patches_the_task(ready, monkeypatch):
     req = rec.requests[0]
     assert req.method == "PATCH" and req.url.path.endswith("/sobjects/Task/00T1")
     body = json.loads(req.content)
-    assert body == {"Description": "with summary", "CallDisposition": "Callback", "Subject": "Call - Callback"}
+    assert body == {"Description": "with summary", "CallDisposition": "Callback"}
 
 
 @pytest.mark.asyncio

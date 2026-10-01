@@ -79,7 +79,7 @@ class _FakeConn:
         self.statements.append((sql, args))
         if self._fetchrow_exc is not None:
             raise self._fetchrow_exc
-        if "FROM calls" in sql:
+        if "SELECT is_test" in sql:
             return {"is_test": self._is_test} if self._call_row_exists else None
         return {"id": str(uuid.uuid4())}
 
@@ -90,7 +90,7 @@ class _FakeConn:
 
     @property
     def is_test_lookups(self):
-        return [(s, a) for s, a in self.statements if "FROM calls" in s]
+        return [(s, a) for s, a in self.statements if "SELECT is_test" in s]
 
 
 class _FakePool:

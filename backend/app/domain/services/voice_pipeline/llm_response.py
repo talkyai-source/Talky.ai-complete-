@@ -81,7 +81,11 @@ async def generate_llm_response(llm_provider, latency_tracker, session, user_inp
         messages = session.conversation_history[:]
         system_prompt = session.system_prompt
         if session.captured_slots is not None:
-            system_prompt = compose_system_prompt(system_prompt, session.captured_slots)
+            from app.domain.services.voice_pipeline.action_execution import enabled_voice_actions
+            system_prompt = compose_system_prompt(
+                system_prompt, session.captured_slots,
+                has_callback_executor="schedule_callback" in enabled_voice_actions(session),
+            )
 
         # Keep this compatibility/non-streaming entry point on the same C2
         # evidence contract as the production streaming turn path.
@@ -92,6 +96,8 @@ async def generate_llm_response(llm_provider, latency_tracker, session, user_inp
             company_name=(getattr(_agent_cfg, "company_name", "") or ""),
             has_introduced=bool(getattr(session, "_has_introduced", False)),
             structured_state_block=render_live_state_block(_structured),
+            direction=(getattr(session, "_call_direction", None)
+                       or getattr(getattr(session, "config", None), "direction", "outbound")),
         )
         if _live_block:
             system_prompt = f"{system_prompt}\n\n{_live_block}"

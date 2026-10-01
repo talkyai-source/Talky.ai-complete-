@@ -1332,6 +1332,33 @@ void test_tts_utterance_idempotency() {
     session.stop("test_done");
 }
 
+void test_correlated_transmission_receipt() {
+    const int sink = make_udp_bound(34982);
+    SessionConfig cfg = base_config("receipt", 34981, 34982);
+    cfg.tts_underrun_fill_ms = 0;
+    RtpSession session(cfg);
+    std::string error, status;
+    std::size_t queued = 0, sent = 0;
+    check(session.start(error), "receipt_start");
+    const std::vector<uint8_t> audio(160 * 3, 0xFF);
+    check(session.enqueue_tts_ulaw(audio, false, queued, error, "receipt-one", 0), "receipt_queue");
+    check(!session.finish_tts_utterance("stale", 0, status, sent, error), "receipt_wrong_identity_rejected");
+    check(!session.finish_tts_utterance("receipt-one", 1, status, sent, error), "receipt_wrong_sequence_rejected");
+    for (int i = 0; i < 100; ++i) {
+        check(session.finish_tts_utterance("receipt-one", 0, status, sent, error), "receipt_final_marker_idempotent");
+        if (status == "transmitted") break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    check(status == "transmitted" && sent == 3, "receipt_requires_all_frames_transmitted");
+    check(!session.enqueue_tts_ulaw(audio, false, queued, error, "receipt-one", 1), "receipt_no_audio_after_final_marker");
+    check(session.enqueue_tts_ulaw(std::vector<uint8_t>(160 * 100, 0xFF), false, queued, error, "receipt-two", 0), "receipt_next_utterance");
+    std::size_t dropped = 0, interrupted = 0;
+    session.interrupt_tts("barge_in", dropped, interrupted);
+    check(session.finish_tts_utterance("receipt-two", 0, status, sent, error) && status == "interrupted", "receipt_clear_never_completes_audio");
+    session.stop("test_done");
+    if (sink >= 0) close(sink);
+}
+
 // VG-24 completion half: once interrupt_tts() has returned, NO further
 // pre-interrupt TTS frame may reach the wire — the sent counter must freeze.
 void test_interrupt_send_barrier() {
@@ -1568,6 +1595,7 @@ int main() {
     test_session_cap_counts_teardown_slots();
     test_body_budget_503();
     test_tts_utterance_idempotency();
+    test_correlated_transmission_receipt();
     test_interrupt_send_barrier();
     test_sink_finish_flushes_tail();
     test_audio_callback_sends_internal_token();

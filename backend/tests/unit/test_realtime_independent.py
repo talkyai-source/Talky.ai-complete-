@@ -99,7 +99,7 @@ async def test_failed_connection_never_constructs_traditional_providers(monkeypa
     assert config.pipeline_mode == "realtime"
 
 
-def test_realtime_prompt_never_uses_traditional_composer_or_guidance(monkeypatch):
+def test_realtime_prompt_uses_campaign_context_without_traditional_composer(monkeypatch):
     from app.domain.services import telephony_session_config as traditional
     def forbidden(*_args, **_kwargs):
         pytest.fail("Traditional prompt composer reached")
@@ -113,7 +113,8 @@ def test_realtime_prompt_never_uses_traditional_composer_or_guidance(monkeypatch
     })
     from app.realtime.prompts import build_realtime_instructions
     text = build_realtime_instructions(VoiceOrchestrator._build_realtime_persona(config))
-    assert "REALTIME ONLY" in text and "TRADITIONAL ONLY" not in text
+    assert "REALTIME ONLY" in text and "TRADITIONAL ONLY" in text
+    assert "Account-wide notes: REALTIME ONLY" in text
     assert "verified troubleshooting" in text
     assert "Welcome" in text
 

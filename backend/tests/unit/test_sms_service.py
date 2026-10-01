@@ -34,7 +34,7 @@ class _FakeDbConnection:
 
     async def execute(self, query, *args):
         self.queries.append((query, args))
-        return "INSERT 0 1"
+        return "UPDATE 1" if query.lstrip().startswith("UPDATE") else "INSERT 0 1"
 
     async def fetchrow(self, query, *args):
         self.queries.append((query, args))

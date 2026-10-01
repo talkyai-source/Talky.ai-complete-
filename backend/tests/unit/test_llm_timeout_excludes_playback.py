@@ -90,7 +90,21 @@ def _make_cerebras(stream):
     return p
 
 
-@pytest.mark.parametrize("factory", [_make_gemini, _make_cerebras])
+def _make_groq(stream):
+    from app.infrastructure.llm.groq import GroqLLMProvider
+    provider = GroqLLMProvider()
+    provider.stream_chat = stream
+    return provider
+
+
+def _make_openai(stream):
+    from app.infrastructure.llm.openai import OpenAILLMProvider
+    provider = OpenAILLMProvider()
+    provider.stream_chat = stream
+    return provider
+
+
+@pytest.mark.parametrize("factory", [_make_gemini, _make_cerebras, _make_groq, _make_openai])
 @pytest.mark.asyncio
 async def test_slow_consumer_does_not_truncate_the_reply(factory):
     """THE REGRESSION.
@@ -116,7 +130,7 @@ async def test_slow_consumer_does_not_truncate_the_reply(factory):
     )
 
 
-@pytest.mark.parametrize("factory", [_make_gemini, _make_cerebras])
+@pytest.mark.parametrize("factory", [_make_gemini, _make_cerebras, _make_groq, _make_openai])
 @pytest.mark.asyncio
 async def test_a_genuinely_slow_provider_still_times_out(factory):
     """The budget must still bite when the PROVIDER is the slow one.
@@ -142,7 +156,7 @@ async def test_a_genuinely_slow_provider_still_times_out(factory):
         )
 
 
-@pytest.mark.parametrize("factory", [_make_gemini, _make_cerebras])
+@pytest.mark.parametrize("factory", [_make_gemini, _make_cerebras, _make_groq, _make_openai])
 @pytest.mark.asyncio
 async def test_fast_path_is_unchanged(factory):
     """A normal, fast turn must behave exactly as before."""
@@ -154,24 +168,3 @@ async def test_fast_path_is_unchanged(factory):
     )
     assert len(out) == 4
     assert "".join(out).startswith("tok0")
-
-
-def test_all_three_providers_budget_provider_wait_not_wall_clock():
-    """Structural guard: none of the three may reintroduce a wall-clock budget.
-
-    The bug shape is `timeout_seconds - (now - t_start)`. Groq was always
-    correct; Gemini and Cerebras were not. Pin all three so a future provider
-    copy-pastes the right one.
-    """
-    from tests.unit._source_scan import code, function_body
-
-    for rel, accum in (
-        ("app/infrastructure/llm/groq.py", "groq_wait_accumulated"),
-        ("app/infrastructure/llm/gemini.py", "gemini_wait_accumulated"),
-        ("app/infrastructure/llm/cerebras.py", "cerebras_wait_accumulated"),
-    ):
-        body = function_body(code(rel), "stream_chat_with_timeout")
-        assert f"remaining = timeout_seconds - {accum}" in body, (
-            f"{rel}: budget must be computed from accumulated provider wait"
-        )
-        assert "_wait_t0" in body, f"{rel}: must measure each await span"

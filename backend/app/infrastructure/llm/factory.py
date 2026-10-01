@@ -32,6 +32,9 @@ class LLMFactory:
 
 
 # Auto-register available providers
+from app.infrastructure.llm.openai import OpenAILLMProvider
+LLMFactory.register("openai", OpenAILLMProvider)
+
 try:
     from app.infrastructure.llm.groq import GroqLLMProvider
     LLMFactory.register("groq", GroqLLMProvider)
@@ -49,4 +52,3 @@ try:
     LLMFactory.register("cerebras", CerebrasLLMProvider)
 except ImportError:
     pass  # cerebras-cloud-sdk not installed; Cerebras provider unavailable
-

@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from copy import deepcopy
 from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
@@ -35,6 +36,14 @@ PROPOSAL_TOOLS = {
     "manage_lead",
     "apply_campaign_voice",
     "send_email",
+    "send_sms",
+    "report_issue",
+    "book_meeting",
+    "update_meeting",
+    "cancel_meeting",
+    "schedule_reminder",
+    "execute_action_plan",
+    "initiate_call",
 }
 
 # proposal_id -> proposal dict
@@ -72,7 +81,10 @@ def store_proposal(
         "proposal_id": proposal_id,
         "tool": tool,
         # Drop confirm — apply re-adds confirm=true. Keep everything else verbatim.
-        "args": {k: v for k, v in (args or {}).items() if k != "confirm"},
+        "args": deepcopy({
+            k: v for k, v in (result.get("_apply_args") or args or {}).items()
+            if k not in {"confirm", "actor_user_id", "trusted_proposal_apply", "proposal_id"}
+        }),
         "changes": result.get("changes") or [],
         "campaigns": result.get("campaigns") or [],
         "note": result.get("note") or "",

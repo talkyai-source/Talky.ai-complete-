@@ -20,9 +20,10 @@ from app.domain.models.ai_config import AIProviderConfig
 
 
 @pytest.mark.asyncio
-async def test_providers_menu_offers_exactly_the_three_chosen_models(monkeypatch):
+async def test_providers_menu_offers_exactly_the_four_chosen_models(monkeypatch):
     """Owner decision 2026-10-01: GPT-OSS 120B (Cerebras), GPT-OSS 20B (Groq)
     and, from Google, Gemini 3.8 Flash only -- no other Gemini id is shown."""
+    monkeypatch.setenv("OPENAI_API_KEY", "set-on-prod")
     monkeypatch.setenv("GEMINI_API_KEY", "set-on-prod")
     monkeypatch.setenv("CEREBRAS_API_KEY", "set-on-prod")
     monkeypatch.setenv("GROQ_API_KEY", "set-on-prod")
@@ -30,12 +31,13 @@ async def test_providers_menu_offers_exactly_the_three_chosen_models(monkeypatch
 
     response = await list_providers()
 
-    assert sorted(response.llm["providers"]) == ["cerebras", "gemini", "groq"]
+    assert sorted(response.llm["providers"]) == ["cerebras", "gemini", "groq", "openai"]
     offered = {(m["provider"], m["id"]) for m in response.llm["models"]}
     assert offered == {
         ("cerebras", "gpt-oss-120b"),
         ("groq", "openai/gpt-oss-20b"),
         ("gemini", "gemini-3.8-flash"),
+        ("openai", "gpt-6-luna"),
     }
 
 

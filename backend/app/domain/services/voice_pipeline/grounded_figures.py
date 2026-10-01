@@ -1,96 +1,173 @@
-"""Never speak a price, fee or percentage the agent was not given.
+"""Validate money against approved source passages, never the system prompt.
 
-Production, call d644f0ea (2026-09-28, Dojo-PC). The caller asked "so what's
-the total, twenty-one ninety-nine?" and the agent answered "That comes to
-£21.99 a month." The knowledge gives £11.99 per location per month for the plan
-and £10 per month for the add-on, and says in so many words that the two are
-quoted separately. £21.99 appears in nothing the model was given: it added two
-figures with different units and presented the sum as a price.
-
-A price the agent makes up is a promise the business did not make, on every
-campaign that talks about money. The rule is deterministic and runs on every
-sentence before it reaches TTS, next to the web-address check:
-
-* the figure appears in what the model was given     -> spoken as written
-* it does, but only under another currency sign      -> the given sign is used
-  (a generated knowledge summary on the same campaign said "$11.99" where the
-  source says "£11.99")
-* it appears nowhere                                  -> the sentence is replaced
-  with a line that promises to get the figure confirmed
-
-"What the model was given" is the assembled per-turn prompt (script, persona,
-retrieved knowledge) plus anything a knowledge tool returned. The caller's own
-words are deliberately NOT a source: repeating a caller's guess back as a price
-is exactly the failure above.
+English spoken numbers and digits share one check. Preserve currency, billing
+period and explicit per-unit restrictions; plain counts/phone numbers are not
+financial claims. This is a deterministic guard, not a general fact verifier.
 """
 from __future__ import annotations
 
 import re
+from decimal import Decimal, InvalidOperation
 from typing import Iterable
 
 UNGROUNDED_FIGURE_REPLACEMENT = (
-    "I'd rather not give you a figure I can't confirm, so I'll make sure that's "
-    "checked for you."
+    "I can't confirm that figure from the information available."
 )
-
 _NUM = r"\d[\d,]*(?:\.\d+)?"
-_CURRENCY_SIGNS = "£$€"
-
-# "£21.99", "$ 11.99", "€1,000"
-_SIGNED = re.compile(rf"(?P<sign>[{_CURRENCY_SIGNS}])\s?(?P<num>{_NUM})")
-# "21.99 pounds", "20p", "15 percent", "1.5%"
-_SUFFIXED = re.compile(
-    rf"(?<![\w{_CURRENCY_SIGNS}.,])(?P<num>{_NUM})\s?"
-    r"(?P<unit>%|per\s?cent\b|percent\b|pounds?\b|quid\b|pence\b|p\b|dollars?\b|euros?\b)",
-    re.IGNORECASE,
+_WORD_VALUES = dict(zip(
+    "zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen".split(), range(20)
+))
+_WORD_VALUES.update(dict(zip("twenty thirty forty fifty sixty seventy eighty ninety".split(), range(20, 100, 10))))
+_WORD = "(?:" + "|".join([*_WORD_VALUES, "hundred", "thousand", "million", "point", "dot", "and"]) + ")"
+_WORD_AMOUNT = rf"{_WORD}(?:[ -]+{_WORD})*"
+_AMOUNT = rf"(?:{_NUM}|{_WORD_AMOUNT})"
+_MONEY = re.compile(
+    rf"(?P<sign>[£$€])\s*(?P<signed>{_NUM})|"
+    rf"(?<![\w£$€.,])(?P<amount>{_AMOUNT})\s*(?P<currency>%|per\s?cent\b|percent\b|pounds?\b|quid\b|pence\b|p\b|dollars?\b|euros?\b)", re.I
 )
-_ANY_NUMBER = re.compile(_NUM)
+_CURRENCIES = {"£": "GBP", "$": "USD", "€": "EUR", "pound": "GBP", "pounds": "GBP", "quid": "GBP",
+               "pence": "GBP_MINOR", "p": "GBP_MINOR", "dollar": "USD", "dollars": "USD",
+               "euro": "EUR", "euros": "EUR", "%": "PERCENT", "percent": "PERCENT", "per cent": "PERCENT"}
 
 
-def _value(num: str) -> str:
-    """A figure's value as a comparable string: '1,000.00' -> '1000'."""
-    cleaned = num.replace(",", "").rstrip(".")
-    if "." in cleaned:
-        cleaned = cleaned.rstrip("0").rstrip(".")
-    return cleaned or "0"
+def _number(text: str) -> Decimal | None:
+    text = text.lower().replace(",", "").strip()
+    try:
+        return Decimal(text)
+    except InvalidOperation:
+        pass
+    tokens = text.replace("-", " ").split()
+    total = group = 0
+    previous = None
+    for i, token in enumerate(tokens):
+        if token in ("point", "dot"):
+            fraction = tokens[i + 1:]
+            if not fraction:
+                return None
+            if all(_WORD_VALUES.get(t, 10) < 10 for t in fraction):
+                digits = "".join(str(_WORD_VALUES[t]) for t in fraction)
+            elif len(fraction) <= 2:
+                value = _number(" ".join(fraction))
+                if value is None or not 0 <= value < 100:
+                    return None
+                digits = str(value)
+            else:
+                return None
+            return Decimal(f"{total + group}.{digits}")
+        if token == "and":
+            continue
+        if token in _WORD_VALUES:
+            value = _WORD_VALUES[token]
+            # Reject ambiguous telephone-style runs such as eleven ninety nine.
+            if previous is not None and not (previous >= 20 and value < 10):
+                return None
+            group += value
+            previous = value
+        elif token == "hundred":
+            group = (group or 1) * 100
+            previous = None
+        elif token in ("thousand", "million"):
+            total += (group or 1) * (1000 if token == "thousand" else 1000000)
+            group = 0
+            previous = None
+        else:
+            return None
+    return Decimal(total + group)
 
 
-def _source_figures(grounding: Iterable[str]) -> tuple[set[str], dict[str, set[str]]]:
-    source = " ".join(str(g) for g in grounding if g)
-    values = {_value(m.group(0)) for m in _ANY_NUMBER.finditer(source)}
-    signs: dict[str, set[str]] = {}
-    for m in _SIGNED.finditer(source):
-        signs.setdefault(_value(m.group("num")), set()).add(m.group("sign"))
-    return values, signs
+_CLAUSE_BREAK = re.compile(r"(?<!\d)[.!?]|[.!?](?!\d)|[;\n]|\b(?:or|but|while|whereas)\b", re.I)
+_AMOUNT_BREAK = re.compile(r",|\band\b", re.I)
+
+
+def _amount_context(text: str, start: int, end: int) -> tuple[str, str]:
+    """Amount-local prefix/tail, without borrowing another price's units.
+
+    Prefix qualifiers matter too: 'Monthly fee: £49' and '£49 per month'
+    convey the same billing period. This deliberately handles local clauses,
+    not eligibility inference across arbitrary paragraphs.
+    """
+    left, right = 0, len(text)
+    for boundary in _CLAUSE_BREAK.finditer(text):
+        if boundary.end() <= start:
+            left = boundary.end()
+        elif boundary.start() >= end:
+            right = boundary.start()
+            break
+    others = list(_MONEY.finditer(text, left, right))
+    previous = [m for m in others if m.end() <= start]
+    following = [m for m in others if m.start() >= end]
+    if previous:
+        joins = list(_AMOUNT_BREAK.finditer(text, previous[-1].end(), start))
+        left = joins[-1].end() if joins else start
+    if following:
+        join = _AMOUNT_BREAK.search(text, end, following[0].start())
+        right = join.start() if join else following[0].start()
+    return text[left:start].lower(), text[end:right].lower()
+
+
+def _conditions(text: str, start: int, end: int) -> frozenset[str]:
+    prefix, tail = _amount_context(text, start, end)
+    context = prefix + " " + tail
+    result = set()
+    for period, adjective in (("day", "daily"), ("week", "weekly"), ("month", "monthly"), ("year", "yearly|annual|annually")):
+        if re.search(rf"\b(?:(?:per|a|each|every)\s+{period}|{adjective})\b", context):
+            result.add(period)
+    for unit in ("location", "user", "seat", "transaction", "device"):
+        if re.search(rf"\b(?:per|each|a)\s+{unit}\b", context):
+            result.add(unit)
+    if re.search(r"\b(?:upfront|one[- ]time|one[- ]off)\b", context):
+        result.add("upfront")
+    if re.search(r"\b(?:excluding|excludes|plus|before)\s+(?:vat|tax)\b", context):
+        result.add("excludes_tax")
+    if re.search(r"\b(?:including|includes)\s+(?:vat|tax)\b", context):
+        result.add("includes_tax")
+    return frozenset(result)
+
+
+def _negated_amount(text: str, start: int, end: int) -> bool:
+    prefix, tail = _amount_context(text, start, end)
+    # Do not promote a rejected/example price into approved positive evidence.
+    # Bound this to the amount's own clause so 'not £10 but £20' keeps £20.
+    return bool(
+        re.search(r"\b(?:not|never|no\s+longer|used\s+to|formerly|previously)\b[^,;:.!?]{0,60}$", prefix)
+        or re.search(r"\bno\s+$", prefix)
+        or re.match(r"\s*(?:(?:is|was|would\s+be)\s+)?(?:not\b|incorrect\b|wrong\b|outdated\b|unavailable\b)", tail)
+    )
+
+
+def _figures(text: str):
+    for match in _MONEY.finditer(text):
+        value = _number(match.group("signed") or match.group("amount"))
+        currency = _CURRENCIES[match.group("sign") or match.group("currency").lower()]
+        if currency == "GBP_MINOR":
+            currency = "GBP"
+            value = value / 100 if value is not None else None
+        yield match, value, currency, _conditions(text, match.start(), match.end())
 
 
 def ground_spoken_figures(text: str, grounding: Iterable[str]) -> tuple[str, list[str]]:
-    """Check every money amount and percentage in ``text`` against ``grounding``.
-
-    Returns the text to speak and the figures that had no source (empty when
-    the text is unchanged or only had a currency sign corrected).
-    """
-    if not text or not any(ch.isdigit() for ch in text):
+    """Return safe speech and unsupported claims; never derive or sum prices."""
+    if not text:
         return text, []
-    values, signs = _source_figures(grounding)
-    ungrounded: list[str] = []
-
-    def _fix_sign(match: re.Match) -> str:
-        sign, num = match.group("sign"), match.group("num")
-        value = _value(num)
-        if value not in values:
-            ungrounded.append(match.group(0))
-            return match.group(0)
-        given = signs.get(value)
-        if given and sign not in given and len(given) == 1:
-            return next(iter(given)) + match.group(0)[1:]
-        return match.group(0)
-
-    checked = _SIGNED.sub(_fix_sign, text)
-    for match in _SUFFIXED.finditer(checked):
-        if _value(match.group("num")) not in values:
-            ungrounded.append(match.group(0))
-
-    if ungrounded:
-        return UNGROUNDED_FIGURE_REPLACEMENT, ungrounded
-    return checked, []
+    approved = [(value, currency, conditions) for source in grounding if source
+                for match, value, currency, conditions in _figures(str(source))
+                if value is not None and not _negated_amount(str(source), match.start(), match.end())]
+    unsupported = []
+    replacements = []
+    for match, value, currency, conditions in _figures(text):
+        candidates = [(c, u) for v, c, u in approved if v == value]
+        if value is not None and (currency, conditions) in candidates:
+            continue
+        # A unique symbol typo can be corrected deterministically. A spoken
+        # currency change or a changed/missing billing unit is withheld.
+        currencies = {c for c, u in candidates if u == conditions}
+        sign_for = {"GBP": "£", "USD": "$", "EUR": "€"}
+        if match.group("sign") and len(currencies) == 1 and next(iter(currencies)) in sign_for:
+            replacements.append((match.start(), match.start() + 1, sign_for[next(iter(currencies))]))
+        else:
+            unsupported.append(match.group(0))
+    if unsupported:
+        return UNGROUNDED_FIGURE_REPLACEMENT, unsupported
+    for start, end, value in reversed(replacements):
+        text = text[:start] + value + text[end:]
+    return text, []

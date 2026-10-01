@@ -23,8 +23,8 @@ def test_compose_defaults_to_no_callback_executor_and_adds_the_policy_line():
     # Round-2 reword (2026-09-24): asserts the invariant (never claim a
     # callback/booking is done), not the pre-reword bytes -- see
     # test_callback_promise_prompt_policy.py for the full finding.
-    assert "never say a callback or booking has been scheduled, booked, or confirmed" in out.lower()
-    assert "pass the caller's details to the team" in out.lower()
+    assert "never as a scheduled callback" in out.lower()
+    assert "only if the runtime provides that route" in out.lower()
     assert BASE in out
 
 

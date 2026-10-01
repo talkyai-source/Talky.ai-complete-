@@ -43,8 +43,8 @@ def test_prompt_tells_the_model_not_to_promise_a_callback_by_default():
     present, campaign-neutral, no campaign data touched."""
     out = compose_system_prompt(BASE, CallState())
     lowered = out.lower()
-    assert "never say a callback or booking has been scheduled, booked, or confirmed" in lowered
-    assert "pass the caller's details to the team" in lowered
+    assert "never as a scheduled callback" in lowered
+    assert "only if the runtime provides that route" in lowered
 
 
 def test_prompt_rule_survives_alongside_a_realistic_call_state():
@@ -58,7 +58,7 @@ def test_prompt_rule_survives_alongside_a_realistic_call_state():
         confirmation_verdict="affirm",
     )
     out = compose_system_prompt(BASE, state)
-    assert "never say a callback or booking has been scheduled, booked, or confirmed" in out.lower()
+    assert "never as a scheduled callback" in out.lower()
 
 
 def test_policy_still_allows_asking_for_and_noting_a_preferred_callback_time():
@@ -86,7 +86,7 @@ def test_policy_wording_does_not_itself_promise_a_call_back():
     out = compose_system_prompt(BASE, CallState())
     lowered = out.lower()
     assert "so they can call back" not in lowered
-    assert "so the team can follow up" in lowered
+    assert "do not promise that details will be passed on or that someone will follow up" in lowered
 
 
 def test_policy_line_is_irrelevant_once_a_real_executor_exists():

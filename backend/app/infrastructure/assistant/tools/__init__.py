@@ -221,7 +221,7 @@ ACTION_TOOLS = {
             "stuck on a technical problem (calls not going through, voice/provider "
             "errors, login/billing/dashboard problems). Gather a clear description "
             "first; it auto-includes the tenant id, the account email, and a "
-            "timestamp, then emails support immediately."
+            "timestamp, then previews an email report for the user to apply."
         ),
         "input_schema": ReportIssueInput
     },

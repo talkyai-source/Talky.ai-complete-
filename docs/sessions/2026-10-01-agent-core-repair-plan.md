@@ -1,6 +1,6 @@
 # Today's goal: reliable agent system, repaired at the source
 
-Date: 1 October 2026. Status: implementation plan; repairs are not yet complete.
+Date: 1 October 2026. Status: implementation and integration verification in progress; not released.
 
 ## Objective
 
@@ -16,10 +16,8 @@ is based on evidence, not the clock, a green health endpoint or a test count.
 An unavailable external account or a failed phone acceptance case remains
 explicitly unfinished; it is not relabeled complete by hiding a control.
 
-The goal tracker already contains an unfinished, blocked knowledge-retrieval
-goal. Its API rejected a second goal and cannot change that objective or resume
-status. This document records the user's expanded goal without falsely marking
-the older goal achieved. Useful work can continue on this plan.
+The user has activated the expanded production-readiness goal. The tracker is
+active. Completion still requires the release and live acceptance evidence below.
 
 ## Baseline and ownership
 
@@ -32,14 +30,16 @@ the older goal achieved. Useful work can continue on this plan.
   work so results are attributable. Measure tuning separately afterward.
 - Existing baseline: 532 focused tests passed, two skipped; new fault scenarios
   must reproduce their failures before being used to verify repairs.
-- This planning step prepares only the branch, audit and plan. No runtime code,
-  database migration, production setting or external action has changed.
+- Runtime repairs and additive migrations are being implemented in this isolated
+  branch. This repair branch has not yet been deployed or used for customer actions.
 
 Follow-up from the user: Google Gemini 3.8 Flash is enabled. The separate Realtime
-worktree now includes `61d5945c` (greeting/script behavior) and `4e88992a` (Gemini
-3.8 Flash catalog). They are not in this repair branch yet. Reconcile and preserve
-these authorized changes before implementation integration/release; verify their
-deployment separately. Include `gemini-3.8-flash` alongside Groq GPT-OSS 20B and
+worktree included `61d5945c` (greeting/script behavior) and `4e88992a` (Gemini
+3.8 Flash catalog); both are merged into the repair branch. A later production
+recheck found clean `b93b23de72fe6fe0fe84d3244c5f59e83401ff74`, with all five
+runtime services active and zero sessions on /health. Preserve the subsequent
+Gemini/Realtime, Luna and conversation/knowledge fixes before release. Include
+`gemini-3.8-flash` alongside Groq GPT-OSS 20B and
 Cerebras GPT-OSS 120B in the final traditional-provider acceptance matrix.
 The user has now authorized adding OpenAI GPT-6 Luna as a selectable fourth
 traditional provider, simplifying the shared LLM structure and prompts, and

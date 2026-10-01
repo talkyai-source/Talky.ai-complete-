@@ -37,13 +37,15 @@ client is configured.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
+from contextlib import aclosing
 from dataclasses import dataclass
 from typing import AsyncIterator, Dict, List, Optional
 
 from app.domain.interfaces.tts_provider import TTSProvider
 from app.domain.models.conversation import AudioChunk
-from app.utils.resilience import CircuitBreaker, CircuitOpenError
+from app.utils.resilience import CircuitBreaker
 
 logger = logging.getLogger(__name__)
 
@@ -54,8 +56,8 @@ class TTSFailoverPolicy:
     recovery_timeout_seconds: float = 30.0
     # Optional mapping of primary voice_id → secondary voice_id. Lets a
     # tenant say "use Cartesia's Tessa normally, ElevenLabs' Bella on
-    # fallback" so the two voices sound similar. Missing entries pass
-    # through unchanged.
+    # fallback" so the two voices sound similar. Cross-vendor fallback
+    # requires a mapping; a primary voice ID is never sent to another vendor.
     voice_id_map: Dict[str, str] | None = None
 
 
@@ -63,6 +65,28 @@ class ResilientTTSProvider(TTSProvider):
     """Primary + secondary TTS with circuit-breaker-gated startup
     failover. Satisfies `TTSProvider` so call sites see a single
     opaque provider."""
+
+    handles_startup_recovery = True
+    startup_attempt_timeout_seconds = 3.0
+
+    @property
+    def startup_timeout_seconds(self) -> float:
+        """Total startup budget consumed here, not retried again by playback."""
+        return self.startup_attempt_timeout_seconds * (2 if self._secondary else 1)
+
+    async def _bounded_start(self, iterator):
+        """Only first audio is retriable. Close sockets immediately on cancel."""
+        async with aclosing(iterator) as stream:
+            async def first_audio():
+                async for chunk in stream:
+                    if getattr(chunk, "data", None):
+                        return chunk
+                raise RuntimeError("TTS provider completed without audio")
+
+            first = await asyncio.wait_for(first_audio(), self.startup_attempt_timeout_seconds)
+            yield first
+            async for chunk in stream:
+                yield chunk
 
     def __init__(
         self,
@@ -119,67 +143,28 @@ class ResilientTTSProvider(TTSProvider):
             raise
 
     async def stream_synthesize(
-        self,
-        text: str,
-        voice_id: str,
-        sample_rate: int = 16000,
-        **kwargs,
+        self, text: str, voice_id: str, sample_rate: int = 16000, **kwargs,
     ) -> AsyncIterator[AudioChunk]:
-        """Stream TTS audio. Promotes secondary on primary failure
-        during synthesis start; raises on mid-stream drops so the
-        caller can decide recovery strategy."""
-        # Fast-path: circuit open → go straight to secondary if we
-        # have one. Otherwise we let the primary raise so the caller
-        # sees the real error.
-        if self._breaker.state.value == "open" and self._secondary is not None:
-            logger.info("resilient_tts_primary_circuit_open — using secondary")
-            async for chunk in self._stream_secondary(text, voice_id, sample_rate, **kwargs):
-                yield chunk
-            return
-
+        """One primary attempt then one fallback, before the first audio only."""
         started = False
         try:
             async with self._breaker:
-                async for chunk in self._primary.stream_synthesize(
+                async with aclosing(self._bounded_start(self._primary.stream_synthesize(
                     text, voice_id, sample_rate, **kwargs,
-                ):
-                    started = True
-                    yield chunk
-                return
-        except CircuitOpenError:
-            # Breaker tripped between the fast-path check and the
-            # context-manager enter — race-safe to retry on secondary.
-            if self._secondary is not None:
-                async for chunk in self._stream_secondary(text, voice_id, sample_rate, **kwargs):
-                    yield chunk
+                ))) as stream:
+                    async for chunk in stream:
+                        started = True
+                        yield chunk
             return
         except Exception as exc:
-            # If we never started yielding, the failure was in the
-            # handshake / header — safe to retry on secondary with the
-            # SAME text. If we DID start, the caller already heard part
-            # of the utterance on the primary voice; swapping mid-
-            # utterance is worse than truncating, so re-raise and let
-            # the caller decide.
-            if started:
-                logger.error(
-                    "resilient_tts_mid_stream_drop provider=%s err=%s — "
-                    "utterance truncated, not failing over",
-                    self._primary.name, exc,
-                )
+            if started or self._secondary is None:
                 raise
-
-            if self._secondary is None:
-                logger.error(
-                    "resilient_tts_startup_failed_no_secondary provider=%s err=%s",
-                    self._primary.name, exc,
-                )
-                raise
-
             logger.warning(
                 "resilient_tts_startup_failed_failover_to=%s err=%s",
-                self._secondary.name, exc,
+                self._secondary.name, type(exc).__name__,
             )
-            async for chunk in self._stream_secondary(text, voice_id, sample_rate, **kwargs):
+        async with aclosing(self._stream_secondary(text, voice_id, sample_rate, **kwargs)) as stream:
+            async for chunk in stream:
                 yield chunk
 
     # ──────────────────────────────────────────────────────────────────
@@ -228,24 +213,34 @@ class ResilientTTSProvider(TTSProvider):
             if self._policy.voice_id_map
             else voice_id
         )
-        if mapped_voice == voice_id and self._pcm_format(self._primary.name) != self._pcm_format(self._secondary.name):
-            # Cross-vendor with no voice mapping: the primary's voice id is
-            # meaningless to the other vendor. Say so loudly; the secondary's
-            # own default/validation decides what happens next.
-            logger.warning(
-                "resilient_tts_voice_unmapped primary=%s secondary=%s voice=%s — "
-                "set TTS_SECONDARY_VOICE_MAP",
-                self._primary.name, self._secondary.name, voice_id,
-            )
+        vendors = {"cartesia", "elevenlabs", "deepgram", "google"}
+        if (
+            self._primary.name in vendors and self._secondary.name in vendors
+            and self._primary.name != self._secondary.name
+            and not (self._policy.voice_id_map or {}).get(voice_id)
+        ):
+            raise RuntimeError("Cross-vendor TTS fallback requires a secondary voice mapping")
         src_fmt = self._pcm_format(self._secondary.name)
         dst_fmt = self._pcm_format(self._primary.name)
-        async for chunk in self._secondary.stream_synthesize(
+        carry = b""
+        async with aclosing(self._bounded_start(self._secondary.stream_synthesize(
             text, mapped_voice, sample_rate, **kwargs,
-        ):
-            if src_fmt != dst_fmt and getattr(chunk, "data", None):
-                chunk = AudioChunk(
-                    data=self._convert_pcm(chunk.data, src_fmt, dst_fmt),
-                    sample_rate=getattr(chunk, "sample_rate", sample_rate),
-                    channels=getattr(chunk, "channels", 1),
-                )
-            yield chunk
+        ))) as stream:
+            async for chunk in stream:
+                if getattr(chunk, "sample_rate", sample_rate) != sample_rate:
+                    raise RuntimeError("Secondary TTS sample rate does not match the media gateway")
+                if src_fmt != dst_fmt and getattr(chunk, "data", None):
+                    data = carry + chunk.data
+                    width = 4 if src_fmt == "f32le" else 2
+                    usable = len(data) - len(data) % width
+                    carry = data[usable:]
+                    if not usable:
+                        continue
+                    chunk = AudioChunk(
+                        data=self._convert_pcm(data[:usable], src_fmt, dst_fmt),
+                        sample_rate=sample_rate,
+                        channels=getattr(chunk, "channels", 1),
+                    )
+                yield chunk
+        if carry:
+            raise RuntimeError("Secondary TTS ended with an incomplete PCM sample")

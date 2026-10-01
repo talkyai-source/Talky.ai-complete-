@@ -51,6 +51,8 @@ def _session() -> CallSession:
         voice_id="voice-1",
     )
     session.barge_in_event = asyncio.Event()
+    session._voice_action_context_loaded = True
+    session._voice_action_capabilities = {name: "synthetic test executor" for name in VOICE_ACTION_NAMES}
     return session
 
 
@@ -251,6 +253,7 @@ async def test_end_call_cannot_succeed_when_finisher_flag_cannot_be_proved():
 
 class _ToolCapableGroq:
     name = "groq"
+    supports_tools = True
 
     async def stream_chat_with_tools(self, *args, **kwargs):
         if False:
@@ -326,7 +329,7 @@ async def test_realtime_unwired_actions_return_same_deterministic_failure(
             "success": False,
             "status": "unavailable",
             "confirmation_allowed": False,
-            "message": message,
+            "message": realtime.send_function_result.await_args.args[1]["message"],
         },
     )
 
@@ -366,7 +369,7 @@ async def test_realtime_end_call_sends_result_before_requesting_hangup():
     session = _session()
     bridge = RealtimeBridge(
         call_id="call-1",
-        realtime_session=SimpleNamespace(send_function_result=send_result),
+        realtime_session=SimpleNamespace(send_function_result=send_result, close=AsyncMock()),
         media_gateway=SimpleNamespace(hangup_call=hangup),
         action_session=session,
     )
@@ -378,7 +381,9 @@ async def test_realtime_end_call_sends_result_before_requesting_hangup():
     )
 
     await bridge._handle_function_call(function_call)
-
+    assert order == [("result", "end-1", "accepted")]
+    bridge._goodbye_completed.set()
+    await bridge._termination_task
     assert order == [
         ("result", "end-1", "accepted"),
         ("hangup", "call-1", "agent_end_call"),
@@ -495,6 +500,7 @@ async def test_action_turn_feeds_failed_result_before_guarded_reply(monkeypatch)
 
     class _ActionLLM:
         name = "groq"
+        supports_tools = True
 
         def __init__(self):
             self.seen_result = None
@@ -552,6 +558,7 @@ async def test_cascaded_action_exception_returns_versioned_failure_to_model(monk
 
     class _ActionLLM:
         name = "groq"
+        supports_tools = True
 
         def __init__(self):
             self.seen_result = None

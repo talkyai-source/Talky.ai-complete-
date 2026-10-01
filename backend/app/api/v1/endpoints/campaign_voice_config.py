@@ -22,7 +22,7 @@ async def build_campaign_voice_config(data, ai_config, *, existing=None):
         if selection.get("realtime_settings") is None:
             selection["realtime_settings"] = ai_config.realtime_settings
         try:
-            validate_realtime(selection["realtime_model"], selection["realtime_voice"], selection["realtime_settings"])
+            selection["realtime_settings"] = validate_realtime(selection["realtime_model"], selection["realtime_voice"], selection["realtime_settings"])
             selection["realtime_prompt"] = RealtimePrompt.model_validate(selection.get("realtime_prompt") or (ai_config.realtime_settings or {}).get("prompt") or {}).model_dump()
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc

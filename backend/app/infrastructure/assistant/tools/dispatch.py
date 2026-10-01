@@ -32,6 +32,12 @@ _ACTOR_AWARE = {
     "get_knowledge_tree",
     "retrieve_knowledge",
     "update_knowledge_node",
+    "execute_action_plan",
+}
+
+_DURABLE_TOOLS = {
+    "send_email", "send_sms", "report_issue", "book_meeting",
+    "update_meeting", "cancel_meeting", "schedule_reminder", "execute_action_plan", "initiate_call",
 }
 
 
@@ -45,9 +51,7 @@ class AssistantActionAuthorizationPolicy:
     overwrite_permission: Permission | None = None
 
 
-# Only permissions that already exist in the canonical RBAC model belong here.
-# Communication actions stay unavailable until the product defines a real
-# send-authority; connector configuration permissions are not send authority.
+# Connector configuration is deliberately not permission to send messages.
 ACTION_AUTHORIZATION_POLICIES = {
     "create_campaign": AssistantActionAuthorizationPolicy(
         required_permissions=(Permission.CAMPAIGNS_CREATE,),
@@ -72,9 +76,16 @@ ACTION_AUTHORIZATION_POLICIES = {
     # transaction/connection as its mutation, which is stronger than a
     # dispatcher pre-check. Do not weaken it into a separate TOCTOU check.
     "update_knowledge_node": AssistantActionAuthorizationPolicy(delegated=True),
-    "send_email": AssistantActionAuthorizationPolicy(supported=False),
-    "send_sms": AssistantActionAuthorizationPolicy(supported=False),
-    "report_issue": AssistantActionAuthorizationPolicy(supported=False),
+    "send_email": AssistantActionAuthorizationPolicy(required_permissions=(Permission.EMAIL_SEND,)),
+    "send_sms": AssistantActionAuthorizationPolicy(required_permissions=(Permission.SMS_SEND,)),
+    "report_issue": AssistantActionAuthorizationPolicy(required_permissions=(Permission.SUPPORT_REPORT,)),
+    "check_availability": AssistantActionAuthorizationPolicy(required_permissions=(Permission.CALENDAR_READ,)),
+    "book_meeting": AssistantActionAuthorizationPolicy(required_permissions=(Permission.CALENDAR_MANAGE,)),
+    "update_meeting": AssistantActionAuthorizationPolicy(required_permissions=(Permission.CALENDAR_MANAGE,)),
+    "cancel_meeting": AssistantActionAuthorizationPolicy(required_permissions=(Permission.CALENDAR_MANAGE,)),
+    "schedule_reminder": AssistantActionAuthorizationPolicy(required_permissions=(Permission.REMINDERS_MANAGE,)),
+    # Every child is checked below, both before preview and again on execution.
+    "execute_action_plan": AssistantActionAuthorizationPolicy(delegated=True),
 }
 
 # Boolean flags small models routinely emit as strings ("confirm": "true").
@@ -117,6 +128,22 @@ async def _authorize_action_tool(
             "Authenticated user context is required for assistant actions.",
         )
 
+    if func_name == "execute_action_plan":
+        from app.domain.models.action_plan import AllowedActionType
+        allowed = {item.value for item in AllowedActionType}
+        actions = call_args.get("actions")
+        if not isinstance(actions, list) or not 1 <= len(actions) <= 10:
+            return _authorization_failure("invalid_plan", "Provide between one and ten action steps.")
+        for step in actions:
+            if not isinstance(step, dict) or step.get("type") not in allowed:
+                return _authorization_failure("invalid_plan", "The plan contains an unsupported action.")
+            failure = await _authorize_action_tool(
+                step["type"], tenant_id, db_client, actor, step,
+            )
+            if failure is not None:
+                return failure
+        return None
+
     policy = ACTION_AUTHORIZATION_POLICIES.get(func_name)
     if policy is None or not policy.supported:
         return _authorization_failure(
@@ -139,6 +166,11 @@ async def _authorize_action_tool(
         )
 
     required_permissions = list(policy.required_permissions)
+    if func_name == "schedule_reminder":
+        channel = call_args.get("reminder_type") or "sms"
+        if channel not in {"sms", "email"}:
+            return _authorization_failure("invalid_arguments", "Reminder type must be sms or email.")
+        required_permissions.append(Permission.SMS_SEND if channel == "sms" else Permission.EMAIL_SEND)
     if policy.overwrite_permission is not None and call_args.get(
         "overwrite_campaign_id"
     ):
@@ -190,6 +222,7 @@ async def dispatch_tool(
     *,
     actor_user_id: Optional[str] = None,
     trusted_proposal_apply: bool = False,
+    proposal_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Route ``func_name`` to its tool and return the raw result dict.
 
@@ -209,6 +242,10 @@ async def dispatch_tool(
     # server path that atomically consumes an actor-bound proposal may set the
     # real keyword argument below.
     call_args.pop("trusted_proposal_apply", None)
+    call_args.pop("proposal_id", None)
+    call_args.pop("idempotency_key", None)
+    if not trusted_proposal_apply:
+        call_args.pop("_prepared_report", None)
     for key, default in _BOOL_ARGS.items():
         if key in call_args:
             call_args[key] = coerce_bool(call_args[key], default)
@@ -239,7 +276,7 @@ async def dispatch_tool(
         if authorization_failure is not None:
             return authorization_failure
 
-    try:
+    async def invoke() -> Dict[str, Any]:
         if func_name in _ACTOR_AWARE:
             return await fn(
                 tenant_id,
@@ -250,6 +287,19 @@ async def dispatch_tool(
         if func_name in _CONVO_AWARE:
             return await fn(tenant_id, db_client, conversation_id=conversation_id, **call_args)
         return await fn(tenant_id, db_client, **call_args)
+
+    try:
+        if func_name in _DURABLE_TOOLS and call_args.get("confirm") is True:
+            if not proposal_id or trusted_proposal_apply is not True:
+                return _authorization_failure("proposal_confirmation_required", "Apply the server-issued proposal.")
+            from app.services.action_execution import DurableActionExecutor
+            return await DurableActionExecutor(db_client.pool).execute(
+                tenant_id=tenant_id, idempotency_key=f"assistant:{actor_user_id}:{proposal_id}",
+                action=func_name, payload=call_args, executor=invoke,
+                user_id=actor_user_id, triggered_by="assistant",
+                conversation_id=conversation_id,
+            )
+        return await invoke()
     except TypeError as exc:
         # Bad / extra kwargs from the model — surface as a tool error rather
         # than crashing the turn.

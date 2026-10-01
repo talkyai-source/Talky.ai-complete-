@@ -25,11 +25,13 @@ class _Session:
 
 
 class _GroqProvider:
+    supports_tools = True
     name = "groq"
     _model = "llama-3.3-70b-versatile"
 
 
 class _GeminiProvider:
+    supports_tools = True
     name = "gemini"
     _model = "gemini-2.5-flash"
 
@@ -62,11 +64,11 @@ def test_tools_skip_unsupported_provider(monkeypatch):
     assert kt.knowledge_tools_for(_Session(), _Other()) is None
 
 
-def test_tools_skip_gpt_oss(monkeypatch):
+def test_tools_support_gpt_oss(monkeypatch):
     monkeypatch.setenv("VOICE_KB_MODE", "tool")
     p = _GroqProvider()
     p._model = "openai/gpt-oss-120b"
-    assert kt.knowledge_tools_for(_Session(), p) is None
+    assert kt.knowledge_tools_for(_Session(), p)
 
 
 def test_tools_skip_non_retrieve_mode(monkeypatch):
@@ -86,7 +88,7 @@ def test_addendum_mentions_tool():
 # run_knowledge_lookup — budget + fail-soft
 # ---------------------------------------------------------------------------
 def test_lookup_budget_and_format(monkeypatch):
-    big = "word " * 4000
+    big = "The price is £49 monthly. " * 4000
     hits = [
         {"heading": f"Node {i}", "voice_answer": None, "summary": None, "content": big}
         for i in range(5)
@@ -117,7 +119,7 @@ def test_lookup_budget_and_format(monkeypatch):
     fixed_overhead = len(KNOWLEDGE_PRICE_GUARD) + 2 * len(kt.KB_FENCE_TAG) + 32
     assert len(out) <= kt._KB_TOTAL_CHARS + fixed_overhead
     assert "Node 0" in out
-    assert "…" in out                              # huge bodies were trimmed
+    assert "£49 monthly." in out  # Complete source passage survives the budget.
 
 
 def test_lookup_passes_bump_hits_false(monkeypatch):
@@ -146,7 +148,21 @@ def test_lookup_passes_bump_hits_false(monkeypatch):
 
 def test_lookup_empty_query_returns_sentinel():
     out = asyncio.run(kt.run_knowledge_lookup(_Session(), "   "))
-    assert "No specific information" in out
+    assert out == kt.NO_KB_FACTS
+
+
+def test_weak_surviving_evidence_is_distinct_from_provider_unavailable(monkeypatch):
+    session = _Session()
+    session._knowledge_snapshot_nodes = [{"id": "weak", "heading": "Coverage", "content": "Service is available locally."}]
+    monkeypatch.setattr("app.services.scripts.knowledge.retrieval.retrieve_pinned_knowledge", lambda *a, **k: session._knowledge_snapshot_nodes)
+    monkeypatch.setattr(kt, "prepare_knowledge_evidence", lambda *a, **k: {
+        "status": "weak_match", "text": "Service is available locally.", "passages": [{"text": "Service is available locally."}],
+    })
+    result = asyncio.run(kt.run_knowledge_lookup(session, "Do you provide international coverage?"))
+    assert "No confirmed answer" in result
+    assert "company_knowledge" in result
+    assert result != kt.KB_UNAVAILABLE
+    assert session._knowledge_grounding == []
 
 
 # ---------------------------------------------------------------------------
@@ -224,7 +240,7 @@ def test_lookup_no_hits_returns_sentinel(monkeypatch):
         "app.services.scripts.knowledge.retrieval.retrieve_knowledge", fake_retrieve
     )
     out = asyncio.run(kt.run_knowledge_lookup(_Session(), "anything"))
-    assert "No specific information" in out
+    assert out == kt.NO_KB_FACTS
 
 
 # ---------------------------------------------------------------------------

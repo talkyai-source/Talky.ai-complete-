@@ -17,34 +17,16 @@ from app.services.scripts.spoken_email_normalizer import (
     natural_phone_readback,
 )
 
-# A receptionist-style campaign prompt can script "I'll arrange a callback"
-# or "I'll book that" as its fallback line -- but no campaign has a live
-# schedule_callback/booking executor (action_tools.py fails every one of
-# them closed). Once the caller agrees, llm_guardrails.py correctly blocks
-# the completion claim, forcing an audible mid-call retraction (call
-# a5e033c7, 2026-09-23: "I'll arrange a callback to confirm the appointment
-# -- is that okay?" / caller "Okay." / then "I can't schedule a callback
-# from this call, but I can take the details for the team."). The retraction
-# is a symptom; the fix belongs upstream of it, so the model never makes an
-# unfulfillable promise in the first place. Campaign-neutral: this names no
-# campaign or field and does not touch campaign data.
-#
-# 2026-09-24 review (round 2): the first wording above ("Never promise,
-# schedule, or confirm a callback or booking yourself") read as banning the
-# agent from even ASKING for or noting a preferred callback day/time -- but
-# inbound campaign 6cc54935's approved_next_actions includes
-# schedule_callback, and the CAPTURED block below prints "Follow-up time
-# (already agreed): X" once one is taken. Also, "so they can call back" is
-# itself an unfulfillable promise (a callback IS coming), the exact class of
-# claim this policy exists to prevent. Reworded so asking for/noting a
-# preferred time is explicitly allowed, only ever STATING the callback/
-# booking as done is banned, and the fallback promises follow-up, not a call.
+# The runtime passes the actual campaign capability. With no executor, a
+# preferred time is only a request; team handoff also needs a real route.
 _NO_CALLBACK_EXECUTOR_POLICY = (
-    "CALLBACK POLICY: No callback or booking can actually be scheduled from "
-    "this call. You may ask for and note the caller's preferred callback day "
-    "or time; just never say a callback or booking has been scheduled, "
-    "booked, or confirmed. Instead, offer to pass the caller's details to "
-    "the team so the team can follow up.\n"
+    "CALLBACK POLICY: No callback scheduling executor is available. You may "
+    "ask for and note the caller's preferred callback day or time as a request, "
+    "never as a scheduled callback. Offer a team follow-up only if the runtime "
+    "provides that route, and describe only its returned status. Otherwise say "
+    "you cannot schedule a callback from this call; do not promise that details "
+    "will be passed on or that someone will follow up. A preferred appointment "
+    "time is also just a request until an available booking tool confirms it.\n"
     "------------------------------------------------------------\n"
 )
 
@@ -101,8 +83,8 @@ def _pending_actions(state: CallState) -> tuple[list[str], list[str]]:
             pending.append(
                 "- You've tried a few times to confirm the caller's email without a "
                 "clear yes. Change tack: offer to take it a different way — ask them "
-                "to spell it slowly one letter at a time, or offer to confirm it by "
-                "text/another channel, or note it and move on to follow up. Do not "
+                "to spell only the unclear part, or offer another approved channel "
+                "if available. Otherwise leave it unconfirmed and move on. Do not "
                 f"keep re-reading the same value: {state.email}"
             )
         else:
@@ -139,8 +121,8 @@ def _pending_actions(state: CallState) -> tuple[list[str], list[str]]:
             pending.append(
                 "- You've tried a few times to confirm the caller's phone number "
                 "without a clear yes. Change tack: ask them to say it once more "
-                "slowly digit by digit, or offer to confirm it another way, or note "
-                f"it and move on. Do not keep re-reading the same value: {state.phone}"
+                "slowly digit by digit, or offer another approved channel if available. "
+                f"Otherwise leave it unconfirmed. Do not keep re-reading the same value: {state.phone}"
             )
         elif readback:
             pending.append(
@@ -248,12 +230,9 @@ def compose_system_prompt(
     The header is deterministic and short (<= 120 tokens) so it never
     crowds out the persona rules.
 
-    ``has_callback_executor`` defaults to False because that is the current
-    truth for every campaign in this codebase (action_tools.py has no live
-    executor for schedule_callback). When False, the CALLBACK POLICY line is
-    always appended (after any CAPTURED block, so CAPTURED still leads);
-    pass True once a real executor exists so the now-irrelevant line drops
-    out on its own, with no campaign-side change required.
+    ``has_callback_executor`` defaults to False. The live turn path passes the
+    resolved campaign capability. When False, CALLBACK POLICY distinguishes
+    a preferred time from real scheduling; when True, tool receipts govern.
     """
     # Confirm-before-commit (issue #1): only a CONFIRMED email is a settled
     # "do not re-ask" CAPTURED fact. An unconfirmed email is surfaced as an
@@ -264,12 +243,12 @@ def compose_system_prompt(
     lines: list[str] = []
     for earlier in getattr(state, "earlier_email_captures", ()) or ():
         lines.append(
-            "- Caller email (confirmed earlier and saved; they asked you to take "
+            "- Caller email (confirmed earlier; they asked you to take "
             f"another one as well): {earlier.normalized_value}."
         )
     for earlier in getattr(state, "earlier_phone_captures", ()) or ():
         lines.append(
-            "- Caller phone number (confirmed earlier and saved; they asked you "
+            "- Caller phone number (confirmed earlier; they asked you "
             f"to take another one as well): {earlier.normalized_value}."
         )
     if state.email and state.email_confirmed:
@@ -289,7 +268,7 @@ def compose_system_prompt(
         )
     if state.follow_up:
         lines.append(
-            f"- Follow-up time (already agreed): {state.follow_up}"
+            f"- Caller-requested follow-up time (not scheduled): {state.follow_up}"
         )
     if state.bidding_active is True:
         lines.append("- Caller confirmed they are actively bidding on projects.")

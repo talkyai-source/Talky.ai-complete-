@@ -345,6 +345,10 @@ class LLMGuardrails:
             if not isinstance(result, Mapping):
                 logger.warning("Blocked unconfirmed voice action claim: %s", action)
                 return False, f"unconfirmed_action:{action}"
+            if (action in {"send_email", "submit_form"}
+                    and result.get("status") in {"accepted", "provider_accepted"}
+                    and re.search(r"\b(?:delivered|received|arrived)\b|\bin (?:your|their|the) inbox\b", response, re.I)):
+                return False, f"action_failed:{action}:delivery_unconfirmed"
             if not (
                 result.get("success") is True
                 and result.get("confirmation_allowed") is True

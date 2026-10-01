@@ -64,9 +64,9 @@ def test_knowledge_precedence_allows_prompt_body_facts():
     low = kp.lower()
     # facts may come from the prompt body (campaign details / persona), not ONLY a KB
     assert "campaign details" in low
-    assert "persona" in low
+    assert "company knowledge" in low
     # but it still must never invent
-    assert "do not guess" in low
+    assert "never invent" in low
 
 
 # ── #3: inline-baked KB drops injection-shaped lines before baking ───────────

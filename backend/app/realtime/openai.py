@@ -31,12 +31,14 @@ Barge-in / interruption
 -----------------------
 semantic_vad means the SERVER owns turn detection. When the caller starts
 talking mid-response the server emits `input_audio_buffer.speech_started`
-and (once it truncates the model turn) `response.done` with a cancelled/
+and (once it cancels model generation) `response.done` with a cancelled/
 interrupted status. On EITHER signal we bump a monotonically increasing
 `_response_epoch` and FLUSH the outbound audio queue, so any model audio
 deltas still buffered from the now-abandoned turn are dropped and the agent
 stops talking over the caller. Deltas that arrive tagged to a stale epoch
-are ignored.
+are ignored. The bridge separately truncates conversation history to the
+transport's acknowledged played position (zero when unknown), never to the
+amount of audio generated or queued.
 
 Reconnect policy (Phase 1)
 --------------------------
@@ -240,7 +242,8 @@ class OpenAIRealtimeSession:
         self._instructions = instructions or ""
         self._last_published_instructions: Optional[str] = None
         self._tools = list(tools or [])
-        self._settings = dict(settings or {})
+        from app.realtime.config import normalize_realtime_settings
+        self._settings = normalize_realtime_settings(settings)
         self._call_id = call_id or "realtime"
 
         self._ws: Optional[Any] = None
@@ -262,13 +265,17 @@ class OpenAIRealtimeSession:
         # create when idle, and otherwise defer until the current response ends.
         self._response_active = False
         self._pending_response_create = False
+        self._last_audio_parts = {}
+        self._last_response_id = None
+        self._truncated_items = set()
+        self._tool_batches = {}
+        self._tool_call_batches = {}
 
         # Per-turn latency instrumentation. T0 = the caller stopped talking
         # (server VAD `speech_stopped`); we log the delta to the FIRST model
-        # audio delta of the turn (T1). This is the same "caller-stopped →
-        # first agent audio" metric the cascaded latency_tracker reports as
-        # total_latency_ms, so realtime vs cascaded is an apples-to-apples
-        # compare from the logs. None between turns / for the agent-first
+        # audio delta of the turn (T1). This measures generation only: output
+        # is quarantined until validation. The bridge records first transport
+        # submission separately. None between turns / for the agent-first
         # greeting (which has no preceding caller speech).
         self._t_speech_stopped: Optional[float] = None
 
@@ -355,6 +362,9 @@ class OpenAIRealtimeSession:
         )
         return True
 
+    def _instruction_update(self, instructions):
+        return {"type": "realtime", "instructions": instructions}
+
     def _build_url(self) -> str:
         """Wire URL for this session's WebSocket connect().
 
@@ -437,16 +447,8 @@ class OpenAIRealtimeSession:
             "output_modalities": ["audio"],
         }
 
-        # Optional generation controls — again only sent when explicitly set, so
-        # the default payload is byte-for-byte unchanged.
-        #   temperature       — sampling temperature (0.6–1.2 typical for realtime)
-        #   max_output_tokens — cap per model response ("inf" or an int)
-        temperature = self._settings.get("temperature")
-        if temperature is not None:
-            try:
-                session["temperature"] = float(temperature)
-            except (TypeError, ValueError):
-                pass
+        # Save, preview and runtime use the same normalized response budget.
+        # GA has no temperature control; legacy saved values are discarded.
         max_output_tokens = self._settings.get("max_output_tokens")
         if max_output_tokens is not None:
             session["max_output_tokens"] = max_output_tokens
@@ -546,7 +548,7 @@ class OpenAIRealtimeSession:
                         # 2026-09-30: "Missing required parameter:
                         # 'session.type'" on the first live-state update, which
                         # then ended the call).
-                        "session": {"type": "realtime", "instructions": updated},
+                        "session": self._instruction_update(updated),
                     }
                 )
             )
@@ -577,6 +579,16 @@ class OpenAIRealtimeSession:
                     "output": payload_out,
                 },
             }))
+            batch = self._tool_call_batches.pop(call_id, None)
+            if batch is not None:
+                response_id, epoch = batch
+                outstanding = self._tool_batches.get(response_id, set())
+                outstanding.discard(call_id)
+                if outstanding:
+                    return  # One continuation only after every parallel result.
+                self._tool_batches.pop(response_id, None)
+                if epoch != self._response_epoch:
+                    return  # Preserve the result, but never restart a barged-in turn.
             # Nudge the model to speak its answer — but ONLY if no response is
             # currently active. The Realtime API rejects a response.create while
             # one is in flight ("conversation already has an active response").
@@ -596,7 +608,11 @@ class OpenAIRealtimeSession:
         (in case the flag lagged a concurrent server-side response)."""
         if self._ws is None or self._closed.is_set():
             return
+        if self._response_active:
+            self._pending_response_create = True
+            return
         try:
+            self._response_active = True  # Claim before awaiting the socket ACK.
             await self._ws.send(json.dumps({"type": "response.create"}))
         except websockets.exceptions.ConnectionClosed:
             self._closed.set()
@@ -609,8 +625,32 @@ class OpenAIRealtimeSession:
             if item.get("type") == "message" and item.get("id"):
                 await self._ws.send(json.dumps({"type": "conversation.item.delete", "item_id": item["id"]}))
         await self._ws.send(json.dumps({"type": "response.create", "response": {
-            "instructions": "Your previous reply was withheld and was not heard. Give one short honest reply. Do not claim any email, booking, submission or transfer succeeded unless a matching successful tool result explicitly permits confirmation. If unavailable, explain the limitation."
+            "instructions": self._instructions + "\nREPAIR THIS TURN: Your previous reply was withheld and was not heard. Give one short honest reply. Keep required contact readbacks and source qualifications. Reuse completed tool results; do not repeat actions. Do not claim an email, booking, submission or transfer succeeded unless a matching successful tool result permits confirmation."
         }}))
+
+    async def truncate_response(self, raw: dict, played_ms: int = 0) -> None:
+        """Remove unheard audio from provider history. Unknown position is zero.
+
+        Positions come from transport receipts, never elapsed send time. A
+        conservative zero may remove heard context, but cannot invent hearing.
+        """
+        if self._ws is None or self._closed.is_set():
+            return
+        parts = raw.get("audio_parts") or []
+        remaining = max(0, int(played_ms))
+        for part in parts:
+            item_id = part.get("item_id")
+            index = part.get("content_index", 0)
+            if not item_id or (item_id, index) in self._truncated_items:
+                continue
+            duration = max(0, int(part.get("audio_bytes", 0) / 8))
+            end = min(remaining, duration)
+            remaining = max(0, remaining - duration)
+            await self._ws.send(json.dumps({"type": "conversation.item.truncate",
+                "item_id": item_id, "content_index": index, "audio_end_ms": end}))
+            self._truncated_items.add((item_id, index))
+        if len(self._truncated_items) > 256:
+            self._truncated_items = set(list(self._truncated_items)[-128:])
 
     async def trigger_greeting(self) -> None:
         """Make the agent speak first (agent-first outbound): request an
@@ -679,7 +719,7 @@ class OpenAIRealtimeSession:
                         # 2026-09-30: "Missing required parameter:
                         # 'session.type'" on the first live-state update, which
                         # then ended the call).
-                        "session": {"type": "realtime", "instructions": updated},
+                        "session": self._instruction_update(updated),
                     }
                 )
             )
@@ -756,17 +796,22 @@ class OpenAIRealtimeSession:
             except Exception:  # noqa: BLE001
                 return
             self.stats.audio_frames_out += 1
+            if self._playout.owns(data):
+                part_key = (data.get("item_id"), data.get("content_index", 0))
+                part = self._last_audio_parts.setdefault(part_key, {
+                    "item_id": part_key[0], "content_index": part_key[1], "audio_bytes": 0})
+                part["audio_bytes"] += len(audio)
             # T1: first model audio of this turn. Log the caller-stopped → first-
-            # audio latency (the perceived "how long till it answers" number) and
+            # generated-audio latency (not caller playback latency) and
             # disarm so we only log once per turn.
             if self._t_speech_stopped is not None:
                 ms = int((time.monotonic() - self._t_speech_stopped) * 1000)
                 self._t_speech_stopped = None
                 logger.info(
-                    "realtime_turn_latency call=%s speech_end_to_first_audio_ms=%d",
+                    "realtime_turn_latency call=%s speech_end_to_first_generated_audio_ms=%d",
                     self._call_id, ms,
                     extra={"call_id": self._call_id,
-                           "realtime_speech_end_to_first_audio_ms": ms},
+                           "realtime_speech_end_to_first_generated_audio_ms": ms},
                 )
             self._playout.add_audio(data, audio)
             return
@@ -809,6 +854,8 @@ class OpenAIRealtimeSession:
         # ---- A new model response begins -----------------------------------
         if etype == "response.created":
             self._playout.reset((data.get("response") or {}).get("id"))
+            self._last_response_id = self._playout.response_id
+            self._last_audio_parts = {}
             # Tag audio deltas that follow to the current epoch so a later
             # barge-in can invalidate exactly this turn's buffered audio.
             self._active_response_epoch = self._response_epoch
@@ -833,16 +880,22 @@ class OpenAIRealtimeSession:
             if resp.get("id") != self._playout.response_id:
                 return  # late terminal event from an interrupted response
             candidate = self._playout.finish(resp)
+            data = {**data, "audio_parts": list(self._last_audio_parts.values())}
             if candidate:
                 audio, transcript = candidate
                 self._offer_event(RealtimeEvent(kind="response_candidate", audio=audio, text=transcript, raw=data))
             elif resp.get("status") == "completed" and (self._playout.audio or self._playout.invalid):
-                self._offer_event(RealtimeEvent(kind="error", text="Realtime response was incomplete or exceeded the playback limit"))
+                self._offer_event(RealtimeEvent(kind="generation_incomplete", text="Realtime response was incomplete or exceeded the playback limit", raw=data))
             if resp.get("status") == "incomplete" and (resp.get("status_details") or {}).get("reason") not in {"turn_detected", "interruption", "cancelled"}:
-                self._offer_event(RealtimeEvent(kind="error", text="Realtime response did not complete"))
+                self._offer_event(RealtimeEvent(kind="generation_incomplete", text="Realtime response did not complete", raw=data))
             if resp.get("status") == "failed":
                 self._offer_event(RealtimeEvent(kind="error", text="Realtime response failed"))
             if resp.get("status") == "completed" and not self._playout.invalid:
+                batch_ids = {tool.function_call.call_id for tool in self._playout.tools}
+                if batch_ids:
+                    self._tool_batches[resp["id"]] = batch_ids
+                    for tool_id in batch_ids:
+                        self._tool_call_batches[tool_id] = (resp["id"], self._active_response_epoch)
                 for tool in self._playout.tools:
                     self._offer_event(tool)
             self._playout.reset()
@@ -908,7 +961,9 @@ class OpenAIRealtimeSession:
         )
         self._offer_event(RealtimeEvent(
             kind="interrupted",
-            raw={"reason": reason, "during_response": during_response},
+            raw={"reason": reason, "during_response": during_response,
+                 "response_id": self._last_response_id,
+                 "audio_parts": list(self._last_audio_parts.values())},
         ))
 
     def _flush_audio_events(self) -> int:

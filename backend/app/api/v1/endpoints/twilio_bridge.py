@@ -301,8 +301,6 @@ def _twiml_stream_response(
     """
     ws_base = _public_base().replace("https://", "wss://").replace("http://", "ws://")
     stream_url = f"{ws_base}/api/v1/twilio/media-stream"
-    if token:
-        stream_url = f"{stream_url}?token={token}"
     token_param = (
         f'<Parameter name="token" value={quoteattr(token)}/>' if token else ""
     )
@@ -314,7 +312,7 @@ def _twiml_stream_response(
         f'<Parameter name="from" value={quoteattr(from_number)}/>'
         f'<Parameter name="to" value={quoteattr(to_number)}/>'
         f"{token_param}"
-        "</Stream></Connect>"
+        "</Stream></Connect><Hangup/>"
         "</Response>"
     )
 
@@ -421,9 +419,9 @@ async def twilio_media_stream(
     Outbound audio + barge-in ``clear`` frames are emitted by TwilioMediaGateway.
 
     Refuses the upgrade unless the bridge is explicitly enabled, and does no work
-    until the /answer-minted token verifies (query string preferred so we can
-    reject pre-accept; ``start.customParameters.token`` as the fallback, since
-    Twilio does not sign the handshake).
+    until the /answer-minted ``start.customParameters.token`` verifies. Twilio
+    Stream URLs cannot contain a query string; legacy clients may still supply
+    a query token for the same verification before accepting media.
     """
     if not _bridge_enabled():
         logger.warning(
@@ -517,6 +515,10 @@ async def twilio_media_stream(
                     if hasattr(gw, "feed_twilio_media"):
                         await gw.feed_twilio_media(voice_session.call_id, ulaw)
 
+                elif event == "mark" and voice_session is not None:
+                    voice_session.media_gateway.mark_playback_complete(
+                        voice_session.call_id, (data.get("mark") or {}).get("name"))
+
                 elif event == "dtmf":
                     digit = (data.get("dtmf", {}) or {}).get("digit")
                     logger.info(
@@ -526,7 +528,7 @@ async def twilio_media_stream(
 
                 elif event == "stop":
                     break
-                # "connected" and "mark" frames are ignored.
+                # "connected" is informational only.
 
     except asyncio.TimeoutError:
         logger.warning("twilio media-stream closed: no authenticated start frame")

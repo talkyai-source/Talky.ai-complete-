@@ -190,6 +190,7 @@ def _confirmed_row(capture: Any, field_type: str) -> dict:
         "normalized_value": capture.normalized_value,
         "validation_status": capture.validation_status,
         "confirmed_at": capture.confirmed_at,
+        "evidence": {"confirmation_evidence": getattr(capture, "confirmation_evidence", None)},
     }
 
 
@@ -503,6 +504,7 @@ async def _capture(
                 normalized_value=item.get("normalized_value"),
                 validation_status=item.get("validation_status"),
                 confirmed_at=item.get("confirmed_at"),
+                evidence=item.get("evidence"),
                 campaign_id=campaign,
                 lead_id=lead,
             )

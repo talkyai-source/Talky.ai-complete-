@@ -19,7 +19,8 @@ def _with_campaign_context(prompt, script, attr):
     information." and opened with a generic line that had nothing to do with
     the campaign. Realtime-specific instructions, when set, still win.
     """
-    if (prompt.instructions or "").strip():
+    campaign_rt = script.get("realtime_prompt") or {}
+    if isinstance(campaign_rt, dict) and str(campaign_rt.get("instructions") or "").strip():
         return prompt
     guidance = (
         script.get("additional_instructions")
@@ -30,6 +31,9 @@ def _with_campaign_context(prompt, script, attr):
     guidance = str(guidance or "").strip()
     if not guidance:
         return prompt
+    account_notes = str(prompt.instructions or "").strip()
+    if account_notes:
+        guidance = f"{guidance}\n\nAccount-wide notes: {account_notes}"
     from app.domain.services.telephony_session_config import (
         campaign_guidance_char_budget,
     )
@@ -69,7 +73,7 @@ def build_realtime_campaign_config(*, source, campaign, script, gateway_type,
     if settings is None:
         settings = source.realtime_settings
     try:
-        validate_realtime(model, voice, settings)
+        settings = validate_realtime(model, voice, settings)
     except ValueError as exc:
         # A saved voice the catalog no longer lists must not stop a call from
         # starting; saving is where an unsupported voice is refused. Use the
@@ -81,7 +85,7 @@ def build_realtime_campaign_config(*, source, campaign, script, gateway_type,
             "realtime_voice_unsupported voice=%r -- using the default voice", voice
         )
         voice = "marin"
-        validate_realtime(model, voice, settings)
+        settings = validate_realtime(model, voice, settings)
     names = script.get("agent_names") or ["Alex"]
     name = clean(agent_name_override or names[0])
     company = clean(script.get("company_name")) or "the company"

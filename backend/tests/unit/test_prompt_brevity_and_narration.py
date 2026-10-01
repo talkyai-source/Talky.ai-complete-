@@ -128,33 +128,23 @@ def test_fewest_sentences_instruction_reaches_every_persona(persona, slots):
 
 @pytest.mark.parametrize("persona,slots", ALL_PERSONAS)
 def test_knowledge_driven_campaigns_get_the_same_brevity_target(persona, slots):
-    """The knowledge-first (slot-free) path composes a LEAN persona shell. It
-    must not become the one path where "keep it short" is left unquantified —
-    the shell used to say only "keep replies short, natural, and easy to
-    follow", which is not a target the model can hit or miss."""
     out = _composed(persona, slots, knowledge_driven=True)
-    assert "Answer in the fewest sentences that actually answer it" in out
-    # ...and the shell itself carries a matching instruction, not just the
-    # guardrails above it.
-    assert "fewest sentences that actually answer them" in out
+    assert out.count("Answer in the fewest sentences that actually answer it") == 1
+    assert "often just a few words" in out
 
 
 @pytest.mark.parametrize("persona,slots", ALL_PERSONAS)
 def test_one_question_then_stop_talking(persona, slots):
-    """"Ask one question" alone never stopped the monologue — the agent asked
-    its question and kept going. The instruction has to end the turn."""
     out = _composed(persona, slots)
-    assert "Ask ONE question per turn, then stop talking" in out
-    # And the recency block (FINAL RESPONSE CONTRACT) says the same thing last.
-    assert "let it be the last thing you say, then stop" in out
+    assert "Ask at most ONE question per turn" in out
+    assert "let it be the last thing you say, then stop talking" in out
 
 
 @pytest.mark.parametrize("persona,slots", ALL_PERSONAS)
 def test_no_statement_explanation_question_stack(persona, slots):
-    """The specific failing turn shape. Naming it is what makes it droppable —
-    a generic "be brief" left the model free to believe three parts was brief."""
     out = _composed(persona, slots)
-    assert "one part too many" in out
+    assert "let that be the whole turn; add a question only when useful" in out
+    assert "then one short reason if needed" not in out
 
 
 # ---------------------------------------------------------------------------
@@ -177,27 +167,13 @@ def test_communication_principles_do_not_license_the_three_part_stack():
 
 
 def test_the_three_turn_shape_blocks_agree_with_each_other():
-    """HARD RULES, COMMUNICATION PRINCIPLES and the FINAL RESPONSE CONTRACT all
-    describe turn shape, at three different depths of the same prompt. If they
-    disagree the model is free to follow whichever it weighs highest, and the
-    rule stops being a constraint — which is how an 11-second turn survived a
-    prompt that already said "keep replies short"."""
-    hard = _flat(GENERIC_GUARDRAILS_HARD)
-    principles = _flat(COMMUNICATION_PRINCIPLES)
-    contract = _flat(FINAL_RESPONSE_CONTRACT)
-
-    # All three agree the answer is the turn, and the question ends it.
-    assert "fewest sentences" in hard
-    assert "fewest sentences" in contract
-    assert "the whole turn" in principles
-
-    # None of them offers a bigger allowance than the HARD RULE ceiling.
-    for block_name, block in (
-        ("COMMUNICATION_PRINCIPLES", principles),
-        ("FINAL_RESPONSE_CONTRACT", contract),
-    ):
-        assert "three sentences" not in block.lower(), block_name
-        assert "up to three" not in block.lower(), block_name
+    # The communication block now owns turn shape once; final contract refers
+    # to it instead of duplicating a competing ceiling in three places.
+    assert "fewest sentences" in COMMUNICATION_PRINCIPLES
+    assert "communication principles above" in FINAL_RESPONSE_CONTRACT
+    assert "fewest sentences" not in GENERIC_GUARDRAILS_HARD
+    for block in (GENERIC_GUARDRAILS_HARD, COMMUNICATION_PRINCIPLES, FINAL_RESPONSE_CONTRACT):
+        assert "up to three" not in block.lower()
 
 
 @pytest.mark.parametrize("persona,slots", ALL_PERSONAS)
@@ -230,36 +206,22 @@ def test_no_composed_block_encourages_length_or_thoroughness(persona, slots):
 
 @pytest.mark.parametrize("persona,slots", ALL_PERSONAS)
 def test_thinking_and_lookups_are_silent(persona, slots):
-    """HARD RULE 8 owns this for every persona. Positively framed on purpose —
-    quoting the phrases we want gone ("let me check", "one sec") would prime
-    them, per the 2026-06-27 Pink-Elephant finding."""
     out = _composed(persona, slots)
-    assert "all happen silently" in out
-    assert "nothing about how you arrived at it" in out
+    assert "Thinking, reading and tools all happen silently" in out
+    assert "the caller hears the answer" in out
 
 
 @pytest.mark.parametrize("persona,slots", ALL_PERSONAS)
 def test_a_knowledge_miss_is_a_next_step_not_a_status_report(persona, slots):
-    """Production: "I couldn't find a clear location statement in the company
-    info I pulled..." — honest, but it hands the caller a report on the
-    retrieval instead of a next step, and it leaks that a knowledge base
-    exists. Both the HARD RULE and the FACTS block now say what to DO."""
     out = _composed(persona, slots)
-    # HARD RULE 6 — the miss belongs to the agent, not the caller.
-    assert "is your work, not theirs" in out
-    # FACTS — one line, then a question that moves the call on.
-    assert "offer the follow-up in ONE short line and move the call on" in out
-    assert "what you looked through and came up short on stays yours" in out
+    assert "say you cannot confirm it" in out
+    assert "Offer only a next step actually available" in out
+    assert "I'll get you that exact figure" not in out
 
 
 def test_never_mention_the_knowledge_base_covers_its_paraphrases():
-    """The old rule named only "the knowledge base", so "the company info I
-    pulled" walked straight past it. Widened to the paraphrases and to the ACT
-    of looking."""
     flat = _flat(KNOWLEDGE_PRECEDENCE)
-    assert "the knowledge base" in flat
-    assert "the company info you were given" in flat
-    assert "that you went looking" in flat
+    assert "do not narrate searches, the knowledge base or internal systems" in flat
 
 
 # Checked against the persona BODIES rather than the whole composed prompt:

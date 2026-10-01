@@ -346,6 +346,7 @@ async def test_same_format_vendors_pass_bytes_through_unchanged():
     raw = b"\x01\x00\x02\x00"
     primary = _TTSStub("deepgram", fail=True)
     secondary = _TTSStub("elevenlabs", chunks=[AudioChunk(data=raw, sample_rate=16000, channels=1)])
-    wrapper = ResilientTTSProvider(primary, secondary)
+    wrapper = ResilientTTSProvider(primary, secondary, policy=TTSFailoverPolicy(voice_id_map={"v": "eleven-voice"}))
     out = [c async for c in wrapper.stream_synthesize("hi", "v", 16000)]
     assert out[0].data == raw
+    assert secondary.seen_voice == "eleven-voice"

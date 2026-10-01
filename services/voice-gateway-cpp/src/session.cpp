@@ -615,6 +615,10 @@ bool RtpSession::enqueue_tts_ulaw(
     // Validate identity before ANY queue mutation. A stale replacement must
     // not clear accepted speech and only then discover it cannot be admitted.
     if (!utterance_id.empty()) {
+        if (utterance_id == tts_receipt_utterance_id_ && tts_receipt_final_) {
+            error = "utterance_already_finalized";
+            return false;
+        }
         if (utterance_id == tts_retired_utterance_id_ ||
             (clear_existing && utterance_id == tts_current_utterance_id_)) {
             // A chunk of an utterance that was already interrupted/replaced —
@@ -640,6 +644,9 @@ bool RtpSession::enqueue_tts_ulaw(
         if (utterance_id != tts_current_utterance_id_) {
             tts_current_utterance_id_ = utterance_id;
             tts_last_chunk_seq_ = -1;
+            tts_receipt_utterance_id_ = utterance_id;
+            tts_receipt_accepted_ = tts_receipt_sent_ = 0;
+            tts_receipt_final_ = tts_receipt_failed_ = tts_receipt_cancelled_ = false;
         }
         if (chunk_seq >= 0) {
             tts_last_chunk_seq_ = chunk_seq;
@@ -647,7 +654,10 @@ bool RtpSession::enqueue_tts_ulaw(
     }
 
     const uint32_t segment_id = next_tts_segment_id_++;
-    tts_segments_[segment_id] = TtsSegmentState{frame_count, false};
+    tts_segments_[segment_id] = TtsSegmentState{frame_count, false, utterance_id};
+    if (!utterance_id.empty() && utterance_id == tts_receipt_utterance_id_) {
+        tts_receipt_accepted_ += frame_count;
+    }
     tts_segments_started_total_.fetch_add(1);
     tts_frames_enqueued_total_.fetch_add(frame_count);
 
@@ -667,6 +677,28 @@ bool RtpSession::enqueue_tts_ulaw(
     // notify_all, not notify_one: the watchdog waits on the same cv, and a
     // notify_one it consumed would be a lost wakeup for the transmitter.
     queue_cv_.notify_all();
+    return true;
+}
+
+bool RtpSession::finish_tts_utterance(const std::string& utterance_id, const int64_t last_chunk_seq,
+    std::string& status, std::size_t& transmitted_frames, std::string& error) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (utterance_id.empty() || utterance_id != tts_receipt_utterance_id_) {
+        error = "unknown_utterance";
+        return false;
+    }
+    transmitted_frames = tts_receipt_sent_;
+    if (tts_receipt_cancelled_) {
+        status = "interrupted";
+        return true;
+    }
+    if (last_chunk_seq != tts_last_chunk_seq_) {
+        error = "final_chunk_sequence_mismatch";
+        return false;
+    }
+    tts_receipt_final_ = true;
+    status = tts_receipt_failed_ ? "failed" :
+        (tts_receipt_sent_ == tts_receipt_accepted_ && tts_receipt_accepted_ > 0 ? "transmitted" : "pending");
     return true;
 }
 
@@ -1330,6 +1362,9 @@ void RtpSession::clear_tts_queue_locked(const std::string& reason) {
     // Retire the active utterance (VG-13): any chunk still in flight over HTTP
     // for it will be rejected by enqueue_tts_ulaw instead of being spoken.
     if (!tts_current_utterance_id_.empty()) {
+        if (tts_current_utterance_id_ == tts_receipt_utterance_id_) {
+            tts_receipt_cancelled_ = true;
+        }
         tts_retired_utterance_id_ = tts_current_utterance_id_;
         tts_current_utterance_id_.clear();
         tts_last_chunk_seq_ = -1;
@@ -1350,6 +1385,9 @@ void RtpSession::mark_tts_frame_sent_locked(const uint32_t segment_id) {
     if (it == tts_segments_.end()) {
         return;
     }
+    if (!it->second.utterance_id.empty() && it->second.utterance_id == tts_receipt_utterance_id_) {
+        ++tts_receipt_sent_;
+    }
     if (it->second.remaining_frames > 0) {
         --it->second.remaining_frames;
     }
@@ -1369,6 +1407,9 @@ void RtpSession::mark_tts_frame_dropped_locked(const uint32_t segment_id) {
     auto it = tts_segments_.find(segment_id);
     if (it == tts_segments_.end()) {
         return;
+    }
+    if (!it->second.utterance_id.empty() && it->second.utterance_id == tts_receipt_utterance_id_) {
+        tts_receipt_failed_ = true;
     }
     if (it->second.remaining_frames > 0) {
         --it->second.remaining_frames;

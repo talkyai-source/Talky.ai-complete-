@@ -22,11 +22,12 @@ import os
 import ssl
 import logging
 import smtplib
+import asyncio
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-from email.utils import formataddr
+from email.utils import formataddr, make_msgid
 
 from app.infrastructure.connectors.base import BaseConnector, ConnectorCapability, OAuthTokens
 from app.infrastructure.connectors.email.base import EmailProvider, EmailMessage
@@ -131,7 +132,11 @@ class SMTPConnector(EmailProvider):
         """SMTP doesn't use OAuth - not applicable."""
         raise NotImplementedError("SMTP connector doesn't use OAuth")
     
-    async def send_email(
+    async def send_email(self, *args, **kwargs) -> EmailMessage:
+        """Keep synchronous SMTP off the event loop and bound an uncertain send."""
+        return await asyncio.wait_for(asyncio.to_thread(self._send_email_blocking, *args, **kwargs), 20.0)
+
+    def _send_email_blocking(
         self,
         to: List[str],
         subject: str,
@@ -172,6 +177,8 @@ class SMTPConnector(EmailProvider):
         message["Subject"] = subject
         message["From"] = formataddr((self.from_name, self.from_email))
         message["To"] = ", ".join(to)
+        message_id = make_msgid()
+        message["Message-ID"] = message_id
         
         if cc:
             message["Cc"] = ", ".join(cc)
@@ -185,19 +192,19 @@ class SMTPConnector(EmailProvider):
             # Connect and send
             if self.use_tls:
                 context = ssl.create_default_context()
-                with smtplib.SMTP(self.host, self.port) as server:
+                with smtplib.SMTP(self.host, self.port, timeout=10) as server:
                     server.ehlo()
                     server.starttls(context=context)
                     server.ehlo()
                     server.login(self.user, self.password)
-                    server.sendmail(self.from_email, all_recipients, message.as_string())
+                    refused = server.sendmail(self.from_email, all_recipients, message.as_string())
             else:
-                with smtplib.SMTP(self.host, self.port) as server:
+                with smtplib.SMTP(self.host, self.port, timeout=10) as server:
                     server.login(self.user, self.password)
-                    server.sendmail(self.from_email, all_recipients, message.as_string())
+                    refused = server.sendmail(self.from_email, all_recipients, message.as_string())
             
-            # Generate pseudo message ID
-            message_id = f"smtp-{datetime.utcnow().strftime('%Y%m%d%H%M%S%f')}"
+            if refused:
+                raise ValueError("SMTP did not accept every recipient; review before retrying")
             
             logger.info(f"Email sent via SMTP to {len(to)} recipients")
             

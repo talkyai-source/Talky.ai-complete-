@@ -63,7 +63,7 @@ def test_url_prefers_agent_id_when_set():
 
 def test_turn_detection_defaults_to_server_vad_085():
     s = XAIRealtimeSession(api_key="xai-test")._build_session_update()["session"]
-    assert s["audio"]["input"]["turn_detection"] == {
+    assert s["turn_detection"] == {
         "type": "server_vad", "threshold": 0.85,
     }
 
@@ -73,18 +73,12 @@ def test_turn_detection_explicit_override_passes_through():
     s = XAIRealtimeSession(
         api_key="xai-test", settings={"turn_detection": override},
     )._build_session_update()["session"]
-    assert s["audio"]["input"]["turn_detection"] == override
+    assert s["turn_detection"] == override
 
 
-def test_turn_detection_bare_eagerness_string_still_normalised():
-    # Inherited normalisation (semantic_vad shorthand) still applies when the
-    # operator explicitly asks for it, even though it isn't our new default.
-    s = XAIRealtimeSession(
-        api_key="xai-test", settings={"turn_detection": "high"},
-    )._build_session_update()["session"]
-    assert s["audio"]["input"]["turn_detection"] == {
-        "type": "semantic_vad", "eagerness": "high",
-    }
+def test_xai_rejects_openai_semantic_vad_before_connecting():
+    with pytest.raises(ValueError, match="server_vad"):
+        XAIRealtimeSession(api_key="xai-test", settings={"turn_detection": "high"})._build_session_update()
 
 
 # ---------------------------------------------------------------------------
@@ -93,14 +87,14 @@ def test_turn_detection_bare_eagerness_string_still_normalised():
 
 def test_voice_omitted_when_unset():
     s = XAIRealtimeSession(api_key="xai-test")._build_session_update()["session"]
-    assert "voice" not in s["audio"]["output"]
+    assert "voice" not in s
 
 
 def test_voice_included_when_explicitly_set():
     s = XAIRealtimeSession(
         api_key="xai-test", voice="some-xai-voice",
     )._build_session_update()["session"]
-    assert s["audio"]["output"]["voice"] == "some-xai-voice"
+    assert s["voice"] == "some-xai-voice"
 
 
 def test_audio_format_still_mulaw_8k_both_directions():

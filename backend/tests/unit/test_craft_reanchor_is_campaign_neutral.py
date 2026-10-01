@@ -35,33 +35,27 @@ def test_no_campaign_content_is_baked_into_the_platform_block(campaign_word):
 
 
 def test_the_next_step_comes_from_the_campaign():
-    assert "your campaign's one next step" in BLOCK
-    assert "your campaign's next step is your only offer" in BLOCK
+    assert "continuing the campaign" in BLOCK
+    assert "next step only when its route exists" in BLOCK
 
 
 def test_the_next_step_waits_until_the_question_is_answered():
-    assert "after you" in BLOCK and "answered what they asked" in BLOCK
-    assert "answer it first" in BLOCK
+    assert "answer their latest question or correction before continuing" in BLOCK
 
 
 def test_a_mishearing_is_asked_about_not_mirrored():
-    """'is your propaganda?' was mirrored as 'wondering about our approach'."""
-    assert "misheard" in BLOCK
-    assert "never guess what they meant" in BLOCK
+    assert "speech is unclear, ask for the unclear part" in BLOCK
 
 
 def test_links_are_named_among_the_things_it_must_not_invent():
-    assert "links" in BLOCK
+    assert "next step only when its route exists" in BLOCK
+    assert "available actions" in BLOCK
 
 
 def test_rules_that_were_working_are_still_there():
-    for kept in (
-        "one question",
-        "fresh words every time",
-        "promise only what exists",
-        "never a survey",
-    ):
-        assert kept in BLOCK, kept
+    for kept in ("one useful question", "then listen", "not done", "known contact details"):
+        assert kept in BLOCK
+    assert "already have their number" not in BLOCK
 
 
 def test_still_no_number_in_the_block():

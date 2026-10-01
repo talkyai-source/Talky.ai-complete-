@@ -10,6 +10,7 @@ import {
     type CampaignBriefDraft,
     type CampaignBriefLeadField,
     type CampaignNextAction,
+    type CampaignFormField,
 } from "@/lib/campaign-brief";
 
 export function CampaignBriefFields({
@@ -39,6 +40,8 @@ export function CampaignBriefFields({
         update({
             approved_next_actions: [...new Set(next)],
             ...(action === "transfer" && !checked ? { transfer_destination: "" } : {}),
+            ...(action === "send_email" && !checked ? { email_action: undefined } : {}),
+            ...(action === "submit_form" && !checked ? { form_action: undefined } : {}),
         });
     }
 
@@ -136,6 +139,55 @@ export function CampaignBriefFields({
                     })}
                 </div>
             </fieldset>
+
+            {value.approved_next_actions.includes("send_email") && (
+                <fieldset className="space-y-3 rounded-xl border border-border bg-background/60 p-3">
+                    <legend className="text-sm font-medium">Approved follow-up email</legend>
+                    <p className="text-xs text-muted-foreground">Configure the exact message below and connect your email integration. The agent sends it only after confirming the caller&apos;s address and request.</p>
+                    <Label htmlFor={`${idPrefix}-email-subject`}>Subject</Label>
+                    <Input id={`${idPrefix}-email-subject`} maxLength={200} disabled={disabled}
+                        value={value.email_action?.subject ?? ""}
+                        onChange={(event) => update({ email_action: { subject: event.target.value, body: value.email_action?.body ?? "" } })} />
+                    <Label htmlFor={`${idPrefix}-email-body`}>Message</Label>
+                    <textarea id={`${idPrefix}-email-body`} rows={4} maxLength={8000} disabled={disabled}
+                        className="w-full rounded-md border border-input bg-background p-3 text-sm"
+                        value={value.email_action?.body ?? ""}
+                        onChange={(event) => update({ email_action: { subject: value.email_action?.subject ?? "", body: event.target.value } })} />
+                    {!value.email_action && <p className="text-xs text-muted-foreground">Email sending stays unavailable until this message is configured.</p>}
+                </fieldset>
+            )}
+
+            {value.approved_next_actions.includes("submit_form") && (
+                <fieldset className="space-y-3 rounded-xl border border-border bg-background/60 p-3">
+                    <legend className="text-sm font-medium">Form sent to your approved inbox</legend>
+                    <p className="text-xs text-muted-foreground">Collected fields are emailed to this destination after the caller confirms submission. Your connected email account sends the form.</p>
+                    {([ ["name", "Form name"], ["recipient", "Destination email"], ["subject", "Email subject"] ] as const).map(([key, label]) => (
+                        <div key={key} className="space-y-1">
+                            <Label htmlFor={`${idPrefix}-form-${key}`}>{label}</Label>
+                            <Input id={`${idPrefix}-form-${key}`} type={key === "recipient" ? "email" : "text"}
+                                disabled={disabled} maxLength={key === "name" ? 100 : key === "recipient" ? 254 : 200}
+                                value={value.form_action?.[key] ?? ""}
+                                onChange={(event) => update({ form_action: {
+                                    name: "", recipient: "", subject: "", fields: ["email"],
+                                    ...value.form_action, [key]: event.target.value,
+                                } })} />
+                        </div>
+                    ))}
+                    <div className="flex flex-wrap gap-3" aria-label="Fields to submit">
+                        {(["email", "phone", "follow_up", "project_type", "bidding_active"] as CampaignFormField[]).map((field) => (
+                            <label key={field} className="flex items-center gap-2 text-xs">
+                                <input type="checkbox" disabled={disabled} checked={(value.form_action?.fields ?? ["email"]).includes(field)}
+                                    onChange={(event) => {
+                                        const current = value.form_action ?? { name: "", recipient: "", subject: "", fields: ["email"] as CampaignFormField[] };
+                                        update({ form_action: { ...current, fields: event.target.checked ? [...current.fields, field] : current.fields.filter((item) => item !== field) } });
+                                    }} />
+                                {field.replaceAll("_", " ")}
+                            </label>
+                        ))}
+                    </div>
+                    {!value.form_action && <p className="text-xs text-muted-foreground">Form submission stays unavailable until its destination and fields are configured.</p>}
+                </fieldset>
+            )}
 
             <div className="grid gap-4 sm:grid-cols-2">
                 <div className="space-y-2">

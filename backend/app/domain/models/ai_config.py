@@ -15,6 +15,7 @@ class LLMProvider(str, Enum):
     GROQ = "groq"
     GEMINI = "gemini"
     CEREBRAS = "cerebras"
+    OPENAI = "openai"
 
 
 class STTProvider(str, Enum):
@@ -185,6 +186,16 @@ class ModelInfo(BaseModel):
     context_window: Optional[int] = None
     is_preview: bool = False
     provider: Optional[str] = None
+
+
+OPENAI_MODELS = [
+    ModelInfo(
+        id="gpt-6-luna",
+        name="GPT-6 Luna",
+        description="OpenAI text model for the traditional voice pipeline. Reasoning disabled for streaming tools.",
+        provider="openai",
+    ),
+]
 
 
 class VoiceInfo(BaseModel):

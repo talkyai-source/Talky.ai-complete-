@@ -1,4 +1,4 @@
-import type { CampaignVoiceSettingsValue } from "@/components/realtime/types";
+import type { CampaignVoiceSettingsValue, RealtimeTurnDetection } from "@/components/realtime/types";
 import { z } from "zod";
 import { sharedHttpClient } from "@/lib/api";
 
@@ -98,7 +98,7 @@ export interface AIProviderConfig {
     pipeline_mode?: "cascaded" | "realtime";
     realtime_model?: string;
     realtime_voice?: string;
-    realtime_settings?: { turn_detection?: string; noise_reduction?: string; reasoning_effort?: string; speed?: number; max_output_tokens?: number; prompt?: CampaignVoiceSettingsValue["realtime_prompt"] } | null;
+    realtime_settings?: { provider?: string; transcription_model?: string; turn_detection?: RealtimeTurnDetection; noise_reduction?: string; reasoning_effort?: string; speed?: number; max_output_tokens?: number; prompt?: CampaignVoiceSettingsValue["realtime_prompt"] } | null;
 }
 
 export interface LLMTestRequest {
@@ -260,14 +260,14 @@ const RawConfigSchema = z
         realtime_voice: z.string().optional(),
         realtimeVoice: z.string().optional(),
         realtime_settings: z
-            .object({ turn_detection: z.string().optional(), noise_reduction: z.string().optional(),
+            .object({ provider: z.string().optional(), transcription_model: z.string().optional(), turn_detection: z.union([z.string(), z.object({ type: z.enum(["semantic_vad", "server_vad"]), eagerness: z.enum(["low", "medium", "high", "auto"]).optional(), threshold: z.number().optional(), prefix_padding_ms: z.number().optional(), silence_duration_ms: z.number().optional() })]).optional(), noise_reduction: z.string().optional(),
                 reasoning_effort: z.string().optional(), speed: z.number().optional(), max_output_tokens: z.number().optional(),
-                prompt: z.object({ persona: z.enum(["assistant", "sales", "support", "receptionist"]).optional(), goal: z.string(), instructions: z.string(), opening_greeting: z.string() }).optional() })
+                prompt: z.object({ persona: z.enum(["assistant", "sales", "support", "receptionist"]).optional(), goal: z.string(), instructions: z.string(), opening_greeting: z.string() }).optional() }).passthrough()
             .nullish(),
         realtimeSettings: z
-            .object({ turn_detection: z.string().optional(), noise_reduction: z.string().optional(),
+            .object({ provider: z.string().optional(), transcription_model: z.string().optional(), turn_detection: z.union([z.string(), z.object({ type: z.enum(["semantic_vad", "server_vad"]), eagerness: z.enum(["low", "medium", "high", "auto"]).optional(), threshold: z.number().optional(), prefix_padding_ms: z.number().optional(), silence_duration_ms: z.number().optional() })]).optional(), noise_reduction: z.string().optional(),
                 reasoning_effort: z.string().optional(), speed: z.number().optional(), max_output_tokens: z.number().optional(),
-                prompt: z.object({ persona: z.enum(["assistant", "sales", "support", "receptionist"]).optional(), goal: z.string(), instructions: z.string(), opening_greeting: z.string() }).optional() })
+                prompt: z.object({ persona: z.enum(["assistant", "sales", "support", "receptionist"]).optional(), goal: z.string(), instructions: z.string(), opening_greeting: z.string() }).optional() }).passthrough()
             .nullish(),
     })
     .passthrough();

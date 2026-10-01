@@ -8,7 +8,7 @@ helpers are replaced by direct function calls within this module.
 """
 import logging
 from typing import Optional, Dict, Any
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from app.core.postgres_adapter import Client
 from app.domain.models.action_plan import (
@@ -83,6 +83,7 @@ async def schedule_reminder(
     params: Dict[str, Any],
     chained_result: Dict[str, Any],
     conversation_id: Optional[str] = None,
+    preview: bool = False,
 ) -> Dict[str, Any]:
     """
     Schedule a reminder based on offset from meeting or absolute time.
@@ -113,11 +114,12 @@ async def schedule_reminder(
         else:
             scheduled_at = scheduled_at_str
     else:
-        # Default to 1 hour from now
-        scheduled_at = datetime.utcnow() + timedelta(hours=1)
+        return {"success": False, "error": "Provide an explicit reminder time, or a meeting and offset."}
 
     # Don't create reminders in the past
-    if scheduled_at <= datetime.utcnow():
+    if scheduled_at.tzinfo is None or scheduled_at.utcoffset() is None:
+        return {"success": False, "error": "The reminder time needs a date and UTC offset."}
+    if scheduled_at <= datetime.now(timezone.utc):
         return {
             "success": False,
             "error": "Cannot schedule reminder in the past",
@@ -139,12 +141,33 @@ async def schedule_reminder(
         },
     }
 
+    if reminder_data["type"] not in {"sms", "email"}:
+        return {"success": False, "error": "Reminder type must be sms or email."}
+    if not reminder_data["meeting_id"] and not reminder_data["lead_id"]:
+        return {"success": False, "error": "Choose the meeting or contact for this reminder."}
+    for table, key in (("meetings", "meeting_id"), ("leads", "lead_id")):
+        if reminder_data[key]:
+            found = db_client.table(table).select("id").eq("tenant_id", tenant_id).eq("id", reminder_data[key]).limit(1).execute()
+            if not found.data:
+                return {"success": False, "error": f"{key} is not available in this account."}
+    if preview:
+        return {"preview": True, "changes": [
+            {"field": "Time", "before": None, "after": scheduled_at.isoformat()},
+            {"field": "Channel", "before": None, "after": reminder_data["type"]},
+            {"field": "Message", "before": None, "after": reminder_data["content"]["message"]},
+        ], "_apply_args": {
+            "meeting_id": reminder_data["meeting_id"], "lead_id": reminder_data["lead_id"],
+            "scheduled_at": scheduled_at.isoformat(), "message": reminder_data["content"]["message"],
+            "reminder_type": reminder_data["type"],
+        }, "note": "Reminder not scheduled yet."}
+
     try:
         response = db_client.table("reminders").insert(reminder_data).execute()
 
         if response.data:
             return {
                 "success": True,
+                "status": "scheduled",
                 "reminder_id": response.data[0]["id"],
                 "scheduled_at": scheduled_at.isoformat(),
                 "message": f"Reminder scheduled for {scheduled_at.strftime('%Y-%m-%d %H:%M')}",
@@ -198,6 +221,7 @@ async def execute_action(
                 lead_id=merged_params.get("lead_id"),
                 description=merged_params.get("description"),
                 add_video_conference=merged_params.get("add_video_conference", True),
+                confirm=True,
                 conversation_id=conversation_id,
             )
 
@@ -220,7 +244,9 @@ async def execute_action(
                 to=merged_params.get("to", []),
                 subject=merged_params.get("subject", ""),
                 body=merged_params.get("body", ""),
-                template_name=merged_params.get("template"),
+                body_html=merged_params.get("body_html"),
+                lead_ids=merged_params.get("lead_ids"),
+                template_name=merged_params.get("template_name") or merged_params.get("template"),
                 template_context=template_context,
                 conversation_id=conversation_id,
                 # Plan execution is an already-approved action — send immediately,
@@ -234,6 +260,7 @@ async def execute_action(
                 db_client=db_client,
                 to=merged_params.get("to", []),
                 message=merged_params.get("message", ""),
+                confirm=True,
                 conversation_id=conversation_id,
             )
 
@@ -252,6 +279,8 @@ async def execute_action(
                 db_client=db_client,
                 phone_number=merged_params.get("phone_number", ""),
                 campaign_id=merged_params.get("campaign_id"),
+                lead_id=merged_params.get("lead_id"),
+                confirm=True,
                 conversation_id=conversation_id,
             )
 
@@ -269,6 +298,7 @@ async def execute_action(
                 db_client=db_client,
                 date_str=merged_params.get("date", ""),
                 duration_minutes=merged_params.get("duration_minutes", 30),
+                timezone_name=merged_params.get("timezone_name"),
             )
 
         elif action_type == AllowedActionType.UPDATE_MEETING.value:
@@ -278,6 +308,7 @@ async def execute_action(
                 meeting_id=merged_params.get("meeting_id", ""),
                 new_time=merged_params.get("new_time"),
                 new_title=merged_params.get("new_title"),
+                confirm=True,
                 conversation_id=conversation_id,
             )
 
@@ -287,6 +318,7 @@ async def execute_action(
                 db_client=db_client,
                 meeting_id=merged_params.get("meeting_id", ""),
                 reason=merged_params.get("reason"),
+                confirm=True,
                 conversation_id=conversation_id,
             )
 
@@ -295,4 +327,5 @@ async def execute_action(
 
     except Exception as e:
         logger.error(f"Action execution error ({action_type}): {e}")
-        return {"success": False, "error": str(e)}
+        return {"success": False, "status": "unknown", "confirmation_allowed": False,
+                "error": "The action outcome is uncertain. Review its receipt before continuing."}

@@ -175,6 +175,7 @@ from app.domain.services.voice_pipeline.kb_budget import (  # noqa: E402
     _KNOWLEDGE_RETRIEVE_TIMEOUT_S,
     _trim_kb_body,
     knowledge_match_is_weak,
+    prepare_knowledge_evidence,
     needs_previous_turn_context,
     should_retrieve_knowledge,
 )
@@ -182,6 +183,10 @@ from app.domain.services.voice_pipeline.kb_budget import (  # noqa: E402
 # What the agent is told when the knowledge base has nothing that answers the
 # caller. Call d644f0ea (2026-09-28): with no relevant section the agent said
 # "Yes, we've helped set up your EPOS" -- a claim nothing supported.
+KNOWLEDGE_UNAVAILABLE_NOTE = (
+    "COMPANY KNOWLEDGE TEMPORARILY UNAVAILABLE. Do not invent business facts. "
+    "Explain briefly that you cannot confirm that detail right now.\n"
+)
 KNOWLEDGE_NO_MATCH_NOTE = (
     "COMPANY KNOWLEDGE — NO CONFIRMED ANSWER. The knowledge base has nothing that "
     "answers what the caller just asked. If they asked about the company, its "
@@ -210,6 +215,8 @@ async def _knowledge_block_for_turn(session: CallSession, messages: list) -> str
     no container, no pool, no hit, timeout, or error — so it can never break or
     stall a turn.
     """
+    session._knowledge_grounding = []
+    session._knowledge_evidence = {"status": "unavailable", "passages": []}
     try:
         # Primary query = caller's latest message, enriched with the previous
         # caller turn so follow-ups ("can you do that there?", "and the price?")
@@ -255,10 +262,10 @@ async def _knowledge_block_for_turn(session: CallSession, messages: list) -> str
 
             container = get_container()
             if not getattr(container, "is_initialized", False):
-                return ""
+                return KNOWLEDGE_UNAVAILABLE_NOTE
             pool = getattr(getattr(container, "db_client", None), "pool", None)
             if pool is None:
-                return ""
+                return KNOWLEDGE_UNAVAILABLE_NOTE
             _cached = _kb_cache.get(
                 session.tenant_id, session.campaign_id, query, now=_t0,
             )
@@ -275,6 +282,7 @@ async def _knowledge_block_for_turn(session: CallSession, messages: list) -> str
                             pool, session.tenant_id, session.campaign_id, query,
                             k=_KB_MAX_CHUNKS, bump_hits=False,
                             acquire_timeout=_KNOWLEDGE_RETRIEVE_TIMEOUT_S,
+                            raise_on_error=True,
                         ),
                         timeout=_KNOWLEDGE_RETRIEVE_TIMEOUT_S,
                     )
@@ -288,9 +296,10 @@ async def _knowledge_block_for_turn(session: CallSession, messages: list) -> str
                         session.call_id[:8], _KNOWLEDGE_RETRIEVE_TIMEOUT_S * 1000,
                         session.knowledge_mode, str(session.tenant_id)[:8],
                     )
-                    return ""
+                    return KNOWLEDGE_UNAVAILABLE_NOTE
         _ms = (time.monotonic() - _t0) * 1000.0
         if not hits:
+            session._knowledge_evidence = {"status": "no_match", "passages": []}
             logger.info(
                 "KB_DEBUG call=%s NO_HITS %.0fms q=%r mode=%s tenant=%s",
                 session.call_id[:8], _ms, last_user[:60],
@@ -308,65 +317,16 @@ async def _knowledge_block_for_turn(session: CallSession, messages: list) -> str
             " WEAK" if weak else "",
         )
 
-        # Retrieved knowledge is tenant/3rd-party data, not a trusted authored
-        # prompt, so it is delimited (Microsoft "Spotlighting") and each node is
-        # run through the content-integrity scan (OWASP LLM01) before it enters
-        # the context window.
-        from app.services.scripts.prompts.prompt_safety import (
-            DATA_ONLY_NOTE,
-            fence_untrusted,
-            scan_for_injection,
-        )
-
+        from app.services.scripts.prompts.prompt_safety import DATA_ONLY_NOTE, fence_untrusted
+        evidence = prepare_knowledge_evidence(hits, query)
+        session._knowledge_evidence = evidence
+        if evidence["status"] == "no_match":
+            return KNOWLEDGE_NO_MATCH_NOTE
+        weak = evidence["status"] == "weak_match"
+        if not weak:
+            session._knowledge_grounding = [p["text"] for p in evidence["passages"]]
         _KB_TAG = "company_knowledge"
-        # Budget the block: prefer the concise voice_answer, trim each node, and
-        # stop once the total budget is hit. Keeps the per-turn prompt small so
-        # the LLM answers fast instead of stalling on a 10k-token dump.
-        entries: list[str] = []
-        used = 0
-        dropped_injection = 0
-        for h in hits:
-            # SOURCE-FIRST. `voice_answer` is an enricher summary of only the
-            # TOP of a node, so leading with it silently drops any fact further
-            # down — the "KB was bad even on the realtime model" bug. Retrieval
-            # can match a fact ANYWHERE in the node, so the answer must be
-            # grounded in the node's own `content`.
-            #
-            # That fix landed in render_node_answer() and was wired into
-            # compact_tree and the realtime bridge, but NOT into this path or
-            # knowledge_tool — and this is the DEFAULT per-turn inject path that
-            # every retrieve/map_retrieve campaign uses. Both now call the one
-            # shared renderer so the three delivery paths cannot diverge again.
-            # render_node_answer picks WHAT text (source-first); _trim_kb_body
-            # decides HOW MUCH and appends the ellipsis that tells the model the
-            # fact is incomplete. Passing max_chars to the renderer as well would
-            # pre-truncate silently and that marker would be lost — a truncated
-            # fact the model believes is whole is exactly the hallucination shape
-            # this pipeline is trying to avoid.
-            # fit_kb_body trims the source but keeps the node's spoken answer —
-            # a trimmed preamble with the answer cut off was the live failure.
-            body = fit_kb_body(render_node_answer(h), h, _KB_CHUNK_CHARS)
-            if not body:
-                continue
-            heading = h.get("heading") or ""
-            # Drop a retrieved node that is shaped like an instruction to the
-            # model (poisoned KB entry) rather than ordinary knowledge.
-            if scan_for_injection(f"{heading} {body}"):
-                dropped_injection += 1
-                continue
-            entry = f"- {heading}: {body}"
-            if used + len(entry) > _KB_TOTAL_CHARS and used > 0:
-                break  # budget reached — drop the rest (already ranked best-first)
-            entries.append(entry)
-            used += len(entry)
-        if dropped_injection:
-            logger.warning(
-                "KB_DEBUG call=%s dropped %d knowledge node(s) flagged as injection",
-                session.call_id[:8], dropped_injection,
-            )
-        if not entries:
-            return KNOWLEDGE_NO_MATCH_NOTE if weak else ""
-        fenced = fence_untrusted("\n".join(entries), tag=_KB_TAG)
+        fenced = fence_untrusted(evidence["text"], tag=_KB_TAG)
         from app.services.scripts.prompts.guardrails import KNOWLEDGE_PRICE_GUARD
 
         header = (
@@ -386,7 +346,7 @@ async def _knowledge_block_for_turn(session: CallSession, messages: list) -> str
         )
     except Exception as exc:
         logger.warning("KB_DEBUG call=%s error: %s", getattr(session, "call_id", "?")[:8], exc)
-        return ""
+        return KNOWLEDGE_UNAVAILABLE_NOTE
 
 
 class TurnStreamer:
@@ -457,7 +417,13 @@ class TurnStreamer:
         # Action tools are offered only on a turn whose caller/preceding-agent
         # text makes an action relevant. Their strict provider path buffers the
         # first pass, ensuring no pre-tool promise can reach TTS.
-        action_tools = action_tools_for_turn(messages, self._p.llm_provider)
+        from app.domain.services.voice_pipeline.action_execution import (
+            prepare_voice_action_context, enabled_voice_actions,
+        )
+        potential_actions = action_tools_for_turn(messages, self._p.llm_provider)
+        if potential_actions:
+            await prepare_voice_action_context(session)
+        action_tools = action_tools_for_turn(messages, self._p.llm_provider, session=session)
         legacy_end_action = bool(
             self._p._supports_llm_end_session_action(session) and not action_tools
         )
@@ -488,8 +454,9 @@ class TurnStreamer:
         kb_tools = None
         knowledge_block = None
         if session.knowledge_mode in ("retrieve", "map_retrieve") and messages:
-            if not legacy_end_action:
-                kb_tools = knowledge_tools_for(session, self._p.llm_provider)
+            kb_tools = knowledge_tools_for(session, self._p.llm_provider)
+            if kb_tools:
+                legacy_end_action = False
             if kb_tools:
                 knowledge_block = tool_system_addendum()
             else:
@@ -592,6 +559,7 @@ class TurnStreamer:
             agent_name=(getattr(_agent_cfg, "agent_name", "") or ""),
             company_name=(getattr(_agent_cfg, "company_name", "") or ""),
             has_introduced=bool(getattr(session, "_has_introduced", False)),
+            direction=getattr(session, "_call_direction", "outbound"),
             time_of_day_line=_tod,
             structured_state_block=render_live_state_block(_structured),
         )
@@ -646,6 +614,7 @@ class TurnStreamer:
             accent_block=accent_filler_block(accent),
             trailing_block=trailing_block,
             captured_slots=session.captured_slots,
+            has_callback_executor="schedule_callback" in enabled_voice_actions(session),
         )
 
         max_sentences = self._p._response_max_sentences_for_turn(
@@ -749,6 +718,10 @@ class TurnStreamer:
         # any knowledge the tool returned. A web address the agent speaks must
         # appear here or it is rewritten (see grounded_links.py).
         turn_grounding: list[str] = []
+        if session.knowledge_mode not in ("retrieve", "map_retrieve"):
+            session._knowledge_grounding = re.findall(
+                r"<company_knowledge>(.*?)</company_knowledge>", system_prompt, re.DOTALL,
+            )
         guardrail_blocked_response: Optional[str] = None
         # Prices/percentages with no source this turn (see grounded_figures.py).
         # A list so the nested validator can record into it.
@@ -786,6 +759,14 @@ class TurnStreamer:
         # it already said things it never spoke → garbled "absurd" replies after
         # a few interruptions.
         session._spoken_sentences = []
+        _action_delivered_sentences = []
+
+        def _record_action_playback(sentence, interrupted):
+            if interrupted or not getattr(session, "_tts_playout_completed", False):
+                _action_delivered_sentences.clear()
+            else:
+                _action_delivered_sentences.append(sentence)
+            session._voice_action_delivered_text = " ".join(_action_delivered_sentences)
         # 12b (round 2, review of 91b61694, 2026-09-24): reset each turn.
         # tts_playback.py's TtsDeliveryError clause sets this when a mid-turn
         # delivery failure (e.g. "no gateway session" after the caller hung
@@ -794,6 +775,7 @@ class TurnStreamer:
         # `tts_was_interrupted` came from a dead channel, not the caller
         # going silent, so it must not carry over from a previous turn.
         session._tts_delivery_failed = False
+        session._tts_failure_reason = None
         # P1: this turn's epoch. A barge-in event that targeted an OLDER turn
         # (stale signal from a previous interruption) must not kill this fresh
         # reply. _barged() below ignores such stale events.
@@ -818,7 +800,7 @@ class TurnStreamer:
                     call_id[:12],
                     _links,
                 )
-            _fig_text, _figures = ground_spoken_figures(text, [system_prompt, *turn_grounding])
+            _fig_text, _figures = ground_spoken_figures(text, [*getattr(session, "_knowledge_grounding", []), *turn_grounding])
             if _figures and not speaking:
                 # Whole-reply pre-check on a tool turn: leave the figure to the
                 # per-sentence pass, which is what actually speaks.
@@ -998,7 +980,7 @@ class TurnStreamer:
                     q = (_args or {}).get("query") or last_user_text_for_limit
                     result = await run_knowledge_lookup(session, q)
                     if result and result != NO_KB_FACTS:
-                        turn_grounding.append(str(result))
+                        turn_grounding.extend(getattr(session, "_knowledge_grounding", []))
                     current = getattr(session, "_live_structured_state", _structured)
                     session._live_structured_state = reduce_live_state(
                         current,
@@ -1221,9 +1203,11 @@ class TurnStreamer:
                         self._p.latency_tracker.mark_tts_start(call_id)
 
                     session.tts_active = True
+                    session._voice_action_delivered_text = ""
                     tts_was_interrupted = await self._p.synthesize_and_send_audio(
                         session, sentence, websocket, track_latency=first_sentence,
                     )
+                    _record_action_playback(sentence, tts_was_interrupted)
                     first_sentence = False
                     t_tts_end = time.monotonic()
                     sentences_done += 1
@@ -1353,9 +1337,11 @@ class TurnStreamer:
                             t_tts_first = time.monotonic()
                             self._p.latency_tracker.mark_tts_start(call_id)
                         session.tts_active = True
+                        session._voice_action_delivered_text = ""
                         tts_was_interrupted = await self._p.synthesize_and_send_audio(
                             session, sentence, websocket, track_latency=first_sentence,
                         )
+                        _record_action_playback(sentence, tts_was_interrupted)
                         first_sentence = False
                         t_tts_end = time.monotonic()
                         if not tts_was_interrupted:
@@ -1381,6 +1367,7 @@ class TurnStreamer:
             and t_tts_first is None
             and not ask_ai_end_action
             and not suppressed_for_action
+            and not getattr(session, "_tts_delivery_failed", False)
             and not _barged()
         ):
             recovery = "Sorry, I didn't quite catch that — could you say it again?"
@@ -1391,9 +1378,11 @@ class TurnStreamer:
             session.tts_active = True
             t_tts_first = time.monotonic()
             self._p.latency_tracker.mark_tts_start(call_id)
+            session._voice_action_delivered_text = ""
             tts_was_interrupted = await self._p.synthesize_and_send_audio(
                 session, recovery, websocket, track_latency=False,
             )
+            _record_action_playback(recovery, tts_was_interrupted)
             t_tts_end = time.monotonic()
 
         llm_latency_ms = (t_llm_done - t_llm_start) * 1000

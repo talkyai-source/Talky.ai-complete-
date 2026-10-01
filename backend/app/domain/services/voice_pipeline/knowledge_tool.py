@@ -30,6 +30,7 @@ from app.domain.models.session import CallSession
 # modes return identically-sized facts (one source of truth for KB sizing).
 from app.domain.services.voice_pipeline.kb_budget import (
     fit_kb_body,
+    prepare_knowledge_evidence,
     _KB_MAX_CHUNKS,
     _KB_CHUNK_CHARS,
     _KB_TOTAL_CHARS,
@@ -57,7 +58,8 @@ KB_FENCE_TAG = "company_knowledge"
 # retrieve timeout, error, and when every hit was dropped by the content-
 # integrity scan. The model then answers from persona + history instead of
 # stalling, and has nothing to hallucinate from.
-NO_KB_FACTS = "No specific information found in the company knowledge base."
+NO_KB_FACTS = "No confirmed answer in company knowledge. Do not invent business facts."
+KB_UNAVAILABLE = "Company knowledge is temporarily unavailable. Do not invent business facts."
 
 # OpenAI/Groq function-tool schema. One string arg: the focused question the
 # model wants answered from the company knowledge base.
@@ -149,16 +151,7 @@ def knowledge_tools_for(session: CallSession, provider) -> list | None:
         return None
     if getattr(session, "knowledge_mode", None) not in ("retrieve", "map_retrieve"):
         return None
-    # Providers wired with stream_chat_with_tools: Groq (OpenAI-style tool
-    # calls) and Gemini (native function calling). Any other provider falls
-    # back to the inject path.
-    provider_name = getattr(provider, "name", "")
-    if provider_name not in ("groq", "gemini"):
-        return None
-    # gpt-oss on Groq uses a reasoning request contract (instructions moved to a
-    # user message) that we don't drive tools through — inject for it.
-    model = str(getattr(provider, "_model", "") or "")
-    if provider_name == "groq" and model.startswith("openai/gpt-oss-"):
+    if not getattr(provider, "supports_tools", False):
         return None
     return [KNOWLEDGE_TOOL_SPEC]
 
@@ -180,6 +173,8 @@ async def run_knowledge_lookup(session: CallSession, query: str) -> str:
     per-node ``scan_for_injection`` (drop a poisoned node) and ``fence_untrusted``
     (delimit what survives). See ``_TOOL_ADDENDUM`` for the framing rule.
     """
+    session._knowledge_grounding = []
+    session._knowledge_evidence = {"status": "unavailable", "passages": []}
     q = (query or "").strip()
     if not q:
         return NO_KB_FACTS
@@ -201,15 +196,16 @@ async def run_knowledge_lookup(session: CallSession, query: str) -> str:
 
             container = get_container()
             if not getattr(container, "is_initialized", False):
-                return NO_KB_FACTS
+                return KB_UNAVAILABLE
             pool = getattr(getattr(container, "db_client", None), "pool", None)
             if pool is None:
-                return NO_KB_FACTS
+                return KB_UNAVAILABLE
             try:
                 hits = await asyncio.wait_for(
                     retrieve_knowledge(
                         pool, session.tenant_id, session.campaign_id, q,
                         k=_KB_MAX_CHUNKS, bump_hits=False,
+                        raise_on_error=True,
                     ),
                     timeout=_KNOWLEDGE_RETRIEVE_TIMEOUT_S,
                 )
@@ -218,10 +214,11 @@ async def run_knowledge_lookup(session: CallSession, query: str) -> str:
                     "KB_TOOL call=%s TIMEOUT >%.0fms q=%r — answering without facts",
                     session.call_id[:8], _KNOWLEDGE_RETRIEVE_TIMEOUT_S * 1000, q[:60],
                 )
-                return NO_KB_FACTS
+                return KB_UNAVAILABLE
         _ms = (time.monotonic() - _t0) * 1000.0
 
         if not hits:
+            session._knowledge_evidence = {"status": "no_match", "passages": []}
             logger.info("KB_TOOL call=%s NO_HITS %.0fms q=%r",
                         session.call_id[:8], _ms, q[:60])
             return NO_KB_FACTS
@@ -232,64 +229,20 @@ async def run_knowledge_lookup(session: CallSession, query: str) -> str:
             [h.get("heading") for h in hits],
         )
 
-        # Same budget as the inject path: prefer the spoken-ready voice_answer,
-        # trim each node, stop at the total char budget (already ranked best-first).
-        lines: list[str] = []
-        used = 0
-        dropped_injection = 0
-        for h in hits:
-            # SOURCE-FIRST — see render_node_answer(). Leading with the
-            # enricher's `voice_answer` summarises only the TOP of a node and
-            # silently drops any fact below it, while retrieval can match a
-            # fact anywhere in the node. This path had kept the old precedence
-            # after the fix was applied to compact_tree and the realtime bridge.
-            # No max_chars here on purpose — _trim_kb_body below owns the budget
-            # AND appends the truncation ellipsis. Pre-truncating in the renderer
-            # loses that marker, leaving the model with a silently-cut fact.
-            raw = render_node_answer(h)
-            body = fit_kb_body(raw, h, _KB_CHUNK_CHARS)
-            if not body:
-                continue
-            heading = h.get("heading") or ""
-            # Drop a retrieved node shaped like an instruction to the model
-            # (poisoned KB entry) BEFORE it becomes an authoritative tool result.
-            if _kb_entry_is_injection(heading, body):
-                dropped_injection += 1
-                continue
-            entry = f"- {heading}: {body}"
-            if used + len(entry) > _KB_TOTAL_CHARS and used > 0:
-                break
-            lines.append(entry)
-            used += len(entry)
-        if dropped_injection:
-            logger.warning(
-                "KB_TOOL call=%s dropped %d knowledge node(s) flagged as injection",
-                session.call_id[:8], dropped_injection,
-            )
-        if not lines:
+        evidence = prepare_knowledge_evidence(hits, q)
+        session._knowledge_evidence = evidence
+        if evidence["status"] == "no_match":
             return NO_KB_FACTS
-        # Delimit what survived. The framing sentence lives in the system
-        # addendum (trusted channel), so the result carries the fence only.
-        #
-        # KNOWLEDGE_PRICE_GUARD rides WITH the facts, adjacent to them — the
-        # inject path does the same (turn_streamer / session_inject). Its
-        # placement is empirically load-bearing, not decorative: in the
-        # 2026-07-02 offline A/B, llama-3.3-70b invented a price on 11 of 12
-        # probes without this line seated next to the knowledge block and 0 of
-        # 12 with it.
-        #
-        # It was missing from THIS path entirely, which is the worst place to
-        # omit it: tool mode is enabled for the groq provider family, so the
-        # exact model the guard was proven necessary for is the one answering
-        # here. A caller asking for a price not covered by the returned snippet
-        # would otherwise be quoted an invented number.
+        if evidence["status"] == "weak_match":
+            return "No confirmed answer. These sections may not answer the question.\n" + fence_kb_result(evidence["text"], with_note=False)
+        session._knowledge_grounding = [p["text"] for p in evidence["passages"]]
         from app.services.scripts.prompts.guardrails import KNOWLEDGE_PRICE_GUARD
 
         return (
-            f"{fence_kb_result(chr(10).join(lines), with_note=False)}\n"
+            f"{fence_kb_result(evidence["text"], with_note=False)}\n"
             f"{KNOWLEDGE_PRICE_GUARD}"
         )
     except Exception as exc:
         logger.warning("KB_TOOL call=%s error: %s",
                        getattr(session, "call_id", "?")[:8], exc)
-        return NO_KB_FACTS
+        return KB_UNAVAILABLE

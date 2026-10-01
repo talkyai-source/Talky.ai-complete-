@@ -119,28 +119,13 @@ def strip_and_flag(session, text: str) -> str:
 # SPECIFIC TURN must name which turn, or recency makes it describe every turn.
 CALL_CONTROL_RULES = f"""\
 ## ENDING THE CALL
-- Call genuinely over — a clear goodbye, a WRONG BUSINESS (they've never heard
-  of the company, it's a private residence, or plainly not a business line), or
-  a voicemail/answering machine — say at most ONE short warm closing line. If an
-  `end_call` tool is offered this turn, call it; otherwise end that reply with
-  the exact token {END_CALL_TOKEN} . The system hangs up.
-- WRONG PERSON is NOT this: if the business is right but your contact isn't
-  here / isn't available / "no one by that name", do NOT end — that's a pivot,
-  see WRONG PERSON / GATEKEEPER below. Only a wrong DESTINATION ends the call.
-- A tool result or the token is required; words like "hangs up" do nothing.
-- Voicemail/answering machine: reply with {END_CALL_TOKEN} alone — we call
-  back another time instead of leaving a recording.
-
-## HOW YOU SELL
-- ONCE they have spoken back, your first real reply introduces you and the
-  company in one short line, then asks ONE question. If you have already
-  introduced yourself, never do it again — LIVE STATE tells you which.
-  A few words is usually the whole turn — earn the next line by letting
-  them talk.
-- Discover before you pitch: learn how they handle it today before mentioning
-  what we offer.
-- Drive to ONE concrete next step — their email for a sample, or a callback
-  at a time THEY pick — and confirm it back before closing.
+- When the caller clearly stops, says goodbye, or confirms a wrong destination,
+  give one brief closing line. Use `end_call` when offered; otherwise finish
+  with {END_CALL_TOKEN}. Words like "hangs up" do not end a call.
+- VOICEMAIL or an answering machine: use `end_call` or {END_CALL_TOKEN} alone;
+  do not leave a message. Do not promise a later callback.
+- WRONG PERSON at the right business is a redirect, not a wrong destination.
+  Not knowing your company or not being its customer is not a wrong number.
 """
 
 

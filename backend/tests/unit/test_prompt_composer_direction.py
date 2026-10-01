@@ -136,8 +136,9 @@ class TestPerPersonaDirectionalOpeners:
         assert "Alex from Acme" in flat
         # The reason is the disarming move; it must be instructed.
         assert "reason" in flat.lower()
-        # A rejected-time callback is still the right recovery.
-        assert "when's better" in flat
+        # A callback request may be captured, but it is not scheduling.
+        assert "preferred callback time" in flat
+        assert "confirm scheduling only after the runtime succeeds" in flat
 
     def test_the_worst_measured_opener_is_absent_from_the_whole_prompt(self):
         """THIS TEST USED TO ASSERT THE OPPOSITE.
@@ -244,6 +245,7 @@ class TestFewShotAndFillers:
             or '"got it"' in out
             or "let me see" in out
             or '"hmm"' in out
+            or "Sound warm and natural, using contractions" in out
         )
 
     @pytest.mark.parametrize("persona,slots", [

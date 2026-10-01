@@ -58,7 +58,7 @@ def test_the_object_shapes_are_declared_for_exactly_those_keys():
 
 def test_action_items_and_objections_are_the_two_known_object_lists():
     """Pins the specific keys, so removing one from the prompt fails loudly."""
-    assert _keys_the_prompt_shows_as_object_lists() == {"action_items", "objections"}
+    assert _keys_the_prompt_shows_as_object_lists() == {"action_items", "objections", "business_details"}
 
 
 def test_scalar_keys_stay_strings_and_plain_lists_stay_string_arrays():

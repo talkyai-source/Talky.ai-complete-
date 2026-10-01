@@ -246,12 +246,12 @@ async def test_malformed_permission_result_is_stable_and_fails_closed(monkeypatc
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("tool_name", ["send_email", "send_sms", "report_issue"])
-async def test_actions_without_canonical_permission_are_explicitly_unsupported(
+async def test_connector_configuration_is_not_communication_authority(
     monkeypatch,
     tool_name,
 ):
     calls = _install_tool(monkeypatch, tool_name)
-    _permissions(monkeypatch, {Permission.PLATFORM_ADMIN})
+    _permissions(monkeypatch, {Permission.CONNECTORS_UPDATE})
 
     result = await dispatch_module.dispatch_tool(
         tool_name,
@@ -262,7 +262,7 @@ async def test_actions_without_canonical_permission_are_explicitly_unsupported(
         actor_user_id=ACTOR_ID,
     )
 
-    assert result["error"] == "tool_authorization_policy_unavailable"
+    assert result["error"] == "permission_denied"
     assert calls == []
 
 
@@ -365,7 +365,7 @@ async def test_actor_bound_server_apply_with_current_grant_can_confirm(monkeypat
 
 
 @pytest.mark.asyncio
-async def test_non_exposed_nested_action_plan_stays_default_denied(monkeypatch):
+async def test_empty_action_plan_is_rejected(monkeypatch):
     calls = _install_tool(monkeypatch, "execute_action_plan")
     _permissions(monkeypatch, {Permission.PLATFORM_ADMIN})
 
@@ -378,7 +378,7 @@ async def test_non_exposed_nested_action_plan_stays_default_denied(monkeypatch):
         actor_user_id=ACTOR_ID,
     )
 
-    assert result["error"] == "tool_authorization_policy_unavailable"
+    assert result["error"] == "invalid_plan"
     assert calls == []
 
 
@@ -392,5 +392,60 @@ def test_every_llm_exposed_action_has_an_explicit_authorization_policy():
 
     assert exposed_actions <= set(dispatch_module.ACTION_AUTHORIZATION_POLICIES)
     assert dispatch_module.ACTION_AUTHORIZATION_POLICIES["update_knowledge_node"].delegated
-    assert not dispatch_module.ACTION_AUTHORIZATION_POLICIES["send_email"].supported
+    assert dispatch_module.ACTION_AUTHORIZATION_POLICIES["send_email"].required_permissions == (Permission.EMAIL_SEND,)
     assert proposals.PROPOSAL_TOOLS <= set(ACTION_TOOLS)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tool_name,permission", [
+    ("send_email", Permission.EMAIL_SEND), ("send_sms", Permission.SMS_SEND),
+    ("report_issue", Permission.SUPPORT_REPORT), ("book_meeting", Permission.CALENDAR_MANAGE),
+    ("update_meeting", Permission.CALENDAR_MANAGE), ("cancel_meeting", Permission.CALENDAR_MANAGE),
+])
+async def test_execution_tools_preview_with_narrow_grant_and_reject_model_confirmation(monkeypatch, tool_name, permission):
+    calls = _install_tool(monkeypatch, tool_name, {"preview": True, "changes": [{"field": "test"}]})
+    _permissions(monkeypatch, {permission})
+    preview = await dispatch_module.dispatch_tool(tool_name, TENANT_ID, _db(), None, {"confirm": False}, actor_user_id=ACTOR_ID)
+    forged = await dispatch_module.dispatch_tool(tool_name, TENANT_ID, _db(), None,
+        {"confirm": True, "trusted_proposal_apply": True, "proposal_id": "fake"}, actor_user_id=ACTOR_ID)
+    assert preview["preview"] is True
+    assert forged["error"] == "proposal_confirmation_required"
+    assert len(calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_workflow_cannot_launder_send_permission_through_campaign_permission(monkeypatch):
+    calls = _install_tool(monkeypatch, "execute_action_plan")
+    _permissions(monkeypatch, {Permission.CAMPAIGNS_UPDATE})
+    result = await dispatch_module.dispatch_tool("execute_action_plan", TENANT_ID, _db(), None,
+        {"actions": [{"type": "start_campaign"}, {"type": "send_email"}], "confirm": False}, actor_user_id=ACTOR_ID)
+    assert result["required"] == "email:send"
+    assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_reminder_needs_permission_for_its_delivery_channel(monkeypatch):
+    calls = _install_tool(monkeypatch, "schedule_reminder")
+    _permissions(monkeypatch, {Permission.REMINDERS_MANAGE, Permission.SMS_SEND})
+    result = await dispatch_module.dispatch_tool("schedule_reminder", TENANT_ID, _db(), None,
+        {"reminder_type": "email"}, actor_user_id=ACTOR_ID)
+    assert result["required"] == "email:send"
+    assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_trusted_external_action_uses_server_proposal_as_durable_key(monkeypatch):
+    from app.services.action_execution import DurableActionExecutor
+    captured = {}
+    async def execute(_self, **kwargs):
+        captured.update(kwargs)
+        return await kwargs["executor"]()
+    monkeypatch.setattr(DurableActionExecutor, "execute", execute)
+    calls = _install_tool(monkeypatch, "send_email")
+    _permissions(monkeypatch, {Permission.EMAIL_SEND})
+    result = await dispatch_module.dispatch_tool("send_email", TENANT_ID, _db(), None,
+        {"confirm": True, "idempotency_key": "forged"}, actor_user_id=ACTOR_ID,
+        trusted_proposal_apply=True, proposal_id="prop_server")
+    assert result["success"]
+    assert captured["idempotency_key"] == f"assistant:{ACTOR_ID}:prop_server"
+    assert "idempotency_key" not in calls[0]

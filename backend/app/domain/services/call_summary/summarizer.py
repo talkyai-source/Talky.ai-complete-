@@ -55,7 +55,8 @@ The object MUST contain exactly these keys (and no others):
   "sentiment": "<positive|neutral|negative + one-word or short note>",
   "next_step": "<single concrete next action>",
   "follow_up_tips": ["<actionable tip to follow up effectively — what to say or send, the best timing/channel, which objection to address, how to move them forward>"],
-  "notable_quotes": ["<short verbatim line(s) that best capture the call>"]
+  "notable_quotes": ["<short verbatim line(s) that best capture the call>"],
+  "business_details": [{"field_key": "<identified_need|current_provider|preferred_channel|callback_request|next_owner|next_action|referral>", "value": "<exact caller wording>", "source_quote": "<verbatim caller quote supporting this value>"}]
 }
 
 Rules:
@@ -65,6 +66,7 @@ Rules:
 - qualification_status is qualified only when a relevant need/fit and a concrete next step are supported by the transcript; nurture means possible need but later timing, missing information, or another decision-maker; unqualified means a clearly unsuitable fit or no relevant need; otherwise use unknown.
 - Never infer authority, need, timing, or budget from tone, politeness, industry stereotypes, or the agent's pitch. Use unknown when the prospect did not reliably confirm it.
 - A FACTS block precedes the transcript. Treat it as ground truth, not the transcript's own wording: only say an action was booked, scheduled, confirmed, or sent if the FACTS block lists it as executed — otherwise say it was requested or discussed, never that it is done. Only state a phone number or email address as a plain fact if the FACTS block lists it as caller-confirmed; any other contact detail mentioned in the transcript must be written with "(unconfirmed)" after it.
+- business_details contains only what the CALLER said; never the agent's pitch. Use the last correction or withdrawal. Quote the original callback wording; do not resolve ambiguous dates or claim scheduling. Keep another person's contact details in referral, never in the caller's details. Omit missing fields. A business detail is not a readback-confirmed contact.
 - Keep each string tight (no waffle, no filler).
 - owner in action_items must be one of: agent, caller, user.
 - Respond ONLY with the JSON object. Any extra text will break parsing."""
@@ -90,6 +92,7 @@ EMPTY_SUMMARY: dict = {
     "next_step": "",
     "follow_up_tips": [],
     "notable_quotes": [],
+    "business_details": [],
 }
 
 _SCHEMA_KEYS = set(EMPTY_SUMMARY.keys())
@@ -110,6 +113,16 @@ _SCHEMA_KEYS = set(EMPTY_SUMMARY.keys())
 # The shapes below are the prompt's, spelled out. test_call_summary_schema.py
 # asserts the two stay in step, which is what "cannot drift" needed to mean.
 _OBJECT_LIST_ITEMS = {
+    "business_details": {
+        "type": "object",
+        "properties": {
+            "field_key": {"type": "string", "enum": ["identified_need", "current_provider", "preferred_channel", "callback_request", "next_owner", "next_action", "referral"]},
+            "value": {"type": "string"},
+            "source_quote": {"type": "string"},
+        },
+        "required": ["field_key", "value", "source_quote"],
+        "additionalProperties": False,
+    },
     "objections": {
         "type": "object",
         "properties": {
@@ -145,7 +158,7 @@ _SUMMARY_SCHEMA_PROPERTIES = {
 }
 
 # Keys whose values must be lists (coerce scalars → single-element list)
-_LIST_KEYS = {"key_points", "objections", "commitments", "action_items", "follow_up_tips", "notable_quotes"}
+_LIST_KEYS = {"key_points", "objections", "commitments", "action_items", "follow_up_tips", "notable_quotes", "business_details"}
 
 # Output budget. This was a flat 1500 tokens however long the call was, and on
 # a 243-second call with 353 transcript rows the model ran out mid-document:

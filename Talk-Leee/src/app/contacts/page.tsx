@@ -12,6 +12,7 @@ import { extendedApi, BulkImportResponse } from "@/lib/extended-api";
 import { sharedHttpClient } from "@/lib/api";
 import { parseContactsCsv } from "@/lib/contact-csv";
 import { contactPayload, EMPTY_CONTACT_FORM, type ContactFormState } from "@/lib/contact-form";
+import { ContactCapturedDetails } from "@/components/calls/lead-details-panel";
 import { ContactLists } from "@/components/campaigns/contact-lists";
 import { CsvImportMapper } from "@/components/contacts/csv-import-mapper";
 import {
@@ -1194,6 +1195,7 @@ export default function ContactsPage() {
                                                 <div className="min-w-0">
                                                     <p className="break-words text-sm font-semibold tabular-nums text-foreground">{contact.phone_number}</p>
                                                      <p className="mt-1 truncate text-sm text-muted-foreground">{displayName}</p>
+                                                     <ContactCapturedDetails leadId={contact.id} latestNote={contact.latest_analysis_note} />
                                                      <p className="truncate text-xs text-muted-foreground">
                                                          {[contact.job_title, contact.company_name].filter(Boolean).join(" · ") || contact.email || "No company or email"}
                                                      </p>
@@ -1260,6 +1262,7 @@ export default function ContactsPage() {
                                                          : contact.full_name?.trim() || "Name unavailable"}</p>
                                                      <p className="whitespace-nowrap text-xs tabular-nums text-muted-foreground">{contact.phone_number}</p>
                                                      {contact.email ? <p className="max-w-56 truncate text-xs text-muted-foreground">{contact.email}</p> : null}
+                                                     <ContactCapturedDetails leadId={contact.id} latestNote={contact.latest_analysis_note} />
                                                  </td>
                                                  <td className="px-4 py-3 text-sm text-muted-foreground">
                                                      <p>{contact.company_name || "--"}</p>

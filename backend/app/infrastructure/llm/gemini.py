@@ -13,6 +13,7 @@ Reference:
 - https://googleapis.github.io/python-genai/
 """
 import os
+from contextlib import aclosing
 import asyncio
 import logging
 from typing import AsyncIterator, List, Optional
@@ -20,6 +21,10 @@ from typing import AsyncIterator, List, Optional
 from app.domain.interfaces.llm_provider import LLMProvider
 from app.domain.models.conversation import Message, MessageRole
 from app.utils.resilience import CircuitBreaker, CircuitOpenError
+
+from app.infrastructure.llm.streaming import (
+    stream_with_timeout, close_stream, execute_tool_call,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +48,7 @@ _THINKING_RESERVE_TOKENS = int(os.getenv("GEMINI_THINKING_RESERVE_TOKENS", "1024
 
 # Imported for the base class below, aliased so the name `LLMTimeoutError`
 # still refers to Gemini's own subclass throughout this module.
-from app.infrastructure.llm.groq import (  # noqa: E402
+from app.infrastructure.llm.streaming import (  # noqa: E402
     LLMTimeoutError as _GroqLLMTimeoutError,
 )
 
@@ -239,7 +244,7 @@ class GeminiLLMProvider(LLMProvider):
         if cls._is_gemini_3(model):
             # thinking_budget is ignored on 3.x — map intent to thinking_level.
             # 0 / unset -> "minimal" (lowest latency, what voice wants).
-            level = "low" if (thinking_budget or 0) > 0 else "minimal"
+            level = "low" if (thinking_budget or 0) > 0 or (model or "").lower().startswith("gemini-3.8") else "minimal"
             try:
                 return genai_types.ThinkingConfig(thinking_level=level)
             except Exception:  # noqa: BLE001 — SDK predates thinking_level
@@ -400,14 +405,17 @@ class GeminiLLMProvider(LLMProvider):
                         config=gen_config,
                     )
 
-                    async for chunk in stream:
-                        # chunk.text may be None for safety-flag chunks or
-                        # response-metadata chunks that carry no content.
-                        text = getattr(chunk, "text", None)
-                        if text:
-                            tokens_yielded += 1
-                            yield text
+                    try:
+                        async for chunk in stream:
+                            # chunk.text may be None for safety-flag chunks or
+                            # response-metadata chunks that carry no content.
+                            text = getattr(chunk, "text", None)
+                            if text:
+                                tokens_yielded += 1
+                                yield text
 
+                    finally:
+                        await close_stream(stream)
                     logger.debug(
                         "Gemini stream completed, yielded %d chunks", tokens_yielded
                     )
@@ -469,11 +477,12 @@ class GeminiLLMProvider(LLMProvider):
         With no tools/runner this degrades to the normal timeout-guarded stream.
         """
         if not tools or tool_runner is None:
-            async for tok in self.stream_chat_with_timeout(
+            async with aclosing(self.stream_chat_with_timeout(
                 messages, timeout_seconds=timeout_seconds, system_prompt=system_prompt,
                 temperature=temperature, max_tokens=max_tokens, **kwargs,
-            ):
-                yield tok
+            )) as stream:
+                async for tok in stream:
+                    yield tok
             return
 
         if not self._client:
@@ -525,77 +534,72 @@ class GeminiLLMProvider(LLMProvider):
             try:
                 cand = (chunk.candidates or [None])[0]
                 parts = getattr(getattr(cand, "content", None), "parts", None) or []
-                txt = "".join(p.text for p in parts if getattr(p, "text", None))
+                txt = "".join(p.text for p in parts if getattr(p, "text", None) and not getattr(p, "thought", False))
                 return txt or None
             except Exception:
                 return None
 
+        model_parts = []
+
         async def _stream(cfg, fcalls_out):
-            t0 = asyncio.get_event_loop().time()
-            ntok = 0
-            async with self._circuit:
+            async def chunks():
                 stream = await self._client.aio.models.generate_content_stream(
                     model=model, contents=contents, config=cfg)
-                agen = stream.__aiter__()
-                while True:
-                    remaining = timeout_seconds - (asyncio.get_event_loop().time() - t0)
-                    if remaining <= 0:
-                        if ntok == 0:
-                            raise LLMTimeoutError(
-                                f"Gemini tool turn timed out after {timeout_seconds}s")
-                        break
-                    tt = remaining if ntok == 0 else min(remaining, 2.0)
-                    try:
-                        chunk = await asyncio.wait_for(agen.__anext__(), timeout=tt)
-                    except StopAsyncIteration:
-                        break
-                    except asyncio.TimeoutError:
-                        if ntok == 0:
-                            raise LLMTimeoutError(
-                                f"Gemini tool turn timed out after {timeout_seconds}s")
-                        break
+                try:
+                    async for chunk in stream:
+                        yield chunk
+                finally:
+                    await close_stream(stream)
+
+            async with self._circuit, aclosing(stream_with_timeout(chunks(), timeout_seconds, timeout_error=LLMTimeoutError)) as stream:
+                async for chunk in stream:
+                    candidate = (getattr(chunk, "candidates", None) or [None])[0]
+                    parts = getattr(getattr(candidate, "content", None), "parts", None) or []
+                    # Keep provider-returned parts intact (including thought signatures).
+                    # Rebuilding Part(function_call=...) silently discards their metadata.
+                    model_parts.extend(parts)
                     txt = _chunk_text(chunk)
                     if txt:
-                        ntok += 1
                         yield txt
-                    try:
-                        for fc in (chunk.function_calls or []):
-                            if fc and fc.name:
-                                fcalls_out.append(fc)
-                    except Exception:
-                        pass
+                    for fc in (getattr(chunk, "function_calls", None) or []):
+                        if fc and fc.name:
+                            fcalls_out.append(fc)
 
         # Round 0 — offer the tool; the model answers directly or calls it.
         round0_cfg = genai_types.GenerateContentConfig(tools=gemini_tools, **base_cfg)
         fcalls: list = []
         produced = False
         round_zero_tokens: list[str] = []
-        async for tok in _stream(round0_cfg, fcalls):
-            produced = True
-            if require_tool_result_before_content:
-                round_zero_tokens.append(tok)
-            else:
-                yield tok
+        async with aclosing(_stream(round0_cfg, fcalls)) as stream:
+            async for tok in stream:
+                produced = True
+                if require_tool_result_before_content:
+                    round_zero_tokens.append(tok)
+                else:
+                    yield tok
 
         if not fcalls:
             if require_tool_result_before_content and produced:
                 yield "".join(round_zero_tokens)
             return
-        if produced and not require_tool_result_before_content:
-            return
 
         # Round 1 — execute the tool(s), feed responses back (role="user", as the
         # SDK's own auto-FC path does), stream the grounded answer with no tools.
-        model_parts = []
         resp_parts = []
+        tool_results = {}
         for fc in fcalls:
-            model_parts.append(genai_types.Part(function_call=fc))
+            if not any(getattr(p, "function_call", None) == fc for p in model_parts):
+                model_parts.append(genai_types.Part(function_call=fc))
             try:
                 args = dict(fc.args) if fc.args else {}
             except Exception:
                 args = {}
             try:
-                result = await tool_runner(fc.name, args)
+                import json
+                key = (fc.name, json.dumps(args, sort_keys=True))
+                if key not in tool_results:
+                    tool_results[key] = await execute_tool_call({"name": fc.name, "arguments": args}, tools, tool_runner)
+                result = tool_results[key]
             except Exception as exc:  # never let a tool failure stall the turn
                 logger.warning("gemini tool_runner failed name=%s: %s", fc.name, exc)
                 result = "No specific information found."
@@ -609,127 +613,23 @@ class GeminiLLMProvider(LLMProvider):
         round1_cfg = genai_types.GenerateContentConfig(**base_cfg)  # no tools
         if require_tool_result_before_content:
             grounded_tokens: list[str] = []
-            async for tok in _stream(round1_cfg, []):
-                grounded_tokens.append(tok)
+            async with aclosing(_stream(round1_cfg, [])) as stream:
+                async for tok in stream:
+                    grounded_tokens.append(tok)
             if grounded_tokens:
                 yield "".join(grounded_tokens)
         else:
-            async for tok in _stream(round1_cfg, []):
-                yield tok
+            async with aclosing(_stream(round1_cfg, [])) as stream:
+                async for tok in stream:
+                    yield tok
 
-    async def stream_chat_with_timeout(
-        self,
-        messages: List[Message],
-        timeout_seconds: float = DEFAULT_LLM_TIMEOUT,
-        **kwargs,
-    ) -> AsyncIterator[str]:
-        """
-        Stream with a hard deadline on provider wait time + stall detection.
-
-        Mirrors GroqLLMProvider.stream_chat_with_timeout so the voice pipeline
-        can call either provider through the same interface. Logic is
-        provider-agnostic — wraps `stream_chat` in per-token asyncio timeouts.
-
-        ``timeout_seconds`` budgets ONLY the time spent *awaiting Gemini*, not
-        wall-clock from stream start. This matters because the voice pipeline
-        is a pull consumer: ``turn_streamer`` awaits ``synthesize_and_send_audio``
-        — which paces playback in REAL TIME — between token pulls. A wall-clock
-        budget therefore charged the caller's own audio playback against the
-        LLM's allowance, so a healthy multi-sentence reply hit "remaining <= 0"
-        partway through and took the ``break`` below: the reply was truncated
-        mid-thought, logged only as "treating as stream end", with no error and
-        no fallback line. The caller simply heard the agent stop talking.
-
-        Telephony sessions allow up to 5 sentences per turn
-        (``telephony_session_config``), each paced at real-time speech rate, so
-        several seconds of playback per turn were being deducted from a 10s
-        budget. Groq already accounted for this correctly; Gemini and Cerebras
-        did not. Fixed 2026-08-06.
-
-        Raises:
-            LLMTimeoutError: no token arrived before the TTFT deadline.
-        """
-        _INTERTOKEN_TIMEOUT = 2.0
-
-        # Time spent INSIDE the awaits that fetch the next token from Gemini.
-        # The gap between yielding a token and being asked for the next one
-        # (consumer-side TTS/playback) is NOT added here, so downstream pacing
-        # can never consume the LLM budget.
-        gemini_wait_accumulated = 0.0
-        t_first_token_start = asyncio.get_event_loop().time()
-        tokens_received = 0
-        gen = self.stream_chat(messages, **kwargs)
-        try:
-            while True:
-                remaining = timeout_seconds - gemini_wait_accumulated
-                if remaining <= 0:
-                    if tokens_received > 0:
-                        logger.warning(
-                            "Gemini-wait budget expired mid-stream "
-                            "(limit=%.1fs, tokens=%d) — treating as stream end",
-                            timeout_seconds, tokens_received,
-                        )
-                        break
-                    logger.error(
-                        "Gemini deadline exceeded before first token (limit=%.1fs)",
-                        timeout_seconds,
-                    )
-                    raise LLMTimeoutError(
-                        f"LLM response timed out after {timeout_seconds}s"
-                    )
-                token_timeout = (
-                    remaining if tokens_received == 0
-                    else min(remaining, _INTERTOKEN_TIMEOUT)
-                )
-                _wait_t0 = asyncio.get_event_loop().time()
-                try:
-                    token = await asyncio.wait_for(gen.__anext__(), timeout=token_timeout)
-                except StopAsyncIteration:
-                    break
-                except asyncio.TimeoutError:
-                    # Only the Gemini wait counts — a full `token_timeout` elapsed.
-                    gemini_wait_accumulated += (
-                        asyncio.get_event_loop().time() - _wait_t0
-                    )
-                    if tokens_received > 0:
-                        logger.warning(
-                            "Gemini inter-token stall (gemini_wait=%.2fs, tokens=%d) "
-                            "— treating as stream end",
-                            gemini_wait_accumulated, tokens_received,
-                        )
-                        break
-                    logger.error(
-                        "Gemini timeout waiting for first token after %.2fs "
-                        "(limit=%.1fs)",
-                        gemini_wait_accumulated, timeout_seconds,
-                    )
-                    raise LLMTimeoutError(
-                        f"LLM response timed out after {timeout_seconds}s"
-                    )
-                # Success: charge ONLY the just-measured Gemini-wait span, then
-                # yield. Whatever time the consumer spends before pulling again
-                # lands OUTSIDE this measured span.
-                gemini_wait_accumulated += asyncio.get_event_loop().time() - _wait_t0
-                if tokens_received == 0:
-                    ttft_ms = (
-                        asyncio.get_event_loop().time() - t_first_token_start
-                    ) * 1000
-                    if ttft_ms > 800:
-                        logger.warning(
-                            "High Gemini TTFT: %.0fms — may indicate cold start "
-                            "or rate limiting.", ttft_ms,
-                        )
-                tokens_received += 1
+    async def stream_chat_with_timeout(self, messages, timeout_seconds=DEFAULT_LLM_TIMEOUT, **kwargs):
+        """Shared provider-wait budget; playback never consumes this allowance."""
+        async with aclosing(stream_with_timeout(
+            self.stream_chat(messages, **kwargs), timeout_seconds, timeout_error=LLMTimeoutError
+        )) as stream:
+            async for token in stream:
                 yield token
-        finally:
-            # Ensure the underlying stream generator is closed so the HTTP
-            # connection is released even if the caller stops iterating early.
-            aclose = getattr(gen, "aclose", None)
-            if aclose is not None:
-                try:
-                    await aclose()
-                except Exception:  # noqa: BLE001
-                    pass
 
     # ------------------------------------------------------------------
     # Identity
@@ -738,6 +638,10 @@ class GeminiLLMProvider(LLMProvider):
     @property
     def name(self) -> str:
         return "gemini"
+
+    @property
+    def supports_tools(self) -> bool:
+        return True
 
     @property
     def supports_streaming(self) -> bool:

@@ -3,7 +3,8 @@ Meeting management tools for the assistant agent.
 """
 import logging
 from typing import Optional, List, Dict, Any
-from datetime import datetime
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from pydantic import BaseModel, Field
 from app.core.postgres_adapter import Client
 
@@ -14,17 +15,19 @@ class CheckAvailabilityInput(BaseModel):
     """Input for check_availability tool"""
     date: str = Field(..., description="Date in YYYY-MM-DD format")
     duration_minutes: int = Field(30, description="Meeting duration in minutes")
+    timezone_name: str = Field(..., description="Caller-provided IANA timezone, e.g. Asia/Karachi")
 
 
 class BookMeetingInput(BaseModel):
     """Input for book_meeting tool"""
     title: str = Field(..., description="Meeting title")
-    start_time: str = Field(..., description="Start time in ISO format (e.g., 2026-01-08T10:00:00)")
+    start_time: str = Field(..., description="Start time in ISO format with explicit UTC offset")
     duration_minutes: int = Field(30, description="Duration in minutes")
     attendees: List[str] = Field(default_factory=list, description="Attendee email addresses")
     lead_id: Optional[str] = Field(None, description="Lead ID if meeting is with a lead")
     description: Optional[str] = Field(None, description="Meeting description")
     add_video_conference: bool = Field(True, description="Add Google Meet or Teams link")
+    confirm: bool = Field(False, description="Leave false for preview; the user's Apply button confirms.")
 
 
 class UpdateMeetingInput(BaseModel):
@@ -32,19 +35,41 @@ class UpdateMeetingInput(BaseModel):
     meeting_id: str = Field(..., description="Meeting ID to update")
     new_time: Optional[str] = Field(None, description="New start time in ISO format")
     new_title: Optional[str] = Field(None, description="New meeting title")
+    confirm: bool = Field(False, description="Preview first; Apply confirms.")
 
 
 class CancelMeetingInput(BaseModel):
     """Input for cancel_meeting tool"""
     meeting_id: str = Field(..., description="Meeting ID to cancel")
     reason: Optional[str] = Field(None, description="Cancellation reason")
+    confirm: bool = Field(False, description="Preview first; Apply confirms.")
+
+
+def _future_time(value: str) -> datetime:
+    result = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if result.tzinfo is None or result.utcoffset() is None:
+        raise ValueError("Specify the date, time and UTC offset; do not assume a timezone.")
+    if result <= datetime.now(timezone.utc):
+        raise ValueError("The meeting time must be in the future.")
+    return result
+
+
+def _meeting(tenant_id, db_client, meeting_id):
+    response = db_client.table("meetings").select("id,title,start_time,status").eq(
+        "tenant_id", tenant_id
+    ).eq("id", meeting_id).single().execute()
+    if not response.data:
+        raise ValueError("Meeting not found in this account.")
+    return response.data
 
 
 async def check_availability(
     tenant_id: str,
     db_client: Client,
-    date_str: str,
-    duration_minutes: int = 30
+    date_str: Optional[str] = None,
+    duration_minutes: int = 30,
+    timezone_name: Optional[str] = None,
+    date: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Check available meeting slots for a given date.
@@ -54,9 +79,15 @@ async def check_availability(
     try:
         from app.services.meeting_service import get_meeting_service, CalendarNotConnectedError
 
+        date_str = date or date_str
+        if not timezone_name:
+            raise ValueError("Provide the timezone for availability; do not assume UTC.")
+        zone = ZoneInfo(timezone_name)
+        if not 1 <= duration_minutes <= 480:
+            raise ValueError("Duration must be between 1 and 480 minutes.")
         target_date = datetime.strptime(date_str, "%Y-%m-%d").date()
-        start_time = datetime.combine(target_date, datetime.min.time().replace(hour=9))  # 9 AM
-        end_time = datetime.combine(target_date, datetime.min.time().replace(hour=18))   # 6 PM
+        start_time = datetime.combine(target_date, datetime.min.time().replace(hour=9), tzinfo=zone)
+        end_time = datetime.combine(target_date, datetime.min.time().replace(hour=18), tzinfo=zone)
 
         service = get_meeting_service(db_client)
 
@@ -91,7 +122,8 @@ async def book_meeting(
     lead_id: Optional[str] = None,
     description: Optional[str] = None,
     add_video_conference: bool = True,
-    conversation_id: Optional[str] = None
+    conversation_id: Optional[str] = None,
+    confirm: bool = False,
 ) -> Dict[str, Any]:
     """
     Book a meeting via connected calendar.
@@ -103,7 +135,16 @@ async def book_meeting(
         from app.services.meeting_service import get_meeting_service, CalendarNotConnectedError
 
         # Parse start time
-        start_dt = datetime.fromisoformat(start_time.replace("Z", "+00:00"))
+        start_dt = _future_time(start_time)
+        if not title.strip() or not 1 <= duration_minutes <= 480:
+            raise ValueError("Provide a title and a duration between 1 and 480 minutes.")
+        if not confirm:
+            return {"preview": True, "changes": [
+                {"field": "Title", "before": None, "after": title},
+                {"field": "Start", "before": None, "after": start_dt.isoformat()},
+                {"field": "Duration", "before": None, "after": f"{duration_minutes} minutes"},
+                {"field": "Attendees", "before": None, "after": ", ".join(attendees or [])},
+            ], "note": "No calendar event has been created."}
 
         service = get_meeting_service(db_client)
 
@@ -134,7 +175,8 @@ async def update_meeting_tool(
     meeting_id: str,
     new_time: Optional[str] = None,
     new_title: Optional[str] = None,
-    conversation_id: Optional[str] = None
+    conversation_id: Optional[str] = None,
+    confirm: bool = False,
 ) -> Dict[str, Any]:
     """
     Update/reschedule an existing meeting.
@@ -146,7 +188,17 @@ async def update_meeting_tool(
 
         new_start_time = None
         if new_time:
-            new_start_time = datetime.fromisoformat(new_time.replace("Z", "+00:00"))
+            new_start_time = _future_time(new_time)
+        if not new_time and not new_title:
+            raise ValueError("Provide a new time or title.")
+        current = _meeting(tenant_id, db_client, meeting_id)
+        if not confirm:
+            changes = []
+            if new_time:
+                changes.append({"field": "Start", "before": current.get("start_time"), "after": new_start_time.isoformat()})
+            if new_title:
+                changes.append({"field": "Title", "before": current.get("title"), "after": new_title})
+            return {"preview": True, "changes": changes, "note": "Meeting not changed yet."}
 
         result = await service.update_meeting(
             tenant_id=tenant_id,
@@ -169,13 +221,18 @@ async def cancel_meeting_tool(
     db_client: Client,
     meeting_id: str,
     reason: Optional[str] = None,
-    conversation_id: Optional[str] = None
+    conversation_id: Optional[str] = None,
+    confirm: bool = False,
 ) -> Dict[str, Any]:
     """
     Cancel a scheduled meeting.
     """
     try:
         from app.services.meeting_service import get_meeting_service
+
+        current = _meeting(tenant_id, db_client, meeting_id)
+        if not confirm:
+            return {"preview": True, "changes": [{"field": "Meeting", "before": current.get("title"), "after": "Cancelled"}], "note": "Meeting not cancelled yet."}
 
         service = get_meeting_service(db_client)
 

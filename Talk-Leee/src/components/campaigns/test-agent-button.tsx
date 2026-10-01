@@ -84,6 +84,7 @@ export function TestAgentButton({
     const jitterRef = useRef<ArrayBuffer[]>([]);
     const playbackStartedRef = useRef<boolean>(false);
     const awaitingPlaybackRef = useRef<boolean>(false);
+    const playbackUtteranceRef = useRef<string | undefined>(undefined);
     const dropAudioRef = useRef<boolean>(false);
     const genRef = useRef<number>(0);
     const JITTER_MS = 40;
@@ -95,16 +96,16 @@ export function TestAgentButton({
     }, []);
 
     // ── Playback ────────────────────────────────────────────────────────
-    const queueAudioChunk = useCallback((buf: ArrayBuffer, rate: number) => {
+    const queueAudioChunk = useCallback((buf: ArrayBuffer, rate: number, flush = false) => {
         const ctx = playCtxRef.current;
         if (!ctx) return;
-        if (new Int16Array(buf).length === 0) return;
-        jitterRef.current.push(buf);
+        if (new Int16Array(buf).length === 0 && !flush) return;
+        if (buf.byteLength) jitterRef.current.push(buf);
 
         const totalSamples = jitterRef.current.reduce((s, b) => s + new Int16Array(b).length, 0);
         const bufferedMs = (totalSamples / rate) * 1000;
         if (!playbackStartedRef.current) {
-            if (bufferedMs < JITTER_MS) return;
+            if (bufferedMs < JITTER_MS && !flush) return;
             playbackStartedRef.current = true;
         }
         const chunks = [...jitterRef.current];
@@ -120,7 +121,10 @@ export function TestAgentButton({
             src.buffer = ab;
             src.connect(ctx.destination);
             const startAt = Math.max(ctx.currentTime + 0.01, nextPlayTimeRef.current || 0);
+            const generation = genRef.current;
+            const utterance = playbackUtteranceRef.current;
             src.onended = () => {
+                if (generation !== genRef.current || utterance !== playbackUtteranceRef.current) return;
                 playSourcesRef.current.delete(src);
                 if (
                     awaitingPlaybackRef.current &&
@@ -128,7 +132,7 @@ export function TestAgentButton({
                     wsRef.current?.readyState === WebSocket.OPEN
                 ) {
                     awaitingPlaybackRef.current = false;
-                    wsRef.current.send(JSON.stringify({ type: "playback_complete" }));
+                    wsRef.current.send(JSON.stringify({ type: "playback_complete", utterance_id: utterance }));
                 }
             };
             playSourcesRef.current.add(src);
@@ -139,6 +143,7 @@ export function TestAgentButton({
 
     const resetPlayback = useCallback(() => {
         awaitingPlaybackRef.current = false;
+        playbackUtteranceRef.current = undefined;
         genRef.current += 1;
         playSourcesRef.current.forEach((s) => { try { s.stop(); } catch { /* */ } });
         playSourcesRef.current.clear();
@@ -303,11 +308,18 @@ export function TestAgentButton({
             case "turn_complete":
                 setPhase("listening");
                 break;
+            case "playback_start":
+                resetPlayback();
+                playbackUtteranceRef.current = typeof data.utterance_id === "string" ? data.utterance_id : undefined;
+                dropAudioRef.current = false;
+                break;
             case "tts_audio_complete":
+                if (data.utterance_id !== playbackUtteranceRef.current) break;
+                queueAudioChunk(new ArrayBuffer(0), playRateRef.current, true);
                 awaitingPlaybackRef.current = true;
                 if (playSourcesRef.current.size === 0 && wsRef.current?.readyState === WebSocket.OPEN) {
                     awaitingPlaybackRef.current = false;
-                    wsRef.current.send(JSON.stringify({ type: "playback_complete" }));
+                    wsRef.current.send(JSON.stringify({ type: "playback_complete", utterance_id: playbackUtteranceRef.current }));
                 }
                 break;
             case "barge_in":

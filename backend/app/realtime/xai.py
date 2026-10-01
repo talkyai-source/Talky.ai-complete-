@@ -128,7 +128,7 @@ class XAIRealtimeSession(OpenAIRealtimeSession):
             voice=voice or "unset",
             instructions=instructions,
             tools=tools,
-            settings=settings,
+            settings={**(settings or {}), "provider": "xai"},
             call_id=call_id,
         )
         self._voice = (voice or "").strip()
@@ -149,23 +149,38 @@ class XAIRealtimeSession(OpenAIRealtimeSession):
             return _XAI_URL_TMPL_AGENT.format(agent_id=self._agent_id)
         return _XAI_URL_TMPL_MODEL.format(model=self._model)
 
+    def _instruction_update(self, instructions):
+        return {"instructions": instructions}
+
     # ── Session config: xAI default turn-detection is server_vad ────────
     def _build_session_update(self, *, include_reasoning: bool = True) -> Dict[str, Any]:
-        payload = super()._build_session_update(include_reasoning=include_reasoning)
-        # Only substitute OUR default when the operator did NOT explicitly
-        # set turn_detection — an explicit override (bare eagerness string,
-        # server_vad dict, or otherwise) already passed straight through via
-        # the inherited normalisation and must not be clobbered here.
-        if self._settings.get("turn_detection") is None:
-            payload["session"]["audio"]["input"]["turn_detection"] = dict(
-                _XAI_DEFAULT_TURN_DETECTION
-            )
-        # No voice explicitly chosen: drop the OpenAI-defaulted "voice" key
-        # entirely rather than sending an OpenAI voice ID ("marin") to xAI —
-        # let the model/agent's own default voice speak.
-        if not self._voice:
-            payload["session"]["audio"]["output"].pop("voice", None)
-        return payload
+        # xAI's session schema is NOT OpenAI's GA schema. Only the event
+        # transport is shared. Preserve the selected model/agent URL.
+        td = self._settings.get("turn_detection") or dict(_XAI_DEFAULT_TURN_DETECTION)
+        if not isinstance(td, dict) or td.get("type") != "server_vad":
+            raise ValueError("xAI requires server_vad settings; semantic eagerness is unsupported")
+        if not 0.1 <= float(td.get("threshold", 0.85)) <= 0.9:
+            raise ValueError("xAI VAD threshold must be between 0.1 and 0.9")
+        effort = self._settings.get("reasoning_effort", "high")
+        if effort not in {"high", "none"}:
+            raise ValueError("xAI reasoning effort must be high or none")
+        output = {"format": {"type": "audio/pcmu"}}
+        if "speed" in self._settings:
+            speed = float(self._settings["speed"])
+            if not 0.7 <= speed <= 1.5:
+                raise ValueError("xAI speech speed must be between 0.7 and 1.5")
+            output["speed"] = speed
+        session = {"instructions": self._instructions, "turn_detection": dict(td),
+            "audio": {"input": {"format": {"type": "audio/pcmu"},
+                                "transcription": {"model": "grok-transcribe"}},
+                      "output": output}}
+        if include_reasoning:
+            session["reasoning"] = {"effort": effort}
+        if self._voice:
+            session["voice"] = self._voice
+        if self._tools:
+            session["tools"] = self._tools
+        return {"type": "session.update", "session": session}
 
     # ── Event mapping: intercept the cumulative-transcript difference ───
     async def _handle_server_event(self, data: Dict[str, Any]) -> None:

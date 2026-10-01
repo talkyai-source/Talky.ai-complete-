@@ -190,6 +190,7 @@ async def resolve_active_connector(
     *,
     force_refresh: bool = False,
     provider: Optional[str] = None,
+    connector_id: Optional[str] = None,
 ) -> Tuple[BaseConnector, str, str]:
     """Return ``(connector, connector_id, provider)`` for the tenant's active
     connector of ``connector_type`` ("email" | "drive" | "calendar" | ...),
@@ -210,6 +211,8 @@ async def resolve_active_connector(
     )
     if provider:
         query = query.eq("provider", provider)
+    if connector_id:
+        query = query.eq("id", connector_id)
     resp = query.order("created_at", desc=True).execute()  # newest-first, matching the UI's choice
     # A DB/RLS/connectivity error must NOT masquerade as "not connected" — the
     # adapter swallows exceptions into resp.error with data=None (agent finding).
@@ -225,7 +228,7 @@ async def resolve_active_connector(
         str(tenant_id)[:8], connector_type, len(rows),
     )
     if not rows:
-        raise ConnectorNotConnectedError(connector_type)
+        raise ConnectorNotConnectedError(connector_type, connector_id=connector_id)
 
     # Repeat "Connect" clicks can leave several active connector rows. The
     # newest connector is authoritative: falling back across connector IDs can

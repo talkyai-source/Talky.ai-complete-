@@ -106,6 +106,10 @@ _EXPECTED_HASHES: dict[str, str] = {
     "lead_gen@7": "9e7af81f15dd8d44",
     "customer_support@6": "ee88d242cec19b86",
     "receptionist@6": "7ddbe9ea1800b829",
+    # Shared concise voice contract and evidence-bound action/identity rules.
+    "lead_gen@8": "2ed57dabb046cd4c",
+    "customer_support@7": "52703d334b9ca05a",
+    "receptionist@7": "8528ef8851e7f88b",
 }
 
 

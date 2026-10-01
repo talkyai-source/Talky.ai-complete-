@@ -152,7 +152,8 @@ async def test_unmute_waits_for_the_browsers_real_playback_complete_signal(monke
         await asyncio.sleep(0.05)
         nonlocal unmuted_before_browser_confirmed
         unmuted_before_browser_confirmed = "unmute" in stt.calls
-        gateway.mark_playback_complete(CALL_ID)
+        marker = next(item for item in ws.sent_json if item["type"] == "tts_audio_complete")
+        gateway.mark_playback_complete(CALL_ID, marker["utterance_id"])
 
     confirm_task = asyncio.create_task(_delayed_browser_confirmation())
 
@@ -167,7 +168,7 @@ async def test_unmute_waits_for_the_browsers_real_playback_complete_signal(monke
         "finished -- a fixed post-send tail, not the real signal, was used "
         "(4a9dd845, 7dbf415f)"
     )
-    assert {"type": "tts_audio_complete"} in ws.sent_json, (
+    assert any(item["type"] == "tts_audio_complete" and item.get("utterance_id") for item in ws.sent_json), (
         "synthesize_and_send never told the browser to expect a playback-"
         "complete confirmation"
     )

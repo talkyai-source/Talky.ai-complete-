@@ -296,6 +296,44 @@ class AudioIngest:
     def __init__(self, pipeline) -> None:
         self._p = pipeline
 
+    async def _handle_stt_recovery(self, session, transcript, websocket=None) -> bool:
+        """Discard incomplete speech; ask once after the lost turn has ended."""
+        recovery = (getattr(transcript, "metadata", None) or {}).get("stt_recovery")
+        if recovery not in {"reset", "repeat_required"}:
+            return False
+        session.current_user_input = ""
+        session._last_transcript_confidence = None
+        session._last_transcript_alternatives = ()
+        if recovery == "reset":
+            return True
+        if getattr(session, "_stt_recovery_repeat_requested", False):
+            return True
+        session._stt_recovery_repeat_requested = True
+        from app.domain.services.voice_pipeline.playback_gate import mark_caller_stopped
+        mark_caller_stopped(session)
+        session._caller_turn_open_since = None
+        session._caller_turn_closed_at = time.monotonic()
+        event = self._p._barge_in_events.get(session.call_id)
+        if event is not None:
+            event.clear()
+        phrase = "The connection cut out. Please say that again."
+        interrupted = await self._p.synthesize_and_send_audio(
+            session, phrase, websocket, track_latency=False,
+        )
+        if not interrupted:
+            session.conversation_history.append(Message(role=MessageRole.ASSISTANT, content=phrase))
+            try:
+                self._p.transcript_service.accumulate_turn(
+                    call_id=session.call_id, role="assistant", content=phrase,
+                    talklee_call_id=getattr(session, "talklee_call_id", None),
+                    turn_index=getattr(session, "turn_id", 0), event_type="assistant_response",
+                    is_final=True, metadata={"reason": "stt_recovery", "delivery_status": "submitted"},
+                )
+            except Exception:
+                logger.exception("stt_recovery_transcript_failed call_id=%s", session.call_id)
+        logger.warning("stt_recovery_repeat_requested call_id=%s submitted=%s", session.call_id, not interrupted)
+        return True
+
     async def process(
         self,
         session: CallSession,
@@ -1106,6 +1144,8 @@ class AudioIngest:
                     call_id=call_id,
                     on_barge_in=_on_barge_in_direct,
                 ):
+                    if await self._handle_stt_recovery(session, transcript, websocket):
+                        continue
                     # Close the "caller turn open" window the moment the
                     # PROVIDER says the turn ended — provider-agnostic
                     # (detect_turn_end is a plain is_final-and-no-text check),

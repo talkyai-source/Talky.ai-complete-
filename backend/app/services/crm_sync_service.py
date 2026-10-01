@@ -33,12 +33,14 @@ from __future__ import annotations
 
 import asyncio
 import json
+import hashlib
 import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel
 
+from app.services.crm_delivery_store import CRMDeliveryStore, MAX_ATTEMPTS
 from app.core.db_utils import acquire_with_tenant
 from app.domain.services.call_status import CallOutcome
 from app.infrastructure.connectors.base import ConnectorProviderError
@@ -220,6 +222,7 @@ class CRMSyncService:
     def __init__(self, db_client, db_pool=None):
         self.db_client = db_client
         self.db_pool = db_pool or getattr(db_client, "pool", None)
+        self.deliveries = CRMDeliveryStore(self.db_pool)
 
     # ----- public -----------------------------------------------------
 
@@ -239,98 +242,109 @@ class CRMSyncService:
         except ConnectorLookupError as exc:
             return CRMSyncResult(success=False, call_id=call_id, error_message=exc.message)
         if not providers:
-            return CRMSyncResult(
-                success=False, call_id=call_id, skipped=True,
-                skipped_reason="no_crm_connected", warning_message=CRMNotConnectedWarning.MISSING_CRM,
-            )
-
+            return CRMSyncResult(success=False, call_id=call_id, skipped=True,
+                skipped_reason="no_crm_connected", warning_message=CRMNotConnectedWarning.MISSING_CRM)
         call = await self._load_call(tenant_id, call_id)
         if call is None:
             return CRMSyncResult(success=False, call_id=call_id, error_message="call not found")
-
         summary = _coerce_json(call.get("summary_json"))
-        existing_call_log = call.get("crm_call_id")
-        if existing_call_log and reason == "settlement":
-            return CRMSyncResult(
-                success=True, call_id=call_id, providers=providers,
-                crm_call_id=str(existing_call_log), skipped=True, skipped_reason="already_synced",
-            )
-
         lead = await self._load_lead(tenant_id, call.get("lead_id"))
-        campaign_name = await self._campaign_name(tenant_id, call.get("campaign_id"))
-        body = build_call_body(call, summary, campaign_name=campaign_name)
-
-        synced_providers: List[str] = []
-        first_contact_id: Optional[str] = None
-        first_call_log_id: Optional[str] = str(existing_call_log) if existing_call_log else None
-        errors: List[str] = []
-        updated_existing = False
-
+        body = build_call_body(call, summary, campaign_name=await self._campaign_name(tenant_id, call.get("campaign_id")))
+        successful, errors = [], []
+        first_contact, first_log, updated = None, None, False
         for provider in providers:
+            # Persist intent before any external request. A trigger also queues
+            # this in the call's transaction if the teardown hook never runs.
+            desired = hashlib.sha256((body + provider_outcome(provider, call.get("outcome"), summary)).encode()).hexdigest()
+            receipt = await self.deliveries.enqueue(tenant_id, call_id, provider, desired, legacy_id=call.get("crm_call_id"))
+            if receipt["status"] == "succeeded":
+                successful.append(provider)
+                first_log = first_log or receipt.get("remote_call_id")
+                continue
+            receipt = await self.deliveries.claim(tenant_id, call_id, provider)
+            if receipt is None:
+                errors.append(f"{provider}: delivery pending, held for review, or already processing")
+                continue
             try:
-                connector = await self._connector(tenant_id, provider)
-                settings = getattr(connector, "config", None) or {}
-                if not self._provider_wants_this_call(provider, settings, call):
-                    continue
+                was_update = bool(receipt.get("remote_call_id"))
+                delivered = await asyncio.wait_for(self._deliver(receipt, call, lead, body, summary), 60)
+                if delivered:
+                    successful.append(provider)
+                    first_contact = first_contact or receipt.get("remote_contact_id")
+                    first_log = first_log or receipt.get("remote_call_id")
+                    updated = updated or was_update
+            except Exception as exc:
+                phase = receipt.get("phase")
+                # A rejected request is safe to retry. A lost POST response is
+                # not: even an HTTP 5xx can follow a committed provider write.
+                code = getattr(exc, "status_code", None)
+                rejected = code is not None and 400 <= code < 500 and code != 408
+                unknown = phase in ("creating_contact", "creating_call", "legacy_unverified") and not rejected
+                permanent = rejected and getattr(exc, "category", None) not in ("authentication", "rate_limit")
+                state = "unknown" if unknown else "failed" if permanent or receipt["attempts"] >= MAX_ATTEMPTS else "pending"
+                category = getattr(exc, "category", type(exc).__name__)
+                detail = f"{category}: delivery {state}"
+                await self.deliveries.save(receipt, status=state, error=detail)
+                errors.append(f"{provider}: {detail}")
+                logger.warning("crm_sync provider=%s call=%s phase=%s status=%s", provider, call_id, phase, state)
+        if successful and first_log:
+            await self._mark_call_synced(tenant_id, call_id, first_log)
+        return CRMSyncResult(success=bool(successful) and not errors, call_id=call_id,
+            providers=successful, crm_contact_id=first_contact, crm_call_id=first_log,
+            updated_existing=updated, error_message="; ".join(errors) or None)
 
-                if existing_call_log and reason == "summary":
-                    # Hook 2 after hook 1: amend the log with the summary.
-                    updated = await self._with_auth_retry(
-                        tenant_id, provider, connector,
-                        lambda c: c.update_call_log(
-                            str(existing_call_log),
-                            call_body=body,
-                            outcome=provider_outcome(provider, call.get("outcome"), summary),
-                        ),
-                    )
-                    updated_existing = bool(updated) or updated_existing
-                    synced_providers.append(provider)
-                    continue
-
-                contact_id = await self._resolve_contact(
-                    tenant_id, provider, connector, call, lead, settings, body_for_new=body,
-                )
-                if not contact_id:
-                    errors.append(f"{provider}: no CRM record and lead creation disabled/impossible")
-                    continue
-                first_contact_id = first_contact_id or contact_id
-
-                call_log_id = await self._with_auth_retry(
-                    tenant_id, provider, connector,
-                    lambda c: c.log_call(
-                        contact_id=contact_id,
-                        call_body=body,
-                        duration_seconds=int(call.get("duration_seconds") or 0),
-                        outcome=provider_outcome(provider, call.get("outcome"), summary),
-                        call_direction=str(call.get("direction") or "outbound").upper(),
-                        timestamp=self._call_timestamp(call),
-                    ),
-                )
-                first_call_log_id = first_call_log_id or (str(call_log_id) if call_log_id else None)
-                synced_providers.append(provider)
-            except ConnectorNotConnectedError as exc:
-                errors.append(f"{provider}: {exc.message}")
-            except ConnectorProviderError as exc:
-                errors.append(f"{provider}: {exc.category}: {exc}")
-            except Exception as exc:  # noqa: BLE001 — one provider must not block the others
-                logger.warning("crm_sync provider=%s call=%s failed: %r", provider, call_id, exc)
-                errors.append(f"{provider}: {type(exc).__name__}")
-
-        if synced_providers and (first_call_log_id or updated_existing):
-            await self._mark_call_synced(tenant_id, call_id, first_call_log_id)
-
-        if errors:
-            logger.warning("crm_sync call=%s partial: %s", call_id, "; ".join(errors))
-
-        return CRMSyncResult(
-            success=bool(synced_providers),
-            call_id=call_id,
-            providers=synced_providers,
-            crm_contact_id=first_contact_id,
-            crm_call_id=first_call_log_id,
-            error_message="; ".join(errors) if errors else None,
-            updated_existing=updated_existing,
-        )
+    async def _deliver(self, receipt, call, lead, body, summary):
+        tenant_id, provider = str(receipt["tenant_id"]), receipt["provider"]
+        if receipt["phase"] == "legacy_unverified":
+            raise RuntimeError("Legacy shared CRM ID requires provider ownership review")
+        connector = await self._connector(tenant_id, provider)
+        settings = getattr(connector, "config", None) or {}
+        if not self._provider_wants_this_call(provider, settings, call):
+            await self.deliveries.save(receipt, status="skipped", error="Disabled by connector settings")
+            return False
+        if receipt.get("reconcile") and receipt["phase"] == "creating_call":
+            remote = await self._with_auth_retry(tenant_id, provider, connector,
+                lambda c: c.find_call_by_reference(str(call["id"])))
+            if not remote:
+                raise RuntimeError("Create outcome remains unknown; no automatic resend")
+            await self.deliveries.save(receipt, call_id=str(remote))
+        remote_call = receipt.get("remote_call_id")
+        if remote_call:
+            await self.deliveries.save(receipt, phase="updating_call")
+            updated = await self._with_auth_retry(tenant_id, provider, connector,
+                lambda c: c.update_call_log(str(remote_call), call_body=body,
+                    outcome=provider_outcome(provider, call.get("outcome"), summary)))
+            if not updated:
+                raise RuntimeError("Provider did not confirm the call update")
+        else:
+            contact = receipt.get("remote_contact_id")
+            if not contact:
+                reconcile_contact = receipt.get("reconcile") and receipt["phase"] == "creating_contact"
+                if not reconcile_contact:
+                    await self.deliveries.save(receipt, phase="resolving_contact")
+                async def before_create():
+                    await self.deliveries.save(receipt, phase="creating_contact")
+                contact = await self._resolve_contact(tenant_id, provider, connector, call, lead, settings,
+                    body_for_new=body, before_create=before_create, allow_create=not reconcile_contact)
+                if not contact:
+                    if reconcile_contact:
+                        raise RuntimeError("Contact creation remains unconfirmed")
+                    raise ConnectorProviderError(provider=provider, operation="resolve_contact",
+                        category="invalid_request", status_code=400,
+                        message="No contact found and contact creation disabled or impossible")
+                await self.deliveries.save(receipt, contact_id=str(contact))
+            await self.deliveries.save(receipt, phase="creating_call")
+            remote_call = await self._with_auth_retry(tenant_id, provider, connector,
+                lambda c: c.log_call(contact_id=contact, call_body=body,
+                    duration_seconds=int(call.get("duration_seconds") or 0),
+                    outcome=provider_outcome(provider, call.get("outcome"), summary),
+                    call_direction=str(call.get("direction") or "outbound").upper(), timestamp=self._call_timestamp(call)))
+            if not remote_call:
+                raise RuntimeError("Provider returned no call ID")
+            # Persist the receipt before treating the operation as successful.
+            await self.deliveries.save(receipt, call_id=str(remote_call))
+        await self.deliveries.save(receipt, status="succeeded", phase="complete")
+        return True
 
     # ----- provider helpers -------------------------------------------
 
@@ -372,6 +386,8 @@ class CRMSyncService:
         settings: Dict[str, Any],
         *,
         body_for_new: str,
+        before_create=None,
+        allow_create=True,
     ) -> Optional[str]:
         ids = _crm_ids(lead)
         if ids.get(provider):
@@ -390,12 +406,16 @@ class CRMSyncService:
         if found and found.get("id"):
             contact_id = str(found["id"])
         else:
+            if not allow_create:
+                return None
             if provider == "salesforce" and settings.get("create_leads") is False:
                 return None
             if provider == "hubspot" and not email:
                 # HubSpot contacts are keyed by e-mail; without one there is
                 # no contact to log against.
                 return None
+            if before_create is not None:
+                await before_create()
             created = await self._with_auth_retry(
                 tenant_id, provider, connector,
                 lambda c: c.create_contact(
@@ -502,11 +522,11 @@ class CRMSyncService:
                     UPDATE leads
                        SET crm_contact_id = $3,
                            custom_fields = COALESCE(custom_fields, '{}'::jsonb)
-                                           || jsonb_build_object('crm_ids', $4::jsonb),
+                                           || jsonb_build_object('crm_ids', COALESCE(custom_fields->'crm_ids','{}'::jsonb) || $4::jsonb),
                            updated_at = NOW()
                      WHERE id = $1::uuid AND tenant_id = $2::uuid
                     """,
-                    lead_id, tenant_id, contact_id, json.dumps(ids),
+                    lead_id, tenant_id, contact_id, json.dumps({provider: contact_id}),
                 )
         except Exception as exc:  # noqa: BLE001 — the CRM write already succeeded
             logger.warning("crm_sync: could not remember %s id for lead %s: %s", provider, lead_id, exc)
@@ -533,6 +553,24 @@ class CRMSyncService:
 # ---------------------------------------------------------------------------
 # Scheduling (fire-and-forget from teardown paths)
 # ---------------------------------------------------------------------------
+
+async def drain_crm_deliveries(db_client, pool, *, batch_size=10):
+    """Recover queued/expired work after restart on the existing worker."""
+    from app.core.security.tenant_isolation import set_current_tenant_id, get_current_tenant_id
+    service = CRMSyncService(db_client, db_pool=pool)
+    rows = await service.deliveries.due(limit=batch_size)
+    previous = get_current_tenant_id()
+    try:
+        for row in rows:
+            tenant_id = str(row["tenant_id"])
+            set_current_tenant_id(tenant_id)
+            try:
+                await service.sync_call(tenant_id, str(row["call_id"]), reason="retry")
+            except Exception as exc:
+                logger.warning("crm_delivery_worker call=%s failed=%s", row["call_id"], type(exc).__name__)
+    finally:
+        set_current_tenant_id(previous)
+    return len(rows)
 
 async def _lookup_tenant_for_call(pool, call_id: str) -> Optional[str]:
     """Teardown hooks sometimes only know the call id. The row lookup needs
@@ -585,7 +623,8 @@ def schedule_crm_sync(call_id: Optional[str], *, tenant_id: Optional[str] = None
     if not call_id:
         return
     try:
-        task = asyncio.create_task(run_crm_sync(str(call_id), tenant_id=tenant_id, reason=reason))
+        loop = asyncio.get_running_loop()
+        task = loop.create_task(run_crm_sync(str(call_id), tenant_id=tenant_id, reason=reason))
         _inflight_tasks.add(task)
         task.add_done_callback(_inflight_tasks.discard)
     except RuntimeError:

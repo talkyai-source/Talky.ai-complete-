@@ -9,11 +9,11 @@ import os
 import logging
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timedelta
-from urllib.parse import urlencode
+from urllib.parse import urlencode, quote
 import httpx
 
-from app.infrastructure.connectors.base import ConnectorFactory, OAuthTokens
-from app.infrastructure.connectors.crm.base import CRMProvider
+from app.infrastructure.connectors.base import ConnectorFactory, OAuthTokens, ConnectorProviderError
+from app.infrastructure.connectors.crm.base import CRMProvider, call_reference
 
 logger = logging.getLogger(__name__)
 
@@ -154,6 +154,18 @@ class HubSpotConnector(CRMProvider):
     # CRM-specific methods
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _check_response(response, operation):
+        if response.status_code in (200, 201, 204):
+            return
+        code = response.status_code
+        category = ("authentication" if code == 401 else "permission" if code == 403
+                    else "rate_limit" if code == 429 else "unavailable" if code >= 500
+                    else "invalid_request")
+        raise ConnectorProviderError(provider="hubspot", operation=operation, category=category,
+            message=f"HubSpot {operation} returned HTTP {code}", status_code=code,
+            retry_after=response.headers.get("Retry-After"))
+
     async def search_contact(
         self,
         email: Optional[str] = None,
@@ -163,7 +175,7 @@ class HubSpotConnector(CRMProvider):
         filters = []
         if email:
             filters.append({"propertyName": "email", "operator": "EQ", "value": email})
-        if phone:
+        elif phone:
             filters.append({"propertyName": "phone", "operator": "EQ", "value": phone})
         if not filters:
             return None
@@ -179,9 +191,7 @@ class HubSpotConnector(CRMProvider):
                 json=body,
                 headers={**self._get_auth_headers(), "Content-Type": "application/json"},
             )
-            if response.status_code != 200:
-                logger.error(f"HubSpot contact search failed: {response.text}")
-                return None
+            self._check_response(response, "search_contact")
             results = response.json().get("results", [])
             if results:
                 r = results[0]
@@ -213,9 +223,7 @@ class HubSpotConnector(CRMProvider):
                 json={"properties": props},
                 headers={**self._get_auth_headers(), "Content-Type": "application/json"},
             )
-            if response.status_code not in (200, 201):
-                logger.error(f"HubSpot create contact failed: {response.text}")
-                raise ValueError(f"Create contact failed: {response.text}")
+            self._check_response(response, "create_contact")
             data = response.json()
             return {"id": data["id"], **data.get("properties", {})}
 
@@ -237,6 +245,9 @@ class HubSpotConnector(CRMProvider):
             "hs_call_status": outcome,
             "hs_call_direction": call_direction,
         }
+        reference = call_reference(call_body)
+        if reference:
+            call_props["hs_call_title"] = f"Talky.ai call {reference}"
         body = {
             "properties": call_props,
             "associations": [
@@ -252,10 +263,39 @@ class HubSpotConnector(CRMProvider):
                 json=body,
                 headers={**self._get_auth_headers(), "Content-Type": "application/json"},
             )
-            if response.status_code not in (200, 201):
-                logger.error(f"HubSpot log call failed: {response.text}")
-                raise ValueError(f"Log call failed: {response.text}")
+            self._check_response(response, "log_call")
             return response.json()["id"]
+
+    async def update_call_log(self, call_log_id, *, call_body=None, outcome=None) -> bool:
+        properties = {}
+        if call_body is not None:
+            properties["hs_call_body"] = call_body
+        if outcome is not None:
+            properties["hs_call_status"] = outcome
+        if not properties:
+            return False
+        async with httpx.AsyncClient(timeout=20) as client:
+            response = await client.patch(
+                f"{self.API_BASE_URL}/crm/v3/objects/calls/{quote(str(call_log_id), safe='')}",
+                json={"properties": properties}, headers=self._get_auth_headers(),
+            )
+            self._check_response(response, "update_call_log")
+            return True
+
+    async def find_call_by_reference(self, reference: str) -> Optional[str]:
+        from uuid import UUID
+        title = f"Talky.ai call {UUID(reference)}"
+        async with httpx.AsyncClient(timeout=20) as client:
+            response = await client.post(
+                f"{self.API_BASE_URL}/crm/v3/objects/calls/search",
+                json={"filterGroups": [{"filters": [{"propertyName": "hs_call_title", "operator": "EQ", "value": title}]}],
+                      "properties": ["hs_call_title"], "limit": 2}, headers=self._get_auth_headers(),
+            )
+            self._check_response(response, "find_call_by_reference")
+            rows = response.json().get("results") or []
+            if len(rows) > 1:
+                raise ValueError("Multiple CRM activities match this delivery; review required")
+            return str(rows[0]["id"]) if rows else None
 
     async def create_note(
         self,
@@ -291,4 +331,3 @@ class HubSpotConnector(CRMProvider):
 
 # Register with factory
 ConnectorFactory.register("hubspot", HubSpotConnector)
-

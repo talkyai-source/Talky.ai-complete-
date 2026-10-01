@@ -166,13 +166,15 @@ class AssistantAgentService:
             if response.data:
                 plan.id = response.data[0]["id"]
                 logger.info(f"Created action plan {plan.id} with {len(validated_actions)} steps")
+            else:
+                raise RuntimeError("The action plan could not be saved; no actions were run.")
         except Exception as e:
             logger.error(f"Failed to persist action plan: {e}")
-            # Continue without persistence for now
+            raise RuntimeError("The action plan could not be saved; no actions were run.") from e
         
         return plan
     
-    async def execute_plan(self, plan: ActionPlan) -> ActionPlan:
+    async def execute_plan(self, plan: ActionPlan, *, authorize_action=None) -> ActionPlan:
         """
         Execute all steps in an action plan sequentially.
         
@@ -219,6 +221,10 @@ class AssistantAgentService:
                         params["_chained_result"] = prev_result.result
                 
                 # Execute action
+                if authorize_action is not None:
+                    failure = await authorize_action(action.type, {**plan.context, **params})
+                    if failure:
+                        raise PermissionError(failure.get("message") or failure.get("error"))
                 action_result = await execute_action(
                     self.db_client,
                     action_type=action.type,
@@ -233,13 +239,17 @@ class AssistantAgentService:
                 result = ActionStepResult(
                     step_index=i,
                     action_type=action.type,
-                    success=action_result.get("success", True),
+                    success=action_result.get("success") is True,
                     result=action_result,
                     error=action_result.get("error"),
                     executed_at=datetime.utcnow(),
                     duration_ms=duration_ms
                 )
                 plan.step_results.append(result)
+
+                if action_result.get("status") in {"unknown", "in_progress", "outcome_unknown"}:
+                    plan.error = "An action outcome is unknown. Remaining steps were not executed; review its receipt."
+                    break
                 
                 if result.success:
                     logger.info(f"Step {i} ({action.type}) completed successfully")
@@ -259,20 +269,22 @@ class AssistantAgentService:
                 )
                 plan.step_results.append(result)
                 plan.error = str(e)
-                # Continue to next step rather than stopping
+                # Unexpected exceptions may follow an external side effect.
+                # Stop the plan; never continue a dependent action blindly.
+                break
         
         # Determine final status
         if plan.successful_steps == len(plan.actions):
             plan.status = ActionPlanStatus.COMPLETED
         elif plan.successful_steps > 0:
             plan.status = ActionPlanStatus.PARTIALLY_COMPLETED
-        elif plan.failed_steps == len(plan.actions):
+        elif plan.failed_steps > 0:
             plan.status = ActionPlanStatus.FAILED
         else:
             plan.status = ActionPlanStatus.PARTIALLY_COMPLETED
         
         plan.completed_at = datetime.utcnow()
-        plan.current_step = len(plan.actions)
+        plan.current_step = len(plan.step_results)
         
         # Final DB update
         self._update_plan_in_db(plan)
@@ -317,7 +329,7 @@ class AssistantAgentService:
             
             self.db_client.table("action_plans").update(
                 update_data
-            ).eq("id", plan.id).execute()
+            ).eq("id", plan.id).eq("tenant_id", plan.tenant_id).execute()
             
         except Exception as e:
             logger.error(f"Failed to update action plan in DB: {e}")

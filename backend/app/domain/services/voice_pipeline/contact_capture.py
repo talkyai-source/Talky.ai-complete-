@@ -87,6 +87,7 @@ class ContactCaptureState:
     # those). Only a caller-parsed value may be stored before the caller
     # confirms it (lead_slot_capture, 2026-09-28).
     from_caller: bool = True
+    confirmation_evidence: Optional[str] = None
 
     def __post_init__(self) -> None:
         # Status is the source of truth; keep the audit string impossible to
@@ -822,6 +823,7 @@ def advance_capture(
     utterance: str,
     readback_issued: bool = False,
     confirmation_verdict: Optional[str] = None,
+    independent_confirmation_value: Optional[str] = None,
     phone_region: Optional[str] = None,
     transcript_confidence: Optional[float] = None,
     transcript_alternatives: Sequence[str] = (),
@@ -1065,6 +1067,22 @@ def advance_capture(
 
     if (
         previous.status is CaptureStatus.AWAITING_CONFIRMATION
+        and previous.from_caller
+        and independent_confirmation_value == previous.normalized_value
+        and normalized == previous.normalized_value
+        and normalized is not None
+        and re.search(r"\b(?:yes|i\s+confirm|that(?:'s|\s+is)\s+correct)\b", text, re.I)
+        and not re.search(r"\b(?:no|not|wrong|instead|actually|change|cancel|never)\b", text, re.I)
+    ):
+        # This confirms the value independently. It is NOT evidence that the
+        # agent's readback was heard. Parsing/confidence/conflict gates above
+        # have already checked the complete caller-repeated value.
+        return replace(previous, status=CaptureStatus.CONFIRMED,
+                       confirmed_at=now or datetime.now(timezone.utc),
+                       clarification_prompt=None, confirmation_evidence="caller_repeatback")
+
+    if (
+        previous.status is CaptureStatus.AWAITING_CONFIRMATION
         and readback_issued
     ):
         verdict = str(confirmation_verdict or "unclear").lower()
@@ -1076,6 +1094,7 @@ def advance_capture(
                 validation_status=CaptureStatus.CONFIRMED.value,
                 confirmed_at=stamp,
                 clarification_prompt=None,
+                confirmation_evidence="readback_and_caller_affirmation",
             )
         if verdict == "reject":
             return replace(

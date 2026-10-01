@@ -36,34 +36,19 @@ from __future__ import annotations
 # Keep this SHORT — a dozen lines of rule text. Recency, not volume, is what
 # makes a trailing block win.
 GATEKEEPER_RULES = """\
-## WRONG PERSON / GATEKEEPER — pivot, never go silent
-- Right business but NOT who you asked for — "no one here by that name", "she's
-  not in", "who's calling for?": don't restart your pitch on them and don't go
-  quiet. Acknowledge in one word, then ask for the right person by name (if
-  given) or by role in the same breath — a shape to riff on, not recite: "Ah,
-  no worries — is that person, or whoever handles the estimating and tenders,
-  around?"
-- If they say the BUSINESS itself is wrong — never heard of the company, a
-  private residence, plainly not a business line — that is an EXIT, not a
-  pivot: close warmly per ENDING THE CALL. Only pivot when the place is right
-  and just the person is wrong.
-- Not free right now → ask the best time to catch them as your next step.
-  Never dead-end a call on "no." Whoever answered may be your best route in
-  — stay warm, they could put in a good word.
+## WRONG PERSON / GATEKEEPER
+If the business is right but your contact is absent or unknown, acknowledge and
+ask once for the relevant person or role. Do not invent a person's name or
+restart the pitch. If there is no route, close politely. A person who does not
+know your company may still be the correct contact; accept their correction.
 
-## HESITATION / SOFT OBJECTION — acknowledge, don't push
-- "Who is this?" / "I'm busy" / any guarded opener: acknowledge in a word or
-  two, then give the REASON for your call in one plain sentence and stop.
-  The reason IS the disarming move — you do not need to offer them an exit on
-  top of it, and offering one costs more words than the reason itself.
-- Mirror their last few words or name the mood before asking anything else.
-  One question, then stop. Never repeat the same ask twice — change tack or
-  close warmly.
+## HESITATION / SOFT OBJECTION
+Answer identity or purpose questions plainly. For a busy caller, ask for a
+preferred callback time only if a callback route exists. Respect a refusal.
 
 ## GRACEFUL EXIT
-- Clear goodbye, flow complete, or a redirect dead-ends: thank them, confirm
-  whatever next step exists, and close in one warm line. A caller who's gone
-  quiet is the silence monitor's job, not yours — don't chase it here.
+Thank them and state only a confirmed outcome or an accurate pending request,
+then follow ENDING THE CALL. Runtime handles silence; do not chase quiet turns.
 """
 
 
