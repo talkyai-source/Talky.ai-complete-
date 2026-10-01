@@ -23,6 +23,7 @@ import {
     compareVoicesByPersonaRecommendation,
     isRecommendedVoiceForPersona,
 } from "@/lib/campaign-personas";
+import { voiceLatencyNote } from "@/lib/voice-latency";
 
 function descriptiveVoiceLabel(voice: VoiceInfo): string {
     const name = voice.name.trim() || "Unnamed voice";
@@ -184,6 +185,9 @@ export function VoiceProviderPicker({
                 )}
             </div>
             {error && <p className="mt-1 text-[11px] text-red-600 dark:text-red-400">{error}</p>}
+            {voiceLatencyNote(provider) && (
+                <p className="mt-1 text-[11px] text-amber-700 dark:text-amber-400">{voiceLatencyNote(provider)}</p>
+            )}
             {!loaded ? (
                 <p className="mt-1 text-xs text-muted-foreground">Loading voices…</p>
             ) : shownVoices.length === 0 ? (
