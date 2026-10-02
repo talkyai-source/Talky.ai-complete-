@@ -40,8 +40,24 @@ const COLUMNS: ColumnDef[] = [
     { key: "failed", label: "Failed", numeric: true },
 ];
 
+// Below md: stacked phone layout. The name column takes the larger share
+// (1.75fr vs 1fr) so campaign names stay readable; the status badge lives on
+// the description line (see the row markup) so it can never crowd the name.
+// From md up: the full 8-column grid. The name track is floored at 10rem so
+// it can never be crushed to zero; everything else is fixed-width.
 const TABLE_GRID_COLS =
-    "grid-cols-[36px_minmax(0,1.5fr)_minmax(0,1fr)] sm:grid-cols-[36px_minmax(0,1.6fr)_110px_170px_120px_90px_90px_90px]";
+    "grid-cols-[36px_minmax(0,1.75fr)_minmax(0,1fr)] md:grid-cols-[36px_minmax(10rem,1.6fr)_110px_170px_120px_90px_90px_90px]";
+// Floor for the md+ grid so narrow viewports scroll it inside the card instead
+// of clipping columns (same pattern as DESKTOP_CALL_MIN_WIDTH on the calls
+// page). Column tracks (36px = 2.25rem) + name floor (10rem) + 110px
+// (6.875rem) + 170px (10.625rem) + 120px (7.5rem) + 3 × 90px (16.875rem)
+// = 54.125rem, + 7 gap-2 gutters (3.5rem) + the row's px-3 inset (1.5rem)
+// = 59.125rem (946px) exactly. At 1280px with the sidebar expanded the card's
+// inner scroll area is ~951px, so the tightest supported desktop still
+// renders the full grid with zero internal scroll; anything narrower scrolls
+// horizontally inside the card. Applied to the sticky header row and to each
+// row's bordered wrapper so the border and grid span the full scroll width.
+const TABLE_MIN_WIDTH = "md:min-w-[59.125rem]";
 
 const ALL_STATUSES: CampaignStatus[] = ["Active", "Paused", "Completed", "Draft", "Failed"];
 
@@ -601,7 +617,8 @@ export function CampaignPerformanceTable({
             role="row"
             className={cn(
                 "sticky top-0 z-20 grid gap-2 border-b border-border bg-background px-3 py-2 text-xs font-semibold text-muted-foreground",
-                TABLE_GRID_COLS
+                TABLE_GRID_COLS,
+                TABLE_MIN_WIDTH
             )}
         >
             <div className="flex items-center justify-center">
@@ -626,7 +643,7 @@ export function CampaignPerformanceTable({
             <button
                 type="button"
                 onClick={(e) => onHeaderClick("progress", e)}
-                className="flex items-center justify-end gap-2 rounded-md px-2 py-1 text-left transition-colors duration-150 ease-out hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:hidden"
+                className="flex items-center justify-end gap-2 rounded-md px-2 py-1 text-left transition-colors duration-150 ease-out hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:hidden"
                 aria-label="Sort by Metrics"
             >
                 <span className="truncate">Metrics</span>
@@ -638,7 +655,7 @@ export function CampaignPerformanceTable({
                     type="button"
                     onClick={(e) => onHeaderClick(c.key, e)}
                     className={cn(
-                        "hidden items-center gap-2 rounded-md px-2 py-1 text-left transition-colors duration-150 ease-out hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:flex",
+                        "hidden items-center gap-2 rounded-md px-2 py-1 text-left transition-colors duration-150 ease-out hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:flex",
                         c.numeric ? "justify-end" : "justify-start"
                     )}
                     aria-label={`Sort by ${c.label}`}
@@ -934,7 +951,7 @@ export function CampaignPerformanceTable({
                     <div
                         ref={tableScrollRef}
                         data-testid="campaigns-performance-table"
-                        className={cn("scrollbar-gutter-stable relative max-h-[520px] overflow-y-auto overflow-x-hidden overscroll-contain", useVirtual ? "pb-2" : "")}
+                        className={cn("scrollbar-gutter-stable relative max-h-[520px] overflow-y-auto overflow-x-auto overscroll-contain", useVirtual ? "pb-2" : "")}
                         role="rowgroup"
                     >
                         {TableHeader}
@@ -948,7 +965,7 @@ export function CampaignPerformanceTable({
                                     const isExpanded = expanded.has(campaign.id);
 
                                     return (
-                                        <div key={campaign.id} className="border-b border-border">
+                                        <div key={campaign.id} className={cn("border-b border-border", TABLE_MIN_WIDTH)}>
                                             <div role="row" className={cn("grid items-center gap-2 px-3 py-2 text-sm text-foreground", TABLE_GRID_COLS)}>
                                                 <div className="flex items-center justify-center">
                                                     <input
@@ -973,21 +990,27 @@ export function CampaignPerformanceTable({
                                                         className="min-w-0 flex-1 rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                                                         onClick={() => setDetailsId(campaign.id)}
                                                     >
-                                                        <div className="min-w-0 flex items-center gap-2">
-                                                            <div className="min-w-0 truncate font-semibold hover:underline">{campaign.name}</div>
+                                                        <div className="min-w-0 truncate font-semibold hover:underline">{campaign.name}</div>
+                                                        {/* The phone status badge sits on the description line, not next
+                                                            to the name: sharing the name's line crushed long names to a
+                                                            few pixels at phone widths. shrink-0 keeps the badge whole and
+                                                            the description truncates instead; leading-[14px] + the 1px
+                                                            badge border = 16px, matching the description line height so
+                                                            the row height does not change. */}
+                                                        <div className="flex min-w-0 items-center gap-2">
                                                             <span
                                                                 className={cn(
-                                                                    "sm:hidden inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold",
+                                                                    "md:hidden inline-flex shrink-0 items-center rounded-full px-1.5 text-[10px] leading-[14px] font-semibold",
                                                                     statusBadgeClass(st)
                                                                 )}
                                                             >
                                                                 {st}
                                                             </span>
+                                                            <div className="min-w-0 flex-1 truncate text-xs text-muted-foreground">{campaign.description || "—"}</div>
                                                         </div>
-                                                        <div className="truncate text-xs text-muted-foreground">{campaign.description || "—"}</div>
                                                     </button>
                                                 </div>
-                                                <div className="px-2 sm:hidden">
+                                                <div className="px-2 md:hidden">
                                                     <div className="flex items-center gap-2">
                                                         <div className="h-2 flex-1 overflow-hidden rounded-full bg-muted">
                                                             <div className={cn("h-full", progressColorClass(progress))} style={{ width: `${progress.toFixed(1)}%` }} />
@@ -1005,12 +1028,12 @@ export function CampaignPerformanceTable({
                                                         </div>
                                                     </div>
                                                 </div>
-                                                <div className="hidden px-2 sm:block">
+                                                <div className="hidden px-2 md:block">
                                                     <span className={cn("inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold", statusBadgeClass(st))}>
                                                         {st}
                                                     </span>
                                                 </div>
-                                                <div className="hidden px-2 sm:block">
+                                                <div className="hidden px-2 md:block">
                                                     <div className="flex items-center justify-end gap-2">
                                                         <div className="h-2 w-20 overflow-hidden rounded-full bg-muted">
                                                             <div className={cn("h-full", progressColorClass(progress))} style={{ width: `${progress.toFixed(1)}%` }} />
@@ -1020,10 +1043,10 @@ export function CampaignPerformanceTable({
                                                         </div>
                                                     </div>
                                                 </div>
-                                                <div className="hidden px-2 text-right text-sm font-semibold tabular-nums text-foreground sm:block">{formatPct(success)}</div>
-                                                <div className="hidden px-2 text-right tabular-nums text-foreground sm:block">{Number(campaign.total_leads || 0).toLocaleString()}</div>
-                                                <div className="hidden px-2 text-right tabular-nums text-foreground sm:block">{Number(campaign.calls_completed || 0).toLocaleString()}</div>
-                                                <div className="hidden px-2 text-right tabular-nums text-foreground sm:block">{Number(campaign.calls_failed || 0).toLocaleString()}</div>
+                                                <div className="hidden px-2 text-right text-sm font-semibold tabular-nums text-foreground md:block">{formatPct(success)}</div>
+                                                <div className="hidden px-2 text-right tabular-nums text-foreground md:block">{Number(campaign.total_leads || 0).toLocaleString()}</div>
+                                                <div className="hidden px-2 text-right tabular-nums text-foreground md:block">{Number(campaign.calls_completed || 0).toLocaleString()}</div>
+                                                <div className="hidden px-2 text-right tabular-nums text-foreground md:block">{Number(campaign.calls_failed || 0).toLocaleString()}</div>
                                             </div>
 
                                             {isExpanded ? (
