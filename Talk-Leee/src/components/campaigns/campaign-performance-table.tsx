@@ -24,7 +24,7 @@ import {
     statusBadgeClass,
 } from "@/lib/campaign-performance";
 import { cn } from "@/lib/utils";
-import { ChevronDown, ChevronRight, Copy, Ellipsis, Pause, Play, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronRight, Pause, Play, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { createPortal } from "react-dom";
 
@@ -41,7 +41,7 @@ const COLUMNS: ColumnDef[] = [
 ];
 
 const TABLE_GRID_COLS =
-    "grid-cols-[36px_minmax(0,1.5fr)_minmax(0,1fr)] sm:grid-cols-[36px_minmax(0,1.6fr)_110px_170px_120px_90px_90px_90px_44px]";
+    "grid-cols-[36px_minmax(0,1.5fr)_minmax(0,1fr)] sm:grid-cols-[36px_minmax(0,1.6fr)_110px_170px_120px_90px_90px_90px]";
 
 const ALL_STATUSES: CampaignStatus[] = ["Active", "Paused", "Completed", "Draft", "Failed"];
 
@@ -307,7 +307,6 @@ export function CampaignPerformanceTable({
     const [statusOpen, setStatusOpen] = useState(false);
     const [statusPanelStyle, setStatusPanelStyle] = useState<CSSProperties | null>(null);
     const [suggestOpen, setSuggestOpen] = useState(false);
-    const [menuOpenFor, setMenuOpenFor] = useState<string | null>(null);
     const [selected, setSelected] = useState<Set<string>>(new Set());
     const [expanded, setExpanded] = useState<Set<string>>(new Set());
     const [detailsId, setDetailsId] = useState<string | null>(null);
@@ -323,7 +322,6 @@ export function CampaignPerformanceTable({
     const statusButtonRef = useRef<HTMLButtonElement | null>(null);
     const statusPanelRef = useRef<HTMLDivElement | null>(null);
     const suggestRef = useRef<HTMLDivElement | null>(null);
-    const menuRefs = useRef<Record<string, HTMLDivElement | null>>({});
     const tableScrollRef = useRef<HTMLDivElement | null>(null);
     const headerRef = useRef<HTMLDivElement | null>(null);
 
@@ -431,15 +429,10 @@ export function CampaignPerformanceTable({
                 if (box && box.contains(t)) return;
                 setSuggestOpen(false);
             }
-            if (menuOpenFor) {
-                const menu = menuRefs.current[menuOpenFor];
-                if (menu && menu.contains(t)) return;
-                setMenuOpenFor(null);
-            }
         };
         window.addEventListener("click", onClick);
         return () => window.removeEventListener("click", onClick);
-    }, [menuOpenFor, statusOpen, suggestOpen]);
+    }, [statusOpen, suggestOpen]);
 
     useEffect(() => {
         const raf = window.requestAnimationFrame(() => {
@@ -654,7 +647,6 @@ export function CampaignPerformanceTable({
                     <span className="text-muted-foreground">{sortIndicator(sort, c.key)}</span>
                 </button>
             ))}
-            <div className="hidden sm:block" />
         </div>
     );
 
@@ -954,8 +946,6 @@ export function CampaignPerformanceTable({
                                     const success = campaignSuccessRatePct(campaign);
                                     const isSelected = selected.has(campaign.id);
                                     const isExpanded = expanded.has(campaign.id);
-                                    const canPause = st === "Active";
-                                    const canResume = st === "Paused" || st === "Draft" || st === "Failed";
 
                                     return (
                                         <div key={campaign.id} className="border-b border-border">
@@ -1034,111 +1024,6 @@ export function CampaignPerformanceTable({
                                                 <div className="hidden px-2 text-right tabular-nums text-foreground sm:block">{Number(campaign.total_leads || 0).toLocaleString()}</div>
                                                 <div className="hidden px-2 text-right tabular-nums text-foreground sm:block">{Number(campaign.calls_completed || 0).toLocaleString()}</div>
                                                 <div className="hidden px-2 text-right tabular-nums text-foreground sm:block">{Number(campaign.calls_failed || 0).toLocaleString()}</div>
-                                                <div className="relative hidden items-center justify-end sm:flex">
-                                                    <button
-                                                        type="button"
-                                                        aria-label="Row actions"
-                                                        className="rounded-md p-2 text-muted-foreground transition-colors duration-150 ease-out hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                                                        onClick={() => setMenuOpenFor((v) => (v === campaign.id ? null : campaign.id))}
-                                                    >
-                                                        <Ellipsis className="h-4 w-4" />
-                                                    </button>
-                                                    {menuOpenFor === campaign.id ? (
-                                                        <div
-                                                            ref={(node) => {
-                                                                menuRefs.current[campaign.id] = node;
-                                                            }}
-                                                            role="menu"
-                                                            className="absolute right-0 top-10 z-50 w-56 origin-top-right overflow-hidden rounded-xl border border-border bg-popover shadow-xl animate-in fade-in-0 zoom-in-95"
-                                                        >
-                                                            <button
-                                                                type="button"
-                                                                role="menuitem"
-                                                                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-foreground transition-colors duration-150 ease-out hover:bg-accent hover:text-accent-foreground"
-                                                                onClick={() => {
-                                                                    setMenuOpenFor(null);
-                                                                    setDetailsId(campaign.id);
-                                                                }}
-                                                            >
-                                                                View Details
-                                                            </button>
-                                                            <button
-                                                                type="button"
-                                                                role="menuitem"
-                                                                className={cn(
-                                                                    "flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-foreground transition-colors duration-150 ease-out hover:bg-accent hover:text-accent-foreground",
-                                                                    !(canPause || canResume) ? "opacity-50" : ""
-                                                                )}
-                                                                disabled={!(canPause || canResume)}
-                                                                onClick={async () => {
-                                                                    setMenuOpenFor(null);
-                                                                    if (canPause) await onPause(campaign.id);
-                                                                    else if (canResume) await onResume(campaign.id);
-                                                                }}
-                                                            >
-                                                                {canPause ? (
-                                                                    <>
-                                                                        <Pause className="h-4 w-4" /> Pause Campaign
-                                                                    </>
-                                                                ) : (
-                                                                    <>
-                                                                        <Play className="h-4 w-4" /> Resume Campaign
-                                                                    </>
-                                                                )}
-                                                            </button>
-                                                            <button
-                                                                type="button"
-                                                                role="menuitem"
-                                                                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-foreground transition-colors duration-150 ease-out hover:bg-accent hover:text-accent-foreground"
-                                                                onClick={() => {
-                                                                    setMenuOpenFor(null);
-                                                                    // Route to the full edit page — the partial in-row
-                                                                    // modal can't satisfy CampaignUpdateRequest's
-                                                                    // required persona_type / agent_names /
-                                                                    // company_name / campaign_slots fields.
-                                                                    router.push(`/campaigns/${campaign.id}/edit`);
-                                                                }}
-                                                            >
-                                                                Edit Campaign
-                                                            </button>
-                                                            <button
-                                                                type="button"
-                                                                role="menuitem"
-                                                                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-foreground transition-colors duration-150 ease-out hover:bg-muted"
-                                                                onClick={() => {
-                                                                    setMenuOpenFor(null);
-                                                                    router.push(`/analytics?campaign=${encodeURIComponent(campaign.id)}`);
-                                                                }}
-                                                            >
-                                                                View Analytics
-                                                            </button>
-                                                            <button
-                                                                type="button"
-                                                                role="menuitem"
-                                                                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-foreground transition-colors duration-150 ease-out hover:bg-accent hover:text-accent-foreground"
-                                                                onClick={async () => {
-                                                                    setMenuOpenFor(null);
-                                                                    await onDuplicate(campaign.id);
-                                                                }}
-                                                            >
-                                                                <Copy className="h-4 w-4" />
-                                                                Duplicate
-                                                            </button>
-                                                            <button
-                                                                type="button"
-                                                                role="menuitem"
-                                                                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-destructive transition-colors duration-150 ease-out hover:bg-destructive/10"
-                                                                onClick={() => {
-                                                                    setMenuOpenFor(null);
-                                                                    setConfirmDeleteId(campaign.id);
-                                                                }}
-                                                            >
-                                                                <Trash2 className="h-4 w-4" />
-                                                                Delete
-                                                            </button>
-                                                        </div>
-                                                    ) : null}
-                                                </div>
                                             </div>
 
                                             {isExpanded ? (
