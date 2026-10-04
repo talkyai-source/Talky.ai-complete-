@@ -22,7 +22,10 @@ script.
 from __future__ import annotations
 
 import re
+from enum import Enum
 from typing import Any, Iterable, Optional
+
+from app.domain.services.caller_assertions import assertion_matches
 
 CONTACT_REASK = (
     "Sorry, I don't think I caught the whole number. Could you say it again, "
@@ -75,7 +78,49 @@ _CUSTOMER_REASSERTION = re.compile(
 )
 
 
-def contradicted_customer_claim(text: str, history: Iterable[Any]) -> Optional[str]:
+class CustomerRelationship(str, Enum):
+    UNKNOWN = "unknown"
+    DENIED = "denied"
+    AFFIRMED = "affirmed"
+
+
+def caller_relationship_assertion(text: str) -> Optional[CustomerRelationship]:
+    """Latest direct caller assertion about their relationship with this company.
+
+    This is deliberately conservative, not a general relationship extractor.
+    Quoted/reported/conditional assertions share the call-control filter;
+    another company's customer and customer-support occupations are unknown.
+    """
+    caller = _plain(text)
+    corrections = []
+    for pattern, position in (
+        (_CUSTOMER_DENIAL, CustomerRelationship.DENIED),
+        (_CUSTOMER_AFFIRMATION, CustomerRelationship.AFFIRMED),
+    ):
+        for match in assertion_matches(caller, pattern, require_direct=True):
+            tail = caller[match.end():]
+            owned_tail = bool(re.match(r"\s+(?:of\s+yours|with\s+you)\b", tail, re.I))
+            if (re.search(r"\bmerchants?$", match[0], re.I)
+                    and not re.search(r"\byour\b", match[0], re.I) and not owned_tail):
+                # Being a merchant is a business type, not a relationship with
+                # the company speaking. Do not turn that into an affirmation.
+                continue
+            if re.search(r"\b(?:customer|client|merchant)s?$", match[0], re.I):
+                if re.match(r"\s+(?:of|with|at|for)\b", tail, re.I):
+                    if not owned_tail:
+                        continue
+                elif re.match(r"\s+[a-z]", tail, re.I) and not re.match(
+                    r"\s+(?:and|but|however|actually|now|already|currently|here|since|because)\b", tail, re.I
+                ):
+                    continue
+            corrections.append((match.start(), position))
+    return max(corrections, key=lambda value: value[0])[1] if corrections else None
+
+
+def contradicted_customer_claim(
+    text: str, history: Iterable[Any] = (), *,
+    relationship: Optional[CustomerRelationship] = None,
+) -> Optional[str]:
     """Respect the latest explicit caller correction of their relationship.
 
     Campaign lists never overrule it. A later caller affirmation clears the
@@ -88,17 +133,18 @@ def contradicted_customer_claim(text: str, history: Iterable[Any]) -> Optional[s
     )]
     if not assertions:
         return None
-    denied = False
-    for message in history or ():
-        role = getattr(message, "role", "")
-        if getattr(role, "value", role) != "user":
-            continue
-        caller = _plain(getattr(message, "content", ""))
-        corrections = [(match.start(), True) for match in _CUSTOMER_DENIAL.finditer(caller)]
-        corrections += [(match.start(), False) for match in _CUSTOMER_AFFIRMATION.finditer(caller)]
-        if corrections:
-            denied = max(corrections)[1]
-    return "Thanks for correcting me. I won't assume you're a customer." if denied else None
+    position = relationship
+    if position is None:
+        position = CustomerRelationship.UNKNOWN
+        for message in history or ():
+            role = getattr(message, "role", "")
+            if getattr(role, "value", role) != "user":
+                continue
+            correction = caller_relationship_assertion(getattr(message, "content", ""))
+            if correction is not None:
+                position = correction
+    return ("Thanks for correcting me. I won't assume you're a customer."
+            if position is CustomerRelationship.DENIED else None)
 
 
 def _digitish_count(text: str) -> int:

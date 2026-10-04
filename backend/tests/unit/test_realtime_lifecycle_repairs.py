@@ -223,11 +223,11 @@ async def test_configured_action_or_verified_resource_offer_passes_realtime_gate
 ])
 async def test_caller_relationship_correction_is_checked_before_realtime_playback(caller_turns, should_block):
     async def events():
+        for index, text in enumerate(caller_turns):
+            yield RealtimeEvent(kind="caller_transcript", text=text, is_final=True, raw={"item_id": f"caller-{index}"})
         yield RealtimeEvent(kind="response_candidate", text="Our records show you are an existing customer.", audio=b"\xff" * 320)
-    provider = SimpleNamespace(events=events, repair_unspoken_response=AsyncMock())
-    bridge = RealtimeBridge(call_id="fixture", realtime_session=provider, media_gateway=SimpleNamespace())
-    for text in caller_turns:
-        bridge._remember_contact_turn("user", text)
+    provider = SimpleNamespace(events=events, repair_unspoken_response=AsyncMock(), update_live_state=AsyncMock())
+    bridge = RealtimeBridge(call_id="fixture", realtime_session=provider, media_gateway=SimpleNamespace(), call_direction="inbound")
     bridge._play_validated_response = AsyncMock()
     await bridge._pump_model_events()
     if should_block:

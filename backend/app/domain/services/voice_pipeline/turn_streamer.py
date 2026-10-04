@@ -808,7 +808,10 @@ class TurnStreamer:
             else:
                 text = _fig_text  # at most a corrected currency sign
             if speaking:
-                _relationship_repair = contradicted_customer_claim(text, session.conversation_history)
+                _relationship_repair = contradicted_customer_claim(
+                    text, session.conversation_history,
+                    relationship=_structured.customer_relationship,
+                )
                 if _relationship_repair:
                     if "customer_relationship" in speech_rewrites:
                         return "", None

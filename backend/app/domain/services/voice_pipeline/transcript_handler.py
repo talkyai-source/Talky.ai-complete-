@@ -23,6 +23,9 @@ from app.core.log_redact import install_pii_log_redaction
 from app.domain.models.conversation import BargeInSignal
 from app.domain.models.session import CallSession
 from app.domain.services.voice_pipeline.backchannel import is_backchannel
+from app.domain.services.voice_pipeline.live_structured_state import (
+    CallerRelationshipEvidence, caller_relationship_assertion,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +36,17 @@ logger = logging.getLogger(__name__)
 # logging (API bootstrap, voice worker, dialer worker, a script or a test).
 # See app/core/log_redact.py for the mechanism and LOG_REDACT_PII to disable.
 install_pii_log_redaction()
+
+
+def _accept_caller_turn(session: CallSession) -> int:
+    """Stamp accepted finals, independently of suppressed/reused media seqs.
+
+    Called synchronously before dispatch or queue insertion. Queue draining
+    and false-barge replay copy this identity instead of creating a new turn.
+    """
+    order = getattr(session, "_accepted_caller_turn_order", 0) + 1
+    session._accepted_caller_turn_order = order
+    return order
 
 
 class TranscriptHandler:
@@ -261,9 +275,32 @@ class TranscriptHandler:
                 # simply overwrites the queued slot (coalesces onto the
                 # latest, matching how a live caller would expect their most
                 # recent words to be the ones answered).
+                _previous_queue = getattr(session, "_queued_next_turn", None)
+                _queued_duplicate = (
+                    _previous_queue is not None
+                    and _previous_queue.get("seq") == _current_seq
+                    and (_previous_queue.get("text") or "").strip() == _new_text
+                )
+                _caller_order = (
+                    _previous_queue.get("caller_turn_order") if _queued_duplicate
+                    else _accept_caller_turn(session)
+                )
+                _preceding_relationship = (
+                    _previous_queue.get("preceding_relationship") if _previous_queue else None
+                )
+                if _previous_queue and not _queued_duplicate:
+                    _position = caller_relationship_assertion(_previous_queue.get("text") or "")
+                    _previous_order = _previous_queue.get("caller_turn_order")
+                    if (_position is not None and isinstance(_previous_order, int)
+                            and not isinstance(_previous_order, bool) and _previous_order > 0):
+                        _preceding_relationship = CallerRelationshipEvidence(
+                            _position, f"accepted:{_previous_order}", _previous_order,
+                        )
                 session._queued_next_turn = {
                     "text": session.current_user_input,
                     "seq": _current_seq,
+                    "caller_turn_order": _caller_order,
+                    "preceding_relationship": _preceding_relationship,
                     "queued_monotonic": time.monotonic(),
                     "confidence": getattr(
                         session, "_last_transcript_confidence", None
@@ -292,6 +329,7 @@ class TranscriptHandler:
             _alternatives = tuple(
                 getattr(session, "_last_transcript_alternatives", ()) or ()
             )
+            _caller_order = _accept_caller_turn(session)
             task = asyncio.create_task(
                 self._p.handle_turn_end(
                     session, websocket, source="final", user_text=_user_text,
@@ -308,6 +346,7 @@ class TranscriptHandler:
             # tell a genuine duplicate from a genuinely new utterance (see the
             # branch above).
             task._utterance_seq = self._p._utterance_seq.get(call_id, 0)
+            task._caller_turn_order = _caller_order
             task._source_text = _user_text
             self._p._pending_llm_tasks[call_id] = task
             return

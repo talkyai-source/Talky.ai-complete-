@@ -135,6 +135,16 @@ class RealtimeBridge:
         self._turn_index = 0
         self._live_user_turn_seq = 0
         self._live_state = LiveConversationState()
+        # Provider item ownership is bounded metadata, not a second transcript.
+        # ASR completion order is not necessarily the caller's speech order.
+        self._caller_items: dict[str, dict] = {}
+        self._caller_item_counter = 0
+        self._caller_item_identity_seen = False
+        self._latest_caller_audio_start_ms: Optional[int] = None
+        self._current_caller_item_key = None
+        self._current_caller_order = 0
+        self._current_caller_transcript_index = None
+        self._pre_current_relationship_state = self._live_state
         self._call_direction = str(call_direction or "outbound").strip().lower()
         # Shared CallSession for deterministic voice-action results. Optional so
         # older construction sites/tests remain compatible; the bridge itself
@@ -412,6 +422,76 @@ class RealtimeBridge:
                 # Transient — keep going; a closed socket ends the loop via closed().
         logger.debug("realtime_bridge caller pump ended call=%s", self._call_id)
 
+    @staticmethod
+    def _caller_item_id(raw: Any) -> Optional[str]:
+        value = raw.get("item_id") if isinstance(raw, dict) else None
+        return value if isinstance(value, str) and value.strip() and len(value) <= 256 else None
+
+    def _register_caller_item(self, raw: Any, *, anchored: bool = True) -> Optional[dict]:
+        item_id = self._caller_item_id(raw)
+        if item_id is None:
+            return None
+        if anchored:
+            self._caller_item_identity_seen = True
+        item = self._caller_items.get(item_id)
+        if item is not None:
+            return item
+        offset = raw.get("audio_start_ms")
+        if "audio_start_ms" in raw and (
+            isinstance(offset, bool) or not isinstance(offset, int) or offset < 0
+            or (self._latest_caller_audio_start_ms is not None
+                and offset <= self._latest_caller_audio_start_ms)
+        ):
+            # OpenAI documents this offset from all input audio in this
+            # session. A retired speech anchor cannot become a newer turn.
+            # Keep a bounded tombstone so its following commit also fails.
+            item = {"order": None, "digest": None, "audio_start_ms": None}
+        else:
+            self._caller_item_counter += 1
+            item = {"order": self._caller_item_counter, "digest": None,
+                    "audio_start_ms": offset}
+            if offset is not None:
+                self._latest_caller_audio_start_ms = offset
+        self._caller_items[item_id] = item
+        if len(self._caller_items) > 64:
+            del self._caller_items[next(iter(self._caller_items))]
+        return item
+
+    def _admit_caller_final(self, text: str, raw: Any) -> Optional[tuple[int, str]]:
+        item_id = self._caller_item_id(raw)
+        item = self._caller_items.get(item_id) if item_id else None
+        if item is None:
+            if self._caller_item_identity_seen:
+                # Missing/retired item ownership cannot become a new current
+                # correction just because its ASR finished late.
+                logger.debug("realtime caller final ignored call=%s reason=unowned_item", self._call_id)
+                return None
+            if item_id is None:
+                item_id = f"anonymous:{self._caller_item_counter + 1}"
+            item = self._register_caller_item({"item_id": item_id}, anchored=False)
+        order = item["order"]
+        if order is None:
+            return None
+        digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        if item["digest"] == digest:
+            return None
+        if order < max(self._current_caller_order, self._caller_item_counter):
+            if item["digest"] is not None:
+                return None  # an old revision cannot replace a newer turn
+            item["digest"] = digest
+            return order, "historical"
+        replacement = item_id == self._current_caller_item_key and item["digest"] is not None
+        item["digest"] = digest
+        self._current_caller_item_key = item_id
+        self._current_caller_order = order
+        return order, "replacement" if replacement else "current"
+
+    @staticmethod
+    def _with_relationship(state: LiveConversationState, evidence_state: LiveConversationState) -> LiveConversationState:
+        return replace(state, customer_relationship=evidence_state.customer_relationship,
+                       relationship_turn_id=evidence_state.relationship_turn_id,
+                       relationship_turn_order=evidence_state.relationship_turn_order)
+
     # ── Model events: OpenAI -> gateway (+ tools, barge-in) ──────────────
     async def _pump_model_events(self) -> None:
         from app.utils.audio_utils import resample_audio, ulaw_to_pcm
@@ -438,7 +518,7 @@ class RealtimeBridge:
                     if grounded_links != (ev.text or "") or unsupported_links:
                         valid, reason = False, "unsupported_company_resource"
                     from app.domain.services.voice_pipeline.conversation_guards import contradicted_customer_claim
-                    if contradicted_customer_claim(ev.text or "", self._contact_history):
+                    if contradicted_customer_claim(ev.text or "", relationship=self._live_state.customer_relationship):
                         valid, reason = False, "contradicted_customer_relationship"
                     if not valid:
                         logger.warning("realtime_playout_rejected call=%s reason=%s", self._call_id, reason)
@@ -457,11 +537,17 @@ class RealtimeBridge:
                     self._utterance = {
                         "id": f"rt-{self._playback_generation}",
                         "generation": self._playback_generation,
-                        "raw": ev.raw or {}, "status": "validated", "receipt": None,
+                        "raw": ev.raw or {}, "text": ev.text or "", "status": "validated", "receipt": None,
                     }
                     self._playback_task = asyncio.create_task(self._play_validated_response(ev))
 
+                elif kind == "caller_turn":
+                    self._register_caller_item(getattr(ev, "raw", None))
+
                 elif kind == "interrupted":
+                    raw = getattr(ev, "raw", None) or {}
+                    if raw.get("reason") == "speech_started":
+                        self._register_caller_item(raw)
                     # Revoke the timer immediately, before ASR supplies the new
                     # words. A delayed tool from the old turn cannot rearm it.
                     if not self._caller_transcript_pending:
@@ -492,39 +578,84 @@ class RealtimeBridge:
                     self._tool_tasks.add(tool_task)
                     tool_task.add_done_callback(self._tool_tasks.discard)
 
-                elif kind == "caller_transcript" and ev.text:
+                elif kind == "caller_transcript" and (ev.text or getattr(ev, "is_final", False)):
+                    text = ev.text if isinstance(ev.text, str) else ""
                     # Contact values are high-risk transcript content. Log only
                     # event shape, never the raw caller text.
                     logger.debug(
                         "realtime caller transcript call=%s chars=%d final=%s",
-                        self._call_id[:12], len(ev.text),
+                        self._call_id[:12], len(text),
                         bool(getattr(ev, "is_final", False)),
                     )
                     if getattr(ev, "is_final", False):
+                        # Provider-final caller opt-out is monotonic, even if
+                        # turn metadata has expired and cannot own actions.
+                        self._record_caller_opt_out(text)
+                        admission = self._admit_caller_final(text, getattr(ev, "raw", None))
+                        if admission is None:
+                            continue
+                        caller_order, admission_kind = admission
+                        evidence = evidence_from_transcript(
+                            role="user", text=text,
+                            turn_id=f"realtime:{caller_order}", caller_turn_order=caller_order,
+                        )
+                        if admission_kind == "historical":
+                            if evidence is not None:
+                                previous = self._live_state
+                                self._live_state = self._with_relationship(self._live_state,
+                                    reduce_live_state(self._live_state, evidence))
+                                # Current-item retraction must restore the
+                                # latest prior evidence, including late ASR.
+                                self._pre_current_relationship_state = self._with_relationship(
+                                    self._pre_current_relationship_state,
+                                    reduce_live_state(self._pre_current_relationship_state, evidence))
+                                if previous != self._live_state:
+                                    await self._invalidate_contradicted_playback()
+                                    await self._publish_live_state()
+                            self._record_turn("user", text, metadata={
+                                "caller_turn_order": caller_order, "late_final": True})
+                            continue
+                        if admission_kind == "replacement":
+                            # A corrected final for the current item replaces
+                            # only that item's relationship contribution. Never
+                            # roll back intervening tool/contact/delivery facts.
+                            corrected = (reduce_live_state(self._pre_current_relationship_state, evidence)
+                                         if evidence is not None else self._pre_current_relationship_state)
+                            self._live_state = self._with_relationship(self._live_state, corrected)
+                            self._latest_caller_text = text
+                            # This is the same caller item, but its old ASR can
+                            # no longer authorize a pending external action.
+                            self._live_user_turn_seq += 1
+                            self._action_session._voice_action_user_turn = self._live_user_turn_seq
+                            self._revoke_pending_end_call()
+                            self._record_caller_revision(caller_order, text)
+                            await self._invalidate_contradicted_playback()
+                            await self._publish_live_state()
+                            continue
+                        self._pre_current_relationship_state = self._live_state
                         if not self._caller_transcript_pending:
                             self._snapshot_caller_question()
                         self._revoke_pending_end_call()
                         self._repair_attempted = False
-                        self._latest_caller_text = ev.text
+                        self._latest_caller_text = text
                         self._live_user_turn_seq += 1
                         self._action_session._voice_action_user_turn = self._live_user_turn_seq
                         # The caller owns close/DNC intent even when the model
                         # produces only a plain goodbye and omits its tool.
                         self._arm_caller_end_call(require_explicit=True)
-                        evidence = evidence_from_transcript(
-                            role="user",
-                            text=ev.text,
-                            turn_id=f"realtime:{self._live_user_turn_seq}",
-                        )
                         if evidence is not None:
                             self._live_state = reduce_live_state(
                                 self._live_state, evidence
                             )
+                            await self._invalidate_contradicted_playback()
                             await self._publish_live_state()
                         _tidx = self._turn_index
-                        await self._observe_contact_turn(ev.text, getattr(ev, "raw", None))
-                        self._remember_contact_turn("user", ev.text)
-                        self._record_turn("user", ev.text)
+                        await self._observe_contact_turn(text, getattr(ev, "raw", None))
+                        self._remember_contact_turn("user", text)
+                        self._current_caller_transcript_index = self._record_turn("user", text, metadata={
+                            "provider_item_id": self._current_caller_item_key,
+                            "caller_turn_order": caller_order,
+                        })
                         # Real-time voicemail detection on the opening turn(s):
                         # if the callee is an answering machine, hang up now and
                         # end the pump — no message, no conversation.
@@ -533,7 +664,7 @@ class RealtimeBridge:
                                 detect_and_hang_up_voicemail,
                             )
                             if await detect_and_hang_up_voicemail(
-                                self._call_id, ev.text, _tidx
+                                self._call_id, text, _tidx
                             ):
                                 break
 
@@ -565,6 +696,41 @@ class RealtimeBridge:
         if callable(send):
             await send(self._call_id, payload)
 
+    async def _invalidate_contradicted_playback(self, owned_utterance=None) -> bool:
+        """Stop only an unfinished utterance contradicted by accepted evidence."""
+        from app.domain.services.voice_pipeline.conversation_guards import contradicted_customer_claim
+        utterance = self._utterance
+        if owned_utterance is not None and (
+                utterance is not owned_utterance
+                or owned_utterance.get("status") == "interrupted"):
+            return True
+        if (not utterance or utterance.get("status") in {"completed", "interrupted"}
+                or not contradicted_customer_claim(utterance.get("text", ""),
+                    relationship=self._live_state.customer_relationship)):
+            return False
+        retry_available = not self._repair_attempted
+        self._repair_attempted = True
+        await self._cancel_playback()
+        if not retry_available:
+            self._failure_reason = "Realtime reply failed validation twice"
+            self._stop.set()
+            close = getattr(self._rt, "close", None)
+            if callable(close):
+                await close()
+            return True
+        # Some of this utterance may have reached the transport. Preserve its
+        # delivery/truncation evidence; never label it wholly withheld/unheard.
+        await self._publish_live_state()
+        request = getattr(self._rt, "request_response", None)
+        if callable(request) and not self._stop.is_set():
+            await request()
+        return True
+
+    def _owns_unfinished_playback(self, utterance) -> bool:
+        return (self._utterance is utterance
+                and utterance.get("status") not in {"completed", "interrupted"}
+                and not self._stop.is_set())
+
     async def _cancel_playback(self, raw=None) -> None:
         """Invalidate exactly the old utterance before a replacement can speak."""
         self._action_session._voice_action_delivered_text = ""
@@ -578,7 +744,7 @@ class RealtimeBridge:
             if utterance["status"] not in {"completed", "interrupted"}:
                 utterance["status"] = "interrupted"
         task = self._playback_task
-        if task is not None and not task.done():
+        if task is not None and task is not asyncio.current_task() and not task.done():
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
         if self._barge_in_event is not None:
@@ -607,13 +773,17 @@ class RealtimeBridge:
         if utterance is None:  # direct callers/tests still get an owned utterance
             self._playback_generation += 1
             utterance = self._utterance = {"id": f"rt-{self._playback_generation}",
-                "generation": self._playback_generation, "raw": event.raw or {},
+                "generation": self._playback_generation, "raw": event.raw or {}, "text": event.text or "",
                 "status": "validated", "receipt": None}
         receipt = {"utterance_id": utterance["id"], "status": "unknown", "evidence": "unknown", "played_ms": 0}
         started = time.monotonic()
         try:
+            if await self._invalidate_contradicted_playback(utterance):
+                return
             self._action_session._voice_action_delivered_text = ""
             await self._send_control_event({"type": "llm_response", "text": event.text})
+            if not self._owns_unfinished_playback(utterance):
+                return
             begin = getattr(self._gw, "begin_playback", None)
             if callable(begin):
                 await begin(self._call_id, utterance["id"])
@@ -621,33 +791,49 @@ class RealtimeBridge:
                 start = getattr(self._gw, "start_playback_tracking", None)
                 if callable(start):
                     start(self._call_id)
+            if not self._owns_unfinished_playback(utterance):
+                return
             utterance["status"] = "playing"
             audio = event.audio or b""
             for offset in range(0, len(audio), 320):
                 if self._stop.is_set() or not self._session_active():
                     return
+                # Admission precedes each transport submission; ASR may finish
+                # while begin_playback/send_audio is awaiting the gateway.
+                if await self._invalidate_contradicted_playback(utterance):
+                    return
                 pcm = ulaw_to_pcm(audio[offset:offset + 320])
                 if self._internal_rate != _WIRE_RATE:
                     pcm = resample_audio(pcm, from_rate=_WIRE_RATE, to_rate=self._internal_rate,
                                          channels=1, bit_depth=16, res_type="soxr_mq")
+                utterance["submission_started"] = True
                 await self._gw.send_audio(self._call_id, pcm)
+                if not self._owns_unfinished_playback(utterance):
+                    return
                 if offset == 0:
                     logger.info("realtime_playout call=%s utterance=%s validation_to_first_submission_ms=%d",
                                 self._call_id, utterance["id"], (time.monotonic() - started) * 1000)
             flush = getattr(self._gw, "flush_audio_buffer", None) or getattr(self._gw, "flush_tts_buffer", None)
             if callable(flush):
                 await flush(self._call_id)
+            if not self._owns_unfinished_playback(utterance):
+                return
             finish = getattr(self._gw, "finish_playback", None)
             if callable(finish):
                 receipt = await finish(self._call_id, utterance["id"])
             else:
                 await self._send_control_event({"type": "tts_audio_complete"})
+                if not self._owns_unfinished_playback(utterance):
+                    return
                 # Legacy transports cannot prove which utterance they completed.
                 wait = getattr(self._gw, "wait_for_playback_complete", None)
                 if callable(wait):
                     await wait(self._call_id)
+            if not self._owns_unfinished_playback(utterance):
+                return
             utterance["receipt"] = receipt
             self._record_turn("assistant", event.text, metadata={"delivery": receipt})
+            utterance["transcript_recorded"] = True
             # Generated text and queue acceptance are not contact confirmation.
             # Only a transport with explicit playback acknowledgement may advance
             # the contact readback state; other transports retain pending details.
@@ -664,17 +850,28 @@ class RealtimeBridge:
                     await self._publish_live_state()
             else:
                 utterance["status"] = receipt.get("status", "unknown")
+            if self._utterance is not utterance or utterance.get("status") == "interrupted":
+                return
             if (self._closing_after_generation is not None
                     and utterance["generation"] > self._closing_after_generation):
                 self._goodbye_completed.set()
             await self._send_control_event({"type": "turn_complete"})
         except asyncio.CancelledError:
-            self._record_turn("assistant", event.text, metadata={"delivery": {
-                "utterance_id": utterance["id"], "status": "interrupted", "evidence": "unknown"}})
+            if utterance.get("status") != "completed":
+                utterance["status"] = "interrupted"
             raise
         except Exception:
             logger.exception("realtime_playout_failed call=%s", self._call_id)
             await self._rt.close()
+        finally:
+            # A gateway may swallow task cancellation after accepting bytes.
+            # Retain uncertain partial delivery even when that await returns.
+            if (utterance.get("status") == "interrupted"
+                    and utterance.get("submission_started")
+                    and not utterance.get("transcript_recorded")):
+                self._record_turn("assistant", event.text, metadata={"delivery": {
+                    "utterance_id": utterance["id"], "status": "interrupted", "evidence": "unknown"}})
+                utterance["transcript_recorded"] = True
 
     def _remember_contact_turn(self, role: str, text: str) -> None:
         from app.domain.models.conversation import Message, MessageRole
@@ -939,7 +1136,18 @@ class RealtimeBridge:
 
         task.add_done_callback(retire)
 
-    def _record_turn(self, role: str, text: str, *, metadata=None) -> None:
+    def _record_caller_revision(self, caller_order: int, text: str) -> None:
+        annotate = getattr(self._transcript_service, "annotate_turn_revision", None)
+        if not callable(annotate) or self._current_caller_transcript_index is None:
+            return
+        try:
+            annotate(self._call_id, turn_index=self._current_caller_transcript_index,
+                     provider_item_id=self._current_caller_item_key,
+                     caller_turn_order=caller_order, content=text)
+        except Exception as exc:  # evidence must not break the active call
+            logger.debug("realtime caller revision record failed error_type=%s", type(exc).__name__)
+
+    def _record_turn(self, role: str, text: str, *, metadata=None) -> Optional[int]:
         """Accumulate one finalised transcript turn (role-tagged, in order) into
         the shared TranscriptService buffer. Fail-soft: a transcript error must
         never break the call, so everything here is swallowed."""
@@ -955,6 +1163,7 @@ class RealtimeBridge:
                 metadata=metadata,
             )
             self._turn_index += 1
+            return self._turn_index - 1
         except Exception as exc:  # noqa: BLE001 — transcript must never break a call
             logger.debug("realtime_bridge record_turn err call=%s: %s",
                          self._call_id, exc)
@@ -1116,16 +1325,21 @@ class RealtimeBridge:
         if task is not None and not task.done():
             task.cancel()
 
+    def _record_caller_opt_out(self, text: str) -> bool:
+        from app.domain.services.voice_pipeline.identity_disposition import contains_dnc
+        opted_out = contains_dnc(text)
+        if opted_out:
+            self._action_session._caller_opted_out = True
+        return opted_out
+
     def _arm_caller_end_call(self, *, require_explicit=False):
         from app.domain.services.end_session_action import caller_signaled_end
-        from app.domain.services.voice_pipeline.identity_disposition import contains_dnc, contains_explicit_goodbye
+        from app.domain.services.voice_pipeline.identity_disposition import contains_explicit_goodbye
         if self._caller_transcript_pending or self._hangup_started:
             return False
         # DNC survives a canceled immediate hangup. Shared telephony teardown
         # reads this CallSession flag and runs the existing durable opt-out.
-        opted_out = contains_dnc(self._latest_caller_text)
-        if opted_out:
-            self._action_session._caller_opted_out = True
+        opted_out = self._record_caller_opt_out(self._latest_caller_text)
         if not caller_signaled_end(self._latest_caller_text, previous_assistant_text=self._previous_assistant_text):
             return False
         # A topic-level "no thanks" is not an automatic instruction to hang

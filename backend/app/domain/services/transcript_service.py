@@ -3,6 +3,7 @@ Transcript Service
 Handles transcript accumulation and storage for call conversations.
 Provider-agnostic - works with any voice pipeline.
 """
+import hashlib
 import json
 import logging
 from datetime import datetime
@@ -245,6 +246,43 @@ class TranscriptService:
             f"Transcript turn added for call {call_id}: "
             f"{role}: {content[:50]}..."
         )
+
+    def annotate_turn_revision(
+        self, call_id: str, *, turn_index: int, provider_item_id: str,
+        caller_turn_order: int, content: str,
+    ) -> bool:
+        """Retain the latest ASR revision as evidence, without rewriting speech.
+
+        The current canonical transcript/lead consumers do not apply revisions.
+        Empty retractions are metadata, never fabricated caller utterances.
+        """
+        if (call_id in self._sealed or not isinstance(content, str)
+                or not isinstance(provider_item_id, str)
+                or not provider_item_id.strip() or len(provider_item_id) > 256
+                or isinstance(turn_index, bool) or not isinstance(turn_index, int) or turn_index < 0
+                or isinstance(caller_turn_order, bool) or not isinstance(caller_turn_order, int)
+                or caller_turn_order < 0):
+            return False
+        for turn in reversed(self._buffers.get(call_id, ())):
+            if (turn.role != "user" or turn.turn_index != turn_index
+                    or turn.metadata.get("provider_item_id") != provider_item_id
+                    or turn.metadata.get("caller_turn_order") != caller_turn_order):
+                continue
+            previous = turn.metadata.get("asr_latest_revision") or {}
+            revision = previous.get("revision", 0) if isinstance(previous, dict) else 0
+            revision = revision if isinstance(revision, int) and not isinstance(revision, bool) else 0
+            turn.metadata["asr_latest_revision"] = {
+                "revision": max(0, revision) + 1,
+                "provider_item_id": provider_item_id,
+                "caller_turn_order": caller_turn_order,
+                "content": content[:4096],
+                "content_sha256": hashlib.sha256(content.encode("utf-8")).hexdigest(),
+                "characters": len(content),
+                "truncated": len(content) > 4096,
+                "retracted": not content.strip(),
+            }
+            return True
+        return False
 
     def bind_call_identity(self, call_id: str, talklee_call_id: Optional[str]) -> None:
         """Bind call_id to talklee_call_id for transcript integrity checks."""

@@ -27,6 +27,9 @@ _NEGATED_PREFIX = re.compile(
     r"\bnot\s+(?:(?:ready|going|trying|about)\s+to\s+(?:say\s+)?|"
     r"(?:asking|telling|requesting)\s+(?:you\s+)?to\s+|(?:say|said|saying)\s+)$|\bnot\s+$", re.I)
 _META_SUFFIX = re.compile(r'^\s*(?:means?\b|is\s+(?:a\s+word|the\s+word|what\b)|was\s+what\b)', re.I)
+_DIRECT_PREFIX = re.compile(
+    r'^\s*(?:(?:yes|no|well|sorry|okay|ok|listen|look|to\s+be\s+clear)\b[\s,:]*)*$', re.I
+)
 _CONTINUE = re.compile(
     r"\b(?:don't|dont|do\s+not|won't|will\s+not|never)\s+(?:(?:you|please)\s+)*"
     r"(?:(?:want|need|wish|intend|plan)\s+(?:you\s+)?to\s+)?"
@@ -54,7 +57,9 @@ def _text(text: str | None) -> str:
     return value.replace(',', ' ').replace('—', ' ').replace('–', ' ')
 
 
-def assertion_matches(text: str | None, pattern: Pattern[str]) -> list[re.Match]:
+def assertion_matches(
+    text: str | None, pattern: Pattern[str], *, require_direct: bool = False
+) -> list[re.Match]:
     """Return only independently asserted matches, with original-text offsets."""
     value = _text(text)
     accepted = []
@@ -66,6 +71,11 @@ def assertion_matches(text: str | None, pattern: Pattern[str]) -> list[re.Match]
         prefix, suffix = value[start:match.start()], value[match.end():end]
         if (_META.search(prefix) or _REPORTED.search(prefix)
                 or _NEGATED_PREFIX.search(prefix) or _META_SUFFIX.search(suffix)):
+            continue
+        # Opt-in for first-person factual state. Embedded claims such as
+        # 'the script says I am ...' are not the caller's own assertion. The
+        # default call-control policy is intentionally unchanged.
+        if require_direct and not _DIRECT_PREFIX.fullmatch(prefix):
             continue
         accepted.append(match)
     return accepted

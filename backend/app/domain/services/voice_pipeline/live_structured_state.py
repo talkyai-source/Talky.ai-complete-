@@ -8,11 +8,18 @@ Assistant prose is never an evidence source.
 
 from __future__ import annotations
 
+import asyncio
+import hashlib
 import re
 import unicodedata
 from dataclasses import dataclass, replace
 from enum import Enum
 from typing import Optional, Union
+
+from app.domain.services.voice_pipeline.conversation_guards import (
+    CustomerRelationship,
+    caller_relationship_assertion,
+)
 
 
 MAX_LIVE_STATE_BLOCK_CHARS = 768
@@ -89,6 +96,19 @@ class LiveConversationState:
     last_tool_code: Optional[str] = None
     sales_stage: SalesStage = SalesStage.OPENING
     last_user_turn_id: Optional[str] = None
+    last_user_turn_order: Optional[int] = None
+    customer_relationship: CustomerRelationship = CustomerRelationship.UNKNOWN
+    relationship_turn_id: Optional[str] = None
+    relationship_turn_order: Optional[int] = None
+
+
+@dataclass(frozen=True)
+class CallerRelationshipEvidence:
+    """Only the latest explicit assertion from a coalesced accepted final."""
+
+    position: CustomerRelationship
+    turn_id: str
+    turn_order: int
 
 
 @dataclass(frozen=True)
@@ -100,6 +120,8 @@ class UserTurnEvidence:
     interest_level: Optional[InterestLevel] = None
     refusal: bool = False
     requested_next_action: Optional[RequestedNextAction] = None
+    caller_turn_order: Optional[int] = None
+    customer_relationship: Optional[CustomerRelationship] = None
 
 
 @dataclass(frozen=True)
@@ -310,7 +332,7 @@ def _safe_identifier(value: str, *, max_chars: int) -> Optional[str]:
 
 
 def evidence_from_transcript(
-    *, role: object, text: str, turn_id: str
+    *, role: object, text: str, turn_id: str, caller_turn_order: Optional[int] = None
 ) -> Optional[UserTurnEvidence]:
     """Extract conservative evidence from one *final caller* transcript.
 
@@ -378,6 +400,8 @@ def evidence_from_transcript(
 
     return UserTurnEvidence(
         turn_id=str(turn_id),
+        caller_turn_order=caller_turn_order,
+        customer_relationship=caller_relationship_assertion(utterance),
         decision_maker=decision_maker,
         current_provider=provider,
         pain_priority=pain,
@@ -413,6 +437,33 @@ def reduce_live_state(
     if isinstance(event, UserTurnEvidence):
         if event.turn_id == state.last_user_turn_id:
             return state
+        relationship = event.customer_relationship
+        if (not isinstance(relationship, CustomerRelationship)
+                or relationship not in (CustomerRelationship.DENIED, CustomerRelationship.AFFIRMED)):
+            relationship = None
+        if event.caller_turn_order is not None:
+            if (isinstance(event.caller_turn_order, bool)
+                    or not isinstance(event.caller_turn_order, int)
+                    or event.caller_turn_order < 0):
+                return state
+            if (state.last_user_turn_order is not None
+                    and event.caller_turn_order <= state.last_user_turn_order):
+                # ASR may finalize an earlier utterance after a newer ordinary
+                # question. Keep its explicit relationship unless a newer
+                # relationship assertion already superseded it; never replay
+                # its contact/interest/action/refusal fields as current state.
+                if relationship is not None and (
+                    (state.relationship_turn_order is not None
+                     and event.caller_turn_order > state.relationship_turn_order)
+                    or (state.relationship_turn_order is None
+                        and state.customer_relationship is CustomerRelationship.UNKNOWN)
+                ):
+                    return replace(
+                        state, customer_relationship=relationship,
+                        relationship_turn_id=event.turn_id,
+                        relationship_turn_order=event.caller_turn_order,
+                    )
+                return state
         state = replace(
             state,
             decision_maker=event.decision_maker or state.decision_maker,
@@ -430,6 +481,11 @@ def reduce_live_state(
                 else state.requested_next_action
             ),
             last_user_turn_id=event.turn_id,
+            last_user_turn_order=(event.caller_turn_order if event.caller_turn_order is not None
+                                  else state.last_user_turn_order),
+            customer_relationship=relationship or state.customer_relationship,
+            relationship_turn_id=event.turn_id if relationship else state.relationship_turn_id,
+            relationship_turn_order=(event.caller_turn_order if relationship else state.relationship_turn_order),
         )
     elif isinstance(event, IdentityEvidence):
         state = replace(state, identity_introduced=bool(event.introduced))
@@ -477,7 +533,8 @@ def reduce_cascaded_session_live_state(
     slot snapshot shared by streaming and non-streaming callers.
     """
     state = getattr(session, "_live_structured_state", None)
-    if not isinstance(state, LiveConversationState):
+    bootstrap_relationship = not isinstance(state, LiveConversationState)
+    if bootstrap_relationship:
         state = LiveConversationState()
 
     user_messages: list[str] = []
@@ -488,13 +545,89 @@ def reduce_cascaded_session_live_state(
     latest_user = (
         user_text if user_text is not None else (user_messages[-1] if user_messages else "")
     )
+    if bootstrap_relationship:
+        # A caller history may already exist when this optional prompt state
+        # is first built. Bootstrap only relationship evidence, not old action,
+        # contact or refusal events. Future calls use the durable field.
+        prior_messages = (user_messages[:-1]
+                          if user_messages and user_messages[-1] == latest_user
+                          else user_messages)
+        for index, text in enumerate(prior_messages, 1):
+            position = caller_relationship_assertion(text)
+            if position is not None:
+                state = replace(
+                    state, customer_relationship=position,
+                    relationship_turn_id=f"history:{index}",
+                )
+    # The final handler stamps acceptance, including queued turns. Media seqs
+    # may repeat when a StartOfTurn callback is suppressed; they are not order.
+    # Unstamped compatibility callers have identity only, not temporal proof.
+    try:
+        task = asyncio.current_task()
+    except RuntimeError:
+        task = None
+    sequence = getattr(task, "_caller_turn_order", None)
+    caller_order = (sequence if isinstance(sequence, int)
+                    and not isinstance(sequence, bool) and sequence > 0 else None)
+    turn_key = f"{getattr(session, 'turn_id', 0)}:{len(user_messages)}"
+    if caller_order is not None:
+        turn_key = f"accepted:{caller_order}"
+    preceding = getattr(task, "_preceding_relationship", None)
+    if (
+        isinstance(preceding, CallerRelationshipEvidence)
+        and isinstance(preceding.position, CustomerRelationship)
+        and preceding.position in (CustomerRelationship.DENIED, CustomerRelationship.AFFIRMED)
+        and isinstance(preceding.turn_order, int) and not isinstance(preceding.turn_order, bool)
+        and caller_order is not None and 0 < preceding.turn_order < caller_order
+        and (state.relationship_turn_order is None
+             or preceding.turn_order > state.relationship_turn_order)
+    ):
+        # Depth-one dispatch may coalesce several accepted caller finals. Keep
+        # their latest explicit relationship, never their actions/contact or
+        # general state. It belongs in the pre-current replacement baseline.
+        state = replace(
+            state, customer_relationship=preceding.position,
+            relationship_turn_id=preceding.turn_id,
+            relationship_turn_order=preceding.turn_order,
+        )
+    digest = hashlib.sha256(str(latest_user).encode("utf-8")).hexdigest()
+    previous = getattr(session, "_relationship_current_turn", None)
+    relationship_fields = ("customer_relationship", "relationship_turn_id", "relationship_turn_order")
+    if previous is not None and previous[0] == turn_key:
+        prior_relationship = previous[2]
+    else:
+        prior_relationship = {name: getattr(state, name) for name in relationship_fields}
     evidence = evidence_from_transcript(
         role="user",
         text=latest_user,
-        turn_id=f"{getattr(session, 'turn_id', 0)}:{len(user_messages)}",
+        turn_id=turn_key,
+        caller_turn_order=caller_order,
     )
-    if evidence is not None:
+    stale_owned_turn = (caller_order is not None and state.last_user_turn_order is not None
+                        and caller_order < state.last_user_turn_order)
+    if stale_owned_turn:
+        if evidence is not None:
+            state = reduce_live_state(state, evidence)
+            if previous is not None:
+                # A delayed first final may refine the relationship that
+                # preceded the current utterance. Keep the current observation
+                # identity/digest so an old task cannot replace its baseline.
+                base = replace(state, **previous[2], last_user_turn_id=None)
+                revised = reduce_live_state(base, evidence)
+                previous = (previous[0], previous[1], {
+                    name: getattr(revised, name) for name in relationship_fields
+                })
+                setattr(session, "_relationship_current_turn", previous)
+    elif previous is not None and previous[0] == turn_key and previous[1] != digest:
+        # Replace only this transcript's relationship contribution; later tool,
+        # contact and action evidence must not be reset or replayed.
+        base = replace(state, **prior_relationship, last_user_turn_id=None)
+        revised = reduce_live_state(base, evidence) if evidence is not None else base
+        state = replace(state, **{name: getattr(revised, name) for name in relationship_fields})
+    elif evidence is not None:
         state = reduce_live_state(state, evidence)
+    if not stale_owned_turn:
+        setattr(session, "_relationship_current_turn", (turn_key, digest, prior_relationship))
 
     state = reduce_live_state(
         state,
@@ -556,6 +689,7 @@ def render_live_state_block(state: LiveConversationState) -> str:
             f"identity_introduced={identity}",
             f"decision_maker={state.decision_maker.value}",
             f"current_provider={provider}",
+            f"customer_relationship={state.customer_relationship.value}",
             f"pain_priority={state.pain_priority.value}",
             f"interest_level={state.interest_level.value}",
             f"refusal_count={refusal}",

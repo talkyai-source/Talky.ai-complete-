@@ -687,6 +687,8 @@ class VoicePipelineService:
             # _resume_after_false_barge_in).
             _cancelled_turn["text"] = getattr(cancelled_task, "_source_text", None)
             _cancelled_turn["type"] = getattr(cancelled_task, "_turn_type", "final")
+            _cancelled_turn["caller_turn_order"] = getattr(cancelled_task, "_caller_turn_order", None)
+            _cancelled_turn["preceding_relationship"] = getattr(cancelled_task, "_preceding_relationship", None)
             # Bounded, NON-blocking cancel: never freeze the single STT consumer
             # waiting for the cancelled turn to unwind. Unbounded awaiting here let
             # rapid barge-ins pile up and dropped every backlogged turn → seconds
@@ -762,6 +764,8 @@ class VoicePipelineService:
             asyncio.create_task(
                 self._resume_after_false_barge_in(
                     session, websocket, _cancelled_turn["text"], _barge_at,
+                    caller_turn_order=_cancelled_turn.get("caller_turn_order"),
+                    preceding_relationship=_cancelled_turn.get("preceding_relationship"),
                 )
             )
         if websocket:
@@ -780,6 +784,9 @@ class VoicePipelineService:
         websocket: Optional[WebSocket],
         user_text: str,
         barge_at: float,
+        *,
+        caller_turn_order: Optional[int] = None,
+        preceding_relationship=None,
     ) -> None:
         """Re-issue a reply that a word-less barge-in cancelled.
 
@@ -800,6 +807,9 @@ class VoicePipelineService:
         call_id = session.call_id
         if call_id not in self._barge_in_events:
             return  # session torn down
+        if (caller_turn_order is not None
+                and getattr(session, "_accepted_caller_turn_order", None) != caller_turn_order):
+            return  # a newer accepted caller turn owns the reply, even if finished
         last_text = getattr(session, "_caller_last_text_at", None)
         if isinstance(last_text, (int, float)) and last_text >= barge_at:
             return  # the caller really spoke; their words drive the next turn
@@ -845,6 +855,8 @@ class VoicePipelineService:
         )
         task._turn_type = "final"
         task._utterance_seq = self._utterance_seq.get(call_id, 0)
+        task._caller_turn_order = caller_turn_order
+        task._preceding_relationship = preceding_relationship
         task._source_text = user_text
         self._pending_llm_tasks[call_id] = task
 

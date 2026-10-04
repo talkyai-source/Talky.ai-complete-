@@ -232,6 +232,9 @@ def _confirmed(session, proposal, user_text):
 
 
 async def execute_connected_voice_action(session, action, arguments, user_text):
+    # Bind the supplied caller text before any async policy/DB read. An ASR
+    # correction must not let an older request adopt a newer admission token.
+    admission_turn = _turn(session)
     if re.search(r"\b(?:cancel|don't|do not|never mind|stop|wait)\b", user_text, re.I):
         getattr(session, "_voice_action_proposals", {}).pop(action, None)
         return _result(action, "cancelled", "The caller has not authorized execution of this action.")
@@ -245,6 +248,8 @@ async def execute_connected_voice_action(session, action, arguments, user_text):
         return _result(action, "needs_details", str(exc))
     except Exception:
         return _result(action, "unavailable", "The action configuration could not be verified.")
+    if _turn(session) != admission_turn:
+        return _result(action, "confirmation_expired", "The caller changed the request. Confirm the current details again.")
     proposals = getattr(session, "_voice_action_proposals", {})
     proposal = proposals.get(action)
     if not proposal or proposal["payload"] != payload:
@@ -260,7 +265,7 @@ async def execute_connected_voice_action(session, action, arguments, user_text):
             "to name the form and repeat its captured values, not the internal inbox or subject. "
             "Do not execute until a later caller turn confirms it.", request_id=proposal["id"], confirmation_summary=summary)
     request = {"parameters": payload, "confirmation": {"request_id": proposal["id"],
-               "turn": str(_turn(session)), "caller_text_hash": hashlib.sha256(user_text.encode()).hexdigest()}}
+               "turn": str(admission_turn), "caller_text_hash": hashlib.sha256(user_text.encode()).hexdigest()}}
     # Replays reuse the original confirmation as well as the same parameters.
     request = proposal.setdefault("confirmed_request", request)
 

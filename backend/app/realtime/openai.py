@@ -658,6 +658,10 @@ class OpenAIRealtimeSession:
             logger.warning("realtime send_function_result failed call=%s err=%s",
                            self._call_id, exc)
 
+    async def request_response(self) -> None:
+        """Continue from current session state without rewriting delivered history."""
+        await self._create_response()
+
     async def _create_response(self) -> None:
         """Send response.create, tolerating the benign 'active response' race
         (in case the flag lagged a concurrent server-side response)."""
@@ -888,14 +892,22 @@ class OpenAIRealtimeSession:
         # Terminal caller transcript for the turn — full text, persisted.
         if etype == "conversation.item.input_audio_transcription.completed":
             text = data.get("transcript")
-            if text:
+            if isinstance(text, str):
                 self._offer_event(RealtimeEvent(
                     kind="caller_transcript", text=text, is_final=True, raw=data))
             return
 
         # ---- Barge-in: caller started talking ------------------------------
         if etype == "input_audio_buffer.speech_started":
-            self._on_interruption("speech_started")
+            self._on_interruption("speech_started", caller_event=data)
+            return
+
+        if etype == "input_audio_buffer.committed":
+            # Transcription completion can arrive out of speech order. Retain
+            # the committed item chain even when no VAD speech-start is sent.
+            self._offer_event(RealtimeEvent(kind="caller_turn", raw={
+                key: data[key] for key in ("item_id", "previous_item_id") if key in data
+            }))
             return
 
         # ---- Caller stopped talking (server VAD end-of-speech) = T0 --------
@@ -994,7 +1006,7 @@ class OpenAIRealtimeSession:
         # notices, etc.) is intentionally ignored in Phase 1.
 
     # ── Barge-in handling ────────────────────────────────────────────────
-    def _on_interruption(self, reason: str) -> None:
+    def _on_interruption(self, reason: str, *, caller_event: Optional[Dict[str, Any]] = None) -> None:
         """Caller took the floor: invalidate the in-flight response and FLUSH
         any model audio still queued, so the agent stops mid-sentence instead
         of talking over the caller."""
@@ -1014,7 +1026,9 @@ class OpenAIRealtimeSession:
             kind="interrupted",
             raw={"reason": reason, "during_response": during_response,
                  "response_id": self._last_response_id,
-                 "audio_parts": list(self._last_audio_parts.values())},
+                 "audio_parts": list(self._last_audio_parts.values()),
+                 **{key: caller_event[key] for key in ("item_id", "audio_start_ms")
+                    if caller_event and key in caller_event}},
         ))
 
     def _flush_audio_events(self) -> int:
