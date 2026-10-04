@@ -33,7 +33,8 @@
     "cp07_implementation_commit": "40232996372305b8ab100bc8fc57a3957296f4e4",
     "ag01_implementation_commit": "4f47123f18af3cb01f2330138c635c76aae7182c",
     "ag02_implementation_commit": "69d09fe575831c42a14b28c0a7417ca1b388c492",
-    "ag03_implementation_commit": "27c04347b2f0d5d0eccf83b3c31663eb3cfbd145"
+    "ag03_implementation_commit": "27c04347b2f0d5d0eccf83b3c31663eb3cfbd145",
+    "ag04_implementation_commit": "c93a05e3561b5feaf7da467b30c2aa37be0e41bd"
   },
   "status_rules": {
     "execution": [
@@ -442,7 +443,7 @@
       "title": "Qualify actual conversation profiles, including failure and interruption",
       "owner_role": "Conversation QA lead",
       "assigned_person": "Codex implementation team",
-      "reviewer": "Independent scenario and qualification-gate review underway",
+      "reviewer": "Independent evaluator/scenario review and cross-engine runtime review completed; human/profile approval pending",
       "status": "in_progress",
       "start_after_milestone": "RG01 baseline recorded",
       "dependencies_and_tests": "See package text; coordination and final acceptance dependencies are distinct from entry milestones.",
@@ -460,18 +461,33 @@
       ],
       "architecture_ids": [],
       "plan_anchor": "ag04-qualify-actual-conversation-profiles-including-failure-and-interruption",
-      "evidence": [],
-      "blocker": null,
-      "next_action": "Replay captured and synthetic conversation cases through actual traditional/native runtime boundaries; preserve known Groq semantic failure and keep live/human approval separate.",
-      "target_date": null
+      "evidence": [
+        {
+          "path": "docs/sessions/2026-10-05-ag04-implementation.md",
+          "kind": "offline_runtime_repairs_and_semantic_limit",
+          "candidate_commit": "c93a05e3561b5feaf7da467b30c2aa37be0e41bd"
+        },
+        {
+          "path": "docs/sessions/artifacts/ag04/verification.json",
+          "kind": "candidate_verification_manifest"
+        },
+        {
+          "path": "docs/production-readiness/ag04-conversation-matrix.json",
+          "kind": "proposed_unratified_acceptance_matrix"
+        }
+      ],
+      "blocker": "Captured Groq semantic failure retained. Proposed matrix37/50mapped by offline replay; intended profile roster/rubric/cohort unratified; live/human/audio/effect acceptance not run. AG02 retrieval gate remains failed.",
+      "next_action": "Continue AG05 source-revision and durable Leads repairs; complete missing common-runner conditions and authorized per-profile/human/telephone acceptance without treating canned output as model approval.",
+      "target_date": null,
+      "execution_note": "1797 tests passed0skip;170offline rows1120controlchecks0failed;1retained semantic failure/169unreviewed. Local source commit only; no provider call/push/deploy."
     },
     {
       "id": "AG05",
       "title": "Complete caller evidence -> Leads -> Sales Hub without overstating trust",
       "owner_role": "Lead workflow lead",
-      "assigned_person": null,
-      "reviewer": null,
-      "status": "planned",
+      "assigned_person": "Codex implementation team",
+      "reviewer": "Independent migrated-PostgreSQL/API fault review underway",
+      "status": "in_progress",
       "start_after_milestone": "RG01 baseline recorded",
       "dependencies_and_tests": "See package text; coordination and final acceptance dependencies are distinct from entry milestones.",
       "finding_ids": [],
@@ -485,7 +501,7 @@
       "plan_anchor": "ag05-complete-caller-evidence-to-leads-to-sales-hub-without-overstating-trust",
       "evidence": [],
       "blocker": null,
-      "next_action": "Assign owner and confirm the baseline reproduction or evidence gap.",
+      "next_action": "Repair reproduced current-ASR contact/source confirmation ownership, suffix revocation/retry, final transcript failure/canonical consumption and ambiguous Leads display using existing stores.",
       "target_date": null
     },
     {

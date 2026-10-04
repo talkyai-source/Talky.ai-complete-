@@ -1,0 +1,93 @@
+{
+  "scope": "AG04 native offline qualification preparation and two reproduced wiring/parser repairs",
+  "base_revision": "e551a9487d7b79db541655bd14cb3e987311ee45",
+  "includes_uncommitted_changes": true,
+  "owned_files": [
+    "backend/app/realtime/bridge.py",
+    "backend/app/domain/services/voice_pipeline/live_structured_state.py",
+    "backend/app/domain/services/voice_pipeline/contact_capture.py",
+    "backend/tests/qualification/ag04_native.py",
+    "backend/tests/fixtures/conversation/ag04_native.json",
+    "backend/tests/unit/test_ag04_native_qualification.py",
+    "backend/tests/unit/test_live_structured_state.py",
+    "backend/tests/unit/test_realtime_end_call_ownership.py"
+  ],
+  "owned_source_and_tests_sha256": "4321b84a086431c14788261e517a4ce72501aaa5bbec9c33453a3c20cd33c9d8",
+  "hash_method": "Ordered path UTF-8 + NUL + bytes + NUL per owned file",
+  "corpus": {
+    "proposed_distinct_controls": 25,
+    "parser_profiles": 2,
+    "profile_scenario_rows": 50,
+    "human_approved_scenarios": 0,
+    "live_provider_calls": 0,
+    "profile_approval": false,
+    "note": "OpenAI/xAI copies are event parser parity, not additional human scenarios or model-quality evidence."
+  },
+  "checks": [
+    {
+      "name": "interrupted opening actual socket/budget before",
+      "failed": 3,
+      "log": "native-opening-red.txt"
+    },
+    {
+      "name": "interrupted opening actual socket/budget after",
+      "passed": 3,
+      "log": "native-opening-green.txt",
+      "scope_note": "Earlier3-case positive; final240-case batch additionally covers worst valid unknown identity/decision/interest combinations after compacting the fact."
+    },
+    {
+      "name": "self-email prefix correction before",
+      "failed": 8,
+      "negative_controls_passed": 6,
+      "log": "native-contact-prefix-red.txt"
+    },
+    {
+      "name": "final native and shared regressions",
+      "passed": 240,
+      "warnings": 164,
+      "log": "native-regression.txt",
+      "command": "python -m pytest tests/unit/test_ag04_native_qualification.py tests/unit/test_live_structured_state.py tests/unit/test_ag03_relationship_state.py tests/unit/test_realtime_end_call_ownership.py tests/unit/test_realtime_relationship_ownership.py tests/unit/test_contact_capture_state_machine.py tests/unit/test_contact_pause_and_punctuation.py tests/unit/test_contact_capture_clarification_bound.py tests/unit/test_contact_capture_best_practice.py -q --tb=short"
+    },
+    {
+      "name": "owned CI F lint",
+      "result": "passed",
+      "log": "native-lint.txt"
+    },
+    {
+      "name": "largest valid unknown-state envelope",
+      "result": "passed in final regression",
+      "observed_block_chars": 767,
+      "maximum": 768,
+      "variants": "identity unknown/no/yes with maximum other fields and unknown decision/interest"
+    }
+  ],
+  "repairs": {
+    "opening": "Provider updater rejected guidance appended after END LIVE STRUCTURED STATE. Existing general interruption prompt is retained; optional opening=interrupted fact now stays inside valid marked block. Maximum populated block stays within768; traditional default serialization is unchanged. A later valid unknown-state budget probe was747chars before the flag; the compact20char addition gives767, avoiding truncation or a larger budget.",
+    "contact": "Explicit leading Correction/Actually before existing self-email cue now permits syntactically clear whole-address correction; pending and confirmed old values become a new unconfirmed candidate. Quoted/reported/third-party/negated/ambiguous controls remain rejected. No durable Lead or confirmation policy changed."
+  },
+  "phone_check": {
+    "scope": "Pure canonical state tracker, synthetic numbers, no calls",
+    "observations": [
+      {
+        "prefix": "Correction,",
+        "before": "+14155550123",
+        "after": "+14155550124",
+        "confirmed": false
+      },
+      {
+        "prefix": "Actually,",
+        "before": "+14155550123",
+        "after": "+14155550124",
+        "confirmed": false
+      }
+    ],
+    "change_required": false
+  },
+  "limitations": [
+    "Native DNC flag is observed in-memory; existing durable persistence occurs at call-ended lifecycle. Immediate/worker-death timing remains OP07/OP05 acceptance handoff; no durable opt-out proof is claimed.",
+    "No provider, acoustic, carrier, latency or human-quality qualification occurred. Approved sale profiles/cohort remain pending.",
+    "Full text is classified submitted only by correlated synthetic full-utterance receipt; partially submitted audio has no word alignment and is never called heard.",
+    "Configured external-action/Lead/CRM effects and actual source database retrieval are not executed. No connected capability or database is installed in this harness.",
+    "Captured Groq semantic failure belongs to the common/traditional runner; native authored outputs remain semantic-unreviewed."
+  ]
+}

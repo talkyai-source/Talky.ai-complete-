@@ -1,0 +1,76 @@
+FFFFFFFF......                                                           [100%]
+================================== FAILURES ===================================
+_ test_explicit_self_email_correction_remains_pending_until_new_confirmation[False-Correction,] _
+tests\unit\test_ag04_native_qualification.py:103: in test_explicit_self_email_correction_remains_pending_until_new_confirmation
+    assert updated.email == "blair@example.com"
+E   AssertionError: assert 'alex@example.com' == 'blair@example.com'
+E     - blair@example.com
+E     ? ^ ^^^
+E     + alex@example.com
+E     ? ^ ^^
+_ test_explicit_self_email_correction_remains_pending_until_new_confirmation[False-Actually,] _
+tests\unit\test_ag04_native_qualification.py:103: in test_explicit_self_email_correction_remains_pending_until_new_confirmation
+    assert updated.email == "blair@example.com"
+E   AssertionError: assert 'alex@example.com' == 'blair@example.com'
+E     - blair@example.com
+E     ? ^ ^^^
+E     + alex@example.com
+E     ? ^ ^^
+_ test_explicit_self_email_correction_remains_pending_until_new_confirmation[False-Correction:] _
+tests\unit\test_ag04_native_qualification.py:103: in test_explicit_self_email_correction_remains_pending_until_new_confirmation
+    assert updated.email == "blair@example.com"
+E   AssertionError: assert 'alex@example.com' == 'blair@example.com'
+E     - blair@example.com
+E     ? ^ ^^^
+E     + alex@example.com
+E     ? ^ ^^
+_ test_explicit_self_email_correction_remains_pending_until_new_confirmation[False-Actually] _
+tests\unit\test_ag04_native_qualification.py:103: in test_explicit_self_email_correction_remains_pending_until_new_confirmation
+    assert updated.email == "blair@example.com"
+E   AssertionError: assert 'alex@example.com' == 'blair@example.com'
+E     - blair@example.com
+E     ? ^ ^^^
+E     + alex@example.com
+E     ? ^ ^^
+_ test_explicit_self_email_correction_remains_pending_until_new_confirmation[True-Correction,] _
+tests\unit\test_ag04_native_qualification.py:103: in test_explicit_self_email_correction_remains_pending_until_new_confirmation
+    assert updated.email == "blair@example.com"
+E   AssertionError: assert 'alex@example.com' == 'blair@example.com'
+E     - blair@example.com
+E     ? ^ ^^^
+E     + alex@example.com
+E     ? ^ ^^
+_ test_explicit_self_email_correction_remains_pending_until_new_confirmation[True-Actually,] _
+tests\unit\test_ag04_native_qualification.py:103: in test_explicit_self_email_correction_remains_pending_until_new_confirmation
+    assert updated.email == "blair@example.com"
+E   AssertionError: assert 'alex@example.com' == 'blair@example.com'
+E     - blair@example.com
+E     ? ^ ^^^
+E     + alex@example.com
+E     ? ^ ^^
+_ test_explicit_self_email_correction_remains_pending_until_new_confirmation[True-Correction:] _
+tests\unit\test_ag04_native_qualification.py:103: in test_explicit_self_email_correction_remains_pending_until_new_confirmation
+    assert updated.email == "blair@example.com"
+E   AssertionError: assert 'alex@example.com' == 'blair@example.com'
+E     - blair@example.com
+E     ? ^ ^^^
+E     + alex@example.com
+E     ? ^ ^^
+_ test_explicit_self_email_correction_remains_pending_until_new_confirmation[True-Actually] _
+tests\unit\test_ag04_native_qualification.py:103: in test_explicit_self_email_correction_remains_pending_until_new_confirmation
+    assert updated.email == "blair@example.com"
+E   AssertionError: assert 'alex@example.com' == 'blair@example.com'
+E     - blair@example.com
+E     ? ^ ^^^
+E     + alex@example.com
+E     ? ^ ^^
+=========================== short test summary info ===========================
+FAILED tests/unit/test_ag04_native_qualification.py::test_explicit_self_email_correction_remains_pending_until_new_confirmation[False-Correction,]
+FAILED tests/unit/test_ag04_native_qualification.py::test_explicit_self_email_correction_remains_pending_until_new_confirmation[False-Actually,]
+FAILED tests/unit/test_ag04_native_qualification.py::test_explicit_self_email_correction_remains_pending_until_new_confirmation[False-Correction:]
+FAILED tests/unit/test_ag04_native_qualification.py::test_explicit_self_email_correction_remains_pending_until_new_confirmation[False-Actually]
+FAILED tests/unit/test_ag04_native_qualification.py::test_explicit_self_email_correction_remains_pending_until_new_confirmation[True-Correction,]
+FAILED tests/unit/test_ag04_native_qualification.py::test_explicit_self_email_correction_remains_pending_until_new_confirmation[True-Actually,]
+FAILED tests/unit/test_ag04_native_qualification.py::test_explicit_self_email_correction_remains_pending_until_new_confirmation[True-Correction:]
+FAILED tests/unit/test_ag04_native_qualification.py::test_explicit_self_email_correction_remains_pending_until_new_confirmation[True-Actually]
+8 failed, 6 passed, 5 deselected in 3.64s

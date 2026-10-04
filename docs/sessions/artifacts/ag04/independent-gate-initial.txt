@@ -1,0 +1,138 @@
+............FFFFFFF...F.                                                 [100%]
+================================== FAILURES ===================================
+______ test_null_observations_cannot_claim_passed_runtime_evidence[end] _______
+
+field = 'end'
+
+    @pytest.mark.parametrize("field", ["end", "effects", "provenance", "history", "requests", "raw_output", "submitted_speech"])
+    def test_null_observations_cannot_claim_passed_runtime_evidence(field):
+        row = replay_row()
+        row[field] = None
+        report = gate.summarize([row], [identity(row)], provenance())
+>       assert report["runtime_control_status"] == "failed"
+E       AssertionError: assert 'passed' == 'failed'
+E         - failed
+E         + passed
+
+tests\unit\test_ag04_qualification_gate.py:122: AssertionError
+____ test_null_observations_cannot_claim_passed_runtime_evidence[effects] _____
+
+field = 'effects'
+
+    @pytest.mark.parametrize("field", ["end", "effects", "provenance", "history", "requests", "raw_output", "submitted_speech"])
+    def test_null_observations_cannot_claim_passed_runtime_evidence(field):
+        row = replay_row()
+        row[field] = None
+        report = gate.summarize([row], [identity(row)], provenance())
+>       assert report["runtime_control_status"] == "failed"
+E       AssertionError: assert 'passed' == 'failed'
+E         - failed
+E         + passed
+
+tests\unit\test_ag04_qualification_gate.py:122: AssertionError
+___ test_null_observations_cannot_claim_passed_runtime_evidence[provenance] ___
+
+field = 'provenance'
+
+    @pytest.mark.parametrize("field", ["end", "effects", "provenance", "history", "requests", "raw_output", "submitted_speech"])
+    def test_null_observations_cannot_claim_passed_runtime_evidence(field):
+        row = replay_row()
+        row[field] = None
+        report = gate.summarize([row], [identity(row)], provenance())
+>       assert report["runtime_control_status"] == "failed"
+E       AssertionError: assert 'passed' == 'failed'
+E         - failed
+E         + passed
+
+tests\unit\test_ag04_qualification_gate.py:122: AssertionError
+____ test_null_observations_cannot_claim_passed_runtime_evidence[history] _____
+
+field = 'history'
+
+    @pytest.mark.parametrize("field", ["end", "effects", "provenance", "history", "requests", "raw_output", "submitted_speech"])
+    def test_null_observations_cannot_claim_passed_runtime_evidence(field):
+        row = replay_row()
+        row[field] = None
+        report = gate.summarize([row], [identity(row)], provenance())
+>       assert report["runtime_control_status"] == "failed"
+E       AssertionError: assert 'passed' == 'failed'
+E         - failed
+E         + passed
+
+tests\unit\test_ag04_qualification_gate.py:122: AssertionError
+____ test_null_observations_cannot_claim_passed_runtime_evidence[requests] ____
+
+field = 'requests'
+
+    @pytest.mark.parametrize("field", ["end", "effects", "provenance", "history", "requests", "raw_output", "submitted_speech"])
+    def test_null_observations_cannot_claim_passed_runtime_evidence(field):
+        row = replay_row()
+        row[field] = None
+        report = gate.summarize([row], [identity(row)], provenance())
+>       assert report["runtime_control_status"] == "failed"
+E       AssertionError: assert 'passed' == 'failed'
+E         - failed
+E         + passed
+
+tests\unit\test_ag04_qualification_gate.py:122: AssertionError
+___ test_null_observations_cannot_claim_passed_runtime_evidence[raw_output] ___
+
+field = 'raw_output'
+
+    @pytest.mark.parametrize("field", ["end", "effects", "provenance", "history", "requests", "raw_output", "submitted_speech"])
+    def test_null_observations_cannot_claim_passed_runtime_evidence(field):
+        row = replay_row()
+        row[field] = None
+        report = gate.summarize([row], [identity(row)], provenance())
+>       assert report["runtime_control_status"] == "failed"
+E       AssertionError: assert 'passed' == 'failed'
+E         - failed
+E         + passed
+
+tests\unit\test_ag04_qualification_gate.py:122: AssertionError
+_ test_null_observations_cannot_claim_passed_runtime_evidence[submitted_speech] _
+
+field = 'submitted_speech'
+
+    @pytest.mark.parametrize("field", ["end", "effects", "provenance", "history", "requests", "raw_output", "submitted_speech"])
+    def test_null_observations_cannot_claim_passed_runtime_evidence(field):
+        row = replay_row()
+        row[field] = None
+        report = gate.summarize([row], [identity(row)], provenance())
+>       assert report["runtime_control_status"] == "failed"
+E       AssertionError: assert 'passed' == 'failed'
+E         - failed
+E         + passed
+
+tests\unit\test_ag04_qualification_gate.py:122: AssertionError
+________ test_udp_send_is_denied_before_even_an_intercepted_transport _________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001CA20845FD0>
+
+    def test_udp_send_is_denied_before_even_an_intercepted_transport(monkeypatch):
+        reached_transport = []
+
+        def intercepted_sendto(_socket, *args):
+            reached_transport.append(args)
+            return 0
+
+        # Replacing the OS method first guarantees the regression cannot send a
+        # real datagram even if the offline guard is incomplete.
+        monkeypatch.setattr(socket.socket, "sendto", intercepted_sendto)
+        attempts = []
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            with gate.offline_network_guard(attempts):
+>               with pytest.raises(RuntimeError, match="offline"):
+E               Failed: DID NOT RAISE <class 'RuntimeError'>
+
+tests\unit\test_ag04_qualification_gate.py:162: Failed
+=========================== short test summary info ===========================
+FAILED tests/unit/test_ag04_qualification_gate.py::test_null_observations_cannot_claim_passed_runtime_evidence[end]
+FAILED tests/unit/test_ag04_qualification_gate.py::test_null_observations_cannot_claim_passed_runtime_evidence[effects]
+FAILED tests/unit/test_ag04_qualification_gate.py::test_null_observations_cannot_claim_passed_runtime_evidence[provenance]
+FAILED tests/unit/test_ag04_qualification_gate.py::test_null_observations_cannot_claim_passed_runtime_evidence[history]
+FAILED tests/unit/test_ag04_qualification_gate.py::test_null_observations_cannot_claim_passed_runtime_evidence[requests]
+FAILED tests/unit/test_ag04_qualification_gate.py::test_null_observations_cannot_claim_passed_runtime_evidence[raw_output]
+FAILED tests/unit/test_ag04_qualification_gate.py::test_null_observations_cannot_claim_passed_runtime_evidence[submitted_speech]
+FAILED tests/unit/test_ag04_qualification_gate.py::test_udp_send_is_denied_before_even_an_intercepted_transport
+8 failed, 16 passed in 3.23s

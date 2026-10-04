@@ -1,0 +1,29 @@
+{
+  "command": [
+    "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\backend\\.venv\\Scripts\\python.exe",
+    "-m",
+    "ruff",
+    "check",
+    "--select",
+    "F",
+    "--ignore",
+    "F401,F841",
+    "backend/app/domain/services/voice_pipeline/contact_capture.py",
+    "backend/app/domain/services/voice_pipeline/grounded_figures.py",
+    "backend/app/domain/services/voice_pipeline/live_structured_state.py",
+    "backend/app/domain/services/voice_pipeline/turn_ender.py",
+    "backend/app/realtime/bridge.py",
+    "backend/scripts/evaluate_ag04_conversations.py",
+    "backend/scripts/realtime_smoke.py",
+    "backend/tests/qualification/ag04_native.py",
+    "backend/tests/qualification/ag04_traditional.py",
+    "backend/tests/unit/test_ag04_iso_price_grounding.py",
+    "backend/tests/unit/test_ag04_native_qualification.py",
+    "backend/tests/unit/test_ag04_qualification_gate.py",
+    "backend/tests/unit/test_ag04_realtime_smoke.py",
+    "backend/tests/unit/test_ag04_traditional_qualification.py",
+    "backend/tests/unit/test_live_structured_state.py",
+    "backend/tests/unit/test_realtime_end_call_ownership.py"
+  ],
+  "exit_code": 0
+}

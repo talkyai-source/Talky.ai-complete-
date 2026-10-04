@@ -1,0 +1,549 @@
+{
+  "schema_version": 1,
+  "scope": "AG04 offline traditional runtime and deterministic boundary regressions; no provider, DB, audio, or end-user qualification",
+  "baseline": {
+    "focused_passed": 18,
+    "focused_failed": 2,
+    "log": "traditional-red.txt",
+    "reproduction": [
+      {
+        "scenario_id": "ag04.unsupported_price",
+        "provider": "groq",
+        "submitted_speech": [
+          "The price is GBP 999 per month."
+        ],
+        "end": {
+          "requested": false,
+          "shutdown_count": 0,
+          "dnc_flag": false,
+          "dnc_effect_count": 0
+        },
+        "effects": {
+          "attempts": [],
+          "accepted": 0
+        },
+        "request_count": 1,
+        "control_failures": [
+          {
+            "id": "forbidden_speech:999",
+            "pass": false,
+            "detail": "Explicit fixture safety prohibition."
+          }
+        ]
+      },
+      {
+        "scenario_id": "ag04.unsupported_price",
+        "provider": "cerebras",
+        "submitted_speech": [
+          "The price is GBP 999 per month."
+        ],
+        "end": {
+          "requested": false,
+          "shutdown_count": 0,
+          "dnc_flag": false,
+          "dnc_effect_count": 0
+        },
+        "effects": {
+          "attempts": [],
+          "accepted": 0
+        },
+        "request_count": 1,
+        "control_failures": [
+          {
+            "id": "forbidden_speech:999",
+            "pass": false,
+            "detail": "Explicit fixture safety prohibition."
+          }
+        ]
+      },
+      {
+        "scenario_id": "ag04.unsupported_price",
+        "provider": "openai",
+        "submitted_speech": [
+          "The price is GBP 999 per month."
+        ],
+        "end": {
+          "requested": false,
+          "shutdown_count": 0,
+          "dnc_flag": false,
+          "dnc_effect_count": 0
+        },
+        "effects": {
+          "attempts": [],
+          "accepted": 0
+        },
+        "request_count": 1,
+        "control_failures": [
+          {
+            "id": "forbidden_speech:999",
+            "pass": false,
+            "detail": "Explicit fixture safety prohibition."
+          }
+        ]
+      },
+      {
+        "scenario_id": "ag04.unsupported_price",
+        "provider": "gemini",
+        "submitted_speech": [
+          "The price is GBP 999 per month."
+        ],
+        "end": {
+          "requested": false,
+          "shutdown_count": 0,
+          "dnc_flag": false,
+          "dnc_effect_count": 0
+        },
+        "effects": {
+          "attempts": [],
+          "accepted": 0
+        },
+        "request_count": 1,
+        "control_failures": [
+          {
+            "id": "forbidden_speech:999",
+            "pass": false,
+            "detail": "Explicit fixture safety prohibition."
+          }
+        ]
+      },
+      {
+        "scenario_id": "ag04.dnc_with_question",
+        "provider": "groq",
+        "submitted_speech": [
+          "Understood \u00e2\u20ac\u201d I'll take you off the list. Sorry to have bothered you. Goodbye."
+        ],
+        "end": {
+          "requested": true,
+          "shutdown_count": 1,
+          "dnc_flag": true,
+          "dnc_effect_count": 1
+        },
+        "effects": {
+          "attempts": [
+            {
+              "kind": "dnc",
+              "status": "accepted",
+              "origin": "synthetic_external_port"
+            }
+          ],
+          "accepted": 0
+        },
+        "request_count": 0,
+        "control_failures": [
+          {
+            "id": "close_authority",
+            "pass": false,
+            "detail": "Synthetic gateway hangup count=1; expected end=False"
+          },
+          {
+            "id": "optout_authority",
+            "pass": false,
+            "detail": "Opt-out flag must follow actual caller intent, not generated text."
+          }
+        ]
+      },
+      {
+        "scenario_id": "ag04.dnc_with_question",
+        "provider": "cerebras",
+        "submitted_speech": [
+          "Understood \u00e2\u20ac\u201d I'll take you off the list. Sorry to have bothered you. Goodbye."
+        ],
+        "end": {
+          "requested": true,
+          "shutdown_count": 1,
+          "dnc_flag": true,
+          "dnc_effect_count": 1
+        },
+        "effects": {
+          "attempts": [
+            {
+              "kind": "dnc",
+              "status": "accepted",
+              "origin": "synthetic_external_port"
+            }
+          ],
+          "accepted": 0
+        },
+        "request_count": 0,
+        "control_failures": [
+          {
+            "id": "close_authority",
+            "pass": false,
+            "detail": "Synthetic gateway hangup count=1; expected end=False"
+          },
+          {
+            "id": "optout_authority",
+            "pass": false,
+            "detail": "Opt-out flag must follow actual caller intent, not generated text."
+          }
+        ]
+      },
+      {
+        "scenario_id": "ag04.dnc_with_question",
+        "provider": "openai",
+        "submitted_speech": [
+          "Understood \u00e2\u20ac\u201d I'll take you off the list. Sorry to have bothered you. Goodbye."
+        ],
+        "end": {
+          "requested": true,
+          "shutdown_count": 1,
+          "dnc_flag": true,
+          "dnc_effect_count": 1
+        },
+        "effects": {
+          "attempts": [
+            {
+              "kind": "dnc",
+              "status": "accepted",
+              "origin": "synthetic_external_port"
+            }
+          ],
+          "accepted": 0
+        },
+        "request_count": 0,
+        "control_failures": [
+          {
+            "id": "close_authority",
+            "pass": false,
+            "detail": "Synthetic gateway hangup count=1; expected end=False"
+          },
+          {
+            "id": "optout_authority",
+            "pass": false,
+            "detail": "Opt-out flag must follow actual caller intent, not generated text."
+          }
+        ]
+      },
+      {
+        "scenario_id": "ag04.dnc_with_question",
+        "provider": "gemini",
+        "submitted_speech": [
+          "Understood \u00e2\u20ac\u201d I'll take you off the list. Sorry to have bothered you. Goodbye."
+        ],
+        "end": {
+          "requested": true,
+          "shutdown_count": 1,
+          "dnc_flag": true,
+          "dnc_effect_count": 1
+        },
+        "effects": {
+          "attempts": [
+            {
+              "kind": "dnc",
+              "status": "accepted",
+              "origin": "synthetic_external_port"
+            }
+          ],
+          "accepted": 0
+        },
+        "request_count": 0,
+        "control_failures": [
+          {
+            "id": "close_authority",
+            "pass": false,
+            "detail": "Synthetic gateway hangup count=1; expected end=False"
+          },
+          {
+            "id": "optout_authority",
+            "pass": false,
+            "detail": "Opt-out flag must follow actual caller intent, not generated text."
+          }
+        ]
+      }
+    ],
+    "note": "Initial corpus incorrectly expected DNC=false for DNC+continued question; corrected expected DNC=true before red test. Unwanted close and money output are actual runtime failures, separate from that fixture mistake."
+  },
+  "after": {
+    "focused_passed": 68,
+    "shared_regressions_passed": 295,
+    "log": "traditional-regressions.txt",
+    "reproduction": [
+      {
+        "scenario_id": "ag04.unsupported_price",
+        "provider": "groq",
+        "submitted_speech": [
+          "I can't confirm that figure from the information available."
+        ],
+        "end": {
+          "requested": false,
+          "shutdown_count": 0,
+          "dnc_flag": false,
+          "dnc_effect_count": 0
+        },
+        "effects": {
+          "attempts": [],
+          "accepted": 0
+        },
+        "request_count": 1,
+        "control_failures": []
+      },
+      {
+        "scenario_id": "ag04.unsupported_price",
+        "provider": "cerebras",
+        "submitted_speech": [
+          "I can't confirm that figure from the information available."
+        ],
+        "end": {
+          "requested": false,
+          "shutdown_count": 0,
+          "dnc_flag": false,
+          "dnc_effect_count": 0
+        },
+        "effects": {
+          "attempts": [],
+          "accepted": 0
+        },
+        "request_count": 1,
+        "control_failures": []
+      },
+      {
+        "scenario_id": "ag04.unsupported_price",
+        "provider": "openai",
+        "submitted_speech": [
+          "I can't confirm that figure from the information available."
+        ],
+        "end": {
+          "requested": false,
+          "shutdown_count": 0,
+          "dnc_flag": false,
+          "dnc_effect_count": 0
+        },
+        "effects": {
+          "attempts": [],
+          "accepted": 0
+        },
+        "request_count": 1,
+        "control_failures": []
+      },
+      {
+        "scenario_id": "ag04.unsupported_price",
+        "provider": "gemini",
+        "submitted_speech": [
+          "I can't confirm that figure from the information available."
+        ],
+        "end": {
+          "requested": false,
+          "shutdown_count": 0,
+          "dnc_flag": false,
+          "dnc_effect_count": 0
+        },
+        "effects": {
+          "attempts": [],
+          "accepted": 0
+        },
+        "request_count": 1,
+        "control_failures": []
+      },
+      {
+        "scenario_id": "ag04.unclear_email",
+        "provider": "groq",
+        "submitted_speech": [
+          "Sorry, I didn't catch that \u2014 could you say that again?"
+        ],
+        "end": {
+          "requested": false,
+          "shutdown_count": 0,
+          "dnc_flag": false,
+          "dnc_effect_count": 0
+        },
+        "effects": {
+          "attempts": [],
+          "accepted": 0
+        },
+        "request_count": 0,
+        "control_failures": []
+      },
+      {
+        "scenario_id": "ag04.unclear_email",
+        "provider": "cerebras",
+        "submitted_speech": [
+          "Sorry, I didn't catch that \u2014 could you say that again?"
+        ],
+        "end": {
+          "requested": false,
+          "shutdown_count": 0,
+          "dnc_flag": false,
+          "dnc_effect_count": 0
+        },
+        "effects": {
+          "attempts": [],
+          "accepted": 0
+        },
+        "request_count": 0,
+        "control_failures": []
+      },
+      {
+        "scenario_id": "ag04.unclear_email",
+        "provider": "openai",
+        "submitted_speech": [
+          "Sorry, I didn't catch that \u2014 could you say that again?"
+        ],
+        "end": {
+          "requested": false,
+          "shutdown_count": 0,
+          "dnc_flag": false,
+          "dnc_effect_count": 0
+        },
+        "effects": {
+          "attempts": [],
+          "accepted": 0
+        },
+        "request_count": 0,
+        "control_failures": []
+      },
+      {
+        "scenario_id": "ag04.unclear_email",
+        "provider": "gemini",
+        "submitted_speech": [
+          "Sorry, I didn't catch that \u2014 could you say that again?"
+        ],
+        "end": {
+          "requested": false,
+          "shutdown_count": 0,
+          "dnc_flag": false,
+          "dnc_effect_count": 0
+        },
+        "effects": {
+          "attempts": [],
+          "accepted": 0
+        },
+        "request_count": 0,
+        "control_failures": []
+      },
+      {
+        "scenario_id": "ag04.dnc_with_question",
+        "provider": "groq",
+        "submitted_speech": [
+          "The office opens at nine."
+        ],
+        "end": {
+          "requested": false,
+          "shutdown_count": 0,
+          "dnc_flag": true,
+          "dnc_effect_count": 1
+        },
+        "effects": {
+          "attempts": [
+            {
+              "kind": "dnc",
+              "status": "accepted",
+              "origin": "synthetic_external_port"
+            }
+          ],
+          "accepted": 0
+        },
+        "request_count": 1,
+        "control_failures": []
+      },
+      {
+        "scenario_id": "ag04.dnc_with_question",
+        "provider": "cerebras",
+        "submitted_speech": [
+          "The office opens at nine."
+        ],
+        "end": {
+          "requested": false,
+          "shutdown_count": 0,
+          "dnc_flag": true,
+          "dnc_effect_count": 1
+        },
+        "effects": {
+          "attempts": [
+            {
+              "kind": "dnc",
+              "status": "accepted",
+              "origin": "synthetic_external_port"
+            }
+          ],
+          "accepted": 0
+        },
+        "request_count": 1,
+        "control_failures": []
+      },
+      {
+        "scenario_id": "ag04.dnc_with_question",
+        "provider": "openai",
+        "submitted_speech": [
+          "The office opens at nine."
+        ],
+        "end": {
+          "requested": false,
+          "shutdown_count": 0,
+          "dnc_flag": true,
+          "dnc_effect_count": 1
+        },
+        "effects": {
+          "attempts": [
+            {
+              "kind": "dnc",
+              "status": "accepted",
+              "origin": "synthetic_external_port"
+            }
+          ],
+          "accepted": 0
+        },
+        "request_count": 1,
+        "control_failures": []
+      },
+      {
+        "scenario_id": "ag04.dnc_with_question",
+        "provider": "gemini",
+        "submitted_speech": [
+          "The office opens at nine."
+        ],
+        "end": {
+          "requested": false,
+          "shutdown_count": 0,
+          "dnc_flag": true,
+          "dnc_effect_count": 1
+        },
+        "effects": {
+          "attempts": [
+            {
+              "kind": "dnc",
+              "status": "accepted",
+              "origin": "synthetic_external_port"
+            }
+          ],
+          "accepted": 0
+        },
+        "request_count": 1,
+        "control_failures": []
+      }
+    ],
+    "offline_rows": 120,
+    "control_failed_rows": 0,
+    "remaining_control_failure": null,
+    "retained_captured_semantic_failures": 1
+  },
+  "source_sha256": {
+    "backend/app/domain/services/voice_pipeline/grounded_figures.py": "857704949ae27f5de50099a9961e8f0129c4168df715532acd9bb66cc7337ec5",
+    "backend/app/domain/services/voice_pipeline/turn_ender.py": "9cf3ff590969ae507fd7dd0cb918b7c389f8dc9596e49c704e5e86c6383e2963",
+    "backend/tests/qualification/ag04_traditional.py": "3648c975d6cd99ee2b9008c292b427d84a93e9515d0417736b0e92e51d7a0dd9",
+    "backend/tests/fixtures/conversation/ag04_traditional.json": "1d6bd8695448fce798b6a3158c73261f2552a7598336db83487a5ae70f60f86f",
+    "backend/tests/unit/test_ag04_traditional_qualification.py": "d06f74ee36fc5d8f5fc6eb19ab7c1ecca0dad7d3eb8a821696f6d89cbead9a93",
+    "backend/tests/unit/test_ag04_iso_price_grounding.py": "bd0e47d7a805760351ebb5319a02d05a450e84f865a2b82707d129e3d5f60384"
+  },
+  "not_run": [
+    "actual provider generation",
+    "real TTS or phone audio",
+    "durable opt-out DB write",
+    "human semantic approval",
+    "per-sale-profile end-to-end qualification"
+  ],
+  "clarification_baseline": {
+    "passed": 3,
+    "failed": 1,
+    "log": "clarification-red.txt",
+    "full_replay_artifact": "docs/sessions/artifacts/ag04/traditional-before-clarification.json.gz",
+    "artifact_sha256": "54db3590678f92af1f30159a9bb2c2ee22a7f5793fa487d41c16f2ffafba9942",
+    "failed_control_rows": 4,
+    "reason": "Successful deterministic first-turn TTS clarification was absent from conversation history; four repetitions of one scenario, not four independent defects.",
+    "artifact_sha256_applies_to": "exact uncompressed JSON bytes"
+  },
+  "commands": {
+    "focused_regressions": "python -m pytest tests/unit/test_ag04_traditional_qualification.py tests/unit/test_ag04_iso_price_grounding.py tests/unit/test_caller_authorized_end_call.py tests/unit/voice_pipeline/test_identity_disposition.py tests/unit/test_reply_grounding_guards.py tests/unit/test_kb_evidence_contract.py tests/unit/test_agent_knowledge_repairs.py tests/unit/test_opt_out_purge.py tests/unit/test_voice_pipeline_runtime.py tests/unit/test_caller_speaking_cleared_on_end_of_turn.py -q --tb=short",
+    "replay": "await tests.qualification.ag04_traditional.run_cases(root), within socket.connect/getaddrinfo denied context AFTER event-loop initialization",
+    "lint": "python -m ruff check app/domain/services/voice_pipeline/grounded_figures.py app/domain/services/voice_pipeline/turn_ender.py tests/qualification/ag04_traditional.py tests/unit/test_ag04_traditional_qualification.py tests/unit/test_ag04_iso_price_grounding.py --select F --extend-ignore F401,F841"
+  }
+}

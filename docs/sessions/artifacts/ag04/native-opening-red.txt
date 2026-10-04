@@ -1,0 +1,36 @@
+FFF                                                                      [100%]
+================================== FAILURES ===================================
+_ test_interrupted_opening_reaches_actual_provider_instruction_serializer[openai] _
+tests\unit\test_ag04_native_qualification.py:68: in test_interrupted_opening_reaches_actual_provider_instruction_serializer
+    assert row["observed"]["opening_state_on_wire"] is True
+E   assert False is True
+------------------------------ Captured log call ------------------------------
+WARNING  app.realtime.openai:openai.py:583 realtime live-state update rejected call=ag04-synthetic-908670399cfa43b7b64e3714b0ca904d err=invalid live structured state block
+WARNING  app.realtime.openai:openai.py:583 realtime live-state update rejected call=ag04-synthetic-908670399cfa43b7b64e3714b0ca904d err=invalid live structured state block
+_ test_interrupted_opening_reaches_actual_provider_instruction_serializer[xai] _
+tests\unit\test_ag04_native_qualification.py:68: in test_interrupted_opening_reaches_actual_provider_instruction_serializer
+    assert row["observed"]["opening_state_on_wire"] is True
+E   assert False is True
+------------------------------ Captured log call ------------------------------
+WARNING  app.realtime.openai:openai.py:583 realtime live-state update rejected call=ag04-synthetic-005aad48b99341b5a990605a0d384c90 err=invalid live structured state block
+WARNING  app.realtime.openai:openai.py:583 realtime live-state update rejected call=ag04-synthetic-005aad48b99341b5a990605a0d384c90 err=invalid live structured state block
+_ test_interrupted_opening_fact_fits_populated_state_without_truncating_other_facts _
+tests\unit\test_ag04_native_qualification.py:88: in test_interrupted_opening_fact_fits_populated_state_without_truncating_other_facts
+    block = render_live_state_block(state, opening_interrupted=True)
+E   TypeError: render_live_state_block() got an unexpected keyword argument 'opening_interrupted'
+============================== warnings summary ===============================
+tests/unit/test_ag04_native_qualification.py::test_interrupted_opening_reaches_actual_provider_instruction_serializer[openai]
+tests/unit/test_ag04_native_qualification.py::test_interrupted_opening_reaches_actual_provider_instruction_serializer[openai]
+tests/unit/test_ag04_native_qualification.py::test_interrupted_opening_reaches_actual_provider_instruction_serializer[openai]
+tests/unit/test_ag04_native_qualification.py::test_interrupted_opening_reaches_actual_provider_instruction_serializer[xai]
+tests/unit/test_ag04_native_qualification.py::test_interrupted_opening_reaches_actual_provider_instruction_serializer[xai]
+tests/unit/test_ag04_native_qualification.py::test_interrupted_opening_reaches_actual_provider_instruction_serializer[xai]
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\backend\app\domain\services\transcript_service.py:231: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    timestamp=datetime.utcnow().isoformat(),
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/unit/test_ag04_native_qualification.py::test_interrupted_opening_reaches_actual_provider_instruction_serializer[openai]
+FAILED tests/unit/test_ag04_native_qualification.py::test_interrupted_opening_reaches_actual_provider_instruction_serializer[xai]
+FAILED tests/unit/test_ag04_native_qualification.py::test_interrupted_opening_fact_fits_populated_state_without_truncating_other_facts
+3 failed, 2 deselected, 6 warnings in 5.40s
