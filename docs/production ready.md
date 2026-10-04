@@ -207,6 +207,8 @@ Exit evidence: dated baseline manifest, owner list, selected supported profiles/
 
 ### CP05 Complete existing white label controls behind truthful containment
 
+**Sequencing update — 4 October 2026:** Deferred for now at the user’s request. CP05 remains planned and unfinished; its findings and acceptance requirements stay in scope. CP06 is the next implementation package.
+
 **Scope and classification:** confirmed demo behavior F37, separate from real core Admin/RBAC capabilities. Partner tenant creation/edit/suspension is React/localStorage-only; billing contains fixed sample usage and paid invoices without visible demo disclosure. Evidence: `Talk-Leee/src/app/white-label/[partner]/tenants/tenants-client.tsx:118`, `:189`; `Talk-Leee/src/app/white-label/[partner]/billing/page.tsx:70`.
 
 **Bounded implementation:**

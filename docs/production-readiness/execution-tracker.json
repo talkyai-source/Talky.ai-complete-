@@ -236,7 +236,7 @@
       "plan_anchor": "cp05-complete-existing-white-label-controls-behind-truthful-containment",
       "evidence": [],
       "blocker": null,
-      "next_action": "Assign owner and confirm the baseline reproduction or evidence gap.",
+      "next_action": "Deferred for now at the user\u2019s request on 4 October 2026. Leave unfinished and retain all existing findings and acceptance requirements; CP06 is next in the execution sequence.",
       "target_date": null
     },
     {
@@ -262,7 +262,7 @@
       "plan_anchor": "cp06-accessible-cancellation-and-dependable-billing-communication",
       "evidence": [],
       "blocker": null,
-      "next_action": "Assign owner and confirm the baseline reproduction or evidence gap.",
+      "next_action": "Next implementation package after the user deferred CP05. First reproduce existing cancellation and receipt-recipient issues and verify the current authorized API contracts.",
       "target_date": null
     },
     {
