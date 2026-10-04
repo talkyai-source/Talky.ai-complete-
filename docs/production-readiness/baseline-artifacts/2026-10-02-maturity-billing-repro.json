@@ -1,0 +1,13 @@
+{
+  "source_revision": "d7b584050e9e45c6b8a1bf543636afd87437ab22",
+  "method": "BillingService.handle_webhook",
+  "fixture_scope": "Actual method compiled from source AST; synthetic verified event, in-memory claim and failing handler. No application import, environment read, provider call or database write.",
+  "observed": {
+    "first": "handler_failed",
+    "retry_status": "duplicate",
+    "handler_attempts": 1,
+    "network_calls": 0,
+    "database_writes": 0
+  },
+  "expected_contract": "A failed business handler must remain recoverable. An already-processed acknowledgement must require successful durable business processing, not merely an earlier claim."
+}

@@ -1,0 +1,16 @@
+{
+  "candidate_revision": "d7b584050e9e45c6b8a1bf543636afd87437ab22",
+  "scope": "Offline synthetic actual RealtimeBridge._remember_contact_turn and actual contradicted_customer_claim",
+  "caller_correction": "I am not your customer.",
+  "candidate_response": "Our records show you are an existing customer.",
+  "ordinary_messages_added": 12,
+  "retained_message_count": 12,
+  "rejected_before_retention": true,
+  "rejected_after_retention": false,
+  "conclusion": "The guard loses this explicit relationship correction after the contact history is bounded.",
+  "limitations": [
+    "No provider was called and no real session/transport was created.",
+    "Does not predict whether a model would emit the candidate response.",
+    "Does not assert the provider's own conversation history was lost."
+  ]
+}

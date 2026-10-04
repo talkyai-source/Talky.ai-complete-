@@ -1,0 +1,18 @@
+{
+  "validated_at": "2026-10-04",
+  "scope": "Document and traceability validation only; no application or production acceptance was executed.",
+  "counts": {
+    "packages": 31,
+    "findings": 25,
+    "features": 45,
+    "architecture_observations": 8,
+    "scenarios": 22,
+    "acceptance_gates": 15
+  },
+  "local_source_links_checked": 286,
+  "inline_source_references_checked": 31,
+  "feature_source_references_checked": 118,
+  "execution_statuses_are_unrun": true,
+  "errors": [],
+  "validated_stage": "Initial plan authoring, before subsequent execution-status updates; not a current application-readiness result."
+}

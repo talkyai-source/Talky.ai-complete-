@@ -1,0 +1,60 @@
+"""Offline synthetic proof of the current RT relationship-guard history bound.
+
+No provider, gateway, session constructor, credentials, database, or network.
+This proves guard coverage only, not a prediction of any model response.
+"""
+from pathlib import Path
+import json
+import subprocess
+import sys
+
+ROOT = next(parent for parent in Path(__file__).resolve().parents
+            if (parent / "backend/app/realtime/bridge.py").is_file())
+sys.path.insert(0, str(ROOT / "backend"))
+
+from app.realtime.bridge import RealtimeBridge
+from app.domain.services.voice_pipeline.conversation_guards import contradicted_customer_claim
+
+
+def main():
+    # The actual production method only needs this buffer. Deliberately avoid
+    # constructing any transport or real session.
+    bridge = RealtimeBridge.__new__(RealtimeBridge)
+    bridge._contact_history = []
+    bridge._remember_contact_turn("user", "I am not your customer.")
+    candidate = "Our records show you are an existing customer."
+    before = contradicted_customer_claim(candidate, bridge._contact_history)
+    for index in range(12):
+        bridge._remember_contact_turn(
+            "assistant" if index % 2 == 0 else "user",
+            "Synthetic ordinary conversation.",
+        )
+    after = contradicted_customer_claim(candidate, bridge._contact_history)
+    result = {
+        "candidate_revision": subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True
+        ).strip(),
+        "scope": "Offline synthetic actual RealtimeBridge._remember_contact_turn and actual contradicted_customer_claim",
+        "caller_correction": "I am not your customer.",
+        "candidate_response": candidate,
+        "ordinary_messages_added": 12,
+        "retained_message_count": len(bridge._contact_history),
+        "rejected_before_retention": before is not None,
+        "rejected_after_retention": after is not None,
+        "conclusion": "The guard loses this explicit relationship correction after the contact history is bounded.",
+        "limitations": [
+            "No provider was called and no real session/transport was created.",
+            "Does not predict whether a model would emit the candidate response.",
+            "Does not assert the provider's own conversation history was lost.",
+        ],
+    }
+    assert result["rejected_before_retention"] is True
+    assert result["rejected_after_retention"] is False
+    assert result["retained_message_count"] == 12
+    output = Path(__file__).with_suffix(".json")
+    output.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
+    print(json.dumps(result, indent=2))
+
+
+if __name__ == "__main__":
+    main()

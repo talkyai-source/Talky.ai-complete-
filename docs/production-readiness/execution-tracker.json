@@ -1,0 +1,2910 @@
+{
+  "schema_version": "1.0",
+  "plan_title": "production ready",
+  "created_at": "2026-10-04",
+  "plan_status": "in_progress",
+  "plan_file": "docs/production ready.md",
+  "scope_policy": "Fixed to the October 2 assessment; no unrelated feature work.",
+  "feature_freeze": {
+    "active": true,
+    "source": "Explicit user instruction on 4 October 2026",
+    "exit": "Full-plan evidence-backed closure with no blocked, failed, contained_not_complete item or unrun required gate; otherwise only an explicit user scope revision. A narrow pilot does not lift the freeze."
+  },
+  "provenance": {
+    "source_candidate": "d7b584050e9e45c6b8a1bf543636afd87437ab22",
+    "tested_ci_merge": "3689f0d806e40d58d018d8a03316436fb5cec2d4",
+    "production_last_observed": "b93b23de72fe6fe0fe84d3244c5f59e83401ff74",
+    "production_observation_date": "2026-10-02",
+    "production_refreshed_for_this_plan": false,
+    "baseline_assessment_sha256": "e1b66b6eb464c34121e59fd96dec92ed1cf86672316de301fb9934195feafedd",
+    "baseline_matrix_sha256": "66f0dd236f5361646e3c73f3acc4dab2dbd44eb4eed6b2895acbdc957c6d9a09",
+    "implementation_branch": "codex/production-ready-20261004",
+    "integrated_base": "a63a20b9",
+    "integrated_origin_main": "0a64828c23a17a8ab84c566d9739487606f26b64",
+    "cp01_implementation_commit": "ce43b268a108e6afe1a8e49d9f4e25d36e9849a2"
+  },
+  "status_rules": {
+    "execution": [
+      "planned",
+      "in_progress",
+      "candidate_verified",
+      "release_verified",
+      "pilot_validated",
+      "closed",
+      "blocked",
+      "failed",
+      "contained_not_complete"
+    ],
+    "gate": [
+      "not_run",
+      "passed",
+      "failed",
+      "blocked"
+    ],
+    "baseline_maturity_is_not_execution_status": true,
+    "closure_requires": "Expected/observed outcome, immutable candidate and relevant release/profile, artifacts, reviewer and residual limitations. Full-plan closure is forbidden with any blocked, failed, contained_not_complete item or unrun required gate. Reviewed evidence-backed validation-only architecture dispositions may close without refactoring; only the user may revise scope.",
+    "containment_can_close_feature": false,
+    "baseline_acceptance_is_historical": "baseline_next_acceptance preserves the source; next_acceptance states current required closure and cannot use exclusion as completion."
+  },
+  "packages": [
+    {
+      "id": "CP01",
+      "title": "Honest discovery claims and reliable enquiries",
+      "owner_role": "Frontend and customer operations lead",
+      "assigned_person": "Codex implementation team",
+      "reviewer": "Independent Codex backend/frontend and Admin reviews; customer-operations acceptance pending",
+      "status": "in_progress",
+      "start_after_milestone": "RG01 baseline recorded",
+      "dependencies_and_tests": "See package text; coordination and final acceptance dependencies are distinct from entry milestones.",
+      "finding_ids": [
+        "C01",
+        "G01",
+        "G02"
+      ],
+      "feature_ids": [
+        "F01",
+        "F02",
+        "F38",
+        "F45"
+      ],
+      "architecture_ids": [],
+      "plan_anchor": "cp01-honest-discovery-claims-and-reliable-enquiries",
+      "evidence": [
+        {
+          "path": "docs/sessions/2026-10-04-cp01-implementation.md",
+          "kind": "local_implementation_and_verification",
+          "candidate": "ce43b268a108e6afe1a8e49d9f4e25d36e9849a2",
+          "status": "partial_acceptance"
+        },
+        {
+          "path": "docs/sessions/2026-10-04-cp01-public-claims.md",
+          "kind": "bounded_claim_inventory"
+        }
+      ],
+      "blocker": "Code and local boundary checks complete. Automatic approval review blocked final loopback Next preview launch (blocked by policy). Production configuration, intake owner/retention and release acceptance remain unverified.",
+      "next_action": "Run final browser-to-database journey when the preview launch is permitted; obtain clean CI and deployed synthetic receipt/operator acceptance with verified origin/rate/retention configuration.",
+      "target_date": null
+    },
+    {
+      "id": "CP02",
+      "title": "Authoritative purchase selection and monthly activation",
+      "owner_role": "Billing engineering lead",
+      "assigned_person": null,
+      "reviewer": null,
+      "status": "planned",
+      "start_after_milestone": "RG01 baseline recorded",
+      "dependencies_and_tests": "See package text; coordination and final acceptance dependencies are distinct from entry milestones.",
+      "finding_ids": [
+        "C02",
+        "O01"
+      ],
+      "feature_ids": [
+        "F07",
+        "F08",
+        "F38"
+      ],
+      "architecture_ids": [],
+      "plan_anchor": "cp02-authoritative-purchase-selection-and-monthly-activation",
+      "evidence": [],
+      "blocker": null,
+      "next_action": "Assign owner and confirm the baseline reproduction or evidence gap.",
+      "target_date": null
+    },
+    {
+      "id": "CP03",
+      "title": "Recoverable billing webhooks without duplicate financial effects",
+      "owner_role": "Billing engineering lead",
+      "assigned_person": null,
+      "reviewer": null,
+      "status": "planned",
+      "start_after_milestone": "RG01 baseline recorded",
+      "dependencies_and_tests": "See package text; coordination and final acceptance dependencies are distinct from entry milestones.",
+      "finding_ids": [
+        "C03"
+      ],
+      "feature_ids": [
+        "F07",
+        "F09",
+        "F10"
+      ],
+      "architecture_ids": [],
+      "plan_anchor": "cp03-recoverable-billing-webhooks-without-duplicate-financial-effects",
+      "evidence": [],
+      "blocker": null,
+      "next_action": "Assign owner and confirm the baseline reproduction or evidence gap.",
+      "target_date": null
+    },
+    {
+      "id": "CP04",
+      "title": "Truthful invoices, usage projections and refunds",
+      "owner_role": "Billing engineering and finance operations lead",
+      "assigned_person": null,
+      "reviewer": null,
+      "status": "planned",
+      "start_after_milestone": "RG01 baseline recorded",
+      "dependencies_and_tests": "See package text; coordination and final acceptance dependencies are distinct from entry milestones.",
+      "finding_ids": [
+        "C04",
+        "O01"
+      ],
+      "feature_ids": [
+        "F09",
+        "F11",
+        "F35",
+        "F39"
+      ],
+      "architecture_ids": [],
+      "plan_anchor": "cp04-truthful-invoices-usage-projections-and-refunds",
+      "evidence": [],
+      "blocker": null,
+      "next_action": "Assign owner and confirm the baseline reproduction or evidence gap.",
+      "target_date": null
+    },
+    {
+      "id": "CP05",
+      "title": "Complete existing white-label controls behind truthful containment",
+      "owner_role": "Partner product lead with tenant platform owner",
+      "assigned_person": null,
+      "reviewer": null,
+      "status": "planned",
+      "start_after_milestone": "RG01 baseline recorded",
+      "dependencies_and_tests": "See package text; coordination and final acceptance dependencies are distinct from entry milestones.",
+      "finding_ids": [
+        "C05"
+      ],
+      "feature_ids": [
+        "F05",
+        "F37"
+      ],
+      "architecture_ids": [],
+      "plan_anchor": "cp05-complete-existing-white-label-controls-behind-truthful-containment",
+      "evidence": [],
+      "blocker": null,
+      "next_action": "Assign owner and confirm the baseline reproduction or evidence gap.",
+      "target_date": null
+    },
+    {
+      "id": "CP06",
+      "title": "Accessible cancellation and dependable billing communication",
+      "owner_role": "Billing product experience and finance operations lead",
+      "assigned_person": null,
+      "reviewer": null,
+      "status": "planned",
+      "start_after_milestone": "RG01 baseline recorded",
+      "dependencies_and_tests": "See package text; coordination and final acceptance dependencies are distinct from entry milestones.",
+      "finding_ids": [
+        "C06"
+      ],
+      "feature_ids": [
+        "F07",
+        "F09",
+        "F12",
+        "F33",
+        "F38"
+      ],
+      "architecture_ids": [],
+      "plan_anchor": "cp06-accessible-cancellation-and-dependable-billing-communication",
+      "evidence": [],
+      "blocker": null,
+      "next_action": "Assign owner and confirm the baseline reproduction or evidence gap.",
+      "target_date": null
+    },
+    {
+      "id": "CP07",
+      "title": "Isolate notifications and make delivery promises accurate",
+      "owner_role": "Notification and identity engineering lead",
+      "assigned_person": null,
+      "reviewer": null,
+      "status": "planned",
+      "start_after_milestone": "RG01 baseline recorded",
+      "dependencies_and_tests": "See package text; coordination and final acceptance dependencies are distinct from entry milestones.",
+      "finding_ids": [
+        "C07"
+      ],
+      "feature_ids": [
+        "F33"
+      ],
+      "architecture_ids": [],
+      "plan_anchor": "cp07-isolate-notifications-and-make-delivery-promises-accurate",
+      "evidence": [],
+      "blocker": null,
+      "next_action": "Assign owner and confirm the baseline reproduction or evidence gap.",
+      "target_date": null
+    },
+    {
+      "id": "CP08",
+      "title": "One canonical identity path and a usable first-value journey",
+      "owner_role": "Identity engineering and customer onboarding lead",
+      "assigned_person": null,
+      "reviewer": null,
+      "status": "planned",
+      "start_after_milestone": "RG01 baseline recorded",
+      "dependencies_and_tests": "See package text; coordination and final acceptance dependencies are distinct from entry milestones.",
+      "finding_ids": [
+        "C06",
+        "C07",
+        "C08"
+      ],
+      "feature_ids": [
+        "F03",
+        "F04",
+        "F05",
+        "F06",
+        "F38",
+        "F45"
+      ],
+      "architecture_ids": [],
+      "plan_anchor": "cp08-one-canonical-identity-path-and-a-usable-first-value-journey",
+      "evidence": [],
+      "blocker": null,
+      "next_action": "Assign owner and confirm the baseline reproduction or evidence gap.",
+      "target_date": null
+    },
+    {
+      "id": "CP09",
+      "title": "Supportability and decisive customer UX acceptance",
+      "owner_role": "Support operations product lead",
+      "assigned_person": null,
+      "reviewer": null,
+      "status": "planned",
+      "start_after_milestone": "RG01 baseline recorded",
+      "dependencies_and_tests": "See package text; coordination and final acceptance dependencies are distinct from entry milestones.",
+      "finding_ids": [
+        "C09"
+      ],
+      "feature_ids": [
+        "F06",
+        "F28",
+        "F35",
+        "F36",
+        "F38"
+      ],
+      "architecture_ids": [],
+      "plan_anchor": "cp09-supportability-and-decisive-customer-ux-acceptance",
+      "evidence": [],
+      "blocker": null,
+      "next_action": "Assign owner and confirm the baseline reproduction or evidence gap.",
+      "target_date": null
+    },
+    {
+      "id": "AG01",
+      "title": "Make the saved profile equal the effective runtime profile",
+      "owner_role": "Voice platform and AI Options lead",
+      "assigned_person": null,
+      "reviewer": null,
+      "status": "planned",
+      "start_after_milestone": "RG01 baseline recorded",
+      "dependencies_and_tests": "See package text; coordination and final acceptance dependencies are distinct from entry milestones.",
+      "finding_ids": [
+        "V02"
+      ],
+      "feature_ids": [
+        "F06",
+        "F13",
+        "F14",
+        "F15"
+      ],
+      "architecture_ids": [
+        "A07"
+      ],
+      "plan_anchor": "ag01-make-the-saved-profile-equal-the-effective-runtime-profile",
+      "evidence": [],
+      "blocker": null,
+      "next_action": "Assign owner and confirm the baseline reproduction or evidence gap.",
+      "target_date": null
+    },
+    {
+      "id": "AG02",
+      "title": "Make knowledge uncertainty honest and verify the existing retrieval chain",
+      "owner_role": "Knowledge engineering lead",
+      "assigned_person": null,
+      "reviewer": null,
+      "status": "planned",
+      "start_after_milestone": "RG01 baseline recorded",
+      "dependencies_and_tests": "See package text; coordination and final acceptance dependencies are distinct from entry milestones.",
+      "finding_ids": [
+        "V03"
+      ],
+      "feature_ids": [
+        "F16"
+      ],
+      "architecture_ids": [
+        "A07"
+      ],
+      "plan_anchor": "ag02-make-knowledge-uncertainty-honest-and-verify-the-existing-retrieval-chain",
+      "evidence": [],
+      "blocker": null,
+      "next_action": "Assign owner and confirm the baseline reproduction or evidence gap.",
+      "target_date": null
+    },
+    {
+      "id": "AG03",
+      "title": "Preserve explicit Realtime relationship corrections beyond 12 messages",
+      "owner_role": "Realtime engineering lead",
+      "assigned_person": null,
+      "reviewer": null,
+      "status": "planned",
+      "start_after_milestone": "RG01 baseline recorded",
+      "dependencies_and_tests": "See package text; coordination and final acceptance dependencies are distinct from entry milestones.",
+      "finding_ids": [
+        "V04"
+      ],
+      "feature_ids": [
+        "F15"
+      ],
+      "architecture_ids": [
+        "A06"
+      ],
+      "plan_anchor": "ag03-preserve-explicit-realtime-relationship-corrections-beyond-12-messages",
+      "evidence": [],
+      "blocker": null,
+      "next_action": "Assign owner and confirm the baseline reproduction or evidence gap.",
+      "target_date": null
+    },
+    {
+      "id": "AG04",
+      "title": "Qualify actual conversation profiles, including failure and interruption",
+      "owner_role": "Conversation QA lead",
+      "assigned_person": null,
+      "reviewer": null,
+      "status": "planned",
+      "start_after_milestone": "RG01 baseline recorded",
+      "dependencies_and_tests": "See package text; coordination and final acceptance dependencies are distinct from entry milestones.",
+      "finding_ids": [
+        "V01",
+        "V02"
+      ],
+      "feature_ids": [
+        "F14",
+        "F15",
+        "F16",
+        "F19",
+        "F20",
+        "F29"
+      ],
+      "architecture_ids": [],
+      "plan_anchor": "ag04-qualify-actual-conversation-profiles-including-failure-and-interruption",
+      "evidence": [],
+      "blocker": null,
+      "next_action": "Assign owner and confirm the baseline reproduction or evidence gap.",
+      "target_date": null
+    },
+    {
+      "id": "AG05",
+      "title": "Complete caller evidence -> Leads -> Sales Hub without overstating trust",
+      "owner_role": "Lead workflow lead",
+      "assigned_person": null,
+      "reviewer": null,
+      "status": "planned",
+      "start_after_milestone": "RG01 baseline recorded",
+      "dependencies_and_tests": "See package text; coordination and final acceptance dependencies are distinct from entry milestones.",
+      "finding_ids": [],
+      "feature_ids": [
+        "F19",
+        "F29"
+      ],
+      "architecture_ids": [
+        "A06"
+      ],
+      "plan_anchor": "ag05-complete-caller-evidence-to-leads-to-sales-hub-without-overstating-trust",
+      "evidence": [],
+      "blocker": null,
+      "next_action": "Assign owner and confirm the baseline reproduction or evidence gap.",
+      "target_date": null
+    },
+    {
+      "id": "AG06",
+      "title": "Finish supported action workflows and reconcile unknown external results",
+      "owner_role": "Action execution and connector lead",
+      "assigned_person": null,
+      "reviewer": null,
+      "status": "planned",
+      "start_after_milestone": "RG01 baseline recorded",
+      "dependencies_and_tests": "See package text; coordination and final acceptance dependencies are distinct from entry milestones.",
+      "finding_ids": [
+        "C09"
+      ],
+      "feature_ids": [
+        "F30",
+        "F31",
+        "F32",
+        "F36"
+      ],
+      "architecture_ids": [],
+      "plan_anchor": "ag06-finish-supported-action-workflows-and-reconcile-unknown-external-results",
+      "evidence": [],
+      "blocker": null,
+      "next_action": "Assign owner and confirm the baseline reproduction or evidence gap.",
+      "target_date": null
+    },
+    {
+      "id": "AG07",
+      "title": "Use small structural repairs only where they support paid readiness",
+      "owner_role": "Backend technical lead",
+      "assigned_person": null,
+      "reviewer": null,
+      "status": "planned",
+      "start_after_milestone": "RG01 baseline recorded",
+      "dependencies_and_tests": "See package text; coordination and final acceptance dependencies are distinct from entry milestones.",
+      "finding_ids": [
+        "O06"
+      ],
+      "feature_ids": [],
+      "architecture_ids": [
+        "A01",
+        "A02",
+        "A03",
+        "A04",
+        "A05",
+        "A06",
+        "A08"
+      ],
+      "plan_anchor": "ag07-use-small-structural-repairs-only-where-they-support-paid-readiness",
+      "evidence": [],
+      "blocker": null,
+      "next_action": "Assign owner and confirm the baseline reproduction or evidence gap.",
+      "target_date": null
+    },
+    {
+      "id": "OP01",
+      "title": "Make minute admission and the displayed allowance agree",
+      "owner_role": "Billing and dialer engineering lead",
+      "assigned_person": null,
+      "reviewer": null,
+      "status": "planned",
+      "start_after_milestone": "RG01 baseline recorded",
+      "dependencies_and_tests": "See package text; coordination and final acceptance dependencies are distinct from entry milestones.",
+      "finding_ids": [
+        "O01"
+      ],
+      "feature_ids": [
+        "F21",
+        "F39"
+      ],
+      "architecture_ids": [],
+      "plan_anchor": "op01-make-minute-admission-and-the-displayed-allowance-agree",
+      "evidence": [],
+      "blocker": null,
+      "next_action": "Assign owner and confirm the baseline reproduction or evidence gap.",
+      "target_date": null
+    },
+    {
+      "id": "OP02",
+      "title": "Enforce provider and shared call limits at their actual boundary",
+      "owner_role": "Platform capacity and speech lead",
+      "assigned_person": null,
+      "reviewer": null,
+      "status": "planned",
+      "start_after_milestone": "RG01 baseline recorded",
+      "dependencies_and_tests": "See package text; coordination and final acceptance dependencies are distinct from entry milestones.",
+      "finding_ids": [
+        "O02"
+      ],
+      "feature_ids": [
+        "F17",
+        "F21",
+        "F40"
+      ],
+      "architecture_ids": [],
+      "plan_anchor": "op02-enforce-provider-and-shared-call-limits-at-their-actual-boundary",
+      "evidence": [],
+      "blocker": null,
+      "next_action": "Assign owner and confirm the baseline reproduction or evidence gap.",
+      "target_date": null
+    },
+    {
+      "id": "OP03",
+      "title": "Validate bounded STT/TTS recovery and honest media completion",
+      "owner_role": "Speech and media lead",
+      "assigned_person": null,
+      "reviewer": null,
+      "status": "planned",
+      "start_after_milestone": "RG01 baseline recorded",
+      "dependencies_and_tests": "See package text; coordination and final acceptance dependencies are distinct from entry milestones.",
+      "finding_ids": [
+        "V06",
+        "O05"
+      ],
+      "feature_ids": [
+        "F15",
+        "F17",
+        "F18",
+        "F19"
+      ],
+      "architecture_ids": [],
+      "plan_anchor": "op03-validate-bounded-stt-and-tts-recovery-and-honest-media-completion",
+      "evidence": [],
+      "blocker": null,
+      "next_action": "Assign owner and confirm the baseline reproduction or evidence gap.",
+      "target_date": null
+    },
+    {
+      "id": "OP04",
+      "title": "Release the selected-trunk and caller-ID contract without drift",
+      "owner_role": "Telephony operations lead",
+      "assigned_person": null,
+      "reviewer": null,
+      "status": "planned",
+      "start_after_milestone": "RG01 baseline recorded",
+      "dependencies_and_tests": "See package text; coordination and final acceptance dependencies are distinct from entry milestones.",
+      "finding_ids": [
+        "O07"
+      ],
+      "feature_ids": [
+        "F06",
+        "F21",
+        "F22",
+        "F24",
+        "F25"
+      ],
+      "architecture_ids": [],
+      "plan_anchor": "op04-release-the-selected-trunk-and-caller-id-contract-without-drift",
+      "evidence": [],
+      "blocker": null,
+      "next_action": "Assign owner and confirm the baseline reproduction or evidence gap.",
+      "target_date": null
+    },
+    {
+      "id": "OP05",
+      "title": "Prove campaign, inbound and redial lifecycle under failure",
+      "owner_role": "Calling application and telephony lifecycle lead",
+      "assigned_person": null,
+      "reviewer": null,
+      "status": "planned",
+      "start_after_milestone": "RG01 baseline recorded",
+      "dependencies_and_tests": "See package text; coordination and final acceptance dependencies are distinct from entry milestones.",
+      "finding_ids": [
+        "O06"
+      ],
+      "feature_ids": [
+        "F21",
+        "F22",
+        "F26",
+        "F27"
+      ],
+      "architecture_ids": [
+        "A02"
+      ],
+      "plan_anchor": "op05-prove-campaign-inbound-and-redial-lifecycle-under-failure",
+      "evidence": [],
+      "blocker": null,
+      "next_action": "Assign owner and confirm the baseline reproduction or evidence gap.",
+      "target_date": null
+    },
+    {
+      "id": "OP06",
+      "title": "Close the existing transfer availability gate honestly",
+      "owner_role": "Inbound telephony lead",
+      "assigned_person": null,
+      "reviewer": null,
+      "status": "planned",
+      "start_after_milestone": "RG01 baseline recorded",
+      "dependencies_and_tests": "See package text; coordination and final acceptance dependencies are distinct from entry milestones.",
+      "finding_ids": [
+        "V05"
+      ],
+      "feature_ids": [
+        "F23"
+      ],
+      "architecture_ids": [],
+      "plan_anchor": "op06-close-the-existing-transfer-availability-gate-honestly",
+      "evidence": [],
+      "blocker": null,
+      "next_action": "Assign owner and confirm the baseline reproduction or evidence gap.",
+      "target_date": null
+    },
+    {
+      "id": "OP07",
+      "title": "Prove consent, recording lifecycle and customer data requests",
+      "owner_role": "Data lifecycle and privacy operations lead",
+      "assigned_person": null,
+      "reviewer": null,
+      "status": "planned",
+      "start_after_milestone": "RG01 baseline recorded",
+      "dependencies_and_tests": "See package text; coordination and final acceptance dependencies are distinct from entry milestones.",
+      "finding_ids": [
+        "G01",
+        "G02"
+      ],
+      "feature_ids": [
+        "F22",
+        "F26",
+        "F34",
+        "F45"
+      ],
+      "architecture_ids": [],
+      "plan_anchor": "op07-prove-consent-recording-lifecycle-and-customer-data-requests",
+      "evidence": [],
+      "blocker": null,
+      "next_action": "Assign owner and confirm the baseline reproduction or evidence gap.",
+      "target_date": null
+    },
+    {
+      "id": "OP08",
+      "title": "Establish real voice quality, latency and capacity evidence",
+      "owner_role": "Conversation QA and performance lead",
+      "assigned_person": null,
+      "reviewer": null,
+      "status": "planned",
+      "start_after_milestone": "RG01 baseline recorded",
+      "dependencies_and_tests": "See package text; coordination and final acceptance dependencies are distinct from entry milestones.",
+      "finding_ids": [
+        "V01",
+        "O05",
+        "G01"
+      ],
+      "feature_ids": [
+        "F01",
+        "F17",
+        "F18",
+        "F19",
+        "F20",
+        "F42"
+      ],
+      "architecture_ids": [],
+      "plan_anchor": "op08-establish-real-voice-quality-latency-and-capacity-evidence",
+      "evidence": [],
+      "blocker": null,
+      "next_action": "Assign owner and confirm the baseline reproduction or evidence gap.",
+      "target_date": null
+    },
+    {
+      "id": "OP09",
+      "title": "Make operational alerts reach an accountable person",
+      "owner_role": "Reliability and on-call lead",
+      "assigned_person": null,
+      "reviewer": null,
+      "status": "planned",
+      "start_after_milestone": "RG01 baseline recorded",
+      "dependencies_and_tests": "See package text; coordination and final acceptance dependencies are distinct from entry milestones.",
+      "finding_ids": [
+        "O04"
+      ],
+      "feature_ids": [
+        "F41"
+      ],
+      "architecture_ids": [],
+      "plan_anchor": "op09-make-operational-alerts-reach-an-accountable-person",
+      "evidence": [],
+      "blocker": null,
+      "next_action": "Assign owner and confirm the baseline reproduction or evidence gap.",
+      "target_date": null
+    },
+    {
+      "id": "OP10",
+      "title": "Demonstrate recoverable backups within declared objectives",
+      "owner_role": "Database and reliability operations lead",
+      "assigned_person": null,
+      "reviewer": null,
+      "status": "planned",
+      "start_after_milestone": "RG01 baseline recorded",
+      "dependencies_and_tests": "See package text; coordination and final acceptance dependencies are distinct from entry milestones.",
+      "finding_ids": [
+        "O03",
+        "G02"
+      ],
+      "feature_ids": [
+        "F34",
+        "F43",
+        "F45"
+      ],
+      "architecture_ids": [],
+      "plan_anchor": "op10-demonstrate-recoverable-backups-within-declared-objectives",
+      "evidence": [],
+      "blocker": null,
+      "next_action": "Assign owner and confirm the baseline reproduction or evidence gap.",
+      "target_date": null
+    },
+    {
+      "id": "OP11",
+      "title": "Reduce privilege and make cost evidence financially honest",
+      "owner_role": "Platform security and finance engineering lead",
+      "assigned_person": null,
+      "reviewer": null,
+      "status": "planned",
+      "start_after_milestone": "RG01 baseline recorded",
+      "dependencies_and_tests": "See package text; coordination and final acceptance dependencies are distinct from entry milestones.",
+      "finding_ids": [
+        "O08"
+      ],
+      "feature_ids": [
+        "F39",
+        "F45"
+      ],
+      "architecture_ids": [],
+      "plan_anchor": "op11-reduce-privilege-and-make-cost-evidence-financially-honest",
+      "evidence": [],
+      "blocker": null,
+      "next_action": "Assign owner and confirm the baseline reproduction or evidence gap.",
+      "target_date": null
+    },
+    {
+      "id": "OP12",
+      "title": "Promote one compatible release and prove an operable recovery path",
+      "owner_role": "Release lead",
+      "assigned_person": null,
+      "reviewer": null,
+      "status": "planned",
+      "start_after_milestone": "RG01 baseline recorded",
+      "dependencies_and_tests": "See package text; coordination and final acceptance dependencies are distinct from entry milestones.",
+      "finding_ids": [
+        "O07"
+      ],
+      "feature_ids": [
+        "F44"
+      ],
+      "architecture_ids": [
+        "A08"
+      ],
+      "plan_anchor": "op12-promote-one-compatible-release-and-prove-an-operable-recovery-path",
+      "evidence": [],
+      "blocker": null,
+      "next_action": "Assign owner and confirm the baseline reproduction or evidence gap.",
+      "target_date": null
+    },
+    {
+      "id": "RG01",
+      "title": "Baseline and preservation",
+      "owner_role": "Integration lead with QA and release operator",
+      "assigned_person": null,
+      "reviewer": null,
+      "status": "in_progress",
+      "start_after_milestone": "Plan saved",
+      "dependencies_and_tests": "See global sequence and package text.",
+      "finding_ids": [],
+      "feature_ids": [],
+      "architecture_ids": [],
+      "plan_anchor": "rg01-baseline-and-preservation",
+      "evidence": [
+        {
+          "date": "2026-10-04",
+          "type": "partial_local_review",
+          "candidate_sha": "d7b584050e9e45c6b8a1bf543636afd87437ab22",
+          "scope": "Read-only review of existing coding-defect patterns, implementation paths and test coverage with independent commercial, agent and operations reviewers. Findings presented in chat at user request.",
+          "confirmed_examples": [
+            "C01",
+            "C02",
+            "C03",
+            "C04",
+            "V03",
+            "V04",
+            "O01",
+            "O02",
+            "O05"
+          ],
+          "new_execution_evidence": "Independent no-I/O ordinary-webhook reproduction: handler_failed then duplicate; one handler attempt; no provider or database effects.",
+          "limitations": [
+            "AI authorship of individual defects is not established.",
+            "Production and remote main were not freshly checked in this diagnostic step.",
+            "No application repair, live call, payment or deployment was performed."
+          ],
+          "source_refs": [
+            "Talk-Leee/src/components/home/contact-section.tsx:39",
+            "Talk-Leee/src/components/home/contact-section.test.tsx:13",
+            "Talk-Leee/src/app/billing/plans/page.tsx:55",
+            "backend/app/domain/services/billing_service.py:465",
+            "backend/tests/unit/test_billing_topup_webhook_routing.py:318",
+            "backend/app/domain/services/voice_pipeline/turn_streamer.py:193",
+            "backend/app/realtime/bridge.py:690",
+            "backend/app/domain/services/minutes_quota.py:118",
+            "backend/app/domain/services/voice_pipeline/tts_playback.py:469"
+          ]
+        }
+      ],
+      "blocker": null,
+      "next_action": "Complete current main/candidate/deployment reconciliation and preserve existing fixes, then execute CP01 within the fixed scope. Local coding-defect review is complete; full RG01 is not.",
+      "target_date": null
+    },
+    {
+      "id": "RG02",
+      "title": "Prove the complete purchased journey",
+      "owner_role": "QA lead with customer success",
+      "assigned_person": null,
+      "reviewer": null,
+      "status": "planned",
+      "start_after_milestone": "Applicable candidate and test-environment prerequisites verified",
+      "dependencies_and_tests": "See global sequence and package text.",
+      "finding_ids": [],
+      "feature_ids": [],
+      "architecture_ids": [],
+      "plan_anchor": "rg02-prove-the-complete-purchased-journey",
+      "evidence": [],
+      "blocker": null,
+      "next_action": "Assign owner and record entry evidence.",
+      "target_date": null
+    },
+    {
+      "id": "RG03",
+      "title": "Bounded pilot and business value",
+      "owner_role": "Product and customer success lead",
+      "assigned_person": null,
+      "reviewer": null,
+      "status": "planned",
+      "start_after_milestone": "Selected offer passes controlled release acceptance",
+      "dependencies_and_tests": "See global sequence and package text.",
+      "finding_ids": [],
+      "feature_ids": [
+        "F35"
+      ],
+      "architecture_ids": [],
+      "plan_anchor": "rg03-bounded-pilot-and-business-value",
+      "evidence": [],
+      "blocker": null,
+      "next_action": "Assign owner and record entry evidence.",
+      "target_date": null
+    }
+  ],
+  "findings": [
+    {
+      "id": "C01",
+      "baseline_label": "P1 \u2014 Contact enquiries can be silently lost.",
+      "baseline_detail": "The public contact form waits 1.5 seconds, clears its inputs and displays success without sending a request or persisting an enquiry. This is a real false-success path, separate from CRM contact import. A prospective buyer can lose a sales or support enquiry before creating an account. Wire it to one durable intake path, or provide an honest email link until ready. Success must require a server receipt; failures must retain the draft. Acceptance: double-click, retry, reload and service failure produce either one accepted enquiry or a visible unsent state. [Contact implementation](https://github.com/talkyai-source/Talky.ai-complete-/blob/d7b58405/Talk-Leee/src/components/home/contact-section.tsx#L39).",
+      "work_packages": [
+        "CP01"
+      ],
+      "status": "planned",
+      "evidence": [],
+      "closure_disposition": null
+    },
+    {
+      "id": "C02",
+      "baseline_label": "P1 \u2014 Annual pricing is presentation without a matching purchase contract.",
+      "baseline_detail": "The plans screen advertises approximately 17% savings and calculates a yearly display, but checkout submits only `plan_id` and return URLs. The backend reads that plan's single Stripe price ID; changing the toggle does not change the purchase request. This establishes a mismatch without knowing the live price configured in Stripe. Hide the annual choice until the catalog supports it, or pass a server-validated price option with its interval. Acceptance: amount, currency, interval, renewal date and provider price agree from selection through invoice. [Plans screen](https://github.com/talkyai-source/Talky.ai-complete-/blob/d7b58405/Talk-Leee/src/app/billing/plans/page.tsx#L55), [checkout service](https://github.com/talkyai-source/Talky.ai-complete-/blob/d7b58405/backend/app/domain/services/billing_service.py#L147).",
+      "work_packages": [
+        "CP02"
+      ],
+      "status": "planned",
+      "evidence": [],
+      "closure_disposition": null
+    },
+    {
+      "id": "C03",
+      "baseline_label": "P1 \u2014 A failed subscription webhook can become permanently ignored.",
+      "baseline_detail": "The service claims an event before business processing. Top-up failures release that claim, but ordinary subscription/invoice handlers do not provide equivalent recovery. The actual method, exercised with an in-memory claim and a transient failing handler, produced `handler_failed`, then `duplicate`, with only one handler attempt. A paid customer could remain incorrectly activated or invoiced despite provider retries. This is a reproduced failure boundary, not evidence of an existing customer loss. Use recoverable event states and idempotent business updates; simply deleting a claim after partly applied work is not a complete fix. Acceptance must inject failures before and after each durable mutation, then verify safe retry and reconciliation. Stripe documents duplicate and unordered delivery, so both belong in the test contract. [Handler](https://github.com/talkyai-source/Talky.ai-complete-/blob/d7b58405/backend/app/domain/services/billing_service.py#L465), [Stripe delivery behavior](https://docs.stripe.com/webhooks), [offline evidence](artifacts/2026-10-02-maturity-billing-repro.json).",
+      "work_packages": [
+        "CP03"
+      ],
+      "status": "planned",
+      "evidence": [],
+      "closure_disposition": null
+    },
+    {
+      "id": "C04",
+      "baseline_label": "P1 \u2014 Invoice details can present invented facts.",
+      "baseline_detail": "The detail endpoint substitutes plan allowance for used minutes, sets tax, overage and peak concurrency to zero, constructs a plan line from the invoice total, and joins current subscription/plan data. Adjustments return an empty list; a separate overage estimate falls back to 10 cents per minute without a stored rate. These are not authoritative invoice facts. Prefer the actual provider invoice/PDF and recorded totals; show unavailable where detail was not captured. Preserve immutable invoice items before presenting a detailed breakdown. Acceptance: tax, credits, discounts, top-ups and plan changes match the provider invoice, and historical detail does not change when the current plan changes. [Invoice projection](https://github.com/talkyai-source/Talky.ai-complete-/blob/d7b58405/backend/app/api/v1/endpoints/billing.py#L542).",
+      "work_packages": [
+        "CP04"
+      ],
+      "status": "planned",
+      "evidence": [],
+      "closure_disposition": null
+    },
+    {
+      "id": "C05",
+      "baseline_label": "P1 for reseller sales \u2014 White-label operational screens are still prototypes.",
+      "baseline_detail": "Partner tenant creation, editing and suspension update React/localStorage state, although tooltips describe ability to place calls. Partner billing hardcodes usage, cost and paid invoices. These reviewed screens do not visibly disclose their local/demo nature. Existing core Admin APIs and tenant isolation do not make these particular controls operational. Hide or explicitly isolate the demo surfaces from paid use; wire the real authorized backend when that offering is ready. Acceptance: another browser sees the created tenant, real membership and entitlements exist, suspension blocks server-side work, and every invoice is real. [Tenant state](https://github.com/talkyai-source/Talky.ai-complete-/blob/d7b58405/Talk-Leee/src/app/white-label/%5Bpartner%5D/tenants/tenants-client.tsx#L118), [partner billing](https://github.com/talkyai-source/Talky.ai-complete-/blob/d7b58405/Talk-Leee/src/app/white-label/%5Bpartner%5D/billing/page.tsx#L70).",
+      "work_packages": [
+        "CP05"
+      ],
+      "status": "planned",
+      "evidence": [],
+      "closure_disposition": null
+    },
+    {
+      "id": "C06",
+      "baseline_label": "P1 for promised self-service cancellation; otherwise P2 \u2014 Cancellation and billing communication are incomplete journeys.",
+      "baseline_detail": "Backend billing portal and period-end cancellation exist, but no customer frontend consumer was found; the UI links to plan selection instead. Email support remains a stated alternative, so cancellation is not categorically impossible. Payment-email recipient selection also uses legacy `owner`, while canonical signup uses `tenant_admin`. Expose one clear authorized manage/cancel route and align recipient roles. Acceptance: the owner sees the effective end date, cancellation survives reload, renewal stops, paid access continues appropriately, and a failure never produces a success claim. [Billing endpoints](https://github.com/talkyai-source/Talky.ai-complete-/blob/d7b58405/backend/app/api/v1/endpoints/billing.py#L267), [recipient selection](https://github.com/talkyai-source/Talky.ai-complete-/blob/d7b58405/backend/app/domain/services/billing_service.py#L951).",
+      "work_packages": [
+        "CP06",
+        "CP08"
+      ],
+      "status": "planned",
+      "evidence": [],
+      "closure_disposition": null
+    },
+    {
+      "id": "C07",
+      "baseline_label": "P1 for sold automated alerts; otherwise P2, with a potentially higher privacy impact \u2014 Notifications are not durable server automation.",
+      "baseline_detail": "The reviewed external notification path posts from the browser and discards failures. Its storage keys are not scoped by authenticated tenant/user, and logout does not visibly clear that store. Closed browsers, CORS and network failures can lose delivery. A cross-account history/destination exposure is a specific risk requiring browser reproduction, not an observed disclosure. Scope and clear local state on identity changes; use existing durable server delivery for operational notifications. Acceptance: tenant A's history and destination never appear after tenant B signs in; failed delivery has a visible, retryable status. [Notification store](https://github.com/talkyai-source/Talky.ai-complete-/blob/d7b58405/Talk-Leee/src/lib/notifications.ts#L80).",
+      "work_packages": [
+        "CP07",
+        "CP08"
+      ],
+      "status": "planned",
+      "evidence": [],
+      "closure_disposition": null
+    },
+    {
+      "id": "C08",
+      "baseline_label": "P2 \u2014 Published legacy signup still conflicts with the canonical schema.",
+      "baseline_detail": "The current verified-code signup has meaningful repairs and membership creation. A separately mounted legacy registration path inserts `owner`, which is outside the canonical role constraint, and does not use the same membership invariant. Retire that route or delegate to the canonical implementation. Acceptance: every published registration route works against the migrated database and cannot leave an orphan tenant or grant incorrect membership. This is not a claim that current normal signup is entirely broken. [Legacy registration](https://github.com/talkyai-source/Talky.ai-complete-/blob/d7b58405/backend/app/api/v1/endpoints/auth/registration.py#L125).",
+      "work_packages": [
+        "CP08"
+      ],
+      "status": "planned",
+      "evidence": [],
+      "closure_disposition": null
+    },
+    {
+      "id": "C09",
+      "baseline_label": "P1 for promised managed support; otherwise P2 \u2014 Parts of the operating console remain unavailable.",
+      "baseline_detail": "Actions Log and Incidents contain Coming Soon surfaces; selected customer Admin consoles explicitly report unavailable functionality. Other call, tenant, user, connector and audit APIs are real. A support promise must match what an operator can actually diagnose and repair. Prioritize tracing a complaint across call, lead, action receipt and billing before expanding the console. Acceptance: an authorized support operator resolves a failed follow-up or billing mismatch with audit evidence and no guessed database edits. [Actions log](https://github.com/talkyai-source/Talky.ai-complete-/blob/d7b58405/Admin/frontend/src/pages/ActionsLogPage.tsx#L31), [incidents](https://github.com/talkyai-source/Talky.ai-complete-/blob/d7b58405/Admin/frontend/src/pages/IncidentsPage.tsx#L31).",
+      "work_packages": [
+        "CP09",
+        "AG06"
+      ],
+      "status": "planned",
+      "evidence": [],
+      "closure_disposition": null
+    },
+    {
+      "id": "V01",
+      "baseline_label": "P1 \u2014 Real telephone quality and performance remain unproven for this release.",
+      "baseline_detail": "Cartesia first-audio observations of 169 and 205 milliseconds describe two provider responses, not total conversational delay. The Realtime smoke used synthetic text and a simulated gateway. An earlier capacity/soak report explicitly invalidates its SIP-only/no-RTP evidence. No current concurrency ceiling or human-rated naturalness claim follows from these tests. Use the existing harnesses, the intended carrier and actual selected voice profiles for bidirectional audio acceptance. [Provider fixture scope](artifacts/2026-10-01-audio-provider-eval.json), [invalidated load evidence](../../telephony/docs/phase_3/day10_concurrency_soak_evidence.md).",
+      "work_packages": [
+        "OP08",
+        "AG04"
+      ],
+      "status": "planned",
+      "evidence": [],
+      "closure_disposition": null
+    },
+    {
+      "id": "V02",
+      "baseline_label": "P1 for approving the affected model profile \u2014 Groq still demonstrated a comprehension failure.",
+      "baseline_detail": "The synthetic provider exercise showed a misremembered previous question even though captured request history contained the exact preceding question. This is not explained by a lost-history bug. Small Luna/Gemini/Cerebras samples do not establish universal superiority or readiness either. Approve a complete model/prompt/voice/knowledge profile only against the same reviewed scenarios; keep unsuccessful profiles experimental for that use case. Do not make an automatic larger-model switch the default remedy. [Recorded provider evidence](artifacts/2026-10-02-call-experience-model-probe.json).",
+      "work_packages": [
+        "AG04",
+        "AG01"
+      ],
+      "status": "planned",
+      "evidence": [],
+      "closure_disposition": null
+    },
+    {
+      "id": "V03",
+      "baseline_label": "P1/P2 \u2014 Traditional no/weak-match turns can include a conflicting knowledge fallback.",
+      "baseline_detail": "The fallback instructions tell the agent it will check and ensure confirmation, even when available tools provide no follow-up route. Other instructions forbid unsupported future promises. This is a confirmed instruction contradiction; it does not prove an external action occurred. Replace that fallback with a short honest inability to confirm and only an actually available next step. Acceptance must evaluate the assembled prompt with no tools, unavailable tools and working tools, rather than testing one template sentence alone. [Knowledge fallback](https://github.com/talkyai-source/Talky.ai-complete-/blob/d7b58405/backend/app/domain/services/voice_pipeline/turn_streamer.py#L193).",
+      "work_packages": [
+        "AG02"
+      ],
+      "status": "planned",
+      "evidence": [],
+      "closure_disposition": null
+    },
+    {
+      "id": "V04",
+      "baseline_label": "P2 defect; P1 before approving the affected profile \u2014 Realtime relationship corrections can leave a bounded guard's memory.",
+      "baseline_detail": "The relationship guard reads a 12-message buffer, and typed live state has no persistent field for an explicit denial of a customer relationship. In a bounded offline test, the guard rejected an existing-customer claim immediately after a denial, but no longer rejected it after the denial aged out. This is a confirmed guard coverage gap, not proof that the live model necessarily repeats the claim. Store the latest explicit relationship correction in existing typed state, with provenance and a valid later reversal. Acceptance: the correction still constrains an incompatible claim after 30 turns; a later explicit caller correction updates it appropriately. [Realtime buffer](https://github.com/talkyai-source/Talky.ai-complete-/blob/d7b58405/backend/app/realtime/bridge.py#L678), [offline proof](artifacts/2026-10-02-maturity-realtime-memory-repro.json).",
+      "work_packages": [
+        "AG03"
+      ],
+      "status": "planned",
+      "evidence": [],
+      "closure_disposition": null
+    },
+    {
+      "id": "V05",
+      "baseline_label": "P1 for a transfer-dependent customer \u2014 Controlled inbound human transfer is unavailable in production.",
+      "baseline_detail": "The controlled inbound transfer declaration is false, with a narrow staging proof path. The UI correctly disables it. Do not present production receptionist-to-human handoff as included. Either exclude it explicitly or complete the existing two-leg, restart, hangup and settlement proofs before enabling it. [Capability declaration](https://github.com/talkyai-source/Talky.ai-complete-/blob/d7b58405/backend/app/domain/services/telephony/inbound_transfer.py#L20).",
+      "work_packages": [
+        "OP06"
+      ],
+      "status": "planned",
+      "evidence": [],
+      "closure_disposition": null
+    },
+    {
+      "id": "V06",
+      "baseline_label": "P2 \u2014 Recovery has real limits that should be explicit.",
+      "baseline_detail": "Traditional provider failover is opt-in. STT fallback can use another engine from the same vendor/account, so it is not independent protection from a shared vendor outage. TTS fallback requires credentials and a voice mapping; replay after partial output is intentionally avoided. STT recovery has a bounded replay buffer and can require repetition. Realtime unexpected disconnect ends the session rather than transparently reconnecting mid-call. These are mostly deliberate tradeoffs. Show effective fallback readiness and test the chosen configuration; avoid adding unsafe replay to make recovery appear seamless. [Voice orchestration](https://github.com/talkyai-source/Talky.ai-complete-/blob/d7b58405/backend/app/domain/services/voice_orchestrator.py#L1164), [Realtime connection](https://github.com/talkyai-source/Talky.ai-complete-/blob/d7b58405/backend/app/realtime/openai.py#L766).",
+      "work_packages": [
+        "OP03"
+      ],
+      "status": "planned",
+      "evidence": [],
+      "closure_disposition": null
+    },
+    {
+      "id": "O01",
+      "baseline_label": "P1 where sold as a hard allowance \u2014 Outbound minute limits are not guaranteed during a narrow metering failure.",
+      "baseline_detail": "The shared minute lookup can return unlimited after a query error; the worker's check also passes on lookup failure. A later CallGuard can fall back to a stored usage value that is not reliably current. Other DNC, platform, spend and concurrency guards remain, and a total database outage can still stop calling. The precise exposure is a failed usage query with other checks working and stale stored usage below the limit. Introduce an explicit metering-unavailable state and a documented bounded continuity policy. A customer-visible hard cap must stop new admission when its authority is unknown. Also define whether the allowance resets on the calendar month or subscription anniversary; the current usage query uses the calendar month. [Shared lookup](https://github.com/talkyai-source/Talky.ai-complete-/blob/d7b58405/backend/app/domain/services/minutes_quota.py#L115), [worker check](https://github.com/talkyai-source/Talky.ai-complete-/blob/d7b58405/backend/app/workers/dialer_worker.py#L1522), [additional guard](https://github.com/talkyai-source/Talky.ai-complete-/blob/d7b58405/backend/app/domain/services/call_guard.py#L1002).",
+      "work_packages": [
+        "OP01",
+        "CP02",
+        "CP04"
+      ],
+      "status": "planned",
+      "evidence": [],
+      "closure_disposition": null
+    },
+    {
+      "id": "O02",
+      "baseline_label": "P1 for promised hard limits; otherwise P2 \u2014 Provider account limits and global limits have different coverage.",
+      "baseline_detail": "The provider concurrency registry is per-process. Flux's prewarm and streaming sockets do not use the guard that the Nova path uses, so the named Deepgram guard setting does not constrain that selected path. Global/per-pod call slots still exist; this is not unlimited calling. Separately, ordinary outbound global-lease acquisition can fail open on Redis failure, while inbound uses a stricter policy. Prove configured limits at the actual process/account boundary, with cancellation-safe release and a documented Redis-degraded admission policy. Do not add a distributed scheduler before it is needed. [Provider guard](https://github.com/talkyai-source/Talky.ai-complete-/blob/d7b58405/backend/app/infrastructure/providers/provider_concurrency.py#L18), [Flux socket](https://github.com/talkyai-source/Talky.ai-complete-/blob/d7b58405/backend/app/infrastructure/stt/deepgram_flux.py#L489), [global policy](https://github.com/talkyai-source/Talky.ai-complete-/blob/d7b58405/backend/app/domain/services/global_concurrency.py#L104).",
+      "work_packages": [
+        "OP02"
+      ],
+      "status": "planned",
+      "evidence": [],
+      "closure_disposition": null
+    },
+    {
+      "id": "O03",
+      "baseline_label": "P1 for recovery promises \u2014 Backup job success is not restored-service proof.",
+      "baseline_detail": "A fresh backup job reported success. Scripts provide checksums and other useful checks, but independent archive restoration, production-shaped migration and off-host survivability were not demonstrated in the inspected evidence. A usable daily dump leaves up to roughly a day's changes exposed between successful backups; failed or unusable dumps can widen that gap. Achieved recovery point and recovery time remain unverified and require agreed targets. Use the existing isolated restore procedure and record timings, tenant isolation, object storage and key recovery. No current uptime or recovery SLA should be inferred from the age of a running container. [Recovery procedure](../RUNBOOK.md#backups), [deployment requirements](../DEPLOYMENT.md).",
+      "work_packages": [
+        "OP10"
+      ],
+      "status": "planned",
+      "evidence": [],
+      "closure_disposition": null
+    },
+    {
+      "id": "O04",
+      "baseline_label": "P1 for managed reliability \u2014 Alert instrumentation exists, but delivery to a person is unproven.",
+      "baseline_detail": "Metrics, worker heartbeats and healthwatch are real. The checked Alertmanager example has empty delivery receivers; no on-host Prometheus/Alertmanager process was observed. External monitoring was not enumerated, so this is not a claim that none exists. A working log message does not prove on-call notification. Inject a controlled failure and retain receipt, acknowledgement and recovery evidence. [Alertmanager configuration](../../telephony/observability/alertmanager/alertmanager.yml), [healthwatch](../../backend/deploy/healthwatch.sh).",
+      "work_packages": [
+        "OP09"
+      ],
+      "status": "planned",
+      "evidence": [],
+      "closure_disposition": null
+    },
+    {
+      "id": "O05",
+      "baseline_label": "P2 \u2014 Some latency measurements end before the caller can hear speech.",
+      "baseline_detail": "The first provider audio chunk can mark `audio_start` before gateway transmission. Asterisk correctly describes its receipt as transmitted rather than heard. Preserve that distinction. Measure endpoint audio separately before using latency as a customer promise. [Playback measurement](https://github.com/talkyai-source/Talky.ai-complete-/blob/d7b58405/backend/app/domain/services/voice_pipeline/tts_playback.py#L469).",
+      "work_packages": [
+        "OP08",
+        "OP03"
+      ],
+      "status": "planned",
+      "evidence": [],
+      "closure_disposition": null
+    },
+    {
+      "id": "O06",
+      "baseline_label": "P2 \u2014 A setup-crash cleanup boundary needs proof.",
+      "baseline_detail": "Lifecycle code documents that an Asterisk channel without a local session is not reconciled by that routine. Other cleanup and timeout paths exist, so permanent leakage is not established. Reproduce a crash between channel arrival and local registration, prove whether existing cleanup covers it, and add ownership-aware reconciliation only if needed. Never hang up every unmatched channel indiscriminately. [Lifecycle reconciliation](https://github.com/talkyai-source/Talky.ai-complete-/blob/d7b58405/backend/app/domain/services/telephony/lifecycle.py#L819).",
+      "work_packages": [
+        "OP05",
+        "AG07"
+      ],
+      "status": "planned",
+      "evidence": [],
+      "closure_disposition": null
+    },
+    {
+      "id": "O07",
+      "baseline_label": "P1 for release readiness \u2014 Deployment and rollback remain coupled to external operational proof.",
+      "baseline_detail": "Frontends auto-deploy from main while the backend/gateway use a separate coordinated release. The new UI fails closed when required readiness fields are absent; old backend and new UI can temporarily disable operations. Current-topology ingress freeze, zero-call drain, compatible rollback/code-forward, generated SIP reconciliation and restored migration proof are necessary. The old production revision is not automatically a safe rollback target for the new gateway contract. Use one recorded release procedure and a rehearsed compatible artifact; adding another deployment platform is unnecessary. [Supported release procedure](../DEPLOYMENT.md).",
+      "work_packages": [
+        "OP12",
+        "OP04"
+      ],
+      "status": "planned",
+      "evidence": [],
+      "closure_disposition": null
+    },
+    {
+      "id": "O08",
+      "baseline_label": "P2 \u2014 Security and financial telemetry have bounded assurance.",
+      "baseline_detail": "API and Python workers were observed running as root on a shared host. This increases the impact of a compromise; it is not evidence of one. Move ordinary services toward the minimum necessary permissions after testing the privileged PBX/configuration operations they depend on. Separately, provider cost telemetry uses an in-memory buffer and can drop events on overflow or process loss. It is useful operational telemetry, but not sufficient by itself as an auditable supplier-cost ledger. Reconcile usage/costs against durable call records and provider statements; do not infer that customer invoices are necessarily wrong from this telemetry design. [Service definitions](../../backend/systemd/), [cost recorder](https://github.com/talkyai-source/Talky.ai-complete-/blob/d7b58405/backend/app/domain/services/provider_cost_ledger.py#L90).",
+      "work_packages": [
+        "OP11"
+      ],
+      "status": "planned",
+      "evidence": [],
+      "closure_disposition": null
+    },
+    {
+      "id": "G01",
+      "baseline_label": "P1 for the affected marketing promise \u2014 Performance and regulated-use claims need evidence.",
+      "baseline_detail": "Public source contains under-500-millisecond response, 1,000-plus concurrent calls and 94% completion claims; industry pages add uptime and AI-accuracy figures. Healthcare content makes HIPAA/BAA statements. No corresponding measured cohort, denominator, signed agreement or approved compliance package was established here. These claims are unsupported by the inspected evidence, not proven false merely because they are constants. Remove or qualify unsubstantiated promises; require a dated artifact and accountable owner before publishing them. [Home claims](https://github.com/talkyai-source/Talky.ai-complete-/blob/d7b58405/Talk-Leee/src/components/home/home-lazy-sections.tsx#L312), [healthcare claims](https://github.com/talkyai-source/Talky.ai-complete-/blob/d7b58405/Talk-Leee/src/app/industries/healthcare/page.tsx#L65).",
+      "work_packages": [
+        "CP01",
+        "OP08",
+        "OP07"
+      ],
+      "status": "planned",
+      "evidence": [],
+      "closure_disposition": null
+    },
+    {
+      "id": "G02",
+      "baseline_label": "P1/P2 \u2014 Privacy descriptions need reconciliation with the actual product.",
+      "baseline_detail": "The supplier list does not describe OpenAI/Cerebras paths supported by the candidate and still lists Supabase database hosting, whereas the inspected production stack uses self-hosted PostgreSQL. Storage supports S3-compatible and local paths; the public wording describes AWS S3. Retention wording promises permanent deletion, but the nightly cleanup worker only targets three telemetry tables and defaults to dry-run; recording lifecycle retention is delegated to bucket configuration. Real permissioned recording deletion exists, so it would be wrong to say deletion is wholly missing. The unresolved requirement is proof across recordings, transcripts, leads, backups and account termination, including policy exceptions and actual configuration. The terms' DPA link could not be verified through the browser tool. Contract existence, lawful calling policies and recording-consent requirements need the responsible owner's review; this report does not certify legal compliance. [Privacy statements](https://github.com/talkyai-source/Talky.ai-complete-/blob/d7b58405/Talk-Leee/src/app/privacy/privacy-content.ts#L190), [cleanup scope](https://github.com/talkyai-source/Talky.ai-complete-/blob/d7b58405/backend/app/workers/cleanup_worker.py#L7), [recording lifecycle configuration](https://github.com/talkyai-source/Talky.ai-complete-/blob/d7b58405/backend/app/domain/services/recording_service.py#L28).",
+      "work_packages": [
+        "OP07",
+        "OP10",
+        "CP01"
+      ],
+      "status": "planned",
+      "evidence": [],
+      "closure_disposition": null
+    }
+  ],
+  "architecture_observations": [
+    {
+      "id": "A01",
+      "baseline_observation": "The Asterisk adapter is 6,157 lines; telephony lifecycle 5,612; bridge endpoint 3,586; orchestrator 1,686; turn streamer 1,464; Realtime bridge 1,259.",
+      "client_or_maintenance_risk": "Size alone proves no defect, but important methods mix admission, provider/session setup, persistence, metrics and cleanup. A change to one failure path can disturb another.",
+      "bounded_response": "Extract the next changed responsibility behind explicit inputs/results and preserve behavior with existing tests. Do not split every large file in a cosmetic rewrite.",
+      "work_packages": [
+        "AG07"
+      ],
+      "status": "planned",
+      "evidence": [],
+      "disposition": null
+    },
+    {
+      "id": "A02",
+      "baseline_observation": "Telephony `_on_new_call` spans roughly 989 lines and `_on_call_ended` roughly 779 lines.",
+      "client_or_maintenance_risk": "Resource ownership and settlement are difficult to review across early returns, exceptions and cancellation.",
+      "bounded_response": "Make admission result, acquired resources and final settlement explicit. Assign one cleanup owner per resource and test failure between acquisitions.",
+      "work_packages": [
+        "AG07",
+        "OP05"
+      ],
+      "status": "planned",
+      "evidence": [],
+      "disposition": null
+    },
+    {
+      "id": "A03",
+      "baseline_observation": "The domain orchestrator imports concrete provider implementations/factories; voice actions and Realtime runtime reach into the service container.",
+      "client_or_maintenance_risk": "The nominal provider-independent layer still controls infrastructure wiring. Hidden dependencies complicate isolated tests and alternative runtimes.",
+      "bounded_response": "Inject existing provider/action dependencies at composition time when touching these seams. Avoid adding another dependency framework.",
+      "work_packages": [
+        "AG07"
+      ],
+      "status": "planned",
+      "evidence": [],
+      "disposition": null
+    },
+    {
+      "id": "A04",
+      "baseline_observation": "Realtime runtime imports `VoiceSession` and `VoiceSessionConfig` from the traditional orchestrator.",
+      "client_or_maintenance_risk": "Separate folders do not yet imply independent lifecycle contracts. A traditional refactor can affect Realtime unexpectedly.",
+      "bounded_response": "Move only genuinely shared session metadata/contracts into a neutral module when needed; keep engine-specific configuration and behavior separate.",
+      "work_packages": [
+        "AG07"
+      ],
+      "status": "planned",
+      "evidence": [],
+      "disposition": null
+    },
+    {
+      "id": "A05",
+      "baseline_observation": "An alternate `get_llm_response` / `generate_llm_response` route has different prompt/validation assembly from streaming. No live caller was found in the inspected search.",
+      "client_or_maintenance_risk": "This is latent duplication, not a demonstrated live guard bypass. Future reuse can reintroduce policy drift.",
+      "bounded_response": "Establish whether it is supported; remove a proven unused path or make it delegate to shared policy assembly. Do not preserve two undocumented behavior contracts.",
+      "work_packages": [
+        "AG07"
+      ],
+      "status": "planned",
+      "evidence": [],
+      "disposition": null
+    },
+    {
+      "id": "A06",
+      "baseline_observation": "`captured_slots` is typed as `Optional[Any]` and excluded from session serialization; some conversation flags are dynamically attached.",
+      "client_or_maintenance_risk": "In-process behavior may work while restart/recovery lacks an explicit contract. This does not prove durable Leads records are missing.",
+      "bounded_response": "Use typed transient state and define whether a broken call terminates or resumes. Persist durable evidence separately; do not serialize live sockets or provider objects.",
+      "work_packages": [
+        "AG03",
+        "AG05",
+        "AG07"
+      ],
+      "status": "planned",
+      "evidence": [],
+      "disposition": null
+    },
+    {
+      "id": "A07",
+      "baseline_observation": "Base prompt versions and hashes identify templates, while runtime state, knowledge and capability instructions add behavior afterward.",
+      "client_or_maintenance_risk": "A known template hash alone cannot reconstruct the full decision context or expose assembly contradictions.",
+      "bounded_response": "Record a safe effective profile/version manifest, including prompt assembly version, knowledge version and enabled capabilities. Avoid logging secret data or unnecessary caller content.",
+      "work_packages": [
+        "AG01",
+        "AG02"
+      ],
+      "status": "planned",
+      "evidence": [],
+      "disposition": null
+    },
+    {
+      "id": "A08",
+      "baseline_observation": "Architecture documentation describes stricter layer/configuration boundaries than all inspected code follows.",
+      "client_or_maintenance_risk": "New maintainers may change the wrong source of truth or assume an unavailable guarantee.",
+      "bounded_response": "Update the existing diagram and configuration precedence alongside the next repair, using the actual runtime path.",
+      "work_packages": [
+        "AG07",
+        "OP12"
+      ],
+      "status": "planned",
+      "evidence": [],
+      "disposition": null
+    }
+  ],
+  "features": [
+    {
+      "id": "F01",
+      "area": "Discovery",
+      "feature": "Performance, scale and customer-outcome claims",
+      "maturity": null,
+      "status": "unsubstantiated",
+      "client_risk": "Homepage response-time, concurrency and completion figures have no reviewed measurement provenance; they must not be treated as purchased guarantees.",
+      "priority": "P1",
+      "recommended_owner": "Product marketing lead",
+      "next_acceptance": "Provide dated definitions, sample, deployment configuration and approved evidence for each numeric claim, or remove the claim.",
+      "evidence": [
+        "Talk-Leee/src/components/home/home-lazy-sections.tsx:312",
+        "Talk-Leee/src/components/home/stats-section.tsx:8"
+      ],
+      "baseline_maturity": null,
+      "work_packages": [
+        "CP01",
+        "OP08"
+      ],
+      "execution_status": "in_progress",
+      "actual_owner": null,
+      "evidence_of_completion": [
+        {
+          "path": "docs/sessions/2026-10-04-cp01-implementation.md",
+          "scope": "CP01 portion only; not feature closure"
+        }
+      ],
+      "closure_disposition": null,
+      "contained": false,
+      "pilot_or_release_evidence": null,
+      "baseline_next_acceptance": "Provide dated definitions, sample, deployment configuration and approved evidence for each numeric claim, or remove the claim."
+    },
+    {
+      "id": "F02",
+      "area": "Discovery",
+      "feature": "Contact and sales enquiry submission",
+      "maturity": 1,
+      "status": "partial_demo",
+      "client_risk": "The public form clears input and reports success after a timer without sending or saving the enquiry.",
+      "priority": "P1",
+      "recommended_owner": "Frontend and customer operations lead",
+      "next_acceptance": "A designated intake system receives one enquiry; failure preserves the draft and never reports sent; retry does not duplicate.",
+      "evidence": [
+        "Talk-Leee/src/components/home/contact-section.tsx:39",
+        "Talk-Leee/src/app/contact/page.tsx:15"
+      ],
+      "baseline_maturity": 1,
+      "work_packages": [
+        "CP01"
+      ],
+      "execution_status": "in_progress",
+      "actual_owner": null,
+      "evidence_of_completion": [
+        {
+          "path": "docs/sessions/2026-10-04-cp01-implementation.md",
+          "scope": "CP01 portion only; not feature closure"
+        }
+      ],
+      "closure_disposition": null,
+      "contained": false,
+      "pilot_or_release_evidence": null,
+      "baseline_next_acceptance": "A designated intake system receives one enquiry; failure preserves the draft and never reports sent; retry does not duplicate."
+    },
+    {
+      "id": "F03",
+      "area": "Identity",
+      "feature": "Verified signup and duplicate-email handling",
+      "maturity": 2,
+      "status": "engineered_with_gaps",
+      "client_risk": "The main code-verification flow is implemented, but the still-mounted legacy register endpoint inserts an unsupported owner role.",
+      "priority": "P2",
+      "recommended_owner": "Identity engineering lead",
+      "next_acceptance": "Exercise every published signup path against migrated schema: verified inbox before session, canonical role and tenant membership, duplicate race rollback.",
+      "evidence": [
+        "backend/app/api/v1/endpoints/auth/signup.py:293",
+        "backend/app/api/v1/endpoints/auth/registration.py:125"
+      ],
+      "baseline_maturity": 2,
+      "work_packages": [
+        "CP08"
+      ],
+      "execution_status": "planned",
+      "actual_owner": null,
+      "evidence_of_completion": [],
+      "closure_disposition": null,
+      "contained": false,
+      "pilot_or_release_evidence": null,
+      "baseline_next_acceptance": "Exercise every published signup path against migrated schema: verified inbox before session, canonical role and tenant membership, duplicate race rollback."
+    },
+    {
+      "id": "F04",
+      "area": "Identity",
+      "feature": "Login, password recovery, MFA, passkeys and sessions",
+      "maturity": 2,
+      "status": "engineered_tested",
+      "client_risk": "Security/session code and tests exist; real mailbox recovery and complete cross-device failure journeys were not established in this audit.",
+      "priority": "P2",
+      "recommended_owner": "Identity engineering lead",
+      "next_acceptance": "Demonstrate designated-account reset, MFA/passkey recovery, refresh, logout and revocation without stale access or misleading success.",
+      "evidence": [
+        "backend/app/api/v1/endpoints/auth/password_reset.py:216",
+        "backend/tests/security/test_passkeys.py:1"
+      ],
+      "baseline_maturity": 2,
+      "work_packages": [
+        "CP08"
+      ],
+      "execution_status": "planned",
+      "actual_owner": null,
+      "evidence_of_completion": [],
+      "closure_disposition": null,
+      "contained": false,
+      "pilot_or_release_evidence": null,
+      "baseline_next_acceptance": "Demonstrate designated-account reset, MFA/passkey recovery, refresh, logout and revocation without stale access or misleading success."
+    },
+    {
+      "id": "F05",
+      "area": "Identity",
+      "feature": "Tenant roles, membership and staff onboarding",
+      "maturity": 2,
+      "status": "engineered_with_gaps",
+      "client_risk": "Backend role ceilings and tenant membership are implemented; a complete email invitation and acceptance journey remains unverified.",
+      "priority": "P2",
+      "recommended_owner": "Identity and product experience lead",
+      "next_acceptance": "An owner completes the existing advertised staff invitation and acceptance journey into the correct tenant; role ceilings and removal work across sessions. If that contract is absent, F05 stays blocked pending explicit user disposition; assisted setup alone does not close it.",
+      "evidence": [
+        "backend/app/api/v1/endpoints/rbac/tenant_users.py:105",
+        "backend/app/api/v1/endpoints/auth/signup.py:350"
+      ],
+      "baseline_maturity": 2,
+      "work_packages": [
+        "CP08",
+        "CP05"
+      ],
+      "execution_status": "planned",
+      "actual_owner": null,
+      "evidence_of_completion": [],
+      "closure_disposition": null,
+      "contained": false,
+      "pilot_or_release_evidence": null,
+      "baseline_next_acceptance": "An owner invites staff, staff accepts into the correct tenant, limited roles cannot escalate, and removal revokes access across sessions."
+    },
+    {
+      "id": "F06",
+      "area": "Onboarding",
+      "feature": "New-tenant setup and first authorized call",
+      "maturity": 2,
+      "status": "engineered_with_gaps",
+      "client_risk": "Setup spans several screens; a seeded plan/trunk is not proof of active entitlement, verified caller ID, healthy route or configured knowledge.",
+      "priority": "P1",
+      "recommended_owner": "Customer onboarding lead",
+      "next_acceptance": "A new nontechnical buyer completes documented setup and one owned-number test call without undocumented database edits; each missing prerequisite has a useful reason.",
+      "evidence": [
+        "backend/app/api/v1/endpoints/auth/signup.py:306",
+        "backend/app/domain/services/telephony/outbound_readiness.py:22"
+      ],
+      "baseline_maturity": 2,
+      "work_packages": [
+        "CP08",
+        "CP09",
+        "OP04",
+        "AG01"
+      ],
+      "execution_status": "planned",
+      "actual_owner": null,
+      "evidence_of_completion": [],
+      "closure_disposition": null,
+      "contained": false,
+      "pilot_or_release_evidence": null,
+      "baseline_next_acceptance": "A new nontechnical buyer completes documented setup and one owned-number test call without undocumented database edits; each missing prerequisite has a useful reason."
+    },
+    {
+      "id": "F07",
+      "area": "Billing",
+      "feature": "Monthly subscription checkout and activation",
+      "maturity": 2,
+      "status": "engineered_with_gaps",
+      "client_risk": "Real Stripe integration exists, but effective live configuration and the paid buyer lifecycle were not verified; event recovery defects are tracked separately.",
+      "priority": "P1",
+      "recommended_owner": "Billing engineering lead",
+      "next_acceptance": "Complete an authorized designated-account purchase with matching amount/currency, signed webhook, entitlement, receipt and renewal state; prove the server is not in mock mode.",
+      "evidence": [
+        "backend/app/domain/services/billing_service.py:130",
+        "backend/app/core/prod_gate.py:386"
+      ],
+      "baseline_maturity": 2,
+      "work_packages": [
+        "CP02",
+        "CP03",
+        "CP06"
+      ],
+      "execution_status": "planned",
+      "actual_owner": null,
+      "evidence_of_completion": [],
+      "closure_disposition": null,
+      "contained": false,
+      "pilot_or_release_evidence": null,
+      "baseline_next_acceptance": "Complete an authorized designated-account purchase with matching amount/currency, signed webhook, entitlement, receipt and renewal state; prove the server is not in mock mode."
+    },
+    {
+      "id": "F08",
+      "area": "Billing",
+      "feature": "Annual plan selection",
+      "maturity": 1,
+      "status": "partial_demo",
+      "client_risk": "The yearly discount changes displayed price only; checkout still sends the same plan ID and uses its single Stripe price.",
+      "priority": "P1",
+      "recommended_owner": "Billing product lead",
+      "next_acceptance": "Monthly and yearly choices select distinct server-validated recurring prices whose amount, currency and interval match all customer screens.",
+      "evidence": [
+        "Talk-Leee/src/app/billing/plans/page.tsx:55",
+        "Talk-Leee/src/app/billing/plans/page.tsx:145",
+        "backend/app/domain/services/billing_service.py:147"
+      ],
+      "baseline_maturity": 1,
+      "work_packages": [
+        "CP02"
+      ],
+      "execution_status": "planned",
+      "actual_owner": null,
+      "evidence_of_completion": [],
+      "closure_disposition": null,
+      "contained": false,
+      "pilot_or_release_evidence": null,
+      "baseline_next_acceptance": "Monthly and yearly choices select distinct server-validated recurring prices whose amount, currency and interval match all customer screens."
+    },
+    {
+      "id": "F09",
+      "area": "Billing",
+      "feature": "Minute top-ups and refund accounting",
+      "maturity": 2,
+      "status": "engineered_with_gaps",
+      "client_risk": "Top-up/refund ledger fences exist, but real charge/refund reconciliation and a customer refund-request journey are not demonstrated.",
+      "priority": "P1",
+      "recommended_owner": "Billing engineering and finance operations lead",
+      "next_acceptance": "One designated purchase credits once; duplicate and partial/full refund events reconcile once to provider and ledger; the customer can obtain the documented support outcome.",
+      "evidence": [
+        "backend/app/domain/services/topup_service.py:163",
+        "backend/app/domain/services/topup_service.py:296",
+        "backend/app/api/v1/endpoints/billing_topups.py:287"
+      ],
+      "baseline_maturity": 2,
+      "work_packages": [
+        "CP03",
+        "CP04",
+        "CP06"
+      ],
+      "execution_status": "planned",
+      "actual_owner": null,
+      "evidence_of_completion": [],
+      "closure_disposition": null,
+      "contained": false,
+      "pilot_or_release_evidence": null,
+      "baseline_next_acceptance": "One designated purchase credits once; duplicate and partial/full refund events reconcile once to provider and ledger; the customer can obtain the documented support outcome."
+    },
+    {
+      "id": "F10",
+      "area": "Billing",
+      "feature": "Subscription and invoice webhook recovery",
+      "maturity": 1,
+      "status": "confirmed_defect",
+      "client_risk": "A failed ordinary business handler leaves its event claimed; redelivery is ignored as duplicate. Dedup-storage failure also permits unclaimed processing, without proving duplicate charges.",
+      "priority": "P1",
+      "recommended_owner": "Billing engineering lead",
+      "next_acceptance": "Inject failure at each handler boundary; retries complete exactly once and only completed processing is acknowledged as duplicate, preserving downstream credit/upsert fences.",
+      "evidence": [
+        "backend/app/domain/services/billing_service.py:465",
+        "backend/app/domain/services/billing_service.py:480",
+        "backend/app/domain/services/billing_service.py:500"
+      ],
+      "baseline_maturity": 1,
+      "work_packages": [
+        "CP03"
+      ],
+      "execution_status": "planned",
+      "actual_owner": null,
+      "evidence_of_completion": [],
+      "closure_disposition": null,
+      "contained": false,
+      "pilot_or_release_evidence": null,
+      "baseline_next_acceptance": "Inject failure at each handler boundary; retries complete exactly once and only completed processing is acknowledged as duplicate, preserving downstream credit/upsert fences."
+    },
+    {
+      "id": "F11",
+      "area": "Billing",
+      "feature": "Invoice detail, adjustments and price transparency",
+      "maturity": 1,
+      "status": "confirmed_defect",
+      "client_risk": "Invoice detail substitutes plan minutes for actual use and zero for unrecorded tax/overage/credits; missing overage rate becomes an assumed price.",
+      "priority": "P1",
+      "recommended_owner": "Billing engineering and finance operations lead",
+      "next_acceptance": "Provider invoice lines, tax, discounts, usage and credits match displayed historical detail; missing facts show unavailable and later plan edits do not rewrite history.",
+      "evidence": [
+        "backend/app/api/v1/endpoints/billing.py:542",
+        "backend/app/api/v1/endpoints/billing.py:610",
+        "backend/app/api/v1/endpoints/billing.py:623"
+      ],
+      "baseline_maturity": 1,
+      "work_packages": [
+        "CP04"
+      ],
+      "execution_status": "planned",
+      "actual_owner": null,
+      "evidence_of_completion": [],
+      "closure_disposition": null,
+      "contained": false,
+      "pilot_or_release_evidence": null,
+      "baseline_next_acceptance": "Provider invoice lines, tax, discounts, usage and credits match displayed historical detail; missing facts show unavailable and later plan edits do not rewrite history."
+    },
+    {
+      "id": "F12",
+      "area": "Billing",
+      "feature": "Customer cancellation and billing portal",
+      "maturity": 1,
+      "status": "partial_journey",
+      "client_risk": "Period-end cancellation and portal APIs exist, but no frontend consumer was located despite terms promising account-settings cancellation; manual email remains a stated alternative.",
+      "priority": "P1",
+      "recommended_owner": "Billing product experience lead",
+      "next_acceptance": "An authorized owner can request cancellation, see the confirmed end date after reload, retain purchased access and avoid renewal; ambiguous provider outcomes never claim success.",
+      "evidence": [
+        "backend/app/api/v1/endpoints/billing.py:267",
+        "backend/app/api/v1/endpoints/billing.py:314",
+        "Talk-Leee/src/app/terms/terms-content.ts:351"
+      ],
+      "baseline_maturity": 1,
+      "work_packages": [
+        "CP06"
+      ],
+      "execution_status": "planned",
+      "actual_owner": null,
+      "evidence_of_completion": [],
+      "closure_disposition": null,
+      "contained": false,
+      "pilot_or_release_evidence": null,
+      "baseline_next_acceptance": "An authorized owner can request cancellation, see the confirmed end date after reload, retain purchased access and avoid renewal; ambiguous provider outcomes never claim success."
+    },
+    {
+      "id": "F13",
+      "area": "Agent configuration",
+      "feature": "AI Options, saved settings and campaign selection",
+      "maturity": 2,
+      "status": "engineered_tested",
+      "client_risk": "Provider/model controls and persistence are implemented; matching frontend/backend and effective per-campaign configuration still need released acceptance.",
+      "priority": "P2",
+      "recommended_owner": "Voice product experience lead",
+      "next_acceptance": "Save each supported configuration, reload, assign it to a campaign and verify the effective runtime model/voice/prompt without silently changing defaults.",
+      "evidence": [
+        "Talk-Leee/src/app/ai-options/page.tsx:442",
+        "Talk-Leee/src/lib/ai-options-api.ts:79"
+      ],
+      "baseline_maturity": 2,
+      "work_packages": [
+        "AG01"
+      ],
+      "execution_status": "planned",
+      "actual_owner": null,
+      "evidence_of_completion": [],
+      "closure_disposition": null,
+      "contained": false,
+      "pilot_or_release_evidence": null,
+      "baseline_next_acceptance": "Save each supported configuration, reload, assign it to a campaign and verify the effective runtime model/voice/prompt without silently changing defaults."
+    },
+    {
+      "id": "F14",
+      "area": "Agent configuration",
+      "feature": "Traditional model adapters and tool continuation",
+      "maturity": 2,
+      "status": "engineered_tested",
+      "client_risk": "Four traditional providers have real adapters and synthetic proof, but supported tools/settings do not guarantee equivalent semantic quality or account limits.",
+      "priority": "P2",
+      "recommended_owner": "LLM platform lead",
+      "next_acceptance": "For each offered model, verify streaming, nullable tool inputs, continuation, provider error/EOF behavior and no side-effect replay using the actual supported configuration. Record effective temperature, reasoning and output budgets for the chosen model; do not infer semantic correctness from low temperature.",
+      "evidence": [
+        "backend/app/infrastructure/llm/streaming.py:1",
+        "backend/app/infrastructure/llm/openai.py:1",
+        "backend/app/infrastructure/llm/groq.py:1",
+        "backend/app/domain/models/ai_config.py:226",
+        "backend/app/infrastructure/llm/groq.py:505"
+      ],
+      "baseline_maturity": 2,
+      "work_packages": [
+        "AG01",
+        "AG04"
+      ],
+      "execution_status": "planned",
+      "actual_owner": null,
+      "evidence_of_completion": [],
+      "closure_disposition": null,
+      "contained": false,
+      "pilot_or_release_evidence": null,
+      "baseline_next_acceptance": "For each offered model, verify streaming, nullable tool inputs, continuation, provider error/EOF behavior and no side-effect replay using the actual supported configuration. Record effective temperature, reasoning and output budgets for the chosen model; do not infer semantic correctness from low temperature."
+    },
+    {
+      "id": "F15",
+      "area": "Agent configuration",
+      "feature": "Native Realtime configuration and lifecycle",
+      "maturity": 2,
+      "status": "engineered_with_confirmed_gap",
+      "client_risk": "Realtime has separate settings and actual OpenAI provider smoke evidence with simulated playback; xAI live acceptance remains unverified. The customer-relationship guard loses an explicit correction when its 12-message buffer rolls over. This proves lost guard coverage, not inevitable model failure.",
+      "priority": "P1",
+      "recommended_owner": "Realtime engineering lead",
+      "next_acceptance": "Preserve explicit relationship corrections beyond the contact buffer until a genuine caller reversal; prove both cases, then validate persona, knowledge/actions, interruption and closure on an owned call without effect replay. Verify the provider-specific effective VAD, noise, speed and token settings; legacy temperature must not leak into the native payload.",
+      "evidence": [
+        "backend/app/realtime/config.py:1",
+        "backend/app/realtime/bridge.py:436",
+        "backend/app/realtime/bridge.py:675",
+        "docs/sessions/2026-10-01-realtime-provider-smoke.json:5",
+        "docs/sessions/2026-10-01-agent-validation-30faff48.json:185",
+        "backend/app/realtime/config.py:45"
+      ],
+      "baseline_maturity": 2,
+      "work_packages": [
+        "AG01",
+        "AG03",
+        "AG04",
+        "OP03"
+      ],
+      "execution_status": "planned",
+      "actual_owner": null,
+      "evidence_of_completion": [],
+      "closure_disposition": null,
+      "contained": false,
+      "pilot_or_release_evidence": null,
+      "baseline_next_acceptance": "Preserve explicit relationship corrections beyond the contact buffer until a genuine caller reversal; prove both cases, then validate persona, knowledge/actions, interruption and closure on an owned call without effect replay. Verify the provider-specific effective VAD, noise, speed and token settings; legacy temperature must not leak into the native payload."
+    },
+    {
+      "id": "F16",
+      "area": "Knowledge",
+      "feature": "Campaign document ingestion and grounded retrieval",
+      "maturity": 2,
+      "status": "engineered_with_confirmed_gap",
+      "client_risk": "Scoped retrieval and source/price guards are implemented, but traditional no/weak-answer instructions promise to check or confirm even when no follow-up route exists. Output occurrence is unproven here; document coverage and qualitative accuracy remain unmeasured.",
+      "priority": "P1",
+      "recommended_owner": "Knowledge engineering lead",
+      "next_acceptance": "Remove unsupported follow-up promises while retaining available-action confirmation; test no/weak evidence with and without a real route, then measure source, caveat and price accuracy against representative approved documents.",
+      "evidence": [
+        "backend/app/services/scripts/knowledge/ingest_service.py:1",
+        "backend/app/services/scripts/knowledge/retrieval.py:1",
+        "backend/app/services/scripts/knowledge/passages.py:1",
+        "backend/app/domain/services/voice_pipeline/turn_streamer.py:193"
+      ],
+      "baseline_maturity": 2,
+      "work_packages": [
+        "AG02",
+        "AG04"
+      ],
+      "execution_status": "planned",
+      "actual_owner": null,
+      "evidence_of_completion": [],
+      "closure_disposition": null,
+      "contained": false,
+      "pilot_or_release_evidence": null,
+      "baseline_next_acceptance": "Remove unsupported follow-up promises while retaining available-action confirmation; test no/weak evidence with and without a real route, then measure source, caveat and price accuracy against representative approved documents."
+    },
+    {
+      "id": "F17",
+      "area": "Voice",
+      "feature": "STT adapters and bounded recognition recovery",
+      "maturity": 2,
+      "status": "engineered_tested",
+      "client_risk": "Actual PCM fixtures and failure tests support adapter operation, not accent/noise/telephone recognition accuracy; fallback may share the same vendor/account.",
+      "priority": "P2",
+      "recommended_owner": "Speech engineering lead",
+      "next_acceptance": "Use representative owned telephone audio to measure content and exact-contact recognition separately; prove EOF, silence, overflow and recovery do not falsely confirm data.",
+      "evidence": [
+        "backend/app/domain/services/resilient_stt.py:25",
+        "docs/sessions/artifacts/2026-10-01-audio-provider-eval.json:2"
+      ],
+      "baseline_maturity": 2,
+      "work_packages": [
+        "OP03",
+        "OP02",
+        "OP08"
+      ],
+      "execution_status": "planned",
+      "actual_owner": null,
+      "evidence_of_completion": [],
+      "closure_disposition": null,
+      "contained": false,
+      "pilot_or_release_evidence": null,
+      "baseline_next_acceptance": "Use representative owned telephone audio to measure content and exact-contact recognition separately; prove EOF, silence, overflow and recovery do not falsely confirm data."
+    },
+    {
+      "id": "F18",
+      "area": "Voice",
+      "feature": "TTS adapters, fallback and transport receipts",
+      "maturity": 2,
+      "status": "engineered_tested",
+      "client_risk": "Provider audio, bounded startup and partial-output safety are implemented; actual selected voice quality/fallback over PSTN is not established, and transmission is not hearing.",
+      "priority": "P2",
+      "recommended_owner": "Speech and media engineering lead",
+      "next_acceptance": "Test selected primary/mapped fallback voices before and after partial audio; no duplicated speech, fabricated completion or leaked media resources.",
+      "evidence": [
+        "backend/app/domain/services/resilient_tts.py:70",
+        "backend/app/domain/services/voice_pipeline/tts_playback.py:469"
+      ],
+      "baseline_maturity": 2,
+      "work_packages": [
+        "OP03",
+        "OP08"
+      ],
+      "execution_status": "planned",
+      "actual_owner": null,
+      "evidence_of_completion": [],
+      "closure_disposition": null,
+      "contained": false,
+      "pilot_or_release_evidence": null,
+      "baseline_next_acceptance": "Test selected primary/mapped fallback voices before and after partial audio; no duplicated speech, fabricated completion or leaked media resources."
+    },
+    {
+      "id": "F19",
+      "area": "Voice",
+      "feature": "Turn-taking, interruption, contact readback and closure",
+      "maturity": 2,
+      "status": "engineered_tested",
+      "client_risk": "Caller-scoped closure and confidence/readback boundaries have regression tests; echo, jitter, speakerphone and real caller interruption behavior remain unmeasured for this release.",
+      "priority": "P1",
+      "recommended_owner": "Conversation engineering lead",
+      "next_acceptance": "Real calls cover correction, topic refusal, quoted goodbye, explicit opt-out and interruption; no premature hangup or falsely confirmed email/phone, with complete resource cleanup.",
+      "evidence": [
+        "backend/app/domain/services/end_session_action.py:128",
+        "backend/app/domain/services/voice_pipeline/contact_capture.py:849",
+        "backend/tests/unit/test_call_experience_end_scope.py:1"
+      ],
+      "baseline_maturity": 2,
+      "work_packages": [
+        "AG04",
+        "AG05",
+        "OP03",
+        "OP08"
+      ],
+      "execution_status": "planned",
+      "actual_owner": null,
+      "evidence_of_completion": [],
+      "closure_disposition": null,
+      "contained": false,
+      "pilot_or_release_evidence": null,
+      "baseline_next_acceptance": "Real calls cover correction, topic refusal, quoted goodbye, explicit opt-out and interruption; no premature hangup or falsely confirmed email/phone, with complete resource cleanup."
+    },
+    {
+      "id": "F20",
+      "area": "Voice quality",
+      "feature": "End-to-end audio quality and semantic comprehension",
+      "maturity": null,
+      "status": "unverified",
+      "client_risk": "Synthetic Groq output misremembers the prior question despite correct wire history; no release-bound caller-heard latency, accent/noise corpus or representative business-success rate is established.",
+      "priority": "P1",
+      "recommended_owner": "Conversation quality lead",
+      "next_acceptance": "Agree a representative owned-call corpus and targets, then measure caller-heard latency, comprehension, unsupported claims, correction burden and exact-contact accuracy with all failures reported.",
+      "evidence": [
+        "docs/sessions/artifacts/2026-10-02-call-experience-model-probe.json:1941",
+        "backend/app/domain/services/voice_pipeline/tts_playback.py:469"
+      ],
+      "baseline_maturity": null,
+      "work_packages": [
+        "AG04",
+        "OP08"
+      ],
+      "execution_status": "planned",
+      "actual_owner": null,
+      "evidence_of_completion": [],
+      "closure_disposition": null,
+      "contained": false,
+      "pilot_or_release_evidence": null,
+      "baseline_next_acceptance": "Agree a representative owned-call corpus and targets, then measure caller-heard latency, comprehension, unsupported claims, correction burden and exact-contact accuracy with all failures reported."
+    },
+    {
+      "id": "F21",
+      "area": "Calling",
+      "feature": "Outbound campaigns, scheduling and launch controls",
+      "maturity": 2,
+      "status": "engineered_tested",
+      "client_risk": "Durable queue and shared route preflight exist; current-candidate carrier launch/pause/stop under real concurrency is not pilot-validated.",
+      "priority": "P1",
+      "recommended_owner": "Telephony application lead",
+      "next_acceptance": "Start, pause, stop and resume an owned campaign under normal and failed carrier/queue conditions; preserve jobs, suppression and truthful pending status.",
+      "evidence": [
+        "backend/app/domain/services/campaign_service.py:246",
+        "Talk-Leee/src/components/campaigns/campaign-readiness.tsx:18"
+      ],
+      "baseline_maturity": 2,
+      "work_packages": [
+        "OP05",
+        "OP01",
+        "OP02",
+        "OP04"
+      ],
+      "execution_status": "planned",
+      "actual_owner": null,
+      "evidence_of_completion": [],
+      "closure_disposition": null,
+      "contained": false,
+      "pilot_or_release_evidence": null,
+      "baseline_next_acceptance": "Start, pause, stop and resume an owned campaign under normal and failed carrier/queue conditions; preserve jobs, suppression and truthful pending status."
+    },
+    {
+      "id": "F22",
+      "area": "Calling",
+      "feature": "Inbound DID/extension routing and admission",
+      "maturity": 2,
+      "status": "engineered_tested",
+      "client_risk": "Tenant/direction routing and durable admission are engineered; actual current-release carrier routing, consent and settlement need acceptance.",
+      "priority": "P1",
+      "recommended_owner": "Inbound telephony lead",
+      "next_acceptance": "Each assigned owned DID/extension reaches only its intended tenant/campaign; unassigned or unauthorized ingress is rejected and holds/usage settle once.",
+      "evidence": [
+        "backend/app/domain/services/telephony/inbound_admission.py:1048",
+        "backend/tests/unit/test_inbound_admission.py:1"
+      ],
+      "baseline_maturity": 2,
+      "work_packages": [
+        "OP05",
+        "OP04",
+        "OP07"
+      ],
+      "execution_status": "planned",
+      "actual_owner": null,
+      "evidence_of_completion": [],
+      "closure_disposition": null,
+      "contained": false,
+      "pilot_or_release_evidence": null,
+      "baseline_next_acceptance": "Each assigned owned DID/extension reaches only its intended tenant/campaign; unassigned or unauthorized ingress is rejected and holds/usage settle once."
+    },
+    {
+      "id": "F23",
+      "area": "Calling",
+      "feature": "Controlled inbound human transfer",
+      "maturity": 2,
+      "status": "unavailable",
+      "client_risk": "Implementation and tests exist, but production transfer is deliberately disabled; buyers requiring receptionist-to-human handoff cannot rely on it.",
+      "priority": "P1",
+      "recommended_owner": "Inbound telephony lead",
+      "next_acceptance": "Complete the existing allowlisted two-leg carrier, audio, teardown, restart and settlement gates, with authorized runtime availability verified. Disabled or excluded transfer remains contained_not_complete and cannot close F23.",
+      "evidence": [
+        "backend/app/domain/services/telephony/inbound_transfer.py:25",
+        "Talk-Leee/src/components/inbound/inbound-campaign-form.tsx:421"
+      ],
+      "baseline_maturity": 2,
+      "work_packages": [
+        "OP06"
+      ],
+      "execution_status": "planned",
+      "actual_owner": null,
+      "evidence_of_completion": [],
+      "closure_disposition": null,
+      "contained": false,
+      "pilot_or_release_evidence": null,
+      "baseline_next_acceptance": "Complete the existing allowlisted two-leg carrier, teardown, restart and settlement gates before enabling production; otherwise exclude transfer from the purchased scope."
+    },
+    {
+      "id": "F24",
+      "area": "Telephony configuration",
+      "feature": "SIP credentials, IP authentication, health and deletion",
+      "maturity": 2,
+      "status": "engineered_tested",
+      "client_risk": "Readiness is independent of enabled state and preserves real response codes; the candidate 10-second timer is not deployed and OPTIONS health is not successful PSTN audio.",
+      "priority": "P1",
+      "recommended_owner": "Telephony operations lead",
+      "next_acceptance": "Deploy generated configuration and timer, verify hand-managed AoRs, test register/IP-auth directions and unused-trunk deletion; stale/down evidence blocks outbound launch.",
+      "evidence": [
+        "backend/app/domain/services/telephony/trunk_runtime.py:17",
+        "backend/systemd/talky-trunk-status.timer:6",
+        "backend/app/infrastructure/telephony/pjsip_config_generator.py:231"
+      ],
+      "baseline_maturity": 2,
+      "work_packages": [
+        "OP04"
+      ],
+      "execution_status": "planned",
+      "actual_owner": null,
+      "evidence_of_completion": [],
+      "closure_disposition": null,
+      "contained": false,
+      "pilot_or_release_evidence": null,
+      "baseline_next_acceptance": "Deploy generated configuration and timer, verify hand-managed AoRs, test register/IP-auth directions and unused-trunk deletion; stale/down evidence blocks outbound launch."
+    },
+    {
+      "id": "F25",
+      "area": "Telephony configuration",
+      "feature": "Caller ID, route ownership and carrier attestation",
+      "maturity": 2,
+      "status": "engineered_tested",
+      "client_risk": "Current selected route and tenant ownership replace unrelated defaults; static STIR token removal is not proof of carrier attestation or authority to use any number.",
+      "priority": "P1",
+      "recommended_owner": "Telephony and trust operations lead",
+      "next_acceptance": "Verify owned caller-ID presentation on actual destinations and carrier signing responsibilities, including Canada; correct legacy allocations without cross-tenant fallback.",
+      "evidence": [
+        "backend/app/domain/services/telephony/caller_id_guard.py:9",
+        "backend/app/domain/services/telephony/trunk_resolver.py:390"
+      ],
+      "baseline_maturity": 2,
+      "work_packages": [
+        "OP04"
+      ],
+      "execution_status": "planned",
+      "actual_owner": null,
+      "evidence_of_completion": [],
+      "closure_disposition": null,
+      "contained": false,
+      "pilot_or_release_evidence": null,
+      "baseline_next_acceptance": "Verify owned caller-ID presentation on actual destinations and carrier signing responsibilities, including Canada; correct legacy allocations without cross-tenant fallback."
+    },
+    {
+      "id": "F26",
+      "area": "Consent",
+      "feature": "DNC, caller opt-out and recording consent",
+      "maturity": 2,
+      "status": "engineered_tested",
+      "client_risk": "Suppression and consent mechanisms exist; jurisdictional policy correctness and actual carrier/recording enforcement are not a blanket compliance certification.",
+      "priority": "P1",
+      "recommended_owner": "Trust and telephony lead",
+      "next_acceptance": "Actual opt-out persists and prevents future admission; topic refusal does not become DNC; recording behavior follows configured disclosure/consent before retaining audio.",
+      "evidence": [
+        "backend/app/domain/services/dnc_service.py:1",
+        "backend/app/domain/services/recording_policy_service.py:97"
+      ],
+      "baseline_maturity": 2,
+      "work_packages": [
+        "OP07",
+        "OP05"
+      ],
+      "execution_status": "planned",
+      "actual_owner": null,
+      "evidence_of_completion": [],
+      "closure_disposition": null,
+      "contained": false,
+      "pilot_or_release_evidence": null,
+      "baseline_next_acceptance": "Actual opt-out persists and prevents future admission; topic refusal does not become DNC; recording behavior follows configured disclosure/consent before retaining audio."
+    },
+    {
+      "id": "F27",
+      "area": "Calling",
+      "feature": "Explicit Dial again and uncertain queue recovery",
+      "maturity": 2,
+      "status": "engineered_tested",
+      "client_risk": "Stable job identity and real PostgreSQL concurrency tests exist, but a queue receipt is not a connected call and fresh live redial acceptance has not occurred.",
+      "priority": "P2",
+      "recommended_owner": "Calling application lead",
+      "next_acceptance": "One authorized explicit reattempt produces one job/call, preserving destination and guards; lost queue acknowledgement retries the same request, never a new identity.",
+      "evidence": [
+        "backend/app/domain/services/call_redial_service.py:123",
+        "backend/tests/integration/test_call_redial.py:1"
+      ],
+      "baseline_maturity": 2,
+      "work_packages": [
+        "OP05"
+      ],
+      "execution_status": "planned",
+      "actual_owner": null,
+      "evidence_of_completion": [],
+      "closure_disposition": null,
+      "contained": false,
+      "pilot_or_release_evidence": null,
+      "baseline_next_acceptance": "One authorized explicit reattempt produces one job/call, preserving destination and guards; lost queue acknowledgement retries the same request, never a new identity."
+    },
+    {
+      "id": "F28",
+      "area": "Customer data",
+      "feature": "Contact import, manual editing and normalization",
+      "maturity": 2,
+      "status": "engineered_tested",
+      "client_risk": "Real import and editing are implemented; representative dirty CSVs, duplicates, country formats and customer recovery effort need buyer acceptance.",
+      "priority": "P2",
+      "recommended_owner": "Customer data product lead",
+      "next_acceptance": "Import a representative mapped CSV, review rejected/duplicate rows, correct a contact and verify unchanged tenant/campaign ownership and intended E.164 destination.",
+      "evidence": [
+        "backend/app/api/v1/endpoints/contacts.py:202",
+        "Talk-Leee/src/app/contacts/page.tsx:514"
+      ],
+      "baseline_maturity": 2,
+      "work_packages": [
+        "CP09"
+      ],
+      "execution_status": "planned",
+      "actual_owner": null,
+      "evidence_of_completion": [],
+      "closure_disposition": null,
+      "contained": false,
+      "pilot_or_release_evidence": null,
+      "baseline_next_acceptance": "Import a representative mapped CSV, review rejected/duplicate rows, correct a contact and verify unchanged tenant/campaign ownership and intended E.164 destination."
+    },
+    {
+      "id": "F29",
+      "area": "Customer data",
+      "feature": "Lead evidence, corrections and Sales Hub projection",
+      "maturity": 2,
+      "status": "engineered_tested",
+      "client_risk": "Revision-safe contact evidence and CRM states are implemented. Additional business details are reviewable caller quotes marked needs_review, not verified scalar facts; automatic qualification and correction workload remain unmeasured.",
+      "priority": "P1",
+      "recommended_owner": "Lead workflow product lead",
+      "next_acceptance": "A real authorized call produces sourced fields, separates confirmed/unconfirmed values, preserves later manual corrections and shows each destination receipt independently.",
+      "evidence": [
+        "backend/app/domain/services/lead_capture_service.py:165",
+        "backend/app/domain/services/call_summary/business_details.py:38",
+        "Talk-Leee/src/components/calls/lead-details-panel.tsx:150"
+      ],
+      "baseline_maturity": 2,
+      "work_packages": [
+        "AG05",
+        "AG04"
+      ],
+      "execution_status": "planned",
+      "actual_owner": null,
+      "evidence_of_completion": [],
+      "closure_disposition": null,
+      "contained": false,
+      "pilot_or_release_evidence": null,
+      "baseline_next_acceptance": "A real authorized call produces sourced fields, separates confirmed/unconfirmed values, preserves later manual corrections and shows each destination receipt independently."
+    },
+    {
+      "id": "F30",
+      "area": "Automation",
+      "feature": "Assistant tools, reviewed actions and durable execution",
+      "maturity": 2,
+      "status": "engineered_tested",
+      "client_risk": "Permissions, frozen reviewed arguments and unknown-outcome fences are engineered; tool availability is not proof every desired business workflow is supported.",
+      "priority": "P1",
+      "recommended_owner": "Assistant action engineering lead",
+      "next_acceptance": "For each sold action, demonstrate authorized preview/confirmation, exact recipient/payload, durable receipt and safe unknown/retry/restart behavior without model-created approval.",
+      "evidence": [
+        "backend/app/services/action_execution.py:32",
+        "backend/app/domain/services/voice_pipeline/action_confirmation.py:1"
+      ],
+      "baseline_maturity": 2,
+      "work_packages": [
+        "AG06"
+      ],
+      "execution_status": "planned",
+      "actual_owner": null,
+      "evidence_of_completion": [],
+      "closure_disposition": null,
+      "contained": false,
+      "pilot_or_release_evidence": null,
+      "baseline_next_acceptance": "For each sold action, demonstrate authorized preview/confirmation, exact recipient/payload, durable receipt and safe unknown/retry/restart behavior without model-created approval."
+    },
+    {
+      "id": "F31",
+      "area": "Connectors",
+      "feature": "Email and calendar delivery",
+      "maturity": 2,
+      "status": "engineered_tested",
+      "client_risk": "Services require provider receipts and pinned credentials; OAuth connected status or mocked browser flow does not establish inbox delivery or a real calendar event.",
+      "priority": "P1",
+      "recommended_owner": "Connector engineering lead",
+      "next_acceptance": "Designated accounts receive one correct email/event; refresh, revocation, timeout and cancellation yield honest accepted/failed/unknown status without duplicate effects.",
+      "evidence": [
+        "backend/app/services/email_service.py:146",
+        "backend/app/services/meeting_service.py:224",
+        "Talk-Leee/tests/connectors.oauth.spec.ts:14"
+      ],
+      "baseline_maturity": 2,
+      "work_packages": [
+        "AG06"
+      ],
+      "execution_status": "planned",
+      "actual_owner": null,
+      "evidence_of_completion": [],
+      "closure_disposition": null,
+      "contained": false,
+      "pilot_or_release_evidence": null,
+      "baseline_next_acceptance": "Designated accounts receive one correct email/event; refresh, revocation, timeout and cancellation yield honest accepted/failed/unknown status without duplicate effects."
+    },
+    {
+      "id": "F32",
+      "area": "Connectors",
+      "feature": "Independent CRM destinations and retries",
+      "maturity": 2,
+      "status": "engineered_tested",
+      "client_risk": "Durable provider-specific/account-pinned receipts exist; real customer CRM schema, reconnect and permissions behavior remains unvalidated for deployment.",
+      "priority": "P1",
+      "recommended_owner": "CRM integration lead",
+      "next_acceptance": "Each approved CRM receives the correct contact/activity once; one failure does not erase another success; account switch during retry holds for review.",
+      "evidence": [
+        "backend/app/services/crm_sync_service.py:268",
+        "backend/app/services/crm_sync_service.py:311"
+      ],
+      "baseline_maturity": 2,
+      "work_packages": [
+        "AG06"
+      ],
+      "execution_status": "planned",
+      "actual_owner": null,
+      "evidence_of_completion": [],
+      "closure_disposition": null,
+      "contained": false,
+      "pilot_or_release_evidence": null,
+      "baseline_next_acceptance": "Each approved CRM receives the correct contact/activity once; one failure does not erase another success; account switch during retry holds for review."
+    },
+    {
+      "id": "F33",
+      "area": "Notifications",
+      "feature": "Customer alerts, webhook routing and billing emails",
+      "maturity": 1,
+      "status": "partial_journey",
+      "client_risk": "Webhook delivery is browser-only with ignored errors and unscoped local storage; payment-email lookup uses legacy owner role. Local toasts and server event records do exist.",
+      "priority": "P1",
+      "recommended_owner": "Notification and identity engineering lead",
+      "next_acceptance": "Tenant switches cannot expose prior lead alerts or inherit destinations; closed-browser delivery follows an explicit durable policy, and canonical billing recipients receive observable receipts.",
+      "evidence": [
+        "Talk-Leee/src/lib/notifications.ts:80",
+        "Talk-Leee/src/lib/notifications.ts:277",
+        "backend/app/domain/services/billing_service.py:951"
+      ],
+      "baseline_maturity": 1,
+      "work_packages": [
+        "CP06",
+        "CP07"
+      ],
+      "execution_status": "planned",
+      "actual_owner": null,
+      "evidence_of_completion": [],
+      "closure_disposition": null,
+      "contained": false,
+      "pilot_or_release_evidence": null,
+      "baseline_next_acceptance": "Tenant switches cannot expose prior lead alerts or inherit destinations; closed-browser delivery follows an explicit durable policy, and canonical billing recipients receive observable receipts."
+    },
+    {
+      "id": "F34",
+      "area": "Data lifecycle",
+      "feature": "Recordings, export, deletion and retention",
+      "maturity": 2,
+      "status": "engineered_with_gaps",
+      "client_risk": "Permissioned recording download/deletion exist; whole-tenant export, policy-wide retention enforcement and verifiable deletion across every store are not established.",
+      "priority": "P1",
+      "recommended_owner": "Data lifecycle and privacy operations lead",
+      "next_acceptance": "Complete one authorized export/deletion request and scheduled retention run across recordings, transcripts, metadata and backups, retaining auditable exceptions and customer receipt.",
+      "evidence": [
+        "backend/app/api/v1/endpoints/recordings.py:657",
+        "backend/app/api/v1/endpoints/recordings.py:725",
+        "Talk-Leee/src/app/terms/terms-content.ts:254"
+      ],
+      "baseline_maturity": 2,
+      "work_packages": [
+        "OP07",
+        "OP10"
+      ],
+      "execution_status": "planned",
+      "actual_owner": null,
+      "evidence_of_completion": [],
+      "closure_disposition": null,
+      "contained": false,
+      "pilot_or_release_evidence": null,
+      "baseline_next_acceptance": "Complete one authorized export/deletion request and scheduled retention run across recordings, transcripts, metadata and backups, retaining auditable exceptions and customer receipt."
+    },
+    {
+      "id": "F35",
+      "area": "Reporting",
+      "feature": "Dashboards, analytics and call history",
+      "maturity": 2,
+      "status": "engineered_tested",
+      "client_risk": "Real API-backed metrics, error states and actual-leg caller ID are implemented; business ROI, attribution definitions and customer decision usefulness are not proven by rendering tests.",
+      "priority": "P2",
+      "recommended_owner": "Analytics product lead",
+      "next_acceptance": "Reconcile representative calls, outcomes, minutes and filters to authoritative records, distinguish outage from zero and document conversion/qualification denominators.",
+      "evidence": [
+        "backend/app/api/v1/endpoints/analytics.py:321",
+        "backend/app/api/v1/endpoints/calls.py:836",
+        "Talk-Leee/src/app/analytics/page.tsx:91"
+      ],
+      "baseline_maturity": 2,
+      "work_packages": [
+        "CP04",
+        "CP09",
+        "RG03"
+      ],
+      "execution_status": "planned",
+      "actual_owner": null,
+      "evidence_of_completion": [],
+      "closure_disposition": null,
+      "contained": false,
+      "pilot_or_release_evidence": null,
+      "baseline_next_acceptance": "Reconcile representative calls, outcomes, minutes and filters to authoritative records, distinguish outage from zero and document conversion/qualification denominators."
+    },
+    {
+      "id": "F36",
+      "area": "Operations UX",
+      "feature": "Admin support and incident consoles",
+      "maturity": 1,
+      "status": "partial_journey",
+      "client_risk": "Several operational APIs work, but Actions Log/Incidents and selected customer-admin consoles are placeholders or unavailable; not all support tasks can be completed through the UI.",
+      "priority": "P1",
+      "recommended_owner": "Support operations product lead",
+      "next_acceptance": "A restricted operator traces and reconciles call, action, provider, lead and billing evidence through audited controls. Complete the listed in-scope support views from existing contracts; an unfinished required console remains blocked/contained despite a passed manual support drill.",
+      "evidence": [
+        "Admin/frontend/src/pages/ActionsLogPage.tsx:31",
+        "Admin/frontend/src/pages/IncidentsPage.tsx:31",
+        "Talk-Leee/src/app/admin/voice-security/page.tsx:16"
+      ],
+      "baseline_maturity": 1,
+      "work_packages": [
+        "CP09",
+        "AG06"
+      ],
+      "execution_status": "planned",
+      "actual_owner": null,
+      "evidence_of_completion": [],
+      "closure_disposition": null,
+      "contained": false,
+      "pilot_or_release_evidence": null,
+      "baseline_next_acceptance": "A restricted support operator can trace and reconcile a complaint across call, action, provider, lead and billing evidence using audited supported controls."
+    },
+    {
+      "id": "F37",
+      "area": "Reseller",
+      "feature": "White-label tenant provisioning, suspension and billing",
+      "maturity": 1,
+      "status": "partial_demo",
+      "client_risk": "Evaluated pages use localStorage-only tenant mutations and hardcoded bills without visible demo disclosure; real backend tenant APIs do not make those screens operational.",
+      "priority": "P1",
+      "recommended_owner": "Partner product lead",
+      "next_acceptance": "Each existing tenant control persists across browsers with authorized membership/entitlement; suspension blocks backend work; scoped usage and bills use real records. Missing partner authority or billing contracts stay blocked; unavailable/demo pages never count as feature completion.",
+      "evidence": [
+        "Talk-Leee/src/app/white-label/[partner]/tenants/tenants-client.tsx:165",
+        "Talk-Leee/src/app/white-label/[partner]/tenants/tenants-client.tsx:189",
+        "Talk-Leee/src/app/white-label/[partner]/billing/page.tsx:70"
+      ],
+      "baseline_maturity": 1,
+      "work_packages": [
+        "CP05"
+      ],
+      "execution_status": "planned",
+      "actual_owner": null,
+      "evidence_of_completion": [],
+      "closure_disposition": null,
+      "contained": false,
+      "pilot_or_release_evidence": null,
+      "baseline_next_acceptance": "A created tenant persists across browsers with actual membership/entitlement; suspension blocks backend work; bills reflect real records or the pages are clearly unavailable/demo."
+    },
+    {
+      "id": "F38",
+      "area": "Experience",
+      "feature": "Mobile, keyboard access and accessible states",
+      "maturity": 2,
+      "status": "engineered_with_gaps",
+      "client_risk": "Responsive components and selected accessibility checks exist, but no complete paid/setup/cancellation journey or accessibility conformance is demonstrated; an unnamed billing switch remains.",
+      "priority": "P2",
+      "recommended_owner": "Frontend accessibility lead",
+      "next_acceptance": "Complete critical journeys by keyboard, screen reader and small-screen touch, including failed requests; verify names, focus, dialogs, overflow and recovery using the released UI.",
+      "evidence": [
+        "Talk-Leee/tests/accessibility-audit.spec.ts:1",
+        "Talk-Leee/src/app/billing/plans/page.tsx:101"
+      ],
+      "baseline_maturity": 2,
+      "work_packages": [
+        "CP01",
+        "CP02",
+        "CP06",
+        "CP08",
+        "CP09"
+      ],
+      "execution_status": "in_progress",
+      "actual_owner": null,
+      "evidence_of_completion": [
+        {
+          "path": "docs/sessions/2026-10-04-cp01-implementation.md",
+          "scope": "CP01 portion only; not feature closure"
+        }
+      ],
+      "closure_disposition": null,
+      "contained": false,
+      "pilot_or_release_evidence": null,
+      "baseline_next_acceptance": "Complete critical journeys by keyboard, screen reader and small-screen touch, including failed requests; verify names, focus, dialogs, overflow and recovery using the released UI."
+    },
+    {
+      "id": "F39",
+      "area": "Cost control",
+      "feature": "Minutes, spend limits and admission during outages",
+      "maturity": 2,
+      "status": "engineered_with_gaps",
+      "client_risk": "Quota and spend mechanisms exist, but selective metering failure can allow new outbound work; calendar-month usage and subscription anniversary policy need explicit alignment.",
+      "priority": "P1",
+      "recommended_owner": "Billing and dialer engineering lead",
+      "next_acceptance": "Fail only the usage query while other guards work and verify the agreed bounded admission policy; reconcile every displayed balance and reset date without calling unknown unlimited.",
+      "evidence": [
+        "backend/app/domain/services/minutes_quota.py:71",
+        "backend/app/workers/dialer_worker.py:1522",
+        "backend/app/domain/services/billing_service.py:1053"
+      ],
+      "baseline_maturity": 2,
+      "work_packages": [
+        "OP01",
+        "OP11",
+        "CP04"
+      ],
+      "execution_status": "planned",
+      "actual_owner": null,
+      "evidence_of_completion": [],
+      "closure_disposition": null,
+      "contained": false,
+      "pilot_or_release_evidence": null,
+      "baseline_next_acceptance": "Fail only the usage query while other guards work and verify the agreed bounded admission policy; reconcile every displayed balance and reset date without calling unknown unlimited."
+    },
+    {
+      "id": "F40",
+      "area": "Capacity control",
+      "feature": "Provider-account limits and global concurrency",
+      "maturity": 2,
+      "status": "engineered_with_gaps",
+      "client_risk": "Existing provider guards are per-process and do not cover selected Flux sockets; outbound global admission can degrade open on Redis failure. Other tenant/call limits still apply.",
+      "priority": "P1",
+      "recommended_owner": "Platform capacity lead",
+      "next_acceptance": "With actual account/process topology, prove the configured provider and global limits, cancellation release and declared Redis-outage behavior without duplicate origination.",
+      "evidence": [
+        "backend/app/infrastructure/providers/provider_concurrency.py:18",
+        "backend/app/domain/services/global_concurrency.py:104"
+      ],
+      "baseline_maturity": 2,
+      "work_packages": [
+        "OP02"
+      ],
+      "execution_status": "planned",
+      "actual_owner": null,
+      "evidence_of_completion": [],
+      "closure_disposition": null,
+      "contained": false,
+      "pilot_or_release_evidence": null,
+      "baseline_next_acceptance": "With actual account/process topology, prove the configured provider and global limits, cancellation release and declared Redis-outage behavior without duplicate origination."
+    },
+    {
+      "id": "F41",
+      "area": "Reliability",
+      "feature": "Metrics, health, alerting and on-call delivery",
+      "maturity": 2,
+      "status": "engineered_with_gaps",
+      "client_risk": "Metrics, worker heartbeats and healthwatch exist; empty baseline pager receivers and no reviewed paging drill prevent an operational response guarantee.",
+      "priority": "P1",
+      "recommended_owner": "Site reliability lead",
+      "next_acceptance": "Inject worker/provider/queue faults and record notification, acknowledgement and recovery at the designated on-call destination within agreed targets.",
+      "evidence": [
+        "backend/app/domain/services/voice_pipeline/latency_alerter.py:75",
+        "telephony/observability/alertmanager/alertmanager.yml:48",
+        "backend/deploy/healthwatch.sh:1"
+      ],
+      "baseline_maturity": 2,
+      "work_packages": [
+        "OP09"
+      ],
+      "execution_status": "planned",
+      "actual_owner": null,
+      "evidence_of_completion": [],
+      "closure_disposition": null,
+      "contained": false,
+      "pilot_or_release_evidence": null,
+      "baseline_next_acceptance": "Inject worker/provider/queue faults and record notification, acknowledgement and recovery at the designated on-call destination within agreed targets."
+    },
+    {
+      "id": "F42",
+      "area": "Performance",
+      "feature": "Sustained capacity and service-level evidence",
+      "maturity": null,
+      "status": "unverified",
+      "client_risk": "Historical small SIP-only soak evidence was invalidated; idle host health and synthetic provider turns do not establish current capacity, high availability or caller-heard latency.",
+      "priority": "P1",
+      "recommended_owner": "Performance and reliability lead",
+      "next_acceptance": "At contracted concurrency, run an agreed representative bidirectional call soak plus overload/fault cases; report latency distributions, setup success, costs and leaked resources.",
+      "evidence": [
+        "telephony/docs/phase_3/day10_concurrency_soak_evidence.md:3",
+        "docs/sessions/artifacts/2026-10-01-audio-provider-eval.json:2"
+      ],
+      "baseline_maturity": null,
+      "work_packages": [
+        "OP08"
+      ],
+      "execution_status": "planned",
+      "actual_owner": null,
+      "evidence_of_completion": [],
+      "closure_disposition": null,
+      "contained": false,
+      "pilot_or_release_evidence": null,
+      "baseline_next_acceptance": "At contracted concurrency, run an agreed representative bidirectional call soak plus overload/fault cases; report latency distributions, setup success, costs and leaked resources."
+    },
+    {
+      "id": "F43",
+      "area": "Recovery",
+      "feature": "Backups, restore and disaster recovery",
+      "maturity": 2,
+      "status": "engineered_with_gaps",
+      "client_risk": "Scheduled dump success and restore procedures exist; restored production-shaped data, off-host survivability and measured RTO/RPO are not established.",
+      "priority": "P1",
+      "recommended_owner": "Database and reliability operations lead",
+      "next_acceptance": "Restore an authorized off-host copy into isolation, validate tenant/RLS/application/object-store evidence and measure recovery against agreed RTO/RPO.",
+      "evidence": [
+        "backend/deploy/db-backup.sh:32",
+        "docs/RUNBOOK.md:268",
+        "docs/DEPLOYMENT.md:327"
+      ],
+      "baseline_maturity": 2,
+      "work_packages": [
+        "OP10"
+      ],
+      "execution_status": "planned",
+      "actual_owner": null,
+      "evidence_of_completion": [],
+      "closure_disposition": null,
+      "contained": false,
+      "pilot_or_release_evidence": null,
+      "baseline_next_acceptance": "Restore an authorized off-host copy into isolation, validate tenant/RLS/application/object-store evidence and measure recovery against agreed RTO/RPO."
+    },
+    {
+      "id": "F44",
+      "area": "Release",
+      "feature": "Drain, deployment compatibility and rollback",
+      "maturity": 2,
+      "status": "engineered_with_gaps",
+      "client_risk": "Candidate is undeployed; gateway/Python/schema compatibility, generated SIP reconciliation and a topology-specific freeze/rollback rehearsal remain operator prerequisites.",
+      "priority": "P1",
+      "recommended_owner": "Release engineering lead",
+      "next_acceptance": "Promote the reviewed tested merge through a genuine candidate-bound drain; verify matching builds, migrations and UI, then rehearse approved rollback/code-forward without erasing receipts.",
+      "evidence": [
+        "docs/DEPLOYMENT.md:194",
+        "docs/DEPLOYMENT.md:327",
+        "deploy_to_server.sh:218"
+      ],
+      "baseline_maturity": 2,
+      "work_packages": [
+        "OP12"
+      ],
+      "execution_status": "planned",
+      "actual_owner": null,
+      "evidence_of_completion": [],
+      "closure_disposition": null,
+      "contained": false,
+      "pilot_or_release_evidence": null,
+      "baseline_next_acceptance": "Promote the reviewed tested merge through a genuine candidate-bound drain; verify matching builds, migrations and UI, then rehearse approved rollback/code-forward without erasing receipts."
+    },
+    {
+      "id": "F45",
+      "area": "Trust",
+      "feature": "Security controls, privacy documentation and regulated-use claims",
+      "maturity": 2,
+      "status": "engineered_with_gaps",
+      "client_risk": "Substantial auth/RLS/credential/security gates exist; provider/subprocessor documentation is stale and certification, DPA, regulated-use readiness and support-process evidence are not established by code.",
+      "priority": "P1",
+      "recommended_owner": "Security and privacy governance lead",
+      "next_acceptance": "Align published suppliers, retention and transfer facts with deployed processing; verify contracts and evidence for claims, and exercise permission, incident and data-request procedures.",
+      "evidence": [
+        "backend/app/core/prod_gate.py:224",
+        "Talk-Leee/src/app/privacy/privacy-content.ts:197",
+        "Talk-Leee/src/app/privacy/privacy-content.ts:205"
+      ],
+      "baseline_maturity": 2,
+      "work_packages": [
+        "OP07",
+        "OP10",
+        "OP11",
+        "CP01",
+        "CP08"
+      ],
+      "execution_status": "in_progress",
+      "actual_owner": null,
+      "evidence_of_completion": [
+        {
+          "path": "docs/sessions/2026-10-04-cp01-implementation.md",
+          "scope": "CP01 portion only; not feature closure"
+        }
+      ],
+      "closure_disposition": null,
+      "contained": false,
+      "pilot_or_release_evidence": null,
+      "baseline_next_acceptance": "Align published suppliers, retention and transfer facts with deployed processing; verify contracts and evidence for claims, and exercise permission, incident and data-request procedures."
+    }
+  ],
+  "scenarios": [
+    {
+      "id": "S01",
+      "situation": "Caller is not an existing customer and has no card-payment setup",
+      "expected_customer_behavior": "Treat them as a new prospect; ask about their need without assuming product ownership.",
+      "backend_test": "Persist explicit relationship correction; keep it after long conversations and allow an explicit later correction.",
+      "work_packages": [
+        "AG03",
+        "AG04"
+      ],
+      "status": "not_run",
+      "evidence": []
+    },
+    {
+      "id": "S02",
+      "situation": "Caller says no to email but continues asking questions",
+      "expected_customer_behavior": "Respect that offer refusal and answer the next question.",
+      "backend_test": "No end-call admission solely from that scoped refusal; explicit goodbye/DNC remains effective.",
+      "work_packages": [
+        "AG04"
+      ],
+      "status": "not_run",
+      "evidence": []
+    },
+    {
+      "id": "S03",
+      "situation": "Caller asks what the previous question meant",
+      "expected_customer_behavior": "Rephrase the actual question.",
+      "backend_test": "Same exact history must reach the provider; evaluate output semantics, not only message presence.",
+      "work_packages": [
+        "AG04"
+      ],
+      "status": "not_run",
+      "evidence": []
+    },
+    {
+      "id": "S04",
+      "situation": "Unclear name, email or phone digit",
+      "expected_customer_behavior": "Ask only for the unclear part; read back appropriately.",
+      "backend_test": "Keep uncertain values unconfirmed; bounded retries; never overwrite stronger confirmed data with a guess.",
+      "work_packages": [
+        "AG05",
+        "AG04"
+      ],
+      "status": "not_run",
+      "evidence": []
+    },
+    {
+      "id": "S05",
+      "situation": "Caller interrupts the opening or corrects an answer",
+      "expected_customer_behavior": "Stop obsolete speech, listen, then continue from the correction.",
+      "backend_test": "Cancel/clear matching audio, reject stale completions, distinguish transmitted from heard, preserve event order.",
+      "work_packages": [
+        "AG04",
+        "OP03",
+        "OP08"
+      ],
+      "status": "not_run",
+      "evidence": []
+    },
+    {
+      "id": "S06",
+      "situation": "Background speech, echo, silence or hold music",
+      "expected_customer_behavior": "Avoid replying to unrelated sound or cutting off a real utterance.",
+      "backend_test": "Test VAD/STT under actual codecs/noise; measure false interruptions and response after intended speech.",
+      "work_packages": [
+        "OP03",
+        "OP08"
+      ],
+      "status": "not_run",
+      "evidence": []
+    },
+    {
+      "id": "S07",
+      "situation": "Knowledge is missing, stale, weakly matched or contradictory",
+      "expected_customer_behavior": "State the narrow uncertainty; offer only an available next step.",
+      "backend_test": "Version/source evidence, no unsupported price or promise, tenant isolation, no injected instructions promoted to authority.",
+      "work_packages": [
+        "AG02"
+      ],
+      "status": "not_run",
+      "evidence": []
+    },
+    {
+      "id": "S08",
+      "situation": "Caller requests a person when transfer is unavailable",
+      "expected_customer_behavior": "Explain the limitation; offer intake only if it genuinely exists.",
+      "backend_test": "Capability check before promising transfer; no unreachable destination, invented callback or orphan transfer leg.",
+      "work_packages": [
+        "OP06",
+        "AG06"
+      ],
+      "status": "not_run",
+      "evidence": []
+    },
+    {
+      "id": "S09",
+      "situation": "Caller requests no more calls",
+      "expected_customer_behavior": "Acknowledge and end appropriately.",
+      "backend_test": "Durable opt-out before future scheduling, including retries and manual redial; clarify disputed/ambiguous intent without ignoring explicit opt-out.",
+      "work_packages": [
+        "OP07",
+        "OP05"
+      ],
+      "status": "not_run",
+      "evidence": []
+    },
+    {
+      "id": "S10",
+      "situation": "Caller requests an unrelated or sensitive action",
+      "expected_customer_behavior": "Keep the agent within approved business scope and use a secure route for sensitive data.",
+      "backend_test": "Tool allowlist, permissions and recipient checks remain outside model instructions; test adversarial caller and KB content.",
+      "work_packages": [
+        "AG02",
+        "AG06"
+      ],
+      "status": "not_run",
+      "evidence": []
+    },
+    {
+      "id": "S11",
+      "situation": "Provider fails before any speech, or after partial speech",
+      "expected_customer_behavior": "Bounded recovery, brief honest clarification or a clean failure.",
+      "backend_test": "No duplicated speech after partial output; retry policy must account for observed effects and release resources.",
+      "work_packages": [
+        "OP03",
+        "AG04"
+      ],
+      "status": "not_run",
+      "evidence": []
+    },
+    {
+      "id": "S12",
+      "situation": "Email/calendar/CRM request times out after sending",
+      "expected_customer_behavior": "Do not say completed or repeat it blindly.",
+      "backend_test": "Persist unknown outcome and stable request identity; reconcile against the exact provider account before another effect.",
+      "work_packages": [
+        "AG06"
+      ],
+      "status": "not_run",
+      "evidence": []
+    },
+    {
+      "id": "S13",
+      "situation": "Connector account is changed or authorization revoked",
+      "expected_customer_behavior": "Show the blocked action and required reconnect clearly.",
+      "backend_test": "Existing delivery remains bound to its reviewed account; no sending to a newly selected destination implicitly.",
+      "work_packages": [
+        "AG06"
+      ],
+      "status": "not_run",
+      "evidence": []
+    },
+    {
+      "id": "S14",
+      "situation": "Selected SIP trunk is down, or health is stale",
+      "expected_customer_behavior": "Disable calling and explain the selected route's state.",
+      "backend_test": "Do not silently route through another trunk/caller ID; readiness freshness and actual origination remain separate checks.",
+      "work_packages": [
+        "OP04"
+      ],
+      "status": "not_run",
+      "evidence": []
+    },
+    {
+      "id": "S15",
+      "situation": "IP-auth trunk ignores OPTIONS but can accept inbound",
+      "expected_customer_behavior": "Do not require registration credentials or equate outbound probing with all inbound readiness.",
+      "backend_test": "Use the documented direction-specific contract; verify real inbound/outbound behavior separately.",
+      "work_packages": [
+        "OP04"
+      ],
+      "status": "not_run",
+      "evidence": []
+    },
+    {
+      "id": "S16",
+      "situation": "Metering is unavailable or the last available minute is being used concurrently",
+      "expected_customer_behavior": "Show allowance as unknown or a documented limited grace state.",
+      "backend_test": "New admission follows the explicit cost policy; no false unlimited/zero usage; atomic protection where a hard cap is promised.",
+      "work_packages": [
+        "OP01",
+        "OP02"
+      ],
+      "status": "not_run",
+      "evidence": []
+    },
+    {
+      "id": "S17",
+      "situation": "Worker/Redis/network fails during origination or queue handoff",
+      "expected_customer_behavior": "Display pending/reconciling state rather than repeating the call.",
+      "backend_test": "Stable job identity, owned-resource cleanup, no duplicate origination, preserved receipts and safe recovery.",
+      "work_packages": [
+        "OP05"
+      ],
+      "status": "not_run",
+      "evidence": []
+    },
+    {
+      "id": "S18",
+      "situation": "Payment succeeds but activation handler fails",
+      "expected_customer_behavior": "Explain activation is pending and expose a support/reference state.",
+      "backend_test": "Retry/reconcile the business event, not just acknowledge a previously claimed event ID.",
+      "work_packages": [
+        "CP03"
+      ],
+      "status": "not_run",
+      "evidence": []
+    },
+    {
+      "id": "S19",
+      "situation": "Customer cancels, disputes an invoice or requests deletion",
+      "expected_customer_behavior": "State exact effective dates, actual bill facts and the supported process.",
+      "backend_test": "Provider confirmation, immutable financial evidence, retention exceptions and completion receipts.",
+      "work_packages": [
+        "CP04",
+        "CP06",
+        "OP07"
+      ],
+      "status": "not_run",
+      "evidence": []
+    },
+    {
+      "id": "S20",
+      "situation": "Two different customers use the same browser",
+      "expected_customer_behavior": "Each sees only their own contacts, notifications and settings.",
+      "backend_test": "Tenant/user-scoped storage and cleanup on identity change, including notification webhook destinations.",
+      "work_packages": [
+        "CP07",
+        "CP08"
+      ],
+      "status": "not_run",
+      "evidence": []
+    },
+    {
+      "id": "S21",
+      "situation": "Call scheduling crosses timezones, DST or a campaign pause",
+      "expected_customer_behavior": "Respect the declared local window and current campaign state.",
+      "backend_test": "Recheck at execution, including redials and delayed jobs; test calendar boundaries and pause/stop under concurrency.",
+      "work_packages": [
+        "OP05"
+      ],
+      "status": "not_run",
+      "evidence": []
+    },
+    {
+      "id": "S22",
+      "situation": "A recording is requested, expired, missing or being erased",
+      "expected_customer_behavior": "Show a true unavailable/deleting/deleted state.",
+      "backend_test": "Tenant permission, local/S3 object boundaries, versioned-object erasure and durable partial-failure recovery.",
+      "work_packages": [
+        "OP07"
+      ],
+      "status": "not_run",
+      "evidence": []
+    }
+  ],
+  "acceptance_gates": [
+    {
+      "id": "GT01",
+      "name": "Commercial truth",
+      "proposed_acceptance": "Every visible purchase option maps to authoritative amount/currency/interval; invoices match provider records; contact and cancellation success require receipts; no operational demo screen masquerades as live.",
+      "status": "not_run",
+      "ratified_target": null,
+      "observed_result": null,
+      "evidence": []
+    },
+    {
+      "id": "GT02",
+      "name": "Core scenario quality",
+      "proposed_acceptance": "At least 50 human-reviewed scenarios, repeated three times per approved voice profile. Include corrections, no knowledge, new prospects, objections, DNC, interruptions, long context and tool failure. Zero false completed-action claims or falsely confirmed contact values in this gate.",
+      "status": "not_run",
+      "ratified_target": null,
+      "observed_result": null,
+      "evidence": []
+    },
+    {
+      "id": "GT03",
+      "name": "Real telephone acceptance",
+      "proposed_acceptance": "At least 50 controlled authorized calls and 500 turns through the intended carrier/codec/profile, spanning quiet and noisy audio, representative accents/speakers and long conversations. Store permitted audio and trace IDs. Synthetic tests supplement this cohort.",
+      "status": "not_run",
+      "ratified_target": null,
+      "observed_result": null,
+      "evidence": []
+    },
+    {
+      "id": "GT04",
+      "name": "Conversation delay",
+      "proposed_acceptance": "Initial target: median at most 1.2 seconds and p95 at most 2.5 seconds from the last audible caller phoneme to first audible substantive response, measured at a consistent endpoint. Tool-dependent waits are measured separately; filler must not conceal delayed useful answers.",
+      "status": "not_run",
+      "ratified_target": null,
+      "observed_result": null,
+      "evidence": []
+    },
+    {
+      "id": "GT05",
+      "name": "Interruption",
+      "proposed_acceptance": "Initial target: p95 at most 250 milliseconds from actual caller speech onset to the last audible obsolete agent output, including speech-detection delay. Report false interruption and missed interruption counts; zero stale cancelled response played after a newer correction in the fixture gate.",
+      "status": "not_run",
+      "ratified_target": null,
+      "observed_result": null,
+      "evidence": []
+    },
+    {
+      "id": "GT06",
+      "name": "Perceived voice quality",
+      "proposed_acceptance": "At least two reviewers rate clarity, pronunciation, pacing, turn-taking and appropriateness on a defined 1\u20135 rubric; proposed mean at least 4 and no critical intelligibility failure. Report disagreement and subgroup results. Do not replace listening with transcript-only scoring.",
+      "status": "not_run",
+      "ratified_target": null,
+      "observed_result": null,
+      "evidence": []
+    },
+    {
+      "id": "GT07",
+      "name": "Useful lead evidence",
+      "proposed_acceptance": "In the reviewed cohort, every confirmed contact value matches the annotated caller confirmation; unclear values remain unconfirmed. Proposed qualification precision at least 95% against agreed business criteria, with recall and human correction rate also reported. A larger representative cohort is needed before broad claims.",
+      "status": "not_run",
+      "ratified_target": null,
+      "observed_result": null,
+      "evidence": []
+    },
+    {
+      "id": "GT08",
+      "name": "Actions",
+      "proposed_acceptance": "For each sold connector, verify a designated real inbox/event/CRM record and its account identity. Duplicate, concurrent, timeout and worker-crash scenarios result in one intended effect or visible unresolved state, never a false completed state.",
+      "status": "not_run",
+      "ratified_target": null,
+      "observed_result": null,
+      "evidence": []
+    },
+    {
+      "id": "GT09",
+      "name": "Telephony identity",
+      "proposed_acceptance": "Zero wrong-tenant route, unauthorized caller ID or wrong-recipient origination in the acceptance set. Confirm handset-presented caller ID in each sold region; display and carrier presentation are distinct.",
+      "status": "not_run",
+      "ratified_target": null,
+      "observed_result": null,
+      "evidence": []
+    },
+    {
+      "id": "GT10",
+      "name": "Paid lifecycle",
+      "proposed_acceptance": "Sandbox/provider test mode exercises signup, payment, renewal, failure, replay, ordering, upgrade, downgrade, cancellation, tax/credit and refund accounting. Controlled live validation requires designated authorized accounts and a documented billing process.",
+      "status": "not_run",
+      "ratified_target": null,
+      "observed_result": null,
+      "evidence": []
+    },
+    {
+      "id": "GT11",
+      "name": "Quota and capacity",
+      "proposed_acceptance": "Agree a concurrency C that has actually been tested. Run a 60-minute bidirectional-media soak at C, with a C+1 admission test. Proposed controlled-call setup success at least 99%, no unexplained duplicate origination and no remaining owned resources after teardown. Measure margin and provider limits, not just successful SIP signalling.",
+      "status": "not_run",
+      "ratified_target": null,
+      "observed_result": null,
+      "evidence": []
+    },
+    {
+      "id": "GT12",
+      "name": "Failure recovery",
+      "proposed_acceptance": "Inject provider timeout, partial speech, Redis disruption, worker crash, lost acknowledgement and storage failure. Existing calls terminate safely; new work follows the declared admission policy; recovery preserves evidence and identities.",
+      "status": "not_run",
+      "ratified_target": null,
+      "observed_result": null,
+      "evidence": []
+    },
+    {
+      "id": "GT13",
+      "name": "Monitoring",
+      "proposed_acceptance": "A worker/provider/queue failure reaches a designated on-call person; proposed worker-death alert within five minutes. Record acknowledgement and recovery notification, not only log emission.",
+      "status": "not_run",
+      "ratified_target": null,
+      "observed_result": null,
+      "evidence": []
+    },
+    {
+      "id": "GT14",
+      "name": "Recovery and release",
+      "proposed_acceptance": "A real authorized off-host backup is restored to an isolated environment; schema, representative records and tenant isolation are verified. Agree and measure RTO/RPO. Rehearse the actual ingress freeze, drain and compatible rollback/code-forward procedure.",
+      "status": "not_run",
+      "ratified_target": null,
+      "observed_result": null,
+      "evidence": []
+    },
+    {
+      "id": "GT15",
+      "name": "Usability and exit",
+      "proposed_acceptance": "Five representative nontechnical users complete the supported setup journey without undocumented developer actions. Keyboard/mobile/screen-reader checks cover decisive actions. Complete cancellation and a bounded export/deletion request with documented exceptions.",
+      "status": "not_run",
+      "ratified_target": null,
+      "observed_result": null,
+      "evidence": []
+    }
+  ],
+  "release_decision": null,
+  "freeze_exit_decision": null
+}
