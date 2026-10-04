@@ -22,6 +22,7 @@ ranged from a small fraction of the gate's number down to zero.
 A tenant could be blocked for exhausting their plan while every screen they
 could see said most of it was left.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -35,6 +36,7 @@ from tests.unit._source_scan import read as _read
 # --------------------------------------------------------------------------
 # One definition, not three
 # --------------------------------------------------------------------------
+
 
 def test_tenant_minutes_delegates_to_the_gate():
     """The billing/auth path must not carry its own SUM."""
@@ -64,9 +66,7 @@ def test_the_dead_status_filter_is_gone_everywhere():
         for i, line in enumerate(_code(rel).splitlines(), 1):
             if "in_progress" in line and "answered" in line:
                 offenders.append(f"{rel}:{i}")
-    assert not offenders, (
-        "the stale status predicate is back at " + str(offenders)
-    )
+    assert not offenders, "the stale status predicate is back at " + str(offenders)
 
 
 def test_outcome_sets_have_exactly_one_definition():
@@ -121,6 +121,7 @@ def test_answered_and_failed_never_overlap():
         FAILED_OUTCOMES,
         GOAL_OUTCOMES,
     )
+
     assert not (ANSWERED_OUTCOMES & FAILED_OUTCOMES)
     assert GOAL_OUTCOMES <= ANSWERED_OUTCOMES
 
@@ -142,6 +143,7 @@ def test_analytics_aliases_still_resolve():
 # The daily series
 # --------------------------------------------------------------------------
 
+
 def _daily_query() -> str:
     code = _code("app/api/v1/endpoints/billing.py")
     return code.split("async def get_daily_usage", 1)[1].split("\n@router", 1)[0]
@@ -156,9 +158,7 @@ def test_daily_failed_count_is_not_structurally_zero():
         "a NOT IN counter inside a query whose WHERE already restricts the "
         "same column is always zero — that exact bug shipped once"
     )
-    assert "outcome = ANY" in q, (
-        "connected/failed must be classified by outcome, not status"
-    )
+    assert "outcome = ANY" in q, "connected/failed must be classified by outcome, not status"
 
 
 def test_daily_minutes_have_no_disposition_filter():
@@ -185,35 +185,11 @@ def test_daily_minutes_exclude_unsettled_inbound_usage_but_keep_outbound():
 # GET /billing/usage
 # --------------------------------------------------------------------------
 
-def _usage_summary_body() -> str:
-    code = _code("app/domain/services/billing_service.py")
-    after = code.split("async def get_usage_summary", 1)[1]
-    return after.split("\n    async def ", 1)[0]
-
-
-def test_usage_summary_no_longer_reads_the_dead_column():
-    """Asserts on the SELECTed columns, not a bare substring — `minutes_used`
-    is also a suffix of `compute_tenant_minutes_used`, which is the function
-    that FIXES this."""
-    body = _usage_summary_body()
-    selected = body.split(".select(", 1)[1].split(")", 1)[0]
-    assert "minutes_used" not in selected, (
-        "tenants.minutes_used is zero for every tenant in production; "
-        "selecting it is what made this endpoint always return 0"
-    )
-    assert "minutes_allocated" in selected
-
-
-def test_usage_summary_uses_the_live_minutes_computation():
-    body = _usage_summary_body()
-    assert "compute_tenant_minutes_used" in body
-
-
-def test_usage_summary_still_serves_non_minute_types():
-    """usage_records is unwired, not wrong — metered add-ons will use it."""
-    body = _usage_summary_body()
-    assert "usage_records" in body
-    assert 'usage_type == "minutes"' in body
+# CP04's behavioral tests in test_billing_read_truth exercise the real service:
+# tenant-scoped canonical quota, finite/unlimited allowances, unavailable usage,
+# and explicit rejection of unwired non-minute types. They replace the three
+# former source-string checks that pinned a fail-soft helper and an unmetered
+# usage_records path rather than checking the returned billing facts.
 
 
 def test_record_usage_still_has_no_callers():
@@ -235,12 +211,13 @@ def test_record_usage_still_has_no_callers():
 # The arithmetic itself
 # --------------------------------------------------------------------------
 
+
 @pytest.mark.parametrize(
     "rows,expected_minutes",
     [
         ([], 0),
-        ([("completed", 3600), ("ended", 5400)], 150),    # both statuses count
-        ([("ended", 59)], 0),                             # floors, never rounds up
+        ([("completed", 3600), ("ended", 5400)], 150),  # both statuses count
+        ([("ended", 59)], 0),  # floors, never rounds up
         ([("ended", 60)], 1),
     ],
 )

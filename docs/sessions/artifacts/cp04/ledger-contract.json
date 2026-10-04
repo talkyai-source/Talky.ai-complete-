@@ -1,0 +1,61 @@
+{
+  "scope": "Synthetic provider payment/refund; actual PostgreSQL ledger and API reads; no live payment",
+  "api_adjustments": [
+    {
+      "id": "242",
+      "order_id": "c511aff6-a87a-42d4-a6da-0282761e7ae3",
+      "provider_event_id": "evt_cp03_63e9ab491c9e41eda6690895eaf3c751_ledger_reverse",
+      "provider_payment_id": "pi_4160090903f44c27a3950e8448fbd45d",
+      "kind": "refund",
+      "minutes_delta": -250,
+      "amount_cents": -2500,
+      "currency": "GBP",
+      "currency_exponent": 2,
+      "note": "refund: reversed 250 minutes",
+      "created_at": "2026-10-04T16:41:59.488769+00:00"
+    },
+    {
+      "id": "241",
+      "order_id": "c511aff6-a87a-42d4-a6da-0282761e7ae3",
+      "provider_event_id": "evt_cp03_63e9ab491c9e41eda6690895eaf3c751_purchase",
+      "provider_payment_id": "pi_4160090903f44c27a3950e8448fbd45d",
+      "kind": "topup",
+      "minutes_delta": 250,
+      "amount_cents": 2500,
+      "currency": "GBP",
+      "currency_exponent": 2,
+      "note": "top-up 250 minutes",
+      "created_at": "2026-10-04T16:41:59.393743+00:00"
+    }
+  ],
+  "api_ledger": {
+    "entries": [
+      {
+        "id": "242",
+        "order_id": "c511aff6-a87a-42d4-a6da-0282761e7ae3",
+        "provider_event_id": "evt_cp03_63e9ab491c9e41eda6690895eaf3c751_ledger_reverse",
+        "provider_payment_id": "pi_4160090903f44c27a3950e8448fbd45d",
+        "kind": "refund",
+        "minutes_delta": -250,
+        "amount_cents": -2500,
+        "currency": "GBP",
+        "currency_exponent": 2,
+        "note": "refund: reversed 250 minutes",
+        "created_at": "2026-10-04T16:41:59.488769+00:00"
+      },
+      {
+        "id": "241",
+        "order_id": "c511aff6-a87a-42d4-a6da-0282761e7ae3",
+        "provider_event_id": "evt_cp03_63e9ab491c9e41eda6690895eaf3c751_purchase",
+        "provider_payment_id": "pi_4160090903f44c27a3950e8448fbd45d",
+        "kind": "topup",
+        "minutes_delta": 250,
+        "amount_cents": 2500,
+        "currency": "GBP",
+        "currency_exponent": 2,
+        "note": "top-up 250 minutes",
+        "created_at": "2026-10-04T16:41:59.393743+00:00"
+      }
+    ]
+  }
+}

@@ -41,11 +41,13 @@ from app.api.v1.dependencies import (
     require_platform_admin,
 )
 from app.core.container import get_container
+from app.core.db_utils import acquire_with_tenant
 from app.core.security.rbac import Permission, require_permission
+from app.domain.services.billing_catalog import _EXPONENTS
 from app.domain.services.audit_logger import AuditEvent, AuditLogger
 from app.domain.services.billing_service import BillingService
 from app.domain.services.minutes_quota import compute_minutes_status
-from app.domain.services.topup_service import TopupError, TopupService
+from app.domain.services.topup_service import TopupError, TopupService, public_ledger_entry
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +79,7 @@ class PackageOut(BaseModel):
     minutes: int
     price_cents: int
     currency: str
+    currency_exponent: Optional[int] = None
     expires_days: Optional[int] = None
     # Shown so the larger bundle can justify itself. Computed here rather than
     # in the browser so every surface quotes the same number.
@@ -121,6 +124,7 @@ async def list_packages(current_user: CurrentUser = Depends(get_current_user)):
     return [
         PackageOut(
             **r,
+            currency_exponent=_EXPONENTS.get(str(r["currency"]).lower()),
             price_per_minute_cents=round(r["price_cents"] / r["minutes"], 2),
         )
         for r in rows
@@ -144,7 +148,7 @@ async def get_balance(current_user: CurrentUser = Depends(get_current_user)):
     tenant_id = _tenant(current_user)
     svc = _service()
     c = get_container()
-    async with c.db_pool.acquire() as conn:
+    async with acquire_with_tenant(c.db_pool, tenant_id) as conn:
         st = await compute_minutes_status(conn, tenant_id)
     return BalanceOut(**st.as_dict(), purchased_minutes=await svc.purchased_total(tenant_id))
 
@@ -209,10 +213,10 @@ async def create_topup_checkout(
             "topup_checkout_failed order=%s tenant=%s: %s",
             str(order["id"])[:8], tenant_id[:8], e,
         )
-        # The order stays pending. Nothing was charged, so nothing is owed.
+        # A failed response does not prove the provider did not create a session.
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="Could not reach the payment provider. Nothing has been charged.",
+            detail="Could not confirm checkout with the payment provider. Check your purchase history before trying again.",
         )
 
     try:
@@ -225,7 +229,7 @@ async def create_topup_checkout(
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Could not start the purchase. Nothing has been charged.",
+            detail="Could not link this checkout to your purchase. Contact billing support with the order reference before trying again.",
         )
 
     await audit_logger.log(
@@ -276,7 +280,10 @@ async def list_orders(
             "minutes": r["minutes"],
             "price_cents": r["price_cents"],
             "currency": r["currency"],
+            "currency_exponent": _EXPONENTS.get(str(r["currency"]).lower()),
             "status": r["status"],
+            "provider_payment_id": r["provider_payment_id"],
+            "refund_details": r["refund_details"],
             "created_at": r["created_at"].isoformat() if r["created_at"] else None,
             "paid_at": r["paid_at"].isoformat() if r["paid_at"] else None,
         }
@@ -296,17 +303,7 @@ async def list_ledger(
     the original purchase disappearing, which is what makes this answerable
     when a customer asks what they were charged for."""
     rows = await _service().ledger(_tenant(current_user), min(max(limit, 1), 500))
-    return {"entries": [
-        {
-            "kind": r["kind"],
-            "minutes_delta": r["minutes_delta"],
-            "amount_cents": r["amount_cents"],
-            "currency": r["currency"],
-            "note": r["note"],
-            "created_at": r["created_at"].isoformat() if r["created_at"] else None,
-        }
-        for r in rows
-    ]}
+    return {"entries": [public_ledger_entry(row) for row in rows]}
 
 
 # ── admin reconciliation (§9) ───────────────────────────────────────────────
@@ -333,9 +330,12 @@ async def reconciliation(
     ``fmt=csv`` returns the same rows as a download for a spreadsheet
     reconciliation against the provider's own export.
     """
+    bounded_limit = min(max(limit, 1), 50_000)
     rows = await _service().reconciliation(
-        since=since, until=until, limit=min(max(limit, 1), 50_000),
+        since=since, until=until, limit=bounded_limit + 1,
     )
+    truncated = len(rows) > bounded_limit
+    rows = rows[:bounded_limit]
 
     records = [
         {
@@ -370,24 +370,36 @@ async def reconciliation(
             media_type="text/csv",
             headers={
                 "Content-Disposition":
-                    'attachment; filename="talky-minute-reconciliation.csv"'
+                'attachment; filename="talky-minute-reconciliation.csv"',
+                "X-Result-Truncated": str(truncated).lower(),
+                "X-Totals-Scope": "returned_rows",
             },
         )
 
-    # Totals, so the top of the page can be compared against the provider's
-    # dashboard without adding up a thousand rows by hand.
-    gross = sum(r["amount_cents"] for r in records if r["amount_cents"] > 0)
-    refunded = sum(-r["amount_cents"] for r in records if r["amount_cents"] < 0)
+    # Signed accounting totals are grouped by currency and cover only the
+    # returned sample. A reversal is not evidence of cash reaching a bank.
+    currencies = {}
+    for record in records:
+        currency = record["currency"].lower() or None
+        totals = currencies.setdefault(currency, {
+            "currency": currency, "currency_exponent": _EXPONENTS.get(currency),
+            "gross_cents": 0, "reversed_cents": 0, "net_cents": 0,
+        })
+        amount = record["amount_cents"]
+        totals["gross_cents"] += max(0, amount)
+        totals["reversed_cents"] += max(0, -amount)
+        totals["net_cents"] += amount
     return {
         "entries": records,
+        "truncated": truncated,
+        "limit": bounded_limit,
         "totals": {
+            "scope": "returned_rows",
             "rows": len(records),
             "minutes_sold": sum(r["minutes_delta"] for r in records
                                 if r["minutes_delta"] > 0),
             "minutes_reversed": sum(-r["minutes_delta"] for r in records
                                     if r["minutes_delta"] < 0),
-            "gross_cents": gross,
-            "refunded_cents": refunded,
-            "net_cents": gross - refunded,
+            "by_currency": list(currencies.values()),
         },
     }

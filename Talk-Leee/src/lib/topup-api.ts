@@ -3,70 +3,32 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 
-/**
- * Minute top-ups (goals.md §9).
- *
- * WHY THIS DOES NOT USE `billingFetch`
- * ------------------------------------
- * The shared billing helper returns `null` on any error so read-only pages can
- * render an honest empty state. That is the right trade for a usage chart and
- * the wrong one for a purchase: a failed checkout would come back as `null` and
- * be indistinguishable from a successful one that returned nothing. Purchases
- * go through `api.request` directly so failures throw and the button can say
- * what went wrong.
- *
- * WHY RETURNING FROM STRIPE IS NOT PROOF OF ANYTHING
- * ---------------------------------------------------
- * The browser comes back from the payment page as soon as the card is
- * accepted. The minutes are credited by a webhook that arrives separately and
- * may be a second or two behind. So the success state polls the balance until
- * it moves rather than announcing a number it has not seen.
- */
+import { z } from "zod";
+import { currencyCode, currencyExponent, formatMinorMoney, ledgerListSchema, type BillingLedgerEntry } from "@/lib/billing-read";
 
-export type TopupPackage = {
-  code: string;
-  name: string;
-  minutes: number;
-  price_cents: number;
-  currency: string;
-  expires_days: number | null;
-  price_per_minute_cents: number;
-};
-
-export type TopupBalance = {
-  allocated: number;
-  used_minutes: number;
-  remaining_minutes: number;
-  unlimited: boolean;
-  exhausted: boolean;
-  purchased_minutes: number;
-};
-
-export type TopupOrder = {
-  id: string;
-  package_code: string;
-  minutes: number;
-  price_cents: number;
-  currency: string;
-  status:
-    | "pending"
-    | "paid"
-    | "failed"
-    | "cancelled"
-    | "refunded"
-    | "disputed";
-  created_at: string | null;
-  paid_at: string | null;
-};
-
-export type LedgerEntry = {
-  kind: "topup" | "refund" | "adjustment" | "dispute";
-  minutes_delta: number;
-  amount_cents: number;
-  currency: string | null;
-  note: string | null;
-  created_at: string | null;
-};
+const recordedDate = z.string().datetime({ offset: true }).nullable();
+export const topupPackageSchema = z.object({ code: z.string(), name: z.string(), minutes: z.number().int().positive(),
+  price_cents: z.number().int().safe().nonnegative(), currency: currencyCode, currency_exponent: currencyExponent,
+  expires_days: z.number().int().positive().nullable(), price_per_minute_cents: z.number().finite().nonnegative(),
+});
+export type TopupPackage = z.infer<typeof topupPackageSchema>;
+export const topupBalanceSchema = z.object({ allocated: z.number().finite(), used_minutes: z.number().finite().nonnegative(),
+  remaining_minutes: z.number().finite(), unlimited: z.boolean(), exhausted: z.boolean(), purchased_minutes: z.number().finite(),
+});
+export type TopupBalance = z.infer<typeof topupBalanceSchema>;
+export const topupOrderSchema = z.object({ id: z.string().uuid(), package_code: z.string(), minutes: z.number().int().safe(),
+  price_cents: z.number().int().safe(), currency: currencyCode, currency_exponent: currencyExponent,
+  status: z.enum(["pending", "paid", "failed", "cancelled", "refunded", "disputed"]),
+  created_at: recordedDate, paid_at: recordedDate, provider_payment_id: z.string().nullable(),
+  refund_details: z.object({ detail_status: z.enum(["complete", "partial", "unavailable"]), captured_at: recordedDate,
+    source_event_id: z.string().nullable(), refunds: z.array(z.object({ id: z.string(),
+      status: z.enum(["pending", "requires_action", "succeeded", "failed", "canceled"]).nullable(),
+      amount: z.number().int().safe().nullable(), currency: currencyCode, currency_exponent: currencyExponent, created_at: recordedDate,
+    })).nullable(),
+  }),
+});
+export type TopupOrder = z.infer<typeof topupOrderSchema>;
+export type LedgerEntry = BillingLedgerEntry;
 
 export const topupKeys = {
   packages: () => ["billing", "topups", "packages"] as const,
@@ -78,7 +40,7 @@ export const topupKeys = {
 export function useTopupPackages() {
   return useQuery({
     queryKey: topupKeys.packages(),
-    queryFn: () => api.request<TopupPackage[]>({ path: "/billing/topups/packages" }),
+    queryFn: async () => z.array(topupPackageSchema).parse(await api.request({ path: "/billing/topups/packages" })),
     // The catalogue changes about as often as the pricing page does.
     staleTime: 5 * 60 * 1000,
   });
@@ -87,7 +49,7 @@ export function useTopupPackages() {
 export function useTopupBalance(pollMs?: number) {
   return useQuery({
     queryKey: topupKeys.balance(),
-    queryFn: () => api.request<TopupBalance>({ path: "/billing/topups/balance" }),
+    queryFn: async () => topupBalanceSchema.parse(await api.request({ path: "/billing/topups/balance" })),
     refetchInterval: pollMs,
   });
 }
@@ -99,7 +61,7 @@ export function useTopupOrders() {
       const r = await api.request<{ orders: TopupOrder[] }>({
         path: "/billing/topups/orders",
       });
-      return r?.orders ?? [];
+      return z.object({ orders: z.array(topupOrderSchema) }).parse(r).orders;
     },
   });
 }
@@ -111,7 +73,7 @@ export function useTopupLedger() {
       const r = await api.request<{ entries: LedgerEntry[] }>({
         path: "/billing/topups/ledger",
       });
-      return r?.entries ?? [];
+      return ledgerListSchema.parse(r);
     },
   });
 }
@@ -137,9 +99,8 @@ export function useStartTopup() {
         body: { package_code: packageCode },
       }),
     onSuccess: () => {
-      // The order exists now even though it is unpaid, and the history list
-      // shows pending rows — so a customer who abandons the payment page can
-      // see that nothing was charged rather than wondering.
+      // Refresh the saved order. A pending row remains unconfirmed and does
+      // not establish whether the provider collected a payment.
       qc.invalidateQueries({ queryKey: topupKeys.orders() });
     },
   });
@@ -170,40 +131,18 @@ export function isLowBalance(balance: TopupBalance | null): boolean {
   return balance.remaining_minutes / balance.allocated < 0.15;
 }
 
-/**
- * Have the minutes actually landed?
- *
- * Returning from the payment page proves the card was accepted, not that the
- * webhook has been processed. The only honest signal is the ledger total
- * moving, so this compares against the value read on arrival.
- *
- * Deliberately `>` and not `!==`: a refund processed in the same window moves
- * the total DOWN, and reporting that as "your minutes are ready" would be a lie
- * in the one direction that matters.
- */
-export function creditHasLanded(
-  baselinePurchased: number | null,
-  current: TopupBalance | null,
-): boolean {
-  if (baselinePurchased === null || !current) return false;
-  return current.purchased_minutes > baselinePurchased;
-}
-
-/** Money, formatted from the minor units the API actually returns. */
-export function formatMoney(cents: number, currency = "GBP") {
-  return new Intl.NumberFormat("en-GB", {
-    style: "currency",
-    currency: currency || "GBP",
-  }).format(cents / 100);
+/** Missing currency or precision is unavailable, never an assumed GBP price. */
+export function formatMoney(minor: number, currency: string | null, exponent: number | null) {
+  return formatMinorMoney(minor, currency, exponent);
 }
 
 export const ORDER_STATUS_LABEL: Record<TopupOrder["status"], string> = {
-  pending: "Awaiting payment",
-  paid: "Added",
+  pending: "Payment unconfirmed",
+  paid: "Paid order",
   failed: "Payment failed",
   cancelled: "Cancelled",
-  refunded: "Refunded",
-  disputed: "Disputed",
+  refunded: "Refund accounting recorded",
+  disputed: "Dispute accounting recorded",
 };
 
 export const ORDER_STATUS_TONE: Record<TopupOrder["status"], string> = {

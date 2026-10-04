@@ -1,0 +1,243 @@
+{
+  "scope": "Synthetic provider objects; actual PostgreSQL capture and API read; no live payment",
+  "provider_invoice": {
+    "id": "in_505fd0f48a3e41518d27f4ab12f7c64b",
+    "object": "invoice",
+    "livemode": false,
+    "customer": "cus_505fd0f48a3e41518d27f4ab12f7c64b",
+    "status": "open",
+    "metadata": {},
+    "parent": {
+      "type": "subscription_details",
+      "subscription_details": {
+        "subscription": "sub_505fd0f48a3e41518d27f4ab12f7c64b"
+      }
+    },
+    "amount_due": 1900,
+    "amount_paid": 1800,
+    "currency": "usd",
+    "status_transitions": {
+      "paid_at": null,
+      "finalized_at": 1700000000
+    },
+    "lines": {
+      "has_more": false,
+      "data": [
+        {
+          "id": "il_505fd0f48a3e41518d27f4ab12f7c64b",
+          "invoice": "in_505fd0f48a3e41518d27f4ab12f7c64b",
+          "livemode": false,
+          "parent": {
+            "type": "subscription_item_details",
+            "subscription_item_details": {}
+          },
+          "pricing": {
+            "type": "price_details",
+            "price_details": {
+              "price": "price_2e52d8580ea04eceafc4619d26802cb8"
+            }
+          },
+          "quantity": 1,
+          "currency": "usd",
+          "description": "Original purchased annual terms",
+          "amount": 1900,
+          "period": {
+            "start": 1700000000,
+            "end": 1731622400
+          }
+        }
+      ]
+    },
+    "number": "SYNTHETIC-CP04",
+    "subtotal": 1900,
+    "total": 2052,
+    "starting_balance": -152,
+    "amount_remaining": 100,
+    "total_taxes": [
+      {
+        "amount": 342,
+        "tax_behavior": "exclusive"
+      }
+    ],
+    "total_discount_amounts": [
+      {
+        "amount": 190,
+        "discount": "di_synthetic"
+      }
+    ],
+    "period_start": 1700000000,
+    "period_end": 1702592000,
+    "invoice_pdf": "https://pay.stripe.com/invoice/synthetic/pdf",
+    "hosted_invoice_url": "https://invoice.stripe.com/i/synthetic"
+  },
+  "stored_snapshot": {
+    "id": 49,
+    "invoice_id": "e91a6b47-c611-4329-a516-2495d82b9069",
+    "tenant_id": "2abfa88d-a4c4-4c09-aead-cc127a5bfa60",
+    "content_hash": "f1fbd7b7370d78ee8a28a15377ba51887acb3fd4c03d657e1488f0eb5b11a7e0",
+    "captured_at": "2026-10-04 16:29:54.306338+00:00",
+    "projection": {
+      "taxes": [
+        {
+          "amount": 342,
+          "inclusive": false,
+          "tax_rate_id": null
+        }
+      ],
+      "total": 2052,
+      "errors": [],
+      "source": "stripe",
+      "status": "open",
+      "credits": [],
+      "paid_at": null,
+      "refunds": [],
+      "version": 1,
+      "currency": "usd",
+      "due_date": null,
+      "subtotal": 1900,
+      "discounts": [
+        {
+          "amount": 190,
+          "discount_id": "di_synthetic"
+        }
+      ],
+      "amount_due": 1900,
+      "line_items": [
+        {
+          "id": "il_505fd0f48a3e41518d27f4ab12f7c64b",
+          "amount": 1900,
+          "currency": "usd",
+          "quantity": 1,
+          "period_end": "2024-11-14T22:13:20+00:00",
+          "description": "Original purchased annual terms",
+          "period_start": "2023-11-14T22:13:20+00:00"
+        }
+      ],
+      "period_end": "2023-12-14T22:13:20+00:00",
+      "amount_paid": 1800,
+      "invoice_pdf": "https://pay.stripe.com/invoice/synthetic/pdf",
+      "finalized_at": "2023-11-14T22:13:20+00:00",
+      "period_start": "2023-11-14T22:13:20+00:00",
+      "detail_status": "complete",
+      "provider_mode": "test",
+      "invoice_number": "SYNTHETIC-CP04",
+      "amount_remaining": 100,
+      "source_reference": "evt_cec60f7f3b324c439973f8f12e16f614",
+      "currency_exponent": 2,
+      "hosted_invoice_url": "https://invoice.stripe.com/i/synthetic"
+    }
+  },
+  "api_invoice": {
+    "id": "e91a6b47-c611-4329-a516-2495d82b9069",
+    "tenant_id": "2abfa88d-a4c4-4c09-aead-cc127a5bfa60",
+    "stripe_invoice_id": "in_505fd0f48a3e41518d27f4ab12f7c64b",
+    "status": "open",
+    "invoice_pdf": "https://pay.stripe.com/invoice/synthetic/pdf",
+    "hosted_invoice_url": "https://invoice.stripe.com/i/synthetic",
+    "paid_at": null,
+    "due_date": null,
+    "created_at": "2026-10-04T16:29:54.206787+00:00",
+    "detail_status": "complete",
+    "detail_source": "provider_snapshot",
+    "captured_at": "2026-10-04T16:29:54.306338+00:00",
+    "source": "stripe",
+    "source_reference": "evt_cec60f7f3b324c439973f8f12e16f614",
+    "provider_mode": "test",
+    "invoice_number": "SYNTHETIC-CP04",
+    "currency": "usd",
+    "currency_exponent": 2,
+    "amount_due": 1900,
+    "amount_paid": 1800,
+    "amount_remaining": 100,
+    "subtotal": 1900,
+    "total": 2052,
+    "discounts": [
+      {
+        "amount": 190,
+        "discount_id": "di_synthetic"
+      }
+    ],
+    "taxes": [
+      {
+        "amount": 342,
+        "inclusive": false,
+        "tax_rate_id": null
+      }
+    ],
+    "credits": [],
+    "refunds": [],
+    "line_items": [
+      {
+        "id": "il_505fd0f48a3e41518d27f4ab12f7c64b",
+        "amount": 1900,
+        "currency": "usd",
+        "quantity": 1,
+        "period_end": "2024-11-14T22:13:20+00:00",
+        "description": "Original purchased annual terms",
+        "period_start": "2023-11-14T22:13:20+00:00"
+      }
+    ],
+    "period_start": "2023-11-14T22:13:20+00:00",
+    "period_end": "2023-12-14T22:13:20+00:00",
+    "errors": []
+  },
+  "api_list": {
+    "invoices": [
+      {
+        "id": "e91a6b47-c611-4329-a516-2495d82b9069",
+        "tenant_id": "2abfa88d-a4c4-4c09-aead-cc127a5bfa60",
+        "stripe_invoice_id": "in_505fd0f48a3e41518d27f4ab12f7c64b",
+        "status": "open",
+        "invoice_pdf": "https://pay.stripe.com/invoice/synthetic/pdf",
+        "hosted_invoice_url": "https://invoice.stripe.com/i/synthetic",
+        "paid_at": null,
+        "due_date": null,
+        "created_at": "2026-10-04T16:29:54.206787+00:00",
+        "detail_status": "complete",
+        "detail_source": "provider_snapshot",
+        "captured_at": "2026-10-04T16:29:54.306338+00:00",
+        "source": "stripe",
+        "source_reference": "evt_cec60f7f3b324c439973f8f12e16f614",
+        "provider_mode": "test",
+        "invoice_number": "SYNTHETIC-CP04",
+        "currency": "usd",
+        "currency_exponent": 2,
+        "amount_due": 1900,
+        "amount_paid": 1800,
+        "amount_remaining": 100,
+        "subtotal": 1900,
+        "total": 2052,
+        "discounts": [
+          {
+            "amount": 190,
+            "discount_id": "di_synthetic"
+          }
+        ],
+        "taxes": [
+          {
+            "amount": 342,
+            "inclusive": false,
+            "tax_rate_id": null
+          }
+        ],
+        "credits": [],
+        "refunds": [],
+        "line_items": [
+          {
+            "id": "il_505fd0f48a3e41518d27f4ab12f7c64b",
+            "amount": 1900,
+            "currency": "usd",
+            "quantity": 1,
+            "period_end": "2024-11-14T22:13:20+00:00",
+            "description": "Original purchased annual terms",
+            "period_start": "2023-11-14T22:13:20+00:00"
+          }
+        ],
+        "period_start": "2023-11-14T22:13:20+00:00",
+        "period_end": "2023-12-14T22:13:20+00:00",
+        "errors": []
+      }
+    ],
+    "count": 1
+  }
+}

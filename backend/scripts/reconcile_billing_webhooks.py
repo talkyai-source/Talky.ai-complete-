@@ -23,6 +23,10 @@ async def run(args):
             result = await reconciliation.list_unresolved(args.limit)
         elif args.action == "inspect":
             result, _ = await reconciliation.inspect(args.event_id)
+        elif args.action == "refresh-details":
+            result = await reconciliation.refresh_details(
+                args.event_id, operator=args.operator, reason=args.reason
+            )
         elif args.action == "authorize-retry":
             result = await reconciliation.authorize_retry(
                 args.event_id, operator=args.operator, reason=args.reason
@@ -42,10 +46,10 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="action", required=True)
     commands.add_parser("list").add_argument("--limit", type=int, default=25)
-    for action in ("inspect", "retry", "authorize-retry"):
+    for action in ("inspect", "retry", "authorize-retry", "refresh-details"):
         command = commands.add_parser(action)
         command.add_argument("--event-id", required=True)
-        if action == "authorize-retry":
+        if action in {"authorize-retry", "refresh-details"}:
             command.add_argument("--operator", required=True)
             command.add_argument("--reason", required=True)
     command = commands.add_parser("retry-unsent-notification")

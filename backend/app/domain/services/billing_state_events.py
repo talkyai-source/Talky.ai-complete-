@@ -6,7 +6,7 @@ returned to the webhook receipt transaction; no email or audit send is issued.
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from app.domain.services.billing_checkout import (
     CheckoutAttempts,
@@ -216,7 +216,7 @@ def _timestamp(value):
     return datetime.fromtimestamp(value, UTC)
 
 
-async def _apply_invoice(conn, billing, event_type, data):
+async def _apply_invoice(conn, billing, event_type, data, *, source_reference=None, details_only=False):
     identity = data.get("id")
     subscription_id = invoice_subscription_id(data)
     if subscription_id:
@@ -245,17 +245,36 @@ async def _apply_invoice(conn, billing, event_type, data):
            for key in ("amount_due", "amount_paid")):
         raise BillingStateReviewRequired("invoice_amount_invalid")
     prior_invoice = await conn.fetchrow(
-        "SELECT tenant_id,stripe_subscription_id,status FROM invoices WHERE stripe_invoice_id=$1 FOR UPDATE", identity,
+        "SELECT tenant_id,stripe_subscription_id,status,notification_history_known FROM invoices WHERE stripe_invoice_id=$1 FOR UPDATE", identity,
     )
     if prior_invoice and (str(prior_invoice["tenant_id"]) != tenant_id
                           or prior_invoice["stripe_subscription_id"] != subscription_id):
         raise BillingStateReviewRequired("invoice_binding_conflict")
+    from app.domain.services.billing_invoice_projection import capture_invoice, store_snapshot
+    projection, hydrated = await capture_invoice(
+        billing, invoice, source_reference or f"observation:{uuid4()}",
+    )
     paid = invoice["status"] == "paid"
-    result = await _apply_subscription(conn, billing, subscription, binding, invoice=invoice if paid else None)
+    financially_relevant = not details_only and event_type in {"invoice.paid", "invoice.payment_failed"}
+    if (financially_relevant and paid and binding["attempt"] and binding["attempt"]["status"] != "completed"
+            and hydrated["lines"]["has_more"]):
+        # Retry provider reads. Partial display rows cannot authorize access.
+        raise BillingStateBusy("invoice_lines_pending")
+    first_payment = paid and binding["attempt"] and binding["attempt"]["status"] != "completed"
+    result = (await _apply_subscription(conn, billing, subscription, binding, invoice=hydrated if first_payment else None)
+              if financially_relevant else _result("handled", tenant_id))
+    if details_only:
+        stored_invoice_id = await conn.fetchval(
+            "SELECT id FROM invoices WHERE stripe_invoice_id=$1 AND tenant_id=$2::uuid", identity, tenant_id,
+        )
+        if not stored_invoice_id:
+            raise BillingStateReviewRequired("invoice_not_recorded")
+        await store_snapshot(conn, stored_invoice_id, tenant_id, projection)
+        return {**result, "detail_status": projection["detail_status"]}
     stored = await conn.execute(
         """INSERT INTO invoices(stripe_invoice_id,stripe_subscription_id,tenant_id,amount_due,amount_paid,
-           currency,status,invoice_pdf,hosted_invoice_url,period_start,period_end,due_date,paid_at)
-           VALUES($1,$2,$3::uuid,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+           currency,status,invoice_pdf,hosted_invoice_url,period_start,period_end,due_date,paid_at,notification_history_known)
+           VALUES($1,$2,$3::uuid,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,TRUE)
            ON CONFLICT(stripe_invoice_id) DO UPDATE SET amount_due=EXCLUDED.amount_due,amount_paid=EXCLUDED.amount_paid,
            currency=EXCLUDED.currency,status=EXCLUDED.status,invoice_pdf=EXCLUDED.invoice_pdf,
            hosted_invoice_url=EXCLUDED.hosted_invoice_url,period_start=EXCLUDED.period_start,
@@ -268,6 +287,12 @@ async def _apply_invoice(conn, billing, event_type, data):
     )
     if stored != "INSERT 0 1":
         raise BillingStateReviewRequired("invoice_binding_conflict")
+    stored_invoice_id = await conn.fetchval(
+        "SELECT id FROM invoices WHERE stripe_invoice_id=$1 AND tenant_id=$2::uuid", identity, tenant_id,
+    )
+    await store_snapshot(conn, stored_invoice_id, tenant_id, projection)
+    if not financially_relevant:
+        return result
     if paid:
         await conn.execute(
             """UPDATE billing_webhook_notifications SET status='superseded',updated_at=NOW()
@@ -296,7 +321,8 @@ async def _apply_invoice(conn, billing, event_type, data):
                                     "subject": subject, "body": body,
                                     # A legacy invoice projection proves money
                                     # state, never that its email was unsent.
-                                    "prior_delivery_unknown": bool(prior_invoice and prior_invoice["status"] == invoice["status"])}]
+                                    "prior_delivery_unknown": bool(prior_invoice and not prior_invoice["notification_history_known"]
+                                                                   and prior_invoice["status"] == invoice["status"])}]
     return result
 
 
@@ -360,10 +386,72 @@ async def _apply_checkout(conn, billing, event_type, data):
     return _result("deferred", tenant_id, reason="payment_unconfirmed")
 
 
-async def apply_billing_event(conn, billing, event_type, data):
+INVOICE_EVENTS = {"invoice.paid", "invoice.payment_failed", "invoice.finalized", "invoice.updated",
+                  "invoice.voided", "invoice.marked_uncollectible"}
+CREDIT_NOTE_EVENTS = {"credit_note.created", "credit_note.updated", "credit_note.voided"}
+REFUND_EVENTS = {"charge.refunded", "refund.created", "refund.updated", "refund.failed", "charge.refund.updated"}
+
+
+async def _invoice_for_adjustment(conn, billing, event_type, data):
+    """Discover an invoice by provider relationships, never by customer search."""
+    if event_type in CREDIT_NOTE_EVENTS:
+        note = await _current(billing, "CreditNote", data.get("id"))
+        identity = _id(note.get("invoice"))
+        adjustment_customer = _id(note.get("customer"))
+    else:
+        if event_type == "charge.refunded":
+            charge = await _current(billing, "Charge", data.get("id"))
+        else:
+            refund = await billing._stripe_call("Refund", "retrieve", data.get("id"))
+            if refund.get("id") != data.get("id") or not _id(refund.get("charge")):
+                raise BillingStateReviewRequired("refund_identity_mismatch")
+            charge = await _current(billing, "Charge", _id(refund["charge"]))
+            if (_id(refund.get("payment_intent")) != _id(charge.get("payment_intent"))
+                    or refund.get("currency") != charge.get("currency")):
+                raise BillingStateReviewRequired("refund_payment_mismatch")
+        identity = _id(charge.get("invoice"))
+        adjustment_customer = _id(charge.get("customer"))
+        if not identity:
+            from app.domain.services.billing_invoice_projection import _pages
+            payment_id = _id(charge.get("payment_intent"))
+            if not payment_id:
+                return None
+            payments = await _pages(
+                billing, "InvoicePayment", payment={"type": "payment_intent", "payment_intent": payment_id},
+                validate=lambda item: (item.get("livemode") is (billing.billing_mode == "live")
+                                       and _id(_object(item.get("payment")).get("payment_intent")) == payment_id),
+            )
+            identities = {_id(item.get("invoice")) for item in payments}
+            if not identities:
+                return None
+            if len(identities) != 1 or None in identities:
+                raise BillingStateReviewRequired("refund_invoice_binding_ambiguous")
+            identity = identities.pop()
+    if not identity or not await conn.fetchval("SELECT id FROM invoices WHERE stripe_invoice_id=$1", identity):
+        return None
+    current_invoice = await _current(billing, "Invoice", identity)
+    if not adjustment_customer or _id(current_invoice.get("customer")) != adjustment_customer:
+        raise BillingStateReviewRequired("invoice_adjustment_customer_mismatch")
+    return identity
+
+
+async def refresh_invoice_details(conn, billing, event_type, data, source_reference):
+    """Append current verified details only. Never grant access or send notices."""
+    if event_type not in INVOICE_EVENTS | CREDIT_NOTE_EVENTS | REFUND_EVENTS:
+        return _result("ignored", reason="unsupported_event")
+    identity = data.get("id") if event_type in INVOICE_EVENTS else await _invoice_for_adjustment(conn, billing, event_type, data)
+    if not identity:
+        return _result("ignored", reason="invoice_not_recorded")
+    return await _apply_invoice(conn, billing, event_type, {"id": identity},
+                                source_reference=source_reference, details_only=True)
+
+
+async def apply_billing_event(conn, billing, event_type, data, *, source_reference=None):
     """Apply one event under the caller's transaction and durable receipt lock."""
-    if event_type in {"invoice.paid", "invoice.payment_failed"}:
-        return await _apply_invoice(conn, billing, event_type, data)
+    if event_type in INVOICE_EVENTS:
+        return await _apply_invoice(conn, billing, event_type, data, source_reference=source_reference)
+    if event_type in CREDIT_NOTE_EVENTS | REFUND_EVENTS:
+        return await refresh_invoice_details(conn, billing, event_type, data, source_reference or f"observation:{uuid4()}")
     if event_type in {"checkout.session.completed", "checkout.session.async_payment_succeeded",
                       "checkout.session.expired", "checkout.session.async_payment_failed"}:
         return await _apply_checkout(conn, billing, event_type, data)

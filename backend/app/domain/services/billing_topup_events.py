@@ -278,6 +278,9 @@ async def apply_topup_event(conn, billing, event_type, data, event_id):
         _review("refund_amount_unavailable", tenant_id)
     if (charge.get("refunded") is True) != (refunded == order["price_cents"]):
         _review("refund_evidence_conflict", tenant_id)
+    from app.domain.services.billing_refund_projection import capture_topup_refunds
+
+    await capture_topup_refunds(conn, order, charge, event_id)
     credit = await conn.fetchrow(
         """SELECT COUNT(*) AS count,COUNT(*) FILTER (WHERE lower(currency)<>$2) AS currency_mismatches,
         COALESCE(SUM(minutes_delta),0) AS minutes,

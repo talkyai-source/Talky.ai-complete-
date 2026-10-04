@@ -96,8 +96,15 @@ async def billing_db():
             # owner. Keep synthetic ledger rows in this disposable database;
             # UUID-scoped tests never reuse their tenant identities.
             await conn.execute("DELETE FROM plan_price_options WHERE plan_id=$1", fixture.plan)
-            await conn.execute("DELETE FROM tenants WHERE id=ANY($1::uuid[])", fixture.tenants)
-            await conn.execute("DELETE FROM plans WHERE id=$1", fixture.plan)
+            # Invoice observations are deliberately immutable, including during
+            # parent deletion. Retain only their UUID-scoped synthetic parents
+            # in this disposable DB instead of disabling evidence protection.
+            has_snapshots = await conn.fetchval(
+                "SELECT EXISTS(SELECT 1 FROM invoice_snapshots WHERE tenant_id=ANY($1::uuid[]))", fixture.tenants,
+            ) if await conn.fetchval("SELECT to_regclass('public.invoice_snapshots') IS NOT NULL") else False
+            if not has_snapshots:
+                await conn.execute("DELETE FROM tenants WHERE id=ANY($1::uuid[])", fixture.tenants)
+                await conn.execute("DELETE FROM plans WHERE id=$1", fixture.plan)
             await conn.execute(f'DROP OWNED BY "{fixture.role}"')
             await conn.execute(f'DROP ROLE "{fixture.role}"')
         await pool.close()

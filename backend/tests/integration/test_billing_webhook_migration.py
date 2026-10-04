@@ -42,6 +42,8 @@ async def webhook_db():
             await conn.execute(f'GRANT USAGE ON SCHEMA public TO "{fixture.role}"')
             await conn.execute(f'GRANT SELECT,INSERT,UPDATE,DELETE ON {",".join(TABLES)} TO "{fixture.role}"')
             await conn.execute(f'GRANT SELECT ON billing_ledger,topup_orders,subscriptions,tenants,invoices,billing_checkout_attempts TO "{fixture.role}"')
+            await conn.execute(f'GRANT SELECT,INSERT ON invoice_snapshots,billing_refund_snapshots TO "{fixture.role}"')
+            await conn.execute(f'GRANT USAGE,SELECT ON SEQUENCE invoice_snapshots_id_seq,billing_refund_snapshots_id_seq TO "{fixture.role}"')
 
         async def set_role(conn):
             await conn.execute(f'SET ROLE "{fixture.role}"')
@@ -187,7 +189,14 @@ async def test_actual_alembic_downgrade_refuses_to_destroy_receipts(webhook_db):
         if process.returncode is None:
             process.kill()
             await process.wait()
-    assert process.returncode != 0 and b"identities must be retained" in output
+    # A newer append-only observation migration may be the first refusal on
+    # the path. Require the explicit retention guard, then prove no revision or
+    # receipt data changed; do not pin this to the old 0054 exception wording.
+    assert process.returncode != 0 and any(message in output for message in (
+        b"Billing event, delivery and review identities must be retained",
+        b"Invoice observations must be retained",
+        b"Refund observations must be retained",
+    ))
     async with acquire_with_tenant(fixture.admin, None) as conn:
         assert await conn.fetchval("SELECT version_num FROM alembic_version") == before
         assert await conn.fetchval("SELECT state FROM processed_webhook_events WHERE event_id=$1", fixture.prefix) == "legacy_unverified"

@@ -253,6 +253,9 @@ jobs:
             tests/integration/test_billing_webhook_http.py \
             tests/integration/test_billing_webhook_receipts.py \
             tests/integration/test_billing_webhook_reconciliation.py \
+            tests/integration/test_billing_invoice_projection.py \
+            tests/integration/test_billing_read_truth.py \
+            tests/integration/test_billing_refund_projection.py \
             -q
         env:
           TEST_DATABASE_URL: postgresql://talky:testpassword@localhost:5432/talky_alembic_test

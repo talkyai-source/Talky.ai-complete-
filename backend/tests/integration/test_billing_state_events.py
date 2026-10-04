@@ -28,6 +28,8 @@ async def state_db(checkout_db):  # noqa: F811
     fixture = checkout_db
     async with acquire_with_tenant(fixture.pool, None) as conn:
         await conn.execute(f'GRANT SELECT,INSERT,UPDATE,DELETE ON invoices TO "{fixture.role}"')
+        await conn.execute(f'GRANT SELECT,INSERT ON invoice_snapshots TO "{fixture.role}"')
+        await conn.execute(f'GRANT USAGE ON SEQUENCE invoice_snapshots_id_seq TO "{fixture.role}"')
         await conn.execute(f'GRANT SELECT ON user_profiles TO "{fixture.role}"')
         await conn.execute(f'GRANT SELECT,INSERT,UPDATE,DELETE ON billing_webhook_notifications,processed_webhook_events TO "{fixture.role}"')
     fixture.objects, fixture.reads = {}, []
@@ -38,7 +40,23 @@ async def state_db(checkout_db):  # noqa: F811
         return deepcopy(fixture.objects[(resource, identity)])
 
     fixture.billing = SimpleNamespace(billing_mode="test", _stripe_call=read)
-    yield fixture
+    try:
+        yield fixture
+    finally:
+        # Retained immutable invoice observations must not leave synthetic
+        # pending email work for a later test's deliberately global drain.
+        # Only this fixture's mutable tenant-scoped delivery/receipt rows go.
+        async with acquire_with_tenant(fixture.pool, None) as conn:
+            await conn.execute(
+                "DELETE FROM billing_webhook_notifications WHERE tenant_id=ANY($1::uuid[])", fixture.tenants,
+            )
+            await conn.execute(
+                """DELETE FROM billing_webhook_review_log WHERE event_id IN
+                   (SELECT event_id FROM processed_webhook_events WHERE tenant_id=ANY($1::uuid[]))""", fixture.tenants,
+            )
+            await conn.execute(
+                "DELETE FROM processed_webhook_events WHERE tenant_id=ANY($1::uuid[])", fixture.tenants,
+            )
 
 
 async def _paid(fixture):
@@ -53,6 +71,7 @@ async def _paid(fixture):
         "amount_due": price["unit_amount"], "amount_paid": price["unit_amount"], "currency": "usd",
         "status_transitions": {"paid_at": 1700000000},
         "lines": {"has_more": False, "data": [{
+            "id": "il_" + receipt["request_id"].replace("-", ""), "invoice": invoice_id, "livemode": False,
             "parent": {"type": "subscription_item_details", "subscription_item_details": {}},
             "pricing": {"type": "price_details", "price_details": {"price": price["id"]}},
             "quantity": 1, "currency": "usd",
@@ -188,7 +207,7 @@ async def test_first_paid_invoice_cannot_loosen_frozen_purchase_binding(state_db
     else:
         current["lines"]["has_more"] = True
     before = await _tenant(fixture)
-    with pytest.raises(BillingStateReviewRequired):
+    with pytest.raises(BillingStateBusy if wrong == "truncated_lines" else BillingStateReviewRequired):
         await _apply(fixture, "invoice.paid", invoice)
     assert await _tenant(fixture) == before
     assert (await fixture.service._get(fixture.tenants[0], receipt["request_id"]))["status"] == "ready"
@@ -289,6 +308,7 @@ async def test_existing_invoice_projection_cannot_prove_old_email_was_unsent(sta
     # an email receipt. A new event ID cannot turn that ambiguity into "unsent".
     async with acquire_with_tenant(fixture.pool, None) as conn:
         assert await conn.fetchval("SELECT COUNT(*) FROM billing_webhook_notifications WHERE tenant_id=$1", fixture.tenants[0]) == 0
+        await conn.execute("UPDATE invoices SET notification_history_known=FALSE WHERE stripe_invoice_id=$1", invoice["id"])
     repeated = await _apply(fixture, event_type, invoice)
     assert repeated["notifications"][0]["prior_delivery_unknown"] is True
     assert repeated["notifications"][0]["delivery_key"] == first["notifications"][0]["delivery_key"]

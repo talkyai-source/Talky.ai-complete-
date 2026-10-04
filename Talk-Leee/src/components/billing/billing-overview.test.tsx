@@ -1,9 +1,11 @@
 import { test, afterEach, beforeEach } from "node:test";
 import assert from "node:assert/strict";
-import { cleanup, screen, waitFor } from "@testing-library/react";
+import { readFileSync } from "node:fs";
+import { cleanup, screen, waitFor, within } from "@testing-library/react";
 import { BillingOverview } from "@/components/billing/billing-overview";
 import { ensureDom } from "@/test-utils/dom";
 import { renderWithQueryClient } from "@/test-utils/render";
+import { formatMinorMoney, ledgerListSchema } from "@/lib/billing-read";
 
 ensureDom();
 
@@ -40,6 +42,8 @@ const EMPTY_USAGE = {
     allocated: 0,
     remaining: 0,
     overage: 0,
+    unlimited: true,
+    metering_period: "calendar_month",
 };
 
 function json(body: unknown, status = 200) {
@@ -106,7 +110,7 @@ test("a genuinely empty successful response renders the empty state, not an erro
     });
 
     assert.ok(screen.getByText("No call activity in the last 30 days."));
-    assert.ok(screen.getByText("of 0 minutes used"));
+    assert.ok(screen.getByText("minutes used · Unlimited allowance"));
     assert.equal(screen.queryByText("Billing data did not load"), null);
     assert.equal(screen.queryByRole("alert"), null);
 });
@@ -181,4 +185,91 @@ test("a failed overage-alerts request is surfaced instead of silently showing no
     await waitFor(() => {
         assert.ok(screen.getByText("Overage alerts did not load."));
     });
+});
+
+test("unlimited minutes keep actual usage without a false zero allowance or percentage", async () => {
+    globalThis.fetch = routeFetch({ ...ALL_EMPTY_OK, "/billing/usage": () => json({ ...EMPTY_USAGE, total_used: 123, unlimited: true }) }) as typeof fetch;
+    renderWithQueryClient(<BillingOverview />);
+    await screen.findByText("minutes used · Unlimited allowance");
+    assert.ok(screen.getByText("123"));
+    assert.equal(screen.queryByText("of 0 minutes used"), null);
+    assert.equal(screen.queryByText("0.0% used"), null);
+    assert.equal(screen.queryByRole("progressbar"), null);
+});
+
+test("usage without a contracted rate does not invent an estimated charge", async () => {
+    globalThis.fetch = routeFetch({ ...ALL_EMPTY_OK, "/billing/overage-alerts": () => json([{ type: "minutes", currentUsage: 110, limit: 100, exceededBy: 10, estimatedCharge: null, currency: null, currency_exponent: null, severity: "critical" }]) }) as typeof fetch;
+    renderWithQueryClient(<BillingOverview />);
+    await screen.findByText(/Additional usage pricing is unavailable/);
+    assert.equal(screen.queryByText(/Estimated overage charge|\$1\.00/), null);
+});
+
+test("linked refund movement preserves negative accounting amounts without a bank-refund claim", async () => {
+    globalThis.fetch = routeFetch({ ...ALL_EMPTY_OK, "/billing/adjustments": () => json([{ id: "12", order_id: "00000000-0000-4000-8000-000000000404", provider_event_id: "evt_refund", provider_payment_id: "pi_original", kind: "refund", minutes_delta: -250, amount_cents: -2500, currency: "gbp", currency_exponent: 2, note: null, created_at: "2026-10-01T00:00:00Z" }]) }) as typeof fetch;
+    renderWithQueryClient(<BillingOverview />);
+    await screen.findByText("Refund accounting reversal");
+    assert.ok(screen.getByText("-£25.00"));
+    assert.ok(screen.getByText("pi_original"));
+    assert.ok(screen.getByText(/A reversal is not proof that funds reached a bank/));
+});
+
+test("malformed successful usage is a load failure instead of zero consumption", async () => {
+    globalThis.fetch = routeFetch({ ...ALL_EMPTY_OK, "/billing/usage": () => json({}) }) as typeof fetch;
+    renderWithQueryClient(<BillingOverview />);
+    await screen.findByText("Billing data did not load");
+    assert.equal(screen.queryByText("of 0 minutes used"), null);
+});
+
+test("an unlimited subscription does not duplicate a false zero remaining or percentage meter", async () => {
+    globalThis.fetch = routeFetch({ ...ALL_EMPTY_OK, "/billing/subscription": () => json({ ...EMPTY_SUBSCRIPTION, status: "active", plan_id: "unlimited", plan_name: "Unlimited plan", minutes_used: 99999 }),
+        "/billing/usage": () => json({ ...EMPTY_USAGE, total_used: 37 }) }) as typeof fetch;
+    renderWithQueryClient(<BillingOverview />);
+    await screen.findByText("Unlimited plan");
+    assert.ok(within(screen.getByText("Included minutes").parentElement!).queryByText("Unlimited"), "zero-sentinel subscription allowance must say Unlimited");
+    assert.equal(screen.queryByText("Minutes remaining"), null);
+    assert.equal(screen.queryByText(/0% used|99,999/), null);
+    assert.equal(screen.queryByRole("progressbar"), null);
+});
+
+test("a missing subscription allowance is a read failure rather than an inferred unlimited plan", async () => {
+    const incomplete = { ...EMPTY_SUBSCRIPTION } as Partial<typeof EMPTY_SUBSCRIPTION>;
+    delete incomplete.minutes_allocated;
+    globalThis.fetch = routeFetch({ ...ALL_EMPTY_OK, "/billing/subscription": () => json(incomplete) }) as typeof fetch;
+    renderWithQueryClient(<BillingOverview />);
+    await screen.findByText("Billing data did not load");
+    assert.equal(screen.queryByText("Unlimited"), null);
+});
+
+test("average settled time preserves a recorded 59-second call instead of reconstructing rounded minutes", async () => {
+    globalThis.fetch = routeFetch({ ...ALL_EMPTY_OK, "/billing/usage/daily": () => json([{ date: "2026-10-04", minutesUsed: 0, secondsUsed: 59, totalCalls: 1, successfulCalls: 1, failedCalls: 0 }]) }) as typeof fetch;
+    renderWithQueryClient(<BillingOverview />);
+    await screen.findByText("Total Calls");
+    assert.ok(screen.queryByText("0m 59s"), "59 recorded seconds must not become zero duration");
+    assert.ok(screen.queryByText("Average settled time per call"));
+    assert.equal(screen.queryByText("Avg Duration"), null);
+});
+
+test("missing exact daily seconds is an unavailable call-stat read, never a guessed zero", async () => {
+    globalThis.fetch = routeFetch({ ...ALL_EMPTY_OK, "/billing/usage/daily": () => json([{ date: "2026-10-04", minutesUsed: 0, totalCalls: 1, successfulCalls: 1, failedCalls: 0 }]) }) as typeof fetch;
+    renderWithQueryClient(<BillingOverview />);
+    await screen.findByText("Call stats did not load.");
+    assert.equal(screen.queryByText("0m 0s"), null);
+});
+
+test("actual PostgreSQL ledger endpoints agree and render signed linked accounting movements", async () => {
+    const evidence = JSON.parse(readFileSync(new URL("../../../../docs/sessions/artifacts/cp04/ledger-contract.json", import.meta.url), "utf8"));
+    const entries = ledgerListSchema.parse(evidence.api_adjustments);
+    assert.deepEqual(ledgerListSchema.parse(evidence.api_ledger), entries);
+    assert.ok(entries.some((entry) => entry.kind === "refund" && entry.minutes_delta < 0));
+    assert.ok(entries.some((entry) => entry.kind === "topup" && entry.minutes_delta > 0));
+    globalThis.fetch = routeFetch({ ...ALL_EMPTY_OK, "/billing/adjustments": () => json(evidence.api_adjustments) }) as typeof fetch;
+    renderWithQueryClient(<BillingOverview />);
+    await screen.findByText("Refund accounting reversal");
+    const table = screen.getByRole("table", { name: "Recorded top-up accounting entries" });
+    for (const entry of entries) {
+        const row = within(table).getByText(formatMinorMoney(entry.amount_cents, entry.currency, entry.currency_exponent)).closest("tr")!;
+        assert.ok(within(row).getByText(entry.order_id!));
+        assert.ok(within(row).getByText(entry.provider_payment_id!));
+    }
+    assert.ok(screen.getByText(/A reversal is not proof that funds reached a bank/));
 });

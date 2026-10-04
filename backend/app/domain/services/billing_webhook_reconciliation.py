@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import json
-from uuid import UUID
+import asyncio
+from uuid import UUID, uuid4
 
 from app.core.db_utils import acquire_with_tenant
 from app.domain.services.billing_webhooks import (
@@ -24,6 +25,9 @@ RECOVERABLE_TYPES = frozenset(
         "customer.subscription.deleted",
         "invoice.paid",
         "invoice.payment_failed",
+        "invoice.finalized", "invoice.updated", "invoice.voided", "invoice.marked_uncollectible",
+        "credit_note.created", "credit_note.updated", "credit_note.voided",
+        "refund.created", "refund.updated", "refund.failed", "charge.refund.updated",
         "charge.refunded",
         "charge.dispute.created",
     }
@@ -90,7 +94,9 @@ class BillingReconciliation:
                     else (
                         "Dispute"
                         if event_type == "charge.dispute.created"
-                        else "Charge" if event_type == "charge.refunded" else None
+                        else "Charge" if event_type == "charge.refunded"
+                        else "Refund" if event_type.startswith("refund.") or event_type == "charge.refund.updated"
+                        else "CreditNote" if event_type.startswith("credit_note.") else None
                     )
                 )
             )
@@ -98,7 +104,9 @@ class BillingReconciliation:
         current = None
         if resource and data.get("id"):
             current = await self.billing._stripe_call(resource, "retrieve", data["id"])
-            if current.get("id") != data["id"] or current.get("livemode") is not (mode == "live"):
+            if current.get("id") != data["id"] or (
+                resource != "Refund" and current.get("livemode") is not (mode == "live")
+            ):
                 raise ValueError("Current provider object identity does not match")
         async with acquire_with_tenant(self.pool, None, timeout=5) as conn:
             ledger = await conn.fetch(
@@ -234,6 +242,45 @@ class BillingReconciliation:
             "state": "pending",
             "financial_effects_applied": False,
             "reviewed": report,
+        }
+
+    async def refresh_details(self, event_id, *, operator, reason):
+        """Append current provider observations; never replay financial handlers."""
+        from app.domain.services.billing_refund_projection import handle_topup_refund_observation
+        from app.domain.services.billing_state_events import (
+            INVOICE_EVENTS, CREDIT_NOTE_EVENTS, REFUND_EVENTS, refresh_invoice_details,
+        )
+
+        if not operator.strip() or len(operator) > 200 or not 12 <= len(reason.strip()) <= 2000:
+            raise ValueError("An identified operator and substantive reconciliation reason are required")
+        async with asyncio.timeout(50):
+            report, event = await self.inspect(event_id)
+            event_type = event["type"]
+            if event_type not in INVOICE_EVENTS | CREDIT_NOTE_EVENTS | REFUND_EVENTS:
+                raise ValueError("This event does not identify invoice or refund detail")
+            reference = "observation:" + str(uuid4())
+            async with acquire_with_tenant(self.pool, None, timeout=5) as conn:
+                await conn.execute("SET LOCAL statement_timeout='10000ms'")
+                if not await lock_event(conn, event_id):
+                    raise BillingWebhookRetryable("event_busy")
+                result = await handle_topup_refund_observation(
+                    conn, self.billing, event_type, event["data"]["object"], reference
+                )
+                if result.get("status") == "ignored":
+                    result = await refresh_invoice_details(
+                        conn, self.billing, event_type, event["data"]["object"], reference
+                    )
+                await conn.execute(
+                    """INSERT INTO billing_webhook_review_log(event_id,operator,decision,reason)
+                    VALUES($1,$2,'refresh_provider_details',$3)""",
+                    event_id, operator.strip(), json.dumps({
+                        "reason": reason.strip(), "observation": reference, "result": result,
+                        "prior_receipt_state": report["state"],
+                    }, default=str, sort_keys=True),
+                )
+        return {
+            "event_id": event_id, "observation": reference, "result": result,
+            "financial_effects_applied": False, "notifications_sent": False,
         }
 
     async def retry(self, event_id):

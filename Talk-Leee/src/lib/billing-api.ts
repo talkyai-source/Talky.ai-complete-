@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { ApiClientError } from "@/lib/http-client";
 import { billingCatalogSchema, billingSubscriptionSchema } from "@/lib/billing-purchase";
+import { dailyUsageSchema, invoiceListSchema, invoiceSchema, ledgerListSchema, overageAlertsSchema, usageSchema } from "@/lib/billing-read";
 
 // ── Fetch helper ──
 //
@@ -49,9 +50,9 @@ async function billingFetch<T>(path: string, options?: BillingFetchInit): Promis
  *
  * Same shape as `extended-api.ts` `getCallFeedback` / `getMyReview`.
  */
-async function billingFetchOptional<T>(path: string): Promise<T | null> {
+async function billingFetchOptional<T>(path: string, parse: (data: unknown) => T): Promise<T | null> {
   try {
-    return await billingFetch<T>(path);
+    return parse(await billingFetch(path));
   } catch (err) {
     if (err instanceof ApiClientError && err.status === 404) return null;
     throw err;
@@ -105,7 +106,7 @@ export function useBillingUsage() {
     queryFn: async () => {
       // Backend exposes /billing/usage (summary for current period).
       const data = await billingFetch("/billing/usage");
-      return data ?? null;
+      return usageSchema.parse(data);
     },
   });
 }
@@ -115,7 +116,7 @@ export function useDailyUsage() {
     queryKey: billingKeys.dailyUsage(),
     queryFn: async () => {
       const data = await billingFetch("/billing/usage/daily");
-      return data ?? [];
+      return dailyUsageSchema.parse(data);
     },
   });
 }
@@ -125,7 +126,7 @@ export function useBillingInvoices() {
     queryKey: billingKeys.invoices(),
     queryFn: async () => {
       const data = await billingFetch("/billing/invoices");
-      return data ?? [];
+      return invoiceListSchema.parse(data);
     },
   });
 }
@@ -136,8 +137,7 @@ export function useBillingInvoice(id: string) {
     queryFn: async () => {
       // 404 here means the invoice does not exist — an answer, not an
       // outage — so it comes back as null and the page says so.
-      const data = await billingFetchOptional(`/billing/invoices/${encodeURIComponent(id)}`);
-      return data ?? null;
+      return billingFetchOptional(`/billing/invoices/${encodeURIComponent(id)}`, (data) => invoiceSchema.parse(data));
     },
     enabled: Boolean(id),
   });
@@ -158,7 +158,7 @@ export function useBillingAdjustments() {
     queryKey: billingKeys.adjustments(),
     queryFn: async () => {
       const data = await billingFetch("/billing/adjustments");
-      return data ?? [];
+      return ledgerListSchema.parse(data);
     },
   });
 }
@@ -168,7 +168,7 @@ export function useOverageAlerts() {
     queryKey: billingKeys.overageAlerts(),
     queryFn: async () => {
       const data = await billingFetch("/billing/overage-alerts");
-      return data ?? [];
+      return overageAlertsSchema.parse(data);
     },
   });
 }

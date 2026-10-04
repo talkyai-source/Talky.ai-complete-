@@ -9,7 +9,6 @@ import {
   ArrowRight,
   CalendarDays,
   CheckCircle,
-  CircleGauge,
   Clock,
   CreditCard,
   FileText,
@@ -24,6 +23,7 @@ import {
 import { ErrorState } from "@/components/states/page-states";
 import { isApiClientError } from "@/lib/http-client";
 import { formatPurchasedPrice, type BillingSubscription } from "@/lib/billing-purchase";
+import { formatMinorMoney, type BillingInvoice, type BillingUsage, type BillingLedgerEntry } from "@/lib/billing-read";
 import {
   useBillingPlan,
   useBillingUsage,
@@ -55,58 +55,29 @@ import {
 
 type Subscription = BillingSubscription;
 
-type UsageSummary = {
-  usage_type: string;
-  total_used: number;
-  allocated: number;
-  remaining: number;
-  overage: number;
-};
+type UsageSummary = BillingUsage;
 
 type DailyUsageDay = {
   date: string;
   minutesUsed: number;
+  secondsUsed: number;
   totalCalls: number;
   successfulCalls: number;
   failedCalls: number;
 };
 
-type InvoiceRow = {
-  id: string;
-  stripe_invoice_id?: string;
-  amount_due: number;
-  currency: string;
-  status: string;
-  period_start: string | null;
-  period_end: string | null;
-  created_at: string;
-};
+type InvoiceRow = BillingInvoice;
 
 type OverageAlertRow = {
   type: "minutes" | "concurrency";
   currentUsage: number;
   limit: number;
   exceededBy: number;
-  estimatedCharge: number;
+  estimatedCharge: number | null;
+  currency: string | null;
+  currency_exponent: number | null;
   severity: "warning" | "critical";
 };
-
-type AdjustmentRow = {
-  id: string;
-  type: "credit" | "debit" | "refund" | "promo";
-  description: string;
-  amount: number;
-  appliedAt: string;
-  reason: string;
-};
-
-function formatCurrency(amount: number) {
-  return new Intl.NumberFormat(undefined, { style: "currency", currency: "USD", minimumFractionDigits: 2 }).format(amount);
-}
-
-function formatCents(cents: number, currency = "usd") {
-  return new Intl.NumberFormat(undefined, { style: "currency", currency: currency.toUpperCase(), minimumFractionDigits: 2 }).format((cents || 0) / 100);
-}
 
 function formatDate(iso: string | null | undefined) {
   if (!iso) return "—";
@@ -201,10 +172,9 @@ export function BillingOverview({ topupSlot, scope }: { topupSlot?: ReactNode; s
   const subscription = (planQ.data as Subscription | null) ?? null;
   const usage = (usageQ.data as UsageSummary | null) ?? null;
   const daily = (dailyQ.data as DailyUsageDay[] | null) ?? [];
-  const invoicesPayload = invoicesQ.data as { invoices?: InvoiceRow[] } | InvoiceRow[] | null;
-  const invoices: InvoiceRow[] = Array.isArray(invoicesPayload) ? invoicesPayload : invoicesPayload?.invoices ?? [];
+  const invoices = invoicesQ.data ?? [];
   const overage = (overageQ.data as OverageAlertRow[] | null) ?? [];
-  const adjustments = (adjQ.data as AdjustmentRow[] | null) ?? [];
+  const adjustments = adjQ.data ?? [];
 
   const initialLoading = planQ.isLoading || usageQ.isLoading;
 
@@ -256,7 +226,7 @@ export function BillingOverview({ topupSlot, scope }: { topupSlot?: ReactNode; s
       />
       {topupSlot}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <MinutesTracker subscription={subscription} usage={usage} />
+        <MinutesTracker usage={usage} />
         <CallStats
           daily={daily}
           loading={dailyQ.isLoading}
@@ -281,6 +251,7 @@ export function BillingOverview({ topupSlot, scope }: { topupSlot?: ReactNode; s
       />
       <AdjustmentsList
         adjustments={adjustments}
+        loading={adjQ.isLoading}
         failed={adjQ.isError}
         error={adjQ.error}
         onRetry={() => void adjQ.refetch()}
@@ -310,9 +281,6 @@ function PlanDisplay({ subscription }: { subscription: Subscription | null }) {
     );
   }
 
-  const usedPercent = subscription.minutes_allocated > 0
-    ? Math.min(100, Math.max(0, (subscription.minutes_used / subscription.minutes_allocated) * 100))
-    : 0;
   const details = [
     { label: "Plan", value: subscription.plan_name || "No plan selected", icon: Layers3, large: true },
     {
@@ -323,14 +291,8 @@ function PlanDisplay({ subscription }: { subscription: Subscription | null }) {
     },
     {
       label: "Included minutes",
-      value: subscription.minutes_allocated.toLocaleString(),
+      value: subscription.minutes_allocated <= 0 ? "Unlimited" : subscription.minutes_allocated.toLocaleString(),
       icon: Phone,
-      large: true,
-    },
-    {
-      label: "Minutes remaining",
-      value: subscription.minutes_remaining.toLocaleString(),
-      icon: CircleGauge,
       large: true,
     },
   ];
@@ -349,7 +311,7 @@ function PlanDisplay({ subscription }: { subscription: Subscription | null }) {
                 <Sparkles className="h-3.5 w-3.5" aria-hidden /> Subscription overview
               </div>
               <CardTitle>Current plan</CardTitle>
-              <CardDescription className="mt-1">Purchased offer, billing period, and recorded minute balance.</CardDescription>
+              <CardDescription className="mt-1">Purchased offer, billing period, and included allowance.</CardDescription>
             </div>
           </div>
           <div className="self-start">{statusBadge(subscription.status)}</div>
@@ -357,7 +319,7 @@ function PlanDisplay({ subscription }: { subscription: Subscription | null }) {
       </CardHeader>
       <CardContent className="relative">
         {subscription.purchased_price_option ? <p className="mb-4 font-medium">Purchased offer: {formatPurchasedPrice(subscription.purchased_price_option)}</p> : <p className="mb-4 text-sm text-muted-foreground">Purchased price and interval are not available in the billing record. The current catalogue is not used to infer them.</p>}
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           {details.map((detail) => (
             <div
               key={detail.label}
@@ -372,19 +334,6 @@ function PlanDisplay({ subscription }: { subscription: Subscription | null }) {
               </div>
             </div>
           ))}
-        </div>
-
-        <div className="mt-5 rounded-2xl border border-border/70 bg-background/50 p-4">
-          <div className="mb-2 flex items-center justify-between gap-3 text-xs">
-            <span className="font-semibold text-foreground">Included allowance</span>
-            <span className="tabular-nums text-muted-foreground">{usedPercent.toFixed(0)}% used</span>
-          </div>
-          <div className="h-2 overflow-hidden rounded-full bg-muted">
-            <div
-              className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-primary transition-[width] duration-500"
-              style={{ width: `${usedPercent}%` }}
-            />
-          </div>
         </div>
 
         <div className="mt-5 flex flex-col gap-3 border-t border-border/60 pt-5 sm:flex-row sm:items-center sm:justify-between">
@@ -405,38 +354,39 @@ function PlanDisplay({ subscription }: { subscription: Subscription | null }) {
   );
 }
 
-function MinutesTracker({ subscription, usage }: { subscription: Subscription | null; usage: UsageSummary | null }) {
-  const minutesUsed = subscription?.minutes_used ?? usage?.total_used ?? 0;
-  const minutesIncluded = subscription?.minutes_allocated ?? usage?.allocated ?? 0;
-  const minutesOverage = usage?.overage ?? Math.max(0, minutesUsed - minutesIncluded);
+function MinutesTracker({ usage }: { usage: UsageSummary | null }) {
+  if (!usage) return <Card><CardContent className="p-4">Usage unavailable.</CardContent></Card>;
+  const minutesUsed = usage.total_used;
+  const minutesIncluded = usage.allocated;
+  const minutesOverage = usage.overage;
   const pct = minutesIncluded > 0 ? Math.min(100, (minutesUsed / minutesIncluded) * 100) : 0;
-  const remaining = Math.max(0, minutesIncluded - minutesUsed);
+  const remaining = usage.remaining;
   const barColor = pct >= 90 ? "bg-red-500" : pct >= 75 ? "bg-amber-500" : "bg-emerald-500";
 
   return (
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2"><Phone className="h-5 w-5" aria-hidden /> Minutes Usage</CardTitle>
-        <CardDescription>Track your voice minutes consumption</CardDescription>
+        <CardDescription>Calendar-month call usage, separate from invoice charges.</CardDescription>
       </CardHeader>
       <CardContent>
         <div className="flex items-end justify-between gap-2">
           <div>
             <div className="text-3xl font-black tabular-nums text-foreground">{minutesUsed.toLocaleString()}</div>
-            <div className="text-sm text-muted-foreground">of {minutesIncluded.toLocaleString()} minutes used</div>
+            <div className="text-sm text-muted-foreground">{usage.unlimited ? "minutes used · Unlimited allowance" : `of ${minutesIncluded.toLocaleString()} minutes used`}</div>
           </div>
           <div className="text-right">
-            <div className="text-lg font-bold tabular-nums text-foreground">{remaining.toLocaleString()}</div>
+              <div className="text-lg font-bold tabular-nums text-foreground">{usage.unlimited ? "Unlimited" : remaining.toLocaleString()}</div>
             <div className="text-xs text-muted-foreground">remaining</div>
           </div>
         </div>
-        <div className="mt-4 h-3 w-full overflow-hidden rounded-full bg-muted/40">
+        {!usage.unlimited && <><div role="progressbar" aria-label="Monthly minutes used" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100} className="mt-4 h-3 w-full overflow-hidden rounded-full bg-muted/40">
           <div className={`h-full rounded-full transition-all duration-500 ${barColor}`} style={{ width: `${pct}%` }} />
         </div>
         <div className="mt-2 flex justify-between text-xs text-muted-foreground">
           <span>{pct.toFixed(1)}% used</span>
           {minutesOverage > 0 && <span className="font-semibold text-red-600 dark:text-red-400">{minutesOverage} overage minutes</span>}
-        </div>
+        </div></>}
       </CardContent>
     </Card>
   );
@@ -458,21 +408,21 @@ function CallStats({
   const totalCalls = daily.reduce((s, d) => s + d.totalCalls, 0);
   const successful = daily.reduce((s, d) => s + d.successfulCalls, 0);
   const failedCalls = daily.reduce((s, d) => s + d.failedCalls, 0);
-  const totalSeconds = daily.reduce((s, d) => s + d.minutesUsed * 60, 0);
+  const totalSeconds = daily.reduce((s, d) => s + d.secondsUsed, 0);
   const avgDuration = totalCalls > 0 ? Math.round(totalSeconds / totalCalls) : 0;
 
   const stats = [
     { label: "Total Calls", value: totalCalls.toLocaleString(), icon: Phone },
     { label: "Successful", value: successful.toLocaleString(), icon: CheckCircle },
     { label: "Failed", value: failedCalls.toLocaleString(), icon: XCircle },
-    { label: "Avg Duration", value: `${Math.floor(avgDuration / 60)}m ${avgDuration % 60}s`, icon: Clock },
+    { label: "Average settled time per call", value: `${Math.floor(avgDuration / 60)}m ${avgDuration % 60}s`, icon: Clock },
   ];
 
   return (
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2"><TrendingUp className="h-5 w-5" aria-hidden /> Call Stats (30d)</CardTitle>
-        <CardDescription>Rolling 30-day call totals</CardDescription>
+        <CardDescription>Rolling 30-day call totals. Settled time includes finalized transfer time.</CardDescription>
       </CardHeader>
       <CardContent>
         {loading ? (
@@ -544,7 +494,7 @@ function UsageSummarySection({
                     >
                       <div
                         className="w-full min-w-1 rounded-t-md bg-gradient-to-t from-primary to-primary/55 transition-[height,filter] duration-500 group-hover:brightness-110"
-                        style={{ height: `${Math.max(h, 4)}%` }}
+                        style={{ height: `${h}%` }}
                       />
                     </div>
                   );
@@ -580,8 +530,8 @@ function OverageAlertsCard({
   alerts.forEach((a) => {
     warnings.push({
       message: a.type === "minutes"
-        ? `You have exceeded your monthly minutes limit by ${a.exceededBy.toLocaleString()} minutes. Estimated overage charge: ${formatCurrency(a.estimatedCharge)}.`
-        : `You have exceeded your concurrency limit by ${a.exceededBy}. Estimated overage charge: ${formatCurrency(a.estimatedCharge)}.`,
+         ? `You have exceeded your monthly minutes allowance by ${a.exceededBy.toLocaleString()} minutes. ${a.estimatedCharge === null ? "Additional usage pricing is unavailable; this is not a charge." : `Estimated charge: ${formatMinorMoney(a.estimatedCharge, a.currency, a.currency_exponent)}.`}`
+        : `You have exceeded your concurrency limit by ${a.exceededBy}. Additional usage pricing is unavailable; this is not a charge.`,
       severity: a.severity,
     });
   });
@@ -590,7 +540,7 @@ function OverageAlertsCard({
     const pct = (usage.total_used / usage.allocated) * 100;
     if (pct >= 85 && pct < 100) {
       warnings.push({
-        message: `You have used ${pct.toFixed(0)}% of your included minutes. Consider upgrading your plan to avoid overage charges.`,
+        message: `You have used ${pct.toFixed(0)}% of your included minutes. Review your allowance before starting more calls.`,
         severity: "warning",
       });
     }
@@ -631,80 +581,21 @@ function OverageAlertsCard({
   );
 }
 
-function AdjustmentsList({
-  adjustments,
-  failed,
-  error,
-  onRetry,
-}: {
-  adjustments: AdjustmentRow[];
-  failed: boolean;
-  error: unknown;
-  onRetry: () => void;
+function AdjustmentsList({ adjustments, loading, failed, error, onRetry }: {
+  adjustments: BillingLedgerEntry[]; loading: boolean; failed: boolean; error: unknown; onRetry: () => void;
 }) {
-  if (failed) {
-    return (
-      <Card>
-        <CardHeader>
-          <CardTitle>Adjustments &amp; Credits</CardTitle>
-          <CardDescription>Corrections and credits applied to your account</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <SectionLoadError what="Adjustments and credits" error={error} onRetry={onRetry} />
-        </CardContent>
-      </Card>
-    );
-  }
-
-  if (adjustments.length === 0) return null;
-
-  const typeBadge = (t: string) => {
-    const m: Record<string, { label: string; className: string }> = {
-      credit: { label: "Credit", className: "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400" },
-      refund: { label: "Refund", className: "border-blue-500/30 bg-blue-500/10 text-blue-700 dark:text-blue-400" },
-      debit: { label: "Charge", className: "border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-400" },
-      promo: { label: "Promo", className: "border-purple-500/30 bg-purple-500/10 text-purple-700 dark:text-purple-400" },
-    };
-    const b = m[t] || m.debit;
-    return <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold ${b.className}`}>{b.label}</span>;
-  };
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Adjustments &amp; Credits</CardTitle>
-        <CardDescription>Corrections and credits applied to your account</CardDescription>
-      </CardHeader>
-      <CardContent>
-        <div className="overflow-x-auto rounded-xl border border-border bg-card/50">
-          <table className="min-w-full text-sm">
-            <thead>
-              <tr className="border-b border-border bg-muted/30 text-left text-xs font-semibold text-muted-foreground">
-                <th className="px-4 py-3">Type</th>
-                <th className="px-4 py-3">Description</th>
-                <th className="px-4 py-3">Reason</th>
-                <th className="px-4 py-3 text-right">Amount</th>
-                <th className="px-4 py-3">Date</th>
-              </tr>
-            </thead>
-            <tbody>
-              {adjustments.map((a) => (
-                <tr key={a.id} className="border-b border-border last:border-b-0">
-                  <td className="px-4 py-3">{typeBadge(a.type)}</td>
-                  <td className="px-4 py-3 font-medium text-foreground">{a.description}</td>
-                  <td className="px-4 py-3 text-muted-foreground max-w-[200px] truncate">{a.reason}</td>
-                  <td className={`px-4 py-3 text-right font-semibold tabular-nums ${a.amount < 0 ? "text-emerald-600 dark:text-emerald-400" : "text-red-600 dark:text-red-400"}`}>
-                    {a.amount < 0 ? "-" : "+"}{formatCurrency(Math.abs(a.amount))}
-                  </td>
-                  <td className="px-4 py-3 text-muted-foreground">{formatDate(a.appliedAt)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </CardContent>
-    </Card>
-  );
+  return <Card><CardHeader><CardTitle>Top-up accounting movements</CardTitle>
+    <CardDescription>Signed minute and monetary ledger entries. A reversal is not proof that funds reached a bank.</CardDescription></CardHeader>
+    <CardContent>{loading ? <p role="status">Loading accounting movements…</p> : failed ?
+      <SectionLoadError what="Accounting movements" error={error} onRetry={onRetry} /> : adjustments.length === 0 ? <p className="text-sm text-muted-foreground">No top-up accounting movements recorded.</p> :
+      <div className="overflow-x-auto"><table className="min-w-full text-sm"><caption className="sr-only">Recorded top-up accounting entries</caption>
+        <thead><tr className="border-b text-left"><th scope="col" className="p-3">Movement</th><th scope="col" className="p-3">Minutes</th><th scope="col" className="p-3">Amount</th><th scope="col" className="p-3">Order and provider reference</th><th scope="col" className="p-3">Recorded</th></tr></thead>
+        <tbody>{adjustments.map((entry) => <tr key={entry.id} className="border-b"><td className="p-3">{entry.kind === "topup" ? "Top-up credit" : entry.kind === "refund" ? "Refund accounting reversal" : entry.kind === "dispute" ? "Dispute accounting reversal" : "Adjustment"}{entry.note && <p className="text-xs text-muted-foreground">{entry.note}</p>}</td>
+          <td className="p-3 tabular-nums">{entry.minutes_delta > 0 ? "+" : ""}{entry.minutes_delta.toLocaleString()}</td>
+          <td className="p-3 tabular-nums">{formatMinorMoney(entry.amount_cents, entry.currency, entry.currency_exponent)}</td>
+          <td className="p-3 break-all"><p>{entry.order_id ?? "Order unavailable"}</p><p className="text-xs text-muted-foreground">{entry.provider_payment_id ?? entry.provider_event_id ?? "Provider reference unavailable"}</p></td>
+          <td className="p-3">{formatDate(entry.created_at)}</td></tr>)}</tbody>
+      </table></div>}</CardContent></Card>;
 }
 
 function RecentInvoices({
@@ -729,7 +620,7 @@ function RecentInvoices({
             <CardDescription>Your latest billing invoices</CardDescription>
           </div>
           <Button asChild variant="outline" size="sm">
-            <Link href="/billing/invoices">View All <ArrowRight className="ml-1 h-4 w-4" aria-hidden /></Link>
+            <Link href="/billing/invoices">Recent invoices <ArrowRight className="ml-1 h-4 w-4" aria-hidden /></Link>
           </Button>
         </div>
       </CardHeader>
@@ -764,7 +655,7 @@ function RecentInvoices({
                       </Link>
                     </td>
                     <td className="px-4 py-3 text-muted-foreground">{formatDate(inv.period_start)} – {formatDate(inv.period_end)}</td>
-                    <td className="px-4 py-3 text-right font-semibold tabular-nums text-foreground">{formatCents(inv.amount_due, inv.currency)}</td>
+                    <td className="px-4 py-3 text-right font-semibold tabular-nums text-foreground">{formatMinorMoney(inv.total, inv.currency, inv.currency_exponent)}</td>
                     <td className="px-4 py-3">{invoiceStatusBadge(inv.status)}</td>
                   </tr>
                 ))}

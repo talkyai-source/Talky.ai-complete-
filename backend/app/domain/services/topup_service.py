@@ -51,6 +51,25 @@ TERMINAL_FAILURE_STATES = {"failed", "cancelled"}
 MAX_OPEN_ORDERS = 20
 
 
+def public_ledger_entry(row) -> dict:
+    """One exact read contract for both billing ledger surfaces."""
+    from app.domain.services.billing_catalog import _EXPONENTS
+
+    return {
+        "id": str(row["id"]),
+        "order_id": str(row["order_id"]) if row["order_id"] else None,
+        "provider_event_id": row["provider_event_id"],
+        "provider_payment_id": row["provider_payment_id"],
+        "kind": row["kind"],
+        "minutes_delta": row["minutes_delta"],
+        "amount_cents": row["amount_cents"],
+        "currency": row["currency"],
+        "currency_exponent": _EXPONENTS.get(str(row["currency"]).lower()),
+        "note": row["note"],
+        "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+    }
+
+
 class TopupError(RuntimeError):
     """Refused before any money or minutes moved."""
 
@@ -480,8 +499,17 @@ class TopupService:
             rows = await conn.fetch(
                 """
                 SELECT o.id, o.package_code, o.minutes, o.price_cents, o.currency,
-                       o.status, o.created_at, o.paid_at
+                       o.status, o.created_at, o.paid_at, o.provider_payment_id,
+                       s.projection AS refund_projection,
+                       s.captured_at AS refund_captured_at,
+                       s.source_event_id AS refund_source_event_id
                   FROM topup_orders o
+             LEFT JOIN LATERAL (
+                       SELECT projection,captured_at,source_event_id
+                         FROM billing_refund_snapshots s
+                        WHERE s.order_id=o.id AND s.tenant_id=o.tenant_id
+                        ORDER BY s.id DESC LIMIT 1
+                       ) s ON TRUE
                  WHERE o.tenant_id = $1::uuid
                  ORDER BY o.created_at DESC
                  LIMIT $2
@@ -489,17 +517,21 @@ class TopupService:
                 str(tenant_id),
                 limit,
             )
-        return [dict(r) for r in rows]
+        from app.domain.services.billing_refund_projection import public_refund_details
+
+        return [{**dict(r), "refund_details": public_refund_details(r)} for r in rows]
 
     async def ledger(self, tenant_id: str, limit: int = 100) -> list[dict]:
         """The reconciliation view §9 asks for — every movement, signed."""
         async with acquire_with_tenant(self._pool, str(tenant_id)) as conn:
             rows = await conn.fetch(
                 """
-                SELECT kind, minutes_delta, amount_cents, currency, note, created_at
-                  FROM billing_ledger
-                 WHERE tenant_id = $1::uuid
-                 ORDER BY created_at DESC
+                SELECT l.id,l.order_id,l.provider_event_id,o.provider_payment_id,
+                       l.kind,l.minutes_delta,l.amount_cents,l.currency,l.note,l.created_at
+                  FROM billing_ledger l
+             LEFT JOIN topup_orders o ON o.id=l.order_id AND o.tenant_id=l.tenant_id
+                 WHERE l.tenant_id = $1::uuid
+                 ORDER BY l.created_at DESC,l.id DESC
                  LIMIT $2
                 """,
                 str(tenant_id),

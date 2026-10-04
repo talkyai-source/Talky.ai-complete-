@@ -83,6 +83,9 @@ class BillingService:
                  "Subscription": ("subscriptions",), "Invoice": ("invoices",),
                  "Charge": ("charges",), "PaymentIntent": ("payment_intents",),
                  "Dispute": ("disputes",), "Event": ("events",),
+                 "InvoiceLineItem": ("invoices", "line_items"),
+                 "InvoicePayment": ("invoice_payments",), "CreditNote": ("credit_notes",),
+                 "Refund": ("refunds",),
                  "checkout.Session": ("checkout", "sessions"),
                  "billing_portal.Session": ("billing_portal", "sessions")}
         options = {}
@@ -210,6 +213,13 @@ class BillingService:
         self._require_billing_enabled()
         customer_result = await self.create_or_get_customer(tenant_id, email, business_name)
         customer_id = customer_result["customer_id"]
+        from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+
+        def return_url(url, **values):
+            parts = urlsplit(url)
+            query = dict(parse_qsl(parts.query, keep_blank_values=True))
+            query.update(order_id=str(order_id), **values)
+            return urlunsplit(parts._replace(query=urlencode(query, safe="{}")))
 
         # Shared by the session and the resulting PaymentIntent. The charge and
         # refund events carry no checkout session, so the payment intent has to
@@ -225,7 +235,7 @@ class BillingService:
             session_id = f"cs_mock_topup_{str(order_id)[:8]}"
             return {
                 "session_id": session_id,
-                "checkout_url": (f"{success_url}?session_id={session_id}&mock=true"),
+                "checkout_url": return_url(success_url, session_id=session_id, mock="true"),
                 "mock_mode": True,
                 "message": (
                     "Mock checkout session created. Configure STRIPE_SECRET_KEY "
@@ -253,8 +263,8 @@ class BillingService:
                     "quantity": 1,
                 }
             ],
-            success_url=success_url + "?session_id={CHECKOUT_SESSION_ID}",
-            cancel_url=cancel_url,
+            success_url=return_url(success_url, session_id="{CHECKOUT_SESSION_ID}"),
+            cancel_url=return_url(cancel_url),
             client_reference_id=str(order_id),
             metadata=meta,
             payment_intent_data={"metadata": meta},
@@ -465,9 +475,16 @@ class BillingService:
             raise BillingWebhookReviewRequired("provider_account_or_mode_mismatch")
         event_type, data = event["type"], event["data"]["object"]
         try:
+            if event_type in {"refund.created", "refund.updated", "refund.failed", "charge.refund.updated"}:
+                from app.domain.services.billing_refund_projection import handle_topup_refund_observation
+                result = await handle_topup_refund_observation(conn, self, event_type, data, event["id"])
+                if result["status"] != "ignored":
+                    return result
             if await self._is_topup_event(event_type, data):
-                return await apply_topup_event(conn, self, event_type, data, event["id"])
-            return await apply_billing_event(conn, self, event_type, data)
+                result = await apply_topup_event(conn, self, event_type, data, event["id"])
+                if result["status"] != "ignored" or event_type != "charge.refunded":
+                    return result
+            return await apply_billing_event(conn, self, event_type, data, source_reference=event["id"])
         except (BillingStateReviewRequired, BillingTopupReviewRequired) as exc:
             raise BillingWebhookReviewRequired(exc.code) from exc
 
@@ -502,63 +519,29 @@ class BillingService:
     async def get_usage_summary(
         self, tenant_id: str, usage_type: str = "minutes"
     ) -> Dict[str, Any]:
-        """Get usage summary for the current billing period.
+        """Current calendar-month meter, not an invoice-period estimate.
 
-        `GET /billing/usage` used to report zero for every tenant, always.
-        It summed `usage_records`, whose only writer is `record_usage()` —
-        a method with no callers anywhere in the codebase — so the table is
-        empty. It then compared that against `tenants.minutes_used`, a column
-        that is likewise zero for every tenant in production.
-
-        Minutes now come from the same live computation as the quota gate,
-        the dashboard and the auth/profile paths, so a tenant cannot be
-        blocked for exhausting an allowance that this endpoint says they have
-        not touched. Non-minute usage types keep the `usage_records` path;
-        it is unwired rather than wrong, and metered add-ons will populate it.
+        Reuse the quota's settled-call definition and purchased allowance. A
+        failed/missing read is unavailable, never evidence of zero usage.
         """
-        # Get tenant allocation (`minutes_used` deliberately not selected —
-        # it is never written; see `tenant_minutes`).
-        tenant = (
-            self.db_client.table("tenants")
-            .select("minutes_allocated")
-            .eq("id", tenant_id)
-            .single()
-            .execute()
-        )
+        if usage_type != "minutes":
+            raise ValueError("Unsupported usage_type; only minutes are metered")
+        from uuid import UUID
+        from app.core.db_utils import acquire_with_tenant
+        from app.domain.services.minutes_quota import compute_minutes_status
 
-        allocated = (tenant.data.get("minutes_allocated", 0) if tenant.data else 0) or 0
-
-        if usage_type == "minutes":
-            from app.core.db import get_pool
-            from app.services.scripts.tenant_minutes import (
-                compute_tenant_minutes_used,
-            )
-
-            try:
-                total_usage = await compute_tenant_minutes_used(get_pool(), tenant_id)
-            except Exception as exc:  # noqa: BLE001
-                # Matches the fail-soft contract of every other minutes
-                # reader: a metering hiccup must not 500 the billing page.
-                logger.warning(
-                    "usage summary: live minutes lookup failed for tenant %s: %s",
-                    str(tenant_id)[:8],
-                    exc,
-                )
-                total_usage = 0
-        else:
-            usage = (
-                self.db_client.table("usage_records")
-                .select("quantity")
-                .eq("tenant_id", tenant_id)
-                .eq("usage_type", usage_type)
-                .execute()
-            )
-            total_usage = sum(record["quantity"] for record in usage.data) if usage.data else 0
-
+        tenant_uuid = UUID(str(tenant_id))
+        async with acquire_with_tenant(self.db_client.pool, str(tenant_uuid), timeout=5) as conn:
+            exists = await conn.fetchval("SELECT EXISTS(SELECT 1 FROM tenants WHERE id=$1)", tenant_uuid)
+            if not exists:
+                raise RuntimeError("Usage tenant unavailable")
+            quota = await compute_minutes_status(conn, tenant_uuid)
         return {
             "usage_type": usage_type,
-            "total_used": total_usage,
-            "allocated": allocated,
-            "remaining": max(0, allocated - total_usage),
-            "overage": max(0, total_usage - allocated),
+            "total_used": quota.used_minutes,
+            "allocated": quota.allocated,
+            "remaining": quota.remaining_minutes,
+            "overage": 0 if quota.unlimited else max(0, quota.used_minutes - quota.allocated),
+            "unlimited": quota.unlimited,
+            "metering_period": "calendar_month",
         }

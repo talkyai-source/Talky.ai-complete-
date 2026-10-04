@@ -13,7 +13,6 @@ import {
     ORDER_STATUS_LABEL,
     ORDER_STATUS_TONE,
     canTopUp,
-    creditHasLanded,
     formatMoney,
     isLowBalance,
     type TopupBalance,
@@ -77,52 +76,24 @@ test("a zero allocation does not divide by zero", () => {
     assert.equal(isLowBalance(balance({ allocated: 0, remaining_minutes: 0 })), false);
 });
 
-// ── has the payment actually landed ─────────────────────────────────────────
-
-test("coming back from the payment page is not proof on its own", () => {
-    // THE ONE THIS FILE EXISTS FOR. Stripe redirects as soon as the card is
-    // accepted; the webhook that credits the minutes arrives separately. A
-    // success message shown on the redirect alone is a claim we cannot see.
-    assert.equal(creditHasLanded(0, balance({ purchased_minutes: 0 })), false);
-});
-
-test("the ledger total moving up is proof", () => {
-    assert.equal(creditHasLanded(0, balance({ purchased_minutes: 250 })), true);
-});
-
-test("a refund landing in the same window is not a successful top-up", () => {
-    // Deliberately `>` and not `!==`: a refund moves the total DOWN, and
-    // announcing that as "your minutes are ready" is a lie in the one
-    // direction that matters.
-    assert.equal(creditHasLanded(600, balance({ purchased_minutes: 350 })), false);
-});
-
-test("a top-up on an account that already bought some still registers", () => {
-    assert.equal(creditHasLanded(250, balance({ purchased_minutes: 850 })), true);
-});
-
-test("no baseline means no claim", () => {
-    assert.equal(creditHasLanded(null, balance({ purchased_minutes: 999 })), false);
-});
-
 // ── money ───────────────────────────────────────────────────────────────────
 
 test("prices render from minor units, not major", () => {
     // The API returns 2500 for £25. Rendering it as £2,500 is the kind of
     // mistake a customer notices before we do.
-    assert.equal(formatMoney(2500, "GBP"), "£25.00");
+    assert.equal(formatMoney(2500, "GBP", 2), "£25.00");
 });
 
 test("a sub-penny per-minute rate keeps its precision", () => {
-    assert.equal(formatMoney(10, "GBP"), "£0.10");
+    assert.equal(formatMoney(10, "GBP", 2), "£0.10");
 });
 
 test("the currency comes from the package, not a hardcoded default", () => {
-    assert.equal(formatMoney(2500, "USD"), "US$25.00");
+    assert.equal(formatMoney(2500, "USD", 2), "$25.00");
 });
 
-test("a missing currency falls back rather than throwing", () => {
-    assert.equal(formatMoney(2500, ""), "£25.00");
+test("a missing currency is unavailable rather than an assumed GBP amount", () => {
+    assert.equal(formatMoney(2500, "", 2), "Unavailable");
 });
 
 // ── every status the backend can return is renderable ───────────────────────
@@ -144,7 +115,7 @@ test("every order status the backend defines has a label and a tone", () => {
     }
 });
 
-test("a pending order says it is unpaid, not that it failed", () => {
-    // A customer who abandoned checkout should see that nothing was charged.
-    assert.equal(ORDER_STATUS_LABEL.pending, "Awaiting payment");
+test("a pending order states uncertainty rather than proving no charge", () => {
+    // A pending local row does not establish whether the provider accepted money.
+    assert.equal(ORDER_STATUS_LABEL.pending, "Payment unconfirmed");
 });
