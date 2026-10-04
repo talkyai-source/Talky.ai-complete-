@@ -292,6 +292,8 @@ Exit evidence: dated baseline manifest, owner list, selected supported profiles/
 
 ### CP09 Supportability and decisive customer UX acceptance
 
+**Sequencing update — 5 October 2026:** Deferred for later at the user’s request. CP09 remains planned and unfinished; all findings and acceptance requirements remain in scope. AG01 is the next package to discuss in the plan. CP08 remains planned and unstarted; this deferral does not mark it completed or explicitly defer it. Existing CP07 delivery/deployment gaps and the feature freeze remain unchanged.
+
 **Scope and classification:** incomplete operator surfaces F36; tested but unvalidated customer journeys F28/F35/F38. Actions Log/Incidents and selected consoles are placeholders; core tenant/call/connector/audit APIs and contact/analytics screens are real. Evidence: `Admin/frontend/src/pages/ActionsLogPage.tsx:31`, `Admin/frontend/src/pages/IncidentsPage.tsx:31`, `Talk-Leee/src/app/admin/voice-security/page.tsx:16`; `backend/app/api/v1/endpoints/contacts.py:202`; `backend/app/api/v1/endpoints/analytics.py:321`; `Talk-Leee/tests/accessibility-audit.spec.ts:1`.
 
 **Bounded implementation:**

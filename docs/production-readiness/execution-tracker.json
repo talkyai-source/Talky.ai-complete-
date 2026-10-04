@@ -344,7 +344,7 @@
       "plan_anchor": "cp09-supportability-and-decisive-customer-ux-acceptance",
       "evidence": [],
       "blocker": null,
-      "next_action": "Assign owner and confirm the baseline reproduction or evidence gap.",
+      "next_action": "Deferred for later at the user\u2019s request on 5 October 2026. Leave unfinished and retain all existing findings and acceptance requirements. AG01 is the next package to discuss; CP08 remains planned and unstarted, without an explicit deferral. Existing CP07 gaps and the feature freeze remain unchanged.",
       "target_date": null
     },
     {
