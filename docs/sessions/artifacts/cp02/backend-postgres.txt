@@ -1,0 +1,96 @@
+CP02 PostgreSQL acceptance — 2026-10-04
+
+Source attribution
+Working tree: tmp/production-ready-20261004
+Base commit: a56af2fc2bf387d2505e1aeb1689f851abb1b356
+Tests exercised the uncommitted CP02 candidate, including the final same-active-free-plan
+preservation guard. This is not evidence for an already committed or deployed release.
+
+Isolation and schema
+Disposable local PostgreSQL server: 127.0.0.1:55434, database cp02_test.
+No production data, provider API, signed HTTP webhook, customer call, email or payment was used.
+Created a new database; applied backend/database/complete_schema.sql; stamped only
+0008_tenant_voice_tuning; ran the actual Alembic upgrade chain through head.
+All three bootstrap commands exited 0. Actual head: 0053_billing_price_options.
+Actual public constraint includes the reviewed anchored price/product ID patterns.
+This local run did not exercise the preserved historical dump bootstrap path.
+Bootstrap log (ignored local diagnostic): tmp/cp02-bootstrap.log.
+
+Environment
+PostgreSQL server 16.1, Windows; Python 3.12.12; asyncpg 0.29.0;
+SQLAlchemy 2.0.25; Alembic 1.13.1; pytest 7.4.4; pytest-asyncio 0.23.3;
+Stripe SDK 14.4.1. These local versions are disclosed rather than presented as a fresh
+Linux requirements installation or the exact CI environment.
+
+Final command
+TEST_DATABASE_URL=postgresql://talky@127.0.0.1:55434/cp02_test ENVIRONMENT=test
+python -m pytest tests/integration/test_billing_price_options.py
+  tests/integration/test_billing_checkout.py -q
+
+Final result: 34 passed in 24.22 seconds; no failures or skips.
+Raw output (ignored local diagnostic): tmp/cp02-postgres-tests.log.
+Both modules are included in the existing migrated-database CI integration step.
+
+Migration, catalog and RLS: 23 cases
+- FORCE RLS is enabled on both new tables. A real NOSUPERUSER NOBYPASSRLS role
+  cannot read, update, delete or insert another tenant's checkout attempt.
+- The same role cannot read/write price options in tenant context; an explicit
+  backend platform context can. The test does not claim to defend against arbitrary
+  database SQL clients that can set the application's internal bypass GUC.
+- Creating, ready and unknown attempts each block another outstanding purchase.
+  Six concurrent database transactions produce exactly one attempt and five unique conflicts.
+- Completed, expired and failed receipts remain stored, preserve frozen purchase and
+  provider history, and release the outstanding-attempt constraint for a new identity.
+- Invalid interval, amount, currency case/exponent, free/paid shape, missing provider IDs,
+  mode and approval shape fail database constraints. A fresh private schema executing
+  current migration SQL also rejects malformed price/product prefix, empty suffix and
+  additional underscore cases.
+- Actual migration backfill creates only the explicit free option; paid monthly/yearly
+  legacy rows and zero-price rows with a Stripe price are not guessed or backfilled.
+  Legacy plans, subscriptions and tenant allocation/usage rows remain byte-equivalent as
+  JSON row values. Downgrade refuses to discard durable purchase identities.
+- Real catalog and option resolution accept raw asyncpg JSON strings, return feature
+  arrays and string UUIDs, hide internal Stripe identifiers, and accept actual SDK
+  Price/expanded Product objects. Provider timeout makes the paid choice unavailable;
+  free remains available. Both async and sync HTTP client cleanup paths execute.
+
+Actual checkout service, SQL and RLS: 11 cases
+- The service uses the real production JSON codecs and a real non-owner,
+  NOSUPERUSER NOBYPASSRLS role. Only the Stripe transport boundary is synthetic.
+- Free activation commits its plan/allowance/receipt atomically and preserves signed
+  top-up deltas. Injected failure after allocation rolls back; the saved request can resume.
+- Same-ID replay and a new ID for an already active free plan preserve usage/allocation.
+- Both monthly and yearly receipts retain their saved terms when the current catalog
+  amount, approval and plan minutes change. Annual payment does not multiply the
+  monthly allowance by 12. Duplicate completion/subscription updates do not reset usage.
+- Browser-return retrieval does not activate allowance. Early subscription-created or
+  updated evidence alone preserves existing free access and does not insert a paid subscription.
+- Six concurrent same-ID service requests reconcile to one provider/session identity.
+  Six different-ID requests save one attempt; rejected requests identify the saved
+  attempt and explicitly prove that their new identity was not started.
+- A synthetic provider accepts a session then loses the response. The attempt remains
+  unknown; retry uses identical frozen session parameters/idempotency identity even if
+  caller email input changes. A different identity cannot start another purchase.
+- Another tenant cannot retrieve or reuse a saved checkout identity, including through
+  the actual SQL path; no provider operation is attempted for that cross-tenant reuse.
+- Unpaid or mismatched completion receipts never change entitlement.
+
+Reproduced defect and repair evidence
+Before the guard, selecting the same active free plan with a NEW request ID changed
+tenants.minutes_used from 71 to 0. The new regression failed on that exact observed
+difference. After the guard, all 34 cases pass and both usage and allocation are preserved.
+This is proof of the stored counter defect, not proof of a canonical minute-cap exploit:
+the canonical minute-status calculation derives monthly usage from calls.
+
+Limits and cleanup
+Synthetic SDK objects model provider responses/idempotency; they do not prove a real
+Stripe account, approved prices, webhook delivery/signature handling, payment collection,
+browser redirect or CP03 webhook recovery/event ordering. Signed HTTP webhook integration
+and live/test provider acceptance remain separate gates.
+Final passing fixtures remove their temporary tenant, catalog, attempt, subscription and role objects.
+Synthetic billing_ledger rows are intentionally retained in this disposable database;
+the append-only trigger is never disabled or bypassed for cleanup. An initial fixture
+attempt to delete them was correctly rejected and was removed from the test harness.
+That failed diagnostic teardown may leave additional synthetic fixture objects in this
+disposable database; this report does not claim an empty database after validation.
+The database is left running for the parent agent's checks; no production process was touched.

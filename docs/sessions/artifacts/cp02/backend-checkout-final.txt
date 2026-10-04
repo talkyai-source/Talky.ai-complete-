@@ -1,0 +1,12 @@
+...........................................                              [100%]
+============================== warnings summary ===============================
+tests/unit/test_billing_checkout_http.py::test_http_rejects_untrusted_purchase_terms_before_service[extra0]
+tests/unit/test_billing_checkout_http.py::test_http_rejects_untrusted_purchase_terms_before_service[extra1]
+tests/unit/test_billing_checkout_http.py::test_http_rejects_untrusted_purchase_terms_before_service[extra2]
+tests/unit/test_billing_checkout_http.py::test_http_rejects_untrusted_purchase_terms_before_service[extra3]
+tests/unit/test_billing_checkout_http.py::test_http_rejects_untrusted_purchase_terms_before_service[extra4]
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\backend\.venv\Lib\site-packages\starlette\_exception_handler.py:59: StarletteDeprecationWarning: 'HTTP_422_UNPROCESSABLE_ENTITY' is deprecated. Use 'HTTP_422_UNPROCESSABLE_CONTENT' instead.
+    response = await handler(conn, exc)  # type: ignore[arg-type]
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+43 passed, 5 warnings in 3.00s

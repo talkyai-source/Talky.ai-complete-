@@ -26,7 +26,8 @@
       "docs/production-readiness/baseline-assessment-2026-10-02.md": "bda97d35ea426c184b536357abfaa6ad327be52afb7dfad1b3afe66c047a125e",
       "docs/production-readiness/baseline-feature-maturity-2026-10-02.json": "356f1f164ffcba36b7799a3cb7110389a65a173a0fd39da51fb9d862160793de"
     },
-    "baseline_hash_note": "The original authoring hash fields are retained as historical metadata; they do not match the portable frozen copies and their original byte convention is unverified. frozen_git_blob_sha256 records the verified SHA-256 of each LF-normalized checked-in frozen artifact. Frozen findings/content were not edited during CP01."
+    "baseline_hash_note": "The original authoring hash fields are retained as historical metadata; they do not match the portable frozen copies and their original byte convention is unverified. frozen_git_blob_sha256 records the verified SHA-256 of each LF-normalized checked-in frozen artifact. Frozen findings/content were not edited during CP01.",
+    "cp02_implementation_commit": "6ca82160e7f1ffc62229f0b5bd09c684db255936"
   },
   "status_rules": {
     "execution": [
@@ -94,9 +95,9 @@
       "id": "CP02",
       "title": "Authoritative purchase selection and monthly activation",
       "owner_role": "Billing engineering lead",
-      "assigned_person": null,
-      "reviewer": null,
-      "status": "planned",
+      "assigned_person": "Codex implementation team",
+      "reviewer": "Independent Codex catalog/migration, checkout and frontend reviews completed; billing-owner and release acceptance pending",
+      "status": "in_progress",
       "start_after_milestone": "RG01 baseline recorded",
       "dependencies_and_tests": "See package text; coordination and final acceptance dependencies are distinct from entry milestones.",
       "finding_ids": [
@@ -110,9 +111,23 @@
       ],
       "architecture_ids": [],
       "plan_anchor": "cp02-authoritative-purchase-selection-and-monthly-activation",
-      "evidence": [],
-      "blocker": null,
-      "next_action": "Assign owner and confirm the baseline reproduction or evidence gap.",
+      "evidence": [
+        {
+          "path": "docs/sessions/2026-10-04-cp02-implementation.md",
+          "kind": "implementation_and_limitations",
+          "candidate_commit": "6ca82160e7f1ffc62229f0b5bd09c684db255936"
+        },
+        {
+          "path": "docs/sessions/artifacts/cp02/verification.json",
+          "kind": "local_verification_manifest"
+        },
+        {
+          "path": "docs/sessions/artifacts/cp02/backend-postgres.txt",
+          "kind": "disposable_database_acceptance"
+        }
+      ],
+      "blocker": "Approved monthly/annual provider price mappings and designated-account signed lifecycle evidence are unverified. CP03 webhook recovery/order, CP04 invoice truth, CP06 communication/cancellation and legacy open-checkout reconciliation remain release dependencies. Annual containment and card-only checkout are not full billing completion.",
+      "next_action": "Proceed to CP03 durable webhook recovery; obtain approved price mappings, reconcile legacy pending sessions and complete designated-account/browser acceptance before release. Preserve existing calendar-month allowance pending billing-owner acceptance.",
       "target_date": null
     },
     {

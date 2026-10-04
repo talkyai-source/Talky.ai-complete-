@@ -1,6 +1,6 @@
 # production ready
 
-Plan date: 4 October 2026. Status: execution started with the RG01 local baseline and CP01 enquiry/claim repairs; local candidate verification is in progress, with release and operational acceptance outstanding. See the [CP01 evidence record](sessions/2026-10-04-cp01-implementation.md). Product: Talky.ai. Scope: the 2 October customer maturity assessment and its 45 feature groups, including the prior repairs that still need deployment and acceptance.
+Plan date: 4 October 2026. Status: execution has reached CP02 purchase/checkout repairs after the RG01 local baseline and CP01 enquiry/claim repairs; release and operational acceptance remain outstanding. See the [CP01 evidence record](sessions/2026-10-04-cp01-implementation.md) and [CP02 evidence record](sessions/2026-10-04-cp02-implementation.md). Product: Talky.ai. Scope: the 2 October customer maturity assessment and its 45 feature groups, including the prior repairs that still need deployment and acceptance.
 
 This is the execution plan for making the existing product worth paying for. It covers the identified defects, incomplete customer journeys, architecture risks and missing validation. Each item needs an owner, a bounded change or validation task, and evidence of the customer outcome. Writing this plan does not mark any repair, live test or deployment complete.
 
