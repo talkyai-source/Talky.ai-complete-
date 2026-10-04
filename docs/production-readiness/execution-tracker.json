@@ -28,7 +28,8 @@
     },
     "baseline_hash_note": "The original authoring hash fields are retained as historical metadata; they do not match the portable frozen copies and their original byte convention is unverified. frozen_git_blob_sha256 records the verified SHA-256 of each LF-normalized checked-in frozen artifact. Frozen findings/content were not edited during CP01.",
     "cp02_implementation_commit": "6ca82160e7f1ffc62229f0b5bd09c684db255936",
-    "cp03_implementation_commit": "9eb2ac8d49442619dbdd26235c67de264a2e8e79"
+    "cp03_implementation_commit": "9eb2ac8d49442619dbdd26235c67de264a2e8e79",
+    "cp04_implementation_commit": "4ec7f51eb05ed00b4ffea68fd77c2ba5649c3c5d"
   },
   "status_rules": {
     "execution": [
@@ -176,9 +177,9 @@
       "id": "CP04",
       "title": "Truthful invoices, usage projections and refunds",
       "owner_role": "Billing engineering and finance operations lead",
-      "assigned_person": null,
-      "reviewer": null,
-      "status": "planned",
+      "assigned_person": "Codex implementation team",
+      "reviewer": "Independent Codex invoice/provider, refund/read, PostgreSQL and frontend reviews; named finance and designated-provider acceptance pending",
+      "status": "in_progress",
       "start_after_milestone": "RG01 baseline recorded",
       "dependencies_and_tests": "See package text; coordination and final acceptance dependencies are distinct from entry milestones.",
       "finding_ids": [
@@ -193,9 +194,26 @@
       ],
       "architecture_ids": [],
       "plan_anchor": "cp04-truthful-invoices-usage-projections-and-refunds",
-      "evidence": [],
-      "blocker": null,
-      "next_action": "Assign owner and confirm the baseline reproduction or evidence gap.",
+      "evidence": [
+        {
+          "path": "docs/sessions/2026-10-04-cp04-implementation.md",
+          "kind": "local_implementation_and_verification",
+          "candidate": "4ec7f51eb05ed00b4ffea68fd77c2ba5649c3c5d",
+          "status": "partial_acceptance"
+        },
+        {
+          "path": "docs/production-readiness/billing-record-reconciliation.md",
+          "kind": "bounded_reconciliation_procedure",
+          "candidate": "4ec7f51eb05ed00b4ffea68fd77c2ba5649c3c5d"
+        },
+        {
+          "path": "docs/sessions/artifacts/cp04/verification.json",
+          "kind": "commands_and_artifact_digests",
+          "candidate": "4ec7f51eb05ed00b4ffea68fd77c2ba5649c3c5d"
+        }
+      ],
+      "blocker": "Local implementation and final synthetic verification passed. Designated provider-account reconciliation, named finance acceptance, deployed grants/event configuration, support operation, retention ownership and partial-refund allocation policy remain unverified.",
+      "next_action": "Complete the recorded designated-account, finance and coordinated deployment gates before CP04 closure. Preserve the feature freeze and existing metering/refund policy; continue the next planned package only within the agreed sequence.",
       "target_date": null
     },
     {

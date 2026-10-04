@@ -1,0 +1,298 @@
+{
+  "package": "CP04",
+  "date": "2026-10-04",
+  "implementation_commit": "4ec7f51eb05ed00b4ffea68fd77c2ba5649c3c5d",
+  "base_commit": "5ff021b41d170afb2fa2df5af6c1a249c9f70a85",
+  "branch": "codex/production-ready-20261004",
+  "package_status": "in_progress",
+  "scope": "Repair existing invoice facts, canonical usage displays, linked ledger/refund reads and bounded detail recovery. No new pricing, payment/refund issuance or metering policy.",
+  "environment": {
+    "python": "3.12.12",
+    "stripe_sdk": "14.4.1",
+    "asyncpg": "0.29.0",
+    "postgresql": "16.1",
+    "node": "25.8.1",
+    "next": "16.3.8",
+    "react": "19.2.1"
+  },
+  "reviews": [
+    "Root orchestration, cross-layer contract, integration and visual review",
+    "llm_audit invoice/provider snapshots and recovery, plus operator-document review",
+    "audio_audit billing reads, refund binding, ledger and actual database contract",
+    "realtime_audit frontend contract, exact formatting, browser and production build"
+  ],
+  "checks": [
+    {
+      "cwd": "backend",
+      "command": "python -m pytest tests/unit/test_billing_catalog.py tests/unit/test_billing_checkout_contract.py tests/unit/test_billing_checkout_http.py tests/unit/test_billing_mode.py tests/unit/test_billing_plan_change_preserves_topup_minutes.py tests/unit/test_billing_topup_webhook_routing.py tests/unit/test_billing_minutes_agree_with_gate.py tests/unit/test_topup_service.py tests/unit/test_billing_state_events.py tests/unit/test_billing_topup_events.py tests/unit/test_billing_webhook_http.py tests/unit/test_billing_webhook_identity.py tests/unit/test_billing_invoice_projection.py tests/unit/test_billing_read_truth.py tests/unit/test_billing_refund_projection.py tests/unit/test_inbound_activation_gaps.py tests/unit/test_subscription_status_vocabulary.py tests/unit/test_call_guard_subscription_cache.py tests/unit/test_prod_gate_stripe.py tests/unit/test_prod_fail_closed.py tests/unit/test_rls_set_local_invariant.py tests/unit/test_endpoint_auth_audit.py tests/unit/test_reminder_worker_heartbeat.py tests/unit/test_reminder_recipient_resolution.py tests/unit/test_csrf_middleware.py tests/security/test_kms_master_key_gate.py -q --tb=short",
+      "exit_code": 0,
+      "passed": 1652,
+      "skipped": 1,
+      "warnings": 8,
+      "artifact": "backend-focused-final.txt",
+      "limit": "Existing public-route inventory skip; deprecation warnings. Selected regression suite, not all backend tests."
+    },
+    {
+      "cwd": "backend",
+      "command": "psql -v ON_ERROR_STOP=1 -f database/complete_schema.sql; python -m alembic stamp 0008_tenant_voice_tuning; python -m alembic upgrade head",
+      "environment": {
+        "DATABASE_URL": "postgresql://talky@127.0.0.1:55434/cp04_acceptance_test"
+      },
+      "exit_code": 0,
+      "artifacts": [
+        "acceptance-bootstrap.txt",
+        "acceptance-migration.txt"
+      ],
+      "head": "0056_billing_refund_snapshots"
+    },
+    {
+      "cwd": "backend",
+      "command": "python -m pytest tests/integration/test_billing_price_options.py tests/integration/test_billing_checkout.py tests/integration/test_billing_state_events.py tests/integration/test_billing_topup_events.py tests/integration/test_billing_webhook_migration.py tests/integration/test_billing_webhook_receipts.py tests/integration/test_billing_webhook_reconciliation.py tests/integration/test_billing_webhook_http.py tests/integration/test_billing_invoice_projection.py tests/integration/test_billing_read_truth.py tests/integration/test_billing_refund_projection.py -q --tb=short",
+      "environment": {
+        "TEST_DATABASE_URL": "postgresql://talky@127.0.0.1:55434/cp04_acceptance_test",
+        "ENVIRONMENT": "test"
+      },
+      "exit_code": 0,
+      "passed": 142,
+      "skipped": 0,
+      "artifact": "backend-postgres-final.txt",
+      "limit": "Real database, transactions, role/RLS and local signed HTTP checks; provider objects synthetic. Before final ledger serializer correction, separately covered below."
+    },
+    {
+      "cwd": "backend",
+      "command": "python -m pytest tests/integration/test_billing_refund_projection.py::test_real_ledger_rows_publish_one_contract_through_both_read_endpoints -q --tb=short",
+      "exit_code": 0,
+      "passed": 1,
+      "artifact": "ledger-contract-postgres.txt",
+      "limit": "Final shared serializer covered through both actual API functions and tenant isolation.",
+      "environment": {
+        "TEST_DATABASE_URL": "postgresql://talky@127.0.0.1:55434/cp04_acceptance_test",
+        "ENVIRONMENT": "test"
+      }
+    },
+    {
+      "cwd": ".",
+      "command": "python -m ruff check --select F,E9 <changed Python paths in implementation commit>",
+      "exit_code": 0,
+      "artifact": "backend-lint.txt"
+    },
+    {
+      "cwd": ".",
+      "command": "git diff --cached --check",
+      "exit_code": 0
+    },
+    {
+      "cwd": "Talk-Leee",
+      "manifest": "frontend-verification.json",
+      "initial_passed": 135,
+      "overlapping_final_passed": 39,
+      "distinct_cases": 140,
+      "lint_exit_code": 0,
+      "typecheck_exit_code": 0,
+      "build_exit_code": 0,
+      "visual": "Final production CSS, actual InvoiceFacts component, desktop and mobile. Actual API captures from synthetic provider data."
+    }
+  ],
+  "supplemental_checks": [
+    {
+      "artifact": "backend-financial-final.txt",
+      "passed": 224,
+      "limit": "Focused run before the final shared ledger serializer; superseded for final source by broad backend and additional database check."
+    },
+    {
+      "artifact": "billing-read-unit-final.txt",
+      "passed": 30
+    },
+    {
+      "artifact": "refund-projection-unit.txt",
+      "passed": 25
+    }
+  ],
+  "intermediate_results": [
+    {
+      "artifact": "backend-focused-initial.txt",
+      "status": "superseded_failed_run",
+      "cause": "New protected snapshot table missing from explicit RLS inventory."
+    },
+    {
+      "artifact": "backend-broad-inventory-order.txt",
+      "status": "superseded_failed_run",
+      "cause": "Updated schema inventory list was not sorted; corrected and final regression passed."
+    },
+    {
+      "artifact": "backend-postgres-initial.txt",
+      "status": "superseded_failed_run",
+      "cause": "Old assertion expected the 0054 downgrade refusal; 0056 correctly refused first."
+    },
+    {
+      "artifact": "backend-postgres-stale-fixture.txt",
+      "status": "superseded_failed_run",
+      "cause": "A new invoice fixture left a mutable pending synthetic notification; cleanup corrected and fresh serial 142-case database run passed without deleting immutable history."
+    },
+    {
+      "artifact": "frontend-allowance-before.txt",
+      "status": "reproduced_then_fixed",
+      "cause": "Duplicate subscription display treated unlimited allocation as finite zero."
+    },
+    {
+      "artifact": "frontend-seconds-before.txt",
+      "status": "reproduced_then_fixed",
+      "cause": "59-second call was rendered as zero duration through floored minute arithmetic."
+    }
+  ],
+  "not_run": [
+    "Complete backend suite",
+    "Authenticated browser-to-deployed-backend journey",
+    "Designated Stripe account payment/refund acceptance or bank tracing",
+    "Real mail delivery/support mailbox acceptance",
+    "Remote CI, deployment and named finance/customer acceptance"
+  ],
+  "release_dependencies": [
+    "Coordinated migrations/API/UI and actual platform service INSERT/sequence permissions plus tenant isolation",
+    "Signed webhook account/mode/event subscriptions and provider price/catalog acceptance",
+    "Named finance reconciliation of actual historical invoices, credit/refund objects and ledger",
+    "Approved partial-refund minute policy and legacy/ambiguous binding/history treatment",
+    "Retention/support/operational ownership and compatible rollback",
+    "Existing CP02/CP03 and CP06 paid-journey acceptance; overall voice and release gates remain open"
+  ],
+  "cleanup": "Disposable PostgreSQL server stopped with synthetic immutable history retained; browser closed and no task application server or test process remains running.",
+  "digest_convention": "SHA-256 of artifact Git blob bytes: LF-normalized UTF-8 for text, terminal trailing whitespace removed without changing test results; PNG bytes unchanged.",
+  "artifacts": {
+    "acceptance-bootstrap.txt": {
+      "path": "docs/sessions/artifacts/cp04/acceptance-bootstrap.txt",
+      "sha256_git_blob": "02aefde6cd6a15e27a88aa3365a4a2610ba9573f779f9a1c058becd98f44389f"
+    },
+    "acceptance-migration.txt": {
+      "path": "docs/sessions/artifacts/cp04/acceptance-migration.txt",
+      "sha256_git_blob": "fa097e9449286f1f74cfa7b7c522d4c5a650426d16afb39363c3dd723d4f918a"
+    },
+    "backend-broad-inventory-order.txt": {
+      "path": "docs/sessions/artifacts/cp04/backend-broad-inventory-order.txt",
+      "sha256_git_blob": "f506337393440e218472ec5ff21624ba05a136903191a8fa7469e78c2c165826"
+    },
+    "backend-financial-final.txt": {
+      "path": "docs/sessions/artifacts/cp04/backend-financial-final.txt",
+      "sha256_git_blob": "8876cc133278fdc756eef06d0b7a075ca0addd77f0e948dbbb2a74cba75a2c93"
+    },
+    "backend-focused-final.txt": {
+      "path": "docs/sessions/artifacts/cp04/backend-focused-final.txt",
+      "sha256_git_blob": "23a66636f05bed5f63505564d2530493708e9eae8112a164bfb00c890510fea4"
+    },
+    "backend-focused-initial.txt": {
+      "path": "docs/sessions/artifacts/cp04/backend-focused-initial.txt",
+      "sha256_git_blob": "655e3c285045f7c3c4e91470cf9329309a5d70eef14143e3d184e5c93f84138a"
+    },
+    "backend-lint.txt": {
+      "path": "docs/sessions/artifacts/cp04/backend-lint.txt",
+      "sha256_git_blob": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18"
+    },
+    "backend-postgres-final.txt": {
+      "path": "docs/sessions/artifacts/cp04/backend-postgres-final.txt",
+      "sha256_git_blob": "231995fc13b224fa6a6bfd3b8fcf093ede68a2264e18d64655587f650903f1a4"
+    },
+    "backend-postgres-initial.txt": {
+      "path": "docs/sessions/artifacts/cp04/backend-postgres-initial.txt",
+      "sha256_git_blob": "e53db49867b6950fb5af840603d0245aecbc4b6f3723640be198585336556446"
+    },
+    "backend-postgres-stale-fixture.txt": {
+      "path": "docs/sessions/artifacts/cp04/backend-postgres-stale-fixture.txt",
+      "sha256_git_blob": "829999250e54c9451a10421599495f8dbd49426686c7ab96e44aa037c1e22af5"
+    },
+    "billing-read-unit-final.txt": {
+      "path": "docs/sessions/artifacts/cp04/billing-read-unit-final.txt",
+      "sha256_git_blob": "aec52459bfa80f390252f47b4de30d769419503ff8896c2aa2b26f320650fc94"
+    },
+    "bootstrap.log": {
+      "path": "docs/sessions/artifacts/cp04/bootstrap.log",
+      "sha256_git_blob": "77c380299ea090f7d7b4578d53f126b5f1e0a4e6d1d57b11b1458d12872c19b3"
+    },
+    "database-final-state.txt": {
+      "path": "docs/sessions/artifacts/cp04/database-final-state.txt",
+      "sha256_git_blob": "6a0a1313c88b290a123c2a8188c85dcfe315d61cb0c6195fbd45b2972ac19679"
+    },
+    "final-bootstrap.txt": {
+      "path": "docs/sessions/artifacts/cp04/final-bootstrap.txt",
+      "sha256_git_blob": "74e7caddafa3b4c1cb5bbb69028d6b3a2743afe0443f8821f8a1feb158c1141a"
+    },
+    "final-migration.txt": {
+      "path": "docs/sessions/artifacts/cp04/final-migration.txt",
+      "sha256_git_blob": "fa097e9449286f1f74cfa7b7c522d4c5a650426d16afb39363c3dd723d4f918a"
+    },
+    "frontend-allowance-before.txt": {
+      "path": "docs/sessions/artifacts/cp04/frontend-allowance-before.txt",
+      "sha256_git_blob": "42c65edc491d26784e3d8c1c3f7f099f47782d9072a2b832eedb9b0435b56d6a"
+    },
+    "frontend-browser.txt": {
+      "path": "docs/sessions/artifacts/cp04/frontend-browser.txt",
+      "sha256_git_blob": "86e3098ca48fda47e0b81f836f5055c40a3d15911cb0bb97c85806d9f09d44cb"
+    },
+    "frontend-build.txt": {
+      "path": "docs/sessions/artifacts/cp04/frontend-build.txt",
+      "sha256_git_blob": "ef83f9487448c2ddfd4535cb0f9d604022bf9c4335cfba017aa3b2fdbfae3310"
+    },
+    "frontend-final-delta-tests.txt": {
+      "path": "docs/sessions/artifacts/cp04/frontend-final-delta-tests.txt",
+      "sha256_git_blob": "a769460e6c4d194fc496166bac51e4eb62a5b942d19127717a1abfe7e7764e04"
+    },
+    "frontend-lint.txt": {
+      "path": "docs/sessions/artifacts/cp04/frontend-lint.txt",
+      "sha256_git_blob": "8c6073fe46844493202e6899d3df97b142115317d89fc139b332d877ffa6119f"
+    },
+    "frontend-seconds-before.txt": {
+      "path": "docs/sessions/artifacts/cp04/frontend-seconds-before.txt",
+      "sha256_git_blob": "9d5d21f978cc2ceb051bf7771db46317d59cf740bc7c89711bcb2b92c1478d7d"
+    },
+    "frontend-tests.txt": {
+      "path": "docs/sessions/artifacts/cp04/frontend-tests.txt",
+      "sha256_git_blob": "3a325e46c4ea8f28e4949bb971dc675ff792fff7db08b79ee315a90d334a07ac"
+    },
+    "frontend-typecheck.txt": {
+      "path": "docs/sessions/artifacts/cp04/frontend-typecheck.txt",
+      "sha256_git_blob": "f277a59365fd7265e8f83b35aa6762dcb2b859b5b960362c4b7b8f3308ba2853"
+    },
+    "frontend-verification.json": {
+      "path": "docs/sessions/artifacts/cp04/frontend-verification.json",
+      "sha256_git_blob": "20989f2f592e24bf06f5b4ebe7fc2608a5bf2f0e602b0170b038124a9c9953bc"
+    },
+    "frontend-visual-result.json": {
+      "path": "docs/sessions/artifacts/cp04/frontend-visual-result.json",
+      "sha256_git_blob": "06a5757c61a7633485e5aaba4707250182e143880fdd5e8d74d00ad0e40b1774"
+    },
+    "invoice-desktop.png": {
+      "path": "docs/sessions/artifacts/cp04/invoice-desktop.png",
+      "sha256_git_blob": "d4d9cbc7e2ab0e1933752cbb03397213583e5032af48a668c6fe9f7a49b86fd6"
+    },
+    "invoice-mobile.png": {
+      "path": "docs/sessions/artifacts/cp04/invoice-mobile.png",
+      "sha256_git_blob": "79d378e129b865ef12fd13db832cb2abebcef0deb596dadd10e64df4bf15b844"
+    },
+    "ledger-contract-postgres.txt": {
+      "path": "docs/sessions/artifacts/cp04/ledger-contract-postgres.txt",
+      "sha256_git_blob": "69ecfaf567d422eefd466e0fe6d916331525411012bbb3614286aa68e60a291c"
+    },
+    "ledger-contract.json": {
+      "path": "docs/sessions/artifacts/cp04/ledger-contract.json",
+      "sha256_git_blob": "c9511b0b4db32aef7468a2f7bf251f4bf8c67718d47608b7abcf28881f0df4a1"
+    },
+    "local-cleanup.txt": {
+      "path": "docs/sessions/artifacts/cp04/local-cleanup.txt",
+      "sha256_git_blob": "ca19178a35ab4153b75b494963b66ce8243e1b94c173107c87b44d09db23652d"
+    },
+    "migration.log": {
+      "path": "docs/sessions/artifacts/cp04/migration.log",
+      "sha256_git_blob": "fa097e9449286f1f74cfa7b7c522d4c5a650426d16afb39363c3dd723d4f918a"
+    },
+    "reconciliation-example.json": {
+      "path": "docs/sessions/artifacts/cp04/reconciliation-example.json",
+      "sha256_git_blob": "bcca62218073d7804dac0f834382c86c99448d0e962550b69b39ee12043fec9e"
+    },
+    "refund-postgres-initial.txt": {
+      "path": "docs/sessions/artifacts/cp04/refund-postgres-initial.txt",
+      "sha256_git_blob": "7f45143659d0d39f57937a8c9ebf02bad73368c5f06a430d62bbab6c5e8016df"
+    },
+    "refund-projection-unit.txt": {
+      "path": "docs/sessions/artifacts/cp04/refund-projection-unit.txt",
+      "sha256_git_blob": "276511bf12c6dd0703adee8ab428e8a1dc814dc6fce4b004e72e1864c674f702"
+    }
+  }
+}

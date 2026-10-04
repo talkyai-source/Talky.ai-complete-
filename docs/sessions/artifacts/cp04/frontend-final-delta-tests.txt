@@ -1,0 +1,47 @@
+✔ a failed billing request renders the error state, never '0 of 0 minutes used' (584.6616ms)
+✔ a genuinely empty successful response renders the empty state, not an error (244.9962ms)
+✔ current purchased terms come from the subscription snapshot and cancellation is not a promised invoice (160.3662ms)
+✔ loading is distinct from both the error and the empty state (22.6764ms)
+✔ a failed invoices request never renders 'No invoices yet.' (126.6566ms)
+✔ a failed daily-usage request never renders zeroed call stats (138.2294ms)
+✔ a failed overage-alerts request is surfaced instead of silently showing no alerts (106.201ms)
+✔ unlimited minutes keep actual usage without a false zero allowance or percentage (125.6625ms)
+✔ usage without a contracted rate does not invent an estimated charge (138.1366ms)
+✔ linked refund movement preserves negative accounting amounts without a bank-refund claim (147.4861ms)
+✔ malformed successful usage is a load failure instead of zero consumption (65.7218ms)
+✔ an unlimited subscription does not duplicate a false zero remaining or percentage meter (126.6409ms)
+✔ a missing subscription allowance is a read failure rather than an inferred unlimited plan (43.9436ms)
+✔ average settled time preserves a recorded 59-second call instead of reconstructing rounded minutes (133.6054ms)
+✔ missing exact daily seconds is an unavailable call-stat read, never a guessed zero (91.3107ms)
+✔ actual PostgreSQL ledger endpoints agree and render signed linked accounting movements (201.6444ms)
+✔ paid detail separates original total and zero remaining, retains captured lines and provider documents (871.7466ms)
+✔ partial detail preserves known totals but never fills absent tax, lines or credits with zero (118.2133ms)
+✔ recorded zero line and credit/refund facts are visible without claiming bank receipt (169.7714ms)
+✔ recent invoice list formats JPY and KWD from their actual minor-unit precision (92.2438ms)
+✔ forbidden stays a load failure, not a missing or zero-valued invoice (60.0747ms)
+✔ outage stays a load failure, not a missing or zero-valued invoice (46.4158ms)
+✔ malformed success stays a load failure, not a missing or zero-valued invoice (43.4209ms)
+✔ empty success stays a load failure, not a missing or zero-valued invoice (44.4052ms)
+✔ unsafe document URL stays a load failure, not a missing or zero-valued invoice (48.7283ms)
+✔ only a server 404 renders invoice not found (26.5241ms)
+✔ actual synthetic-provider PostgreSQL API capture renders its recorded historical facts (92.9526ms)
+✔ topup=success never establishes payment or nonpayment from a browser return (265.4773ms)
+✔ topup=cancelled never establishes payment or nonpayment from a browser return (50.6964ms)
+✔ topup=success&mock=true never establishes payment or nonpayment from a browser return (45.4538ms)
+✔ an unrelated aggregate increase cannot confirm this returned purchase; previously saved order is visible (63.3527ms)
+✔ an unknown order reference from the URL is not presented as a saved order (25.0169ms)
+✔ recorded refund accounting and captured provider pending state do not promise bank settlement (135.2915ms)
+✔ a partial empty refund capture remains visible on a paid order (41.9401ms)
+✔ failed balance loading does not claim nothing was charged (32.725ms)
+✔ malformed successful history is an error instead of no purchases (31.3935ms)
+✔ invoice money respects zero-, two- and three-decimal currencies (21.2884ms)
+✔ unknown invoice amounts are unavailable; recorded zero and negative credits stay real amounts (0.3697ms)
+✔ safe minor integers retain every minor unit and unsafe or fractional totals are rejected (0.2335ms)
+ℹ tests 39
+ℹ suites 0
+ℹ pass 39
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 23625.7813

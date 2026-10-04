@@ -1,0 +1,60 @@
+{
+  "scope": "CP04 frontend billing reads and truthful invoice/usage/top-up display; local implementation candidate",
+  "base_revision": "5ff021b41d170afb2fa2df5af6c1a249c9f70a85",
+  "working_directory": "Talk-Leee",
+  "node_tests": {
+    "command": "node --test --test-concurrency=1 --import tsx --import ./src/test-utils/setup.ts src/lib/billing-read.test.ts src/lib/billing-api.test.ts src/lib/billing-purchase.test.ts src/lib/billing-local-route.test.ts src/lib/topup-api.test.ts src/components/billing/billing-plan-selector.test.tsx src/components/billing/billing-overview.test.tsx src/components/billing/invoice-view.test.tsx src/components/billing/topup-card.test.tsx src/lib/contact-enquiries.test.ts src/lib/contact-form.test.ts src/components/home/contact-section.test.tsx src/app/api/contact-enquiries/route.test.ts src/proxy.contact.test.ts",
+    "passed": 135,
+    "failed": 0,
+    "log": "frontend-tests.txt",
+    "final_delta_command": "node --test --test-concurrency=1 --import tsx --import ./src/test-utils/setup.ts src/lib/billing-read.test.ts src/components/billing/billing-overview.test.tsx src/components/billing/invoice-view.test.tsx src/components/billing/topup-card.test.tsx",
+    "final_delta_passed": 39,
+    "final_delta_failed": 0,
+    "final_delta_log": "frontend-final-delta-tests.txt",
+    "explanation": "Final delta removes the duplicate subscription meter, preserves exact daily seconds, adds five meaningful allowance/time/API-ledger regressions, and renders finalized PostgreSQL/API invoice and ledger captures. 140 distinct cases across initial and delta runs; not a single 140-case invocation."
+  },
+  "lint": {
+    "command": "npx eslint src/lib/billing-read.ts src/lib/billing-read.test.ts src/lib/billing-api.ts src/lib/topup-api.ts src/lib/topup-api.test.ts src/components/billing/billing-overview.tsx src/components/billing/billing-overview.test.tsx src/components/billing/invoice-view.tsx src/components/billing/invoice-view.test.tsx src/components/billing/topup-card.tsx src/components/billing/topup-card.test.tsx src/test-utils/billing-fixtures.ts src/app/billing/invoices/page.tsx src/app/billing/invoices/[id]/page.tsx",
+    "exit_code": 0,
+    "log": "frontend-lint.txt"
+  },
+  "typecheck": {
+    "command": "npm run typecheck",
+    "exit_code": 0,
+    "log": "frontend-typecheck.txt"
+  },
+  "build": {
+    "command": "npm run build",
+    "status": "passed on final source",
+    "log": "frontend-build.txt",
+    "exit_code": 0
+  },
+  "visual": {
+    "status": "passed against final production CSS: desktop 1280x1000 and mobile 390x844; no page-level horizontal overflow",
+    "scope": "Actual InvoiceFacts React component rendered with production CSS and reconciliation-example.json. No authenticated route, provider account or payment proof.",
+    "screenshots": [
+      "invoice-desktop.png",
+      "invoice-mobile.png"
+    ],
+    "log": "frontend-browser.txt",
+    "result": "frontend-visual-result.json"
+  },
+  "limitations": [
+    "Provider invoice fixture is synthetic; persistence and API read were actual PostgreSQL operations performed by the backend acceptance harness.",
+    "No live payment, refund, email or customer action was performed by frontend validation.",
+    "Contact and purchase regressions are local synthetic HTTP/component tests."
+  ],
+  "allowance_reproduction": {
+    "command": "node --test --test-name-pattern='unlimited subscription|missing subscription allowance' --import tsx --import ./src/test-utils/setup.ts src/components/billing/billing-overview.test.tsx",
+    "log": "frontend-allowance-before.txt",
+    "after_fix": "Both cases pass in the final 39-case affected batch.",
+    "expected_before_fix": "1 failed (unlimited display defect), 1 passed (missing allowance error control)"
+  },
+  "seconds_reproduction": {
+    "expected_before_fix": "1 failed: recorded 59 seconds rendered no 0m 59s",
+    "log": "frontend-seconds-before.txt",
+    "command": "node --test --test-name-pattern='average settled time preserves' --import tsx --import ./src/test-utils/setup.ts src/components/billing/billing-overview.test.tsx",
+    "after_fix": "Exact-seconds and missing-seconds cases pass in the final delta."
+  },
+  "implementation_commit": "4ec7f51eb05ed00b4ffea68fd77c2ba5649c3c5d"
+}

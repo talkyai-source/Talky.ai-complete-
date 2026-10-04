@@ -1,0 +1,26 @@
+✖ an unlimited subscription does not duplicate a false zero remaining or percentage meter (710.9742ms)
+✔ a missing subscription allowance is a read failure rather than an inferred unlimited plan (83.7889ms)
+ℹ tests 2
+ℹ suites 0
+ℹ pass 1
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 12340.2084
+
+✖ failing tests:
+
+test at src\components\billing\billing-overview.test.tsx:2:10538
+✖ an unlimited subscription does not duplicate a false zero remaining or percentage meter (710.9742ms)
+  AssertionError [ERR_ASSERTION]: zero-sentinel subscription allowance must say Unlimited
+      at TestContext.<anonymous> (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\components\billing\billing-overview.test.tsx:226:12)
+      at async Test.run (node:internal/test_runner/test:1208:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: null,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }

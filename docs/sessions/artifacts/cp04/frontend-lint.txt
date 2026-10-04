@@ -1,0 +1,7 @@
+Changed-file ESLint: exit 0, no diagnostics.
+Command: npx eslint src/lib/billing-read.ts src/lib/billing-read.test.ts src/lib/billing-api.ts src/lib/topup-api.ts src/lib/topup-api.test.ts src/components/billing/billing-overview.tsx src/components/billing/billing-overview.test.tsx src/components/billing/invoice-view.tsx src/components/billing/invoice-view.test.tsx src/components/billing/topup-card.tsx src/components/billing/topup-card.test.tsx src/test-utils/billing-fixtures.ts src/app/billing/invoices/page.tsx src/app/billing/invoices/[id]/page.tsx
+The added actual PostgreSQL/API captured-fixture regression was linted again separately:
+Command: npx eslint src/components/billing/invoice-view.test.tsx
+Result: exit 0, no diagnostics.
+Changed-file ESLint exit code: 0
+Final changed-file ESLint exit code: 0

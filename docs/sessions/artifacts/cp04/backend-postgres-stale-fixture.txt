@@ -1,0 +1,12 @@
+........................................................................ [ 50%]
+....................F.................................................   [100%]
+================================== FAILURES ===================================
+________ test_concurrent_notification_drains_send_one_committed_intent ________
+tests\integration\test_billing_webhook_receipts.py:232: in test_concurrent_notification_drains_send_one_committed_intent
+    assert calls == 1 and effects == 1 and row["state"] == "completed"
+E   assert (2 == 1)
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.billing_webhook_notifications:billing_webhook_notifications.py:135 Billing notification outcome unknown id=1dd867c5-aeef-46b0-885a-7f3a44d0a3ae error_type=AssertionError
+=========================== short test summary info ===========================
+FAILED tests/integration/test_billing_webhook_receipts.py::test_concurrent_notification_drains_send_one_committed_intent
+1 failed, 141 passed in 119.60s (0:01:59)

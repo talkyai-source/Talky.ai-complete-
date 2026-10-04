@@ -1,6 +1,6 @@
 # production ready
 
-Plan date: 4 October 2026. Status: execution has reached CP02 purchase/checkout repairs after the RG01 local baseline and CP01 enquiry/claim repairs; release and operational acceptance remain outstanding. See the [CP01 evidence record](sessions/2026-10-04-cp01-implementation.md) and [CP02 evidence record](sessions/2026-10-04-cp02-implementation.md). Product: Talky.ai. Scope: the 2 October customer maturity assessment and its 45 feature groups, including the prior repairs that still need deployment and acceptance.
+Plan date: 4 October 2026. Status: execution has reached CP04 invoice/usage/refund repairs after the RG01 local baseline and CP01–CP03 implementation; release and operational acceptance remain outstanding. See the [CP01 evidence](sessions/2026-10-04-cp01-implementation.md), [CP02 evidence](sessions/2026-10-04-cp02-implementation.md), [CP03 evidence](sessions/2026-10-04-cp03-implementation.md) and [CP04 evidence](sessions/2026-10-04-cp04-implementation.md). Product: Talky.ai. Scope: the 2 October customer maturity assessment and its 45 feature groups, including the prior repairs that still need deployment and acceptance.
 
 This is the execution plan for making the existing product worth paying for. It covers the identified defects, incomplete customer journeys, architecture risks and missing validation. Each item needs an owner, a bounded change or validation task, and evidence of the customer outcome. Writing this plan does not mark any repair, live test or deployment complete.
 
@@ -185,6 +185,8 @@ Exit evidence: dated baseline manifest, owner list, selected supported profiles/
 **Closure evidence:** migration proof, focused handler/ledger tests, concurrent real-database results, signed test-mode provider replay/order results, recovery traces at each injected boundary, and a reconciled event sample. Existing `test_billing_topup_webhook_routing.py`, `test_topup_service.py` and `test_billing_plan_change_preserves_topup_minutes.py` remain regression anchors.
 
 ### CP04 Truthful invoices usage projections and refunds
+
+**Execution checkpoint — 4 October 2026:** Local repairs and synthetic database/API/UI verification are recorded in [CP04 evidence](sessions/2026-10-04-cp04-implementation.md). Package remains **in progress** pending designated-provider reconciliation, finance sign-off and deployed operational acceptance. See the [billing record reconciliation procedure](production-readiness/billing-record-reconciliation.md). The existing metering/reset policy and partial-refund allocation decision are unchanged.
 
 **Scope and classification:** invented invoice-detail values and assumed overage price F11; top-up/refund journey gap F09; financial reconciliation part of F35. The endpoint uses current plan allowance as usage, substitutes zero for unknown components and creates a synthetic invoice line. Historical detail can drift with current plan state. Evidence: `backend/app/api/v1/endpoints/billing.py:542`, `:610`, `:623`; `backend/app/domain/services/topup_service.py:163`, `:296`; `backend/app/api/v1/endpoints/billing_topups.py:287`.
 

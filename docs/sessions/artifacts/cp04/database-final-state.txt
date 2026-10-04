@@ -1,0 +1,3 @@
+[{'version_num': '0056_billing_refund_snapshots'}]
+[{'pending_synthetic_notifications': 0}]
+[{'relname': 'billing_refund_snapshots', 'relrowsecurity': True, 'relforcerowsecurity': True}, {'relname': 'invoice_snapshots', 'relrowsecurity': True, 'relforcerowsecurity': True}]
