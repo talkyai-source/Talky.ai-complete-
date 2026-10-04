@@ -1,0 +1,35 @@
+.....................F...                                                [100%]
+================================== FAILURES ===================================
+_ test_clarification_durable_snapshot_only_contains_successful_submission[submitted] _
+tests\unit\test_ag05_transcript_evidence.py:291: in test_clarification_durable_snapshot_only_contains_successful_submission
+    assert transcript.get_transcript_text(session.call_id) == "Assistant: " + submitted
+E   AssertionError: assert '' == 'Assistant: S...y that again?'
+E     - Assistant: Sorry, I didn't catch that � could you say that again?
+============================== warnings summary ===============================
+tests/unit/test_ag05_transcript_evidence.py: 35 warnings
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\backend\app\domain\services\transcript_service.py:369: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    timestamp=datetime.utcnow().isoformat(),
+
+tests/unit/test_ag05_transcript_evidence.py: 24 warnings
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\backend\.venv\Lib\site-packages\pydantic\main.py:250: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+
+tests/unit/test_ag05_transcript_evidence.py: 12 warnings
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\backend\app\domain\services\voice_pipeline\transcript_handler.py:146: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "timestamp": datetime.utcnow().isoformat(),
+
+tests/unit/test_ag05_transcript_evidence.py: 22 warnings
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\backend\app\domain\models\session.py:207: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    self.last_activity_at = datetime.utcnow()
+
+tests/unit/test_ag05_transcript_evidence.py::test_actual_queued_coalescing_keeps_raw_source_identity_even_when_not_answered
+tests/unit/test_ag05_transcript_evidence.py::test_actual_queued_coalescing_keeps_raw_source_identity_even_when_not_answered
+tests/unit/test_ag05_transcript_evidence.py::test_actual_traditional_runner_contact_sources_resolve_to_saved_caller_rows
+tests/unit/test_ag05_transcript_evidence.py::test_actual_traditional_runner_contact_sources_resolve_to_saved_caller_rows
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\backend\app\domain\services\voice_pipeline\turn_ender.py:569: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "timestamp": datetime.utcnow().isoformat(),
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/unit/test_ag05_transcript_evidence.py::test_clarification_durable_snapshot_only_contains_successful_submission[submitted]
+1 failed, 24 passed, 97 warnings in 1.83s

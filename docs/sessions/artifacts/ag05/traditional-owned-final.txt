@@ -1,0 +1,46 @@
+........................................................................ [ 29%]
+........................................................................ [ 59%]
+........................................................................ [ 88%]
+...........................                                              [100%]
+============================== warnings summary ===============================
+tests/unit/test_ag05_transcript_evidence.py: 37 warnings
+tests/unit/test_call_list_captured_contact.py: 6 warnings
+tests/unit/test_transcript_conversation_turns.py: 3 warnings
+tests/unit/test_transcript_flush_pooled.py: 3 warnings
+tests/unit/test_transcript_sealed_after_hangup.py: 35 warnings
+tests/unit/test_agent_first_transcript_persistence.py: 5 warnings
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\backend\app\domain\services\transcript_service.py:372: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    timestamp=datetime.utcnow().isoformat(),
+
+tests/unit/test_ag05_transcript_evidence.py: 24 warnings
+tests/unit/test_ag04_traditional_qualification.py: 250 warnings
+tests/unit/test_ag03_caller_dispatch_order.py: 72 warnings
+tests/unit/test_ag03_cascaded_relationship.py: 6 warnings
+tests/unit/test_turn_streamer_tts_delivery_error_transcript_gap.py: 4 warnings
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\backend\.venv\Lib\site-packages\pydantic\main.py:250: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+
+tests/unit/test_ag05_transcript_evidence.py: 12 warnings
+tests/unit/test_ag04_traditional_qualification.py: 136 warnings
+tests/unit/test_ag03_caller_dispatch_order.py: 78 warnings
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\backend\app\domain\services\voice_pipeline\transcript_handler.py:150: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "timestamp": datetime.utcnow().isoformat(),
+
+tests/unit/test_ag05_transcript_evidence.py: 22 warnings
+tests/unit/test_ag04_traditional_qualification.py: 316 warnings
+tests/unit/test_ag03_caller_dispatch_order.py: 103 warnings
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\backend\app\domain\models\session.py:207: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    self.last_activity_at = datetime.utcnow()
+
+tests/unit/test_ag05_transcript_evidence.py: 4 warnings
+tests/unit/test_ag04_traditional_qualification.py: 64 warnings
+tests/unit/test_ag03_caller_dispatch_order.py: 16 warnings
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\backend\app\domain\services\voice_pipeline\turn_ender.py:594: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "timestamp": datetime.utcnow().isoformat(),
+
+tests/unit/test_ag03_caller_dispatch_order.py::test_actual_barge_cancel_carries_accepted_order_into_replay
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\backend\app\domain\services\voice_pipeline_service.py:649: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "timestamp": datetime.utcnow().isoformat(),
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+243 passed, 1197 warnings in 22.82s

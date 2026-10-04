@@ -1,0 +1,12 @@
+INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.
+INFO  [alembic.runtime.migration] Will assume transactional DDL.
+INFO  [alembic.runtime.migration] Running upgrade 0056_billing_refund_snapshots -> 0057_transcript_save_state, Distinguish a final saved transcript from partial or unavailable evidence.
+        version_num
+----------------------------
+ 0057_transcript_save_state
+(1 row)
+
+ column_default  | is_nullable
+-----------------+-------------
+ 'unknown'::text | NO
+(1 row)

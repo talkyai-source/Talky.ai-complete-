@@ -1,0 +1,216 @@
+FFF                                                                      [100%]
+================================== FAILURES ===================================
+_______ test_manual_withdrawal_is_saved_as_a_protected_explicit_status ________
+
+call_id = '84150562-0c56-41de-8c6a-8ba6942b4210', field_key = 'email'
+body = ManualEdit(value=None, field_type='email', confirmed=True)
+current_user = namespace(tenant_id='46ecc6be-be1f-45f9-8a68-444e37d768b1')
+
+    @router.put(
+        "/calls/{call_id}/lead-details/{field_key}",
+        dependencies=[Depends(require_permission(Permission.CALLS_CREATE))],
+    )
+    async def correct_lead_detail(
+        call_id: str, field_key: str, body: ManualEdit,
+        current_user=Depends(get_current_user),
+    ):
+        """A human correcting a captured value.
+
+        Always written as source=manual_edit, which outranks everything, so a human
+        fix is never overwritten by a later inference � that is the whole point of
+        the trust ordering.
+        """
+        try:
+>           written = await _service().capture(
+                tenant_id=_tenant(current_user), call_id=call_id,
+                field_key=field_key, value=body.value,
+                source="manual_edit", field_type=body.field_type,
+                confirmed=body.confirmed,
+            )
+
+app\api\v1\endpoints\lead_details.py:379:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <app.domain.services.lead_capture_service.LeadCaptureService object at 0x0000012E35920B90>
+
+    async def capture(
+        self,
+        *,
+        tenant_id: str,
+        call_id: str,
+        field_key: str,
+        value: Any,
+        source: str,
+        field_type: str = "text",
+        confirmed: bool = False,
+        campaign_id: Optional[str] = None,
+        lead_id: Optional[str] = None,
+        is_required: bool = False,
+        raw_value: Any = None,
+        normalized_value: Any = None,
+        validation_status: Optional[str] = None,
+        confirmed_at: Optional[datetime] = None,
+        evidence: Optional[dict] = None,
+        expected_transcript: Optional[str] = None,
+        expected_summary_hash: Optional[str] = None,
+        expected_summary_snapshot: Optional[list] = None,
+    ) -> bool:
+        """Store one captured field. Returns True if it was written.
+
+        A LOWER-TRUST SOURCE DOES NOT OVERWRITE A HIGHER ONE. The agent
+        inferring something late in a call must not replace what the caller
+        explicitly said earlier � and it must certainly not replace a human's
+        manual correction. That rule lives in the ON CONFLICT clause so it holds
+        even when two writers race.
+        """
+        if source not in VALID_SOURCES:
+            raise InvalidCaptureError(
+                f"unknown source {source!r}; expected one of {sorted(VALID_SOURCES)}"
+            )
+        if field_type not in VALID_TYPES:
+            raise InvalidCaptureError(f"unknown field type {field_type!r}")
+        key = (field_key or "").strip()
+        if not key:
+            raise InvalidCaptureError("field_key is required")
+
+        stored = normalise_value(value, field_type)
+        is_contact = field_type in {"email", "phone"}
+        audit_status = validation_status
+        audit_raw = None
+        audit_normalized = None
+        audit_confirmed_at = confirmed_at
+        if is_contact:
+            audit_status = audit_status or (
+                "confirmed" if confirmed else "awaiting_confirmation"
+            )
+            if audit_status not in CONTACT_VALIDATION_STATUSES:
+                raise InvalidCaptureError(
+                    "unknown contact validation_status; expected one of "
+                    f"{sorted(CONTACT_VALIDATION_STATUSES)}"
+                )
+            # 2026-09-28 (owner): a contact the caller SAID is kept even if the
+            # read-back never completed (4291700f gave a number that was never
+            # shown), stored unconfirmed. Only the caller's own parsed words
+            # may do that � never a model guess, an import or a manual edit.
+            caller_pending = (
+                source == "caller_stated"
+                and not confirmed
+                and audit_status == "awaiting_confirmation"
+            )
+            if not caller_pending and (not confirmed or audit_status != "confirmed"):
+                raise InvalidCaptureError(
+                    "email/phone must be confirmed before persistence unless "
+                    "the caller stated it and it is awaiting confirmation"
+                )
+            if confirmed != (audit_status == "confirmed"):
+                raise InvalidCaptureError(
+                    "confirmed flag and contact validation_status disagree"
+                )
+            audit_raw = normalise_value(
+                raw_value if raw_value is not None else value,
+                field_type,
+            )
+            audit_normalized = normalise_value(
+                normalized_value if normalized_value is not None else value,
+                field_type,
+            )
+            if audit_normalized is None:
+>               raise InvalidCaptureError("confirmed contact value is empty")
+E               app.domain.services.lead_capture_service.InvalidCaptureError: confirmed contact value is empty
+
+app\domain\services\lead_capture_service.py:217: InvalidCaptureError
+
+The above exception was the direct cause of the following exception:
+
+lead_db = namespace(admin=<asyncpg.connection.Connection object at 0x0000012E35B64320>, pool=<asyncpg.pool.Pool object at 0x0000....lead_capture_service.LeadCaptureService object at 0x0000012E35920B90>, migration_head='0056_billing_refund_snapshots')
+
+    async def test_manual_withdrawal_is_saved_as_a_protected_explicit_status(lead_db):
+        state = session()
+        assert await persist(lead_db, state) == 1
+>       await api.correct_lead_detail(
+            str(lead_db.calls[0]), "email", api.ManualEdit(value=None, field_type="email"),
+            SimpleNamespace(tenant_id=str(lead_db.tenants[0])),
+        )
+
+tests\integration\test_ag05_lead_evidence.py:277:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+call_id = '84150562-0c56-41de-8c6a-8ba6942b4210', field_key = 'email'
+body = ManualEdit(value=None, field_type='email', confirmed=True)
+current_user = namespace(tenant_id='46ecc6be-be1f-45f9-8a68-444e37d768b1')
+
+    @router.put(
+        "/calls/{call_id}/lead-details/{field_key}",
+        dependencies=[Depends(require_permission(Permission.CALLS_CREATE))],
+    )
+    async def correct_lead_detail(
+        call_id: str, field_key: str, body: ManualEdit,
+        current_user=Depends(get_current_user),
+    ):
+        """A human correcting a captured value.
+
+        Always written as source=manual_edit, which outranks everything, so a human
+        fix is never overwritten by a later inference � that is the whole point of
+        the trust ordering.
+        """
+        try:
+            written = await _service().capture(
+                tenant_id=_tenant(current_user), call_id=call_id,
+                field_key=field_key, value=body.value,
+                source="manual_edit", field_type=body.field_type,
+                confirmed=body.confirmed,
+            )
+        except InvalidCaptureError as exc:
+>           raise HTTPException(status_code=422, detail=str(exc)) from exc
+E           fastapi.exceptions.HTTPException: 422: confirmed contact value is empty
+
+app\api\v1\endpoints\lead_details.py:386: HTTPException
+_____ test_required_fields_use_the_call_campaign_not_optional_query_input _____
+
+lead_db = namespace(admin=<asyncpg.connection.Connection object at 0x0000012E35B659A0>, pool=<asyncpg.pool.Pool object at 0x0000....lead_capture_service.LeadCaptureService object at 0x0000012E35B68620>, migration_head='0056_billing_refund_snapshots')
+
+    async def test_required_fields_use_the_call_campaign_not_optional_query_input(lead_db):
+        for index, field in enumerate(("email", "phone")):
+            await lead_db.admin.execute(
+                """INSERT INTO campaign_lead_fields
+                (tenant_id,campaign_id,field_key,label,field_type,is_required)
+                VALUES($1,$2,$3,$3,$3,TRUE)""",
+                lead_db.tenants[index], lead_db.campaigns[index], field,
+            )
+>       assert (await details(lead_db))["missing_required"] == ["email"]
+E       AssertionError: assert [] == ['email']
+E         Right contains one more item: 'email'
+E         Use -v to get more diff
+
+tests\integration\test_ag05_lead_evidence.py:296: AssertionError
+______ test_incremental_transcript_refuses_a_target_outside_bound_tenant ______
+
+lead_db = namespace(admin=<asyncpg.connection.Connection object at 0x0000012E35B665D0>, pool=<asyncpg.pool.Pool object at 0x0000....lead_capture_service.LeadCaptureService object at 0x0000012E35BF0F80>, migration_head='0056_billing_refund_snapshots')
+
+    async def test_incremental_transcript_refuses_a_target_outside_bound_tenant(lead_db):
+        svc = TranscriptService()
+        buffer_id = str(uuid4())
+        try:
+            svc.accumulate_turn(buffer_id, "user", "Tenant A synthetic evidence", turn_index=1)
+            await svc.flush_to_database(
+                buffer_id, db_pool=lead_db.pool, tenant_id=str(lead_db.tenants[0]),
+                target_call_id=str(lead_db.calls[1]),
+            )
+            row = await lead_db.admin.fetchrow(
+                "SELECT transcript,transcript_json FROM calls WHERE id=$1", lead_db.calls[1],
+            )
+>           assert row["transcript"] is None and row["transcript_json"] is None
+E           AssertionError: assert ('User: Tenant A synthetic evidence' is None)
+
+tests\integration\test_ag05_lead_evidence.py:370: AssertionError
+============================== warnings summary ===============================
+tests/integration/test_ag05_lead_evidence.py::test_incremental_transcript_refuses_a_target_outside_bound_tenant
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\backend\app\domain\services\transcript_service.py:231: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    transcript_text, turns_jsonb, talklee_call_id, row_id,
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/integration/test_ag05_lead_evidence.py::test_manual_withdrawal_is_saved_as_a_protected_explicit_status
+FAILED tests/integration/test_ag05_lead_evidence.py::test_required_fields_use_the_call_campaign_not_optional_query_input
+FAILED tests/integration/test_ag05_lead_evidence.py::test_incremental_transcript_refuses_a_target_outside_bound_tenant
+3 failed, 11 deselected, 1 warning in 7.04s

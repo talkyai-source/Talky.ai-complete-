@@ -1,0 +1,46 @@
+app\realtime\bridge.py:508:43: F401 [*] `app.utils.audio_utils.resample_audio` imported but unused
+    |
+506 |     # ── Model events: OpenAI -> gateway (+ tools, barge-in) ──────────────
+507 |     async def _pump_model_events(self) -> None:
+508 |         from app.utils.audio_utils import resample_audio, ulaw_to_pcm
+    |                                           ^^^^^^^^^^^^^^ F401
+509 |
+510 |         try:
+    |
+    = help: Remove unused import
+
+app\realtime\bridge.py:508:59: F401 [*] `app.utils.audio_utils.ulaw_to_pcm` imported but unused
+    |
+506 |     # ── Model events: OpenAI -> gateway (+ tools, barge-in) ──────────────
+507 |     async def _pump_model_events(self) -> None:
+508 |         from app.utils.audio_utils import resample_audio, ulaw_to_pcm
+    |                                                           ^^^^^^^^^^^ F401
+509 |
+510 |         try:
+    |
+    = help: Remove unused import
+
+app\realtime\bridge.py:963:13: F401 [*] `app.services.scripts.spoken_email_normalizer.extract_email_from_speech` imported but unused
+    |
+961 |         )
+962 |         from app.services.scripts.spoken_email_normalizer import (
+963 |             extract_email_from_speech,
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^ F401
+964 |         )
+965 |         from app.domain.services.voice_pipeline.turn_runner import (
+    |
+    = help: Remove unused import: `app.services.scripts.spoken_email_normalizer.extract_email_from_speech`
+
+app\realtime\bridge.py:1041:17: F841 Local variable `current` is assigned to but never used
+     |
+1039 |             prior_result = self._current_contact_result or baseline
+1040 |             for kind in ("email", "phone"):
+1041 |                 current = getattr(current_slots, f"{kind}_capture", None)
+     |                 ^^^^^^^ F841
+1042 |                 previous = getattr(prior_result, f"{kind}_capture", None)
+1043 |                 owned_fields = (f"{kind}_capture", kind, f"{kind}_confirmed",
+     |
+     = help: Remove assignment to unused variable `current`
+
+Found 4 errors.
+[*] 3 fixable with the `--fix` option (1 hidden fix can be enabled with the `--unsafe-fixes` option).

@@ -1,0 +1,36 @@
+.....................F........                                           [100%]
+================================== FAILURES ===================================
+_____ test_business_quote_remains_needs_review_and_manual_correction_wins _____
+
+lead_db = namespace(admin=<asyncpg.connection.Connection object at 0x000001D0E1F4A7B0>, pool=<asyncpg.pool.Pool object at 0x0000...ces.lead_capture_service.LeadCaptureService object at 0x000001D0D2C2A450>, migration_head='0057_transcript_save_state')
+
+    async def test_business_quote_remains_needs_review_and_manual_correction_wins(lead_db):
+        from app.domain.services.call_summary.business_details import (
+            persist_business_details, save_summary_details, transcript_revision,
+        )
+
+        quote = "I need information about accepting card payments."
+        row = {"transcript": "User: " + quote, "transcript_json": [{"role": "user", "content": quote}],
+               "action_results": None, "campaign_id": lead_db.campaigns[0], "lead_id": lead_db.leads[0]}
+        summary = {"business_details": [{"field_key": "identified_need", "value": "Synthetic classification",
+                                         "source_quote": quote}]}
+        await lead_db.admin.execute(
+            """UPDATE calls SET transcript=$2,transcript_json=$3::jsonb,summary_transcript_hash=$4,
+            transcript_save_state='partial' WHERE id=$1""",
+            lead_db.calls[0], row["transcript"], json.dumps(row["transcript_json"]), transcript_revision(row),
+        )
+        await save_summary_details(lead_db.pool, str(lead_db.tenants[0]), str(lead_db.calls[0]), summary, row)
+        response = await details(lead_db)
+>       note = response["details"][0]
+E       IndexError: list index out of range
+
+tests\integration\test_ag05_lead_evidence.py:675: IndexError
+============================== warnings summary ===============================
+tests/integration/test_ag05_lead_evidence.py: 23 warnings
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\backend\app\domain\services\transcript_service.py:372: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    timestamp=datetime.utcnow().isoformat(),
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/integration/test_ag05_lead_evidence.py::test_business_quote_remains_needs_review_and_manual_correction_wins
+1 failed, 29 passed, 23 warnings in 28.27s

@@ -1,0 +1,192 @@
+........................................................................ [  3%]
+........................................................................ [  6%]
+........................................................................ [  9%]
+........................................................................ [ 13%]
+........................................................................ [ 16%]
+........................................................................ [ 19%]
+........................................................................ [ 23%]
+........................................................................ [ 26%]
+........................................................................ [ 29%]
+........................................................................ [ 32%]
+........................................................................ [ 36%]
+........................................................................ [ 39%]
+........................................................................ [ 42%]
+........................................................................ [ 46%]
+........................................................................ [ 49%]
+........................................................................ [ 52%]
+........................................................................ [ 55%]
+........................................................................ [ 59%]
+........................................................................ [ 62%]
+........................................................................ [ 65%]
+........................................................................ [ 69%]
+........................................................................ [ 72%]
+........................................................................ [ 75%]
+........................................................................ [ 78%]
+........................................................................ [ 82%]
+............F........................................................... [ 85%]
+........................................................................ [ 88%]
+........................................................................ [ 92%]
+........................................................................ [ 95%]
+........................................................................ [ 98%]
+..............................                                           [100%]
+================================== FAILURES ===================================
+_ test_summary_cache_requires_current_evidence_and_business_fields[structured] _
+tests\unit\test_summary_revision_repairs.py:43: in test_summary_cache_requires_current_evidence_and_business_fields
+    assert result == (old if change == "none" else fresh)
+E   AssertionError: assert None == {'business_details': [], 'headline': 'Current analysis'}
+============================== warnings summary ===============================
+..\..\..\backend\.venv\Lib\site-packages\fastapi\testclient.py:1
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\backend\.venv\Lib\site-packages\fastapi\testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+tests/unit/test_ag03_caller_dispatch_order.py: 72 warnings
+tests/unit/test_ag03_cascaded_relationship.py: 6 warnings
+tests/unit/test_ag04_traditional_qualification.py: 250 warnings
+tests/unit/test_ag05_transcript_evidence.py: 24 warnings
+tests/unit/test_agent_first_nonturn_audio_latency_not_tracked.py: 4 warnings
+tests/unit/test_audio_ingest_caller_first_silence.py: 16 warnings
+tests/unit/test_bargein_cancel_keeps_caller_turn.py: 4 warnings
+tests/unit/test_bargein_epoch_partial.py: 8 warnings
+tests/unit/test_bargein_silence.py: 42 warnings
+tests/unit/test_call_experience_end_scope.py: 129 warnings
+tests/unit/test_caller_authorized_end_call.py: 107 warnings
+tests/unit/test_caller_speaking_cleared_on_end_of_turn.py: 40 warnings
+tests/unit/test_caller_turn_across_token_edge.py: 8 warnings
+tests/unit/test_end_call_streaming.py: 8 warnings
+tests/unit/test_false_barge_in_resume.py: 10 warnings
+tests/unit/test_knowledge_uncertainty_contract.py: 10 warnings
+tests/unit/test_live_call_lead_capture.py: 10 warnings
+tests/unit/test_live_capability_offers.py: 14 warnings
+tests/unit/test_live_structured_state.py: 4 warnings
+tests/unit/test_opening_nudge_words_without_start_of_turn.py: 4 warnings
+tests/unit/test_regreet_ladder_over_open_caller_turn.py: 8 warnings
+tests/unit/test_reply_grounding_guards.py: 16 warnings
+tests/unit/test_turn_streamer_tts_delivery_error_transcript_gap.py: 4 warnings
+tests/unit/test_voice_action_contract.py: 24 warnings
+tests/unit/test_voice_pipeline_service.py: 117 warnings
+tests/unit/voice_pipeline/test_turn_streamer_kb_prefetch.py: 2 warnings
+tests/unit/voice_pipeline/test_turn_streamer_tts_overlap.py: 6 warnings
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\backend\.venv\Lib\site-packages\pydantic\main.py:250: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+
+tests/unit/test_ag03_caller_dispatch_order.py: 78 warnings
+tests/unit/test_ag04_traditional_qualification.py: 136 warnings
+tests/unit/test_ag05_transcript_evidence.py: 12 warnings
+tests/unit/test_bargein_silence.py: 12 warnings
+tests/unit/test_caller_speaking_cleared_on_end_of_turn.py: 19 warnings
+tests/unit/test_voice_pipeline_service.py: 7 warnings
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\backend\app\domain\services\voice_pipeline\transcript_handler.py:150: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "timestamp": datetime.utcnow().isoformat(),
+
+tests/unit/test_ag03_caller_dispatch_order.py: 103 warnings
+tests/unit/test_ag04_traditional_qualification.py: 316 warnings
+tests/unit/test_ag05_transcript_evidence.py: 22 warnings
+tests/unit/test_bargein_silence.py: 29 warnings
+tests/unit/test_call_experience_end_scope.py: 100 warnings
+tests/unit/test_caller_authorized_end_call.py: 84 warnings
+tests/unit/test_caller_speaking_cleared_on_end_of_turn.py: 2 warnings
+tests/unit/test_live_call_lead_capture.py: 8 warnings
+tests/unit/test_voice_pipeline_service.py: 62 warnings
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\backend\app\domain\models\session.py:207: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    self.last_activity_at = datetime.utcnow()
+
+tests/unit/test_ag03_caller_dispatch_order.py: 16 warnings
+tests/unit/test_ag04_traditional_qualification.py: 64 warnings
+tests/unit/test_ag05_transcript_evidence.py: 4 warnings
+tests/unit/test_bargein_silence.py: 6 warnings
+tests/unit/test_call_experience_end_scope.py: 27 warnings
+tests/unit/test_caller_authorized_end_call.py: 22 warnings
+tests/unit/test_caller_speaking_cleared_on_end_of_turn.py: 3 warnings
+tests/unit/test_live_call_lead_capture.py: 2 warnings
+tests/unit/test_voice_pipeline_service.py: 23 warnings
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\backend\app\domain\services\voice_pipeline\turn_ender.py:594: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "timestamp": datetime.utcnow().isoformat(),
+
+tests/unit/test_ag03_caller_dispatch_order.py::test_actual_barge_cancel_carries_accepted_order_into_replay
+tests/unit/test_bargein_silence.py::test_handle_barge_in_does_not_arm_event_for_speculative_task_while_thinking
+tests/unit/test_voice_pipeline_service.py::test_handle_barge_in_cancels_speculative_task_before_tts
+tests/unit/test_voice_pipeline_service.py::test_handle_barge_in_cancels_final_task_when_tts_playing
+tests/unit/test_voice_pipeline_service.py::test_handle_barge_in_cancels_active_turn_task_immediately
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\backend\app\domain\services\voice_pipeline_service.py:649: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "timestamp": datetime.utcnow().isoformat(),
+
+tests/unit/test_ag03_relationship_acceptance.py: 2 warnings
+tests/unit/test_ag04_native_qualification.py: 157 warnings
+tests/unit/test_ag05_contact_projection.py: 8 warnings
+tests/unit/test_ag05_native_contact_revision.py: 36 warnings
+tests/unit/test_ag05_transcript_evidence.py: 37 warnings
+tests/unit/test_agent_first_transcript_persistence.py: 5 warnings
+tests/unit/test_call_experience_end_scope.py: 19 warnings
+tests/unit/test_call_list_captured_contact.py: 6 warnings
+tests/unit/test_caller_authorized_end_call.py: 20 warnings
+tests/unit/test_live_call_lead_capture.py: 2 warnings
+tests/unit/test_realtime_quality_pass.py: 2 warnings
+tests/unit/test_realtime_relationship_ownership.py: 3 warnings
+tests/unit/test_transcript_conversation_turns.py: 3 warnings
+tests/unit/test_transcript_flush_pooled.py: 3 warnings
+tests/unit/test_transcript_sealed_after_hangup.py: 35 warnings
+tests/unit/test_voice_pipeline_service.py: 11 warnings
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\backend\app\domain\services\transcript_service.py:372: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    timestamp=datetime.utcnow().isoformat(),
+
+tests/unit/test_ag04_realtime_smoke.py::test_smoke_captures_complete_response_candidate[False]
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\backend\scripts\realtime_smoke.py:82: DeprecationWarning: 'audioop' is deprecated and slated for removal in Python 3.13
+    import audioop  # deprecated in 3.13 but present in the 3.11 venv
+
+tests/unit/test_assistant_knowledge_authorization.py::test_streaming_dispatch_threads_authenticated_actor
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\backend\app\infrastructure\assistant\streaming.py:340: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    system_prompt = SYSTEM_PROMPT.format(current_time=datetime.utcnow().isoformat())
+
+tests/unit/test_bargein_silence.py::test_handle_barge_in_does_not_arm_event_for_speculative_task_while_thinking
+tests/unit/test_voice_pipeline_service.py::test_handle_barge_in_cancels_speculative_task_before_tts
+tests/unit/test_voice_pipeline_service.py::test_handle_barge_in_cancels_final_task_when_tts_playing
+tests/unit/test_voice_pipeline_service.py::test_handle_barge_in_cancels_active_turn_task_immediately
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\backend\app\domain\services\voice_pipeline_service.py:776: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "timestamp": datetime.utcnow().isoformat(),
+
+tests/unit/test_contact_direction_boundaries.py::test_contact_update_never_claims_success_after_direction_trigger_rejection[add]
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\backend\app\api\v1\endpoints\campaigns.py:1813: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "created_at": datetime.utcnow().isoformat()
+
+tests/unit/test_realtime_inbound_opening.py: 1 warning
+tests/unit/test_realtime_independent.py: 1 warning
+tests/unit/test_realtime_profile_contract.py: 14 warnings
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\backend\app\realtime\runtime.py:187: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    started_at=datetime.utcnow(),
+
+tests/unit/test_realtime_inbound_opening.py: 1 warning
+tests/unit/test_realtime_independent.py: 1 warning
+tests/unit/test_realtime_profile_contract.py: 14 warnings
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\backend\app\realtime\runtime.py:188: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    last_activity_at=datetime.utcnow(),
+
+tests/unit/test_realtime_inbound_opening.py: 1 warning
+tests/unit/test_realtime_profile_contract.py: 14 warnings
+  <string>:17: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+
+tests/unit/test_realtime_lifecycle_repairs.py::test_actual_browser_receipt_rejects_stale_and_uncorrelated_ack
+tests/unit/test_realtime_lifecycle_repairs.py::test_twilio_mark_protocol_and_clear_cannot_confirm_readback
+  <string>:5: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+
+tests/unit/test_transfer_restart_recovery_wiring.py::test_normal_lifespan_wires_answer_fence_before_connect_and_readiness
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\backend\app\api\v1\endpoints\admin\health\_shared.py:16: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    _server_start_time = datetime.utcnow()
+
+tests/unit/test_transfer_restart_recovery_wiring.py::test_normal_lifespan_wires_answer_fence_before_connect_and_readiness
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\backend\app\api\v1\endpoints\abuse_monitoring.py:147: FastAPIDeprecationWarning: `regex` has been deprecated, please use `pattern` instead
+    severity: Optional[str] = Query(None, regex="^(low|medium|high|critical)$"),
+
+tests/unit/test_transfer_restart_recovery_wiring.py::test_normal_lifespan_wires_answer_fence_before_connect_and_readiness
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\backend\app\api\v1\endpoints\abuse_monitoring.py:684: FastAPIDeprecationWarning: `regex` has been deprecated, please use `pattern` instead
+    min_severity: str = Query("high", regex="^(medium|high|critical)$"),
+
+tests/unit/test_voice_pipeline_service.py::test_live_turn_prompt_carries_the_floor_once_and_last
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\backend\app\domain\services\voice_pipeline\capture_mode.py:110: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+    target.enter_capture_mode(call_id)
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/unit/test_summary_revision_repairs.py::test_summary_cache_requires_current_evidence_and_business_fields[structured]
+1 failed, 2189 passed, 2519 warnings in 85.69s (0:01:25)

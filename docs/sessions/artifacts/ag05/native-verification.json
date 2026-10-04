@@ -1,0 +1,50 @@
+{
+  "scope": "AG05 native contact provenance, current ASR revision, conditional persistence and read projection",
+  "source_provenance": {
+    "base_revision": "016419334f974882bdaf5f89a8322ce20884a92d",
+    "uncommitted_candidate": true,
+    "final_non_executable_docstring_edit_utc": "2026-10-04T23:51:59Z"
+  },
+  "source_files": [
+    "backend/app/realtime/bridge.py",
+    "backend/app/domain/services/voice_pipeline/contact_capture.py",
+    "backend/app/domain/services/voice_pipeline/lead_slot_capture.py",
+    "backend/app/domain/services/lead_capture_service.py"
+  ],
+  "test_files_owned_or_coordinated": [
+    "backend/tests/unit/test_ag05_native_contact_revision.py",
+    "backend/tests/unit/test_ag05_contact_projection.py",
+    "backend/tests/unit/test_realtime_relationship_ownership.py",
+    "backend/tests/unit/test_ag03_relationship_acceptance.py"
+  ],
+  "verification": {
+    "initial_native_regression": {"failed": 6, "passed": 2, "log": "native-contact-red.txt"},
+    "final_unit_regression": {
+      "passed": 349,
+      "failed": 0,
+      "skipped": 0,
+      "warnings": 230,
+      "seconds": 14.04,
+      "log": "native-final-tests.txt",
+      "working_directory": "backend",
+      "command": "python -m pytest tests/unit/test_ag05_native_contact_revision.py tests/unit/test_ag05_contact_projection.py tests/unit/test_realtime_relationship_ownership.py tests/unit/test_ag03_relationship_acceptance.py tests/unit/test_realtime_independent.py tests/unit/test_realtime_end_call_ownership.py tests/unit/test_ag04_native_qualification.py tests/unit/test_lead_capture_service.py tests/unit/test_live_call_lead_capture.py tests/unit/test_contact_capture_state_machine.py tests/unit/test_contact_pause_and_punctuation.py tests/unit/test_contact_capture_best_practice.py tests/unit/test_contact_capture_clarification_bound.py -q --tb=short"
+    },
+    "final_lint": {
+      "exit_code": 0,
+      "log": "native-lint.txt",
+      "working_directory": "backend",
+      "command": "python -m ruff check app/realtime/bridge.py app/domain/services/voice_pipeline/contact_capture.py app/domain/services/voice_pipeline/lead_slot_capture.py app/domain/services/lead_capture_service.py tests/unit/test_ag05_native_contact_revision.py tests/unit/test_ag05_contact_projection.py tests/unit/test_realtime_relationship_ownership.py tests/unit/test_ag03_relationship_acceptance.py --select F"
+    },
+    "owned_diff_check": {"exit_code": 0, "notes": "Only existing CRLF-to-LF working-copy notices."},
+    "independent_postgresql": {"owner": "audio_audit", "passed": 30, "failed": 0, "log": "lead-evidence-final.txt", "scope": "Disposable database, actual SQL and API projections; synthetic provider events, no live calls or external deliveries."}
+  },
+  "limitations": [
+    "These are deterministic offline/runtime and disposable-database checks, not a live acoustic or model quality qualification.",
+    "A correlated transport-played receipt is transport evidence, not proof that a person heard or understood the readback.",
+    "Traditional contact confirmation currently has no correlated readback receipt identifier; no identifier is invented.",
+    "Legacy caller contacts without typed provenance remain explicitly unversioned; they are not retroactively verified.",
+    "Current-item source revision handling is bounded; it does not implement general historical contact replay.",
+    "Persistent database outage or process death cannot recover evidence that was never committed. Durable transcript state and source projection prevent a known changed source from appearing currently confirmed.",
+    "Previously frozen CRM delivery payloads are not reconciled by this change; that remains the explicit AG06 handoff. New summary reads use the shared contact projection."
+  ]
+}

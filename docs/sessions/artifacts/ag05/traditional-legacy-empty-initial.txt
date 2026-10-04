@@ -1,0 +1,71 @@
+...............FFFFF                                                     [100%]
+================================== FAILURES ===================================
+_____ test_supported_legacy_turn_aliases_share_canonical_rendering[False] _____
+tests\unit\test_ag05_transcript_evidence.py:189: in test_supported_legacy_turn_aliases_share_canonical_rendering
+    assert transcript_text_from_turns(data) == "User: My provider is CurrentCo.\nAssistant: Thank you."
+E   AssertionError: assert '' == 'User: My pro...t: Thank you.'
+E     - User: My provider is CurrentCo.
+E     - Assistant: Thank you.
+_____ test_supported_legacy_turn_aliases_share_canonical_rendering[True] ______
+tests\unit\test_ag05_transcript_evidence.py:189: in test_supported_legacy_turn_aliases_share_canonical_rendering
+    assert transcript_text_from_turns(data) == "User: My provider is CurrentCo.\nAssistant: Thank you."
+E   AssertionError: assert '' == 'User: My pro...t: Thank you.'
+E     - User: My provider is CurrentCo.
+E     - Assistant: Thank you.
+________ test_legacy_alias_does_not_resurrect_retracted_owned_revision ________
+tests\unit\test_ag05_transcript_evidence.py:200: in test_legacy_alias_does_not_resurrect_retracted_owned_revision
+    assert conversation_turns({"turns": [raw]})[0]["effective_content_status"] == "retracted"
+E   IndexError: list index out of range
+________ test_empty_owned_final_retains_identity_for_a_later_revision _________
+tests\unit\test_ag05_transcript_evidence.py:207: in test_empty_owned_final_retains_identity_for_a_later_revision
+    assert row is not None
+E   assert None is not None
+__________ test_cancelled_final_save_retains_bounded_frozen_evidence __________
+tests\unit\test_ag05_transcript_evidence.py:232: in test_cancelled_final_save_retains_bounded_frozen_evidence
+    assert "ag05-synthetic" in transcript._failed_finalizations
+E   AssertionError: assert 'ag05-synthetic' in OrderedDict()
+E    +  where OrderedDict() = <app.domain.services.transcript_service.TranscriptService object at 0x000001D7D7B94740>._failed_finalizations
+============================== warnings summary ===============================
+tests/unit/test_ag05_transcript_evidence.py: 25 warnings
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\backend\app\domain\services\transcript_service.py:350: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    timestamp=datetime.utcnow().isoformat(),
+
+tests/unit/test_ag05_transcript_evidence.py::test_actual_queued_coalescing_keeps_raw_source_identity_even_when_not_answered
+tests/unit/test_ag05_transcript_evidence.py::test_actual_queued_coalescing_keeps_raw_source_identity_even_when_not_answered
+tests/unit/test_ag05_transcript_evidence.py::test_actual_queued_coalescing_keeps_raw_source_identity_even_when_not_answered
+tests/unit/test_ag05_transcript_evidence.py::test_actual_queued_coalescing_keeps_raw_source_identity_even_when_not_answered
+tests/unit/test_ag05_transcript_evidence.py::test_actual_queued_coalescing_keeps_raw_source_identity_even_when_not_answered
+tests/unit/test_ag05_transcript_evidence.py::test_actual_queued_coalescing_keeps_raw_source_identity_even_when_not_answered
+tests/unit/test_ag05_transcript_evidence.py::test_actual_queued_coalescing_keeps_raw_source_identity_even_when_not_answered
+tests/unit/test_ag05_transcript_evidence.py::test_actual_queued_coalescing_keeps_raw_source_identity_even_when_not_answered
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\backend\.venv\Lib\site-packages\pydantic\main.py:250: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+
+tests/unit/test_ag05_transcript_evidence.py::test_actual_queued_coalescing_keeps_raw_source_identity_even_when_not_answered
+tests/unit/test_ag05_transcript_evidence.py::test_actual_queued_coalescing_keeps_raw_source_identity_even_when_not_answered
+tests/unit/test_ag05_transcript_evidence.py::test_actual_queued_coalescing_keeps_raw_source_identity_even_when_not_answered
+tests/unit/test_ag05_transcript_evidence.py::test_actual_queued_coalescing_keeps_raw_source_identity_even_when_not_answered
+tests/unit/test_ag05_transcript_evidence.py::test_actual_queued_coalescing_keeps_raw_source_identity_even_when_not_answered
+tests/unit/test_ag05_transcript_evidence.py::test_actual_queued_coalescing_keeps_raw_source_identity_even_when_not_answered
+tests/unit/test_ag05_transcript_evidence.py::test_actual_queued_coalescing_keeps_raw_source_identity_even_when_not_answered
+tests/unit/test_ag05_transcript_evidence.py::test_actual_queued_coalescing_keeps_raw_source_identity_even_when_not_answered
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\backend\app\domain\services\voice_pipeline\transcript_handler.py:146: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "timestamp": datetime.utcnow().isoformat(),
+
+tests/unit/test_ag05_transcript_evidence.py: 12 warnings
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\backend\app\domain\models\session.py:207: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    self.last_activity_at = datetime.utcnow()
+
+tests/unit/test_ag05_transcript_evidence.py::test_actual_queued_coalescing_keeps_raw_source_identity_even_when_not_answered
+tests/unit/test_ag05_transcript_evidence.py::test_actual_queued_coalescing_keeps_raw_source_identity_even_when_not_answered
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\backend\app\domain\services\voice_pipeline\turn_ender.py:569: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "timestamp": datetime.utcnow().isoformat(),
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/unit/test_ag05_transcript_evidence.py::test_supported_legacy_turn_aliases_share_canonical_rendering[False]
+FAILED tests/unit/test_ag05_transcript_evidence.py::test_supported_legacy_turn_aliases_share_canonical_rendering[True]
+FAILED tests/unit/test_ag05_transcript_evidence.py::test_legacy_alias_does_not_resurrect_retracted_owned_revision
+FAILED tests/unit/test_ag05_transcript_evidence.py::test_empty_owned_final_retains_identity_for_a_later_revision
+FAILED tests/unit/test_ag05_transcript_evidence.py::test_cancelled_final_save_retains_bounded_frozen_evidence
+5 failed, 15 passed, 55 warnings in 5.30s

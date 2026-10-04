@@ -1,0 +1,64 @@
+FFFFFF..                                                                 [100%]
+================================== FAILURES ===================================
+__________ test_source_revision_replaces_only_owned_contact[openai] ___________
+tests\unit\test_ag05_native_contact_revision.py:26: in test_source_revision_replaces_only_owned_contact
+    assert slots.email == "blair@example.com"
+E   AssertionError: assert 'alex@example.com' == 'blair@example.com'
+E     - blair@example.com
+E     ? ^ ^^^
+E     + alex@example.com
+E     ? ^ ^^
+____________ test_source_revision_replaces_only_owned_contact[xai] ____________
+tests\unit\test_ag05_native_contact_revision.py:26: in test_source_revision_replaces_only_owned_contact
+    assert slots.email == "blair@example.com"
+E   AssertionError: assert 'alex@example.com' == 'blair@example.com'
+E     - blair@example.com
+E     ? ^ ^^^
+E     + alex@example.com
+E     ? ^ ^^
+_ test_confirmation_revision_cannot_keep_obsolete_yes[No, that is wrong.-openai] _
+tests\unit\test_ag05_native_contact_revision.py:44: in test_confirmation_revision_cannot_keep_obsolete_yes
+    assert confirmed_evidence.get("confirmation_source", {}).get("provider_item_id") == "confirmation"
+E   AssertionError: assert None == 'confirmation'
+E    +  where None = <built-in method get of dict object at 0x000001FCE2F01200>('provider_item_id')
+E    +    where <built-in method get of dict object at 0x000001FCE2F01200> = {}.get
+E    +      where {} = <built-in method get of dict object at 0x000001FCE2ECAC00>('confirmation_source', {})
+E    +        where <built-in method get of dict object at 0x000001FCE2ECAC00> = {}.get
+_ test_confirmation_revision_cannot_keep_obsolete_yes[No, that is wrong.-xai] _
+tests\unit\test_ag05_native_contact_revision.py:44: in test_confirmation_revision_cannot_keep_obsolete_yes
+    assert confirmed_evidence.get("confirmation_source", {}).get("provider_item_id") == "confirmation"
+E   AssertionError: assert None == 'confirmation'
+E    +  where None = <built-in method get of dict object at 0x000001FCE2F374C0>('provider_item_id')
+E    +    where <built-in method get of dict object at 0x000001FCE2F374C0> = {}.get
+E    +      where {} = <built-in method get of dict object at 0x000001FCE2F15A40>('confirmation_source', {})
+E    +        where <built-in method get of dict object at 0x000001FCE2F15A40> = {}.get
+________ test_confirmation_revision_cannot_keep_obsolete_yes[-openai] _________
+tests\unit\test_ag05_native_contact_revision.py:44: in test_confirmation_revision_cannot_keep_obsolete_yes
+    assert confirmed_evidence.get("confirmation_source", {}).get("provider_item_id") == "confirmation"
+E   AssertionError: assert None == 'confirmation'
+E    +  where None = <built-in method get of dict object at 0x000001FCE2F38B80>('provider_item_id')
+E    +    where <built-in method get of dict object at 0x000001FCE2F38B80> = {}.get
+E    +      where {} = <built-in method get of dict object at 0x000001FCE2F39280>('confirmation_source', {})
+E    +        where <built-in method get of dict object at 0x000001FCE2F39280> = {}.get
+__________ test_confirmation_revision_cannot_keep_obsolete_yes[-xai] __________
+tests\unit\test_ag05_native_contact_revision.py:44: in test_confirmation_revision_cannot_keep_obsolete_yes
+    assert confirmed_evidence.get("confirmation_source", {}).get("provider_item_id") == "confirmation"
+E   AssertionError: assert None == 'confirmation'
+E    +  where None = <built-in method get of dict object at 0x000001FCE2F68940>('provider_item_id')
+E    +    where <built-in method get of dict object at 0x000001FCE2F68940> = {}.get
+E    +      where {} = <built-in method get of dict object at 0x000001FCE2F65300>('confirmation_source', {})
+E    +        where <built-in method get of dict object at 0x000001FCE2F65300> = {}.get
+============================== warnings summary ===============================
+tests/unit/test_ag05_native_contact_revision.py: 16 warnings
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\backend\app\domain\services\transcript_service.py:231: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    timestamp=datetime.utcnow().isoformat(),
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/unit/test_ag05_native_contact_revision.py::test_source_revision_replaces_only_owned_contact[openai]
+FAILED tests/unit/test_ag05_native_contact_revision.py::test_source_revision_replaces_only_owned_contact[xai]
+FAILED tests/unit/test_ag05_native_contact_revision.py::test_confirmation_revision_cannot_keep_obsolete_yes[No, that is wrong.-openai]
+FAILED tests/unit/test_ag05_native_contact_revision.py::test_confirmation_revision_cannot_keep_obsolete_yes[No, that is wrong.-xai]
+FAILED tests/unit/test_ag05_native_contact_revision.py::test_confirmation_revision_cannot_keep_obsolete_yes[-openai]
+FAILED tests/unit/test_ag05_native_contact_revision.py::test_confirmation_revision_cannot_keep_obsolete_yes[-xai]
+6 failed, 2 passed, 16 warnings in 4.23s

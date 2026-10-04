@@ -34,7 +34,8 @@
     "ag01_implementation_commit": "4f47123f18af3cb01f2330138c635c76aae7182c",
     "ag02_implementation_commit": "69d09fe575831c42a14b28c0a7417ca1b388c492",
     "ag03_implementation_commit": "27c04347b2f0d5d0eccf83b3c31663eb3cfbd145",
-    "ag04_implementation_commit": "c93a05e3561b5feaf7da467b30c2aa37be0e41bd"
+    "ag04_implementation_commit": "c93a05e3561b5feaf7da467b30c2aa37be0e41bd",
+    "ag05_implementation_commit": "71cdeefa59a0f786f236d3a3d25ba592470ddf05"
   },
   "status_rules": {
     "execution": [
@@ -486,7 +487,7 @@
       "title": "Complete caller evidence -> Leads -> Sales Hub without overstating trust",
       "owner_role": "Lead workflow lead",
       "assigned_person": "Codex implementation team",
-      "reviewer": "Independent migrated-PostgreSQL/API fault review underway",
+      "reviewer": "Independent native/traditional source review and migrated PostgreSQL/API fault acceptance; live cohort/browser/connector acceptance pending",
       "status": "in_progress",
       "start_after_milestone": "RG01 baseline recorded",
       "dependencies_and_tests": "See package text; coordination and final acceptance dependencies are distinct from entry milestones.",
@@ -499,18 +500,32 @@
         "A06"
       ],
       "plan_anchor": "ag05-complete-caller-evidence-to-leads-to-sales-hub-without-overstating-trust",
-      "evidence": [],
-      "blocker": null,
-      "next_action": "Repair reproduced current-ASR contact/source confirmation ownership, suffix revocation/retry, final transcript failure/canonical consumption and ambiguous Leads display using existing stores.",
+      "evidence": [
+        {
+          "path": "docs/sessions/2026-10-05-ag05-implementation.md",
+          "kind": "local_implementation_and_limitations",
+          "candidate": "71cdeefa59a0f786f236d3a3d25ba592470ddf05"
+        },
+        {
+          "path": "docs/sessions/artifacts/ag05/verification.json",
+          "kind": "verification_manifest"
+        },
+        {
+          "path": "docs/sessions/artifacts/ag05/api-state-examples-final.json",
+          "kind": "annotated_synthetic_database_api_states"
+        }
+      ],
+      "blocker": "Local source, persistence and display repairs pass. Exact contact cohort accuracy, qualification precision/recall and correction burden, real Sales Hub browser acceptance, connector frozen-payload handling and release acceptance remain unverified. Same-process retry cannot recover evidence that was never committed before process death.",
+      "next_action": "Continue AG06 current/frozen connector evidence, original account and unknown-outcome handling; obtain approved cohort/profile and complete real browser/live acceptance before claiming AG05 closure.",
       "target_date": null
     },
     {
       "id": "AG06",
       "title": "Finish supported action workflows and reconcile unknown external results",
       "owner_role": "Action execution and connector lead",
-      "assigned_person": null,
-      "reviewer": null,
-      "status": "planned",
+      "assigned_person": "Codex implementation team",
+      "reviewer": "Independent runtime/action/CRM source audit; reproduced repairs and database acceptance underway",
+      "status": "in_progress",
       "start_after_milestone": "RG01 baseline recorded",
       "dependencies_and_tests": "See package text; coordination and final acceptance dependencies are distinct from entry milestones.",
       "finding_ids": [
@@ -526,7 +541,7 @@
       "plan_anchor": "ag06-finish-supported-action-workflows-and-reconcile-unknown-external-results",
       "evidence": [],
       "blocker": null,
-      "next_action": "Assign owner and confirm the baseline reproduction or evidence gap.",
+      "next_action": "Reproduce and repair Admin cancellation/dispatch races, false retry admission, Actions UI/backend contract mismatch, dashboard reviewed-account and durable-receipt gaps, and stale/uncertain CRM recipient evidence within existing services. Preserve no-blind-resend; real provider acceptance remains pending designated accounts.",
       "target_date": null
     },
     {
