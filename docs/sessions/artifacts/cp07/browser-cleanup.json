@@ -1,0 +1,11 @@
+{
+  "owned_server_pid": 16560,
+  "browser_session": "cp07-audit",
+  "checked_at": "2026-10-05T00:48:48.7175186+05:00",
+  "listener_3197_count": 0,
+  "browser_closed": true,
+  "server_stopped": true,
+  "harness_source_copy_verified": true,
+  "temporary_harness_removed": false,
+  "cleanup_limit": "Automatic approval review rejected recursive deletion of ignored tmp/cp07-browser as blocked by policy. Inactive temporary files retained; no server or browser remains active."
+}

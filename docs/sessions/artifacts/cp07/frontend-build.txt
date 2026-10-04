@@ -1,0 +1,117 @@
+▲ Next.js 16.3.8 (webpack)
+✓ Running next.config.ts took 2.7s
+Warning: Custom Cache-Control headers detected for the following routes:
+  - /_next/static/:path*
+
+Setting a custom Cache-Control header can break Next.js development behavior.
+- Experiments (use with caution):
+  · clientTraceMetadata
+  · optimizePackageImports
+
+  Creating an optimized production build ...
+✓ Compiled successfully in 76s
+  Running TypeScript ...
+  Finished TypeScript in 60s ...
+  Collecting page data using 7 workers ...
+  Generating static pages using 7 workers (0/70) ...
+  Generating static pages using 7 workers (17/70) 
+  Generating static pages using 7 workers (34/70) 
+  Generating static pages using 7 workers (52/70) 
+✓ Generating static pages using 7 workers (70/70) in 18.6s
+  Finalizing page optimization ...
+  Collecting build traces ...
+
+Route (app)
+┌ ○ /
+├ ○ /_not-found
+├ ○ /403
+├ ○ /admin
+├ ○ /admin/abuse-detection
+├ ○ /admin/api-keys
+├ ○ /admin/audit-logs
+├ ○ /admin/billing
+├ ○ /admin/billing/tenants
+├ ○ /admin/rate-limiting
+├ ○ /admin/reviews
+├ ○ /admin/secrets
+├ ○ /admin/voice-security
+├ ○ /admin/webhooks
+├ ○ /ai-assist
+├ ○ /ai-options
+├ ○ /ai-voice-agent
+├ ○ /ai-voice-dialer
+├ ○ /ai-voices
+├ ○ /analytics
+├ ƒ /api/contact-enquiries
+├ ƒ /api/v1/[...path]
+├ ƒ /api/voices
+├ ƒ /api/white-label/branding/[partner]
+├ ○ /assistant
+├ ○ /assistant/actions
+├ ○ /assistant/meetings
+├ ○ /assistant/reminders
+├ ○ /auth/callback
+├ ○ /auth/forgot-password
+├ ƒ /auth/login
+├ ƒ /auth/register
+├ ○ /billing
+├ ○ /billing/invoices
+├ ƒ /billing/invoices/[id]
+├ ○ /billing/plans
+├ ○ /calls
+├ ƒ /calls/[id]
+├ ○ /campaigns
+├ ƒ /campaigns/[id]
+├ ƒ /campaigns/[id]/edit
+├ ○ /campaigns/new
+├ ○ /connectors
+├ ƒ /connectors/[type]/callback
+├ ○ /connectors/callback
+├ ○ /contact
+├ ○ /contacts
+├ ƒ /dashboard
+├ ○ /email
+├ ƒ /favicon-192.png
+├ ƒ /favicon-512.png
+├ ƒ /favicon.png
+├ ○ /inbound-campaigns
+├ ƒ /inbound-campaigns/[id]
+├ ƒ /inbound-campaigns/[id]/edit
+├ ○ /inbound-campaigns/new
+├ ○ /industries/education
+├ ○ /industries/financial-services
+├ ○ /industries/healthcare
+├ ƒ /industries/marketing-automation
+├ ○ /industries/professional-services
+├ ○ /industries/real-estate
+├ ○ /industries/recruitment
+├ ○ /industries/retail-ecommerce
+├ ○ /industries/software-tech-support
+├ ○ /industries/travel-industry
+├ ○ /meetings
+├ ○ /notifications
+├ ○ /privacy
+├ ○ /recordings
+├ ○ /reminders
+├ ○ /reviews
+├ ○ /robots.txt
+├ ○ /security
+├ ○ /settings
+├ ○ /sitemap.xml
+├ ○ /terms
+├ ○ /use-cases/automated-lead-qualification
+├ ○ /use-cases/customer-services-support
+├ ƒ /white-label/[partner]/analytics
+├ ƒ /white-label/[partner]/billing
+├ ƒ /white-label/[partner]/dashboard
+├ ƒ /white-label/[partner]/preview
+├ ƒ /white-label/[partner]/tenants
+├ ƒ /white-label/[partner]/tenants/[tenant]/agent-settings
+└ ƒ /white-label/dashboard
+
+
+ƒ Proxy (Middleware)
+
+○  (Static)   prerendered as static content
+ƒ  (Dynamic)  server-rendered on demand
+

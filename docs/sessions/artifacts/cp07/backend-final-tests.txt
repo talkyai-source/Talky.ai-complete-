@@ -1,0 +1,25 @@
+.............................................                            [100%]
+============================== warnings summary ===============================
+..\..\..\backend\.venv\Lib\site-packages\fastapi\testclient.py:1
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\backend\.venv\Lib\site-packages\fastapi\testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+app\api\v1\endpoints\abuse_monitoring.py:147
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\backend\app\api\v1\endpoints\abuse_monitoring.py:147: FastAPIDeprecationWarning: `regex` has been deprecated, please use `pattern` instead
+    severity: Optional[str] = Query(None, regex="^(low|medium|high|critical)$"),
+
+app\api\v1\endpoints\abuse_monitoring.py:684
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\backend\app\api\v1\endpoints\abuse_monitoring.py:684: FastAPIDeprecationWarning: `regex` has been deprecated, please use `pattern` instead
+    min_severity: str = Query("high", regex="^(medium|high|critical)$"),
+
+tests/security/test_admin_tenant_isolation.py::TestApiKeys::test_revoke_cannot_kill_other_tenants_credential
+tests/security/test_admin_tenant_isolation.py::TestApiKeys::test_revoke_own_credential_still_works
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\backend\app\api\v1\endpoints\api_keys.py:115: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "revoked_at": datetime.utcnow().isoformat(),
+
+tests/security/test_admin_tenant_isolation.py::TestApiKeys::test_create_stamps_callers_tenant
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\backend\app\api\v1\endpoints\api_keys.py:84: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "created_at": datetime.utcnow().isoformat(),
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+45 passed, 6 warnings in 3.96s

@@ -29,7 +29,8 @@
     "baseline_hash_note": "The original authoring hash fields are retained as historical metadata; they do not match the portable frozen copies and their original byte convention is unverified. frozen_git_blob_sha256 records the verified SHA-256 of each LF-normalized checked-in frozen artifact. Frozen findings/content were not edited during CP01.",
     "cp02_implementation_commit": "6ca82160e7f1ffc62229f0b5bd09c684db255936",
     "cp03_implementation_commit": "9eb2ac8d49442619dbdd26235c67de264a2e8e79",
-    "cp04_implementation_commit": "4ec7f51eb05ed00b4ffea68fd77c2ba5649c3c5d"
+    "cp04_implementation_commit": "4ec7f51eb05ed00b4ffea68fd77c2ba5649c3c5d",
+    "cp07_implementation_commit": "40232996372305b8ab100bc8fc57a3957296f4e4"
   },
   "status_rules": {
     "execution": [
@@ -236,7 +237,7 @@
       "plan_anchor": "cp05-complete-existing-white-label-controls-behind-truthful-containment",
       "evidence": [],
       "blocker": null,
-      "next_action": "Deferred for now at the user\u2019s request on 4 October 2026. Leave unfinished and retain all existing findings and acceptance requirements; CP06 was also deferred and CP07 is next.",
+      "next_action": "Deferred for now at the user\u2019s request on 4 October 2026. Leave unfinished and retain all existing findings and acceptance requirements; CP06 was also deferred and CP07 local implementation and its remaining delivery gap are now recorded.",
       "target_date": null
     },
     {
@@ -262,16 +263,16 @@
       "plan_anchor": "cp06-accessible-cancellation-and-dependable-billing-communication",
       "evidence": [],
       "blocker": null,
-      "next_action": "Deferred for later at the user\u2019s request on 4 October 2026. Leave unfinished and retain all existing findings and acceptance requirements; CP07 is next.",
+      "next_action": "Deferred for later at the user\u2019s request on 4 October 2026. Leave unfinished and retain all existing findings and acceptance requirements; CP07 local implementation and its remaining delivery gap are now recorded.",
       "target_date": null
     },
     {
       "id": "CP07",
       "title": "Isolate notifications and make delivery promises accurate",
       "owner_role": "Notification and identity engineering lead",
-      "assigned_person": null,
-      "reviewer": null,
-      "status": "planned",
+      "assigned_person": "Codex implementation team",
+      "reviewer": "Independent Codex store/auth, mutation/query and delivery-contract reviews; deployed acceptance pending",
+      "status": "in_progress",
       "start_after_milestone": "RG01 baseline recorded",
       "dependencies_and_tests": "See package text; coordination and final acceptance dependencies are distinct from entry milestones.",
       "finding_ids": [
@@ -282,9 +283,13 @@
       ],
       "architecture_ids": [],
       "plan_anchor": "cp07-isolate-notifications-and-make-delivery-promises-accurate",
-      "evidence": [],
-      "blocker": null,
-      "next_action": "Next implementation package after the user deferred CP05 and CP06. First verify notification identity isolation and the existing delivery contracts; preserve the documented scope and unresolved dependencies.",
+      "evidence": [
+        "docs/sessions/2026-10-05-cp07-implementation.md",
+        "docs/sessions/2026-10-04-cp07-delivery-contracts.md",
+        "docs/sessions/artifacts/cp07/verification.json"
+      ],
+      "blocker": "External background alerts have no suitable existing authorized durable delivery/receipt and HTTP egress contract. Browser routing is unavailable as containment, not completion. Deployed authenticated two-account/multitab acceptance remains unverified; CP06 billing recipients remain deferred.",
+      "next_action": "Review the bounded external-alert completion contract and designated receiver acceptance described in the CP07 delivery review. Keep the unsupported offer unavailable and retain the feature freeze. Validate the coordinated candidate in the designated environment before closing CP07; CP05 and CP06 remain deferred.",
       "target_date": null
     },
     {
@@ -986,8 +991,11 @@
         "CP07",
         "CP08"
       ],
-      "status": "planned",
-      "evidence": [],
+      "status": "in_progress",
+      "evidence": [
+        "docs/sessions/2026-10-05-cp07-implementation.md",
+        "docs/sessions/2026-10-04-cp07-delivery-contracts.md"
+      ],
       "closure_disposition": null
     },
     {
@@ -2213,9 +2221,11 @@
         "CP06",
         "CP07"
       ],
-      "execution_status": "planned",
-      "actual_owner": null,
-      "evidence_of_completion": [],
+      "execution_status": "in_progress",
+      "actual_owner": "Codex implementation team; notification/identity and billing operations acceptance pending",
+      "evidence_of_completion": [
+        "docs/sessions/2026-10-05-cp07-implementation.md"
+      ],
       "closure_disposition": null,
       "contained": false,
       "pilot_or_release_evidence": null,

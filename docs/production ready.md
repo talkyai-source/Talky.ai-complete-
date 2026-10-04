@@ -1,6 +1,6 @@
 # production ready
 
-Plan date: 4 October 2026. Status: execution has reached CP04 invoice/usage/refund repairs after the RG01 local baseline and CP01–CP03 implementation; release and operational acceptance remain outstanding. See the [CP01 evidence](sessions/2026-10-04-cp01-implementation.md), [CP02 evidence](sessions/2026-10-04-cp02-implementation.md), [CP03 evidence](sessions/2026-10-04-cp03-implementation.md) and [CP04 evidence](sessions/2026-10-04-cp04-implementation.md). Product: Talky.ai. Scope: the 2 October customer maturity assessment and its 45 feature groups, including the prior repairs that still need deployment and acceptance.
+Plan date: 4 October 2026. Status: execution has reached CP07 notification privacy and delivery truth after local CP01–CP04 repairs; CP05 and CP06 are deferred at the user’s request. CP07 external delivery and release/operational acceptance remain unfinished. See the [CP01 evidence](sessions/2026-10-04-cp01-implementation.md), [CP02 evidence](sessions/2026-10-04-cp02-implementation.md), [CP03 evidence](sessions/2026-10-04-cp03-implementation.md), [CP04 evidence](sessions/2026-10-04-cp04-implementation.md) and [CP07 evidence](sessions/2026-10-05-cp07-implementation.md). Product: Talky.ai. Scope: the 2 October customer maturity assessment and its 45 feature groups, including the prior repairs that still need deployment and acceptance.
 
 This is the execution plan for making the existing product worth paying for. It covers the identified defects, incomplete customer journeys, architecture risks and missing validation. Each item needs an owner, a bounded change or validation task, and evidence of the customer outcome. Writing this plan does not mark any repair, live test or deployment complete.
 
@@ -207,7 +207,7 @@ Exit evidence: dated baseline manifest, owner list, selected supported profiles/
 
 ### CP05 Complete existing white label controls behind truthful containment
 
-**Sequencing update — 4 October 2026:** Deferred for now at the user’s request. CP05 remains planned and unfinished; its findings and acceptance requirements stay in scope. CP06 was also subsequently deferred; CP07 is the next implementation package.
+**Sequencing update — 4 October 2026:** Deferred for now at the user’s request. CP05 remains planned and unfinished; its findings and acceptance requirements stay in scope. CP06 was also subsequently deferred; CP07 local implementation is recorded below.
 
 **Scope and classification:** confirmed demo behavior F37, separate from real core Admin/RBAC capabilities. Partner tenant creation/edit/suspension is React/localStorage-only; billing contains fixed sample usage and paid invoices without visible demo disclosure. Evidence: `Talk-Leee/src/app/white-label/[partner]/tenants/tenants-client.tsx:118`, `:189`; `Talk-Leee/src/app/white-label/[partner]/billing/page.tsx:70`.
 
@@ -229,7 +229,7 @@ Exit evidence: dated baseline manifest, owner list, selected supported profiles/
 
 ### CP06 Accessible cancellation and dependable billing communication
 
-**Sequencing update — 4 October 2026:** Deferred for later at the user’s request. CP06 remains planned and unfinished; its findings and acceptance requirements stay in scope. CP07 is next.
+**Sequencing update — 4 October 2026:** Deferred for later at the user’s request. CP06 remains planned and unfinished; its findings and acceptance requirements stay in scope. CP07 local implementation is recorded below.
 
 **Scope and classification:** missing self-service connection F12; legacy recipient lookup in F33; partial F09 support/refund journey. Existing portal and period-end cancel APIs are real. No customer UI caller was found; manual email is a stated alternative, so cancellation is not wholly absent. Payment receipts search for `owner` while canonical signup creates `tenant_admin`. Evidence: `backend/app/api/v1/endpoints/billing.py:267`, `:314`; `backend/app/domain/services/billing_service.py:951`; `Talk-Leee/src/app/terms/terms-content.ts:351`.
 
@@ -249,6 +249,8 @@ Exit evidence: dated baseline manifest, owner list, selected supported profiles/
 **Closure evidence:** authorized/denied UI/API tests, test-mode cancellation lifecycle, reload/timeout trace, sanitized provider subscription state and designated email acceptance/delivery observation. Distinguish provider accepted email, observed inbox receipt and user read state.
 
 ### CP07 Isolate notifications and make delivery promises accurate
+
+**Execution checkpoint — 5 October 2026:** Scoped browser history/settings, account-change and delayed-response protection, and truthful unavailable external routing are implemented locally. Verification and limits are recorded in [CP07 evidence](sessions/2026-10-05-cp07-implementation.md). Package remains **in progress**: the [delivery-contract review](sessions/2026-10-04-cp07-delivery-contracts.md) found no existing authorized durable HTTP alert sender/receipt contract. Closed-browser delivery and deployed account-transition acceptance remain unproved. Containment does not complete CP07/F33 or lift the feature freeze; CP05 and CP06 remain deferred.
 
 **Scope and classification:** browser-only external delivery and unscoped local storage F33; risk of cross-account exposure, not a confirmed incident. Local toasts and server event records exist. Evidence: `Talk-Leee/src/lib/notifications.ts:80`, `:172`, `:277`; `Talk-Leee/src/components/notifications/qualified-lead-alerts.tsx:102`; billing recipient defect is owned by CP06.
 

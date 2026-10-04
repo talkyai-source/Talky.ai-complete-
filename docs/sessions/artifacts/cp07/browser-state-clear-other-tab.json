@@ -1,0 +1,23 @@
+{
+  "syntheticIdentity": "B",
+  "scopeKey": "[\"00000000-0000-4000-8000-00000000000b\",\"00000000-0000-4000-8000-00000000001b\"]",
+  "generation": 1,
+  "hydrated": true,
+  "persistence": "local",
+  "storeHistory": false,
+  "titles": [
+    "Synthetic account B alert",
+    "Synthetic account B alert",
+    "Synthetic account B alert"
+  ],
+  "toastTitles": [],
+  "externalDestination": {
+    "enabled": false,
+    "url": ""
+  },
+  "thirdPartyConsent": false,
+  "networkAttempts": 0,
+  "eventReads": 9,
+  "lateResult": "not captured",
+  "delayStorage": false
+}

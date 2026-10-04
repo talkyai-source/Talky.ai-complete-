@@ -1,0 +1,226 @@
+✔ a failed billing request renders the error state, never '0 of 0 minutes used' (159.8087ms)
+✔ a genuinely empty successful response renders the empty state, not an error (63.6933ms)
+✔ current purchased terms come from the subscription snapshot and cancellation is not a promised invoice (41.6055ms)
+✔ loading is distinct from both the error and the empty state (5.2893ms)
+✔ a failed invoices request never renders 'No invoices yet.' (30.8167ms)
+✔ a failed daily-usage request never renders zeroed call stats (30.1908ms)
+✔ a failed overage-alerts request is surfaced instead of silently showing no alerts (24.7317ms)
+✔ unlimited minutes keep actual usage without a false zero allowance or percentage (39.5487ms)
+✔ usage without a contracted rate does not invent an estimated charge (27.4391ms)
+✔ linked refund movement preserves negative accounting amounts without a bank-refund claim (36.3878ms)
+✔ malformed successful usage is a load failure instead of zero consumption (24.3958ms)
+✔ an unlimited subscription does not duplicate a false zero remaining or percentage meter (31.0101ms)
+✔ a missing subscription allowance is a read failure rather than an inferred unlimited plan (32.1355ms)
+✔ average settled time preserves a recorded 59-second call instead of reconstructing rounded minutes (24.1327ms)
+✔ missing exact daily seconds is an unavailable call-stat read, never a guessed zero (27.5449ms)
+✔ actual PostgreSQL ledger endpoints agree and render signed linked accounting movements (43.6112ms)
+✔ topup=success never establishes payment or nonpayment from a browser return (118.9253ms)
+✔ topup=cancelled never establishes payment or nonpayment from a browser return (24.1383ms)
+✔ topup=success&mock=true never establishes payment or nonpayment from a browser return (36.7872ms)
+✔ an unrelated aggregate increase cannot confirm this returned purchase; previously saved order is visible (32.1127ms)
+✔ an unknown order reference from the URL is not presented as a saved order (29.6733ms)
+✔ recorded refund accounting and captured provider pending state do not promise bank settlement (74.175ms)
+✔ a partial empty refund capture remains visible on a paid order (34.4766ms)
+✔ failed balance loading does not claim nothing was charged (15.0828ms)
+✔ malformed successful history is an error instead of no purchases (30.8196ms)
+✔ a read-only account is told it cannot review instead of being shown the form (60.1642ms)
+✔ calls:create renders the review form (104.6652ms)
+✔ a failed permission lookup is reported as unchecked, not as a refusal (12.0379ms)
+✔ teammates' reviews stay visible to an account that cannot write one (31.6747ms)
+✔ a 403 on submit does not offer a Try again that would be refused identically (192.5526ms)
+✔ a server fault still offers Try again, and it re-sends (227.6486ms)
+✔ the review form promises no points, rewards or credits — even with rewards reported ON (138.8223ms)
+✔ a saved review confirms the save without announcing an award (155.751ms)
+✔ an existing review can be edited without any wording about awards (18.3303ms)
+✔ call this list is disabled before a ready route without asking to place calls (167.4046ms)
+✔ call-list success applies the server's authoritative active state without a parent callback (78.1652ms)
+✔ partial 503 applies is_active from structured server details (93.4287ms)
+✔ a pending account-A call-list response cannot publish its private message into B's history (116.64ms)
+✔ empty inbound panel asks for an incoming test call, never an outbound start (44.3096ms)
+✔ empty outbound panel keeps its outbound start instruction (16.5065ms)
+✔ hangup responses require the confirmation-aware contract (3.1182ms)
+✔ termination presentation remains pending until the call itself is terminal (0.5245ms)
+✔ inbound live rows show direction, ANI, DID, admission, and consent (56.9862ms)
+✔ an inbound campaign panel scopes every poll by campaign and direction (5.1129ms)
+✔ a superseded campaign poll cannot replace the current live calls (36.6814ms)
+✔ switching campaigns immediately clears loaded rows and their local action state (155.7385ms)
+✔ a hangup request shows Ending without optimistically ending the row or allowing a duplicate (186.7168ms)
+✔ a failed or unconfirmed hangup exposes the provider error and allows retry (154.2832ms)
+An update to LiveCallsPanelScope inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to LiveCallsPanelScope inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to LiveCallsPanelScope inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+✔ an HTTP unconfirmed response surfaces its structured provider detail (69.5401ms)
+An update to LiveCallsPanelScope inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to LiveCallsPanelScope inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to LiveCallsPanelScope inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+✔ without download permission the recording object URL is revoked when playback stops (1908.4838ms)
+✔ with download permission playback pausing keeps the loaded recording (185.4965ms)
+✔ polling a terminal call clears Ending and uses the server's final status (1513.0707ms)
+✔ scoped saved lead IDs suppress repeats while fresh leads create in-app alerts (102.4646ms)
+✔ a first load seeds silently without adopting legacy or another identity's seen IDs (74.9835ms)
+✔ stale unseen leads are absorbed silently while fresh ones toast (81.9789ms)
+✔ an initially empty stream still alerts on the next newly qualified lead (152.2908ms)
+✔ late A event response cannot populate B's query or notifications after an identity switch (172.5253ms)
+✔ another tab's scoped seen update prevents a repeated alert (78.4807ms)
+✔ no verified identity means no lead polling or alert hydration (2.5278ms)
+✔ an absent policy is shown as recording OFF (53.8122ms)
+✔ non-admins see the policy but cannot save (27.8114ms)
+✔ changing retention enables Save and sends the full policy (36.0002ms)
+✔ two-party fields are disabled unless the mode is two-party (11.1962ms)
+✔ registration and a successful old probe do not claim calling readiness (175.0273ms)
+✔ editing a saved trunk preserves credentials without asking for its password (167.6441ms)
+✔ switching to IP authentication clears credentials and registration together (181.1615ms)
+✔ changing username without a replacement password is blocked (137.2996ms)
+✔ delete explicitly disables first and retains the server conflict in the dialog (82.7342ms)
+✔ IP trunk can be ready without registration or credentials (30.2933ms)
+✔ an inbound-only IP trunk uses inbound proof despite an unanswered outbound probe (30.5351ms)
+✔ invoice money respects zero-, two- and three-decimal currencies (18.7154ms)
+✔ unknown invoice amounts are unavailable; recorded zero and negative credits stay real amounts (0.3947ms)
+✔ safe minor integers retain every minor unit and unsafe or fractional totals are rejected (0.4993ms)
+✔ 401 fires the registered session-expired handler and clears the token (20.8137ms)
+✔ multiple parallel 401s fire the handler only ONCE (idempotent) (1.9871ms)
+✔ resetSessionExpiredLatch re-arms the handler after a successful login (1.6846ms)
+✔ non-401 errors do NOT fire the session-expired handler (1.0924ms)
+✔ a thrown handler does not derail the request rejection (0.7412ms)
+✔ http client injects Authorization header when token present (35.0523ms)
+✔ http client refreshes on 401 then retries the original request (2.2664ms)
+✔ http client surfaces 401 when refresh also fails (1.9026ms)
+✔ http client maps 429 response to rate_limited with retryAfterMs (1.2824ms)
+✔ requestRaw refreshes on 401 then retries and returns the raw binary Response (3.3217ms)
+✔ requestRaw surfaces the backend error detail on a non-OK response (1.1814ms)
+✔ http client preserves structured FastAPI detail codes (1.9778ms)
+✔ requestRaw preserves canonical error codes for binary endpoints (1.1909ms)
+✔ a delayed mutation success cannot notify B after observer callbacks are replaced (7.0072ms)
+✔ a delayed mutation failure cannot notify B after observer callbacks are replaced (2.158ms)
+✔ the cache captures mutation origin before its first await, including immediate switches (1.1193ms)
+✔ same-owner completion preserves onMutate context, rollback, and notification (5.2402ms)
+✔ verified same-identity refresh preserves the pending operation origin (1.3957ms)
+✔ logout followed by the same user logging in does not revive old operation callbacks (0.9313ms)
+✔ a delayed global query error is silent after a tenant switch, then a fresh B fetch notifies (2.5227ms)
+✔ global mutation errors without local notification hooks remain bound to their start (0.9697ms)
+✔ health failures and unverified identities cannot publish global errors (1.2524ms)
+✔ the actual Salesforce hook drops a delayed A error after rerender in B (40.0605ms)
+✔ the actual inbound mutation drops a stale success and preserves the new tenant cache (8.3039ms)
+✔ confirmed B scope loads and creates normally without importing legacy A history or destination (65.5306ms)
+✔ logout clears notifications before server response and stale bootstrap cannot reactivate them (7.0265ms)
+✔ late A profile refresh cannot overwrite a newly verified B login (33.1916ms)
+✔ same verified identity refresh (silent=true) preserves notifications, settings and bound callback (17.1484ms)
+✔ same verified identity refresh (silent=false) preserves notifications, settings and bound callback (13.7965ms)
+✔ foreground refresh preserves the verified scope during loading and only latest profile read may change it (18.0123ms)
+✔ cross-tab non-null token change masks A immediately and verifies B before enabling notifications (28.4274ms)
+✔ unverified same-account token rotation aborts old work but restores saved history after verification (19.5788ms)
+✔ cookie-only logout broadcasts an identity boundary even with no stored bearer token (28.9236ms)
+✔ cross-tab cookie logout fences an outstanding profile response without a bearer-key event (14.546ms)
+✔ a verified user without tenant identity remains unscoped and cannot create notifications (13.6264ms)
+✔ logout then login as A creates a new generation that rejects pre-logout A work (31.2992ms)
+✖ a profile refresh started by an old timer after logout begins cannot restore the logged-out account (16.8482ms)
+✔ unverified identity cannot hydrate or publish an owned notification (3.9742ms)
+✔ same-owner create, dismiss, read, reload and clear retain their existing behavior (6.3492ms)
+✔ history, settings and exports isolate tenant-b/bob (2.3441ms)
+✔ history, settings and exports isolate tenant-a/another-user (1.5424ms)
+✔ history, settings and exports isolate another-tenant/alice (1.3854ms)
+✔ logout and verification revoke old callbacks, while a same-identity refresh preserves them (1.7553ms)
+✔ legacy unowned records are removed and malformed scoped records never become valid history (1.6192ms)
+✔ hydration rejects non-array history and enforces retention and bounded history (6.8967ms)
+✔ SecurityError degrades to memory without carrying history into another account (1.5775ms)
+✔ QuotaExceededError degrades to memory without carrying history into another account (0.637ms)
+✔ same-owner tabs cannot resurrect cleared history before a delayed storage event (2.0148ms)
+✔ privacy opt-out and storage events remain scoped and prevent old-tab persistence (1.726ms)
+✔ storage recovery respects another tab's clear and privacy opt-out before writing (1.2934ms)
+✔ browser webhook settings neither send HTTP nor retain an external destination (0.9383ms)
+✔ every customer role lands on the customer dashboard (1.1404ms)
+✔ white-label admins land on their dashboard (0.1755ms)
+✔ registration hydrates auth state before performing a hard dashboard navigation (1.0167ms)
+✔ every authenticated entry point ignores return URLs and opens a dashboard (1.316ms)
+✔ campaign cache commits never rewrite capability objects (5.4861ms)
+✔ a 503 authorization_unavailable is not rendered as no-permission (0.4042ms)
+✔ only auth-context (and allowlisted bridges) read the canonical token (182.8076ms)
+ℹ tests 131
+ℹ suites 0
+ℹ pass 130
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 56168.5425
+
+✖ failing tests:
+
+test at src\lib\notifications-isolation.test.tsx:2:14729
+✖ a profile refresh started by an old timer after logout begins cannot restore the logged-out account (16.8482ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+  
+  + {
+  +   email: 'a@example.test',
+  +   id: 'user-a',
+  +   minutes_remaining: 10,
+  +   role: 'tenant_admin',
+  +   tenant_id: 'tenant-a'
+  + }
+  - null
+  
+      at TestContext.<anonymous> (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\lib\notifications-isolation.test.tsx:198:12)
+      at async Test.run (node:internal/test_runner/test:1208:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:831:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: { id: 'user-a', tenant_id: 'tenant-a', email: 'a@example.test', role: 'tenant_admin', minutes_remaining: 10 },
+    expected: null,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

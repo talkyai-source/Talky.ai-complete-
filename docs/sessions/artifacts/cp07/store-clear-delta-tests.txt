@@ -1,0 +1,41 @@
+✔ confirmed B scope loads and creates normally without importing legacy A history or destination (242.4137ms)
+✔ logout clears notifications before server response and stale bootstrap cannot reactivate them (28.5403ms)
+✔ late A profile refresh cannot overwrite a newly verified B login (80.6205ms)
+✔ same verified identity refresh (silent=true) preserves notifications, settings and bound callback (33.1426ms)
+✔ same verified identity refresh (silent=false) preserves notifications, settings and bound callback (48.9175ms)
+✔ foreground refresh preserves scope and latest read (silent=true) settles loading and identity (48.2517ms)
+✔ foreground refresh preserves scope and latest read (silent=false) settles loading and identity (44.6889ms)
+✔ cross-tab non-null token change masks A immediately and verifies B before enabling notifications (69.6543ms)
+✔ unverified same-account token rotation aborts old work but restores saved history after verification (47.3205ms)
+✔ cookie-only logout broadcasts an identity boundary even with no stored bearer token (71.4712ms)
+✔ cross-tab cookie logout fences an outstanding profile response without a bearer-key event (38.5384ms)
+✔ a verified user without tenant identity remains unscoped and cannot create notifications (27.4803ms)
+✔ logout then login as A creates a new generation that rejects pre-logout A work (50.65ms)
+✔ a profile refresh started by an old timer after logout begins cannot restore the logged-out account (32.0492ms)
+✔ blocked storage still receives cookie logout over BroadcastChannel and fences delayed profile reads (33.9262ms)
+✔ blocked-storage account change uses verified B scope and duplicate channel/storage marker verifies only once (56.1888ms)
+✔ local cookie logout and login publish secret-free BroadcastChannel markers when storage writes fail (46.9286ms)
+✔ notifications remain unscoped when neither storage nor BroadcastChannel can synchronize cookie identity (17.4504ms)
+✔ unverified identity cannot hydrate or publish an owned notification (22.3268ms)
+✔ same-owner create, dismiss, read, reload and clear retain their existing behavior (34.9948ms)
+✔ history, settings and exports isolate tenant-b/bob (8.8424ms)
+✔ history, settings and exports isolate tenant-a/another-user (4.5378ms)
+✔ history, settings and exports isolate another-tenant/alice (3.9852ms)
+✔ logout and verification revoke old callbacks, while a same-identity refresh preserves them (5.6231ms)
+✔ legacy unowned records are removed and malformed scoped records never become valid history (5.5784ms)
+✔ hydration rejects non-array history and enforces retention and bounded history (32.9585ms)
+✔ SecurityError degrades to memory without carrying history into another account (6.845ms)
+✔ QuotaExceededError degrades to memory without carrying history into another account (2.9888ms)
+✔ same-owner tabs cannot resurrect cleared history before a delayed storage event (12.0403ms)
+✔ privacy opt-out and storage events remain scoped and prevent old-tab persistence (10.329ms)
+✔ storage recovery respects another tab's clear and privacy opt-out before writing (8.7294ms)
+✔ browser webhook settings neither send HTTP nor retain an external destination (3.4984ms)
+✔ clear reaches another tab when privacy is off and history/settings writes are browser no-ops (7.0765ms)
+ℹ tests 33
+ℹ suites 0
+ℹ pass 33
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 11233.3358

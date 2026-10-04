@@ -1,0 +1,101 @@
+{
+  "candidate_commit": "40232996372305b8ab100bc8fc57a3957296f4e4",
+  "checks": [
+    {
+      "cwd": "Talk-Leee",
+      "command": [
+        "node",
+        "--test",
+        "--test-concurrency=1",
+        "--import",
+        "tsx",
+        "--import",
+        "./src/test-utils/setup.ts",
+        "src/lib/notifications.test.ts",
+        "src/lib/notifications-isolation.test.tsx",
+        "src/lib/notification-mutations.test.ts",
+        "src/components/notifications/qualified-lead-alerts.test.ts",
+        "src/components/campaigns/contact-lists.test.tsx",
+        "src/components/settings/sip-trunks-list.test.tsx",
+        "src/components/settings/recording-policy-section.test.ts",
+        "src/lib/queries/inbound-queries.test.ts",
+        "src/lib/structural-auth-isolation.test.ts",
+        "src/lib/http-client.test.ts",
+        "src/lib/http-client.session-expired.test.ts",
+        "src/lib/post-auth-navigation.test.ts",
+        "src/components/calls/conversation-review-panel.test.tsx",
+        "src/components/campaigns/live-calls-panel.test.tsx",
+        "src/lib/billing-read.test.ts",
+        "src/components/billing/billing-overview.test.tsx",
+        "src/components/billing/topup-card.test.tsx"
+      ],
+      "exit_code": 0,
+      "artifact": "frontend-final-tests.txt",
+      "elapsed_seconds": 174.62,
+      "tests": 140,
+      "pass": 140,
+      "fail": 0,
+      "skipped": 0
+    },
+    {
+      "cwd": "Talk-Leee",
+      "command": [
+        "node",
+        "node_modules/eslint/bin/eslint.js",
+        "src/app/campaigns/page.tsx",
+        "src/app/connectors/page.tsx",
+        "src/app/meetings/page.tsx",
+        "src/app/settings/page.tsx",
+        "src/components/campaigns/contact-lists.test.tsx",
+        "src/components/campaigns/contact-lists.tsx",
+        "src/components/notifications/notification-center.tsx",
+        "src/components/notifications/qualified-lead-alerts.test.ts",
+        "src/components/notifications/qualified-lead-alerts.tsx",
+        "src/components/providers/app-providers.tsx",
+        "src/components/settings/recording-policy-section.tsx",
+        "src/components/settings/sip-trunks-list.tsx",
+        "src/components/settings/telephony-providers-section.tsx",
+        "src/lib/api-hooks.ts",
+        "src/lib/app-query-client.ts",
+        "src/lib/auth-context.tsx",
+        "src/lib/backend-api.ts",
+        "src/lib/event-stream-api.ts",
+        "src/lib/notification-mutations.test.ts",
+        "src/lib/notification-mutations.ts",
+        "src/lib/notifications-client.tsx",
+        "src/lib/notifications-isolation.test.tsx",
+        "src/lib/notifications.test.ts",
+        "src/lib/notifications.ts",
+        "src/lib/queries/inbound-queries.ts"
+      ],
+      "exit_code": 0,
+      "artifact": "frontend-lint.txt",
+      "elapsed_seconds": 25.88
+    },
+    {
+      "cwd": "Talk-Leee",
+      "command": [
+        "node",
+        "node_modules/typescript/bin/tsc",
+        "-p",
+        "tsconfig.json",
+        "--noEmit"
+      ],
+      "exit_code": 0,
+      "artifact": "frontend-typecheck.txt",
+      "elapsed_seconds": 56.03
+    },
+    {
+      "cwd": "Talk-Leee",
+      "command": [
+        "node",
+        "node_modules/next/dist/bin/next",
+        "build",
+        "--webpack"
+      ],
+      "exit_code": 0,
+      "artifact": "frontend-build.txt",
+      "elapsed_seconds": 226.72
+    }
+  ]
+}

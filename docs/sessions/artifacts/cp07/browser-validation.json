@@ -1,0 +1,345 @@
+{
+  "status": "passed",
+  "scope": "Actual notification modules; synthetic identity boundary and event source; no real AuthProvider/cookie or external delivery proof",
+  "browserVersion": "154.0.8037.93",
+  "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/154.0.0.0 Safari/537.36",
+  "states": {
+    "account_a": {
+      "syntheticIdentity": "A",
+      "scopeKey": "[\"00000000-0000-4000-8000-00000000000a\",\"00000000-0000-4000-8000-00000000001a\"]",
+      "generation": 1,
+      "hydrated": true,
+      "persistence": "local",
+      "storeHistory": true,
+      "titles": [
+        "Qualified synthetic lead A",
+        "Synthetic account A alert"
+      ],
+      "toastTitles": [
+        "Qualified synthetic lead A"
+      ],
+      "externalDestination": {
+        "enabled": false,
+        "url": ""
+      },
+      "thirdPartyConsent": false,
+      "networkAttempts": 0,
+      "eventReads": 2,
+      "lateResult": "not captured",
+      "delayStorage": false
+    },
+    "foreign_event_owner_rejected": {
+      "syntheticIdentity": "A",
+      "scopeKey": "[\"00000000-0000-4000-8000-00000000000a\",\"00000000-0000-4000-8000-00000000001a\"]",
+      "generation": 1,
+      "hydrated": true,
+      "persistence": "local",
+      "storeHistory": true,
+      "titles": [
+        "Qualified synthetic lead A",
+        "Synthetic account A alert"
+      ],
+      "toastTitles": [
+        "Qualified synthetic lead A"
+      ],
+      "externalDestination": {
+        "enabled": false,
+        "url": ""
+      },
+      "thirdPartyConsent": false,
+      "networkAttempts": 0,
+      "eventReads": 2,
+      "lateResult": "not captured",
+      "delayStorage": false
+    },
+    "missing_event_owner_rejected": {
+      "syntheticIdentity": "A",
+      "scopeKey": "[\"00000000-0000-4000-8000-00000000000a\",\"00000000-0000-4000-8000-00000000001a\"]",
+      "generation": 1,
+      "hydrated": true,
+      "persistence": "local",
+      "storeHistory": true,
+      "titles": [
+        "Qualified synthetic lead A",
+        "Synthetic account A alert"
+      ],
+      "toastTitles": [
+        "Qualified synthetic lead A"
+      ],
+      "externalDestination": {
+        "enabled": false,
+        "url": ""
+      },
+      "thirdPartyConsent": false,
+      "networkAttempts": 0,
+      "eventReads": 2,
+      "lateResult": "not captured",
+      "delayStorage": false
+    },
+    "account_a_second_tab": {
+      "syntheticIdentity": "A",
+      "scopeKey": "[\"00000000-0000-4000-8000-00000000000a\",\"00000000-0000-4000-8000-00000000001a\"]",
+      "generation": 1,
+      "hydrated": true,
+      "persistence": "local",
+      "storeHistory": true,
+      "titles": [
+        "Qualified synthetic lead A",
+        "Synthetic account A alert"
+      ],
+      "toastTitles": [],
+      "externalDestination": {
+        "enabled": false,
+        "url": ""
+      },
+      "thirdPartyConsent": false,
+      "networkAttempts": 0,
+      "eventReads": 0,
+      "lateResult": "not captured",
+      "delayStorage": false
+    },
+    "account_b_late_a_rejected": {
+      "syntheticIdentity": "B",
+      "scopeKey": "[\"00000000-0000-4000-8000-00000000000b\",\"00000000-0000-4000-8000-00000000001b\"]",
+      "generation": 3,
+      "hydrated": true,
+      "persistence": "local",
+      "storeHistory": true,
+      "titles": [
+        "Synthetic account B alert",
+        "Synthetic account B alert"
+      ],
+      "toastTitles": [],
+      "externalDestination": {
+        "enabled": false,
+        "url": ""
+      },
+      "thirdPartyConsent": false,
+      "networkAttempts": 0,
+      "eventReads": 6,
+      "lateResult": null,
+      "delayStorage": false
+    },
+    "account_b_after_refresh": {
+      "syntheticIdentity": "B",
+      "scopeKey": "[\"00000000-0000-4000-8000-00000000000b\",\"00000000-0000-4000-8000-00000000001b\"]",
+      "generation": 1,
+      "hydrated": true,
+      "persistence": "local",
+      "storeHistory": true,
+      "titles": [
+        "Synthetic account B alert",
+        "Synthetic account B alert"
+      ],
+      "toastTitles": [],
+      "externalDestination": {
+        "enabled": false,
+        "url": ""
+      },
+      "thirdPartyConsent": false,
+      "networkAttempts": 0,
+      "eventReads": 0,
+      "lateResult": "not captured",
+      "delayStorage": false
+    },
+    "delayed_before_clear": {
+      "syntheticIdentity": "B",
+      "scopeKey": "[\"00000000-0000-4000-8000-00000000000b\",\"00000000-0000-4000-8000-00000000001b\"]",
+      "generation": 1,
+      "hydrated": true,
+      "persistence": "local",
+      "storeHistory": true,
+      "titles": [
+        "Synthetic account B alert",
+        "Synthetic account B alert",
+        "Synthetic account B alert"
+      ],
+      "toastTitles": [
+        "Synthetic account B alert"
+      ],
+      "externalDestination": {
+        "enabled": false,
+        "url": ""
+      },
+      "thirdPartyConsent": false,
+      "networkAttempts": 0,
+      "eventReads": 1,
+      "lateResult": "not captured",
+      "delayStorage": true
+    },
+    "cleared": {
+      "syntheticIdentity": "B",
+      "scopeKey": "[\"00000000-0000-4000-8000-00000000000b\",\"00000000-0000-4000-8000-00000000001b\"]",
+      "generation": 1,
+      "hydrated": true,
+      "persistence": "local",
+      "storeHistory": false,
+      "titles": [],
+      "toastTitles": [],
+      "externalDestination": {
+        "enabled": false,
+        "url": ""
+      },
+      "thirdPartyConsent": false,
+      "networkAttempts": 0,
+      "eventReads": 1,
+      "lateResult": "not captured",
+      "delayStorage": false
+    },
+    "clear_other_tab": {
+      "syntheticIdentity": "B",
+      "scopeKey": "[\"00000000-0000-4000-8000-00000000000b\",\"00000000-0000-4000-8000-00000000001b\"]",
+      "generation": 3,
+      "hydrated": true,
+      "persistence": "local",
+      "storeHistory": false,
+      "titles": [],
+      "toastTitles": [],
+      "externalDestination": {
+        "enabled": false,
+        "url": ""
+      },
+      "thirdPartyConsent": false,
+      "networkAttempts": 0,
+      "eventReads": 6,
+      "lateResult": null,
+      "delayStorage": false
+    },
+    "account_a_restored": {
+      "syntheticIdentity": "A",
+      "scopeKey": "[\"00000000-0000-4000-8000-00000000000a\",\"00000000-0000-4000-8000-00000000001a\"]",
+      "generation": 4,
+      "hydrated": true,
+      "persistence": "local",
+      "storeHistory": true,
+      "titles": [
+        "Qualified synthetic lead A",
+        "Synthetic account A alert"
+      ],
+      "toastTitles": [],
+      "externalDestination": {
+        "enabled": false,
+        "url": ""
+      },
+      "thirdPartyConsent": false,
+      "networkAttempts": 0,
+      "eventReads": 6,
+      "lateResult": null,
+      "delayStorage": false
+    },
+    "logout_tab0": {
+      "syntheticIdentity": "none",
+      "scopeKey": null,
+      "generation": 6,
+      "hydrated": false,
+      "persistence": "none",
+      "storeHistory": true,
+      "titles": [],
+      "toastTitles": [],
+      "externalDestination": {
+        "enabled": false,
+        "url": ""
+      },
+      "thirdPartyConsent": false,
+      "networkAttempts": 0,
+      "eventReads": 7,
+      "lateResult": null,
+      "delayStorage": false
+    },
+    "logout_tab1": {
+      "syntheticIdentity": "none",
+      "scopeKey": null,
+      "generation": 4,
+      "hydrated": false,
+      "persistence": "none",
+      "storeHistory": true,
+      "titles": [],
+      "toastTitles": [],
+      "externalDestination": {
+        "enabled": false,
+        "url": ""
+      },
+      "thirdPartyConsent": false,
+      "networkAttempts": 0,
+      "eventReads": 2,
+      "lateResult": "not captured",
+      "delayStorage": false
+    }
+  },
+  "stored": {
+    "talklee.notifications.settings.v2:%5B%2200000000-0000-4000-8000-00000000000a%22%2C%2200000000-0000-4000-8000-00000000001a%22%5D": "{\"toastDurationMs\":5000,\"soundsEnabled\":true,\"theme\":\"system\",\"historyRetentionDays\":30,\"category\":{\"success\":{\"enabled\":true,\"priority\":\"normal\",\"routing\":\"inApp\"},\"warning\":{\"enabled\":true,\"priority\":\"normal\",\"routing\":\"inApp\"},\"error\":{\"enabled\":true,\"priority\":\"high\",\"routing\":\"inApp\"},\"info\":{\"enabled\":true,\"priority\":\"low\",\"routing\":\"inApp\"}},\"privacy\":{\"storeHistory\":true,\"consentThirdParty\":false},\"integrations\":{\"webhook\":{\"enabled\":false,\"url\":\"\"}},\"account\":{\"profile\":{\"name\":\"\",\"email\":\"\"},\"auth\":{\"twoFactorEnabled\":false},\"linking\":{\"google\":false,\"github\":false}}}",
+    "talklee.notifications.v2:%5B%2200000000-0000-4000-8000-00000000000a%22%2C%2200000000-0000-4000-8000-00000000001a%22%5D": "[{\"id\":\"9ea92326-51dc-4779-bece-e2adf0bb7754\",\"type\":\"success\",\"priority\":\"high\",\"title\":\"Qualified synthetic lead A\",\"message\":\"Phone: +15550001111 \u2014 Synthetic follow-up request\",\"createdAt\":1791143178368,\"data\":{\"kind\":\"qualified_lead\",\"phone_number\":\"+15550001111\"}},{\"id\":\"7d15dae6-1d4b-4fde-8812-1628b3208409\",\"type\":\"success\",\"priority\":\"normal\",\"title\":\"Synthetic account A alert\",\"message\":\"Private fixture for A\",\"createdAt\":1791143177609,\"data\":{\"fixture\":true}}]",
+    "talklee.notifications.clear.v1:%5B%2200000000-0000-4000-8000-00000000000b%22%2C%2200000000-0000-4000-8000-00000000001b%22%5D": "2949e70e-8ae7-4452-a77c-a08d8771c03c",
+    "talklee.notifications.settings.v2:%5B%2200000000-0000-4000-8000-00000000000b%22%2C%2200000000-0000-4000-8000-00000000001b%22%5D": "{\"toastDurationMs\":5000,\"soundsEnabled\":true,\"theme\":\"system\",\"historyRetentionDays\":30,\"category\":{\"success\":{\"enabled\":true,\"priority\":\"normal\",\"routing\":\"inApp\"},\"warning\":{\"enabled\":true,\"priority\":\"normal\",\"routing\":\"inApp\"},\"error\":{\"enabled\":true,\"priority\":\"high\",\"routing\":\"inApp\"},\"info\":{\"enabled\":true,\"priority\":\"low\",\"routing\":\"inApp\"}},\"privacy\":{\"storeHistory\":false,\"consentThirdParty\":false},\"integrations\":{\"webhook\":{\"enabled\":false,\"url\":\"\"}},\"account\":{\"profile\":{\"name\":\"\",\"email\":\"\"},\"auth\":{\"twoFactorEnabled\":false},\"linking\":{\"google\":false,\"github\":false}}}"
+  },
+  "fetchAttempts": [
+    0,
+    0
+  ],
+  "requests": [
+    {
+      "url": "http://127.0.0.1:3197/",
+      "method": "GET"
+    },
+    {
+      "url": "http://127.0.0.1:3197/bundle.js",
+      "method": "GET"
+    },
+    {
+      "url": "http://127.0.0.1:3197/",
+      "method": "GET"
+    },
+    {
+      "url": "http://127.0.0.1:3197/bundle.js",
+      "method": "GET"
+    },
+    {
+      "url": "http://127.0.0.1:3197/",
+      "method": "GET"
+    },
+    {
+      "url": "http://127.0.0.1:3197/bundle.js",
+      "method": "GET"
+    },
+    {
+      "url": "http://127.0.0.1:3197/",
+      "method": "GET"
+    },
+    {
+      "url": "http://127.0.0.1:3197/bundle.js",
+      "method": "GET"
+    }
+  ],
+  "recorded_at_utc": "2026-10-04T19:47:19.323780+00:00",
+  "provenance": {
+    "base_commit": "40232996372305b8ab100bc8fc57a3957296f4e4",
+    "bundled_application_status": "",
+    "qualification": "Aggregate digest pins actual bundled application inputs; empty bundled_application_status means those inputs match the recorded commit. AuthProvider is deliberately aliased out and not browser-tested here.",
+    "application_inputs": [
+      "Talk-Leee/src/components/notifications/notification-center.tsx",
+      "Talk-Leee/src/components/notifications/qualified-lead-alerts.tsx",
+      "Talk-Leee/src/components/ui/button.tsx",
+      "Talk-Leee/src/lib/event-stream-api.ts",
+      "Talk-Leee/src/lib/notifications-client.tsx",
+      "Talk-Leee/src/lib/notifications.ts",
+      "Talk-Leee/src/lib/utils.ts"
+    ],
+    "application_aggregate_sha256": "4e79e38e558f5c1584eac9ce51ecd88574bdfdc7ab637f4b1fd5306f17941889",
+    "harness_inputs": [
+      "tmp/cp07-browser/auth-context.ts",
+      "tmp/cp07-browser/backend-api.ts",
+      "tmp/cp07-browser/browser-run.js",
+      "tmp/cp07-browser/build.mjs",
+      "tmp/cp07-browser/harness.tsx",
+      "tmp/cp07-browser/index.html",
+      "tmp/cp07-browser/server.mjs",
+      "tmp/cp07-browser/write-browser-evidence.py"
+    ],
+    "harness_aggregate_sha256": "16f65da16843245dbe987237aac00581f1a1cc9222b9fa95c1a86ef66dc267b4",
+    "aggregate_method": "SHA256 over sorted relative UTF-8 filename + NUL + raw file bytes + NUL for each listed file",
+    "bundle_sha256": "c591a18b0b5e6d53d5f325132c57712da0aa6b137e31b9519ef371f315a2ff77",
+    "dependency_lock_sha256": "834c420ccd9c84cf75ac8a8ece012a4d01413b3e2530ea9ae71f7b7226a526dc",
+    "node_version": "v25.8.1",
+    "command": "npx --yes --package @playwright/cli playwright-cli -s=cp07-audit --raw run-code --filename tmp/cp07-browser/browser-run.js"
+  }
+}

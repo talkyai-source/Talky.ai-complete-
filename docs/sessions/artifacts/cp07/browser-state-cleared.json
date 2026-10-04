@@ -1,0 +1,26 @@
+{
+  "state": {
+    "syntheticIdentity": "B",
+    "scopeKey": "[\"00000000-0000-4000-8000-00000000000b\",\"00000000-0000-4000-8000-00000000001b\"]",
+    "generation": 1,
+    "hydrated": true,
+    "persistence": "local",
+    "storeHistory": false,
+    "titles": [],
+    "toastTitles": [],
+    "externalDestination": {
+      "enabled": false,
+      "url": ""
+    },
+    "thirdPartyConsent": false,
+    "networkAttempts": 0,
+    "eventReads": 12,
+    "lateResult": "not captured",
+    "delayStorage": false
+  },
+  "stored": {
+    "talklee.notifications.settings.v2:%5B%2200000000-0000-4000-8000-00000000000a%22%2C%2200000000-0000-4000-8000-00000000001a%22%5D": "{\"toastDurationMs\":5000,\"soundsEnabled\":true,\"theme\":\"system\",\"historyRetentionDays\":30,\"category\":{\"success\":{\"enabled\":true,\"priority\":\"normal\",\"routing\":\"inApp\"},\"warning\":{\"enabled\":true,\"priority\":\"normal\",\"routing\":\"inApp\"},\"error\":{\"enabled\":true,\"priority\":\"high\",\"routing\":\"inApp\"},\"info\":{\"enabled\":true,\"priority\":\"low\",\"routing\":\"inApp\"}},\"privacy\":{\"storeHistory\":true,\"consentThirdParty\":false},\"integrations\":{\"webhook\":{\"enabled\":false,\"url\":\"\"}},\"account\":{\"profile\":{\"name\":\"\",\"email\":\"\"},\"auth\":{\"twoFactorEnabled\":false},\"linking\":{\"google\":false,\"github\":false}}}",
+    "talklee.notifications.v2:%5B%2200000000-0000-4000-8000-00000000000a%22%2C%2200000000-0000-4000-8000-00000000001a%22%5D": "[{\"id\":\"210a9dc2-2c8f-4fee-b9d7-99598fb16709\",\"type\":\"success\",\"priority\":\"high\",\"title\":\"Qualified synthetic lead A\",\"message\":\"Phone: +15550001111 — Synthetic follow-up request\",\"createdAt\":1791141390605,\"data\":{\"kind\":\"qualified_lead\",\"phone_number\":\"+15550001111\"}},{\"id\":\"7d0a2ea4-62d4-4da1-8a3f-4670d9eab176\",\"type\":\"success\",\"priority\":\"normal\",\"title\":\"Synthetic account A alert\",\"message\":\"Private fixture for A\",\"createdAt\":1791141388023,\"data\":{\"fixture\":true}}]",
+    "talklee.notifications.settings.v2:%5B%2200000000-0000-4000-8000-00000000000b%22%2C%2200000000-0000-4000-8000-00000000001b%22%5D": "{\"toastDurationMs\":5000,\"soundsEnabled\":true,\"theme\":\"system\",\"historyRetentionDays\":30,\"category\":{\"success\":{\"enabled\":true,\"priority\":\"normal\",\"routing\":\"inApp\"},\"warning\":{\"enabled\":true,\"priority\":\"normal\",\"routing\":\"inApp\"},\"error\":{\"enabled\":true,\"priority\":\"high\",\"routing\":\"inApp\"},\"info\":{\"enabled\":true,\"priority\":\"low\",\"routing\":\"inApp\"}},\"privacy\":{\"storeHistory\":false,\"consentThirdParty\":false},\"integrations\":{\"webhook\":{\"enabled\":false,\"url\":\"\"}},\"account\":{\"profile\":{\"name\":\"\",\"email\":\"\"},\"auth\":{\"twoFactorEnabled\":false},\"linking\":{\"google\":false,\"github\":false}}}"
+  }
+}

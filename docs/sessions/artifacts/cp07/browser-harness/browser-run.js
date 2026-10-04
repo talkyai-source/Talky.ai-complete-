@@ -1,0 +1,74 @@
+async (page) => {
+  const tabs = page.context().pages();
+  if (tabs.length !== 2) throw new Error('Use exactly two isolated harness tabs');
+  const [a,b] = tabs;
+  const url = 'http://127.0.0.1:3197/';
+  if (tabs.some(tab => tab.url() !== url)) throw new Error('Unexpected tab origin');
+  const requests = [];
+  for (const tab of tabs) tab.on('request', request => requests.push({url:request.url(),method:request.method()}));
+  await a.evaluate(() => localStorage.clear());
+  await a.reload(); await b.reload();
+  const states = {};
+  const state = tab => tab.locator('#status').textContent().then(JSON.parse);
+  const capture = async (key, tab) => { states[key] = await state(tab); };
+  const click = (tab, name) => tab.getByRole('button',{name,exact:true}).click();
+  const identity = (tab, value) => tab.waitForFunction(expected => JSON.parse(document.getElementById('status').textContent).syntheticIdentity === expected,value);
+  const assert = (condition, message) => { if (!condition) throw new Error(message); };
+  const settleRead = (tab, before) => tab.waitForFunction(prior => window.__cp07.eventReads > prior && window.__cp07.queryFetching() === 0,before);
+  await click(a,'Bind verified A'); await identity(a,'A');
+  await a.waitForFunction(() => window.__cp07.eventReads > 0 && window.__cp07.queryFetching() === 0);
+  await click(a,'Create current alert'); await click(a,'Add qualified lead');
+  await a.waitForFunction(() => JSON.parse(document.getElementById('status').textContent).titles.includes('Qualified synthetic lead A'));
+  await capture('account_a',a);
+  assert(states.account_a.titles.length === 2,'A should contain local and qualified-lead alerts');
+  await a.screenshot({path:'docs/sessions/artifacts/cp07/browser-account-a.png',fullPage:true});
+  for (const mode of ['foreign','missing']) {
+    await click(a,`Return ${mode} event owner`);
+    const before = await a.evaluate(() => window.__cp07.eventReads);
+    await click(a,'Add qualified lead'); await settleRead(a,before);
+    await capture(`${mode}_event_owner_rejected`,a);
+    assert(states[`${mode}_event_owner_rejected`].titles.length === 2,`${mode} owner event escaped into A`);
+  }
+  // Remove only the deliberately invalid synthetic source events before the
+  // next valid response. Actual store/query/seen-state is not altered.
+  await a.evaluate(() => { window.__cp07.events.A = window.__cp07.events.A.slice(0,1); });
+  await click(a,'Return current event owner');
+  await click(a,'Capture delayed action');
+  await click(a,'Hold next event read'); await click(a,'Add qualified lead');
+  await a.waitForFunction(() => Boolean(window.__cp07.pendingRead));
+  await b.reload(); await identity(b,'A'); await capture('account_a_second_tab',b);
+  assert(states.account_a_second_tab.titles.length === 2,'Second tab should hydrate A history');
+  await click(b,'Bind verified B'); await identity(a,'B'); await identity(b,'B');
+  await click(b,'Create current alert'); await click(b,'Try legacy webhook settings');
+  await a.waitForFunction(() => JSON.parse(document.getElementById('status').textContent).titles.length === 2);
+  await click(a,'Release delayed action'); await click(a,'Release held event read');
+  await a.waitForFunction(() => window.__cp07.pendingRead === null && window.__cp07.queryFetching() === 0);
+  await capture('account_b_late_a_rejected',a);
+  assert(states.account_b_late_a_rejected.lateResult === null,'Captured A action was not rejected');
+  assert(states.account_b_late_a_rejected.titles.every(title => title === 'Synthetic account B alert'),'A response contaminated B');
+  assert(states.account_b_late_a_rejected.externalDestination.enabled === false && states.account_b_late_a_rejected.thirdPartyConsent === false,'Legacy external routing remained enabled');
+  await a.screenshot({path:'docs/sessions/artifacts/cp07/browser-account-b.png',fullPage:true});
+  await b.reload(); await identity(b,'B'); await capture('account_b_after_refresh',b);
+  assert(states.account_b_after_refresh.titles.length === 2 && states.account_b_after_refresh.titles.every(title => title === 'Synthetic account B alert'),'B refresh loaded wrong history');
+  await click(b,'Create current alert'); await click(b,'Delay storage events');
+  await click(a,'Disable persisted history'); await capture('delayed_before_clear',b);
+  assert(states.delayed_before_clear.storeHistory === true && states.delayed_before_clear.delayStorage === true,'Storage delay fixture did not hold old settings');
+  await click(b,'Clear notification history'); await click(b,'Release storage events');
+  await a.waitForFunction(() => { const value = JSON.parse(document.getElementById('status').textContent); return value.storeHistory === false && value.titles.length === 0 && value.toastTitles.length === 0; });
+  await capture('cleared',b); await capture('clear_other_tab',a);
+  for(const name of ['cleared','clear_other_tab']) assert(states[name].storeHistory === false && states[name].titles.length === 0 && states[name].toastTitles.length === 0,`${name} retained history/toasts or restored old privacy`);
+  const stored = await b.evaluate(() => Object.fromEntries(Object.entries(localStorage).filter(([key]) => key.includes('notifications'))));
+  assert(!Object.keys(stored).some(key => key.startsWith('talklee.notifications.v2:') && decodeURIComponent(key).includes('00000000-0000-4000-8000-00000000000b')),'B history was repersisted');
+  assert(!Object.keys(stored).some(key => key.endsWith('.v1')),'Unowned legacy history/settings survived hydration');
+  await b.screenshot({path:'docs/sessions/artifacts/cp07/browser-clear-after-delayed-storage.png',fullPage:true});
+  await click(a,'Bind verified A'); await identity(b,'A'); await capture('account_a_restored',a);
+  assert(states.account_a_restored.titles.length === 2 && states.account_a_restored.titles.every(title => title.endsWith(' A') || title === 'Synthetic account A alert'),'A restoration was lost or contaminated');
+  await click(a,'Create current alert'); await click(b,'Logout all tabs'); await identity(a,'none');
+  await capture('logout_tab0',a); await capture('logout_tab1',b);
+  for(const name of ['logout_tab0','logout_tab1']) assert(states[name].scopeKey === null && states[name].titles.length === 0 && states[name].toastTitles.length === 0,`${name} retained private live state`);
+  await b.screenshot({path:'docs/sessions/artifacts/cp07/browser-logout.png',fullPage:true});
+  const fetchAttempts = await Promise.all(tabs.map(tab => tab.evaluate(() => window.__cp07.networkAttempts)));
+  assert(fetchAttempts.every(count => count === 0) && Object.values(states).every(value => value.networkAttempts === 0),'An outbound fetch was attempted');
+  assert(requests.every(request => request.url.startsWith(url) && request.method === 'GET'),'Unexpected network request');
+  return {status:'passed',scope:'Actual notification modules; synthetic identity boundary and event source; no real AuthProvider/cookie or external delivery proof',browserVersion:page.context().browser().version(),userAgent:await a.evaluate(()=>navigator.userAgent),states,stored,fetchAttempts,requests};
+}
