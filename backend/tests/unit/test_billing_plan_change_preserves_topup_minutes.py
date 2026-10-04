@@ -23,8 +23,8 @@ import inspect
 
 import pytest
 
+from app.domain.services.billing_checkout import CheckoutError, apply_plan_allocation
 from app.domain.services.billing_service import BillingService
-
 
 # ── fakes ───────────────────────────────────────────────────────────────────
 
@@ -159,7 +159,7 @@ async def test_a_plan_change_keeps_minutes_the_customer_bought():
     """THE BUG. 500 purchased minutes must survive a move to a 2000 plan."""
     store = make_store(allocated=1500, purchased=(500,), plan_minutes=2000)
 
-    await _svc(store)._handle_checkout_completed(_session())
+    await apply_plan_allocation(_svc(store).db_client.pool.conn, _session()["metadata"]["tenant_id"], store["plan"]["minutes"])
 
     assert store["allocated"] == 2500, (
         "the plan change overwrote the allocation with the plan figure alone — "
@@ -174,7 +174,7 @@ async def test_a_refunded_topup_is_not_re_added_on_the_next_plan_change():
     back as free minutes the next time the plan moves."""
     store = make_store(allocated=1000, purchased=(500, -500), plan_minutes=2000)
 
-    await _svc(store)._handle_checkout_completed(_session())
+    await apply_plan_allocation(_svc(store).db_client.pool.conn, _session()["metadata"]["tenant_id"], store["plan"]["minutes"])
 
     assert store["allocated"] == 2000
 
@@ -183,7 +183,7 @@ async def test_a_refunded_topup_is_not_re_added_on_the_next_plan_change():
 async def test_a_tenant_who_never_topped_up_gets_exactly_the_plan():
     store = make_store(allocated=100, purchased=(), plan_minutes=2000)
 
-    await _svc(store)._handle_checkout_completed(_session())
+    await apply_plan_allocation(_svc(store).db_client.pool.conn, _session()["metadata"]["tenant_id"], store["plan"]["minutes"])
 
     assert store["allocated"] == 2000
 
@@ -195,7 +195,7 @@ async def test_an_unlimited_plan_stays_unlimited():
     uncapped account — the same trap ``topup_service`` avoids."""
     store = make_store(allocated=0, purchased=(500,), plan_minutes=0)
 
-    await _svc(store)._handle_checkout_completed(_session())
+    await apply_plan_allocation(_svc(store).db_client.pool.conn, _session()["metadata"]["tenant_id"], store["plan"]["minutes"])
 
     assert store["allocated"] == 0, "an unlimited plan was capped at 500 minutes"
 
@@ -204,7 +204,8 @@ async def test_an_unlimited_plan_stays_unlimited():
 async def test_a_checkout_with_no_plan_leaves_the_allocation_alone():
     store = make_store(allocated=1500, purchased=(500,))
 
-    await _svc(store)._handle_checkout_completed(_session(plan_id=None))
+    with pytest.raises(CheckoutError, match="reconciliation"):
+        await _svc(store)._handle_checkout_completed(_session(plan_id=None))
 
     assert store["allocated"] == 1500
 
@@ -216,7 +217,7 @@ def test_the_purchased_balance_is_read_in_the_same_statement_that_writes():
     window: a top-up committing between the two is overwritten, and a lost
     update on money is the bug this file exists for.
     """
-    src = inspect.getsource(BillingService._set_plan_allocation)
+    src = inspect.getsource(apply_plan_allocation)
     assert "billing_ledger" in src, (
         "the plan allocation is written without consulting the ledger"
     )
@@ -240,7 +241,8 @@ async def test_a_failed_allocation_write_does_not_fall_back_to_destroying_minute
 
     svc.db_client.pool.conn.execute = _boom
 
-    await svc._handle_checkout_completed(_session())  # must not raise
+    with pytest.raises(RuntimeError, match="connection reset"):
+        await apply_plan_allocation(svc.db_client.pool.conn, _session()["metadata"]["tenant_id"], 2000)
 
     assert store["allocated"] == 1500
     assert not any(

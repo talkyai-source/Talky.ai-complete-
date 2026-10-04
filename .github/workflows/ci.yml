@@ -245,6 +245,8 @@ jobs:
             tests/integration/test_bootstrap_contract_repair.py \
             tests/integration/test_call_redial.py \
             tests/integration/test_contact_enquiries.py \
+            tests/integration/test_billing_price_options.py \
+            tests/integration/test_billing_checkout.py \
             -q
         env:
           TEST_DATABASE_URL: postgresql://talky:testpassword@localhost:5432/talky_alembic_test

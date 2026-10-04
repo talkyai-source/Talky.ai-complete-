@@ -1,16 +1,7 @@
-"""Production-gate coverage for Stripe readiness (Worker E).
+"""Production billing requires real mode, a live key, SDK and signing secret.
 
-Two new rules added to `_check_required_secrets()`:
-  - STRIPE_LIVE_KEY: STRIPE_SECRET_KEY is set but is not a live key
-    (does not start with 'sk_live_'). The operator believes billing is
-    live when it may be running against Stripe's test mode.
-  - STRIPE_SDK_MISSING: STRIPE_SECRET_KEY is set but the `stripe` SDK
-    isn't importable — billing_service would silently fall back to mock
-    mode despite the key being configured.
-
-Neither rule fires when no key is set at all — mock mode with no key is
-an accepted, deliberate state (see the pre-existing `missing_secret` /
-STRIPE_BILLING_DISABLED path, untouched by this change).
+Explicit non-billed deployments remain allowed. None of these local checks
+claims that Stripe credentials, account permissions or webhook delivery work.
 """
 from __future__ import annotations
 
@@ -30,6 +21,8 @@ def _clear_stripe_env(monkeypatch):
     # Isolate from whatever the real environment has set.
     monkeypatch.delenv("STRIPE_SECRET_KEY", raising=False)
     monkeypatch.delenv("STRIPE_BILLING_DISABLED", raising=False)
+    monkeypatch.delenv("STRIPE_MOCK_MODE", raising=False)
+    monkeypatch.delenv("STRIPE_WEBHOOK_SECRET", raising=False)
     monkeypatch.setenv("JWT_SECRET", "a-sufficiently-random-secret-value")
     monkeypatch.setenv("TELEPHONY_METRICS_TOKEN", "a-sufficiently-random-token")
 
@@ -44,6 +37,7 @@ def test_non_live_stripe_key_is_flagged(monkeypatch):
 
 def test_live_stripe_key_with_sdk_present_is_not_flagged(monkeypatch):
     monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_live_abc123")
+    monkeypatch.setenv("STRIPE_WEBHOOK_SECRET", "whsec_fixture")
     # Only assert this branch if the SDK is actually importable in this env;
     # otherwise STRIPE_SDK_MISSING is the correct (and separately tested)
     # outcome and would make this assertion meaningless.
@@ -54,6 +48,7 @@ def test_live_stripe_key_with_sdk_present_is_not_flagged(monkeypatch):
 
     assert "STRIPE_LIVE_KEY" not in _rules(violations)
     assert "STRIPE_SDK_MISSING" not in _rules(violations)
+    assert not [v for v in violations if "stripe" in (v.rule + v.detail).lower()]
 
 
 def test_stripe_key_set_but_sdk_absent_is_flagged(monkeypatch):
@@ -66,7 +61,7 @@ def test_stripe_key_set_but_sdk_absent_is_flagged(monkeypatch):
             return None
         return real_find_spec(name, *a, **k)
 
-    monkeypatch.setattr(prod_gate.importlib.util, "find_spec", _fake_find_spec)
+    monkeypatch.setattr(importlib.util, "find_spec", _fake_find_spec)
 
     violations = prod_gate._check_required_secrets()
 
@@ -101,3 +96,32 @@ def test_no_stripe_key_but_billing_disabled_raises_nothing_stripe_related(monkey
     )
     assert "STRIPE_LIVE_KEY" not in stripe_rules
     assert "STRIPE_SDK_MISSING" not in stripe_rules
+
+
+def test_live_looking_key_cannot_hide_explicit_mock_mode(monkeypatch):
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_live_fixture")
+    monkeypatch.setenv("STRIPE_MOCK_MODE", "true")
+    monkeypatch.setenv("STRIPE_WEBHOOK_SECRET", "whsec_fixture")
+    assert "STRIPE_MOCK_MODE" in _rules(prod_gate._check_required_secrets())
+
+
+def test_paid_billing_requires_webhook_signing_configuration(monkeypatch):
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_live_fixture")
+    assert "STRIPE_WEBHOOK_SECRET" in _rules(prod_gate._check_required_secrets())
+    monkeypatch.setenv("STRIPE_WEBHOOK_SECRET", "  whsec_fixture  ")
+    assert "STRIPE_WEBHOOK_SECRET" not in _rules(prod_gate._check_required_secrets())
+
+
+def test_explicit_disabled_billing_ignores_stale_payment_configuration(monkeypatch):
+    monkeypatch.setenv("STRIPE_BILLING_DISABLED", "true")
+    monkeypatch.setenv("STRIPE_MOCK_MODE", "true")
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test_fixture")
+    assert not [v for v in prod_gate._check_required_secrets()
+                if "stripe" in (v.rule + v.detail).lower()]
+
+
+def test_bad_key_diagnostic_does_not_echo_any_key_characters(monkeypatch):
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "private_synthetic_marker")
+    violations = prod_gate._check_required_secrets()
+    assert "STRIPE_LIVE_KEY" in _rules(violations)
+    assert not any("private_" in v.detail for v in violations)

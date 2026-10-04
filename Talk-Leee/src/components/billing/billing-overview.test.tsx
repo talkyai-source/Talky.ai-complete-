@@ -111,6 +111,18 @@ test("a genuinely empty successful response renders the empty state, not an erro
     assert.equal(screen.queryByRole("alert"), null);
 });
 
+test("current purchased terms come from the subscription snapshot and cancellation is not a promised invoice", async () => {
+    globalThis.fetch = routeFetch({ ...ALL_EMPTY_OK, "/billing/subscription": () => json({
+        ...EMPTY_SUBSCRIPTION, status: "active", plan_id: "starter", plan_name: "Starter", cancel_at_period_end: true,
+        current_period_start: "2026-10-01T00:00:00Z", current_period_end: "2027-10-01T00:00:00Z",
+        purchased_price_option: { id: "bd8cb7f8-78ab-4ac8-bb15-24d9de9d34b0", plan_id: "starter", plan_name: "Starter", kind: "stripe", interval: "year", interval_count: 1, amount_minor: 123456, currency: "kwd", currency_exponent: 3 },
+    }) }) as typeof fetch;
+    renderWithQueryClient(<BillingOverview />);
+    await screen.findByText(/Purchased offer:.*123\.456.*year/);
+    assert.ok(screen.getByText(/Access period ends:/));
+    assert.equal(screen.queryByText(/Next invoice:/), null);
+});
+
 test("loading is distinct from both the error and the empty state", async () => {
     // Never resolves — the page stays in flight.
     globalThis.fetch = (() => new Promise<Response>(() => {})) as unknown as typeof fetch;

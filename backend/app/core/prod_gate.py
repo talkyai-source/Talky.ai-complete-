@@ -12,12 +12,13 @@ Called from `app.main.lifespan` before the service container starts.
 """
 from __future__ import annotations
 
-import importlib.util
 import ipaddress
 import logging
 import os
 from dataclasses import dataclass
 from urllib.parse import urlsplit
+
+from app.domain.services.billing_mode import get_billing_mode
 
 logger = logging.getLogger(__name__)
 
@@ -225,7 +226,7 @@ def _check_required_secrets() -> list[GateViolation]:
     """T0.3 — secrets that MUST be set in production. JWT controls auth;
     TELEPHONY_METRICS_TOKEN gates the /metrics endpoint;
     INTERNAL_SERVICE_TOKEN authenticates private gateway/worker callbacks;
-    STRIPE_SECRET_KEY stops billing from silently falling back to mock mode;
+    Stripe configuration must enable real, signed payment processing;
     SECRETS_MASTER_KEY is the KEK every stored secret is encrypted under.
     """
     violations: list[GateViolation] = []
@@ -383,25 +384,36 @@ def _check_required_secrets() -> list[GateViolation]:
             )
         )
 
-    # Stripe: refuse mock-mode billing in prod. If the product is intentionally
-    # non-billed (self-hosted open-source), set STRIPE_BILLING_DISABLED=1 to
-    # acknowledge that and skip the check.
-    billing_disabled = (os.getenv("STRIPE_BILLING_DISABLED", "") or "").strip().lower() in {
-        "1", "true", "yes"
-    }
+    # Explicit non-billed deployments do not need Stripe configuration. Every
+    # active paid deployment must agree with the service's effective mode.
+    billing_mode = get_billing_mode()
+    if billing_mode == "disabled":
+        return violations
+
     stripe_key = (os.getenv("STRIPE_SECRET_KEY", "") or "").strip()
-    if not stripe_key and not billing_disabled:
+    if billing_mode == "mock":
+        violations.append(
+            GateViolation(
+                rule="STRIPE_MOCK_MODE",
+                detail=(
+                    "STRIPE_MOCK_MODE is enabled — simulated checkout is not "
+                    "permitted in production. Disable mock mode and configure "
+                    "live billing, or explicitly disable billing."
+                ),
+            )
+        )
+    if not stripe_key:
         violations.append(
             GateViolation(
                 rule="missing_secret",
                 detail=(
-                    "STRIPE_SECRET_KEY is not set — billing would silently fall "
-                    "back to mock mode. Set the key, or set "
+                    "STRIPE_SECRET_KEY is not set — paid billing is unavailable. "
+                    "Set the key, or set "
                     "STRIPE_BILLING_DISABLED=1 to acknowledge running without billing."
                 ),
             )
         )
-    elif stripe_key and not stripe_key.startswith("sk_live_"):
+    elif not stripe_key.startswith("sk_live_") or len(stripe_key) <= len("sk_live_"):
         # A set-but-non-live key (test/restricted-test 'sk_test_...' or a
         # malformed value) means the operator believes billing is live when
         # it is actually charging against Stripe's test ledger — or not at
@@ -410,26 +422,35 @@ def _check_required_secrets() -> list[GateViolation]:
             GateViolation(
                 rule="STRIPE_LIVE_KEY",
                 detail=(
-                    f"STRIPE_SECRET_KEY is set but is not a live key "
-                    f"({stripe_key[:8]}…) — production billing would run "
-                    "against Stripe's test mode. Use an 'sk_live_' key."
+                    "STRIPE_SECRET_KEY is not a supported live key — production "
+                    "billing requires a configured 'sk_live_' key."
                 ),
             )
         )
 
-    if stripe_key and importlib.util.find_spec("stripe") is None:
-        # A key is configured but the SDK that would actually call Stripe
-        # isn't installed — billing_service falls back to mock mode
-        # silently in that case, so the operator believes billing is live
-        # (key is set) while every charge is actually simulated.
+    if billing_mode == "unconfigured" and any(
+        stripe_key.startswith(prefix) and len(stripe_key) > len(prefix)
+        for prefix in ("sk_live_", "sk_test_")
+    ):
         violations.append(
             GateViolation(
                 rule="STRIPE_SDK_MISSING",
                 detail=(
-                    "STRIPE_SECRET_KEY is set but the 'stripe' package is not "
-                    "installed — billing would silently run in mock mode "
-                    "despite the operator believing it is live. Install the "
-                    "stripe SDK or unset STRIPE_SECRET_KEY."
+                    "STRIPE_SECRET_KEY is set but the Stripe SDK is unavailable "
+                    "or cannot be imported. Restore the SDK; missing dependencies "
+                    "must not be treated as mock mode."
+                ),
+            )
+        )
+
+    if not (os.getenv("STRIPE_WEBHOOK_SECRET", "") or "").strip():
+        violations.append(
+            GateViolation(
+                rule="STRIPE_WEBHOOK_SECRET",
+                detail=(
+                    "STRIPE_WEBHOOK_SECRET is not set — signed billing events "
+                    "cannot be verified. Configure the signing secret for the "
+                    "deployed webhook endpoint before enabling paid billing."
                 ),
             )
         )

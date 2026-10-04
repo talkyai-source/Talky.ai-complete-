@@ -35,7 +35,6 @@ import pytest
 
 from tests.unit._source_scan import BACKEND, app_sources
 
-
 TENANT_ID = "11111111-1111-1111-1111-111111111111"
 
 
@@ -173,7 +172,7 @@ class _Recorder:
 
     def __init__(self):
         self.updates: list[tuple[str, dict]] = []
-        self._select_row = {"stripe_subscription_id": "sub_123"}
+        self._select_row = {"stripe_subscription_id": "sub_123", "stripe_customer_id": "cus_1"}
 
     # -- entry point ------------------------------------------------------
     def table(self, name):
@@ -222,9 +221,10 @@ class _RecorderTable:
 def _billing(rec: _Recorder):
     from app.domain.services.billing_service import BillingService
 
-    svc = BillingService(rec)
-    svc.mock_mode = True
-    return svc
+    with pytest.MonkeyPatch.context() as configured:
+        configured.setenv("STRIPE_MOCK_MODE", "true")
+        configured.delenv("STRIPE_BILLING_DISABLED", raising=False)
+        return BillingService(rec)
 
 
 def _tenant_status_writes(rec: _Recorder) -> list[str]:
@@ -386,8 +386,8 @@ def test_the_archive_verb_writes_the_same_value_the_guard_blocks_on():
     """admin/tenants.py keeps its own literal (it is another owner's file);
     this pins it to the canonical constant so the two cannot drift."""
     from app.api.v1.endpoints.admin.tenants import (
-        ARCHIVED_STATUS,
         _SUBSCRIPTION_STATUS_PATTERN,
+        ARCHIVED_STATUS,
     )
     from app.domain.services.subscription_status import (
         CANCELLED,

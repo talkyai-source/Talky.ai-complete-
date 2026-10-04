@@ -12,7 +12,6 @@ import {
     sanitizeUnknown,
     sanitizeTextInput,
     sha256Hex,
-    verifyStripeWebhookSignature,
 } from "@/server/api-security";
 import {
     authMeFromRequest,
@@ -718,7 +717,6 @@ function isPublicApiPath(method: string, path: string) {
     if (method === "POST" && path === "/auth/passkeys/login/complete") return true;
     if (method === "POST" && path === "/auth/passkeys/login/options") return true;
     if (method === "POST" && path === "/auth/passkeys/login/verify") return true;
-    if (method === "POST" && path === "/billing/webhooks/stripe") return true;
     // Voice preview MP3s: browser plays them via <audio src="..."> which
     // can't send Authorization headers. The samples themselves are
     // already-public ElevenLabs preview URLs cached server-side, so
@@ -729,7 +727,6 @@ function isPublicApiPath(method: string, path: string) {
 }
 
 function rateLimitTierForPath(method: string, path: string) {
-    if (method === "POST" && path === "/billing/webhooks/stripe") return "webhook" as const;
     if (path.startsWith("/auth/")) return "sensitive" as const;
     return "default" as const;
 }
@@ -737,7 +734,6 @@ function rateLimitTierForPath(method: string, path: string) {
 function shouldUseIdempotency(method: string, path: string) {
     if (method !== "POST" && method !== "PATCH" && method !== "DELETE") return false;
     if (path.startsWith("/auth/")) return false;
-    if (path === "/billing/webhooks/stripe") return false;
     if (path === "/assistant/plan") return false;
     return true;
 }
@@ -745,6 +741,11 @@ function shouldUseIdempotency(method: string, path: string) {
 async function handle(request: Request, segments: string[]) {
     const method = request.method.toUpperCase();
     const path = `/${segments.join("/")}`;
+    // Billing has one authority: FastAPI. Never claim a local webhook receipt
+    // or write generic idempotency state for a request this route cannot apply.
+    if (path === "/billing" || path.startsWith("/billing/")) {
+        return json({ error: { code: "billing_backend_unavailable", message: "Billing requires the configured backend service." } }, { status: 503 });
+    }
     const token = authTokenFromRequest(request);
     const cachedAuth = token && !isSessionMutationRequest(method, path) ? await authMeFromRequest(request) : null;
     const useIdempotency = shouldUseIdempotency(method, path);
@@ -834,7 +835,6 @@ async function handleInner(request: Request, segments: string[], state: { cached
         method,
         userId,
         tenantId,
-        layers: tier === "webhook" ? { ip: true, user: false, tenant: false } : undefined,
     });
     if (!rate.ok) return json({ detail: "Too many requests" }, { status: 429, headers: rate.headers });
 
@@ -857,110 +857,6 @@ async function handleInner(request: Request, segments: string[], state: { cached
 
     if (method === "GET" && path === "/health") {
         return json({ status: "ok" });
-    }
-
-    if (method === "POST" && path === "/billing/webhooks/stripe") {
-        const secret = String(process.env.STRIPE_WEBHOOK_SECRET ?? "").trim();
-        if (!secret) return json({ detail: "Service unavailable" }, { status: 503 });
-
-        const sig = request.headers.get("stripe-signature") ?? "";
-        const maxBytesRaw = Number(process.env.API_MAX_WEBHOOK_BODY_BYTES ?? 262_144);
-        const maxBytes = Number.isFinite(maxBytesRaw) && maxBytesRaw > 0 ? Math.floor(maxBytesRaw) : 262_144;
-        let raw: Uint8Array;
-        try {
-            raw = new Uint8Array(await request.arrayBuffer());
-        } catch {
-            return json({ detail: "Invalid request" }, { status: 400 });
-        }
-        if (raw.byteLength > maxBytes) return json({ detail: "Invalid request" }, { status: 400 });
-
-        const verified = verifyStripeWebhookSignature({
-            rawBody: raw,
-            header: sig,
-            secret,
-            toleranceSeconds: Number(process.env.STRIPE_WEBHOOK_TOLERANCE_SECONDS ?? 300),
-        });
-        if (!verified.ok) {
-            try {
-                captureMessage("webhook_signature_invalid", { provider: "stripe", code: verified.code });
-            } catch {
-            }
-            return json({ detail: "Unauthorized" }, { status: 401 });
-        }
-
-        let event: unknown;
-        try {
-            const text = new TextDecoder().decode(raw);
-            event = sanitizeUnknown(JSON.parse(text));
-        } catch {
-            return json({ detail: "Invalid request" }, { status: 400 });
-        }
-
-        const StripeEventSchema = z
-            .object({
-                id: z.string().min(1).max(255),
-                type: z.string().min(1).max(255),
-                created: z.number().int().nonnegative().optional(),
-                data: z
-                    .object({
-                        object: z.record(z.unknown()).optional(),
-                    })
-                    .optional(),
-            })
-            .strip();
-        const parsed = StripeEventSchema.safeParse(event);
-        if (!parsed.success) return json({ detail: "Invalid request" }, { status: 400 });
-
-        const metadata =
-            parsed.data.data?.object && typeof parsed.data.data.object === "object"
-                ? ((parsed.data.data.object as Record<string, unknown>).metadata as unknown)
-                : undefined;
-        const tenantId =
-            metadata && typeof metadata === "object" && metadata
-                ? (metadata as Record<string, unknown>).tenant_id
-                : undefined;
-        const tenantScope = typeof tenantId === "string" && tenantId.trim().length > 0 ? `tenant:${tenantId.trim()}` : "tenant:unknown";
-        const webhookTenantRate = await enforceMultiLevelRateLimit({
-            request,
-            tier: "webhook",
-            path,
-            method,
-            userId: null,
-            tenantId: typeof tenantId === "string" ? tenantId : null,
-            layers: { ip: false, user: false, tenant: true },
-        });
-        if (!webhookTenantRate.ok) return json({ detail: "Too many requests" }, { status: 429, headers: webhookTenantRate.headers });
-
-        const requestHash = sha256Hex(raw);
-        const ipAddress = clientIpFromRequest(request) || null;
-        const idem = await beginIdempotency({
-            scope: tenantScope,
-            idempotencyKey: `stripe_event:${parsed.data.id}`,
-            requestHash,
-            method,
-            path,
-            userId: null,
-            tenantId: typeof tenantId === "string" ? tenantId : null,
-            ipAddress,
-        });
-        if (!idem.ok) return json({ detail: "Conflict" }, { status: idem.status });
-        if (idem.state === "replay" && idem.row) {
-            return json(idem.row.response_body, {
-                status: idem.row.response_status ?? 200,
-                headers: { "x-idempotent-replay": "1" },
-            });
-        }
-
-        const responseBody = { received: true };
-        await completeIdempotency({
-            scope: tenantScope,
-            idempotencyKey: `stripe_event:${parsed.data.id}`,
-            requestHash,
-            responseStatus: 200,
-            responseHeaders: { "content-type": "application/json" },
-            responseBody,
-        });
-        return json(responseBody);
     }
 
     if (method === "GET" && (path === "/auth/me" || path === "/me")) {

@@ -3,6 +3,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { ApiClientError } from "@/lib/http-client";
+import { billingCatalogSchema, billingSubscriptionSchema } from "@/lib/billing-purchase";
 
 // ── Fetch helper ──
 //
@@ -84,16 +85,16 @@ export const billingKeys = {
 
 // ── Billing Hooks ──
 
-export function useBillingPlan() {
+export function useBillingPlan(scope?: string) {
   return useQuery({
-    queryKey: billingKeys.plan(),
+    queryKey: [...billingKeys.plan(), scope ?? "legacy"],
     queryFn: async () => {
       // Backend exposes /billing/subscription (plan + status + period).
       const data = await billingFetch("/billing/subscription");
       // A successful response with no body is a genuine "no subscription",
       // which the page renders as "Choose a plan". A FAILED request now
       // throws instead of arriving here as null.
-      return data ?? null;
+      return data == null ? null : billingSubscriptionSchema.parse(data);
     },
   });
 }
@@ -142,12 +143,12 @@ export function useBillingInvoice(id: string) {
   });
 }
 
-export function useBillingPlans() {
+export function useBillingPlans(scope?: string) {
   return useQuery({
-    queryKey: billingKeys.plans(),
+    queryKey: [...billingKeys.plans(), scope ?? "legacy"],
     queryFn: async () => {
       const data = await billingFetch("/billing/plans");
-      return data ?? [];
+      return billingCatalogSchema.parse(data);
     },
   });
 }
@@ -421,19 +422,6 @@ export function useRotateSecret() {
       billingFetch(`/admin/secrets/${encodeURIComponent(id)}/rotate`, { method: "POST" }),
     onSettled: () => { void qc.invalidateQueries({ queryKey: billingKeys.secrets() }); },
     onError: (err) => { console.error("Failed to rotate secret:", err); },
-  });
-}
-
-export function useChangePlan() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (input: { planId: string; isYearly: boolean }) =>
-      billingFetch("/billing/plan/change", { method: "POST", body: JSON.stringify(input) }),
-    onSettled: () => {
-      void qc.invalidateQueries({ queryKey: billingKeys.plan() });
-      void qc.invalidateQueries({ queryKey: billingKeys.plans() });
-    },
-    onError: (err) => { console.error("Failed to change plan:", err); },
   });
 }
 

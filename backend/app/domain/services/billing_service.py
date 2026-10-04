@@ -10,23 +10,29 @@ Day 8: Fully integrated billing with:
 - Invoice management
 """
 
-import os
+import asyncio
 import logging
-from typing import Optional, Dict, Any
+import os
 from datetime import datetime
-from app.core.postgres_adapter import Client
-from app.core.db_utils import acquire_with_tenant
+from typing import Any, Dict, Optional
 
+from app.core.db_utils import acquire_with_tenant
+from app.core.postgres_adapter import Client
 from app.domain.services.audit_logger import AuditEvent, AuditLogger
 from app.domain.services.notification_service import (
-    get_notification_service,
     NotificationChannel,
+    get_notification_service,
 )
 from app.domain.services.subscription_status import (
-    ACTIVE as SUBSCRIPTION_ACTIVE,
     CANCELLED as SUBSCRIPTION_CANCELLED,
+)
+from app.domain.services.subscription_status import (
     INACTIVE as SUBSCRIPTION_INACTIVE,
+)
+from app.domain.services.subscription_status import (
     PAST_DUE as SUBSCRIPTION_PAST_DUE,
+)
+from app.domain.services.subscription_status import (
     canonical as canonical_subscription_status,
 )
 
@@ -39,39 +45,65 @@ try:
     STRIPE_AVAILABLE = True
 except ImportError:
     STRIPE_AVAILABLE = False
-    logger.warning("Stripe SDK not installed. Billing features will use mock mode.")
+    logger.warning("Stripe SDK not installed. Provider billing is unavailable.")
 
 
 class BillingService:
     """
     Service for handling Stripe billing operations.
 
-    Supports mock mode when:
-    - Stripe SDK is not installed
-    - STRIPE_SECRET_KEY is not configured
-    - STRIPE_MOCK_MODE environment variable is set to 'true'
+    Mock mode requires an explicit STRIPE_MOCK_MODE setting. Missing provider
+    configuration and disabled billing never simulate a financial operation.
     """
 
     def __init__(self, db_client: Client, audit_logger: Optional[AuditLogger] = None):
         self.db_client = db_client
         self.audit_logger = audit_logger
+        from app.domain.services.billing_mode import get_billing_mode
+        self.billing_mode = get_billing_mode(sdk_available=STRIPE_AVAILABLE)
+        self._stripe_api_key = (os.getenv("STRIPE_SECRET_KEY") or "").strip()
         self.mock_mode = self._should_use_mock_mode()
 
-        if not self.mock_mode and STRIPE_AVAILABLE:
-            stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
-            self.webhook_secret = os.getenv("STRIPE_WEBHOOK_SECRET")
+        self.webhook_secret = (os.getenv("STRIPE_WEBHOOK_SECRET") or "").strip()
+        if self.billing_mode in {"live", "test"}:
+            stripe.api_key = (os.getenv("STRIPE_SECRET_KEY") or "").strip()
 
         logger.info(f"BillingService initialized (mock_mode={self.mock_mode})")
 
     def _should_use_mock_mode(self) -> bool:
-        """Determine if we should use mock mode"""
-        if not STRIPE_AVAILABLE:
-            return True
-        if os.getenv("STRIPE_MOCK_MODE", "false").lower() == "true":
-            return True
-        if not os.getenv("STRIPE_SECRET_KEY"):
-            return True
-        return False
+        return self.billing_mode == "mock"
+
+    def _require_billing_enabled(self):
+        if self.billing_mode not in {"live", "test", "mock"}:
+            raise ValueError("Billing is unavailable in the current mode")
+
+    async def _stripe_call(self, resource: str, method: str, *args, **kwargs):
+        """Keep synchronous SDK I/O off the request event loop.
+
+        A timed-out thread may still be accepted by Stripe; checkout attempts
+        retain their identity and uncertainty instead of replaying a new write.
+        """
+        if self.billing_mode not in {"live", "test"}:
+            raise ValueError("Paid billing is not available in the current mode")
+        paths = {"Price": ("prices",), "Customer": ("customers",),
+                 "Subscription": ("subscriptions",), "checkout.Session": ("checkout", "sessions"),
+                 "billing_portal.Session": ("billing_portal", "sessions")}
+        options = {}
+        if "idempotency_key" in kwargs:
+            options["idempotency_key"] = kwargs.pop("idempotency_key")
+
+        def call():
+            transport = stripe.RequestsClient(timeout=5)
+            try:
+                client = stripe.StripeClient(self._stripe_api_key, http_client=transport, max_network_retries=0)
+                target = client.v1
+                for part in paths[resource]:
+                    target = getattr(target, part)
+                return getattr(target, method)(*args, params=kwargs, options=options)
+            finally:
+                transport.close()
+
+        return await asyncio.wait_for(asyncio.to_thread(call), 20.0)
 
     # =========================================================================
     # Customer Management
@@ -86,6 +118,7 @@ class BillingService:
         Returns:
             Dict with customer_id and whether it was newly created
         """
+        self._require_billing_enabled()
         # Check if tenant already has a Stripe customer
         tenant = (
             self.db_client.table("tenants")
@@ -123,84 +156,20 @@ class BillingService:
     # =========================================================================
 
     async def create_checkout_session(
-        self,
-        tenant_id: str,
-        email: str,
-        plan_id: str,
-        success_url: str,
-        cancel_url: str,
-        business_name: Optional[str] = None,
+        self, *, tenant_id: str, email: str, request_id: str,
+        price_option_id: str, business_name: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """
-        Create a Stripe Checkout Session for subscription.
-
-        Returns:
-            Dict with checkout_url and session_id
-        """
-        # Get or create customer
-        customer_result = await self.create_or_get_customer(tenant_id, email, business_name)
-        customer_id = customer_result["customer_id"]
-
-        # Get plan's stripe_price_id
-        plan = (
-            self.db_client.table("plans")
-            .select("stripe_price_id, name, price, minutes")
-            .eq("id", plan_id)
-            .single()
-            .execute()
+        from app.domain.services.billing_checkout import CheckoutAttempts
+        return await CheckoutAttempts(self.db_client.pool, self).create(
+            tenant_id=tenant_id, email=email, request_id=request_id,
+            price_option_id=price_option_id, business_name=business_name,
         )
 
-        if not plan.data:
-            raise ValueError(f"Plan not found: {plan_id}")
-
-        stripe_price_id = plan.data.get("stripe_price_id")
-
-        if self._plan_is_free(plan.data):
-            # 2026-09-10: a plan that costs nothing needs no payment. Before
-            # this, every new tenant sat on the default subscription_status
-            # 'inactive' (11 of 12 tenants on prod) because the only activation
-            # path was a Stripe checkout that prod does not have — and inbound
-            # readiness ('tenant_active') requires an active subscription.
-            # Activate the free plan here, server-side, with the same tenant
-            # update the Stripe webhook performs for a paid one.
-            return await self.activate_free_plan(
-                tenant_id=tenant_id, plan_id=plan_id, plan=plan.data, success_url=success_url
-            )
-
-        if self.mock_mode:
-            # In mock mode, stripe_price_id may be NULL — we still return a
-            # fake checkout URL so the frontend flow is fully testable
-            # before real Stripe products are configured.
-            # Return mock checkout session
-            session_id = f"cs_mock_{tenant_id[:8]}_{plan_id}"
-            return {
-                "session_id": session_id,
-                "checkout_url": f"{success_url}?session_id={session_id}&mock=true",
-                "mock_mode": True,
-                "message": "Mock checkout session created. Configure STRIPE_SECRET_KEY for real payments.",
-            }
-
-        if not stripe_price_id:
-            raise ValueError(
-                f"Plan {plan_id} has no stripe_price_id configured. "
-                "Create the product/price in Stripe Dashboard and update "
-                "plans.stripe_price_id for this row."
-            )
-
-        # Create real Stripe Checkout Session
-        session = stripe.checkout.Session.create(
-            customer=customer_id,
-            mode="subscription",
-            line_items=[{"price": stripe_price_id, "quantity": 1}],
-            success_url=success_url + "?session_id={CHECKOUT_SESSION_ID}",
-            cancel_url=cancel_url,
-            metadata={"tenant_id": tenant_id, "plan_id": plan_id},
-            subscription_data={"metadata": {"tenant_id": tenant_id, "plan_id": plan_id}},
+    async def get_checkout_attempt(self, *, tenant_id: str, request_id: str):
+        from app.domain.services.billing_checkout import CheckoutAttempts
+        return await CheckoutAttempts(self.db_client.pool, self).get(
+            tenant_id=tenant_id, request_id=request_id,
         )
-
-        logger.info(f"Created checkout session {session.id} for tenant {tenant_id}")
-
-        return {"session_id": session.id, "checkout_url": session.url, "mock_mode": False}
 
     # =========================================================================
     # Minute Top-Ups (one-time payments, goals.md §9)
@@ -241,6 +210,7 @@ class BillingService:
                              object has to exist first and the customer is
                              charged exactly what the order says.
         """
+        self._require_billing_enabled()
         customer_result = await self.create_or_get_customer(tenant_id, email, business_name)
         customer_id = customer_result["customer_id"]
 
@@ -328,55 +298,75 @@ class BillingService:
         if not customer_id:
             raise ValueError("No Stripe customer found for this tenant")
 
-        if self.mock_mode:
-            return {
-                "portal_url": f"{return_url}?mock_portal=true",
-                "mock_mode": True,
-                "message": "Mock portal session. Configure STRIPE_SECRET_KEY for real portal.",
-            }
-
-        session = stripe.billing_portal.Session.create(customer=customer_id, return_url=return_url)
+        if not await self._portal_customer_verified(tenant_id, customer_id):
+            raise ValueError("Billing portal customer ownership could not be verified")
+        session = await self._stripe_call("billing_portal.Session", "create", customer=customer_id, return_url=return_url)
 
         return {"portal_url": session.url, "mock_mode": False}
+
+    async def _portal_customer_verified(self, tenant_id, customer_id):
+        if self.billing_mode not in {"live", "test"} or not customer_id:
+            return False
+        try:
+            customer = await self._stripe_call("Customer", "retrieve", customer_id)
+            return bool(customer.get("id") == customer_id and not customer.get("deleted")
+                        and customer.get("livemode") is (self.billing_mode == "live")
+                        and (customer.get("metadata") or {}).get("tenant_id") == str(tenant_id))
+        except Exception:
+            return False
+
+    async def _purchase_projection(self, tenant_id, subscription):
+        from app.domain.services.billing_checkout import _object, public_option
+        metadata = _object(subscription.get("metadata"))
+        purchase = metadata.get("purchase")
+        if not purchase:
+            async with acquire_with_tenant(self.db_client.pool, tenant_id) as conn:
+                row = await conn.fetchrow(
+                    """SELECT a.snapshot FROM billing_checkout_attempts a JOIN tenants t ON t.id=a.tenant_id
+                       WHERE a.tenant_id=$1::uuid AND a.status='completed'
+                         AND a.snapshot->'option'->>'kind'='free'
+                         AND a.snapshot->'option'->>'plan_id'=t.plan_id
+                         AND t.stripe_subscription_id IS NULL
+                       ORDER BY a.created_at DESC LIMIT 1""", str(tenant_id),
+                )
+            if row:
+                purchase = _object(row["snapshot"])["option"]
+        subscription["purchased_price_option"] = public_option(purchase) if purchase else None
+        customer_id = subscription.get("stripe_customer_id")
+        if not customer_id:
+            tenant = self.db_client.table("tenants").select("stripe_customer_id").eq("id", tenant_id).single().execute()
+            customer_id = (tenant.data or {}).get("stripe_customer_id")
+        subscription["billing_portal_available"] = await self._portal_customer_verified(tenant_id, customer_id)
+        return subscription
 
     # =========================================================================
     # Subscription Management
     # =========================================================================
 
     async def get_subscription(self, tenant_id: str) -> Optional[Dict[str, Any]]:
-        """
-        Get current subscription for a tenant.
-        """
-        subscription = (
-            self.db_client.table("subscriptions")
-            .select("*, plans(name, price, minutes, agents)")
-            .eq("tenant_id", tenant_id)
-            .order("created_at", desc=True)
-            .limit(1)
-            .execute()
-        )
-
-        if not subscription.data:
-            # Check tenants table for basic subscription info
-            tenant = (
-                self.db_client.table("tenants")
-                .select(
-                    "subscription_status, stripe_subscription_id, plan_id, plans(name, price, minutes)"
-                )
-                .eq("id", tenant_id)
-                .single()
-                .execute()
-            )
-
-            if tenant.data and tenant.data.get("subscription_status") != SUBSCRIPTION_INACTIVE:
-                return {
-                    "status": tenant.data.get("subscription_status", SUBSCRIPTION_INACTIVE),
-                    "plan": tenant.data.get("plans"),
-                    "stripe_subscription_id": tenant.data.get("stripe_subscription_id"),
-                }
+        """Project current tenant access, never an unrelated historical subscription."""
+        tenant = self.db_client.table("tenants").select(
+            "subscription_status,stripe_subscription_id,stripe_customer_id,plan_id,plans(name,price,minutes,agents)"
+        ).eq("id", tenant_id).single().execute()
+        if not tenant.data:
             return None
-
-        return subscription.data[0]
+        data = tenant.data
+        subscription_id = data.get("stripe_subscription_id")
+        if not subscription_id and data.get("subscription_status") == SUBSCRIPTION_INACTIVE:
+            return None
+        result = {
+            "status": data.get("subscription_status", SUBSCRIPTION_INACTIVE),
+            "plan_id": data.get("plan_id"), "plan": data.get("plans"),
+            "stripe_subscription_id": subscription_id,
+            "stripe_customer_id": data.get("stripe_customer_id"),
+        }
+        if subscription_id:
+            stored = self.db_client.table("subscriptions").select("*,plans(name,price,minutes,agents)").eq(
+                "tenant_id", tenant_id
+            ).eq("stripe_subscription_id", subscription_id).limit(1).execute()
+            if stored.data:
+                result = {**stored.data[0], "status": result["status"]}
+        return await self._purchase_projection(tenant_id, result)
 
     async def cancel_subscription(
         self, tenant_id: str, cancel_at_period_end: bool = True
@@ -384,6 +374,7 @@ class BillingService:
         """
         Cancel a subscription (at period end by default).
         """
+        self._require_billing_enabled()
         tenant = (
             self.db_client.table("tenants")
             .select("stripe_subscription_id")
@@ -447,6 +438,9 @@ class BillingService:
         """
         if self.mock_mode:
             return {"status": "ignored", "reason": "mock_mode"}
+        self._require_billing_enabled()
+        if not signature or not self.webhook_secret:
+            raise ValueError("Webhook verification is unavailable or its signature is missing")
 
         try:
             event = stripe.Webhook.construct_event(payload, signature, self.webhook_secret)
@@ -743,142 +737,25 @@ class BillingService:
                 e,
             )
 
-    @staticmethod
-    def _plan_is_free(plan: Dict[str, Any]) -> bool:
-        try:
-            return float(plan.get("price") or 0) <= 0
-        except (TypeError, ValueError):
-            return False
-
-    async def activate_free_plan(
-        self,
-        *,
-        tenant_id: str,
-        plan_id: str,
-        plan: Dict[str, Any],
-        success_url: str,
-    ) -> Dict[str, Any]:
-        """Put the tenant on a $0 plan immediately — no checkout, no webhook."""
-        self.db_client.table("tenants").update(
-            {
-                "subscription_status": SUBSCRIPTION_ACTIVE,
-                "plan_id": plan_id,
-            }
-        ).eq("id", tenant_id).execute()
-        await self._set_plan_allocation(tenant_id, int(plan.get("minutes", 0) or 0))
-        logger.info("free_plan_activated tenant=%s plan=%s", str(tenant_id)[:8], plan_id)
-        if self.audit_logger:
-            await self.audit_logger.log(
-                event_type=AuditEvent.BILLING_UPDATED,
-                tenant_id=tenant_id,
-                action="subscription_activated",
-                description=f"Free plan activated without payment: {plan_id}",
-                metadata={"plan_id": plan_id, "free_plan": True},
-                actor_type="system",
-            )
-        return {
-            "session_id": f"free_{str(tenant_id)[:8]}_{plan_id}",
-            "checkout_url": success_url,
-            "mock_mode": False,
-            "activated": True,
-            "message": f"{plan.get('name') or 'Free'} plan activated — no payment required.",
-        }
-
-    async def _set_plan_allocation(self, tenant_id: str, plan_minutes: int) -> None:
-        """Write the plan entitlement WITHOUT destroying purchased minutes.
-
-        Top-ups and plan allocations share one column: ``topup_service`` adds to
-        ``tenants.minutes_allocated``, and this handler used to hard-SET the
-        same column to the plan figure. A customer who bought a 500-minute
-        bundle and then changed plan lost the 500 — silently, while
-        ``billing_ledger`` still recorded the sale.
-
-        The schema has no separate "purchased" column, and the ledger is the
-        record of what was actually bought (signed, so a refund nets itself
-        out), so the balance is re-derived from it. It is a SUBSELECT inside the
-        UPDATE rather than a read followed by a write: a top-up committing
-        between the two would otherwise be overwritten — a lost update on money.
-
-        ``plan_minutes <= 0`` is the UNLIMITED sentinel (``minutes_quota``).
-        Adding a purchased balance to it would CAP an uncapped account, so it is
-        written straight through as 0.
-
-        NEVER falls back to the plan figure alone. If this cannot be written the
-        allocation is left exactly as it stands: an entitlement that failed to
-        rise is visible and recoverable, and destroyed minutes are neither.
-        """
-        try:
-            from app.core.db_utils import acquire_with_tenant
-
-            async with acquire_with_tenant(self.db_client.pool, None) as conn:
-                await conn.execute(
-                    """
-                    UPDATE tenants
-                       SET minutes_allocated = CASE
-                               WHEN $2::int <= 0 THEN 0
-                               ELSE $2::int + GREATEST(0, COALESCE((
-                                       SELECT SUM(minutes_delta)
-                                         FROM billing_ledger
-                                        WHERE tenant_id = $1::uuid
-                                   ), 0))
-                           END,
-                           minutes_used = 0
-                     WHERE id = $1::uuid
-                    """,
-                    str(tenant_id),
-                    int(plan_minutes),
-                )
-        except Exception as e:  # noqa: BLE001
-            logger.error(
-                "plan allocation NOT applied for tenant=%s plan_minutes=%s: %s — "
-                "the previous allocation stands (purchased minutes are intact); "
-                "reconcile this plan change by hand",
-                str(tenant_id)[:8],
-                plan_minutes,
-                e,
-            )
-
     async def _handle_checkout_completed(self, session: Dict):
         """Handle checkout.session.completed event"""
-        tenant_id = session.get("metadata", {}).get("tenant_id")
-        plan_id = session.get("metadata", {}).get("plan_id")
-        subscription_id = session.get("subscription")
-        customer_id = session.get("customer")
-
-        if not tenant_id:
-            logger.warning("Checkout completed but no tenant_id in metadata")
+        from app.domain.services.billing_checkout import CheckoutAttempts, CheckoutError
+        meta = session.get("metadata") or {}
+        if meta.get("request_id"):
+            if session.get("mode") != "subscription" or session.get("payment_status") != "paid":
+                raise CheckoutError("payment_unconfirmed", "Subscription payment is not confirmed.")
+            session = await self._stripe_call("checkout.Session", "retrieve", session["id"])
+            if session.get("mode") != "subscription" or session.get("payment_status") != "paid":
+                raise CheckoutError("payment_unconfirmed", "Current subscription payment is not confirmed.")
+            subscription_id = session.get("subscription")
+            if not isinstance(subscription_id, str) or not subscription_id:
+                raise CheckoutError("subscription_missing", "Subscription receipt is missing.")
+            subscription = await self._stripe_call("Subscription", "retrieve", subscription_id)
+            await CheckoutAttempts(self.db_client.pool, self).sync_subscription(subscription, checkout_session=session)
             return
-
-        # Update tenant
-        self.db_client.table("tenants").update(
-            {
-                "stripe_customer_id": customer_id,
-                "stripe_subscription_id": subscription_id,
-                "subscription_status": SUBSCRIPTION_ACTIVE,
-                "plan_id": plan_id,
-            }
-        ).eq("id", tenant_id).execute()
-
-        # Get plan details to update minutes
-        if plan_id:
-            plan = (
-                self.db_client.table("plans").select("minutes").eq("id", plan_id).single().execute()
-            )
-            if plan.data:
-                await self._set_plan_allocation(tenant_id, int(plan.data.get("minutes", 0) or 0))
-
-        logger.info(f"Activated subscription for tenant {tenant_id}")
-
-        # Day 8: Audit log
-        if self.audit_logger:
-            await self.audit_logger.log(
-                event_type=AuditEvent.BILLING_UPDATED,
-                tenant_id=tenant_id,
-                action="subscription_activated",
-                description=f"Subscription activated via Stripe checkout: {plan_id}",
-                metadata={"subscription_id": subscription_id, "plan_id": plan_id},
-                actor_type="system",
-            )
+        # Legacy in-flight checkout needs explicit reconciliation: no durable
+        # purchase/customer/price binding can be manufactured from metadata.
+        raise CheckoutError("legacy_checkout_unreconciled", "Legacy checkout needs billing reconciliation.")
 
     async def _handle_subscription_created(self, subscription: Dict):
         """Handle customer.subscription.created event"""
@@ -1043,15 +920,30 @@ class BillingService:
 
     async def _sync_subscription(self, subscription: Dict):
         """Sync subscription data from Stripe to database"""
+        from app.domain.services.billing_checkout import (
+            CheckoutAttempts,
+            CheckoutError,
+            subscription_period,
+        )
+        if (subscription.get("metadata") or {}).get("request_id"):
+            return await CheckoutAttempts(self.db_client.pool, self).sync_subscription(subscription)
         tenant_id = subscription.get("metadata", {}).get("tenant_id")
         plan_id = subscription.get("metadata", {}).get("plan_id")
+
+        # Existing subscriptions keep their access and provider identity. An
+        # unrecorded legacy purchase is never activated using metadata alone.
+        tenant = self.db_client.table("tenants").select("stripe_customer_id,stripe_subscription_id").eq("id", tenant_id).single().execute()
+        if (not tenant.data or tenant.data.get("stripe_customer_id") != subscription.get("customer")
+                or tenant.data.get("stripe_subscription_id") != subscription.get("id")):
+            raise CheckoutError("legacy_subscription_unbound", "Legacy subscription needs billing reconciliation.")
+        start, end = subscription_period(subscription)
 
         subscription_data = {
             "stripe_subscription_id": subscription["id"],
             "stripe_customer_id": subscription["customer"],
             "status": subscription["status"],
-            "current_period_start": datetime.fromtimestamp(subscription["current_period_start"]),
-            "current_period_end": datetime.fromtimestamp(subscription["current_period_end"]),
+            "current_period_start": start,
+            "current_period_end": end,
         }
 
         if tenant_id:

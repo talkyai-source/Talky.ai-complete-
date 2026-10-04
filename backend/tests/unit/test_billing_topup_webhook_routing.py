@@ -23,7 +23,11 @@ class _StubClient:
 
 
 def _svc() -> BillingService:
-    return BillingService(_StubClient())
+    with pytest.MonkeyPatch.context() as configured:
+        configured.setenv("STRIPE_SECRET_KEY", "sk_test_synthetic")
+        configured.delenv("STRIPE_MOCK_MODE", raising=False)
+        configured.delenv("STRIPE_BILLING_DISABLED", raising=False)
+        return BillingService(_StubClient())
 
 
 def _topup_session(**over):

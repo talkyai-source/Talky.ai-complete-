@@ -2,19 +2,26 @@
 Billing API Endpoints
 Handles Stripe subscription management and payment operations
 """
-import os
 import logging
+import os
 from datetime import datetime, timedelta, timezone
+from typing import Any, List, Literal, Optional
 from uuid import UUID
-from fastapi import APIRouter, HTTPException, Depends, Request, status
-from pydantic import BaseModel
-from typing import Any, List, Optional
-from app.core.postgres_adapter import Client
 
-from app.api.v1.dependencies import get_db_client, get_current_user, CurrentUser, get_audit_logger, get_db_pool
-from app.core.security.rbac import require_permission, Permission
-from app.domain.services.billing_service import BillingService
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from pydantic import BaseModel, ConfigDict
+
+from app.api.v1.dependencies import (
+    CurrentUser,
+    get_audit_logger,
+    get_current_user,
+    get_db_client,
+    get_db_pool,
+)
+from app.core.postgres_adapter import Client
+from app.core.security.rbac import Permission, require_permission
 from app.domain.services.audit_logger import AuditEvent, AuditLogger
+from app.domain.services.billing_service import BillingService
 from app.domain.services.call_outcomes import (
     ANSWERED_OUTCOME_LIST,
     FAILED_OUTCOME_LIST,
@@ -30,23 +37,26 @@ router = APIRouter(prefix="/billing", tags=["billing"])
 # ============================================
 
 class CreateCheckoutRequest(BaseModel):
-    """Request to create a checkout session"""
-    plan_id: str
-    success_url: Optional[str] = None
-    cancel_url: Optional[str] = None
+    """Select an approved server price; preserve identity across uncertainty."""
+    model_config = ConfigDict(extra="forbid")
+    request_id: UUID
+    price_option_id: UUID
 
 
 class CreateCheckoutResponse(BaseModel):
     """Checkout session response"""
-    session_id: str
-    checkout_url: str
+    request_id: UUID
+    state: Literal["open", "activated", "pending", "expired", "failed"]
+    session_id: Optional[str] = None
+    checkout_url: Optional[str] = None
+    price_option: dict[str, Any]
     mock_mode: bool = False
     message: Optional[str] = None
 
 
 class PortalRequest(BaseModel):
     """Request to create customer portal session"""
-    return_url: Optional[str] = None
+    model_config = ConfigDict(extra="forbid")
 
 
 class PortalResponse(BaseModel):
@@ -67,6 +77,8 @@ class SubscriptionResponse(BaseModel):
     minutes_allocated: int = 0
     minutes_used: int = 0
     minutes_remaining: int = 0
+    purchased_price_option: Optional[dict[str, Any]] = None
+    billing_portal_available: bool = False
 
 
 class CancelResponse(BaseModel):
@@ -95,15 +107,6 @@ def get_billing_service(db_client: Client = Depends(get_db_client)) -> BillingSe
     return BillingService(db_client)
 
 
-def get_default_urls(request: Request):
-    """Get default success/cancel URLs based on request origin"""
-    origin = request.headers.get("origin", "http://localhost:3000")
-    return {
-        "success_url": f"{origin}/dashboard/billing/success",
-        "cancel_url": f"{origin}/dashboard/billing/canceled"
-    }
-
-
 # ============================================
 # Endpoints
 # ============================================
@@ -120,18 +123,11 @@ async def create_checkout_session(
     Create a Stripe Checkout Session for subscribing to a plan.
     """
     try:
-        # Get default URLs if not provided
-        default_urls = get_default_urls(request)
-        success_url = body.success_url or default_urls["success_url"]
-        cancel_url = body.cancel_url or default_urls["cancel_url"]
-        
-        # Validate plan exists
         result = await billing.create_checkout_session(
             tenant_id=current_user.tenant_id,
             email=current_user.email,
-            plan_id=body.plan_id,
-            success_url=success_url,
-            cancel_url=cancel_url,
+            request_id=str(body.request_id),
+            price_option_id=str(body.price_option_id),
             business_name=current_user.business_name
         )
 
@@ -142,8 +138,8 @@ async def create_checkout_session(
             actor_type="user",
             tenant_id=current_user.tenant_id,
             action="checkout_session_created",
-            description=f"User initiated checkout for plan: {body.plan_id}",
-            metadata={"plan_id": body.plan_id, "mock_mode": result.get("mock_mode", False)},
+            description="User requested a saved subscription checkout",
+            metadata={"request_id": str(body.request_id), "price_option_id": str(body.price_option_id)},
             ip_address=request.client.host if request.client else None,
             user_agent=request.headers.get("user-agent"),
         )
@@ -151,16 +147,38 @@ async def create_checkout_session(
         return CreateCheckoutResponse(**result)
     
     except ValueError as e:
+        from app.domain.services.billing_checkout import CheckoutError
+        detail = {"code": getattr(e, "code", "checkout_unconfirmed"), "message": str(e) if isinstance(e, CheckoutError) else "Checkout is unconfirmed. Retry the same saved request."}
+        if isinstance(e, CheckoutError) and e.request_not_started:
+            detail["request_not_started"] = True
+            if e.existing_attempt is not None:
+                detail["existing_attempt"] = e.existing_attempt
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
+            status_code=e.status_code if isinstance(e, CheckoutError) else 503,
+            detail=detail,
         )
     except Exception as e:
-        logger.error(f"Failed to create checkout session: {e}")
+        logger.error("Checkout outcome unconfirmed: %s", type(e).__name__)
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to create checkout session: {str(e)}"
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"code": "checkout_unconfirmed", "message": "Checkout is unconfirmed. Retry the same saved request."},
         )
+
+
+@router.get("/checkout-attempts/{request_id}", response_model=CreateCheckoutResponse,
+            dependencies=[Depends(require_permission(Permission.BILLING_UPDATE))])
+async def get_checkout_attempt(
+    request_id: UUID,
+    current_user: CurrentUser = Depends(get_current_user),
+    billing: BillingService = Depends(get_billing_service),
+):
+    from app.domain.services.billing_checkout import CheckoutError
+    try:
+        return await billing.get_checkout_attempt(tenant_id=current_user.tenant_id, request_id=str(request_id))
+    except CheckoutError as exc:
+        raise HTTPException(exc.status_code, detail={"code": exc.code, "message": str(exc)}) from exc
+    except Exception as exc:
+        raise HTTPException(503, detail={"code": "checkout_unconfirmed", "message": "Checkout status is unavailable. Keep your saved request."}) from exc
 
 
 @router.post("/webhooks")
@@ -218,31 +236,24 @@ async def get_subscription(
     try:
         subscription = await billing.get_subscription(current_user.tenant_id)
 
-        # Live `minutes_used` from the calls table; matches the dashboard
-        # endpoint and the auth/profile path.
-        from app.services.scripts.tenant_minutes import compute_tenant_minutes_used
-        minutes_used = await compute_tenant_minutes_used(
-            db_pool,
-            tenant_id=current_user.tenant_id,
-        )
+        from app.core.db_utils import acquire_with_tenant
+        from app.domain.services.minutes_quota import compute_minutes_status
+        async with acquire_with_tenant(db_pool, current_user.tenant_id) as conn:
+            quota = await compute_minutes_status(conn, current_user.tenant_id)
+        minutes_used = quota.used_minutes
 
         if not subscription:
-            allocated = (
-                current_user.minutes_remaining + minutes_used
-                if current_user.minutes_remaining is not None
-                else 0
-            )
             return SubscriptionResponse(
                 status="inactive",
-                minutes_allocated=allocated,
+                minutes_allocated=quota.allocated,
                 minutes_used=minutes_used,
-                minutes_remaining=current_user.minutes_remaining,
+                minutes_remaining=quota.remaining_minutes,
             )
 
         # Get plan info
         plan = subscription.get("plans") or subscription.get("plan") or {}
-        allocated = int(plan.get("minutes", 0) or 0) if plan else 0
-        minutes_remaining = max(0, allocated - minutes_used)
+        allocated = quota.allocated
+        minutes_remaining = quota.remaining_minutes
 
         return SubscriptionResponse(
             status=subscription.get("status", "unknown"),
@@ -254,6 +265,8 @@ async def get_subscription(
             minutes_allocated=allocated,
             minutes_used=minutes_used,
             minutes_remaining=minutes_remaining,
+            purchased_price_option=subscription.get("purchased_price_option"),
+            billing_portal_available=bool(subscription.get("billing_portal_available")),
         )
     
     except Exception as e:
@@ -276,8 +289,8 @@ async def create_portal_session(
     Create a Stripe Customer Portal session.
     """
     try:
-        default_urls = get_default_urls(request)
-        return_url = body.return_url or f"{default_urls['success_url'].rsplit('/', 1)[0]}"
+        from app.domain.services.billing_checkout import billing_return_urls
+        return_url = billing_return_urls()
         
         result = await billing.create_portal_session(
             tenant_id=current_user.tenant_id,
@@ -641,8 +654,8 @@ async def list_billing_plans(
     fetch /billing/plans from a single billing module.
     """
     try:
-        response = db_client.table("plans").select("*").order("price").execute()
-        return response.data or []
+        from app.domain.services.billing_catalog import list_plan_catalog
+        return await list_plan_catalog(db_client.pool)
     except Exception as e:
         logger.error(f"Failed to list plans: {e}")
         raise HTTPException(status_code=500, detail="Failed to list plans")
@@ -655,11 +668,13 @@ async def get_billing_config():
     
     Useful for frontend to determine if billing is in mock mode.
     """
-    stripe_configured = bool(os.getenv("STRIPE_SECRET_KEY"))
-    mock_mode = os.getenv("STRIPE_MOCK_MODE", "false").lower() == "true" or not stripe_configured
+    from app.domain.services.billing_mode import get_billing_mode
+    mode = get_billing_mode()
+    stripe_configured = mode in {"live", "test"}
     
     return {
         "stripe_configured": stripe_configured,
-        "mock_mode": mock_mode,
+        "mock_mode": mode == "mock",
+        "billing_mode": mode,
         "publishable_key": os.getenv("STRIPE_PUBLISHABLE_KEY") if stripe_configured else None
     }

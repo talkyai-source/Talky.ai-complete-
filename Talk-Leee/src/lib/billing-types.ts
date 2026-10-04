@@ -9,32 +9,6 @@ export type InvoiceStatus = "paid" | "open" | "past_due" | "void" | "draft";
 
 export type OverageType = "minutes" | "concurrency";
 
-export interface BillingPlan {
-  id: string;
-  name: string;
-  tier: "starter" | "professional" | "business" | "enterprise";
-  priceMonthly: number;
-  priceYearly: number;
-  includedMinutes: number;
-  includedConcurrentCalls: number;
-  overagePerMinute: number;
-  overageConcurrencyPerSlot: number;
-  features: string[];
-  recommended?: boolean;
-}
-
-export interface TenantPlan {
-  planId: string;
-  plan: BillingPlan;
-  billingState: BillingState;
-  billingCycleStart: string;
-  billingCycleEnd: string;
-  isYearly: boolean;
-  trialEndsAt?: string;
-  canceledAt?: string;
-  nextInvoiceDate: string;
-}
-
 export interface UsageSummary {
   period: "daily" | "monthly";
   date: string;

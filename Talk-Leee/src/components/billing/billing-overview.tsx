@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import { ErrorState } from "@/components/states/page-states";
 import { isApiClientError } from "@/lib/http-client";
+import { formatPurchasedPrice, type BillingSubscription } from "@/lib/billing-purchase";
 import {
   useBillingPlan,
   useBillingUsage,
@@ -52,17 +53,7 @@ import {
  * a 403 from a clean bill.
  */
 
-type Subscription = {
-  status: string;
-  plan_id?: string | null;
-  plan_name?: string | null;
-  current_period_start?: string | null;
-  current_period_end?: string | null;
-  cancel_at_period_end?: boolean;
-  minutes_allocated: number;
-  minutes_used: number;
-  minutes_remaining: number;
-};
+type Subscription = BillingSubscription;
 
 type UsageSummary = {
   usage_type: string;
@@ -199,8 +190,8 @@ function SectionLoadError({ what, error, onRetry }: { what: string; error: unkno
   );
 }
 
-export function BillingOverview({ topupSlot }: { topupSlot?: ReactNode }) {
-  const planQ = useBillingPlan();
+export function BillingOverview({ topupSlot, scope }: { topupSlot?: ReactNode; scope?: string }) {
+  const planQ = useBillingPlan(scope);
   const usageQ = useBillingUsage();
   const dailyQ = useDailyUsage();
   const invoicesQ = useBillingInvoices();
@@ -358,13 +349,14 @@ function PlanDisplay({ subscription }: { subscription: Subscription | null }) {
                 <Sparkles className="h-3.5 w-3.5" aria-hidden /> Subscription overview
               </div>
               <CardTitle>Current plan</CardTitle>
-              <CardDescription className="mt-1">Plan allowance, renewal window, and live minute balance.</CardDescription>
+              <CardDescription className="mt-1">Purchased offer, billing period, and recorded minute balance.</CardDescription>
             </div>
           </div>
           <div className="self-start">{statusBadge(subscription.status)}</div>
         </div>
       </CardHeader>
       <CardContent className="relative">
+        {subscription.purchased_price_option ? <p className="mb-4 font-medium">Purchased offer: {formatPurchasedPrice(subscription.purchased_price_option)}</p> : <p className="mb-4 text-sm text-muted-foreground">Purchased price and interval are not available in the billing record. The current catalogue is not used to infer them.</p>}
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
           {details.map((detail) => (
             <div
@@ -384,7 +376,7 @@ function PlanDisplay({ subscription }: { subscription: Subscription | null }) {
 
         <div className="mt-5 rounded-2xl border border-border/70 bg-background/50 p-4">
           <div className="mb-2 flex items-center justify-between gap-3 text-xs">
-            <span className="font-semibold text-foreground">Monthly allowance</span>
+            <span className="font-semibold text-foreground">Included allowance</span>
             <span className="tabular-nums text-muted-foreground">{usedPercent.toFixed(0)}% used</span>
           </div>
           <div className="h-2 overflow-hidden rounded-full bg-muted">
@@ -401,7 +393,7 @@ function PlanDisplay({ subscription }: { subscription: Subscription | null }) {
               <span className="font-semibold text-amber-600 dark:text-amber-400">Cancels at period end</span>
             )}
             {subscription.current_period_end && (
-              <span>Next invoice: {formatDate(subscription.current_period_end)}</span>
+              <span>{subscription.cancel_at_period_end ? "Access period ends" : "Current billing period ends"}: {formatDate(subscription.current_period_end)}</span>
             )}
           </div>
           <Button asChild size="sm" className="w-full sm:w-auto">

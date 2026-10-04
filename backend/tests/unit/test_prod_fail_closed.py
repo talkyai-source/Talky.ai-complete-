@@ -59,6 +59,9 @@ def _prod_env_happy_path(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("VOICE_GATEWAY_CALLBACK_HOST", "127.0.0.1")
     monkeypatch.setenv("BACKEND_INTERNAL_URL", "http://127.0.0.1:8000")
     monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_live_" + "a" * 32)
+    monkeypatch.setenv("STRIPE_WEBHOOK_SECRET", "whsec_fixture")
+    monkeypatch.delenv("STRIPE_MOCK_MODE", raising=False)
+    monkeypatch.delenv("STRIPE_BILLING_DISABLED", raising=False)
 
 
 # ────────────────────────────────────────────────────────────────────────────
