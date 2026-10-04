@@ -193,7 +193,11 @@ async def stripe_webhook(
     billing = BillingService(db_client, audit_logger=audit_logger)
     
     # Get raw body and signature
-    payload = await request.body()
+    payload = bytearray()
+    async for chunk in request.stream():
+        payload.extend(chunk)
+        if len(payload) > 512 * 1024:
+            raise HTTPException(413, detail="Webhook payload is too large")
     signature = request.headers.get("stripe-signature", "")
     
     if not signature and not billing.mock_mode:
@@ -202,17 +206,22 @@ async def stripe_webhook(
             detail="Missing Stripe signature"
         )
     
+    from app.domain.services.billing_webhooks import BillingWebhookRetryable
     try:
-        result = await billing.handle_webhook(payload, signature)
+        result = await billing.handle_webhook(bytes(payload), signature)
         return result
-    
+    except BillingWebhookRetryable as exc:
+        raise HTTPException(
+            503, detail={"code": exc.code, "message": "Billing event is not completed. Retry or reconcile the saved receipt."},
+            headers={"Retry-After": "30"},
+        ) from exc
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e)
         )
     except Exception as e:
-        logger.error(f"Webhook handling failed: {e}")
+        logger.error("Webhook handling failed error_type=%s", type(e).__name__)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Webhook handling failed"

@@ -30,6 +30,8 @@ from __future__ import annotations
 
 import ast
 import re
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -250,11 +252,8 @@ async def test_the_stripe_deleted_webhook_writes_the_canonical_value():
     in production — the one that wrote the unblockable spelling."""
     from app.domain.services.subscription_status import CANCELLED
 
-    rec = _Recorder()
-    await _billing(rec)._handle_subscription_deleted(
-        {"id": "sub_123", "metadata": {"tenant_id": "t1"}}
-    )
-    assert _tenant_status_writes(rec) == [CANCELLED]
+    writes = await _apply_current_provider_cancellation("customer.subscription.deleted")
+    assert writes and all(status == CANCELLED for status in writes)
 
 
 @pytest.mark.asyncio
@@ -264,18 +263,28 @@ async def test_a_synced_stripe_status_is_normalised_before_it_is_stored():
     two explicit writes were fixed."""
     from app.domain.services.subscription_status import CANCELLED
 
-    rec = _Recorder()
-    await _billing(rec)._sync_subscription(
-        {
-            "id": "sub_123",
-            "customer": "cus_1",
-            "status": "canceled",
-            "current_period_start": 1700000000,
-            "current_period_end": 1700086400,
-            "metadata": {"tenant_id": "t1"},
-        }
+    writes = await _apply_current_provider_cancellation("customer.subscription.updated")
+    assert writes and all(status == CANCELLED for status in writes)
+
+
+async def _apply_current_provider_cancellation(event_type):
+    from app.domain.services.billing_state_events import apply_billing_event
+
+    conn = SimpleNamespace(
+        fetchval=AsyncMock(return_value=True),
+        fetchrow=AsyncMock(side_effect=[
+            {"tenant_id": TENANT_ID, "stripe_customer_id": "cus_1", "plan_id": "starter"},
+            {"id": TENANT_ID, "stripe_subscription_id": "sub_123", "stripe_customer_id": "cus_1", "plan_id": "starter"},
+        ]),
+        execute=AsyncMock(side_effect=lambda sql, *args: "INSERT 0 1" if "INSERT INTO" in sql else "UPDATE 1"),
     )
-    assert _tenant_status_writes(rec) == [CANCELLED]
+    billing = SimpleNamespace(billing_mode="test", _stripe_call=AsyncMock(return_value={
+        "id": "sub_123", "livemode": False, "customer": "cus_1", "status": "canceled",
+        "metadata": {}, "current_period_start": 1700000000, "current_period_end": 1700086400,
+    }))
+    await apply_billing_event(conn, billing, event_type, {"id": "sub_123", "status": "active"})
+    billing._stripe_call.assert_awaited_once_with("Subscription", "retrieve", "sub_123")
+    return [call.args[-1] for call in conn.execute.await_args_list if "UPDATE tenants" in call.args[0]]
 
 
 # ── the drift guard ─────────────────────────────────────────────────────────

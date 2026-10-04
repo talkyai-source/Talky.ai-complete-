@@ -23,7 +23,7 @@ import inspect
 
 import pytest
 
-from app.domain.services.billing_checkout import CheckoutError, apply_plan_allocation
+from app.domain.services.billing_checkout import apply_plan_allocation
 from app.domain.services.billing_service import BillingService
 
 # ── fakes ───────────────────────────────────────────────────────────────────
@@ -202,11 +202,20 @@ async def test_an_unlimited_plan_stays_unlimited():
 
 @pytest.mark.asyncio
 async def test_a_checkout_with_no_plan_leaves_the_allocation_alone():
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from app.domain.services.billing_state_events import (
+        BillingStateReviewRequired,
+        apply_billing_event,
+    )
     store = make_store(allocated=1500, purchased=(500,))
-
-    with pytest.raises(CheckoutError, match="reconciliation"):
-        await _svc(store)._handle_checkout_completed(_session(plan_id=None))
-
+    conn = SimpleNamespace(fetchval=AsyncMock(return_value=True), execute=AsyncMock())
+    provider_session = {**_session(plan_id=None), "mode": "subscription", "livemode": False}
+    billing = SimpleNamespace(billing_mode="test", _stripe_call=AsyncMock(return_value=provider_session))
+    with pytest.raises(BillingStateReviewRequired, match="legacy_checkout_unreconciled"):
+        await apply_billing_event(conn, billing, "checkout.session.completed", provider_session)
+    conn.execute.assert_not_awaited()
     assert store["allocated"] == 1500
 
 

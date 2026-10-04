@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from urllib.parse import urlsplit
 from uuid import UUID
@@ -74,9 +75,17 @@ class CheckoutAttempts:
     def __init__(self, pool, billing):
         self.pool, self.billing = pool, billing
 
-    async def _get(self, tenant_id, request_id):
-        async with acquire_with_tenant(self.pool, tenant_id) as conn:
-            row = await conn.fetchrow(
+    @asynccontextmanager
+    async def _connection(self, tenant_id, conn=None):
+        if conn is not None:
+            yield conn
+        else:
+            async with acquire_with_tenant(self.pool, tenant_id) as acquired:
+                yield acquired
+
+    async def _get(self, tenant_id, request_id, *, conn=None):
+        async with self._connection(tenant_id, conn) as db:
+            row = await db.fetchrow(
                 "SELECT * FROM billing_checkout_attempts WHERE id=$1::uuid AND tenant_id=$2::uuid",
                 str(request_id), str(tenant_id),
             )
@@ -335,11 +344,12 @@ class CheckoutAttempts:
             row = await self._get(str(tenant_id), str(request_id))
         return self.response(row)
 
-    async def sync_subscription(self, subscription, *, checkout_session=None):
-        """Bind new purchase events to their durable attempt and paid session.
+    async def sync_subscription(self, subscription, *, checkout_session=None, paid_invoice=None, conn=None):
+        """Apply a verified purchase under the supplied receipt transaction.
 
-        CP03 still owns event claims/recovery/order. No event claim is deleted or
-        replayed here. A subscription-created event alone cannot grant allowance.
+        The state-event caller serializes current provider reads first. Without
+        a supplied connection this preserves CP02's own atomic transaction.
+        An early subscription event alone never grants the first allowance.
         """
         from app.domain.services.billing_catalog import validate_provider_price
         from app.domain.services.subscription_status import ACTIVE, INACTIVE, canonical
@@ -347,7 +357,7 @@ class CheckoutAttempts:
         tenant_id, request_id = meta.get("tenant_id"), meta.get("request_id")
         if not tenant_id or not request_id:
             raise CheckoutError("purchase_binding_missing", "Subscription purchase binding is unavailable.")
-        row = await self._get(str(tenant_id), str(UUID(request_id)))
+        row = await self._get(str(tenant_id), str(UUID(request_id)), conn=conn)
         if row is None:
             raise CheckoutError("purchase_binding_missing", "Subscription purchase was not recorded.")
         option = row["snapshot"]["option"]
@@ -372,7 +382,19 @@ class CheckoutAttempts:
                     or checkout_session.get("payment_status") != "paid"
                     or _id(checkout_session.get("subscription")) != subscription.get("id")):
                 raise CheckoutError("payment_unconfirmed", "Subscription payment is not confirmed.")
-        async with acquire_with_tenant(self.pool, str(tenant_id)) as conn:
+        if paid_invoice is not None:
+            from app.domain.services.billing_state_events import (
+                invoice_subscription_id,
+                validate_paid_invoice_lines,
+            )
+            if (not paid_invoice.get("id") or paid_invoice.get("status") != "paid"
+                    or paid_invoice.get("livemode") is not (option["provider_mode"] == "live")
+                    or _id(paid_invoice.get("customer")) != row["stripe_customer_id"]
+                    or invoice_subscription_id(paid_invoice) != subscription.get("id")
+                    or paid_invoice.get("currency") != option["currency"]):
+                raise CheckoutError("payment_unconfirmed", "Subscription invoice payment is not confirmed.")
+            validate_paid_invoice_lines(paid_invoice, option)
+        async with self._connection(str(tenant_id), conn) as conn:
             tenant = await conn.fetchrow("SELECT stripe_customer_id,stripe_subscription_id FROM tenants WHERE id=$1::uuid FOR UPDATE", str(tenant_id))
             saved = await conn.fetchrow("SELECT status,stripe_session_id FROM billing_checkout_attempts WHERE id=$1::uuid AND tenant_id=$2::uuid FOR UPDATE", str(request_id), str(tenant_id))
             if (not tenant or not saved or tenant["stripe_customer_id"] != row["stripe_customer_id"]
@@ -384,7 +406,7 @@ class CheckoutAttempts:
             purchase = public_option(option)
             purchase["stripe_price_id"] = option["stripe_price_id"]
             was_completed = saved["status"] == "completed"
-            activate = checkout_session is not None and eligible
+            activate = (checkout_session is not None or paid_invoice is not None) and eligible
             if not was_completed and not activate:
                 # Do not replace existing free access, plan or quota while the
                 # first payment is still unconfirmed. The attempt stays pending.
@@ -404,12 +426,19 @@ class CheckoutAttempts:
             )
             if stored != "INSERT 0 1":
                 raise CheckoutError("subscription_binding_conflict", "Subscription belongs to another billing account.")
+            if checkout_session is not None and saved["stripe_session_id"] is None:
+                # An invoice may have recovered activation after the checkout
+                # response was lost. Learn its verified session without a reset.
+                await conn.execute(
+                    "UPDATE billing_checkout_attempts SET stripe_session_id=$3,updated_at=NOW() WHERE id=$1::uuid AND tenant_id=$2::uuid",
+                    str(request_id), str(tenant_id), checkout_session["id"],
+                )
             if activate and not was_completed:
                 await apply_plan_allocation(conn, str(tenant_id), option["minutes"])
                 await conn.execute(
                     """UPDATE billing_checkout_attempts SET status='completed',stripe_session_id=$3,
                        updated_at=NOW() WHERE id=$1::uuid AND tenant_id=$2::uuid""",
-                    str(request_id), str(tenant_id), checkout_session["id"],
+                    str(request_id), str(tenant_id), checkout_session["id"] if checkout_session else saved["stripe_session_id"],
                 )
             # Preserve the raw subscription status for the display, but do not
             # grant tenant activation on an early created/updated event alone.

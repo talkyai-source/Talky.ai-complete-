@@ -33,9 +33,11 @@ the customer worse off than before they paid. Those tenants get a ledger entry
 for the money and no change to the allocation, and the mismatch is logged loudly
 because it means something was sold that should not have been sellable.
 """
+
 from __future__ import annotations
 
 import logging
+from contextlib import asynccontextmanager
 from typing import Optional
 
 from app.core.db_utils import acquire_with_tenant
@@ -51,6 +53,24 @@ MAX_OPEN_ORDERS = 20
 
 class TopupError(RuntimeError):
     """Refused before any money or minutes moved."""
+
+
+class BillingTopupReviewRequired(TopupError):
+    def __init__(self, code: str, tenant_id=None):
+        self.code = code
+        self.tenant_id = str(tenant_id) if tenant_id else None
+        super().__init__(code)
+
+
+@asynccontextmanager
+async def _mutation_connection(pool, conn):
+    if conn is not None:
+        if hasattr(conn, "is_in_transaction") and not conn.is_in_transaction():
+            raise RuntimeError("Top-up mutation requires the caller's transaction")
+        yield conn
+    else:
+        async with acquire_with_tenant(pool, None) as acquired:
+            yield acquired
 
 
 def _rows_affected(tag: str) -> int:
@@ -94,7 +114,11 @@ class TopupService:
     # ── order ───────────────────────────────────────────────────────────────
 
     async def create_order(
-        self, *, tenant_id: str, user_id: Optional[str], package_code: str,
+        self,
+        *,
+        tenant_id: str,
+        user_id: Optional[str],
+        package_code: str,
     ) -> dict:
         """Record the intent to buy, BEFORE sending anyone to a payment page.
 
@@ -128,14 +152,21 @@ class TopupService:
                 VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, 'pending')
                 RETURNING id, package_code, minutes, price_cents, currency, status
                 """,
-                str(tenant_id), str(user_id) if user_id else None,
-                pkg["code"], pkg["minutes"], pkg["price_cents"], pkg["currency"],
+                str(tenant_id),
+                str(user_id) if user_id else None,
+                pkg["code"],
+                pkg["minutes"],
+                pkg["price_cents"],
+                pkg["currency"],
             )
         out = dict(row)
         out["name"] = pkg["name"]
         logger.info(
             "topup_order_created tenant=%s order=%s package=%s minutes=%d",
-            str(tenant_id)[:8], str(row["id"])[:8], package_code, pkg["minutes"],
+            str(tenant_id)[:8],
+            str(row["id"])[:8],
+            package_code,
+            pkg["minutes"],
         )
         return out
 
@@ -149,7 +180,8 @@ class TopupService:
             tag = await conn.execute(
                 "UPDATE topup_orders SET provider_session_id = $2, updated_at = NOW() "
                 " WHERE id = $1::uuid",
-                str(order_id), session_id,
+                str(order_id),
+                session_id,
             )
         if _rows_affected(tag) == 0:
             raise TopupError(
@@ -160,8 +192,12 @@ class TopupService:
     # ── credit ──────────────────────────────────────────────────────────────
 
     async def credit_paid_order(
-        self, *, session_id: str, event_id: str,
+        self,
+        *,
+        session_id: str,
+        event_id: str,
         payment_id: Optional[str] = None,
+        conn=None,
     ) -> bool:
         """Credit minutes for a paid checkout session. True if minutes moved.
 
@@ -175,7 +211,7 @@ class TopupService:
         otherwise leave minutes credited with nothing recording why, or a
         record with no minutes.
         """
-        async with acquire_with_tenant(self._pool, None) as conn:
+        async with _mutation_connection(self._pool, conn) as conn:
             order = await conn.fetchrow(
                 "SELECT id, tenant_id, minutes, price_cents, currency, status "
                 "  FROM topup_orders WHERE provider_session_id = $1 FOR UPDATE",
@@ -185,14 +221,22 @@ class TopupService:
                 logger.warning(
                     "topup_webhook_unknown_session session=%s event=%s — a payment "
                     "arrived for an order we never created",
-                    session_id[:16], event_id[:24],
+                    session_id[:16],
+                    event_id[:24],
                 )
                 return False
 
-            if order["status"] == "paid":
+            # Different Stripe event IDs can describe the same payment. The
+            # immutable credit survives refund/dispute and stale order status.
+            already_credited = await conn.fetchval(
+                "SELECT EXISTS(SELECT 1 FROM billing_ledger WHERE order_id=$1 AND kind='topup')",
+                order["id"],
+            )
+            if already_credited or order["status"] in {"paid", "refunded", "disputed"}:
                 logger.info(
                     "topup_already_paid order=%s event=%s — redelivery, no-op",
-                    str(order["id"])[:8], event_id[:24],
+                    str(order["id"])[:8],
+                    event_id[:24],
                 )
                 return False
 
@@ -205,8 +249,12 @@ class TopupService:
                 ON CONFLICT (provider_event_id) DO NOTHING
                 RETURNING id
                 """,
-                order["tenant_id"], order["id"], order["minutes"],
-                order["price_cents"], order["currency"], event_id,
+                order["tenant_id"],
+                order["id"],
+                order["minutes"],
+                order["price_cents"],
+                order["currency"],
+                event_id,
                 "top-up {} minutes".format(order["minutes"]),
             )
             if ledger is None:
@@ -215,7 +263,8 @@ class TopupService:
                 logger.info(
                     "topup_duplicate_event event=%s order=%s — already credited, "
                     "no minutes added",
-                    event_id[:24], str(order["id"])[:8],
+                    event_id[:24],
+                    str(order["id"])[:8],
                 )
                 return False
 
@@ -227,7 +276,8 @@ class TopupService:
                 await conn.execute(
                     "UPDATE tenants SET minutes_allocated = minutes_allocated + $2 "
                     " WHERE id = $1",
-                    order["tenant_id"], order["minutes"],
+                    order["tenant_id"],
+                    order["minutes"],
                 )
             else:
                 # <= 0 means UNLIMITED. Adding to it would CAP an uncapped
@@ -236,7 +286,8 @@ class TopupService:
                     "topup_on_unlimited_tenant tenant=%s order=%s minutes=%d — "
                     "money recorded, allocation untouched. This tenant should not "
                     "have been offered a top-up.",
-                    str(order["tenant_id"])[:8], str(order["id"])[:8],
+                    str(order["tenant_id"])[:8],
+                    str(order["id"])[:8],
                     order["minutes"],
                 )
 
@@ -262,39 +313,49 @@ class TopupService:
                 "   SET monthly_minutes_allocated = monthly_minutes_allocated + $2, "
                 "       updated_at = NOW() "
                 " WHERE tenant_id = $1 AND monthly_minutes_allocated > 0",
-                order["tenant_id"], order["minutes"],
+                order["tenant_id"],
+                order["minutes"],
             )
 
             await conn.execute(
                 "UPDATE topup_orders SET status='paid', paid_at=NOW(), updated_at=NOW(), "
                 "       provider_payment_id=COALESCE($2, provider_payment_id) "
                 " WHERE id = $1",
-                order["id"], payment_id,
+                order["id"],
+                payment_id,
             )
 
         logger.info(
             "topup_credited tenant=%s order=%s minutes=%d event=%s",
-            str(order["tenant_id"])[:8], str(order["id"])[:8],
-            order["minutes"], event_id[:24],
+            str(order["tenant_id"])[:8],
+            str(order["id"])[:8],
+            order["minutes"],
+            event_id[:24],
         )
         return True
 
-    async def mark_failed(self, *, session_id: str, status: str) -> None:
+    async def mark_failed(self, *, session_id: str, status: str, conn=None) -> None:
         """A failed or expired checkout. NO ledger entry and NO minutes —
         nothing happened financially, so nothing is recorded."""
         if status not in TERMINAL_FAILURE_STATES:
             raise TopupError(f"{status!r} is not a failure state")
-        async with acquire_with_tenant(self._pool, None) as conn:
+        async with _mutation_connection(self._pool, conn) as conn:
             await conn.execute(
                 "UPDATE topup_orders SET status=$2, updated_at=NOW() "
                 " WHERE provider_session_id = $1 AND status = 'pending'",
-                session_id, status,
+                session_id,
+                status,
             )
         logger.info("topup_order_%s session=%s", status, session_id[:16])
 
     async def reverse(
-        self, *, event_id: str, kind: str = "refund",
-        payment_id: Optional[str] = None, session_id: Optional[str] = None,
+        self,
+        *,
+        event_id: str,
+        kind: str = "refund",
+        payment_id: Optional[str] = None,
+        session_id: Optional[str] = None,
+        conn=None,
     ) -> bool:
         """Claw minutes back after a refund or a chargeback.
 
@@ -306,32 +367,56 @@ class TopupService:
         what the customer was charged; rewriting it to represent a refund
         destroys the only evidence of what actually happened.
 
-        The allocation is floored at zero: a tenant who has already SPENT the
-        minutes must not be pushed negative, because ``<= 0`` reads as UNLIMITED
-        and a chargeback would hand them free calls.
+        A finite allocation must not reach zero: ``<= 0`` is the existing
+        unlimited sentinel. That conflict requires reconciliation rather than
+        inventing a new allowance or silently allowing unlimited calls.
         """
         if kind not in ("refund", "dispute"):
             raise TopupError(f"{kind!r} is not a reversal")
         if not payment_id and not session_id:
             raise TopupError("reverse() needs a payment id or a session id")
 
-        async with acquire_with_tenant(self._pool, None) as conn:
+        async with _mutation_connection(self._pool, conn) as conn:
             order = await conn.fetchrow(
                 "SELECT id, tenant_id, minutes, price_cents, currency, status "
                 "  FROM topup_orders "
-                " WHERE ($1::text IS NOT NULL AND provider_payment_id = $1) "
-                "    OR ($2::text IS NOT NULL AND provider_session_id = $2) "
+                " WHERE ($2::text IS NOT NULL AND provider_session_id = $2 "
+                "        AND ($1::text IS NULL OR provider_payment_id = $1 OR provider_payment_id IS NULL)) "
+                "    OR ($2::text IS NULL AND $1::text IS NOT NULL AND provider_payment_id = $1) "
                 " FOR UPDATE",
-                payment_id, session_id,
+                payment_id,
+                session_id,
             )
             if not order or order["status"] != "paid":
                 # Most refunds on this account are subscription refunds, which
                 # have no top-up order. Nothing to reverse is the normal case.
                 logger.info(
                     "topup_reverse_skipped ref=%s kind=%s — no paid top-up order",
-                    (payment_id or session_id or "")[:16], kind,
+                    (payment_id or session_id or "")[:16],
+                    kind,
                 )
                 return False
+
+            if await conn.fetchval(
+                "SELECT EXISTS(SELECT 1 FROM billing_ledger WHERE order_id=$1 AND kind IN ('refund','dispute'))",
+                order["id"],
+            ):
+                return False
+
+            allocated = await conn.fetchval(
+                "SELECT minutes_allocated FROM tenants WHERE id=$1 FOR UPDATE", order["tenant_id"]
+            )
+            enforced = await conn.fetchval(
+                "SELECT monthly_minutes_allocated FROM tenant_call_limits WHERE tenant_id=$1 FOR UPDATE",
+                order["tenant_id"],
+            )
+            if allocated is None or any(
+                value is not None and 0 < value <= order["minutes"]
+                for value in (allocated, enforced)
+            ):
+                raise BillingTopupReviewRequired(
+                    "reversal_would_change_unlimited_semantics", order["tenant_id"]
+                )
 
             entry = await conn.fetchrow(
                 """
@@ -342,8 +427,13 @@ class TopupService:
                 ON CONFLICT (provider_event_id) DO NOTHING
                 RETURNING id
                 """,
-                order["tenant_id"], order["id"], kind, -order["minutes"],
-                -order["price_cents"], order["currency"], event_id,
+                order["tenant_id"],
+                order["id"],
+                kind,
+                -order["minutes"],
+                -order["price_cents"],
+                order["currency"],
+                event_id,
                 "{}: reversed {} minutes".format(kind, order["minutes"]),
             )
             if entry is None:
@@ -353,27 +443,33 @@ class TopupService:
                 "UPDATE tenants "
                 "   SET minutes_allocated = GREATEST(0, minutes_allocated - $2) "
                 " WHERE id = $1 AND minutes_allocated > 0",
-                order["tenant_id"], order["minutes"],
+                order["tenant_id"],
+                order["minutes"],
             )
             # The enforced ceiling moves back with it. Leaving it raised after a
             # refund hands the tenant minutes they no longer own and lets the
-            # two tables drift apart again. Floored for the same reason as
-            # above, and scoped to a ceiling that is actually configured.
+            # two tables drift apart again. The locked preflight above refuses
+            # any finite ceiling that would reach the unlimited sentinel.
             await conn.execute(
                 "UPDATE tenant_call_limits "
                 "   SET monthly_minutes_allocated = "
                 "           GREATEST(0, monthly_minutes_allocated - $2), "
                 "       updated_at = NOW() "
                 " WHERE tenant_id = $1 AND monthly_minutes_allocated > 0",
-                order["tenant_id"], order["minutes"],
+                order["tenant_id"],
+                order["minutes"],
             )
             await conn.execute(
                 "UPDATE topup_orders SET status=$2, updated_at=NOW() WHERE id=$1",
-                order["id"], "refunded" if kind == "refund" else "disputed",
+                order["id"],
+                "refunded" if kind == "refund" else "disputed",
             )
         logger.info(
             "topup_reversed tenant=%s order=%s kind=%s minutes=-%d",
-            str(order["tenant_id"])[:8], str(order["id"])[:8], kind, order["minutes"],
+            str(order["tenant_id"])[:8],
+            str(order["id"])[:8],
+            kind,
+            order["minutes"],
         )
         return True
 
@@ -390,7 +486,8 @@ class TopupService:
                  ORDER BY o.created_at DESC
                  LIMIT $2
                 """,
-                str(tenant_id), limit,
+                str(tenant_id),
+                limit,
             )
         return [dict(r) for r in rows]
 
@@ -405,12 +502,16 @@ class TopupService:
                  ORDER BY created_at DESC
                  LIMIT $2
                 """,
-                str(tenant_id), limit,
+                str(tenant_id),
+                limit,
             )
         return [dict(r) for r in rows]
 
     async def reconciliation(
-        self, *, since: Optional[str] = None, until: Optional[str] = None,
+        self,
+        *,
+        since: Optional[str] = None,
+        until: Optional[str] = None,
         limit: int = 5000,
     ) -> list[dict]:
         """Cross-tenant ledger for admin reconciliation (goals.md §9).
@@ -435,7 +536,9 @@ class TopupService:
                  ORDER BY l.created_at DESC
                  LIMIT $3
                 """,
-                since, until, limit,
+                since,
+                until,
+                limit,
             )
         return [dict(r) for r in rows]
 

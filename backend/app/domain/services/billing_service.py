@@ -11,6 +11,7 @@ Day 8: Fully integrated billing with:
 """
 
 import asyncio
+import json
 import logging
 import os
 from datetime import datetime
@@ -18,19 +19,12 @@ from typing import Any, Dict, Optional
 
 from app.core.db_utils import acquire_with_tenant
 from app.core.postgres_adapter import Client
-from app.domain.services.audit_logger import AuditEvent, AuditLogger
-from app.domain.services.notification_service import (
-    NotificationChannel,
-    get_notification_service,
-)
+from app.domain.services.audit_logger import AuditLogger
 from app.domain.services.subscription_status import (
     CANCELLED as SUBSCRIPTION_CANCELLED,
 )
 from app.domain.services.subscription_status import (
     INACTIVE as SUBSCRIPTION_INACTIVE,
-)
-from app.domain.services.subscription_status import (
-    PAST_DUE as SUBSCRIPTION_PAST_DUE,
 )
 from app.domain.services.subscription_status import (
     canonical as canonical_subscription_status,
@@ -86,7 +80,10 @@ class BillingService:
         if self.billing_mode not in {"live", "test"}:
             raise ValueError("Paid billing is not available in the current mode")
         paths = {"Price": ("prices",), "Customer": ("customers",),
-                 "Subscription": ("subscriptions",), "checkout.Session": ("checkout", "sessions"),
+                 "Subscription": ("subscriptions",), "Invoice": ("invoices",),
+                 "Charge": ("charges",), "PaymentIntent": ("payment_intents",),
+                 "Dispute": ("disputes",), "Event": ("events",),
+                 "checkout.Session": ("checkout", "sessions"),
                  "billing_portal.Session": ("billing_portal", "sessions")}
         options = {}
         if "idempotency_key" in kwargs:
@@ -433,140 +430,25 @@ class BillingService:
     # =========================================================================
 
     async def handle_webhook(self, payload: bytes, signature: str) -> Dict[str, Any]:
-        """
-        Verify and handle Stripe webhook events.
-        """
+        """Verify raw Stripe bytes before persisting or applying any event."""
+        from app.domain.services.billing_webhooks import BillingWebhookProcessor, BillingWebhookRetryable
         if self.mock_mode:
             return {"status": "ignored", "reason": "mock_mode"}
-        self._require_billing_enabled()
-        if not signature or not self.webhook_secret:
-            raise ValueError("Webhook verification is unavailable or its signature is missing")
-
+        if self.billing_mode not in {"test", "live"} or not self.webhook_secret:
+            raise BillingWebhookRetryable("webhook_unavailable")
+        if not signature:
+            raise ValueError("Missing Stripe signature")
         try:
             event = stripe.Webhook.construct_event(payload, signature, self.webhook_secret)
-        except stripe.error.SignatureVerificationError as e:
-            logger.error(f"Webhook signature verification failed: {e}")
-            raise ValueError("Invalid webhook signature")
-
-        event_type = event["type"]
-        data = event["data"]["object"]
-        event_id = event.get("id")
-
-        # Idempotency: Stripe redelivers events (up to ~3x). Without dedup,
-        # checkout.completed/invoice.paid would re-apply minute resets and
-        # re-send confirmation emails on each redelivery. Claim the event id;
-        # if it was already processed, ack 200 without re-running the handler.
-        if event_id and not await self._claim_webhook_event(event_id, event_type):
-            logger.info(
-                "Duplicate Stripe webhook ignored event_id=%s type=%s", event_id, event_type
-            )
-            return {"status": "duplicate", "event_id": event_id, "event_type": event_type}
-
-        logger.info(f"Processing webhook event: {event_type} (id={event_id})")
-
-        # ── minute top-ups branch off FIRST ─────────────────────────────────
-        # Stripe delivers subscription checkouts and top-up checkouts down the
-        # same `checkout.session.completed` stream. Routing on the purpose we
-        # stamped at creation time is what keeps a top-up from reaching
-        # _handle_checkout_completed, which would null out the tenant's
-        # plan_id and stripe_subscription_id from a one-time session's empty
-        # fields — breaking the plan of a customer who just gave us money.
-        if await self._is_topup_event(event_type, data):
-            try:
-                return await self._handle_topup_event(event_type, data, event_id)
-            except Exception:
-                # The claim was taken before the handler ran, so a redelivery
-                # would be discarded as a duplicate and the minutes would never
-                # be credited. Release it and let Stripe retry.
-                if event_id:
-                    await self._release_webhook_claim(event_id)
-                raise
-
-        handlers = {
-            "checkout.session.completed": self._handle_checkout_completed,
-            "customer.subscription.created": self._handle_subscription_created,
-            "customer.subscription.updated": self._handle_subscription_updated,
-            "customer.subscription.deleted": self._handle_subscription_deleted,
-            "invoice.paid": self._handle_invoice_paid,
-            "invoice.payment_failed": self._handle_invoice_payment_failed,
-        }
-
-        handler = handlers.get(event_type)
-        if handler:
-            await handler(data)
-            return {"status": "handled", "event_type": event_type}
-
-        return {"status": "ignored", "event_type": event_type}
-
-    async def _claim_webhook_event(self, event_id: str, event_type: str) -> bool:
-        """Atomically claim a Stripe event id for processing.
-
-        Returns True if THIS call claimed it (first time → process), False if it
-        was already processed (duplicate → skip). Fail-OPEN on any error: a
-        missing table or DB hiccup must not drop a real billing event, so we
-        process it (the previous always-process behavior).
-        """
-        try:
-            async with acquire_with_tenant(self.db_client.pool, None) as conn:
-                status = await conn.execute(
-                    """
-                    INSERT INTO processed_webhook_events (event_id, event_type)
-                    VALUES ($1, $2)
-                    ON CONFLICT (event_id) DO NOTHING
-                    """,
-                    event_id,
-                    event_type,
-                )
-            # asyncpg tag: "INSERT 0 1" = inserted (claimed); "INSERT 0 0" = conflict
-            return status.strip().endswith(" 1")
-        except Exception as e:  # noqa: BLE001
-            logger.warning("webhook idempotency claim failed (processing anyway): %s", e)
-            return True
-
-    async def _release_webhook_claim(self, event_id: str) -> None:
-        """Undo a claim whose handler then failed.
-
-        Without this, a transient database error while crediting a top-up is
-        permanent: the claim is committed before the handler runs, so Stripe's
-        redelivery is discarded as a duplicate and the customer never receives
-        the minutes they paid for. Releasing turns that into a retry.
-        """
-        try:
-            async with acquire_with_tenant(self.db_client.pool, None) as conn:
-                await conn.execute(
-                    "DELETE FROM processed_webhook_events WHERE event_id = $1",
-                    event_id,
-                )
-            logger.warning(
-                "webhook claim released after handler failure event_id=%s — "
-                "Stripe's redelivery will retry",
-                event_id,
-            )
-        except Exception as e:  # noqa: BLE001
-            logger.error(
-                "could not release webhook claim %s: %s — this event will NOT be "
-                "retried, reconcile it by hand",
-                event_id,
-                e,
-            )
-
-    # -- top-up routing -------------------------------------------------------
+        except (stripe.error.SignatureVerificationError, ValueError) as exc:
+            raise ValueError("Invalid Stripe webhook") from exc
+        event = json.loads(json.dumps(event))
+        return await BillingWebhookProcessor(self.db_client.pool).process(event, self._apply_webhook_event)
 
     _TOPUP_SESSION_EVENTS = {
-        "checkout.session.completed",
-        "checkout.session.expired",
-        # Delayed methods settle AFTER the session completes, and Stripe
-        # reports the outcome as a pair. Routing only the failure half is how a
-        # customer gets charged and never credited: the success event has no
-        # entry in the subscription handler table either, so it fell through to
-        # "ignored" and the order sat 'pending' forever with nothing to reap it.
-        "checkout.session.async_payment_succeeded",
-        "checkout.session.async_payment_failed",
+        "checkout.session.completed", "checkout.session.expired",
+        "checkout.session.async_payment_succeeded", "checkout.session.async_payment_failed",
     }
-    # Reversals arrive on the charge, which carries no checkout session. Neither
-    # of these has a handler in the subscription table, so claiming them for the
-    # top-up path costs nothing when the charge turns out to be a subscription:
-    # the order lookup finds nothing and the handler no-ops.
     _TOPUP_CHARGE_EVENTS = {"charge.refunded", "charge.dispute.created"}
 
     async def _is_topup_event(self, event_type: str, data: Dict) -> bool:
@@ -574,411 +456,20 @@ class BillingService:
             return (data.get("metadata") or {}).get("purpose") == "minute_topup"
         return event_type in self._TOPUP_CHARGE_EVENTS
 
-    async def _handle_topup_event(
-        self, event_type: str, data: Dict, event_id: Optional[str]
-    ) -> Dict[str, Any]:
-        from app.domain.services.topup_service import TopupService
-
-        topups = TopupService(self.db_client.pool)
-        # A missing event id would defeat the ledger's uniqueness guard, so fall
-        # back to something equally unique per payment rather than NULL (which
-        # a partial unique index does not dedupe).
-        eid = event_id or f"no_event_id:{event_type}:{data.get('id')}"
-
-        if event_type in ("checkout.session.completed", "checkout.session.async_payment_succeeded"):
-            # ONE credit path for both events, because a delayed payment
-            # produces both — `completed` (payment_status still processing, so
-            # deferred here) and later `async_payment_succeeded` carrying the
-            # same session. They are different event ids, so the ledger's
-            # uniqueness guard does not separate them; the order's paid state
-            # does, inside credit_paid_order's transaction.
-            #
-            # payment_status is the field that actually says money arrived.
-            # A session can complete with payment still processing, and
-            # crediting there hands out minutes for a payment that may fail.
-            if data.get("payment_status") != "paid":
-                logger.info(
-                    "topup_checkout_completed_unpaid session=%s payment_status=%s "
-                    "— waiting for the payment to settle",
-                    str(data.get("id"))[:24],
-                    data.get("payment_status"),
-                )
-                return {"status": "deferred", "event_type": event_type}
-            credited = await topups.credit_paid_order(
-                session_id=str(data.get("id")),
-                event_id=eid,
-                payment_id=data.get("payment_intent"),
-            )
-            if credited:
-                # Only on a real credit, so a redelivery does not send a second
-                # receipt for one payment.
-                await self._send_topup_receipt(data)
-            return {
-                "status": "handled" if credited else "duplicate",
-                "event_type": event_type,
-            }
-
-        if event_type in ("checkout.session.expired", "checkout.session.async_payment_failed"):
-            await topups.mark_failed(
-                session_id=str(data.get("id")),
-                status="cancelled" if event_type.endswith("expired") else "failed",
-            )
-            return {"status": "handled", "event_type": event_type}
-
-        if event_type == "charge.refunded":
-            # A PARTIAL refund must not claw back the whole bundle. Only a fully
-            # refunded charge reverses the minutes; anything else is flagged for
-            # a human because splitting a bundle is a judgement call.
-            if not data.get("refunded"):
-                logger.warning(
-                    "topup_partial_refund charge=%s refunded=%s of %s — minutes "
-                    "left in place, reconcile by hand",
-                    str(data.get("id"))[:24],
-                    data.get("amount_refunded"),
-                    data.get("amount"),
-                )
-                return {"status": "ignored", "event_type": event_type}
-            await topups.reverse(
-                event_id=eid,
-                kind="refund",
-                payment_id=data.get("payment_intent"),
-            )
-            return {"status": "handled", "event_type": event_type}
-
-        if event_type == "charge.dispute.created":
-            await topups.reverse(
-                event_id=eid,
-                kind="dispute",
-                payment_id=data.get("payment_intent"),
-            )
-            return {"status": "handled", "event_type": event_type}
-
-        return {"status": "ignored", "event_type": event_type}
-
-    async def _send_topup_receipt(self, session: Dict) -> None:
-        """Confirm the purchase to the customer (goals.md §9).
-
-        NEVER RAISES. The minutes are already credited and committed by the
-        time this runs. Letting a mail-provider outage propagate would fail the
-        webhook, release the claim, and have Stripe retry an event whose credit
-        has already happened — a loop of 500s over an email that could simply
-        be sent later. A failed receipt is logged and dropped.
-        """
+    async def _apply_webhook_event(self, conn, event: Dict) -> Dict[str, Any]:
+        from app.domain.services.billing_webhooks import BillingWebhookReviewRequired
+        from app.domain.services.billing_state_events import apply_billing_event, BillingStateReviewRequired
+        from app.domain.services.billing_topup_events import apply_topup_event, BillingTopupReviewRequired
+        mode = "live" if event["livemode"] else "test"
+        if mode != self.billing_mode or event.get("account"):
+            raise BillingWebhookReviewRequired("provider_account_or_mode_mismatch")
+        event_type, data = event["type"], event["data"]["object"]
         try:
-            tenant_id = (session.get("metadata") or {}).get("tenant_id")
-            minutes = (session.get("metadata") or {}).get("minutes")
-            if not tenant_id:
-                return
-
-            to_email = (session.get("customer_details") or {}).get("email")
-            if not to_email:
-                # Fall back to the account owner. A receipt with nowhere to go
-                # is not worth failing over, but it is worth trying twice.
-                users = (
-                    self.db_client.table("user_profiles")
-                    .select("email")
-                    .eq("tenant_id", tenant_id)
-                    .eq("role", "owner")
-                    .limit(1)
-                    .execute()
-                )
-                if users.data:
-                    to_email = users.data[0].get("email", "")
-            if not to_email:
-                logger.warning(
-                    "topup_receipt_no_recipient tenant=%s — minutes credited, "
-                    "no address to confirm to",
-                    str(tenant_id)[:8],
-                )
-                return
-
-            amount = (session.get("amount_total") or 0) / 100
-            currency = (session.get("currency") or "gbp").upper()
-            notification_service = get_notification_service()
-            await notification_service.send_email(
-                to_email=to_email,
-                subject=f"{minutes} minutes added to your Talky.ai account",
-                html_body=f"""
-                <html>
-                    <body style="font-family: Arial, sans-serif; color: #333;">
-                        <h1 style="color: #34C759;">Minutes added</h1>
-                        <p><strong>{minutes}</strong> call minutes have been added
-                           to your account and are ready to use.</p>
-                        <p><strong>Amount charged:</strong> {amount:.2f} {currency}</p>
-                        <p>You can see this purchase and your remaining balance on
-                           the Billing page.</p>
-                    </body>
-                </html>
-                """,
-                text_body=(
-                    f"{minutes} call minutes have been added to your Talky.ai "
-                    f"account. Amount charged: {amount:.2f} {currency}."
-                ),
-            )
-            logger.info("topup_receipt_sent tenant=%s minutes=%s", str(tenant_id)[:8], minutes)
-
-            if self.audit_logger:
-                await self.audit_logger.log(
-                    event_type=AuditEvent.BILLING_UPDATED,
-                    tenant_id=tenant_id,
-                    action="topup_credited",
-                    description=f"{minutes} minutes credited via top-up",
-                    metadata={
-                        "minutes": minutes,
-                        "amount_total": session.get("amount_total"),
-                        "currency": currency,
-                        "session_id": session.get("id"),
-                    },
-                    actor_type="system",
-                )
-        except Exception as e:  # noqa: BLE001
-            logger.error(
-                "topup receipt failed (minutes ARE credited, this is cosmetic): %s",
-                e,
-            )
-
-    async def _handle_checkout_completed(self, session: Dict):
-        """Handle checkout.session.completed event"""
-        from app.domain.services.billing_checkout import CheckoutAttempts, CheckoutError
-        meta = session.get("metadata") or {}
-        if meta.get("request_id"):
-            if session.get("mode") != "subscription" or session.get("payment_status") != "paid":
-                raise CheckoutError("payment_unconfirmed", "Subscription payment is not confirmed.")
-            session = await self._stripe_call("checkout.Session", "retrieve", session["id"])
-            if session.get("mode") != "subscription" or session.get("payment_status") != "paid":
-                raise CheckoutError("payment_unconfirmed", "Current subscription payment is not confirmed.")
-            subscription_id = session.get("subscription")
-            if not isinstance(subscription_id, str) or not subscription_id:
-                raise CheckoutError("subscription_missing", "Subscription receipt is missing.")
-            subscription = await self._stripe_call("Subscription", "retrieve", subscription_id)
-            await CheckoutAttempts(self.db_client.pool, self).sync_subscription(subscription, checkout_session=session)
-            return
-        # Legacy in-flight checkout needs explicit reconciliation: no durable
-        # purchase/customer/price binding can be manufactured from metadata.
-        raise CheckoutError("legacy_checkout_unreconciled", "Legacy checkout needs billing reconciliation.")
-
-    async def _handle_subscription_created(self, subscription: Dict):
-        """Handle customer.subscription.created event"""
-        await self._sync_subscription(subscription)
-
-    async def _handle_subscription_updated(self, subscription: Dict):
-        """Handle customer.subscription.updated event"""
-        await self._sync_subscription(subscription)
-
-    async def _handle_subscription_deleted(self, subscription: Dict):
-        """Handle customer.subscription.deleted event"""
-        tenant_id = subscription.get("metadata", {}).get("tenant_id")
-
-        if tenant_id:
-            self.db_client.table("tenants").update(
-                {"subscription_status": SUBSCRIPTION_CANCELLED, "stripe_subscription_id": None}
-            ).eq("id", tenant_id).execute()
-
-        # Update subscription record
-        self.db_client.table("subscriptions").update(
-            {"status": "canceled", "canceled_at": datetime.now()}
-        ).eq("stripe_subscription_id", subscription["id"]).execute()
-
-        # Day 8: Audit log
-        if self.audit_logger and tenant_id:
-            await self.audit_logger.log(
-                event_type=AuditEvent.BILLING_UPDATED,
-                tenant_id=tenant_id,
-                action="subscription_deleted",
-                description="Subscription deleted/canceled via Stripe",
-                metadata={"subscription_id": subscription["id"]},
-                actor_type="system",
-            )
-
-    async def _handle_invoice_paid(self, invoice: Dict):
-        """Handle invoice.paid event"""
-        tenant_id = invoice.get("metadata", {}).get("tenant_id")
-
-        # Store invoice record
-        self.db_client.table("invoices").upsert(
-            {
-                "stripe_invoice_id": invoice["id"],
-                "stripe_subscription_id": invoice.get("subscription"),
-                "tenant_id": tenant_id,
-                "amount_due": invoice.get("amount_due", 0),
-                "amount_paid": invoice.get("amount_paid", 0),
-                "currency": invoice.get("currency", "usd"),
-                "status": "paid",
-                "invoice_pdf": invoice.get("invoice_pdf"),
-                "hosted_invoice_url": invoice.get("hosted_invoice_url"),
-                "paid_at": datetime.now(),
-            },
-            on_conflict="stripe_invoice_id",
-        ).execute()
-
-        # Send payment success notification
-        if tenant_id:
-            # Get user email from tenant
-            tenant_data = (
-                self.db_client.table("tenants")
-                .select("business_name")
-                .eq("id", tenant_id)
-                .single()
-                .execute()
-            )
-
-            user_email = ""
-            if tenant_data.data:
-                # Try to get admin user email
-                users = (
-                    self.db_client.table("user_profiles")
-                    .select("email")
-                    .eq("tenant_id", tenant_id)
-                    .eq("role", "owner")
-                    .limit(1)
-                    .execute()
-                )
-                if users.data:
-                    user_email = users.data[0].get("email", "")
-
-            if user_email:
-                notification_service = get_notification_service()
-                await notification_service.send_email(
-                    to_email=user_email,
-                    subject="Payment Received",
-                    html_body=f"""
-                    <html>
-                        <body style="font-family: Arial, sans-serif; color: #333;">
-                            <h1 style="color: #34C759;">Payment Successful</h1>
-                            <p>Your payment of ${invoice.get('amount_paid', 0)/100:.2f} {invoice.get('currency', 'USD').upper()} has been received.</p>
-                            <p><strong>Invoice ID:</strong> {invoice['id']}</p>
-                            <p><a href="{invoice.get('hosted_invoice_url', 'https://talky.ai/invoices')}" style="color: #007AFF;">View Invoice</a></p>
-                        </body>
-                    </html>
-                    """,
-                )
-
-            # Audit log
-            if self.audit_logger:
-                await self.audit_logger.log(
-                    event_type=AuditEvent.BILLING_UPDATED,
-                    tenant_id=tenant_id,
-                    action="payment_received",
-                    description=f"Payment received: ${invoice.get('amount_paid', 0)/100:.2f}",
-                    metadata={"invoice_id": invoice["id"], "amount": invoice.get("amount_paid", 0)},
-                    actor_type="system",
-                )
-
-    async def _handle_invoice_payment_failed(self, invoice: Dict):
-        """Handle invoice.payment_failed event"""
-        subscription_id = invoice.get("subscription")
-        tenant_id = invoice.get("metadata", {}).get("tenant_id")
-
-        if subscription_id:
-            self.db_client.table("subscriptions").update({"status": "past_due"}).eq(
-                "stripe_subscription_id", subscription_id
-            ).execute()
-
-            # Update tenant status
-            if tenant_id:
-                self.db_client.table("tenants").update(
-                    {"subscription_status": SUBSCRIPTION_PAST_DUE}
-                ).eq("id", tenant_id).execute()
-
-        # Send payment failure notification
-        if tenant_id:
-            # Get user email
-            users = (
-                self.db_client.table("user_profiles")
-                .select("email")
-                .eq("tenant_id", tenant_id)
-                .eq("role", "owner")
-                .limit(1)
-                .execute()
-            )
-
-            if users.data:
-                user_email = users.data[0].get("email", "")
-                if user_email:
-                    notification_service = get_notification_service()
-                    await notification_service.notify_billing_failure(
-                        user_email=user_email,
-                        amount=invoice.get("amount_due", 0) / 100,
-                        error_message=invoice.get("attempt_count", 1) > 1
-                        and "Multiple payment attempts failed"
-                        or "Payment declined",
-                        channels=NotificationChannel.BOTH,
-                    )
-
-            # Audit log
-            if self.audit_logger:
-                await self.audit_logger.log_security_event(
-                    event_type="billing_payment_failed",
-                    severity="HIGH",
-                    description=f"Payment failed for tenant {tenant_id}: {invoice['id']}",
-                    metadata={
-                        "invoice_id": invoice["id"],
-                        "amount": invoice.get("amount_due", 0),
-                        "attempt_count": invoice.get("attempt_count", 1),
-                    },
-                )
-
-    async def _sync_subscription(self, subscription: Dict):
-        """Sync subscription data from Stripe to database"""
-        from app.domain.services.billing_checkout import (
-            CheckoutAttempts,
-            CheckoutError,
-            subscription_period,
-        )
-        if (subscription.get("metadata") or {}).get("request_id"):
-            return await CheckoutAttempts(self.db_client.pool, self).sync_subscription(subscription)
-        tenant_id = subscription.get("metadata", {}).get("tenant_id")
-        plan_id = subscription.get("metadata", {}).get("plan_id")
-
-        # Existing subscriptions keep their access and provider identity. An
-        # unrecorded legacy purchase is never activated using metadata alone.
-        tenant = self.db_client.table("tenants").select("stripe_customer_id,stripe_subscription_id").eq("id", tenant_id).single().execute()
-        if (not tenant.data or tenant.data.get("stripe_customer_id") != subscription.get("customer")
-                or tenant.data.get("stripe_subscription_id") != subscription.get("id")):
-            raise CheckoutError("legacy_subscription_unbound", "Legacy subscription needs billing reconciliation.")
-        start, end = subscription_period(subscription)
-
-        subscription_data = {
-            "stripe_subscription_id": subscription["id"],
-            "stripe_customer_id": subscription["customer"],
-            "status": subscription["status"],
-            "current_period_start": start,
-            "current_period_end": end,
-        }
-
-        if tenant_id:
-            subscription_data["tenant_id"] = tenant_id
-        if plan_id:
-            subscription_data["plan_id"] = plan_id
-
-        # Upsert subscription record
-        self.db_client.table("subscriptions").upsert(
-            subscription_data, on_conflict="stripe_subscription_id"
-        ).execute()
-
-        # Update tenant
-        if tenant_id:
-            self.db_client.table("tenants").update(
-                {
-                    "subscription_status": canonical_subscription_status(subscription["status"]),
-                    "stripe_subscription_id": subscription["id"],
-                }
-            ).eq("id", tenant_id).execute()
-
-            # Day 8: Audit log
-            if self.audit_logger:
-                await self.audit_logger.log(
-                    event_type=AuditEvent.BILLING_UPDATED,
-                    tenant_id=tenant_id,
-                    action="subscription_synced",
-                    description=f"Subscription state synced: {subscription['status']}",
-                    metadata={
-                        "subscription_id": subscription["id"],
-                        "status": subscription["status"],
-                        "plan_id": plan_id,
-                    },
-                    actor_type="system",
-                )
+            if await self._is_topup_event(event_type, data):
+                return await apply_topup_event(conn, self, event_type, data, event["id"])
+            return await apply_billing_event(conn, self, event_type, data)
+        except (BillingStateReviewRequired, BillingTopupReviewRequired) as exc:
+            raise BillingWebhookReviewRequired(exc.code) from exc
 
     # =========================================================================
     # Usage Tracking (for metered billing)

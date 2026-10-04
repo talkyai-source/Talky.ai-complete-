@@ -135,12 +135,19 @@ def test_subscription_period_accepts_actual_item_shape_and_legacy_shape():
 
 
 @pytest.mark.asyncio
-async def test_unpaid_checkout_event_never_activates_or_retrieves_subscription():
-    svc = BillingService.__new__(BillingService)
-    svc._stripe_call = AsyncMock()
-    with pytest.raises(checkout.CheckoutError, match="not confirmed"):
-        await svc._handle_checkout_completed({"mode": "subscription", "payment_status": "unpaid", "metadata": {"request_id": str(uuid4())}})
-    svc._stripe_call.assert_not_awaited()
+async def test_unpaid_checkout_event_reads_current_state_without_activating():
+    from app.domain.services.billing_state_events import apply_billing_event
+
+    row = attempt()
+    current_session = {**session(row), "status": "complete", "payment_status": "unpaid", "subscription": "sub_synthetic"}
+    current_sub = {"id": "sub_synthetic", "livemode": False, "customer": "cus_synthetic", "status": "incomplete", "metadata": current_session["metadata"]}
+    conn = SimpleNamespace(fetchval=AsyncMock(return_value=True), fetchrow=AsyncMock(side_effect=[
+        row, None, row, {"id": row["tenant_id"], "stripe_customer_id": "cus_synthetic", "stripe_subscription_id": None},
+    ]), execute=AsyncMock())
+    billing = SimpleNamespace(billing_mode="test", _stripe_call=AsyncMock(side_effect=[current_session, current_sub]))
+    result = await apply_billing_event(conn, billing, "checkout.session.completed", current_session)
+    assert result["status"] == "deferred" and result["reason"] == "payment_unconfirmed"
+    conn.execute.assert_not_awaited()
 
 
 @pytest.mark.parametrize("origin", ["https://bad.example/path", "https://user:pass@app.example", "https://app.example?redirect=bad", "javascript:alert(1)"])
@@ -332,7 +339,9 @@ async def test_unavailable_mode_never_implicitly_mocks_financial_operations(monk
     svc = BillingService(db)
     assert svc.billing_mode == mode
     assert svc.mock_mode is False
-    with pytest.raises(ValueError, match="unavailable"):
+    from app.domain.services.billing_webhooks import BillingWebhookRetryable
+    error_type = BillingWebhookRetryable if operation == "webhook" else ValueError
+    with pytest.raises(error_type, match="unavailable"):
         if operation == "customer":
             await svc.create_or_get_customer(str(uuid4()), "synthetic@example.com")
         elif operation == "topup":

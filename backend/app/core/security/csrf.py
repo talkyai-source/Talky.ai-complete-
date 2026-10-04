@@ -101,6 +101,11 @@ class CSRFMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         path = request.url.path
+        # Stripe is a server-to-server sender without a browser Origin. Only
+        # this exact route is exempt; its handler verifies the raw-body Stripe
+        # signature before processing. Other billing writes keep CSRF checks.
+        if request.method == "POST" and path == "/api/v1/billing/webhooks":
+            return await call_next(request)
         if any(path.startswith(prefix) for prefix in _EXEMPT_PATH_PREFIXES):
             return await call_next(request)
 

@@ -21,13 +21,13 @@ here that reference SQL text are marked as structural, and they exist because a
 guard that quietly stops being present in the statement is exactly how the trust
 rule in lead capture turned decorative.
 """
+
 from __future__ import annotations
 
 import inspect
 
 import pytest
 
-from app.domain.services import topup_service as mod
 from app.domain.services.topup_service import (
     MAX_OPEN_ORDERS,
     TopupError,
@@ -37,6 +37,7 @@ from app.domain.services.topup_service import (
 
 
 # ── a connection that behaves the way Postgres does on the paths we branch on ──
+
 
 class FakeConn:
     """Enough of asyncpg to run the service's real branching.
@@ -114,13 +115,23 @@ class FakeConn:
             return {"id": len(self.store["ledger"])}
         if "INSERT INTO topup_orders" in sql:
             return {
-                "id": "order-1", "package_code": args[2], "minutes": args[3],
-                "price_cents": args[4], "currency": args[5], "status": "pending",
+                "id": "order-1",
+                "package_code": args[2],
+                "minutes": args[3],
+                "price_cents": args[4],
+                "currency": args[5],
+                "status": "pending",
             }
         return None
 
     async def fetchval(self, sql, *args):
         self.sql.append(sql)
+        if "EXISTS" in sql and "billing_ledger" in sql:
+            if "'refund'" in sql:
+                return any(row["kind"] in {"refund", "dispute"} for row in self.store["ledger"])
+            return any(row["kind"] == "topup" for row in self.store["ledger"])
+        if "FROM tenant_call_limits" in sql:
+            return self.store.get("enforced", 0)
         if "minutes_allocated" in sql:
             return self.store["allocated"]
         if "count(*)" in sql:
@@ -167,8 +178,11 @@ def make_store(*, allocated=1000, order=None, package=None, enforced=0):
 
 def paid_order(status="pending", minutes=250):
     return {
-        "id": "order-1", "tenant_id": "11111111-1111-1111-1111-111111111111",
-        "minutes": minutes, "price_cents": 2500, "currency": "GBP",
+        "id": "order-1",
+        "tenant_id": "11111111-1111-1111-1111-111111111111",
+        "minutes": minutes,
+        "price_cents": 2500,
+        "currency": "GBP",
         "status": status,
     }
 
@@ -177,6 +191,7 @@ TENANT = "11111111-1111-1111-1111-111111111111"
 
 
 # ── the redelivery problem ──────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_the_same_event_credits_once_no_matter_how_often_it_arrives():
@@ -236,6 +251,7 @@ def test_the_ledger_insert_is_conditional_on_the_constraint():
 
 # ── paying is not the same as starting to pay ───────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_a_payment_for_an_order_we_never_created_credits_nothing():
     store = make_store(allocated=1000, order=None)
@@ -267,6 +283,7 @@ async def test_mark_failed_refuses_a_status_that_is_not_a_failure():
 
 # ── the unlimited sentinel ──────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_topping_up_an_unlimited_tenant_does_not_give_them_a_limit():
     """``minutes_allocated <= 0`` means unlimited everywhere else in the system
@@ -282,6 +299,7 @@ async def test_topping_up_an_unlimited_tenant_does_not_give_them_a_limit():
 
 
 # ── reversals ───────────────────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_a_refund_is_a_new_negative_row_not_an_edit():
@@ -303,10 +321,9 @@ async def test_a_chargeback_cannot_push_an_allocation_below_zero():
     store = make_store(allocated=100, order=paid_order(status="paid"))
     svc = TopupService(FakePool(store))
 
-    await svc.reverse(event_id="evt_d", kind="dispute", payment_id="pi_1")
-
-    assert store["allocated"] == 0
-    assert store["allocated"] >= 0
+    with pytest.raises(TopupError):
+        await svc.reverse(event_id="evt_d", kind="dispute", payment_id="pi_1")
+    assert store["allocated"] == 100 and store["ledger"] == []
 
 
 @pytest.mark.asyncio
@@ -341,6 +358,7 @@ def test_the_reversal_floor_is_in_the_statement():
 
 # ── what the client is allowed to name ──────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_an_unknown_package_is_refused_before_any_order_exists():
     store = make_store(package=None)
@@ -353,30 +371,42 @@ async def test_an_unknown_package_is_refused_before_any_order_exists():
 async def test_price_and_minutes_come_from_the_package_not_the_caller():
     """THE HOLE THIS CLOSES: an endpoint that accepts `minutes` and `price`
     from the browser sells 10,000 minutes for a penny."""
-    store = make_store(package={
-        "code": "mins_250", "name": "250 minutes", "minutes": 250,
-        "price_cents": 2500, "currency": "GBP",
-    })
+    store = make_store(
+        package={
+            "code": "mins_250",
+            "name": "250 minutes",
+            "minutes": 250,
+            "price_cents": 2500,
+            "currency": "GBP",
+        }
+    )
     svc = TopupService(FakePool(store))
 
     order = await svc.create_order(
-        tenant_id=TENANT, user_id=None, package_code="mins_250",
+        tenant_id=TENANT,
+        user_id=None,
+        package_code="mins_250",
     )
 
     assert order["minutes"] == 250
     assert order["price_cents"] == 2500
     sig = inspect.signature(TopupService.create_order).parameters
-    assert "minutes" not in sig and "price_cents" not in sig, (
-        "create_order must not accept an amount from its caller"
-    )
+    assert (
+        "minutes" not in sig and "price_cents" not in sig
+    ), "create_order must not accept an amount from its caller"
 
 
 @pytest.mark.asyncio
 async def test_a_flood_of_unfinished_checkouts_is_refused():
-    store = make_store(package={
-        "code": "mins_250", "name": "250 minutes", "minutes": 250,
-        "price_cents": 2500, "currency": "GBP",
-    })
+    store = make_store(
+        package={
+            "code": "mins_250",
+            "name": "250 minutes",
+            "minutes": 250,
+            "price_cents": 2500,
+            "currency": "GBP",
+        }
+    )
     store["open_orders"] = MAX_OPEN_ORDERS
     svc = TopupService(FakePool(store))
 
@@ -385,6 +415,7 @@ async def test_a_flood_of_unfinished_checkouts_is_refused():
 
 
 # ── the silent-zero-row trap ────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_a_lost_session_link_raises_instead_of_passing_quietly():
@@ -409,12 +440,20 @@ def test_every_write_path_uses_the_rls_aware_connection():
     bare ``pool.acquire()`` sees no rows and every UPDATE silently touches
     nothing. Only the read-only catalogue (which is not tenant-scoped) may use
     a plain acquire."""
-    for name in ("create_order", "attach_session", "credit_paid_order",
-                 "mark_failed", "reverse", "history", "ledger", "purchased_total"):
+    for name in (
+        "create_order",
+        "attach_session",
+        "credit_paid_order",
+        "mark_failed",
+        "reverse",
+        "history",
+        "ledger",
+        "purchased_total",
+    ):
         src = inspect.getsource(getattr(TopupService, name))
-        assert "acquire_with_tenant" in src, (
-            f"{name} acquires a connection without setting the RLS context"
-        )
+        assert (
+            "acquire_with_tenant" in src or "_mutation_connection" in src
+        ), f"{name} acquires a connection without setting the RLS context"
 
 
 def test_the_catalogue_read_is_the_only_plain_acquire():
@@ -423,10 +462,11 @@ def test_the_catalogue_read_is_the_only_plain_acquire():
 
 # ── the sign convention ─────────────────────────────────────────────────────
 
+
 def test_trust_that_a_topup_is_positive_and_a_reversal_is_negative():
     credit = inspect.getsource(TopupService.credit_paid_order)
     reverse = inspect.getsource(TopupService.reverse)
-    assert "-order[\"minutes\"]" in reverse or "-order['minutes']" in reverse
+    assert '-order["minutes"]' in reverse or "-order['minutes']" in reverse
     assert "'topup'" in credit
 
 
@@ -437,6 +477,7 @@ def test_trust_that_a_topup_is_positive_and_a_reversal_is_negative():
 # different column in a different table, with nothing syncing the two. A
 # tenant with an admin-set ceiling could top up 500 minutes, see the balance
 # rise everywhere, and still be blocked at origination by the old ceiling.
+
 
 @pytest.mark.asyncio
 async def test_a_credit_raises_the_ceiling_the_call_guard_enforces():
@@ -484,9 +525,9 @@ def test_the_ceiling_moves_inside_the_credit_transaction():
     credit and the ceiling, leaving minutes bought that cannot be dialled."""
     src = inspect.getsource(TopupService.credit_paid_order)
     assert "tenant_call_limits" in src
-    assert src.count("acquire_with_tenant") == 1, (
-        "the enforced ceiling is updated outside the credit's transaction"
-    )
+    assert (
+        src.count("_mutation_connection") == 1
+    ), "the enforced ceiling is updated outside the credit's transaction"
 
 
 @pytest.mark.asyncio
@@ -503,6 +544,7 @@ async def test_a_duplicate_event_does_not_raise_the_ceiling_either():
 
 # ── two Stripe events, one delayed payment ──────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_completed_and_async_succeeded_credit_one_session_once():
     """A delayed payment (Bacs/SEPA/Klarna) produces
@@ -517,3 +559,36 @@ async def test_completed_and_async_succeeded_credit_one_session_once():
 
     assert store["allocated"] == 1250, "one payment credited twice"
     assert len(store["ledger"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_late_distinct_success_cannot_recredit_a_refunded_order():
+    store = make_store(allocated=1000, order=paid_order())
+    service = TopupService(FakePool(store))
+    await service.credit_paid_order(session_id="cs_fixture", event_id="evt_credit")
+    await service.reverse(event_id="evt_refund", payment_id="pi_fixture")
+    assert await service.credit_paid_order(session_id="cs_fixture", event_id="evt_late") is False
+    assert store["allocated"] == 1000
+    assert [row["minutes_delta"] for row in store["ledger"]] == [250, -250]
+
+
+@pytest.mark.asyncio
+async def test_existing_positive_ledger_prevents_recredit_when_order_status_is_stale():
+    store = make_store(allocated=1000, order=paid_order())
+    store["ledger"].append({"kind": "topup", "minutes_delta": 250})
+    assert (
+        await TopupService(FakePool(store)).credit_paid_order(
+            session_id="cs_fixture", event_id="evt_new"
+        )
+        is False
+    )
+    assert store["allocated"] == 1000 and len(store["ledger"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_reversal_cannot_turn_finite_allowance_into_unlimited():
+    store = make_store(allocated=50, enforced=50, order=paid_order(status="paid"))
+    with pytest.raises(TopupError):
+        await TopupService(FakePool(store)).reverse(event_id="evt_refund", payment_id="pi_fixture")
+    assert store["allocated"] == store["enforced"] == 50
+    assert store["ledger"] == [] and store["order"]["status"] == "paid"

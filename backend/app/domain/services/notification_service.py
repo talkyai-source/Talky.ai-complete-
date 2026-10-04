@@ -6,10 +6,9 @@ Day 8: Comprehensive notification system with email and Slack support
 """
 import logging
 import os
-from typing import Optional, Dict, List, Any
+from typing import Optional, Dict, Any
 from enum import Enum
 from datetime import datetime
-from uuid import UUID
 
 logger = logging.getLogger(__name__)
 
@@ -153,6 +152,8 @@ class NotificationService:
                 message.reply_to = reply_to
 
             sg = SendGridAPIClient(self.sendgrid_api_key)
+            if hasattr(self, "delivery_timeout_seconds"):
+                sg.client.timeout = self.delivery_timeout_seconds
             response = sg.send(message)
 
             logger.info(
@@ -160,7 +161,7 @@ class NotificationService:
             )
             return {
                 "status": "success",
-                "message_id": f"sendgrid_{response.status_code}",
+                "message_id": (response.headers or {}).get("X-Message-Id"),
             }
         except ImportError:
             logger.error("sendgrid package not installed")
@@ -199,7 +200,9 @@ class NotificationService:
             msg.attach(MIMEText(html_body, "html"))
 
             # Connect and send
-            with smtplib.SMTP(self.smtp_host, self.smtp_port) as server:
+            timeout_options = ({"timeout": self.delivery_timeout_seconds}
+                               if hasattr(self, "delivery_timeout_seconds") else {})
+            with smtplib.SMTP(self.smtp_host, self.smtp_port, **timeout_options) as server:
                 server.starttls()
                 server.login(self.smtp_user, self.smtp_password)
                 server.send_message(msg)
@@ -225,12 +228,21 @@ class NotificationService:
 
         try:
             import boto3
+            from botocore.config import Config
 
+            transport_options = {}
+            if hasattr(self, "delivery_timeout_seconds"):
+                transport_options["config"] = Config(
+                    connect_timeout=self.delivery_timeout_seconds,
+                    read_timeout=self.delivery_timeout_seconds,
+                    retries={"max_attempts": 0},
+                )
             client = boto3.client(
                 "ses",
                 region_name=self.aws_region,
                 aws_access_key_id=self.aws_access_key,
                 aws_secret_access_key=self.aws_secret_key,
+                **transport_options,
             )
 
             kwargs = {

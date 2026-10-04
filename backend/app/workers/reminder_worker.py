@@ -16,7 +16,7 @@ import sys
 import json
 import time
 from datetime import datetime
-from typing import Optional, List, Dict, Any
+from typing import Optional, Dict, Any
 
 from app.core.dotenv_compat import load_dotenv
 from app.core.db_utils import acquire_with_tenant
@@ -30,7 +30,7 @@ try:
 except ImportError as e:
     raise ImportError(f"Required dependency not installed: {e}")
 
-from app.core.db import init_db_pool, close_db_pool, Database
+from app.core.db import init_db_pool, close_db_pool
 
 logger = logging.getLogger(__name__)
 
@@ -131,6 +131,7 @@ class ReminderWorker:
         heartbeat_task = asyncio.create_task(self._heartbeat())
         crm_task = asyncio.create_task(self._crm_delivery_loop())
         callback_task = asyncio.create_task(self._voice_callback_loop())
+        billing_task = asyncio.create_task(self._billing_delivery_loop())
 
         try:
             while self.running:
@@ -167,6 +168,11 @@ class ReminderWorker:
 
                     await asyncio.sleep(min(5 * consecutive_errors, 60))
         finally:
+            billing_task.cancel()
+            try:
+                await billing_task
+            except (asyncio.CancelledError, Exception):
+                pass
             callback_task.cancel()
             try:
                 await callback_task
@@ -184,6 +190,16 @@ class ReminderWorker:
                 pass
 
         await self.shutdown()
+
+    async def _billing_delivery_loop(self):
+        """Billing email delivery is independent of financial webhook retries."""
+        from app.domain.services.billing_webhook_notifications import drain_billing_notifications
+        while self.running:
+            try:
+                await drain_billing_notifications(self._db_pool)
+            except Exception as exc:
+                logger.warning("Billing notification scan failed: %s", type(exc).__name__)
+            await asyncio.sleep(self.POLL_INTERVAL)
 
     async def _voice_callback_loop(self):
         from app.services.voice_callback_service import drain_voice_callbacks
