@@ -39,7 +39,7 @@ def test_render_prefers_source_content_over_voice_answer():
     assert "Florida" in out                    # the late fact is present
 
 
-def test_render_appends_voice_answer_as_phrasing_when_novel():
+def test_render_does_not_add_unbound_generated_phrasing():
     node = {
         "heading": "Hours",
         "voice_answer": "We're open nine to five, weekdays.",
@@ -48,12 +48,12 @@ def test_render_appends_voice_answer_as_phrasing_when_novel():
     }
     out = render_node_answer(node)
     assert out.startswith("Open 09:00-17:00 Mon-Fri.")   # fact from source first
-    assert "nine to five" in out                          # phrasing appended
+    assert "nine to five" not in out                     # no source binding
 
 
-def test_render_falls_back_to_voice_answer_when_no_source():
+def test_render_withholds_generated_answer_when_no_source():
     node = {"heading": "H", "voice_answer": "Nine to five.", "summary": None, "content": None}
-    assert render_node_answer(node) == "Nine to five."
+    assert render_node_answer(node) == ""
 
 
 def test_render_empty_node_is_empty():
@@ -117,7 +117,7 @@ def _node(depth, heading, content, summary=None, voice_answer=None):
             "summary": summary, "voice_answer": voice_answer}
 
 
-def test_compact_tree_drops_whole_trailing_nodes_with_log(monkeypatch, caplog):
+def test_compact_tree_overflow_requires_per_turn_retrieval(monkeypatch, caplog):
     rows = [
         _node(0, "A", "a" * 300),
         _node(0, "B", "b" * 300),
@@ -126,20 +126,15 @@ def test_compact_tree_drops_whole_trailing_nodes_with_log(monkeypatch, caplog):
     _patch_rows(monkeypatch, rows)
     with caplog.at_level(logging.WARNING):
         out = asyncio.run(compact_tree(object(), "t1", "c1", max_chars=350))
-    # Only the first WHOLE node fits under 350; B and C are dropped whole —
-    # none of their content leaks (no char-slice of node B's 'b's).
-    assert "A:" in out
-    assert "b" not in out and "c" not in out
-    assert "dropped 2 trailing node(s)" in caplog.text
+    assert out == ""
+    assert "requiring per-turn retrieval" in caplog.text
 
 
-def test_compact_tree_first_oversized_node_cut_on_line_boundary(monkeypatch):
+def test_compact_tree_first_oversized_node_requires_retrieval(monkeypatch):
     rows = [_node(0, "H", "Line one fact.\nLine two fact.\nLine three fact.")]
     _patch_rows(monkeypatch, rows)
     out = asyncio.run(compact_tree(object(), "t1", "c1", max_chars=30))
-    assert "Line one fact." in out
-    # cut on a line boundary — the second line is NOT partially present.
-    assert "Line two" not in out
+    assert out == ""  # never bake an incomplete fact then disable live retrieval
 
 
 def test_compact_tree_whole_tree_fits_no_drop(monkeypatch, caplog):

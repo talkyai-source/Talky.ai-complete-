@@ -30,3 +30,15 @@ def test_unversioned_and_stale_knowledge_are_not_claimed_as_current():
     skipped = turn_profile(session, "instructions", None)
     assert skipped["knowledge_status"] == "not_retrieved_this_turn"
     assert skipped["knowledge_passage_count"] == 0
+
+
+def test_source_revision_change_is_visible_even_when_selected_node_is_unchanged():
+    passage = {"node_id": "node-a", "version": "unchanged-node-time",
+               "source_id": "source-a", "source_version": 3}
+    session = SimpleNamespace(knowledge_mode="retrieve",
+                              _knowledge_evidence={"status": "matched", "passages": [passage]})
+    before = turn_profile(session, "same instructions", "same selected passage")
+    passage["source_version"] = 4
+    after = turn_profile(session, "same instructions", "same selected passage")
+    assert before["knowledge_versions_sha256"] != after["knowledge_versions_sha256"]
+    assert "source-a" not in json.dumps(after)

@@ -342,7 +342,8 @@ async def test_realtime_preserves_knowledge_lookup_dispatch():
         realtime_session=realtime,
         media_gateway=SimpleNamespace(),
     )
-    bridge._lookup_knowledge = AsyncMock(return_value="Verified hours")
+    knowledge = {"status": "matched", "text": "Verified hours", "sources": [], "source_policy": "current_lookup"}
+    bridge._lookup_knowledge = AsyncMock(return_value=knowledge)
     function_call = SimpleNamespace(
         name="knowledge_lookup",
         call_id="kb-1",
@@ -352,7 +353,7 @@ async def test_realtime_preserves_knowledge_lookup_dispatch():
     await bridge._handle_function_call(function_call)
 
     bridge._lookup_knowledge.assert_awaited_once_with("hours")
-    realtime.send_function_result.assert_awaited_once_with("kb-1", "Verified hours")
+    realtime.send_function_result.assert_awaited_once_with("kb-1", knowledge)
 
 
 @pytest.mark.asyncio

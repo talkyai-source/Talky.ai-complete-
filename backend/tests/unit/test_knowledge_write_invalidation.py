@@ -52,7 +52,7 @@ class _FakeConn:
             return 0
         if "SELECT 1 FROM campaigns" in q:
             return 1
-        if "RETURNING id" in q:
+        if "RETURNING id" in q or "SELECT changed.id" in q:
             return str(uuid.uuid4())
         return None
 

@@ -155,6 +155,8 @@ def test_does_not_clobber_existing_tenant(monkeypatch):
     cs = _session(tenant_id="already-set")
     _run(session_inject.apply_campaign_knowledge(cs, _row("inline"), pool=object()))
     assert cs.tenant_id == "already-set"
+    assert cs.system_prompt == "PERSONA"
+    assert cs.knowledge_mode is None
 
 
 def test_pinned_retrieve_uses_snapshot_even_if_live_flag_changes(monkeypatch):

@@ -12,6 +12,16 @@ _STOPWORDS = frozenset(
     "also very really any some all more most much many than too up out tell know".split()
 )
 
+# A sentence referring back to the fact immediately before it cannot be
+# excerpted independently, or silently dropped from that fact's price/terms.
+_REFERS_BACK = re.compile(
+    r"^(?:this|that|these|those|it|they)\b", re.I
+)
+_CONDITION = re.compile(
+    r"\b(?:only|except|exclud\w*|includ\w*|unless|subject to|provided|"
+    r"eligible|eligibility|additional|separately|however|does not|not cover)\b", re.I
+)
+
 
 def content_words(text: str) -> list[str]:
     return [t for t in re.findall(r"[a-z0-9]+", (text or "").lower())
@@ -41,13 +51,13 @@ def select_passage(source: str, query: str, limit: int) -> str:
             continue
         # Bind nearby exceptions, eligibility and qualifiers to their fact.
         start, end = index, index + 1
-        condition = re.compile(
-            r"\b(?:only|except|exclud\w*|includ\w*|unless|subject to|provided|"
-            r"eligible|eligibility|additional|separately|however|does not|not cover)\b", re.I
-        )
-        if index > 0 and condition.search(units[index - 1]):
+        while start > 0 and _REFERS_BACK.match(units[start]):
             start -= 1
-        while end < len(units) and condition.search(units[end]):
+        if start > 0 and _CONDITION.search(units[start - 1]):
+            start -= 1
+        while end < len(units) and (
+            _CONDITION.search(units[end]) or _REFERS_BACK.match(units[end])
+        ):
             end += 1
         group = " ".join(units[start:end])
         if len(group) <= limit:

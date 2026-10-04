@@ -836,23 +836,14 @@ class InboundAdmissionService:
                     "map_retrieve",
                     "retrieve",
                 }:
-                    rows = await conn.fetch(
-                        """
-                        SELECT id, depth, path, position, heading, content,
-                               summary, voice_answer, keywords,
-                               example_questions, search_text, priority,
-                               updated_at
-                        FROM campaign_knowledge_nodes
-                        WHERE campaign_id=$1::uuid AND tenant_id=$2::uuid
-                          AND enabled
-                        ORDER BY string_to_array(path, '.')::int[]
-                        """,
-                        route["campaign_id"],
-                        route["tenant_id"],
+                    from app.services.scripts.knowledge.retrieval import load_current_knowledge_nodes
+
+                    rows = await load_current_knowledge_nodes(
+                        conn, tenant_id, str(route["campaign_id"]),
                     )
                     for raw_node in rows:
                         node = dict(raw_node)
-                        for key in ("id", "updated_at"):
+                        for key in ("id", "source_id", "updated_at"):
                             if node.get(key) is not None:
                                 node[key] = str(node[key])
                         for key in ("keywords", "example_questions"):

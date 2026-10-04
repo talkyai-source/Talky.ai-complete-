@@ -255,6 +255,7 @@ jobs:
             tests/integration/test_billing_webhook_reconciliation.py \
             tests/integration/test_billing_invoice_projection.py \
             tests/integration/test_billing_read_truth.py \
+            tests/integration/test_knowledge_retrieval_boundaries.py \
             tests/integration/test_billing_refund_projection.py \
             -q
         env:

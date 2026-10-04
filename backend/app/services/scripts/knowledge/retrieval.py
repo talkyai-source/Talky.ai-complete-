@@ -97,40 +97,18 @@ def _truncate_on_boundary(text: str, max_chars: int) -> str:
 
 
 def render_node_answer(node: dict, *, max_chars: Optional[int] = None) -> str:
-    """Render a matched knowledge node SOURCE-FIRST for the voice model.
+    """Render authored source only; generated phrasing is not factual evidence.
 
-    The FACT must come from the node's own ``content`` — the source text that
-    FTS/pg_trgm actually matched, and retrieval can match a fact ANYWHERE in
-    the node — NOT from the enricher's ``voice_answer``, which only summarises
-    the TOP of the node. Leading with ``voice_answer`` silently drops any fact
-    below the first sentence (the "KB was bad even on the realtime model" bug).
-
-    So we LEAD with the source ``content`` and only fall back to
-    voice_answer/summary when the node has no source text. When there is room
-    we append the short spoken ``voice_answer`` as phrasing help, but the fact
-    is always grounded in the source.
+    There is no approval/revision binding for summary or voice_answer, so even
+    historical enrichment cannot add a price or contradict an edited source.
     """
     source = (node.get("content") or "").strip()
-    phrasing = (node.get("voice_answer") or "").strip()
-    summary = (node.get("summary") or "").strip()
+    if max_chars is not None and len(source) > max_chars:
+        # Callers needing a smaller passage must use the query-aware selector.
+        # A source prefix could omit an adjacent exception or qualification.
+        return ""
+    return source
 
-    if not source:
-        # No source text on this node — the enrichment is all we have.
-        body = phrasing or summary
-        if body and max_chars is not None:
-            body = _truncate_on_boundary(body, max_chars)
-        return body
-
-    body = source
-    # Append the spoken phrasing as a natural-wording hint, but only when it
-    # adds wording the source doesn't already contain and there's budget for it.
-    if phrasing and phrasing.lower() not in source.lower():
-        candidate = f"{source}\n{phrasing}"
-        if max_chars is None or len(candidate) <= max_chars:
-            body = candidate
-    if max_chars is not None and len(body) > max_chars:
-        body = _truncate_on_boundary(body, max_chars)
-    return body
 
 
 def knowledge_enabled() -> bool:
@@ -201,7 +179,15 @@ async def retrieve_knowledge(
                 # cheap match predicate and orders by priority/hit_count so the
                 # nodes most likely to win are the ones that survive the cap.
                 """
-                WITH tq AS (
+                WITH eligible AS (
+                    SELECT n.*, s.version AS source_version
+                    FROM campaign_knowledge_nodes n
+                    JOIN campaign_knowledge_sources s ON s.id = n.source_id
+                      AND s.tenant_id = n.tenant_id AND s.campaign_id = n.campaign_id
+                    WHERE n.campaign_id = $1 AND n.tenant_id = $5
+                      AND n.enabled AND s.status = 'ready'
+                ),
+                tq AS (
                     SELECT websearch_to_tsquery('english', $2) AS q_and,
                            NULLIF(replace(
                                websearch_to_tsquery('english', $2)::text,
@@ -209,8 +195,9 @@ async def retrieve_knowledge(
                 ),
                 cand AS (
                     SELECT n.id, n.heading, n.summary, n.voice_answer, n.content,
-                           n.search_tsv, n.search_text, n.priority, n.hit_count
-                    FROM campaign_knowledge_nodes n, tq
+                           n.search_tsv, n.search_text, n.priority, n.hit_count,
+                           n.source_id, n.source_version, n.updated_at
+                    FROM eligible n, tq
                     WHERE n.campaign_id = $1
                       AND n.tenant_id = $5
                       AND n.enabled
@@ -233,10 +220,8 @@ async def retrieve_knowledge(
                             FROM unnest(to_tsvector('english', $2))
                            WHERE NOT (lexeme = ANY($6::text[]))) l
                     CROSS JOIN (SELECT count(*)::numeric AS n
-                                  FROM campaign_knowledge_nodes
-                                 WHERE campaign_id = $1 AND tenant_id = $5
-                                   AND enabled) tot
-                    LEFT JOIN campaign_knowledge_nodes d
+                                  FROM eligible) tot
+                    LEFT JOIN eligible d
                            ON d.campaign_id = $1 AND d.tenant_id = $5 AND d.enabled
                           AND d.search_tsv @@ plainto_tsquery('simple', l.lexeme)
                     GROUP BY l.lexeme, tot.n
@@ -254,7 +239,7 @@ async def retrieve_knowledge(
                 -- Estimation knowledge before shipping.
                 top_k AS (
                     SELECT c.id, c.heading, c.summary, c.voice_answer, c.content,
-                           c.search_tsv,
+                           c.search_tsv, c.source_id, c.source_version, c.updated_at,
                            ts_rank(c.search_tsv, tq.q_and) AS fts,
                            word_similarity($2, c.search_text) AS sim,
                            row_number() OVER (ORDER BY
@@ -280,7 +265,7 @@ async def retrieve_knowledge(
                     LIMIT $3
                 )
                 SELECT t.id, t.heading, t.summary, t.voice_answer, t.content,
-                       t.fts, t.sim,
+                       t.source_id, t.source_version, t.updated_at, t.fts, t.sim,
                        COALESCE((SELECT sum(w.idf) FROM w
                                   WHERE t.search_tsv @@ plainto_tsquery('simple', w.lexeme)), 0)
                          / NULLIF((SELECT sum(w.idf) FROM w), 0) AS coverage
@@ -301,6 +286,7 @@ async def retrieve_knowledge(
                 )
             out = [dict(r) for r in rows]
             for row in out:
+                row["version"] = str(row["updated_at"]) if row.get("updated_at") is not None else None
                 if row.get("coverage") is not None:
                     row["coverage"] = float(row["coverage"])
             return out
@@ -367,6 +353,31 @@ def retrieve_pinned_knowledge(
     return [item[3] for item in ranked[: max(1, int(k or 1))]]
 
 
+async def load_current_knowledge_nodes(conn, tenant_id: str, campaign_id: str) -> List[dict]:
+    """Current published, enabled nodes; used for inline and admission snapshots."""
+    if not tenant_id or not str(tenant_id).strip() or not campaign_id:
+        return []
+    rows = await conn.fetch(
+        """
+        SELECT n.id, n.depth, n.path, n.position, n.heading, n.content,
+               n.summary, n.voice_answer, n.keywords, n.example_questions,
+               n.search_text, n.priority, n.updated_at, n.source_id,
+               s.version AS source_version
+        FROM campaign_knowledge_nodes n
+        JOIN campaign_knowledge_sources s ON s.id = n.source_id
+          AND s.tenant_id = n.tenant_id AND s.campaign_id = n.campaign_id
+        WHERE n.campaign_id = $1 AND n.tenant_id = $2
+          AND n.enabled AND s.status = 'ready'
+        ORDER BY string_to_array(n.path, '.')::int[], n.id
+        """,
+        campaign_id, tenant_id,
+    )
+    result = [dict(row) for row in rows]
+    for row in result:
+        row["version"] = str(row["updated_at"]) if row.get("updated_at") is not None else None
+    return result
+
+
 async def compact_tree(
     pool,
     tenant_id: str,
@@ -378,27 +389,20 @@ async def compact_tree(
     """Render enabled nodes as an indented outline for inline injection.
 
     skeleton_only=True (map_retrieve): heading + summary only (the "table of
-    contents"). False (inline): heading + SOURCE content (fact-complete), with
-    the spoken voice_answer appended as phrasing help (see render_node_answer).
+    contents"). False (inline): heading + complete source content. Generated
+    summary/voice_answer never substitutes for a factual source.
 
-    Budgeting is done at NODE granularity: nodes are emitted WHOLE, best-first
-    (priority/path order), until ``max_chars`` is reached, and the remaining
-    nodes are dropped as whole units with a loud log. We never char-slice the
-    joined string — that would cut a fact mid-line and silently swallow later
-    topics. Only if the very FIRST node alone exceeds the budget do we emit a
-    boundary-truncated slice of it (so the call is never left with zero KB).
+    Budgeting is done at NODE granularity: nodes are emitted WHOLE in path
+    order, until ``max_chars`` is reached, and the remaining
+    nodes are omitted only for skeletons. Any full-content overflow returns
+    empty so session setup falls back to per-turn retrieval; an incomplete
+    inline bake must never suppress later lookup or lose a price qualifier.
     """
+    if not tenant_id or not str(tenant_id).strip() or not campaign_id:
+        return ""
     try:
         async with acquire_with_tenant(pool, tenant_id) as conn:
-            rows = await conn.fetch(
-                """
-                SELECT depth, heading, summary, voice_answer, content
-                FROM campaign_knowledge_nodes
-                WHERE campaign_id = $1 AND enabled
-                ORDER BY string_to_array(path, '.')::int[]
-                """,
-                campaign_id,
-            )
+            rows = await load_current_knowledge_nodes(conn, tenant_id, campaign_id)
     except Exception as exc:
         logger.warning("compact_tree failed campaign=%s: %s", str(campaign_id)[:12], exc)
         return ""
@@ -440,8 +444,11 @@ def compact_tree_from_nodes(
                 block = f"{indent}- {head}"
         sep = 1 if blocks else 0  # the "\n".join adds one char between blocks
         if used + sep + len(block) > max_chars:
+            if not skeleton_only:
+                logger.warning("compact_tree incomplete; requiring per-turn retrieval campaign=%s", str(campaign_id)[:12])
+                return ""
             if not blocks:
-                # First node alone blows the budget: emit a boundary-truncated
+                # First skeleton node alone blows the budget: emit a boundary-truncated
                 # slice (never zero knowledge), then stop.
                 blocks.append(_truncate_on_boundary(block, max_chars))
                 dropped = len(rows) - 1

@@ -57,9 +57,10 @@ def test_the_old_precedence_would_have_lost_it():
     assert "75 pounds" not in old
 
 
-def test_falls_back_when_the_node_has_no_source_text():
+def test_no_source_text_cannot_be_replaced_by_unapproved_generated_fact():
     node = {"heading": "X", "voice_answer": "Spoken only.", "content": ""}
-    assert render_node_answer(node, max_chars=200) == "Spoken only."
+    # No source revision or human approval binds this generated wording.
+    assert render_node_answer(node, max_chars=200) == ""
 
 
 def test_truncation_respects_the_budget():

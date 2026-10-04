@@ -118,9 +118,10 @@ def test_no_hit_at_all_still_tells_the_model_not_to_guess():
 def test_weak_is_decided_by_coverage_and_never_removes_knowledge():
     assert knowledge_match_is_weak([{"coverage": 0.2}, {"coverage": 0.3}])
     assert not knowledge_match_is_weak([{"coverage": 0.2}, {"coverage": 0.9}])
-    # Nodes from a path that does not label coverage are trusted as before.
-    assert not knowledge_match_is_weak([{"heading": "x"}])
-    assert not knowledge_match_is_weak([])
+    # Unknown coverage cannot grant factual authority; supported retrievers
+    # measure relevance, while malformed/legacy hits remain cautious.
+    assert knowledge_match_is_weak([{"heading": "x"}])
+    assert knowledge_match_is_weak([])
 
 
 # ── the database path labels coverage without changing the ranking ────────

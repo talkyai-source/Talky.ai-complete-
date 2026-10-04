@@ -85,7 +85,7 @@ def _wire_cascaded(monkeypatch, hits):
 
 
 def _node(heading, body):
-    return {"heading": heading, "voice_answer": body, "summary": None, "content": body}
+    return {"heading": heading, "voice_answer": body, "summary": None, "content": body, "coverage": 1.0}
 
 
 def test_cascaded_tool_drops_instruction_shaped_node(monkeypatch):
@@ -172,7 +172,7 @@ class _FakeBridge:
 
 
 def _run_realtime(query="how much is it"):
-    return asyncio.run(RealtimeBridge._lookup_knowledge(_FakeBridge(), query))
+    return asyncio.run(RealtimeBridge._lookup_knowledge(_FakeBridge(), query))["text"]
 
 
 def _wire_realtime(monkeypatch, nodes=None, *, delay=0.0, seen=None):
@@ -262,7 +262,7 @@ def test_realtime_lookup_is_bounded_by_the_shared_budget(monkeypatch):
     elapsed = time.monotonic() - t0
 
     assert elapsed < 1.0                # did NOT wait out the 5s retrieval
-    assert out == _NO_KB_INFO           # bounded, truthful, nothing to invent
+    assert "temporarily unavailable" in out  # outage is distinct from no match
     assert len(out) < 200               # a short result, not a dump
 
 
@@ -277,7 +277,7 @@ def test_realtime_timeout_matches_the_other_paths_budget(monkeypatch):
     monkeypatch.setattr(kb_budget, "_KNOWLEDGE_RETRIEVE_TIMEOUT_S", 0.02)
     _wire_realtime(monkeypatch, [_node(CLEAN_HEADING, CLEAN_BODY)], delay=2.0)
     t0 = time.monotonic()
-    assert _run_realtime() == _NO_KB_INFO
+    assert "temporarily unavailable" in _run_realtime()
     assert time.monotonic() - t0 < 0.5     # honoured the (patched) shared budget
 
     # Retrieval behaviour itself is unchanged (same k, still no hit_count write).

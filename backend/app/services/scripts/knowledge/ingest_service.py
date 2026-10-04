@@ -141,7 +141,8 @@ async def create_processing_source(
                 """
                 INSERT INTO campaign_knowledge_sources
                     (campaign_id, tenant_id, filename, raw_md, status)
-                VALUES ($1, $2, $3, $4, 'processing')
+                SELECT $1, $2, $3, $4, 'processing'
+                FROM campaigns WHERE id = $1 AND tenant_id = $2
                 RETURNING id
                 """,
                 campaign_id,

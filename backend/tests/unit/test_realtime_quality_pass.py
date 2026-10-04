@@ -118,7 +118,8 @@ async def test_lookup_knowledge_fails_closed_on_missing_tenant(monkeypatch):
     )
     out = await bridge._lookup_knowledge("what are your hours")
     assert called["n"] == 0                     # retrieve NEVER called (no bypass)
-    assert "don't have specific information" in out.lower()
+    assert out["status"] == "unavailable"
+    assert "cannot confirm" in out["text"].lower()
 
 
 @pytest.mark.asyncio
@@ -127,7 +128,7 @@ async def test_lookup_knowledge_valid_tenant_returns_source_first(monkeypatch):
     top-of-node voice_answer summary) and never bumps hit_count."""
     captured = {}
 
-    async def _fake_retrieve(pool, *, tenant_id, campaign_id, query, k, bump_hits=True):
+    async def _fake_retrieve(pool, *, tenant_id, campaign_id, query, k, bump_hits=True, raise_on_error=False):
         captured["tenant_id"] = tenant_id
         captured["campaign_id"] = campaign_id
         captured["bump_hits"] = bump_hits
@@ -137,6 +138,7 @@ async def test_lookup_knowledge_valid_tenant_returns_source_first(monkeypatch):
             "voice_answer": "We serve many areas.",
             "summary": None,
             "content": "We cover Texas, and we also cover Ohio and Florida.",
+            "coverage": 1.0,
         }]
 
     import app.services.scripts.knowledge.retrieval as retr
@@ -156,7 +158,8 @@ async def test_lookup_knowledge_valid_tenant_returns_source_first(monkeypatch):
     assert captured["tenant_id"] == tid         # the validated tenant, no bypass
     assert captured["campaign_id"] == "camp-1"
     assert captured["bump_hits"] is False       # voice hot path: no hit_count write
-    assert "Florida" in out                     # the SOURCE fact, not "many areas"
+    assert out["status"] == "matched"
+    assert "Florida" in out["text"]             # the SOURCE fact, not "many areas"
 
 
 @pytest.mark.asyncio
@@ -173,7 +176,8 @@ async def test_lookup_knowledge_no_pool_returns_graceful():
     # No pool and no pinned snapshot => the no-info sentinel: graceful, and
     # crucially nothing for the model to invent from. Compared against the
     # constant so a reworded sentinel can never silently drift this test.
-    assert out == _NO_KB_INFO
+    assert out["status"] == "unavailable"
+    assert out["sources"] == []
 
 
 # ---------------------------------------------------------------------------

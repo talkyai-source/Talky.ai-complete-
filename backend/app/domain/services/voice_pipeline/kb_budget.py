@@ -12,6 +12,7 @@ each trimmed to ~350 chars, total ≤ ~1500 chars.
 """
 from __future__ import annotations
 
+import math
 import os
 import re
 from app.services.scripts.knowledge.passages import content_words, select_passage
@@ -143,44 +144,68 @@ def needs_previous_turn_context(text: str) -> bool:
     return len(content_words(text)) < 2
 
 
-def knowledge_match_is_weak(hits: list[dict]) -> bool:
-    """True when no retrieved node covers enough of the question to answer it.
+def _coverage(value) -> float | None:
+    """Unknown/malformed relevance is not proof that a source answers a query."""
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        value = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return value if math.isfinite(value) and 0 <= value <= 1 else None
 
-    Nodes without a coverage figure (older retrieval paths) are trusted, so
-    this can only ever ADD caution, never remove knowledge.
+
+def knowledge_match_is_weak(hits: list[dict]) -> bool:
+    """True unless at least one hit has measured sufficient query coverage.
+
+    Both supported retrievers return coverage. Missing legacy metadata remains
+    usable for cautious diagnostics, never an implicit factual authorization.
     """
-    coverages = [h.get("coverage") for h in hits if isinstance(h, dict)]
-    known = [float(c) for c in coverages if c is not None]
-    if not known or len(known) < len(coverages):
-        return False
-    return max(known) < KNOWLEDGE_MIN_COVERAGE
+    return not any(
+        (coverage := _coverage(hit.get("coverage"))) is not None
+        and coverage >= KNOWLEDGE_MIN_COVERAGE
+        for hit in hits if isinstance(hit, dict)
+    )
 
 
 def prepare_knowledge_evidence(hits: list[dict], query: str, *,
                                chunk_chars: int = _KB_CHUNK_CHARS,
                                total_chars: int = _KB_TOTAL_CHARS) -> dict:
     """One source/qualification/security boundary for all three voice consumers."""
-    from app.services.scripts.knowledge.retrieval import render_node_answer
     from app.services.scripts.prompts.prompt_safety import scan_for_injection
 
     passages = []
     used = 0
     for node in hits[:_KB_MAX_CHUNKS]:
-        raw = render_node_answer(node)
+        if not isinstance(node, dict):
+            continue
+        # Summary/voice_answer are generated phrasing, not source evidence.
+        raw = str(node.get("content") or "").strip()
+        if not raw:
+            continue
         heading = str(node.get("heading") or "")
         if scan_for_injection(f"{heading} {raw}"):
             continue
         available = min(chunk_chars, total_chars - used - len(heading) - 4)
         if available <= 0:
             break
-        body = fit_kb_body(raw, node, available, query=query)
+        body = select_passage(raw, query, available)
         if not body:
             continue
         text = f"- {heading}: {body}"
         passages.append({"node_id": str(node.get("id") or ""),
-                         "version": node.get("version"), "text": text,
-                         "coverage": node.get("coverage")})
+                         "version": node.get("version"),
+                         "source_id": str(node["source_id"]) if node.get("source_id") is not None else None,
+                         "source_version": node.get("source_version"),
+                         "text": text,
+                         "coverage": _coverage(node.get("coverage"))})
         used += len(text) + 1
+    strong = [p for p in passages if p["coverage"] is not None
+              and p["coverage"] >= KNOWLEDGE_MIN_COVERAGE]
+    if strong:
+        # One relevant passage cannot authorize every loosely related hit's
+        # prices. Consumers use precisely these passages as financial evidence.
+        passages = strong
     status = "no_match" if not passages else (
         "weak_match" if knowledge_match_is_weak(passages) else "matched"
     )

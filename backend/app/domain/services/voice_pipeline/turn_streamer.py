@@ -195,14 +195,17 @@ KNOWLEDGE_NO_MATCH_NOTE = (
     "answers what the caller just asked. If they asked about the company, its "
     "products, prices, fees, integrations, policies or what it has done for them, "
     "do NOT answer yes or no and do NOT give figures or details from general "
-    "knowledge or the call's background. Say briefly that you'll check and make "
-    "sure it gets confirmed, then carry on.\n"
+    "knowledge or the call's background. Say briefly that you cannot confirm "
+    "that detail from the available information. Offer only a next step the "
+    "runtime supports; do not promise a follow-up without an available route.\n"
 )
 KNOWLEDGE_WEAK_MATCH_HEADER = (
     "COMPANY KNOWLEDGE — NO CONFIRMED ANSWER. These are the closest sections, but "
-    "they may not answer the caller's question. Use a fact only if it directly "
-    "answers what was asked; otherwise do not answer yes or no or give figures — "
-    "say you'll check and make sure it gets confirmed.\n"
+    "they are not sufficient evidence for the caller's question. Do not use "
+    "these passages to confirm business facts or give figures — "
+    "say you cannot confirm that detail from the available information. Offer "
+    "only a next step the runtime supports; do not promise a follow-up without "
+    "an available route.\n"
 )
 # Every knowledge block, confirmed or not.
 KNOWLEDGE_ONLY_WHAT_IT_SAYS = (
@@ -214,9 +217,8 @@ KNOWLEDGE_ONLY_WHAT_IT_SAYS = (
 async def _knowledge_block_for_turn(session: CallSession, messages: list) -> str:
     """Top-k campaign knowledge for the caller's latest message, formatted for
     the system prompt. Only for retrieve/map_retrieve campaigns (inline already
-    baked the whole tree in at pre-warm). Fail-soft: returns "" on anything —
-    no container, no pool, no hit, timeout, or error — so it can never break or
-    stall a turn.
+    baked the whole tree in at pre-warm). Missing/error evidence produces an
+    explicit uncertainty instruction; ordinary acknowledgements skip lookup.
     """
     session._knowledge_grounding = []
     session._knowledge_evidence = {"status": "unavailable", "passages": []}
@@ -256,12 +258,11 @@ async def _knowledge_block_for_turn(session: CallSession, messages: list) -> str
                 pinned_nodes, query, k=_KB_MAX_CHUNKS,
             )
             logger.info(
-                "KB_DEBUG call=%s PINNED_SNAPSHOT %d rows q=%r",
-                session.call_id[:8], len(hits), last_user[:60],
+                "KB_DEBUG call=%s PINNED_SNAPSHOT rows=%d query_chars=%d",
+                session.call_id[:8], len(hits), len(query),
             )
         else:
             from app.core.container import get_container
-            from app.services.scripts.knowledge import cache as _kb_cache
 
             container = get_container()
             if not getattr(container, "is_initialized", False):
@@ -269,60 +270,45 @@ async def _knowledge_block_for_turn(session: CallSession, messages: list) -> str
             pool = getattr(getattr(container, "db_client", None), "pool", None)
             if pool is None:
                 return KNOWLEDGE_UNAVAILABLE_NOTE
-            _cached = _kb_cache.get(
-                session.tenant_id, session.campaign_id, query, now=_t0,
-            )
-            if _cached is not None:
-                hits = _cached
-                logger.info(
-                    "KB_DEBUG call=%s CACHE_HIT %d rows q=%r",
-                    session.call_id[:8], len(hits), last_user[:60],
+            # A process-local cache cannot observe edits/disables in another
+            # API/voice worker. Live-mode turns re-read current evidence;
+            # admission-pinned calls deliberately use their snapshot above.
+            try:
+                hits = await asyncio.wait_for(
+                    retrieve_knowledge(
+                        pool, session.tenant_id, session.campaign_id, query,
+                        k=_KB_MAX_CHUNKS, bump_hits=False,
+                        acquire_timeout=_KNOWLEDGE_RETRIEVE_TIMEOUT_S,
+                        raise_on_error=True,
+                    ),
+                    timeout=_KNOWLEDGE_RETRIEVE_TIMEOUT_S,
                 )
-            else:
-                try:
-                    hits = await asyncio.wait_for(
-                        retrieve_knowledge(
-                            pool, session.tenant_id, session.campaign_id, query,
-                            k=_KB_MAX_CHUNKS, bump_hits=False,
-                            acquire_timeout=_KNOWLEDGE_RETRIEVE_TIMEOUT_S,
-                            raise_on_error=True,
-                        ),
-                        timeout=_KNOWLEDGE_RETRIEVE_TIMEOUT_S,
-                    )
-                    if hits:
-                        _kb_cache.put(
-                            session.tenant_id, session.campaign_id, query, hits, now=_t0,
-                        )
-                except asyncio.TimeoutError:
-                    logger.warning(
-                        "KB_DEBUG call=%s TIMEOUT >%.0fms mode=%s tenant=%s — turn without knowledge",
-                        session.call_id[:8], _KNOWLEDGE_RETRIEVE_TIMEOUT_S * 1000,
-                        session.knowledge_mode, str(session.tenant_id)[:8],
-                    )
-                    return KNOWLEDGE_UNAVAILABLE_NOTE
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "KB_DEBUG call=%s TIMEOUT >%.0fms mode=%s tenant=%s — turn without knowledge",
+                    session.call_id[:8], _KNOWLEDGE_RETRIEVE_TIMEOUT_S * 1000,
+                    session.knowledge_mode, str(session.tenant_id)[:8],
+                )
+                return KNOWLEDGE_UNAVAILABLE_NOTE
         _ms = (time.monotonic() - _t0) * 1000.0
         if not hits:
             session._knowledge_evidence = {"status": "no_match", "passages": []}
             logger.info(
-                "KB_DEBUG call=%s NO_HITS %.0fms q=%r mode=%s tenant=%s",
-                session.call_id[:8], _ms, last_user[:60],
+                "KB_DEBUG call=%s NO_HITS %.0fms query_chars=%d mode=%s tenant=%s",
+                session.call_id[:8], _ms, len(query),
                 session.knowledge_mode, str(session.tenant_id)[:8],
             )
             # An empty block used to leave the model free to answer from the
             # call's background or general knowledge. Say so explicitly.
             return KNOWLEDGE_NO_MATCH_NOTE
-        weak = knowledge_match_is_weak(hits)
-        logger.info(
-            "KB_DEBUG call=%s HITS=%d %.0fms q=%r headings=%s coverage=%s%s",
-            session.call_id[:8], len(hits), _ms, last_user[:60],
-            [h.get("heading") for h in hits],
-            [round(float(h["coverage"]), 2) if h.get("coverage") is not None else None for h in hits],
-            " WEAK" if weak else "",
-        )
-
         from app.services.scripts.prompts.prompt_safety import DATA_ONLY_NOTE, fence_untrusted
         evidence = prepare_knowledge_evidence(hits, query)
         session._knowledge_evidence = evidence
+        logger.info(
+            "KB_DEBUG call=%s HITS=%d %.0fms query_chars=%d status=%s passages=%d",
+            session.call_id[:8], len(hits), _ms, len(query),
+            evidence["status"], len(evidence["passages"]),
+        )
         if evidence["status"] == "no_match":
             return KNOWLEDGE_NO_MATCH_NOTE
         weak = evidence["status"] == "weak_match"
@@ -348,7 +334,7 @@ async def _knowledge_block_for_turn(session: CallSession, messages: list) -> str
             + KNOWLEDGE_PRICE_GUARD
         )
     except Exception as exc:
-        logger.warning("KB_DEBUG call=%s error: %s", getattr(session, "call_id", "?")[:8], exc)
+        logger.warning("KB_DEBUG call=%s error_type=%s", getattr(session, "call_id", "?")[:8], type(exc).__name__)
         return KNOWLEDGE_UNAVAILABLE_NOTE
 
 
@@ -816,7 +802,7 @@ class TurnStreamer:
                 )
                 first = not ungrounded_figures
                 ungrounded_figures.extend(_figures)
-                # Say the "I'll get that confirmed" line once per reply; any
+                # Say the uncertainty line once per reply; any
                 # later sentence with a made-up figure is simply dropped.
                 return (_fig_text if first else ""), None
             else:

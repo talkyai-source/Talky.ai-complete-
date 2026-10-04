@@ -513,13 +513,14 @@ async def test_realtime_tool_result_is_published_before_model_continuation():
         realtime_session=_RT(),
         media_gateway=object(),
     )
-    bridge._lookup_knowledge = AsyncMock(return_value="We open at nine.")
+    knowledge = {"status": "matched", "text": "We open at nine.", "sources": [], "source_policy": "current_lookup"}
+    bridge._lookup_knowledge = AsyncMock(return_value=knowledge)
 
     await bridge._handle_function_call(_FC())
 
     assert order[0][0] == "state"
-    assert "last_tool_result=knowledge_lookup:succeeded:ok" in order[0][1]
-    assert order[1] == ("result", "We open at nine.")
+    assert "last_tool_result=knowledge_lookup:succeeded:matched" in order[0][1]
+    assert order[1] == ("result", knowledge)
 
 
 @pytest.mark.asyncio

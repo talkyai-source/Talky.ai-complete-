@@ -427,48 +427,28 @@ async def update_node(
         raise HTTPException(status_code=400, detail=f"No editable fields (allowed: {sorted(allowed)})")
 
     conn = mutation.conn
-    # $1/$2/$3 are node, campaign and tenant; edited values begin at $4.
-    set_parts = [f"{k} = ${i + 4}" for i, k in enumerate(fields)]
-    params = list(fields.values())
-    # If heading/content changed, recompute search_text + tsvector so the
-    # retriever reflects the edit (same shape ingest builds).
-    if "heading" in fields or "content" in fields:
-        cur = await conn.fetchrow(
-            "SELECT heading, content, keywords, example_questions "
-            "FROM campaign_knowledge_nodes "
-            "WHERE id = $1 AND campaign_id = $2 AND tenant_id = $3",
-            node_id,
-            campaign_id,
-            tenant_id,
-        )
-        if not cur:
-            raise HTTPException(status_code=404, detail="Node not found")
-        heading = fields.get("heading", cur["heading"]) or ""
-        content = fields.get("content", cur["content"]) or ""
-        kw = cur["keywords"] or []
-        eq = cur["example_questions"] or []
-        search_text = " ".join(
-            p for p in [heading, content, " ".join(kw), " ".join(eq)] if p
-        ).strip()
-        idx = len(params) + 4
-        params.append(search_text)
-        set_parts.append(f"search_text = ${idx}")
-        set_parts.append(f"search_tsv = to_tsvector('english', ${idx})")
+    from app.services.scripts.knowledge.node_updates import prepare_node_changes, write_node_update
 
-    sets = ", ".join(set_parts)
-    updated = await conn.fetchval(
-        f"UPDATE campaign_knowledge_nodes SET {sets}, updated_at = NOW() "
-        "WHERE id = $1 AND campaign_id = $2 AND tenant_id = $3 RETURNING id",
-        node_id,
-        campaign_id,
-        tenant_id,
-        *params,
+    requested_fields = list(fields)
+    fields = prepare_node_changes(fields)
+    current = {}
+    if "heading" in fields or "content" in fields:
+        current = await conn.fetchrow(
+            "SELECT heading, content FROM campaign_knowledge_nodes "
+            "WHERE id = $1 AND campaign_id = $2 AND tenant_id = $3 FOR UPDATE",
+            node_id, campaign_id, tenant_id,
+        )
+        if not current:
+            raise HTTPException(status_code=404, detail="Node not found")
+    updated = await write_node_update(
+        conn, tenant_id=tenant_id, campaign_id=campaign_id,
+        node_id=node_id, fields=fields, current=dict(current),
     )
     if not updated:
         raise HTTPException(status_code=404, detail="Node not found")
 
     mutation.mark_cache_dirty()
-    return {"id": str(updated), "updated": list(fields.keys())}
+    return {"id": str(updated), "updated": requested_fields}
 
 
 @router.post("/{campaign_id}/knowledge/test")

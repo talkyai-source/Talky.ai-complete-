@@ -211,22 +211,21 @@ async def run_knowledge_lookup(session: CallSession, query: str) -> str:
                 )
             except asyncio.TimeoutError:
                 logger.warning(
-                    "KB_TOOL call=%s TIMEOUT >%.0fms q=%r — answering without facts",
-                    session.call_id[:8], _KNOWLEDGE_RETRIEVE_TIMEOUT_S * 1000, q[:60],
+                    "KB_TOOL call=%s TIMEOUT >%.0fms query_chars=%d — answering without facts",
+                    session.call_id[:8], _KNOWLEDGE_RETRIEVE_TIMEOUT_S * 1000, len(q),
                 )
                 return KB_UNAVAILABLE
         _ms = (time.monotonic() - _t0) * 1000.0
 
         if not hits:
             session._knowledge_evidence = {"status": "no_match", "passages": []}
-            logger.info("KB_TOOL call=%s NO_HITS %.0fms q=%r",
-                        session.call_id[:8], _ms, q[:60])
+            logger.info("KB_TOOL call=%s NO_HITS %.0fms query_chars=%d",
+                        session.call_id[:8], _ms, len(q))
             return NO_KB_FACTS
 
         logger.info(
-            "KB_TOOL call=%s HITS=%d %.0fms q=%r headings=%s",
-            session.call_id[:8], len(hits), _ms, q[:60],
-            [h.get("heading") for h in hits],
+            "KB_TOOL call=%s HITS=%d %.0fms query_chars=%d",
+            session.call_id[:8], len(hits), _ms, len(q),
         )
 
         evidence = prepare_knowledge_evidence(hits, q)
@@ -234,7 +233,12 @@ async def run_knowledge_lookup(session: CallSession, query: str) -> str:
         if evidence["status"] == "no_match":
             return NO_KB_FACTS
         if evidence["status"] == "weak_match":
-            return "No confirmed answer. These sections may not answer the question.\n" + fence_kb_result(evidence["text"], with_note=False)
+            return (
+                "No confirmed answer. These sections are insufficient evidence; "
+                "do not use them to confirm business facts. Say you cannot confirm "
+                "the detail; offer only an available next step.\n"
+                + fence_kb_result(evidence["text"], with_note=False)
+            )
         session._knowledge_grounding = [p["text"] for p in evidence["passages"]]
         from app.services.scripts.prompts.guardrails import KNOWLEDGE_PRICE_GUARD
 
@@ -243,6 +247,6 @@ async def run_knowledge_lookup(session: CallSession, query: str) -> str:
             f"{KNOWLEDGE_PRICE_GUARD}"
         )
     except Exception as exc:
-        logger.warning("KB_TOOL call=%s error: %s",
-                       getattr(session, "call_id", "?")[:8], exc)
+        logger.warning("KB_TOOL call=%s error_type=%s",
+                       getattr(session, "call_id", "?")[:8], type(exc).__name__)
         return KB_UNAVAILABLE

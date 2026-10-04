@@ -15,7 +15,6 @@ import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from app.core.db_utils import acquire_with_tenant
 from app.domain.services.campaign_knowledge_access import (
     CampaignKnowledgeAccessBusy,
     CampaignKnowledgeAccessDenied,
@@ -469,6 +468,7 @@ async def update_knowledge_node(
                        enabled, priority, summary, voice_answer
                 FROM campaign_knowledge_nodes
                 WHERE id = $1 AND campaign_id = $2 AND tenant_id = $3
+                FOR UPDATE
                 """,
                 node_id,
                 lease.campaign_id,
@@ -477,7 +477,9 @@ async def update_knowledge_node(
             if row is None:
                 return {"error": "knowledge node not found"}
             current_node = dict(row)
+            from app.services.scripts.knowledge.node_updates import prepare_node_changes, write_node_update
 
+            filtered = prepare_node_changes(filtered)
             diff_entries = _build_diff(
                 {k: current_node.get(k) for k in filtered},
                 filtered,
@@ -495,39 +497,10 @@ async def update_knowledge_node(
                     "note": "Not applied yet. Call again with confirm=true to apply.",
                 }
 
-            # $1/$2/$3 are node, campaign, tenant; edited values begin at $4.
-            set_parts = [f"{key} = ${index + 4}" for index, key in enumerate(filtered)]
-            params = list(filtered.values())
-            if "heading" in filtered or "content" in filtered:
-                heading = filtered.get("heading", current_node.get("heading")) or ""
-                content = filtered.get("content", current_node.get("content")) or ""
-                keywords: List[str] = current_node.get("keywords") or []
-                questions: List[str] = current_node.get("example_questions") or []
-                search_text = " ".join(
-                    part
-                    for part in [
-                        heading,
-                        content,
-                        " ".join(keywords),
-                        " ".join(questions),
-                    ]
-                    if part
-                ).strip()
-                search_index = len(params) + 4
-                params.append(search_text)
-                set_parts.append(f"search_text = ${search_index}")
-                set_parts.append(
-                    f"search_tsv = to_tsvector('english', ${search_index})"
-                )
-
-            sets = ", ".join(set_parts)
-            updated = await lease.conn.fetchval(
-                f"UPDATE campaign_knowledge_nodes SET {sets}, updated_at = NOW() "
-                "WHERE id = $1 AND campaign_id = $2 AND tenant_id = $3 RETURNING id",
-                node_id,
-                lease.campaign_id,
-                lease.tenant_id,
-                *params,
+            updated = await write_node_update(
+                lease.conn, tenant_id=lease.tenant_id,
+                campaign_id=lease.campaign_id, node_id=node_id,
+                fields=filtered, current=current_node,
             )
             if not updated:
                 return {"error": "knowledge node not found or update failed"}

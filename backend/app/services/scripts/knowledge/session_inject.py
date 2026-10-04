@@ -27,12 +27,15 @@ _INLINE_HEADER = (
     "## Company knowledge\n"
     "Use the following to answer the caller. Speak naturally in your own words — "
     "do NOT read it verbatim, and never mention that you are reading from notes. "
-    "If the answer isn't here, say you'll follow up rather than guessing."
+    "If the answer isn't here, say you cannot confirm it from the available "
+    "information. Offer only a next step the runtime supports; do not promise "
+    "a follow-up without an available route."
 )
 _MAP_HEADER = (
-    "## Company knowledge — topics you can speak to\n"
-    "These are the subjects you know about. Answer from them naturally; more "
-    "detail on a topic is provided as the caller asks about it."
+    "## Company knowledge — topic navigation\n"
+    "These are topic hints, not verified answers. Use the current source facts "
+    "provided for the caller's question to answer; do not quote these summaries "
+    "as evidence."
 )
 
 
@@ -68,6 +71,17 @@ def _log_setup(call_session, state: str, **fields: Any) -> None:
         pass
 
 
+def _scope_matches(call_session, tenant_id: str, campaign_id: str) -> bool:
+    """Knowledge cannot change the tenant/campaign already owning this call."""
+    return all(
+        not current or str(current).strip() == expected
+        for current, expected in (
+            (getattr(call_session, "tenant_id", None), tenant_id),
+            (getattr(call_session, "campaign_id", None), campaign_id),
+        )
+    )
+
+
 def apply_pinned_campaign_knowledge(call_session, snapshot: Any) -> None:
     """Apply the immutable knowledge captured by inbound admission.
 
@@ -98,6 +112,9 @@ def apply_pinned_campaign_knowledge(call_session, snapshot: Any) -> None:
         _log_setup(
             call_session, "OFF", reason="snapshot_incomplete", path="inbound",
         )
+        return
+    if not _scope_matches(call_session, tenant_id, campaign_id):
+        _log_setup(call_session, "OFF", reason="scope_mismatch", path="inbound")
         return
     if not nodes:
         _log_setup(
@@ -167,6 +184,9 @@ async def apply_campaign_knowledge(call_session, campaign_row: Any, *, pool) -> 
             )
             return
         tenant_id, campaign_id = str(tenant_id), str(campaign_id)
+        if not _scope_matches(call_session, tenant_id, campaign_id):
+            _log_setup(call_session, "OFF", reason="scope_mismatch", path="outbound")
+            return
 
         # The turn loop needs these to do tenant-scoped per-turn retrieval.
         call_session.tenant_id = call_session.tenant_id or tenant_id
@@ -236,8 +256,8 @@ def _bake_inline_knowledge(call_session, tree: str, header: str,
                            campaign_id: str, mode: str) -> bool:
     """Fence + injection-scan ``tree`` and append it to the session prompt.
 
-    Returns True if something was baked, False if there was nothing to bake
-    (empty tree, or every line flagged as injection). Raises only on a genuine
+    Returns True if something was baked, False for empty or poisoned trees.
+    Raises only on a genuine
     error (e.g. an import failure) — the caller turns that into a retrieve-mode
     fallback so the call is never left with zero KB.
     """
@@ -252,22 +272,15 @@ def _bake_inline_knowledge(call_session, tree: str, header: str,
         scan_for_injection,
     )
 
-    # Content-integrity: drop any line shaped like an instruction to the model
-    # (poisoned KB entry) BEFORE baking, mirroring the per-turn retrieve path
-    # (turn_streamer). The fence alone isn't enough — a model can still act on
-    # instruction-shaped fenced text.
-    _all_lines = tree.splitlines()
-    _clean_lines = [ln for ln in _all_lines if not scan_for_injection(ln)]
-    _dropped = len(_all_lines) - len(_clean_lines)
-    tree = "\n".join(_clean_lines).strip()
-    if _dropped:
+    # Removing an individual line could remove an exclusion but leave its
+    # price. Fall back to per-turn retrieval, which validates whole passages.
+    if scan_for_injection(tree):
         logger.warning(
-            "campaign_knowledge dropped %d line(s) flagged as injection "
-            "campaign=%s mode=%s",
-            _dropped, campaign_id[:12], mode,
+            "campaign_knowledge rejected inline tree flagged as injection "
+            "campaign=%s mode=%s; using per-turn retrieval",
+            campaign_id[:12], mode,
         )
-    if not tree:
-        return False  # everything was flagged — bake nothing
+        return False
 
     _KB_TAG = "company_knowledge"
     fenced = fence_untrusted(tree, tag=_KB_TAG)

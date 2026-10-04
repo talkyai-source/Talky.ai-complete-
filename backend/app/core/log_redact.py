@@ -254,6 +254,16 @@ _NON_PII_CONTEXT_RE = re.compile(
     r"(?i)\b(?P<name>" + "|".join(sorted(_NON_PII_VALUE_FIELDS)) + r")\s*[=:]\s*['\"]?$"
 )
 
+# Runtime profiles are JSON strings, and a SHA256 may contain a phone-shaped
+# digit run in its middle. Exempt only complete 64-hex values in these exact
+# provenance fields; a phone/email under the same key is still redacted.
+_PROFILE_DIGEST_RE = re.compile(
+    r'''(?<![\w])["']?(?:instructions_sha256|knowledge_block_sha256|'''
+    r'''knowledge_versions_sha256|knowledge_snapshot_checksum|snapshot_sha256|'''
+    r'''request_envelope_sha256|sources_sha256)["']?\s*[=:]\s*["']?'''
+    r'''(?P<digest>[a-fA-F0-9]{64})(?![a-zA-Z0-9])'''
+)
+
 #: Values that cannot carry speech — never rewritten, even in a sensitive slot.
 _NON_TEXT_TYPES = (bool, int, float, complex, type(None))
 
@@ -341,7 +351,15 @@ def scrub_text(value: str) -> str:
     """
     if not value or not _QUICK_SCAN_RE.search(value):
         return value
-    return _PII_RE.sub(_mask_match, value)
+    pieces = []
+    end = 0
+    for digest in _PROFILE_DIGEST_RE.finditer(value):
+        start, stop = digest.span("digest")
+        pieces.append(_PII_RE.sub(_mask_match, value[end:start]))
+        pieces.append(value[start:stop])
+        end = stop
+    pieces.append(_PII_RE.sub(_mask_match, value[end:]))
+    return "".join(pieces)
 
 
 def summarize_sensitive(value: str) -> str:

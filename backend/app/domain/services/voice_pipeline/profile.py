@@ -14,7 +14,10 @@ def turn_profile(session, system_prompt: str, knowledge_block: str | None) -> di
     raw_passages = evidence.get("passages")
     passages = [p for p in raw_passages if isinstance(p, dict)] if isinstance(raw_passages, list) else []
     versioned = bool(passages) and all(p.get("version") is not None for p in passages)
-    versions = [(str(p.get("node_id") or ""), str(p.get("version"))) for p in passages]
+    versions = [(
+        str(p.get("node_id") or ""), str(p.get("version")),
+        str(p.get("source_id") or ""), str(p.get("source_version")),
+    ) for p in passages]
     mode = getattr(session, "knowledge_mode", None)
     status = evidence.get("status")
     return {
