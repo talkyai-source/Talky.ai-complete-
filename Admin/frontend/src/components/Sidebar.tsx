@@ -10,6 +10,7 @@ import {
     AlertTriangle,
     Activity,
     Users,
+    Inbox,
 } from 'lucide-react';
 import { useAuth } from '../lib/auth';
 
@@ -24,6 +25,7 @@ interface NavItem {
 const navItems: NavItem[] = [
     { id: 'command-center', label: 'Command Center', icon: <LayoutDashboard />, path: '/', platformOnly: true },
     { id: 'tenants', label: 'Tenants', icon: <Building2 />, path: '/tenants', platformOnly: true },
+    { id: 'enquiries', label: 'Website Enquiries', icon: <Inbox />, path: '/enquiries', platformOnly: true },
     { id: 'users', label: 'Users & Roles', icon: <Users />, path: '/users', platformOnly: true },
     { id: 'calls', label: 'Calls', icon: <Phone />, path: '/calls', platformOnly: true },
     { id: 'inbound', label: 'Inbound Control', icon: <PhoneIncoming />, path: '/inbound', platformOnly: true },

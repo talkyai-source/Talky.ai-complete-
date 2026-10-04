@@ -37,10 +37,10 @@ export default function MarketingAutomationIndustryPage() {
     "rounded-full border border-border/70 bg-background/60 dark:bg-white/5 backdrop-blur-sm px-4 py-2 text-xs sm:text-sm font-medium text-gray-700 dark:text-muted-foreground";
 
   const heroStats = [
-    { value: "500+", label: "Agency campaigns automated" },
-    { value: "100K+", label: "AI conversations" },
-    { value: "24/7", label: "AI availability" },
-    { value: "98%", label: "Lead response rate" },
+    { value: "Campaign", label: "Settings" },
+    { value: "Call", label: "Records" },
+    { value: "Configured", label: "Hours" },
+    { value: "Lead", label: "Details" },
   ];
 
   const challengeHighlights = [
@@ -90,7 +90,7 @@ export default function MarketingAutomationIndustryPage() {
     {
       title: "Capture Every Lead",
       description:
-        "Every call gets answered, every prospect gets a response, and no opportunity slips through the cracks.",
+        "Configure campaign calling rules and review recorded outcomes and captured lead details.",
     },
     {
       title: "Book More Meetings",
@@ -119,7 +119,7 @@ export default function MarketingAutomationIndustryPage() {
     },
   ];
 
-  const scaleStats = ["99.9% Uptime", "CRM Integrations", "24/7 AI Conversations"];
+  const scaleStats = ["Call Records", "CRM Integrations", "Configured Calling Hours"];
 
   const whyTalkLee = [
     {
@@ -172,7 +172,7 @@ export default function MarketingAutomationIndustryPage() {
     {
       title: "Capture Every Lead",
       description:
-        "AI voice agents answer inbound inquiries and outbound calls instantly, ensuring every prospect receives a fast, professional response without missed opportunities or long wait times.",
+        "Configure inbound and outbound calls using approved information, calling rules, and account and provider limits.",
     },
     {
       title: "Qualify Every Prospect",
@@ -227,7 +227,7 @@ export default function MarketingAutomationIndustryPage() {
       price: "Let’s Talk",
       description: "Designed for high-volume agencies and enterprise teams.",
       features: [
-        "Unlimited Client Accounts",
+        "Client Account Configuration",
         "Advanced AI Workflows",
         "Custom Integrations",
         "Dedicated Success Manager",

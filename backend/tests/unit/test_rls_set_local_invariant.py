@@ -246,6 +246,7 @@ _RLS_TABLES = (
     "invoices",
     "leads",
     "meetings",
+    "public_contact_enquiries",
     "recordings",
     "recordings_s3",
     "refresh_tokens",

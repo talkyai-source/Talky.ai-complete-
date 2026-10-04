@@ -37,30 +37,30 @@ export default function TravelIndustryIndustryPage() {
   const centeredCtaClassName = "mt-10 flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-4";
 
   const heroStats = [
-    { value: "500K+", label: "Guest Conversations" },
-    { value: "24/7", label: "Guest Support" },
-    { value: "<2 Sec", label: "Response Time" },
-    { value: "99.9%", label: "Uptime" },
+    { value: "Guest", label: "Enquiries" },
+    { value: "Configured", label: "Hours" },
+    { value: "Request", label: "Details" },
+    { value: "Call", label: "Records" },
   ];
 
   const guestExperiencePoints = [
-    "Instant booking assistance",
+    "Booking request intake",
     "Fast answers to travel questions",
     "Personalized guest support",
     "24/7 availability",
     "Seamless reservation management",
   ];
 
-  const guestExperiencePills = ["Always Available", "Better Guest Experiences", "Never Miss a Booking"];
+  const guestExperiencePills = ["Configured Hours", "Guest Enquiries", "Booking Requests"];
 
   const beforeArrival = [
     {
       title: "Always-On Reservations",
       description:
-        "Our AI booking assistant helps guests check availability, confirm reservations, modify bookings, and receive instant confirmations - any time of day.",
+        "Collect booking requests and use only the scheduling actions and availability information enabled for your workflow.",
     },
     {
-      title: "Instant Travel Answers",
+      title: "Approved Travel Answers",
       description:
         "Handle AI travel inquiry handling with natural conversations that answer questions about destinations, room types, pricing, amenities, parking, and local attractions.",
     },
@@ -80,7 +80,7 @@ export default function TravelIndustryIndustryPage() {
     {
       title: "Always Within Reach",
       description:
-        "Questions about amenities, dining, hotel facilities, and services are answered instantly through AI hospitality customer service, giving guests the information they need without making them wait.",
+        "Use approved information about amenities, dining, hotel facilities and services to answer routine guest questions.",
     },
     {
       title: "Beyond the Front Desk",
@@ -131,7 +131,7 @@ export default function TravelIndustryIndustryPage() {
     {
       title: "More Bookings",
       description:
-        "Respond to every guest inquiry instantly, helping convert more travelers into confirmed reservations and reducing missed booking opportunities.",
+        "Collect guest enquiries and booking requests for your team to review.",
     },
     {
       title: "Faster Service",
@@ -197,7 +197,7 @@ export default function TravelIndustryIndustryPage() {
     },
   ];
 
-  const reliabilityPills = ["99.9% Uptime", "Enterprise Ready", "Reliable AI", "24/7 Guest Support", "Built to Scale"];
+  const reliabilityPills = ["Call Records", "Campaign Settings", "Voice Options", "Configured Hours", "Call Limits"];
 
   const whyTeamsChoose = [
     {
@@ -206,7 +206,7 @@ export default function TravelIndustryIndustryPage() {
         "Designed to help hospitality teams deliver faster service, simplify operations, and create exceptional guest experiences.",
     },
     {
-      title: "Never Miss a Call",
+      title: "Configured Call Intake",
       description:
         "Capture every guest inquiry with AI travel call automation, ensuring faster responses and more booking opportunities.",
     },
@@ -255,7 +255,7 @@ export default function TravelIndustryIndustryPage() {
     {
       title: "Reserve With Ease",
       description:
-        "Guests receive instant answers to booking inquiries, availability, and reservations, making it simple to plan their stay.",
+        "Use approved booking information and collect guest preferences for review.",
     },
     {
       title: "Personalize Every Stay",
@@ -263,9 +263,9 @@ export default function TravelIndustryIndustryPage() {
         "Whether guests need concierge services, hotel information, or travel assistance, every request is understood and handled seamlessly.",
     },
     {
-      title: "Support Without Delays",
+      title: "Requests for Review",
       description:
-        "Routine requests are resolved immediately, while more complex inquiries are routed to the right team with complete context.",
+        "Use approved information for routine enquiries and collect requests for review. Live human transfer is not currently available.",
     },
     {
       title: "Stay Connected",
@@ -310,7 +310,7 @@ export default function TravelIndustryIndustryPage() {
       price: "Let’s Talk",
       blurb: "Designed for hotel groups, resorts, and enterprise travel organizations.",
       features: [
-        "Unlimited Properties",
+        "Property Configuration Review",
         "Advanced AI Hospitality Workflows",
         "Enterprise Integrations",
         "Dedicated Customer Success Manager",
@@ -341,7 +341,7 @@ export default function TravelIndustryIndustryPage() {
     {
       question: "Can AI act as a virtual receptionist for hotels?",
       answer:
-        "Yes. AI answers guest calls, provides hotel information, assists with reservations, and routes specialized requests to the appropriate staff when needed.",
+        "AI can use approved hotel information and collect guest requests for review. Live human transfer is not currently available.",
     },
     {
       question: "Does it integrate with our hotel management software?",
@@ -364,7 +364,7 @@ export default function TravelIndustryIndustryPage() {
             AI for Travel Industry
           </h1>
           <h2 className="mt-6 text-2xl md:text-3xl font-semibold text-primary dark:text-foreground">
-            Never Miss Another Booking or Guest Inquiry
+            Collect Booking and Guest Enquiries
           </h2>
           <p className="mt-6 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed max-w-4xl mx-auto">
             From reservations and concierge requests to travel questions and guest support, AI ensures every conversation receives
@@ -402,13 +402,12 @@ export default function TravelIndustryIndustryPage() {
           <p className={eyebrowClassName}>The Guest Experience</p>
           <h2 className={`mt-3 ${headingClassName}`}>Every Missed Call Is a Missed Booking</h2>
           <p className={bodyClassName}>
-            Travelers expect quick answers when choosing where to stay. AI responds instantly to booking requests, amenity
-            questions, transportation inquiries, and reservation changes, helping you convert more inquiries into confirmed guests.
+            Travelers may ask about bookings, amenities, transportation or reservation changes. Configure approved answers
+            and collect requests for your team to review.
           </p>
           <p className={bodyClassName}>
-            With AI for travel industry, every inquiry is answered instantly. Whether someone wants to book a room, ask about
-            amenities, request transportation, or modify a reservation, AI ensures every guest receives fast, friendly, and
-            consistent service while your team focuses on delivering memorable experiences.
+            Talk-Lee AI handles configured calls within your account and provider limits. A captured request does not
+            confirm a booking, reservation change or transportation arrangement.
           </p>
           <ul className={listClassName}>
             {guestExperiencePoints.map((point) => (
@@ -428,8 +427,7 @@ export default function TravelIndustryIndustryPage() {
           <p className={eyebrowClassName}>Before Arrival</p>
           <h2 className={`mt-3 ${headingClassName}`}>Make Every First Impression Count</h2>
           <p className={bodyClassName}>
-            Guests want quick answers before making a decision. AI responds instantly to reservation requests, availability
-            checks, and travel inquiries.
+            Use approved travel information and capture reservation requests and guest preferences for review.
           </p>
           <div className="mt-8 grid grid-cols-1 md:grid-cols-2 gap-4">
             {beforeArrival.map((item) => (
@@ -445,8 +443,7 @@ export default function TravelIndustryIndustryPage() {
           <p className={eyebrowClassName}>During Their Stay</p>
           <h2 className={`mt-3 ${headingClassName}`}>Every Moment Matters</h2>
           <p className={bodyClassName}>
-            Whether guests need help, recommendations, or quick answers, every request is handled instantly so your team can focus
-            on delivering exceptional hospitality.
+            Use approved information for routine guest questions and collect requests for your team to review.
           </p>
           <div className="mt-8 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {duringStay.map((item) => (

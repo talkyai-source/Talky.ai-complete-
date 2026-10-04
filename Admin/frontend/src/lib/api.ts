@@ -118,6 +118,24 @@ export interface TerminateCallResponse {
     detail?: string;
 }
 
+export interface ContactEnquiry {
+    id: string;
+    name: string;
+    email: string;
+    company: string;
+    message: string;
+    status: 'new' | 'handled';
+    created_at: string;
+    handled_at: string | null;
+}
+
+export interface ContactEnquiriesResponse {
+    items: ContactEnquiry[];
+    total: number;
+    limit: number;
+    offset: number;
+}
+
 export interface LiveCallItem {
     id: string;
     tenant_id: string;
@@ -1056,6 +1074,7 @@ interface RequestOptions {
     method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
     body?: unknown;
     headers?: Record<string, string>;
+    timeoutMs?: number;
 }
 
 // API Client Class
@@ -1085,7 +1104,9 @@ class ApiClient {
     }
 
     private async request<T>(endpoint: string, options: RequestOptions = {}): Promise<ApiResponse<T>> {
-        const { method = 'GET', body, headers = {} } = options;
+        const { method = 'GET', body, headers = {}, timeoutMs } = options;
+        const controller = timeoutMs ? new AbortController() : undefined;
+        const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : undefined;
 
         const requestHeaders: Record<string, string> = {
             'Content-Type': 'application/json',
@@ -1101,6 +1122,7 @@ class ApiClient {
                 method,
                 headers: requestHeaders,
                 body: body ? JSON.stringify(body) : undefined,
+                signal: controller?.signal,
             });
 
             const data: unknown = await response.json();
@@ -1113,10 +1135,14 @@ class ApiClient {
         } catch (error) {
             return {
                 error: {
-                    code: 'NETWORK_ERROR',
-                    message: error instanceof Error ? error.message : 'Network error occurred',
+                    code: controller?.signal.aborted ? 'REQUEST_TIMEOUT' : 'NETWORK_ERROR',
+                    message: controller?.signal.aborted
+                        ? 'The request timed out. Refresh to check the current state before retrying.'
+                        : error instanceof Error ? error.message : 'Network error occurred',
                 },
             };
+        } finally {
+            if (timer !== undefined) clearTimeout(timer);
         }
     }
 
@@ -1302,6 +1328,18 @@ class ApiClient {
     }
 
     // Tenant Management Endpoints (Day 3)
+    async getContactEnquiries(status: '' | 'new' | 'handled', offset = 0) {
+        const params = new URLSearchParams({ limit: '50', offset: String(offset) });
+        if (status) params.set('status', status);
+        return this.request<ContactEnquiriesResponse>(`/admin/contact-enquiries?${params}`, { timeoutMs: 15_000 });
+    }
+
+    async updateContactEnquiry(id: string, status: 'new' | 'handled') {
+        return this.request<ContactEnquiry>(`/admin/contact-enquiries/${encodeURIComponent(id)}`, {
+            method: 'PATCH', body: { status }, timeoutMs: 15_000,
+        });
+    }
+
     async getTenants(search?: string, status?: string) {
         const params = new URLSearchParams();
         if (search) params.append('search', search);

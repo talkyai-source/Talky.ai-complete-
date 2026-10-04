@@ -12,6 +12,7 @@ import { UsageCostPage } from './pages/UsageCostPage';
 import { IncidentsPage } from './pages/IncidentsPage';
 import { SystemHealthPage } from './pages/SystemHealthPage';
 import { InboundControlPage } from './pages/InboundControlPage';
+import { ContactEnquiriesPage } from './pages/ContactEnquiriesPage';
 import './index.css';
 
 const PLATFORM_ROLES = ['platform_admin', 'super_admin'];
@@ -25,6 +26,11 @@ function App() {
           <Route path="/login" element={<LoginPage />} />
 
           {/* Protected Admin Routes */}
+          <Route path="/enquiries" element={
+            <AdminRouteGuard allowedRoles={PLATFORM_ROLES}>
+              <ContactEnquiriesPage />
+            </AdminRouteGuard>
+          } />
           <Route
             path="/"
             element={

@@ -46,7 +46,7 @@ export default function RealEstateIndustryPage() {
     "Support callers after hours",
   ];
 
-  const coveragePills = ["24/7 Call Coverage", "100% Lead Response", "More Appointments"];
+  const coveragePills = ["Configured Hours", "Lead Details", "Appointment Requests"];
 
   const builtForRealEstate = [
     {
@@ -105,7 +105,7 @@ export default function RealEstateIndustryPage() {
     },
     {
       title: "Answer Faster",
-      description: "Give prospects instant responses to common listing and service questions.",
+      description: "Use approved listing and service information to answer routine questions.",
     },
     {
       title: "Qualify Smarter",
@@ -132,7 +132,7 @@ export default function RealEstateIndustryPage() {
     },
     {
       title: "Rentals",
-      description: "Handle availability, pricing, requirements, and viewing requests instantly.",
+      description: "Use approved availability and pricing information, and collect viewing requests.",
     },
     {
       title: "Property Management",
@@ -144,7 +144,7 @@ export default function RealEstateIndustryPage() {
     },
     {
       title: "Brokerages",
-      description: "Centralize calls and route each conversation to the right agent, team, or location.",
+      description: "Review call records and captured requests with the relevant agent or team.",
     },
   ];
 
@@ -180,7 +180,7 @@ export default function RealEstateIndustryPage() {
         "Talk-Lee AI captures the details that matter, from property preferences and budget to buying goals and timelines.",
     },
     {
-      title: "Give Instant Answers",
+      title: "Use Approved Answers",
       description:
         "Provide fast, relevant responses to common questions and keep prospects engaged while their interest is high.",
     },
@@ -208,12 +208,12 @@ export default function RealEstateIndustryPage() {
       description: "Engage prospects immediately instead of letting high-intent leads wait for a callback.",
     },
     {
-      title: "100% Lead Focus",
+      title: "Lead Details",
       description: "Capture key details, qualify prospects, and guide every conversation toward the next step.",
     },
     {
-      title: "0 Unnecessary Transfers",
-      description: "Route callers to the right agent with relevant context when human support is needed.",
+      title: "Requests for Review",
+      description: "Collect a caller request for your team to review. Live human transfer is not currently available.",
     },
     {
       title: "More Leads, Less Work",
@@ -227,7 +227,7 @@ export default function RealEstateIndustryPage() {
     {
       title: "Answer",
       description:
-        "Talk-Lee AI picks up instantly, giving every prospect a fast and professional response without making them wait.",
+        "Talk-Lee AI handles configured calls within your account and provider limits.",
     },
     {
       title: "Qualify",
@@ -240,9 +240,9 @@ export default function RealEstateIndustryPage() {
         "AI answers questions, captures lead details, and guides qualified prospects toward showings, consultations, or appointments.",
     },
     {
-      title: "Handoff",
+      title: "Team Review",
       description:
-        "When an agent is needed, the call moves to the right person with the conversation context already captured.",
+        "Your team can review captured requests and decide what follow-up is appropriate. Live human transfer is not currently available.",
     },
   ];
 
@@ -335,7 +335,7 @@ export default function RealEstateIndustryPage() {
     {
       question: "Can an agent take over the call?",
       answer:
-        "Yes. When a conversation requires human expertise, AI can route the caller to the appropriate team member.",
+        "Live human transfer is not currently available. The agent can collect a request for your team to review; this does not arrange a callback.",
     },
     {
       question: "Does AI work after business hours?",
@@ -383,16 +383,15 @@ export default function RealEstateIndustryPage() {
 
         <section className="mt-14">
           <p className={eyebrowClassName}>The Real Estate Problem</p>
-          <h2 className={`mt-3 ${headingClassName}`}>Never Let a Call Become a Lost Opportunity</h2>
+          <h2 className={`mt-3 ${headingClassName}`}>Collect Property Enquiries for Review</h2>
           <p className={bodyClassName}>
             Real estate moves fast. While agents are busy showing properties, meeting clients, negotiating deals, or
             managing listings, they can&rsquo;t always answer every call. But buyers and sellers don&rsquo;t wait. A missed
             call can mean a missed showing and a missed showing can mean a lost transaction.
           </p>
           <p className={bodyClassName}>
-            Talk-Lee AI keeps your business connected 24/7. It answers calls instantly, understands what prospects need,
-            qualifies leads, and helps schedule the next step &mdash; so every opportunity gets a response, even when your
-            team is busy.
+            Talk-Lee AI uses approved property information and collects enquiry details within your configured hours
+            and limits. Your team can review the records and decide the next step.
           </p>
           <div className={`mt-8 ${accentCardClassName}`} style={accentCardStyle}>
             <ul className="space-y-2 text-sm sm:text-base text-gray-700 dark:text-muted-foreground">
@@ -430,8 +429,8 @@ export default function RealEstateIndustryPage() {
           <p className={eyebrowClassName}>Capture Buyers While They&rsquo;re Ready to Act</p>
           <h2 className={`mt-3 ${headingClassName}`}>Turn Property Interest Into Action</h2>
           <p className={bodyClassName}>
-            Talk-Lee AI responds instantly, answers property questions, captures key lead details, and helps qualified
-            prospects move directly toward a scheduled showing or conversation.
+            Talk-Lee AI can answer routine questions using approved property information and capture requests for a
+            viewing or conversation. Scheduling depends on the actions enabled for your workflow.
           </p>
           <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             {captureSteps.map((item) => (
@@ -485,7 +484,7 @@ export default function RealEstateIndustryPage() {
         </section>
 
         <section className="mt-14">
-          <h2 className={headingClassName}>Never Lose a Lead After the First Conversation</h2>
+          <h2 className={headingClassName}>Review Captured Leads After a Conversation</h2>
           <p className={bodyClassName}>
             Keep prospects engaged with timely, intelligent follow-ups that turn more conversations into real
             opportunities.
@@ -661,7 +660,7 @@ export default function RealEstateIndustryPage() {
           <div className="rounded-3xl border border-border/70 bg-background/70 dark:bg-white/5 backdrop-blur-sm p-8 md:p-12 text-center shadow-sm transition-[transform,box-shadow,border-color] duration-200 ease-out hover:-translate-y-0.5 hover:shadow-md hover:border-border">
             <h2 className={headingClassName}>Your Next Listing Lead Could Be Calling</h2>
             <p className="mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed max-w-3xl mx-auto">
-              Never miss a real estate opportunity. Let AI answer, qualify, schedule, and keep leads moving.
+              Configure approved answers, enquiry capture and enabled scheduling actions for your property workflow.
             </p>
             <div className={ctaPairClassName}>
               <Link href="/auth/register">

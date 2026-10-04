@@ -53,7 +53,7 @@ export function PackagesSection() {
               viewport={{ once: true }}
               className="text-3xl md:text-4xl font-bold tracking-tight text-primary dark:text-foreground"
             >
-              Speak Every Language, Connect Everywhere
+              Choose a Voice for Your Workflow
             </motion.h2>
             <motion.p
               initial={{ opacity: 0, y: 20 }}
@@ -62,7 +62,7 @@ export function PackagesSection() {
               transition={{ delay: 0.1 }}
               className="text-base sm:text-lg font-light text-gray-700 dark:text-muted-foreground"
             >
-              <span className="font-semibold">100+ Languages. Countless Accents. Unlimited Reach.</span>
+              <span className="font-semibold">Language availability depends on your selected voice and model.</span>
             </motion.p>
           </div>
 
@@ -71,7 +71,7 @@ export function PackagesSection() {
               {
                 icon: Globe,
                 title: "Global communication at scale",
-                description: "Our AI voice agent platform empowers natural‑sounding voices in over 100 languages.",
+                description: "Review supported language options for the voice and model selected for your campaign.",
               },
               {
                 icon: Sparkles,
@@ -81,12 +81,12 @@ export function PackagesSection() {
               {
                 icon: Headphones,
                 title: "Diverse accents and tones",
-                description: "Choose from hundreds of diverse accents and tones.",
+                description: "Preview the available voices before choosing one for your campaign.",
               },
               {
                 icon: PhoneCall,
                 title: "Consistent customer experience",
-                description: "Keep quality high across inbound and outbound calls, 24/7.",
+                description: "Test your selected voice on the inbound and outbound workflows you plan to use.",
               },
             ].map((item) => (
               <div
@@ -165,9 +165,9 @@ export function PackagesSection() {
                 title: "Feels Human",
                 points: [
                   "AI voice agents that let customers speak naturally, interrupt, and change topics.",
-                  "Super‑low latency responses.",
-                  "Fluent in 30+ languages and hundreds of accents.",
-                  "Always available, never frustrated, never quitting.",
+                  "Streaming speech for configured calling workflows.",
+                  "Language options depend on the selected voice and model.",
+                  "Calling availability follows your configuration and service limits.",
                 ],
               },
               {
@@ -184,7 +184,7 @@ export function PackagesSection() {
                 icon: Settings,
                 title: "Operates Like Software",
                 points: [
-                  "Scale call volume instantly and eliminate hold times forever.",
+                  "Manage call volume within your configured limits.",
                   "Customize agents for any use case.",
                   "Train once, deploy everywhere.",
                   "End‑to‑end AI call automation for enterprises and call centers.",
@@ -293,9 +293,9 @@ export function PackagesSection() {
               {
                 icon: Headphones,
                 title: "Automate Customer Support Inquiries",
-                description: "Deliver instant answers with AI call automation — no queues, no wait times, no frustration.",
+                description: "Configure inbound call handling using approved information and your account and provider limits.",
                 points: [
-                  "24/7 availability with parallel calls",
+                  "Configured hours and call limits",
                   "Real‑time integration with your systems",
                   "Inject support procedure documents",
                 ],

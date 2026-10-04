@@ -26,7 +26,7 @@ const orbitron = Orbitron({
 export const metadata: Metadata = {
   title: "Talk-Lee",
   description:
-    "Scale conversations instantly with Talk-Lee AI. Smart voice agents deliver support, scheduling, and compliance worldwide.",
+    "Configure inbound and outbound calling with Talk-Lee AI. Manage voice agents, campaign knowledge and call records.",
 };
 
 export default function Home() {

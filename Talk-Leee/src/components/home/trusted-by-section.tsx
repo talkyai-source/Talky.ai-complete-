@@ -102,7 +102,7 @@ export function TrustedBySection() {
           viewport={{ once: true }}
           className="text-3xl font-bold text-primary dark:text-foreground"
         >
-          Trusted by Industry Leaders
+          Explore Industry Workflows
         </motion.h2>
         <motion.p
           initial={{ opacity: 0, y: 20 }}
@@ -111,8 +111,7 @@ export function TrustedBySection() {
           transition={{ delay: 0.1 }}
           className="text-lg text-muted-foreground max-w-2xl mx-auto"
         >
-          Join Fortune 500 companies and innovative startups that rely on our AI voice platform
-          for critical business communications.
+          Explore examples of calling workflows for different industries and review the requirements for your use case.
         </motion.p>
 
         <motion.div

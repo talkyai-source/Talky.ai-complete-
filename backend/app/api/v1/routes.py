@@ -41,6 +41,7 @@ from app.api.v1.endpoints.connectors import router as connectors_router
 from app.api.v1.endpoints.salesforce import router as salesforce_router
 from app.api.v1.endpoints.contacts import router as contacts_router
 from app.api.v1.endpoints.contact_lists import router as contact_lists_router
+from app.api.v1.endpoints.contact_enquiries import router as contact_enquiries_router
 from app.api.v1.endpoints.dashboard import router as dashboard_router
 from app.api.v1.endpoints.health import router as health_router
 from app.api.v1.endpoints.meetings import router as meetings_router
@@ -85,6 +86,7 @@ api_router.include_router(inbound_campaigns_router)
 api_router.include_router(campaign_knowledge_router)
 api_router.include_router(contacts_router)
 api_router.include_router(contact_lists_router)
+api_router.include_router(contact_enquiries_router)
 api_router.include_router(calls_router)
 api_router.include_router(call_feedback_router)
 # Before calls_router: this one owns literal paths under /calls (e.g.

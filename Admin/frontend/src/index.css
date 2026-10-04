@@ -4263,3 +4263,13 @@ body {
     grid-template-columns: 1fr;
   }
 }
+
+.enquiry-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin: 18px 0; }
+.enquiry-list { display: grid; gap: 16px; }
+.enquiry-card { min-width: 0; overflow-wrap: anywhere; }
+.enquiry-card .card-body { padding: 20px; }
+.enquiry-toolbar select { padding: 6px 10px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--bg-card); color: var(--text-primary); }
+.enquiry-card dl { margin: 0; display: grid; gap: 8px; }
+.enquiry-card dt { color: var(--text-muted); font-size: 12px; }
+.enquiry-card dd { margin: 2px 0 0; }
+.enquiry-message { white-space: pre-wrap; overflow-wrap: anywhere; margin: 20px 0; }

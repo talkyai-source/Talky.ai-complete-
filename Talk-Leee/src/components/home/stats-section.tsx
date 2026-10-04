@@ -5,9 +5,9 @@ import type { Variants } from "framer-motion";
 import { Clock, PhoneCall, Smile } from "lucide-react";
 
 const stats = [
-  { label: "Higher Contact Rate", value: "55%", icon: PhoneCall },
-  { label: "Lower Avg. Handle Time", value: "40%", icon: Clock },
-  { label: "Faster First-Call Resolution", value: "25%", icon: Smile },
+  { label: "Manage outbound calling", value: "Campaigns", icon: PhoneCall },
+  { label: "Set calling windows", value: "Schedules", icon: Clock },
+  { label: "Review call results", value: "Records", icon: Smile },
 ];
 
 export function StatsSection() {
@@ -41,12 +41,11 @@ export function StatsSection() {
     <section className="py-12 px-4 md:px-6 lg:px-8 bg-cyan-50 dark:bg-black">
       <div className="max-w-6xl mx-auto">
         <h2 className="text-center text-2xl md:text-3xl font-semibold text-primary dark:text-foreground mb-8">
-          Why 5,000+ Businesses Worldwide Choose Us
+          Tools for Business Calling
         </h2>
         <p className="mx-auto max-w-4xl text-center text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed mb-10">
-          Our AI voice agent platform delivers more than just automated phone calls AI. We help enterprises and call centers transform every
-          customer interaction into a win. From global teams to specialized call centers, our AI customer support platform scales effortlessly —
-          driving efficiency, engagement, and measurable business growth.
+          Configure calling campaigns, set the hours when calls may run, and review the resulting records.
+          Your team can use captured details and call outcomes to decide what to do next.
         </p>
 
         <motion.div
@@ -83,7 +82,7 @@ export function StatsSection() {
                   <stat.icon className="h-5 w-5 text-black" aria-hidden />
                 </div>
               </div>
-              <div className="text-4xl md:text-5xl font-bold text-primary dark:text-foreground mb-2">
+              <div className="text-2xl md:text-3xl font-bold text-primary dark:text-foreground mb-2">
                 {stat.value}
               </div>
               <div className="text-gray-700 dark:text-muted-foreground font-medium">{stat.label}</div>

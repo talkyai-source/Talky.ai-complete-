@@ -35,10 +35,10 @@ export default function RecruitmentIndustryPage() {
   const outlineButtonClassName = `${buttonSizeClassName} bg-blue-950 hover:bg-blue-950 text-white hover:text-white border-blue-950 hover:border-blue-950 dark:bg-blue-900 dark:hover:bg-blue-900 dark:text-white dark:hover:text-white dark:border-blue-900 dark:hover:border-blue-900`;
 
   const heroStats = [
-    { value: "500K+", label: "Candidates Screened" },
-    { value: "100K+", label: "Recruitment Conversations" },
-    { value: "24/7", label: "Candidate Support" },
-    { value: "98%", label: "Screening Accuracy" },
+    { value: "Candidate", label: "Enquiries" },
+    { value: "Call", label: "Records" },
+    { value: "Configured", label: "Hours" },
+    { value: "Team", label: "Review" },
   ];
 
   const recruitmentRealityPoints = [
@@ -139,7 +139,7 @@ export default function RecruitmentIndustryPage() {
     },
   ];
 
-  const growthBadges = ["99.9% Uptime", "Enterprise Ready", "ATS Integrations", "24/7 Candidate Engagement"];
+  const growthBadges = ["Call Records", "Campaign Settings", "ATS Integrations", "Configured Calling Hours"];
 
   const whyTalkLee = [
     {
@@ -260,7 +260,7 @@ export default function RecruitmentIndustryPage() {
       price: "Let’s Talk",
       blurb: "Designed for enterprise hiring and large-scale recruitment operations.",
       features: [
-        "Unlimited Hiring Workspaces",
+        "Hiring Workspace Configuration",
         "Advanced AI Recruitment Automation",
         "Enterprise Integrations",
         "Dedicated Customer Success Manager",
@@ -296,7 +296,7 @@ export default function RecruitmentIndustryPage() {
     {
       question: "Can it manage candidate phone calls and inquiries?",
       answer:
-        "Yes. AI handles recruitment calls, answers common candidate questions, provides application updates, and routes more complex inquiries to your recruitment team when needed.",
+        "Use approved answers for routine candidate enquiries and collect requests for recruiter review. Live human transfer is not currently available.",
     },
     {
       question: "How quickly can our team get started?",

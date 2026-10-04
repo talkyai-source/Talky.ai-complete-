@@ -39,7 +39,6 @@ import inspect
 
 import pytest
 
-
 # --- known-public allowlist ------------------------------------------
 #
 # Each entry is (METHOD, exact_path) plus the reason it's intentionally
@@ -86,6 +85,10 @@ _WEBHOOKS = {
 _PUBLIC = {
     "GET /api/v1/plans/": "public plan catalog (no per-tenant data)",
     "GET /api/v1/billing/plans": "billing-module passthrough to the same public plan catalog (no per-tenant data)",
+    "POST /api/v1/public/contact-enquiries": (
+        "anonymous rate-limited, CSRF-checked enquiry intake; inserts platform-owned "
+        "records and returns only its receipt, never tenant data"
+    ),
 }
 
 # ---------------------------------------------------------------------
@@ -310,6 +313,27 @@ def test_known_public_routes_actually_exist():
     # Don't fail on stale entries — endpoint paths drift; flag for cleanup.
     if stale:
         pytest.skip(
-            f"KNOWN_PUBLIC_ROUTES has stale entries (clean these up):\n  "
+            "KNOWN_PUBLIC_ROUTES has stale entries (clean these up):\n  "
             + "\n  ".join(stale)
         )
+
+
+def test_contact_intake_exception_does_not_exempt_admin_read_or_update():
+    """The public POST shares a module with private administration handlers."""
+    from app.main import app
+
+    expected = {
+        "GET /api/v1/admin/contact-enquiries",
+        "PATCH /api/v1/admin/contact-enquiries/{enquiry_id}",
+    }
+    found = set()
+    for path, route in _collect_api_routes(app.routes):
+        for method in route.methods:
+            key = _norm_route_key(method, path)
+            if key not in expected:
+                continue
+            found.add(key)
+            assert key not in KNOWN_PUBLIC_ROUTES
+            assert _route_has_db_dep(route.endpoint)
+            assert _route_level_auth(route)
+    assert found == expected

@@ -76,8 +76,14 @@ function sentryOriginFromDsn(raw: string | undefined) {
     }
 }
 
+function isPublicContactPath(pathname: string) {
+    return pathname === "/contact" || pathname === "/contact/" ||
+        pathname === "/api/contact-enquiries" || pathname === "/api/contact-enquiries/";
+}
+
 function isPublicPath(pathname: string) {
     if (pathname === "/") return true;
+    if (isPublicContactPath(pathname)) return true;
     if (pathname.startsWith("/auth/")) return true;
     if (pathname === "/auth") return true;
     if (pathname.startsWith("/connectors/callback")) return true;
@@ -302,6 +308,7 @@ export async function proxy(req: NextRequest) {
     if (hasAuthSignal) {
         const shouldCheckRole =
             !isApiPath(pathname) &&
+            !isPublicContactPath(pathname) &&
             !pathname.startsWith("/_next/") &&
             !pathname.startsWith("/favicon") &&
             !pathname.startsWith("/site.webmanifest");

@@ -39,7 +39,7 @@ export default function EducationIndustryPage() {
   const ctaPairClassName = "mt-8 flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-4";
 
   const whyItMattersPoints = [
-    "Instant student support",
+    "Student enquiry intake",
     "24/7 availability",
     "Faster admission responses",
     "Automated follow-ups",
@@ -48,21 +48,21 @@ export default function EducationIndustryPage() {
   ];
 
   const heroStats = [
-    { value: "24/7", label: "Student Support" },
-    { value: "<2 Sec", label: "Response" },
-    { value: "99.9%", label: "Uptime" },
+    { value: "Enquiry", label: "Intake" },
+    { value: "Configured", label: "Hours" },
+    { value: "Call", label: "Records" },
   ];
 
   const whatWeDo = [
     {
       title: "AI Student Support",
       description:
-        "Give students and parents instant answers about admissions, programs, schedules, fees, campus services, and everyday questions — without waiting for office hours.",
+        "Use approved information to answer routine questions about admissions, programs, schedules, fees and campus services.",
     },
     {
       title: "AI Virtual Assistant for Schools",
       description:
-        "Provide an always-available digital assistant that helps students find information, complete simple tasks, and connect with the right department.",
+        "Use approved information to answer routine student questions and collect requests for staff review.",
     },
     {
       title: "AI Call Automation for Education",
@@ -104,7 +104,7 @@ export default function EducationIndustryPage() {
   const businessImpact = [
     {
       title: "Capture More Leads",
-      description: "Respond to prospective students instantly and turn more inquiries into enrollment opportunities.",
+      description: "Collect prospective students’ enquiries and contact details for your admissions team to review.",
     },
     {
       title: "Reduce Admin Work",
@@ -112,7 +112,7 @@ export default function EducationIndustryPage() {
     },
     {
       title: "Respond Faster",
-      description: "Give students and parents quick, accurate answers whenever they need assistance.",
+      description: "Use your approved information for routine student and parent enquiries.",
     },
     {
       title: "Boost Engagement",
@@ -134,7 +134,7 @@ export default function EducationIndustryPage() {
       description: "Students and parents can ask questions in everyday language without navigating complicated menus.",
     },
     {
-      title: "Always Available",
+      title: "Configured Calling Hours",
       description:
         "Provide reliable support 24/7, regardless of office hours, weekends, holidays, or peak admission periods.",
     },
@@ -146,14 +146,14 @@ export default function EducationIndustryPage() {
     {
       title: "Works With Your Team",
       description:
-        "AI manages routine interactions while complex requests are smoothly transferred to the appropriate staff member.",
+        "AI can collect routine enquiries and requests for staff review. Live human transfer is not currently available.",
     },
   ];
 
   const howItWorks = [
     {
       title: "Answer Fast",
-      description: "Every student and parent call is answered instantly, reducing missed inquiries and wait times.",
+      description: "Configure call intake for student and parent enquiries within your hours and service limits.",
     },
     {
       title: "Understand Needs",
@@ -161,7 +161,7 @@ export default function EducationIndustryPage() {
     },
     {
       title: "Take Action",
-      description: "AI answers questions, schedules appointments, sends follow-ups, or routes calls to the right team.",
+      description: "Use approved answers and enabled actions, or collect a request for your team to review.",
     },
     {
       title: "Stay Connected",
@@ -177,7 +177,7 @@ export default function EducationIndustryPage() {
     {
       title: "Admission Support",
       description:
-        "Provide instant information about programs, fees, eligibility, deadlines, and enrollment requirements.",
+        "Use approved information about programs, fees, eligibility, deadlines and enrollment requirements.",
     },
     {
       title: "Appointment Management",
@@ -251,7 +251,7 @@ export default function EducationIndustryPage() {
       price: "Let’s Talk",
       blurb: "For universities, education groups, and large institutions.",
       features: [
-        "Unlimited AI conversations",
+        "Configured calling limits",
         "Advanced education workflows",
         "CRM & calendar integrations",
         "Custom AI automation",
@@ -283,7 +283,7 @@ export default function EducationIndustryPage() {
     {
       question: "Can AI route student calls?",
       answer:
-        "Yes. AI identifies the reason for each call and routes students to the appropriate department or staff member.",
+        "Live human transfer is not currently available. The agent can collect the reason for a call for staff review; this does not arrange a callback.",
     },
     {
       question: "Can AI support students after office hours?",
@@ -310,7 +310,7 @@ export default function EducationIndustryPage() {
             AI for Education
           </h1>
           <p className="mt-4 text-base sm:text-lg md:text-xl font-semibold text-primary dark:text-foreground">
-            Every Student Call. Every Opportunity. Handled Instantly.
+            Configure Calling Workflows for Student Enquiries.
           </p>
           <p className="mt-6 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed max-w-4xl mx-auto">
             Talk-Lee AI helps schools, colleges, universities, and institutes automate student communication,
@@ -335,15 +335,15 @@ export default function EducationIndustryPage() {
 
         <section className="mt-14">
           <p className={eyebrowClassName}>Why It Matters</p>
-          <h2 className={`mt-3 ${headingClassName}`}>Never Let a Student Inquiry Go Unanswered</h2>
+          <h2 className={`mt-3 ${headingClassName}`}>Collect Student Enquiries for Review</h2>
           <p className={bodyClassName}>
             Admissions teams handle countless calls and questions about programs, fees, eligibility, deadlines, courses,
             and appointments. When staff are busy, unanswered inquiries can quickly become missed enrollment
             opportunities.
           </p>
           <p className={bodyClassName}>
-            Talk-Lee AI responds instantly, understands what students and parents need, and either provides the right
-            answer or connects them with the right department.
+            Talk-Lee AI uses your approved information to handle routine student and parent enquiries and provide an
+            answer or collect a request for staff review.
           </p>
           <ul className={listClassName}>
             {whyItMattersPoints.map((point) => (

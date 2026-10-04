@@ -47,7 +47,7 @@ function FAQSection() {
     {
       question: "What is Talk-Lee AI?",
       answer:
-        "Talk-Lee AI is a fully featured platform that automates phone calls with intelligent voice agents, helping teams scale conversations without queues or delays.",
+        "Talk-Lee AI provides voice agents for configured inbound and outbound calling workflows, with campaign settings and call records.",
     },
     {
       question: "Do I need technical expertise to use Talk-Lee AI?",
@@ -63,11 +63,11 @@ function FAQSection() {
     },
     {
       question: "Can calls be transferred to human agents?",
-      answer: "Absolutely. Talk-Lee AI can forward calls to live agents whenever needed or requested by customers.",
+      answer: "Live transfer to a human agent is not currently available. An agent can collect a request for your team to review; this does not arrange a callback.",
     },
     {
       question: "Is Talk-Lee AI secure and compliant?",
-      answer: "Yes. We provide built‑in consent handling, encryption, GDPR/TCPA tooling, and enterprise‑grade compliance features.",
+      answer: "Access, consent and recording controls are available. Review the configuration, data handling and applicable requirements for your intended use before launch.",
     },
     {
       question: "Can I resell Talk-Lee AI under my own brand?",
@@ -303,15 +303,15 @@ export function HomeLazySections() {
         <Hero
           title="AI Voice Agent Platform for Seamless Call Automation"
           description={[
-            "Automate inbound and outbound calls with intelligent AI voice agents that deliver end-to-end customer support, appointment scheduling, and enterprise-grade engagement — 24/7.",
-            "Intelligent voice communication platform powered by advanced AI agents, built to operate at scale with high accuracy and reliability. Real-time speech recognition, natural language processing, and seamless call automation support enterprise-scale outbound campaigns.",
-            "The platform enables natural, human-like conversations through adaptive dialogue handling, intent detection, and contextual understanding. It ensures consistent performance across large call volumes while maintaining clarity, responsiveness, and automation efficiency for enterprise communication workflows.",
+            "Configure AI voice agents for inbound enquiries and outbound campaigns using your approved business information.",
+            "Choose a supported model and voice, set calling rules, and review the effective configuration before starting a campaign.",
+            "Review call records and captured details to decide what needs a follow-up or a correction from your team.",
           ]}
           adjustForNavbar
           stats={[
-            { label: "Response Time", value: "<500ms" },
-            { label: "Concurrent Calls", value: "1000+" },
-            { label: "Completion Rate", value: "94%" },
+            { label: "Inbound & outbound", value: "Calls" },
+            { label: "Campaign settings", value: "Controls" },
+            { label: "Review outcomes", value: "Records" },
           ]}
         />
         <SecondaryHero />

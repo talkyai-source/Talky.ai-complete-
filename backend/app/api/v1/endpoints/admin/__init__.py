@@ -14,6 +14,7 @@ from .usage import router as usage_router
 from .health import router as health_router
 from .media import router as media_router
 from .inbound import router as inbound_router
+from app.api.v1.endpoints.contact_enquiries import admin_router as contact_enquiries_router
 
 # Create main admin router
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -29,3 +30,4 @@ router.include_router(usage_router)
 router.include_router(health_router)
 router.include_router(media_router)
 router.include_router(inbound_router)
+router.include_router(contact_enquiries_router)

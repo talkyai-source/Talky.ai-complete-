@@ -41,9 +41,9 @@ export default function SoftwareTechSupportIndustryPage() {
   ];
 
   const supportChallengeStats = [
-    { value: "500+", label: "Businesses" },
-    { value: "24/7", label: "Support" },
-    { value: "<2 Sec", label: "Response" },
+    { value: "Enquiry", label: "Intake" },
+    { value: "Configured", label: "Hours" },
+    { value: "Call", label: "Records" },
   ];
 
   const differenceAreas = [
@@ -55,12 +55,12 @@ export default function SoftwareTechSupportIndustryPage() {
     {
       title: "AI Tech Support Automation",
       description:
-        "Guide users through common technical issues and collect problem details before escalation to your technical team.",
+        "Use approved troubleshooting information and collect problem details for your technical team to review.",
     },
     {
       title: "AI Voice Agents for SaaS",
       description:
-        "Handle customer conversations by phone, answer questions naturally, and transfer complex requests to the right specialist.",
+        "Use approved answers for routine questions and capture requests for review. Live human transfer is not currently available.",
     },
     {
       title: "AI Onboarding Support Automation",
@@ -70,7 +70,7 @@ export default function SoftwareTechSupportIndustryPage() {
     {
       title: "AI Call Automation for Tech",
       description:
-        "Manage incoming technology calls, identify caller intent, and automatically direct each request to the appropriate team.",
+        "Manage configured incoming calls and collect the caller’s request for your team to review.",
     },
   ];
 
@@ -81,7 +81,7 @@ export default function SoftwareTechSupportIndustryPage() {
     },
     {
       title: "Faster Resolution",
-      description: "Give customers instant answers instead of making them wait for an available agent.",
+      description: "Use approved support information to answer routine questions.",
     },
     {
       title: "Easier Onboarding",
@@ -138,7 +138,7 @@ export default function SoftwareTechSupportIndustryPage() {
     },
     {
       title: "Connect",
-      description: "Complex requests are passed to the right person with useful context.",
+      description: "Complex requests can be captured for your team to review.",
     },
   ];
 
@@ -146,7 +146,7 @@ export default function SoftwareTechSupportIndustryPage() {
     "Natural conversations",
     "Intelligent request recognition",
     "Automated support workflows",
-    "Human escalation",
+    "Requests for team review",
     "24/7 availability",
     "Scalable customer communication",
   ];
@@ -194,7 +194,7 @@ export default function SoftwareTechSupportIndustryPage() {
     {
       question: "What can AI automate for a software company?",
       answer:
-        "AI can automate customer support, technical questions, onboarding assistance, phone calls, routing, and other repetitive customer interactions.",
+        "Use approved information for routine technical and onboarding questions, and collect requests for review. Available actions depend on your configuration.",
     },
     {
       question: "Can AI support SaaS customers 24/7?",
@@ -204,7 +204,7 @@ export default function SoftwareTechSupportIndustryPage() {
     {
       question: "Can AI voice agents handle technical calls?",
       answer:
-        "Yes. AI voice agents can understand customer requests, provide supported assistance, collect information, and route complex issues to technical teams.",
+        "AI voice agents can use approved information for routine questions and collect problem details for your technical team to review.",
     },
     {
       question: "Can AI help with software onboarding?",
@@ -213,7 +213,7 @@ export default function SoftwareTechSupportIndustryPage() {
     },
     {
       question: "Will customers still be able to reach human agents?",
-      answer: "Yes. Complex or specialized requests can be transferred to the appropriate member of your team.",
+      answer: "Live human transfer is not currently available. The agent can collect a request for your team to review; this does not arrange a callback.",
     },
     {
       question: "Is this suitable for growing SaaS companies?",
@@ -357,7 +357,7 @@ export default function SoftwareTechSupportIndustryPage() {
           </p>
           <p className={bodyClassName}>
             Talk-Lee AI identifies the reason for the call, handles supported requests, gathers relevant information, and
-            transfers the conversation when specialized assistance is required.
+            records requests that need your team&rsquo;s review.
           </p>
           <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             {callSteps.map((step) => (
@@ -372,8 +372,8 @@ export default function SoftwareTechSupportIndustryPage() {
         <section className="mt-14">
           <h2 className={headingClassName}>Intelligent Automation Without Losing the Human Touch</h2>
           <p className={bodyClassName}>
-            Talk-Lee AI combines automation with human escalation, giving customers the speed of AI and the expertise of
-            your team when it matters most.
+            Talk-Lee AI supports routine call intake and request capture. Your team can review the records and decide
+            what follow-up is appropriate.
           </p>
           <div className={`mt-8 ${accentCardClassName}`} style={accentCardStyle}>
             <ul className="space-y-2 text-sm sm:text-base text-gray-700 dark:text-muted-foreground">

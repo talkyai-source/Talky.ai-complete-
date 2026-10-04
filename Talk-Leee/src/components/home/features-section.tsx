@@ -4,7 +4,7 @@ const services = [
   {
     icon: PhoneCall,
     title: "Simultaneous Calls",
-    description: "Run 50+ calls in parallel with no queues, ensuring immediate outreach and response.",
+    description: "Manage calls within your configured campaign, account and provider limits.",
   },
   {
     icon: Users,
@@ -23,8 +23,8 @@ const services = [
   },
   {
     icon: Settings,
-    title: "Human Transfers",
-    description: "Seamlessly forward calls to live agents whenever needed, preserving conversation context.",
+    title: "Requests for Your Team",
+    description: "Collect caller requests for review. Live transfer to a human agent is not currently available.",
   },
   {
     icon: BarChart3,

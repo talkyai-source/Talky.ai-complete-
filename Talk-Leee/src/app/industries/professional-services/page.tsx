@@ -35,7 +35,7 @@ export default function ProfessionalServicesIndustryPage() {
   const centeredCtaClassName = "mt-10 flex justify-center";
 
   const repetitiveWork = [
-    "Answer calls instantly",
+    "Configure call intake",
     "Capture new client inquiries",
     "Schedule consultations",
     "Handle routine business questions",
@@ -44,9 +44,9 @@ export default function ProfessionalServicesIndustryPage() {
   ];
 
   const outcomeStats = [
-    { value: "50%", label: "Faster Responses" },
-    { value: "40%", label: "Less Admin Work" },
-    { value: "30%", label: "Better Client Experiences" },
+    { value: "Enquiry", label: "Intake" },
+    { value: "Request", label: "Details" },
+    { value: "Call", label: "Records" },
   ];
 
   const assistantCapabilities = [
@@ -63,7 +63,7 @@ export default function ProfessionalServicesIndustryPage() {
     {
       title: "AI Voice Agents",
       description:
-        "Provide a professional AI voice assistant that understands client needs, delivers instant answers, and connects callers with the right team member.",
+        "Use approved information to answer routine client questions and collect requests for team review.",
     },
     {
       title: "AI Appointment Scheduling",
@@ -74,7 +74,7 @@ export default function ProfessionalServicesIndustryPage() {
 
   const opportunityCards = [
     {
-      title: "Instant Response",
+      title: "Configured Call Intake",
       description:
         "Engage potential clients the moment they reach out, providing immediate answers instead of leaving them waiting for a callback.",
     },
@@ -91,7 +91,7 @@ export default function ProfessionalServicesIndustryPage() {
     {
       title: "24/7 Lead Capture",
       description:
-        "Capture and qualify new opportunities outside business hours, including evenings, weekends, and holidays, so valuable leads never go unanswered.",
+        "Configure calling hours and capture enquiry details within your account and provider limits.",
     },
   ];
 
@@ -111,7 +111,7 @@ export default function ProfessionalServicesIndustryPage() {
     {
       title: "Consistent Communication",
       description:
-        "Every caller receives a professional and reliable experience, regardless of when they contact your firm.",
+        "Configure the voice, approved information, calling hours and limits for your workflow.",
     },
     {
       title: "Easier Growth",
@@ -129,7 +129,7 @@ export default function ProfessionalServicesIndustryPage() {
     {
       title: "Legal Practices",
       description:
-        "Handle initial inquiries, collect basic information, schedule consultations, and route calls to the appropriate team.",
+        "Handle initial enquiries, collect basic information and review consultation requests with your team.",
     },
     {
       title: "Accounting & Tax Firms",
@@ -180,12 +180,12 @@ export default function ProfessionalServicesIndustryPage() {
     },
     {
       title: "Assist",
-      description: "Answer questions, collect information, schedule appointments, and handle routine tasks instantly.",
+      description: "Use approved answers, collect information and use scheduling actions enabled for your workflow.",
     },
     {
       title: "Connect",
       description:
-        "When human expertise is needed, transfer the conversation to the right team member with the relevant context.",
+        "Collect requests that need human expertise for your team to review. Live human transfer is not currently available.",
     },
   ];
 
@@ -246,7 +246,7 @@ export default function ProfessionalServicesIndustryPage() {
     {
       title: "Your Team Steps In",
       description:
-        "Complex or high-value conversations are transferred to the appropriate team member with useful context.",
+        "Your team can review captured requests and decide what follow-up is appropriate.",
     },
     {
       title: "The Workflow Continues",
@@ -258,7 +258,7 @@ export default function ProfessionalServicesIndustryPage() {
   const aiCapabilities = [
     {
       title: "24/7 AI Call Answering",
-      description: "Never leave a potential client wondering whether someone will call them back.",
+      description: "Collect client requests for review. Recording a request does not arrange a callback.",
     },
     {
       title: "Lead Qualification",
@@ -274,7 +274,7 @@ export default function ProfessionalServicesIndustryPage() {
     },
     {
       title: "Intelligent Call Routing",
-      description: "Connect callers with the appropriate department, consultant, or specialist.",
+      description: "Collect the requested department or specialist for your team to review. Live human transfer is not currently available.",
     },
     {
       title: "Automated Follow-Ups",
@@ -356,7 +356,7 @@ export default function ProfessionalServicesIndustryPage() {
     {
       question: "Can existing clients still speak with a human?",
       answer:
-        "Absolutely. We can handle routine requests while transferring complex or high-value conversations to the right professional.",
+        "Live human transfer is not currently available. The agent can collect a request for your team to review; this does not arrange a callback.",
     },
     {
       question: "Can it work outside business hours?",
@@ -450,7 +450,7 @@ export default function ProfessionalServicesIndustryPage() {
           <p className={eyebrowClassName}>Capture More Opportunities</p>
           <h2 className={`mt-3 ${headingClassName}`}>Turn Every Call Into a Potential Client</h2>
           <p className={bodyClassName}>
-            Talk-Lee AI responds instantly, qualifies prospects, captures key details, and helps move serious inquiries
+            Talk-Lee AI uses approved information, captures enquiry details, and supports enabled actions to move requests
             toward a scheduled consultation.
           </p>
           <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">

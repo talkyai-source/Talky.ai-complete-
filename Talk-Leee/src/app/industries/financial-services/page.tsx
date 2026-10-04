@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 export const metadata: Metadata = {
   title: "AI for Financial Services",
   description:
-    "Today’s customers expect fast, reliable support. Talk-Lee AI helps financial institutions automate customer conversations, answer calls, resolve routine requests, and route complex inquiries to the right team.",
+    "Explore configured call intake, approved answers to routine enquiries and request capture for your team to review.",
 };
 
 export default function FinancialServicesIndustryPage() {
@@ -35,14 +35,14 @@ export default function FinancialServicesIndustryPage() {
     "rounded-full border border-border/70 bg-background/60 dark:bg-white/5 backdrop-blur-sm px-4 py-2 text-xs sm:text-sm font-medium text-gray-700 dark:text-muted-foreground";
 
   const heroStats = [
-    "1M+ Customer Conversations",
-    "24/7 AI Availability",
-    "<2 Sec Average Response",
-    "Enterprise Ready",
+    "Enquiry Intake",
+    "Configured Calling Hours",
+    "Call Records",
+    "Workflow Settings",
   ];
 
   const expectationBenefits = [
-    "Instant call answering",
+    "Configured call intake",
     "Faster customer assistance",
     "Reduced support workload",
     "Consistent customer experiences",
@@ -55,17 +55,17 @@ export default function FinancialServicesIndustryPage() {
     {
       title: "AI Banking Customer Support",
       description:
-        "Provide instant assistance for account inquiries, card services, transaction questions, and everyday banking requests with natural AI conversations available around the clock.",
+        "Use approved information to answer routine service questions and collect requests for review. Access to account information depends on an authorized integration.",
     },
     {
       title: "AI Call Automation for Finance",
       description:
-        "Automatically answer, route, and manage inbound customer calls, reducing wait times while ensuring every inquiry reaches the right department quickly.",
+        "Configure inbound call intake and collect enquiries for your team to review.",
     },
     {
       title: "AI Voice Agents for Finance",
       description:
-        "Deliver human-like conversations that guide customers through common financial requests, answer frequently asked questions, and escalate sensitive cases whenever necessary.",
+        "Use approved information to answer routine questions and collect requests for review. Live human transfer is not currently available.",
     },
     {
       title: "AI Financial Customer Service",
@@ -111,7 +111,7 @@ export default function FinancialServicesIndustryPage() {
     {
       title: "Answer Every Customer Call",
       description:
-        "Never miss an opportunity to assist a customer. AI answers every call instantly, reducing abandoned calls and improving service availability.",
+        "Handle configured calls within your account and provider limits, and review the recorded outcomes.",
     },
     {
       title: "Reduce Response Times",
@@ -169,12 +169,12 @@ export default function FinancialServicesIndustryPage() {
     {
       title: "Fraud & Security Reporting",
       description:
-        "Identify urgent security concerns and immediately transfer customers to the appropriate fraud or security team.",
+        "Live transfer to fraud or security staff is not available. Keep your institution’s existing reporting channels available for those concerns.",
     },
   ];
 
   const trustPills = [
-    "99.9% Uptime",
+    "Configured Calling Hours",
     "Enterprise Ready",
     "Reliable Infrastructure",
     "24/7 Customer Support",
@@ -185,7 +185,7 @@ export default function FinancialServicesIndustryPage() {
     {
       title: "AI Virtual Assistant for Finance",
       description:
-        "Provide customers with instant answers, personalized guidance, and natural conversations without increasing support workload.",
+        "Configure approved answers for routine enquiries and review the resulting call records.",
     },
     {
       title: "AI Inbound Finance Calls",
@@ -245,7 +245,7 @@ export default function FinancialServicesIndustryPage() {
     {
       title: "Answer Every Call",
       description:
-        "AI responds instantly to every incoming call, ensuring customers receive immediate assistance without waiting in long queues or reaching voicemail.",
+        "AI handles configured incoming calls using approved information and your account and provider limits.",
     },
     {
       title: "Understand Every Request",
@@ -255,7 +255,7 @@ export default function FinancialServicesIndustryPage() {
     {
       title: "Resolve The Issue",
       description:
-        "Routine requests are completed automatically, while more complex financial matters are transferred to the appropriate department with full conversation context.",
+        "Use only actions enabled for the workflow and capture other requests for review. A captured request is not a completed action or an arranged callback.",
     },
     {
       title: "Keep Customers Informed",
@@ -301,7 +301,7 @@ export default function FinancialServicesIndustryPage() {
       description:
         "Designed for banks, enterprise financial institutions, and high-volume customer service teams.",
       features: [
-        "Unlimited AI Conversations",
+        "Configured Calling Limits",
         "Advanced Workflow Automation",
         "Enterprise Integrations",
         "Dedicated Success Manager",
@@ -327,7 +327,7 @@ export default function FinancialServicesIndustryPage() {
     {
       question: "Can AI route customers to the correct department?",
       answer:
-        "Yes. AI identifies the purpose of every call and automatically routes customers to the appropriate team whenever human assistance is required.",
+        "Live human transfer is not currently available. The agent can collect a request for your team to review; this does not arrange a callback.",
     },
     {
       question: "Does it integrate with our existing systems?",
@@ -355,11 +355,11 @@ export default function FinancialServicesIndustryPage() {
             AI for Financial Services
           </h1>
           <p className="mt-4 text-base sm:text-lg md:text-xl font-semibold text-primary dark:text-foreground">
-            Deliver Faster Financial Support With AI That Never Stops Working
+            Configure AI Call Intake for Financial Services
           </p>
           <p className="mt-6 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed max-w-4xl mx-auto">
             Today&rsquo;s customers expect fast, reliable support. Talk-Lee AI helps financial institutions automate
-            customer conversations, answer calls, resolve routine requests, and route complex inquiries to the right team.
+            routine enquiries using approved information and collect requests for your team to review.
           </p>
           <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-4">
             <Link href="/auth/register">
@@ -469,8 +469,7 @@ export default function FinancialServicesIndustryPage() {
           <p className={eyebrowClassName}>Customer Conversations</p>
           <h2 className={`mt-3 ${headingClassName}`}>Every Financial Conversation, Handled</h2>
           <p className={bodyClassName}>
-            Every customer inquiry is answered with speed and accuracy. AI understands intent, resolves routine requests,
-            and routes complex cases to the right team.
+            Configure approved answers and enabled actions for routine enquiries, and review captured requests with your team.
           </p>
           <div className="mt-8 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {conversationTypes.map((type) => (
@@ -621,10 +620,9 @@ export default function FinancialServicesIndustryPage() {
 
         <section className="mt-14">
           <div className="rounded-3xl border border-border/70 bg-background/70 dark:bg-white/5 backdrop-blur-sm p-8 md:p-12 text-center shadow-sm transition-[transform,box-shadow,border-color] duration-200 ease-out hover:-translate-y-0.5 hover:shadow-md hover:border-border">
-            <h2 className={headingClassName}>Never Miss Another Customer Conversation</h2>
+            <h2 className={headingClassName}>Review Your Customer Calling Workflow</h2>
             <p className="mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed max-w-3xl mx-auto">
-              Give every customer instant support with AI that answers calls, resolves routine inquiries, and routes
-              complex requests to the right team.
+              Use approved answers for routine enquiries and collect requests for your team to review.
             </p>
             <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-4">
               <Link href="/auth/register">

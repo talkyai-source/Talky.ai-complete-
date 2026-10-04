@@ -41,11 +41,11 @@ export default function RetailEcommerceIndustryPage() {
     "Support returns and common requests",
     "Capture customer details",
     "Schedule appointments",
-    "Route complex conversations",
+    "Capture requests for team review",
     "Follow up with customers",
   ];
 
-  const instantSupportStats = ["24/7 Availability", "Instant Support", "1000+ Happier Customers"];
+  const instantSupportStats = ["Configured Hours", "Enquiry Intake", "Call Records"];
 
   const completedActions = [
     {
@@ -77,7 +77,7 @@ export default function RetailEcommerceIndustryPage() {
 
   const readyToBuy = [
     {
-      title: "Respond Instantly",
+      title: "Use Approved Answers",
       description: "Give customers immediate answers instead of sending them to voicemail or making them wait.",
     },
     {
@@ -101,11 +101,11 @@ export default function RetailEcommerceIndustryPage() {
     },
     {
       title: "Respond Faster",
-      description: "Give customers instant answers instead of making them wait for an available representative.",
+      description: "Use approved product and business information to answer routine questions.",
     },
     {
-      title: "Smarter Handoffs",
-      description: "Pass relevant conversation context to your team when human support is needed.",
+      title: "Requests for Review",
+      description: "Review captured customer requests. Live human transfer is not currently available.",
     },
     {
       title: "Handle Peak Demand",
@@ -129,15 +129,15 @@ export default function RetailEcommerceIndustryPage() {
     },
     {
       title: "Share Store Info",
-      description: "Instantly answer questions about locations, hours, services, and store availability.",
+      description: "Use approved information about locations, hours, services and store availability.",
     },
     {
       title: "Stay Connected",
       description: "Follow up after inquiries, purchases, appointments, or support conversations.",
     },
     {
-      title: "Bring in Experts",
-      description: "Route complex requests to the right team member with useful context already captured.",
+      title: "Review Complex Requests",
+      description: "Collect requests for your team to review and decide the next step.",
     },
   ];
 
@@ -169,7 +169,7 @@ export default function RetailEcommerceIndustryPage() {
       description: "Customers explain what they need without navigating confusing menus or repeating information.",
     },
     {
-      title: "Understand Instantly",
+      title: "Collect the Request",
       description: "Talk-Lee AI identifies the purpose of the call and captures the details needed to help.",
     },
     {
@@ -181,8 +181,8 @@ export default function RetailEcommerceIndustryPage() {
       description: "Move conversations toward order updates, appointments, follow-ups, or other supported actions.",
     },
     {
-      title: "Connect When Needed",
-      description: "Route complex conversations to the right team member with useful context already captured.",
+      title: "Review Requests",
+      description: "Review captured requests. Live human transfer is not currently available.",
     },
   ];
 
@@ -204,7 +204,7 @@ export default function RetailEcommerceIndustryPage() {
     "Faster Customer Journeys",
     "Actionable Call Insights",
     "Flexible Workflows",
-    "Easy Team Escalation",
+    "Requests for Team Review",
     "Peak-Time Ready",
     "Consistent Brand Experience",
   ];
@@ -227,7 +227,7 @@ export default function RetailEcommerceIndustryPage() {
   const howItWorks = [
     {
       title: "Answer",
-      description: "The AI picks up instantly and gives the customer a professional, conversational first response.",
+      description: "The AI handles configured incoming calls within your account and provider limits.",
     },
     {
       title: "Understand",
@@ -279,7 +279,7 @@ export default function RetailEcommerceIndustryPage() {
     },
     {
       title: "Multi-Location Retailers",
-      description: "Route customers to the right location, team, or department based on their needs.",
+      description: "Collect the requested location or department as part of a customer request for review.",
     },
     {
       title: "High-Volume Retailers",
@@ -320,7 +320,7 @@ export default function RetailEcommerceIndustryPage() {
     {
       question: "Can AI transfer customers to human agents?",
       answer:
-        "Yes. When a conversation requires human expertise, the AI can route the customer to the appropriate team member with relevant conversation context.",
+        "Live human transfer is not currently available. The agent can collect a request for your team to review; this does not arrange a callback.",
     },
     {
       question: "Does AI work after business hours?",
@@ -375,8 +375,7 @@ export default function RetailEcommerceIndustryPage() {
           </p>
           <p className={bodyClassName}>
             Missed calls and slow responses can mean frustrated customers, abandoned purchases, and lost loyalty. Talk-Lee
-            AI keeps your business available 24/7, handling routine conversations instantly and bringing your team in when
-            human support matters.
+            AI can handle configured routine enquiries and collect requests for your team to review.
           </p>
           <ul className={listClassName}>
             {instantSupportCapabilities.map((item) => (
@@ -414,8 +413,8 @@ export default function RetailEcommerceIndustryPage() {
           <h2 className={`mt-3 ${headingClassName}`}>Respond While They&rsquo;re Ready to Buy</h2>
           <p className={bodyClassName}>
             Customers often reach out when they&rsquo;re already considering a purchase. A slow response can give them a
-            reason to leave and shop elsewhere. Talk-Lee AI responds instantly, answers questions, and keeps the buying
-            journey moving.
+            reason to leave and shop elsewhere. Talk-Lee AI can use approved information to answer routine questions
+            and collect requests for review.
           </p>
           <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             {readyToBuy.map((item) => (
@@ -493,7 +492,7 @@ export default function RetailEcommerceIndustryPage() {
         </section>
 
         <section className="mt-14">
-          <p className={eyebrowClassName}>Never Out of Reach</p>
+          <p className={eyebrowClassName}>Configured Calling Hours</p>
           <h2 className={`mt-3 ${headingClassName}`}>Keep Serving Customers Around the Clock</h2>
           <p className={bodyClassName}>
             Customers shop and seek support at all hours. An after-hours question shouldn&rsquo;t automatically become a
@@ -561,8 +560,7 @@ export default function RetailEcommerceIndustryPage() {
           <p className={eyebrowClassName}>How It Works</p>
           <h2 className={`mt-3 ${headingClassName}`}>From Incoming Call to Customer Action</h2>
           <p className={bodyClassName}>
-            Talk-Lee AI turns a customer call into a structured conversation that can lead to an answer, action, or human
-            handoff.
+            Talk-Lee AI uses approved answers and enabled actions, and captures requests for your team to review.
           </p>
           <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
             {howItWorks.map((item) => (

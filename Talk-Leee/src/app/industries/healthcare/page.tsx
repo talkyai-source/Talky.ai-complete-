@@ -6,9 +6,9 @@ import { Button } from "@/components/ui/button";
 import Image from "next/image";
 
 export const metadata: Metadata = {
-  title: "Healthcare Call Routing AI | Patient Call Automation",
+  title: "Healthcare Call Intake | Talk-Lee AI",
   description:
-    "Want to stop missing patient calls? Get Healthcare Call Routing AI for scheduling, billing, reminders & 24/7 support. Book a demo today!",
+    "Explore AI call intake for routine administrative enquiries. Review the workflow, data handling and service requirements before use.",
 };
 
 export default function HealthcareIndustryPage() {
@@ -35,9 +35,6 @@ export default function HealthcareIndustryPage() {
   const primaryButtonClassName = `${buttonSizeClassName} bg-blue-600 hover:bg-blue-700 text-white`;
   const outlineButtonClassName = `${buttonSizeClassName} bg-blue-950 hover:bg-blue-950 text-white hover:text-white border-blue-950 hover:border-blue-950 dark:bg-blue-900 dark:hover:bg-blue-900 dark:text-white dark:hover:text-white dark:border-blue-900 dark:hover:border-blue-900`;
   const centeredCtaClassName = "mt-10 flex justify-center";
-  const imageFrameClassName =
-    "group w-full overflow-hidden rounded-3xl border border-border/70 shadow-sm transition-[transform,box-shadow,filter] duration-200 ease-out hover:-translate-y-0.5 hover:shadow-md hover:brightness-[1.02]";
-  const imageClassName = "object-cover transition-transform duration-300 ease-out group-hover:scale-[1.02]";
 
   const callPreview = [
     {
@@ -46,7 +43,7 @@ export default function HealthcareIndustryPage() {
     },
     {
       speaker: "Talk-Lee AI",
-      line: "Of course. I can move your appointment right now — then I’ll connect you with billing for your question. What day works better for you?",
+      line: "I can note your request for the practice to review. I cannot transfer this call or confirm an appointment change. What day would you prefer?",
     },
     {
       speaker: "Patient",
@@ -54,47 +51,47 @@ export default function HealthcareIndustryPage() {
     },
     {
       speaker: "Talk-Lee AI",
-      line: "Done. You’re set for Thursday at 2:30 PM. Connecting you to billing now.",
+      line: "You prefer Thursday afternoon. Is that the preference you would like included in your request?",
     },
   ];
 
   const heroStats = [
-    { value: "100%", label: "Lead Coverage" },
-    { value: "10 Sec", label: "Response Time" },
-    { value: "24/7", label: "Always Available" },
-    { value: "99.9%", label: "AI Accuracy" },
-    { value: "500+", label: "Businesses Served" },
+    { value: "Call", label: "Intake" },
+    { value: "Configured", label: "Hours" },
+    { value: "Request", label: "Capture" },
+    { value: "Call", label: "Records" },
+    { value: "Team", label: "Review" },
   ];
 
   const whyItMattersPoints = [
-    "Sounds like a real person, not a robot",
-    "Understands plain, everyday language",
-    "Routes patients without menus or guesswork",
-    "Escalates urgent calls to staff instantly",
-    "Keeps a clean record of every conversation",
+    "Choose a supported voice for your workflow",
+    "Use approved answers for routine enquiries",
+    "Collect administrative requests for review",
+    "Live human transfer is not currently available",
+    "Review available call records with your team",
   ];
 
   const whyItMattersStats = [
-    { value: "24/7", label: "Always answering" },
-    { value: "< 2 sec", label: "Average pickup time" },
-    { value: "0", label: "Missed calls" },
+    { value: "Call", label: "Settings" },
+    { value: "Request", label: "Details" },
+    { value: "Team", label: "Review" },
   ];
 
   const whatWeDo = [
     {
       title: "Smart Call Answering",
       description:
-        "Every call gets picked up in seconds. No hold music, no voicemail — just a real conversation from the first ring.",
+        "Configure an agent to answer routine enquiries using information approved by your practice.",
     },
     {
-      title: "Patient Call Routing Automation",
+      title: "Administrative Request Intake",
       description:
-        "Patients say what they need in plain words. We send them straight to billing, scheduling, nursing, or care — instantly.",
+        "Collect the reason for a call and the details your team needs to review it. Live human transfer is not currently available.",
     },
     {
       title: "Appointment Booking & Reminders",
       description:
-        "Patients book, confirm, or reschedule right on the call. Automatic reminders keep your schedule full and on time.",
+        "Use supported calendar connections for configured scheduling workflows, with confirmation before an action.",
     },
     {
       title: "Insurance & Billing Questions",
@@ -102,75 +99,75 @@ export default function HealthcareIndustryPage() {
         "Common questions get answered on the spot, so your staff stops repeating the same answers all day long.",
     },
     {
-      title: "Emergency Escalation",
+      title: "Service Limits",
       description:
-        "Urgent calls are flagged the moment they’re detected and transferred to a real person immediately. No delays.",
+        "This service does not provide emergency response or live transfer to clinical staff.",
     },
     {
       title: "After-Hours Coverage",
       description:
-        "Nights, weekends, holidays — your line stays open and answered, even when your office doors are closed.",
+        "Configure the hours and after-hours behavior for your approved call intake workflow.",
     },
   ];
 
   const payoff = [
     {
-      title: "Save Hours Every Day",
+      title: "Routine Enquiry Intake",
       description:
-        "Your staff stops drowning in repetitive calls and gets time back for patients standing right in front of them.",
+        "Use approved information to answer routine administrative questions and collect requests for your staff.",
     },
     {
-      title: "Cut Wait Times To Zero",
-      description: "No more holding. Patients get a real answer within seconds of dialing in, any time of day.",
+      title: "Configured Calling Hours",
+      description: "Set when your intake workflow is available and how calls outside those hours are handled.",
     },
     {
-      title: "Fewer No-Shows",
+      title: "Appointment Workflows",
       description:
-        "Automatic reminders and easy rescheduling keep patients on your calendar instead of falling off it.",
+        "Review supported calendar and reminder options before enabling them for your practice.",
     },
     {
-      title: "Scale Without Hiring",
+      title: "Call Limits",
       description:
-        "Handle ten calls or ten thousand with the same speed and quality — no extra payroll required.",
+        "Review the call volume, account limits and provider configuration for your workflow.",
     },
     {
-      title: "Patient Data Stays Protected",
-      description: "Every call is handled with strict privacy and security standards built in from day one.",
+      title: "Data Handling Review",
+      description: "Review access, consent, recording and retention settings before sharing patient information.",
     },
     {
-      title: "Happier Patients",
+      title: "Voice Selection",
       description:
-        "A calm, clear voice on every call builds trust instead of frustration — even on your busiest day.",
+        "Preview a supported voice and test it against the routine enquiries you intend to handle.",
     },
   ];
 
   const whyChoose = [
     {
-      title: "It Sounds Genuinely Human",
+      title: "Configurable Voice",
       description:
-        "No robotic tone, no awkward pauses. Patients relax into the conversation instead of fighting through a script.",
+        "Choose a supported voice and review how it handles your approved administrative workflow.",
     },
     {
-      title: "It’s Secure By Design",
+      title: "Access and Recording Controls",
       description:
-        "Patient information is protected with strict data handling standards on every single call, no exceptions.",
+        "Review permissions, consent and recording settings alongside the requirements for your intended use.",
     },
     {
-      title: "It Never Goes Down",
-      description: "No dropped calls, no downtime, no excuses. Your line is covered even during your busiest hours.",
+      title: "Visible Call State",
+      description: "Review call outcomes and configuration to identify requests that need attention.",
     },
     {
-      title: "It’s Live In Days, Not Months",
+      title: "Setup Review",
       description:
-        "No tech team needed. We handle setup so your line is answered by Talk-Lee AI faster than you’d expect.",
+        "Confirm your phone configuration, approved knowledge and data requirements before starting calls.",
     },
   ];
 
   const howItWorks = [
     {
-      title: "Instant Call Pickup",
+      title: "Configured Call Intake",
       description:
-        "Every call is answered within seconds, ensuring patients receive immediate assistance without waiting or reaching voicemail.",
+        "Calls follow your configured routing, hours and service limits.",
     },
     {
       title: "Intelligent Request Recognition",
@@ -178,25 +175,25 @@ export default function HealthcareIndustryPage() {
         "Using natural language understanding, Talk-Lee AI identifies why the patient is calling — whether it’s scheduling, billing, prescription refills, or general support.",
     },
     {
-      title: "Smart Action & Routing",
+      title: "Request Review",
       description:
-        "AI healthcare voice assistants complete the requested task by booking appointments, answering routine questions, routing callers to the appropriate department, or escalating urgent cases to staff in real time.",
+        "Review captured requests and use only the actions enabled for your workflow. Live human transfer is not currently available.",
     },
   ];
 
   const trustBadges = [
-    "HIPAA-Ready",
-    "Data Encrypted",
-    "Privacy First",
-    "No Hidden Fees",
-    "24/7 Uptime",
-    "BAA Available",
+    "Access Controls",
+    "Consent Settings",
+    "Recording Settings",
+    "Workflow Review",
+    "Configured Hours",
+    "Requirements Review",
   ];
 
   const capabilities = [
     {
-      title: "24/7 AI Call Answering",
-      description: "Ensure every customer call is answered, day or night, without delays.",
+      title: "Configured Call Answering",
+      description: "Set calling hours and review the service limits for your intake workflow.",
     },
     {
       title: "Patient Intent Recognition",
@@ -217,7 +214,7 @@ export default function HealthcareIndustryPage() {
       name: "Starter",
       price: "Free / 14-day trial",
       blurb: "For solo practices testing the waters.",
-      features: ["Up to 1 phone line", "Call answering & routing", "Appointment booking", "Email support"],
+      features: ["Up to 1 phone line", "Call intake settings", "Appointment booking", "Email support"],
       ctaLabel: "Start Free",
       ctaHref: "/auth/register",
       ctaVariant: "primary" as const,
@@ -227,8 +224,8 @@ export default function HealthcareIndustryPage() {
       price: "patients / per month",
       blurb: "For clinics and multi-provider offices.",
       features: [
-        "Unlimited phone lines",
-        "Emergency escalation",
+        "Phone configuration review",
+        "Administrative request intake",
         "Billing & insurance Q&A",
         "Priority technical support",
       ],
@@ -241,7 +238,7 @@ export default function HealthcareIndustryPage() {
       price: "Let’s Talk",
       blurb: "For hospital networks and large groups.",
       features: [
-        "Unlimited AI conversations",
+        "Configured calling limits",
         "Patient AI workflows",
         "CRM & calendar integration",
         "Dedicated success manager",
@@ -256,17 +253,17 @@ export default function HealthcareIndustryPage() {
     {
       question: "What is Talk-Lee AI, exactly?",
       answer:
-        "It’s an AI virtual receptionist healthcare that answers calls, routes patients, books appointments, and handles common questions — all without a human needing to pick up the phone first.",
+        "Talk-Lee AI supports configured call intake, approved answers to routine questions and enabled scheduling actions. Live human transfer is not currently available.",
     },
     {
       question: "Is my patients’ data safe?",
       answer:
-        "Yes. Every call is handled with strict privacy and data protection standards, so sensitive patient information stays secure from the first ring to the last. Our agents support HIPAA-compliant workflows, and we sign a Business Associate Agreement (BAA) with every healthcare practice we work with.",
+        "Healthcare use requires review of the intended workflow, data handling and required agreements. Contact us to discuss those requirements before sharing patient information.",
     },
     {
       question: "Can it handle emergency or urgent calls?",
       answer:
-        "Yes. Urgent calls are flagged instantly and transferred straight to your staff, so nothing critical waits in a queue.",
+        "No. This service does not provide emergency response or live transfer to clinical staff.",
     },
     {
       question: "Do I need a tech team to set this up?",
@@ -286,7 +283,7 @@ export default function HealthcareIndustryPage() {
     {
       question: "How fast can I actually get started?",
       answer:
-        "Most practices are live within a few days of signing up. Create your free account now and see it answer a real call today.",
+        "Setup depends on your phone configuration, approved workflow and data requirements. Review those prerequisites before starting calls.",
     },
   ];
 
@@ -296,19 +293,19 @@ export default function HealthcareIndustryPage() {
       <div className="mx-auto w-full max-w-6xl px-4 md:px-6 lg:px-8 py-16 md:py-20">
         <header className="text-center">
           <h1 className="text-3xl sm:text-4xl md:text-5xl font-bold tracking-tight text-primary dark:text-foreground">
-            Healthcare Call Routing AI
+            Healthcare Call Intake
           </h1>
           <p className="mt-4 text-base sm:text-lg md:text-xl text-gray-700 dark:text-muted-foreground font-semibold">
-            Every patient&rsquo;s call, answered instantly. Every single time.
+            Configure intake for routine administrative enquiries.
           </p>
           <p className="mt-6 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed max-w-4xl mx-auto">
-            Talk-Lee AI is the healthcare call routing AI that picks up, listens, and sends every caller to the right place
-            &mdash; no hold music, no missed calls, no burned-out front desk.
+            Use approved information to answer routine questions and collect requests for your practice to review.
+            Confirm the workflow and data handling requirements before use.
           </p>
           <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-4">
             <Link href="/auth/register">
               <Button size="lg" className={primaryButtonClassName}>
-                Start Free &mdash; 2 Minutes
+                Explore Setup
               </Button>
             </Link>
             <Link href="/#contact">
@@ -318,14 +315,15 @@ export default function HealthcareIndustryPage() {
             </Link>
           </div>
           <p className="mt-6 text-sm sm:text-base font-medium text-gray-700 dark:text-muted-foreground">
-            No credit card needed. Live on your phone line within days.
+            Phone configuration and workflow review are required before calling.
           </p>
         </header>
 
         <section className="mt-14">
           <div className="flex flex-col lg:flex-row items-center justify-center gap-6 lg:gap-3">
             <div className={`${accentCardClassName} w-full max-w-xl`} style={accentCardStyle}>
-              <h2 className={cardTitleClassName}>Live Call Preview</h2>
+              <h2 className={cardTitleClassName}>Illustrative Request Intake</h2>
+              <p className={cardBodyClassName}>Example dialogue, not a live call or a confirmed appointment.</p>
               <div className="mt-4 space-y-4">
                 {callPreview.map((turn, index) => (
                   <p
@@ -336,19 +334,6 @@ export default function HealthcareIndustryPage() {
                     &ldquo;{turn.line}&rdquo;
                   </p>
                 ))}
-              </div>
-            </div>
-            <div className={`${imageFrameClassName} w-full max-w-sm shrink-0`}>
-              <div className="relative aspect-[1193/1318] w-full">
-                <Image
-                  src="/images/industries/healthcare/live-call-preview.png"
-                  alt="Live call preview: a patient asks to reschedule an appointment and Talk-Lee AI books Thursday at 2:30 PM, then connects them to billing."
-                  fill
-                  sizes="(max-width: 1024px) 100vw, 384px"
-                  priority
-                  quality={100}
-                  className={imageClassName}
-                />
               </div>
             </div>
           </div>
@@ -379,8 +364,8 @@ export default function HealthcareIndustryPage() {
             chaos, a patient hangs up and calls someone else.
           </p>
           <p className={bodyClassName}>
-            Talk-Lee AI steps in before that happens. It answers every call the moment it rings, understands what the patient
-            actually needs, and routes them correctly &mdash; day or night, weekday or holiday.
+            Talk-Lee AI can collect routine administrative enquiries within your configured calling hours and limits.
+            Your team can review the captured details and decide the appropriate next step.
           </p>
           <ul className={listClassName}>
             {whyItMattersPoints.map((point) => (
@@ -403,7 +388,7 @@ export default function HealthcareIndustryPage() {
           <p className={eyebrowClassName}>What We Do</p>
           <h2 className={`mt-3 ${headingClassName}`}>AI Hospital Call Management, Built Right</h2>
           <p className={bodyClassName}>
-            AI voice agents for healthcare. Every call type is covered. Nothing falls through the cracks.
+            Configure approved administrative workflows and review the resulting requests with your team.
           </p>
           <div className="mt-8 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {whatWeDo.map((item) => (
@@ -466,8 +451,7 @@ export default function HealthcareIndustryPage() {
         <section className="mt-14">
           <h2 className={headingClassName}>How It Works</h2>
           <p className={bodyClassName}>
-            From the first ring to the final resolution, Talk-Lee AI manages every call with speed, accuracy, and a natural
-            conversational experience.
+            Calls follow the workflow you configure, using approved knowledge and enabled actions.
           </p>
           <div className="mt-8 grid grid-cols-1 md:grid-cols-3 gap-4">
             {howItWorks.map((item) => (
@@ -483,9 +467,8 @@ export default function HealthcareIndustryPage() {
           <p className={eyebrowClassName}>Built On Trust</p>
           <h2 className={`mt-3 ${headingClassName}`}>Healthcare data is sensitive, and we treat it that way.</h2>
           <p className={bodyClassName}>
-            Every call your patients make is handled under strict privacy and protection standards &mdash; clearly,
-            transparently, no fine print. Talk-Lee AI is built to support HIPAA-compliant workflows, and we sign Business
-            Associate Agreements (BAAs) with every healthcare practice we work with.
+            Review the intended workflow, data handling and required agreements before sharing patient information.
+            Access, consent and recording settings do not by themselves establish suitability for healthcare use.
           </p>
           <div className="mt-8 flex flex-wrap items-center justify-center gap-2 sm:gap-3">
             {trustBadges.map((badge) => (
@@ -498,25 +481,10 @@ export default function HealthcareIndustryPage() {
 
         <section className="mt-14">
           <p className={eyebrowClassName}>Healthcare AI Capabilities</p>
-          <h2 className={`mt-3 ${headingClassName}`}>Never Miss Another Patient Call</h2>
+          <h2 className={`mt-3 ${headingClassName}`}>Review Your Call Intake Workflow</h2>
           <p className={bodyClassName}>
-            Deliver exceptional patients experiences with an AI voice assistant that answers calls instantly, qualifies leads,
-            schedules appointments, and provides support around the clock.
+            Configure routine enquiry handling, request capture and supported scheduling actions for your practice.
           </p>
-          <div className="mt-8 flex justify-center">
-            <div className={imageFrameClassName}>
-              <div className="relative aspect-[1536/1024] w-full">
-                <Image
-                  src="/images/industries/healthcare/smarter-conversations-better-patient-care.png"
-                  alt="Smarter conversations, better patient care: AI voice agents handling 24/7 patient support, smart appointment booking, automated reminders and HIPAA-compliant calls, alongside the Enterprise Healthcare Plan."
-                  fill
-                  sizes="(max-width: 768px) 100vw, (max-width: 1024px) 900px, 1152px"
-                  quality={100}
-                  className={imageClassName}
-                />
-              </div>
-            </div>
-          </div>
           <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             {capabilities.map((item) => (
               <div key={item.title} className={accentCardClassName} style={accentCardStyle}>
@@ -528,7 +496,7 @@ export default function HealthcareIndustryPage() {
           <div className={centeredCtaClassName}>
             <Link href="/#contact">
               <Button size="lg" variant="outline" className={outlineButtonClassName}>
-                Watch Live Demo
+                Discuss Your Workflow
               </Button>
             </Link>
           </div>
@@ -538,7 +506,7 @@ export default function HealthcareIndustryPage() {
           <h2 className={headingClassName}>Flexible Plans for Every Healthcare Practice</h2>
           <p className={bodyClassName}>Designed for businesses that need secure, scalable, intelligent communication</p>
           <p className={bodyClassName}>
-            Pick the plan that matches your call volume. Every tier includes HIPAA-ready data handling.
+            Review plan limits and data requirements before selecting a workflow for your practice.
           </p>
           <div className="mt-8 grid grid-cols-1 md:grid-cols-3 gap-4">
             {plans.map((plan) => (
