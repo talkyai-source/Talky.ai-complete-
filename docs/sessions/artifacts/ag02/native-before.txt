@@ -1,0 +1,52 @@
+FFFFFFFF                                                                 [100%]
+================================== FAILURES ===================================
+_________ test_empty_query_cannot_be_reported_as_successful_knowledge _________
+tests\unit\test_realtime_knowledge_evidence.py:47: in test_empty_query_cannot_be_reported_as_successful_knowledge
+    assert subject._live_state.last_tool_success is False
+E   AssertionError: assert True is False
+E    +  where True = LiveConversationState(identity_introduced=None, decision_maker=<DecisionMakerStatus.UNKNOWN: 'unknown'>, current_provi...kup', last_tool_success=True, last_tool_code='ok', sales_stage=<SalesStage.OPENING: 'opening'>, last_user_turn_id=None).last_tool_success
+E    +    where LiveConversationState(identity_introduced=None, decision_maker=<DecisionMakerStatus.UNKNOWN: 'unknown'>, current_provi...kup', last_tool_success=True, last_tool_code='ok', sales_stage=<SalesStage.OPENING: 'opening'>, last_user_turn_id=None) = <app.realtime.bridge.RealtimeBridge object at 0x00000268178DB440>._live_state
+____ test_lookup_failure_status_and_no_unsupported_promise[None-no_match] _____
+tests\unit\test_realtime_knowledge_evidence.py:61: in test_lookup_failure_status_and_no_unsupported_promise
+    assert result["status"] == expected
+E   TypeError: string indices must be integers, not 'str'
+__ test_lookup_failure_status_and_no_unsupported_promise[fault1-unavailable] __
+tests\unit\test_realtime_knowledge_evidence.py:61: in test_lookup_failure_status_and_no_unsupported_promise
+    assert result["status"] == expected
+E   TypeError: string indices must be integers, not 'str'
+__ test_lookup_failure_status_and_no_unsupported_promise[fault2-unavailable] __
+tests\unit\test_realtime_knowledge_evidence.py:61: in test_lookup_failure_status_and_no_unsupported_promise
+    assert result["status"] == expected
+E   TypeError: string indices must be integers, not 'str'
+------------------------------ Captured log call ------------------------------
+WARNING  app.realtime.bridge:bridge.py:1237 realtime_bridge KB lookup TIMEOUT >500ms call=ag02-synthetic � answering without facts
+_________ test_latest_revision_replaces_prior_financial_authorization _________
+tests\unit\test_realtime_knowledge_evidence.py:77: in test_latest_revision_replaces_prior_financial_authorization
+    assert not await offer_response(subject, "The Basic plan costs �20 per month.")
+E   assert not True
+_________ test_miss_or_weak_lookup_revokes_prior_guard_facts[later0] __________
+tests\unit\test_realtime_knowledge_evidence.py:91: in test_miss_or_weak_lookup_revokes_prior_guard_facts
+    assert subject._verified_knowledge == []
+E   AssertionError: assert ['- Basic pla...0 per month.'] == []
+E     Left contains one more item: '- Basic plan: The Basic plan costs �20 per month.'
+E     Use -v to get more diff
+_________ test_miss_or_weak_lookup_revokes_prior_guard_facts[later1] __________
+tests\unit\test_realtime_knowledge_evidence.py:91: in test_miss_or_weak_lookup_revokes_prior_guard_facts
+    assert subject._verified_knowledge == []
+E   AssertionError: assert ['- Basic pla...0 per month.'] == []
+E     Left contains one more item: '- Basic plan: The Basic plan costs �20 per month.'
+E     Use -v to get more diff
+_____________ test_delayed_old_lookup_cannot_restore_older_facts ______________
+tests\unit\test_realtime_knowledge_evidence.py:113: in test_delayed_old_lookup_cannot_restore_older_facts
+    assert latest["status"] == "matched"
+E   TypeError: string indices must be integers, not 'str'
+=========================== short test summary info ===========================
+FAILED tests/unit/test_realtime_knowledge_evidence.py::test_empty_query_cannot_be_reported_as_successful_knowledge
+FAILED tests/unit/test_realtime_knowledge_evidence.py::test_lookup_failure_status_and_no_unsupported_promise[None-no_match]
+FAILED tests/unit/test_realtime_knowledge_evidence.py::test_lookup_failure_status_and_no_unsupported_promise[fault1-unavailable]
+FAILED tests/unit/test_realtime_knowledge_evidence.py::test_lookup_failure_status_and_no_unsupported_promise[fault2-unavailable]
+FAILED tests/unit/test_realtime_knowledge_evidence.py::test_latest_revision_replaces_prior_financial_authorization
+FAILED tests/unit/test_realtime_knowledge_evidence.py::test_miss_or_weak_lookup_revokes_prior_guard_facts[later0]
+FAILED tests/unit/test_realtime_knowledge_evidence.py::test_miss_or_weak_lookup_revokes_prior_guard_facts[later1]
+FAILED tests/unit/test_realtime_knowledge_evidence.py::test_delayed_old_lookup_cannot_restore_older_facts
+8 failed in 2.02s

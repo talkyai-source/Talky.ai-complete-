@@ -31,7 +31,8 @@
     "cp03_implementation_commit": "9eb2ac8d49442619dbdd26235c67de264a2e8e79",
     "cp04_implementation_commit": "4ec7f51eb05ed00b4ffea68fd77c2ba5649c3c5d",
     "cp07_implementation_commit": "40232996372305b8ab100bc8fc57a3957296f4e4",
-    "ag01_implementation_commit": "4f47123f18af3cb01f2330138c635c76aae7182c"
+    "ag01_implementation_commit": "4f47123f18af3cb01f2330138c635c76aae7182c",
+    "ag02_implementation_commit": "69d09fe575831c42a14b28c0a7417ca1b388c492"
   },
   "status_rules": {
     "execution": [
@@ -383,9 +384,9 @@
       "id": "AG02",
       "title": "Make knowledge uncertainty honest and verify the existing retrieval chain",
       "owner_role": "Knowledge engineering lead",
-      "assigned_person": null,
-      "reviewer": null,
-      "status": "planned",
+      "assigned_person": "Codex implementation team",
+      "reviewer": "Independent shared/source/native reviews; content-owner and live profile acceptance pending",
+      "status": "in_progress",
       "start_after_milestone": "RG01 baseline recorded",
       "dependencies_and_tests": "See package text; coordination and final acceptance dependencies are distinct from entry milestones.",
       "finding_ids": [
@@ -398,18 +399,22 @@
         "A07"
       ],
       "plan_anchor": "ag02-make-knowledge-uncertainty-honest-and-verify-the-existing-retrieval-chain",
-      "evidence": [],
+      "evidence": [
+        "docs/sessions/2026-10-05-ag02-implementation.md",
+        "docs/sessions/artifacts/ag02/verification.json"
+      ],
       "blocker": null,
-      "next_action": "Assign owner and confirm the baseline reproduction or evidence gap.",
-      "target_date": null
+      "next_action": "Meet the unchanged corpus targets on approved campaign knowledge and run reviewed provider/telephone acceptance; continue AG03 deterministic relationship memory work.",
+      "target_date": null,
+      "execution_note": "Local candidate 69d09fe575831c42a14b28c0a7417ca1b388c492: 791 combined backend and 9 PostgreSQL tests passed. Synthetic 60-question quality gate failed (pinned 93.33/71.11%, SQL 88.89/68.89%, targets 90/85%). No provider calls, push or deployment; no package closure."
     },
     {
       "id": "AG03",
       "title": "Preserve explicit Realtime relationship corrections beyond 12 messages",
       "owner_role": "Realtime engineering lead",
-      "assigned_person": null,
-      "reviewer": null,
-      "status": "planned",
+      "assigned_person": "Codex implementation team",
+      "reviewer": "Independent ordering and assertion review in progress",
+      "status": "in_progress",
       "start_after_milestone": "RG01 baseline recorded",
       "dependencies_and_tests": "See package text; coordination and final acceptance dependencies are distinct from entry milestones.",
       "finding_ids": [
@@ -424,7 +429,7 @@
       "plan_anchor": "ag03-preserve-explicit-realtime-relationship-corrections-beyond-12-messages",
       "evidence": [],
       "blocker": null,
-      "next_action": "Assign owner and confirm the baseline reproduction or evidence gap.",
+      "next_action": "Reproduce long-call correction loss and implement bounded typed relationship provenance with stable caller-turn ordering; no completion claimed.",
       "target_date": null
     },
     {
@@ -1057,7 +1062,7 @@
       "work_packages": [
         "AG02"
       ],
-      "status": "planned",
+      "status": "in_progress",
       "evidence": [],
       "closure_disposition": null
     },
@@ -1068,7 +1073,7 @@
       "work_packages": [
         "AG03"
       ],
-      "status": "planned",
+      "status": "in_progress",
       "evidence": [],
       "closure_disposition": null
     },
@@ -1776,7 +1781,7 @@
         "AG02",
         "AG04"
       ],
-      "execution_status": "planned",
+      "execution_status": "in_progress",
       "actual_owner": null,
       "evidence_of_completion": [],
       "closure_disposition": null,

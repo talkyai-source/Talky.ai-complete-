@@ -1,0 +1,79 @@
+{
+  "as_of": "2026-10-05",
+  "baseline_commit": "717fb14faf70f365e023f4fd630cadb1e86775b8",
+  "scope": "AG02 shared coverage, source passages and grounding boundary; synthetic acceptance corpus",
+  "caller_inventory_before_compatibility_change": [
+    {
+      "caller": "backend/app/domain/services/voice_pipeline/turn_streamer.py:324",
+      "retrievers": [
+        "retrieve_knowledge",
+        "retrieve_pinned_knowledge"
+      ],
+      "old_missing_coverage_behavior": "trusted; could promote mixed weak/unknown set to matched"
+    },
+    {
+      "caller": "backend/app/domain/services/voice_pipeline/knowledge_tool.py:232",
+      "retrievers": [
+        "retrieve_knowledge",
+        "retrieve_pinned_knowledge"
+      ],
+      "old_missing_coverage_behavior": "trusted"
+    },
+    {
+      "caller": "backend/app/realtime/bridge.py:1251",
+      "retrievers": [
+        "retrieve_knowledge",
+        "retrieve_pinned_knowledge"
+      ],
+      "old_missing_coverage_behavior": "trusted"
+    }
+  ],
+  "coverage_inventory_conclusion": "No alternate production legacy retriever found. SQL returns coverage (NULL possible for no meaningful query lexemes); pinned path can omit coverage if meaningful terms are absent. Direct fixture/render callers exist. Missing coverage is now uncertainty, not permission to quote facts.",
+  "confirmed_reproductions": [
+    "Missing/NaN/infinite/bool/out-of-range coverage could grant matched status; malformed numeric text raised instead of providing cautious evidence.",
+    "One strong hit promoted a loosely related hit and its price into the same grounding list.",
+    "Source-less generated summaries/voice answers could become official factual evidence; injected enrichment could also discard an otherwise legitimate source.",
+    "A price and its next-sentence This price requires ... contract condition were separable during trimming; a short qualifier could be selected alone when its antecedent was oversized."
+  ],
+  "repairs": [
+    "Finite0..1 coverage only; missing/invalid coverage stays weak. Matched results contain only sufficiently covered source passages.",
+    "Shared factual evidence comes only from node.content, never generated enrichment; enrichment can still assist retrieval in its existing role.",
+    "Backward-referring sentences are kept with their preceding fact. If the group cannot fit, it is withheld; budgets are unchanged.",
+    "Passages retain exact node version plus source_id/source_version; UUID source identities serialize safely for native tool results."
+  ],
+  "before": {
+    "command": "python -m pytest -q tests/unit/test_kb_evidence_contract.py",
+    "failed": 15,
+    "passed": 2
+  },
+  "after": {
+    "command": "python -m pytest -q tests/unit/test_kb_evidence_contract.py tests/unit/test_ag02_gold_matrix.py tests/unit/test_agent_knowledge_repairs.py tests/unit/test_knowledge_relevance.py tests/unit/test_knowledge_tool.py tests/unit/test_kb_source_first_all_paths.py",
+    "passed": 78,
+    "failed": 0
+  },
+  "lint": {
+    "command": "python -m ruff check app/domain/services/voice_pipeline/kb_budget.py app/services/scripts/knowledge/passages.py tests/unit/test_kb_evidence_contract.py tests/unit/test_ag02_gold_matrix.py scripts/evaluate_ag02_knowledge.py tests/unit/test_knowledge_relevance.py --select E9,F63,F7,F82",
+    "result": "passed"
+  },
+  "matrix": "backend/tests/fixtures/knowledge/ag02_gold.json",
+  "retrieval_evidence": "docs/sessions/artifacts/ag02/gold-pinned-current.json",
+  "remaining_acceptance": [
+    "The raw-source, unenriched synthetic corpus misses the predeclared85% sufficient-passage target:32/45=71.11%, despite42/45=93.33% top3source recall. Targets were not lowered.",
+    "The production enrichment pipeline optionally supplies keyword synonyms and example questions. This run does not measure successful model enrichment, and no failed query aliases were retrofitted.",
+    "SQL tenant/source selection and version/edit visibility require the separate actual PostgreSQL harness.",
+    "No content owner approved these synthetic answers, no actual provider generated answers, and no caller heard audio. Qualitative claims and semantic cross-product use need human/provider evaluation; numeric guards are not universal truth verification."
+  ],
+  "no_external_effects": true,
+  "standalone_gate": {
+    "command": "python -m scripts.evaluate_ag02_knowledge --output ../docs/sessions/artifacts/ag02/gold-pinned-current.json",
+    "exit_code": 1,
+    "report_written_before_exit": true,
+    "result": "failed predeclared evidence-sufficiency target; metrics and thresholds unchanged",
+    "regression_command": "python -m pytest -q tests/unit/test_ag02_gold_matrix.py",
+    "regression_result": {
+      "passed": 6,
+      "failed": 0
+    },
+    "lint": "passed E9,F63,F7,F82"
+  }
+}

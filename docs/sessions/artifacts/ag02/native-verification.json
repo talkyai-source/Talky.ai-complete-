@@ -1,0 +1,63 @@
+{
+  "scope": "AG02 native Realtime deterministic knowledge boundary; synthetic storage, model events and websocket capture; no provider calls or customer data",
+  "candidate_base_revision": "717fb14faf70f365e023f4fd630cadb1e86775b8",
+  "includes_uncommitted_changes": true,
+  "owned_files": [
+    "backend/app/realtime/bridge.py",
+    "backend/app/realtime/prompts.py",
+    "backend/tests/unit/test_realtime_knowledge_evidence.py",
+    "backend/tests/unit/test_realtime_quality_pass.py",
+    "backend/tests/unit/test_live_structured_state.py",
+    "backend/tests/unit/test_voice_action_contract.py",
+    "backend/tests/unit/test_true_inbound_prompt_separation.py",
+    "backend/tests/security/test_kb_tool_injection.py"
+  ],
+  "owned_source_and_tests_sha256": "eecb7e853aaed45975d545d58464aaa631478025a38dd49e69f436b15e17a57a",
+  "prompt_version": "realtime@6",
+  "checks": [
+    {
+      "name": "native/provider/action/knowledge/redaction regression",
+      "result": "passed",
+      "passed": 459,
+      "warnings": 355,
+      "log": "native-regression.txt",
+      "command": "python -m pytest tests/unit/test_realtime_*.py tests/unit/test_xai_realtime.py tests/unit/test_voice_preview_realtime.py tests/unit/test_live_structured_state.py tests/unit/test_voice_action_contract.py tests/unit/test_true_inbound_prompt_separation.py tests/unit/test_call_experience_end_scope.py tests/security/test_kb_tool_injection.py tests/unit/test_knowledge_tool.py tests/security/test_log_pii_redaction.py -q --tb=short",
+      "note": "PowerShell expands test_realtime_*.py to absolute paths before pytest."
+    },
+    {
+      "name": "owned file Ruff F gate",
+      "result": "passed",
+      "log": "native-lint.txt",
+      "command": "python -m ruff check --select F --ignore F401,F841 app/realtime/bridge.py app/realtime/prompts.py tests/unit/test_realtime_knowledge_evidence.py tests/unit/test_realtime_quality_pass.py tests/unit/test_live_structured_state.py tests/unit/test_voice_action_contract.py tests/unit/test_true_inbound_prompt_separation.py tests/security/test_kb_tool_injection.py"
+    },
+    {
+      "name": "initial boundary reproduction",
+      "result": "failed before repair as intended",
+      "failed": 8,
+      "log": "native-before.txt"
+    },
+    {
+      "name": "post-playback stale result reproduction",
+      "result": "failed before repair as intended",
+      "failed": 1,
+      "log": "native-delayed-send-before.txt"
+    }
+  ],
+  "verified_boundaries": [
+    "Empty query/no match is not a successful knowledge tool result; timeout/backend error is unavailable.",
+    "Current lookup replaces factual grounding; miss, weak coverage, and unavailable revoke earlier facts.",
+    "Delayed old lookup and old result waiting for playback cannot return old facts as matched.",
+    "Only source-containing sufficiently covered non-poisoned passages authorize figures; amount conditions are retained.",
+    "Admission-pinned source revision is explicitly labeled and never replaced by a new storage lookup mid-call.",
+    "OpenAI and hidden opt-in xAI actual serializers preserve status, source identity and fenced data with fake websocket transport.",
+    "Retrieved instruction text cannot authorize an unavailable transfer tool.",
+    "Runtime evidence logging emits statuses/counts/source-reference digest without query/body content; exact digest survives redaction."
+  ],
+  "limitations": [
+    "Deterministic fake-model admission tests do not establish provider semantic accuracy or audible caller experience.",
+    "Existing injection detection and numeric/link guards cannot prove all qualitative claims or all prompt-injection resistance.",
+    "Only latest matched lookup grounds a response; facts from another lookup must be retrieved again. Admission snapshots intentionally remain pinned for the call.",
+    "Full AG02 approval remains dependent on the reviewed shared retrieval matrix, actual DB isolation/version acceptance and later AG04 provider/telephone profile qualification.",
+    "No migration, deployment, saved/default model change or live provider action was performed."
+  ]
+}
