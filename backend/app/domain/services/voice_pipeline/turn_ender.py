@@ -36,6 +36,7 @@ from app.domain.services.voice_pipeline.lead_slot_capture import (
 from app.domain.services.voice_pipeline.end_call import model_end_call_allowed
 from app.domain.services.end_session_action import (
     agent_left_a_question_open,
+    caller_signaled_end,
     contact_capture_open,
 )
 from app.domain.services.voice_pipeline.turn_helpers import (
@@ -256,11 +257,22 @@ class TurnEnder:
                 # short reprompt so rejection is never the silent path. Fail-soft:
                 # a reprompt-TTS failure must not mask the drop.
                 try:
-                    await self._p.synthesize_and_send_audio(
+                    reprompt = "Sorry, I didn't catch that — could you say that again?"
+                    interrupted = await self._p.synthesize_and_send_audio(
                         session,
-                        "Sorry, I didn't catch that — could you say that again?",
+                        reprompt,
                         websocket,
                     )
+                    if not interrupted and not getattr(session, "_tts_delivery_failed", False):
+                        from app.domain.models.conversation import Message as _Msg
+
+                        # Keep the actual submitted clarification in context,
+                        # without treating rejected recognition as caller facts
+                        # or promoting a TTS submission to proof of hearing.
+                        session.conversation_history.append(
+                            _Msg(role=MessageRole.ASSISTANT, content=reprompt)
+                        )
+                        session._speculative_history_len = None
                 except Exception:
                     pass
                 return
@@ -573,7 +585,7 @@ class TurnEnder:
 
         # Deterministic identity disposition (Case 1 fix): remove the LLM's
         # coin-flip for the unambiguous cases. A wrong DESTINATION (wrong
-        # business / residence) or DNC ends the call with a fixed line and no
+        # business / residence) or DNC without a continued request ends the call
         # LLM; a bare "wrong number" with no scope asks ONE clarifying question
         # (once). A wrong PERSON is left to the LLM's now-non-contradictory
         # pivot rule. The result is stashed for the reverse enforcement gate
@@ -621,28 +633,23 @@ class TurnEnder:
         # transition) live for the reverse enforcement gate below to act on.
         session._turn_disposition = disposition
 
-        if disposition in (IdentityDisposition.WRONG_BUSINESS, IdentityDisposition.DNC):
+        dnc_close = disposition == IdentityDisposition.DNC and caller_signaled_end(full_transcript)
+        if disposition == IdentityDisposition.DNC:
+            # Removing future calling permission does not necessarily end the
+            # current conversation. Preserve opt-out even if persistence fails;
+            # teardown retries it. The existing shutdown path persists a close.
+            session._caller_opted_out = True
+            if not dnc_close:
+                from app.domain.services.dialer.opt_out import purge_opt_out_before_farewell
+
+                await purge_opt_out_before_farewell(session)
+
+        if disposition == IdentityDisposition.WRONG_BUSINESS or dnc_close:
             end_line = disposition_end_line(disposition) or ""
             logger.info(
                 "identity_disposition_end call=%s disposition=%s transcript_chars=%d",
                 call_id[:12], disposition.value, len(full_transcript),
             )
-            if disposition == IdentityDisposition.DNC:
-                # Persist the opt-out (F-13 fix 2026-07-20 + user directive
-                # "always persist tenant-wide"): the deterministic DNC path
-                # SPOKE "I'll take you off the list" but never set this flag, so
-                # teardown's purge_lead_on_opt_out (DNC-list the number + cancel
-                # scheduled jobs + mark the lead) never ran — a promise the
-                # system didn't keep. Mirror turn_runner's LLM-JSON path exactly;
-                # the side effects run once, at hangup.
-                try:
-                    session._caller_opted_out = True
-                except Exception:
-                    pass
-                logger.info(
-                    "caller_opt_out_detected call_id=%s (deterministic DNC) — will purge at hangup",
-                    call_id[:12],
-                )
             # Record the exchange so the transcript/recording review shows WHY
             # the call ended (the deterministic path skips _run_turn's append).
             try:

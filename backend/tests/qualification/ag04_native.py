@@ -1,0 +1,350 @@
+"""Offline native qualification observations, not model or acoustic approval.
+
+The real provider event parsers, independent prompt composer and RealtimeBridge
+consume synthetic wire events. Socket, playback receipts and campaign sources
+are local fixtures. No connect(), credentials, database or delivery is used.
+"""
+from __future__ import annotations
+
+import asyncio
+import base64
+import hashlib
+import json
+from pathlib import Path
+from types import SimpleNamespace
+from uuid import uuid4
+
+from app.domain.services.transcript_service import TranscriptService
+from app.domain.services.voice_pipeline.action_tools import action_tool_system_addendum
+from app.realtime.bridge import RealtimeBridge
+from app.realtime.openai import OpenAIRealtimeSession, knowledge_lookup_tool
+from app.realtime.prompt_config import prepare_realtime_prompt
+from app.realtime.tools import realtime_voice_action_tools
+from app.realtime.xai import XAIRealtimeSession
+
+
+def _digest(value) -> str:
+    return hashlib.sha256(json.dumps(value, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+
+
+class FixtureSocket:
+    def __init__(self):
+        self.sent = []
+        self.closed = False
+
+    async def send(self, message):
+        self.sent.append(json.loads(message))
+
+    async def close(self):
+        self.closed = True
+
+
+class FixtureGateway:
+    """Synthetic acknowledgments explicitly cannot establish human hearing."""
+    playback_evidence = "transport_played"
+
+    def __init__(self, config):
+        self.config = config
+        self.submissions = []
+        self.receipts = []
+        self.controls = []
+        self.clears = 0
+        self.current = None
+        self.current_text = None
+        self.entered = asyncio.Event()
+        self.release = asyncio.Event()
+        self.queue = asyncio.Queue()
+        self.blocked = False
+
+    def set_realtime_output(self, *args):
+        pass
+
+    def get_audio_queue(self, call_id):
+        return self.queue
+
+    async def send_control_event(self, call_id, payload):
+        self.controls.append(payload)
+        if payload.get("type") == "llm_response":
+            self.current_text = payload.get("text")
+
+    async def begin_playback(self, call_id, utterance_id):
+        self.current = utterance_id
+
+    async def _block(self, phase):
+        if self.config.get("block") != phase or self.blocked:
+            return
+        self.blocked = True
+        self.entered.set()
+        try:
+            await self.release.wait()
+        except asyncio.CancelledError:
+            if not self.config.get("swallow_cancel"):
+                raise
+
+    async def send_audio(self, call_id, audio):
+        self.submissions.append({"utterance_id": self.current, "candidate_text": self.current_text,
+            "pcm_bytes": len(audio), "sha256": hashlib.sha256(audio).hexdigest()})
+        if len(self.submissions) == 1:
+            await self._block("send")
+
+    async def finish_playback(self, call_id, utterance_id):
+        await self._block("finish")
+        kind = self.config.get("receipt", "completed")
+        receipt = {"utterance_id": "expired-utterance" if kind == "stale" else utterance_id,
+            "status": "unknown" if kind == "unknown" else "completed",
+            "evidence": "unknown" if kind == "unknown" else "transport_played",
+            "played_ms": 0 if kind == "unknown" else sum(row["pcm_bytes"] for row in self.submissions
+                if row["utterance_id"] == utterance_id) // 16}
+        self.receipts.append(receipt)
+        return receipt
+
+    def playback_receipt(self, call_id, utterance_id):
+        return {"utterance_id": utterance_id, "status": "unknown", "evidence": "unknown", "played_ms": 0}
+
+    async def clear_output_buffer(self, call_id):
+        self.clears += 1
+
+
+class NativeReplay:
+    def __init__(self, scenario, provider_name, corpus):
+        self.scenario, self.provider_name, self.corpus = scenario, provider_name, corpus
+        self.profile = _profile(corpus, provider_name)
+        self.call_id = "ag04-synthetic-" + uuid4().hex
+        self.socket = FixtureSocket()
+        self.gateway = FixtureGateway(scenario.get("gateway", {}))
+        self.transcripts = TranscriptService()
+        # Missing business identities deliberately make external actions
+        # unavailable before any database access; all offered tools are real.
+        self.session = SimpleNamespace(_voice_action_capabilities={}, _voice_action_context_loaded=True,
+            _voice_action_pool=object(), call_id=self.call_id, captured_slots=None)
+        self.config = SimpleNamespace(direction="inbound", agent_config=SimpleNamespace(
+            agent_name="Ava", company_name="Northwind Systems"), realtime_prompt={
+                "persona": "assistant", "goal": "Answer the caller using verified information.",
+                "instructions": corpus["campaign_guidance"]}, realtime_opening_greeting="",
+            realtime_message_intake=False)
+        self.instructions = prepare_realtime_prompt(self.config,
+            capability_instructions=action_tool_system_addendum({"end_call"}))
+        self.tools = [knowledge_lookup_tool(), *realtime_voice_action_tools(self.session)]
+        if provider_name == "openai":
+            self.provider = OpenAIRealtimeSession(api_key="offline-unused", model=self.profile["model"], voice=self.profile["voice"],
+                instructions=self.instructions, tools=self.tools, call_id=self.call_id,
+                settings=self.profile["settings"])
+        elif provider_name == "xai":
+            self.provider = XAIRealtimeSession(api_key="offline-unused", model=self.profile["model"], voice=self.profile["voice"],
+                instructions=self.instructions, tools=self.tools, call_id=self.call_id, settings=self.profile["settings"])
+        else:
+            raise ValueError("Unsupported offline native profile")
+        self.provider._ws = self.socket
+        self.provider._prompt_identity = {"template": self.config.prompt_template, "version": self.config.prompt_version}
+        self.initial_wire = self.provider._build_session_update()
+        self.shutdown_count = 0
+        self.raw = []
+        self.raw_events = []
+        self.response_counter = 0
+        self.item_counter = 0
+        self.observed_exception = None
+        self.bridge = RealtimeBridge(call_id=self.call_id, realtime_session=self.provider,
+            media_gateway=self.gateway, contact_session=self.session, action_session=self.session,
+            transcript_service=self.transcripts, on_end_call=self.on_end, call_direction="inbound",
+            greet_on_start=scenario.get("opening", False),
+            tenant_id="synthetic-tenant", campaign_id="synthetic-campaign",
+            knowledge_snapshot_nodes=scenario.get("source_facts", []))
+
+    async def on_end(self):
+        self.shutdown_count += 1
+
+    async def wire(self, event):
+        self.raw_events.append(event)
+        await self.provider._handle_server_event(event)
+
+    async def drain(self, *, playback=True):
+        self.provider._offer_event(None)
+        await asyncio.wait_for(self.bridge._pump_model_events(), 2)
+        if playback and self.bridge._playback_task:
+            await asyncio.wait_for(asyncio.gather(self.bridge._playback_task, return_exceptions=True), 2)
+        if playback and self.bridge._tool_tasks:
+            await asyncio.wait_for(asyncio.gather(*self.bridge._tool_tasks), 2)
+        if self.bridge._goodbye_completed.is_set() and self.bridge._termination_task:
+            await asyncio.wait_for(self.bridge._termination_task, 2)
+
+    async def emit(self, step):
+        kind = step["kind"]
+        if kind in {"caller", "start"}:
+            self.item_counter += 1
+            item_id = step.get("item", f"caller-{self.item_counter}")
+            if kind == "start":
+                await self.wire({"type": "input_audio_buffer.speech_started", "item_id": item_id,
+                    "audio_start_ms": step.get("offset", self.item_counter * 1000)})
+            else:
+                if not step.get("revision"):
+                    await self.wire({"type": "input_audio_buffer.committed", "item_id": item_id})
+                await self.wire({"type": "conversation.item.input_audio_transcription.completed",
+                    "item_id": item_id, "transcript": step["text"],
+                    **({"confidence": step["confidence"]} if "confidence" in step else {})})
+        elif kind in {"response", "tool"}:
+            self.response_counter += 1
+            rid = f"response-{self.response_counter}"
+            await self.wire({"type": "response.created", "response": {"id": rid}})
+            if kind == "response":
+                text = step.get("text")
+                self.raw.append({"response_id": rid, "text": text, "status": step.get("status", "completed")})
+                audio = b"\xff" * step.get("audio_bytes", 320)
+                common = {"response_id": rid, "item_id": rid + "-item", "content_index": 0}
+                await self.wire({"type": "response.output_audio.delta", **common,
+                    "delta": base64.b64encode(audio).decode()})
+                if text is not None:
+                    await self.wire({"type": "response.output_audio_transcript.done", **common, "transcript": text})
+            else:
+                await self.wire({"type": "response.function_call_arguments.done", "response_id": rid,
+                    "call_id": rid + "-tool", "name": step["name"], "arguments": json.dumps(step.get("arguments", {}))})
+            response = {"id": rid, "status": step.get("status", "completed")}
+            if response["status"] == "incomplete":
+                response["status_details"] = {"reason": "max_output_tokens"}
+            await self.wire({"type": "response.done", "response": response})
+        else:
+            raise ValueError(f"Not a provider event fixture: {kind}")
+
+    async def step(self, step):
+        kind = step["kind"]
+        if kind == "batch":
+            for event in step["events"]:
+                await self.emit(event)
+            await self.drain(playback=step.get("wait", True))
+        elif kind == "ordinary_turns":
+            for _ in range(step["count"]):
+                await self.emit({"kind": "caller", "text": "What information is available?"})
+                await self.drain()
+        elif kind == "wait_gateway":
+            await asyncio.wait_for(self.gateway.entered.wait(), 2)
+        elif kind == "release":
+            self.gateway.release.set()
+            if self.bridge._playback_task:
+                await asyncio.wait_for(asyncio.gather(self.bridge._playback_task, return_exceptions=True), 2)
+        elif kind == "disconnect":
+            self.provider._closed.set()
+            self.provider._offer_event(None)
+            try:
+                await asyncio.wait_for(self.bridge.run(), 2)
+            except RuntimeError as exc:
+                self.observed_exception = str(exc)
+        else:
+            await self.emit(step)
+            await self.drain(playback=step.get("wait", True))
+
+    def result(self):
+        history = self.transcripts.get_transcript_json(self.call_id)
+        function_results = [json.loads(message["item"]["output"]) for message in self.socket.sent
+            if message.get("type") == "conversation.item.create"
+            and message.get("item", {}).get("type") == "function_call_output"]
+        repairs = [message for message in self.socket.sent if message.get("type") == "response.create"
+            and "REPAIR THIS TURN" in message.get("response", {}).get("instructions", "")]
+        normal_continuations = [message for message in self.socket.sent
+            if message == {"type": "response.create"}]
+        slots = self.session.captured_slots
+        observed = {
+            "submissions": len(self.gateway.submissions), "clears": self.gateway.clears,
+            "shutdowns": self.shutdown_count, "end_requested": bool(getattr(self.session, "_end_call_requested", False)),
+            "dnc": bool(getattr(self.session, "_caller_opted_out", False)),
+            "relationship": self.bridge._live_state.customer_relationship.value,
+            "identity_introduced": self.bridge._live_state.identity_introduced,
+            "opening_interrupted": self.bridge._opening_interrupted,
+            "opening_state_on_wire": any("opening=interrupted" in message.get("session", {}).get("instructions", "")
+                for message in self.socket.sent),
+            "email_confirmed": bool(getattr(slots, "email_confirmed", False)),
+            "email": getattr(slots, "email", None),
+            "repair_requests": len(repairs), "normal_continuations": len(normal_continuations),
+            "failure": bool(self.bridge._failure_reason), "connection_lost": self.bridge._connection_lost,
+            "tool_statuses": [item.get("status") for item in function_results],
+            "last_tool_success": self.bridge._live_state.last_tool_success,
+            "delivered_text": getattr(self.session, "_voice_action_delivered_text", ""),
+        }
+        controls = [{"id": key, "pass": observed[key] == expected,
+            "detail": {"expected": expected, "observed": observed[key]}}
+            for key, expected in self.scenario["expect"].items()]
+        wire = self.initial_wire
+        submitted_ids = {row["utterance_id"] for row in self.gateway.submissions}
+        submitted_speech = [row["content"] for row in history if row["role"] == "assistant"
+            and (row.get("metadata", {}).get("delivery") or {}).get("utterance_id") in submitted_ids
+            and (row.get("metadata", {}).get("delivery") or {}).get("status") == "completed"
+            and (row.get("metadata", {}).get("delivery") or {}).get("evidence") == "transport_played"]
+        return {
+            "scenario_id": self.scenario["id"], "semantic_ids": self.scenario["semantic_ids"],
+            "engine": "native", "profile": self.profile,
+            "provenance": {"type": "proposed_synthetic_control", "corpus_version": self.corpus["version"],
+                "provider_calls": 0, "full_session_admission_exercised": False},
+            "source_facts": self.scenario.get("source_facts", []),
+            "requests": [{"model": self.provider._model, "instructions_sha256": hashlib.sha256(self.instructions.encode()).hexdigest(),
+                "wire_sha256": _digest(wire), "messages": [], "instructions": self.instructions,
+                "tool_names": [tool["name"] for tool in self.tools], "session_update": wire,
+                "session_update_origin": "actual serializer; no handshake sent or acknowledged",
+                "instruction_updates": [message["session"] for message in self.socket.sent
+                    if message.get("type") == "session.update"],
+                "provider_event_sha256": _digest(self.raw_events)}],
+            "raw_output": self.raw, "candidate_text": [value["text"] for value in self.raw],
+            "submitted_speech": submitted_speech,
+            "submitted_speech_evidence": "Full utterances from correlated synthetic completion receipts only; not human hearing.",
+            "history": history,
+            "contacts": {kind: {"value": getattr(slots, kind, None),
+                "confirmed": bool(getattr(slots, f"{kind}_confirmed", False)),
+                "capture_status": getattr(getattr(getattr(slots, f"{kind}_capture", None), "status", None), "value", None)}
+                for kind in ("email", "phone")},
+            "end": {"requested": observed["end_requested"], "shutdown_count": self.shutdown_count,
+                "dnc_flag": observed["dnc"], "dnc_effect_count": None},
+            "effects": {"attempts": [event["name"] for event in self.raw_events
+                if event.get("type") == "response.function_call_arguments.done"], "accepted": 0,
+                "external_execution": "not_run; no business action capability or database configured",
+                "tool_results": function_results},
+            "media": {"generated_codec": "pcmu/8000", "submitted_codec": "pcm_s16le/8000",
+                "generated_bytes": sum(len(base64.b64decode(event["delta"])) for event in self.raw_events
+                    if event.get("type") == "response.output_audio.delta"),
+                "submitted_bytes": sum(entry["pcm_bytes"] for entry in self.gateway.submissions),
+                "submissions": self.gateway.submissions, "receipts": self.gateway.receipts,
+                "receipt_origin": "synthetic gateway fixture", "clear_count": self.gateway.clears,
+                "truncate_events": [event for event in self.socket.sent if event.get("type") == "conversation.item.truncate"]},
+            "observed": observed,
+            "findings": {"control": controls, "semantic": [{"id": "profile_quality", "status": "unreviewed",
+                "detail": "Scripted responses test runtime admission, not whether this model produces the right answer."}]},
+            "scope": "Offline real event parser + independent prompt composer + bridge; synthetic socket/media/source facts.",
+            "limitations": ["No actual provider, STT, TTS, carrier or acoustic quality was evaluated.",
+                "The provider/voice is a replay label, not an approved or available sale profile.",
+                "No durable DNC, Lead, CRM or connector write occurred; downstream acceptance belongs to its package.",
+                "Partial audio bytes have no word-level mapping; full candidate text is not claimed submitted or heard.",
+                "Session creation/credential admission is separately covered by AG01, not this replay harness."],
+        }
+
+    async def run(self):
+        try:
+            for step in self.scenario["steps"]:
+                await self.step(step)
+            return self.result()
+        finally:
+            self.gateway.release.set()
+            await self.bridge.stop()
+            self.transcripts.clear_buffer(self.call_id)
+
+
+def _profile(corpus, provider_name):
+    saved = corpus["profiles"][provider_name]
+    return {"provider": provider_name, "model": saved["model"], "voice": saved["voice"],
+        "settings": saved["settings"], "mode": "offline_replay", "hidden_opt_in": provider_name == "xai"}
+
+
+def _corpus(root):
+    corpus_path = root / "backend/tests/fixtures/conversation/ag04_native.json"
+    return json.loads(corpus_path.read_text(encoding="utf-8"))
+
+
+def case_inventory(root: Path) -> list[dict]:
+    corpus = _corpus(root)
+    return [{"scenario_id": scenario["id"], "semantic_ids": scenario["semantic_ids"],
+        "engine": "native", "profile": _profile(corpus, provider)}
+        for scenario in corpus["scenarios"] for provider in corpus["providers"]]
+
+
+async def run_cases(root: Path) -> list[dict]:
+    corpus = _corpus(root)
+    results = []
+    for scenario in corpus["scenarios"]:
+        for provider in corpus["providers"]:
+            results.append(await NativeReplay(scenario, provider, corpus).run())
+    return results

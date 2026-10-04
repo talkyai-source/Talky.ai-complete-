@@ -21,13 +21,20 @@ _WORD_VALUES.update(dict(zip("twenty thirty forty fifty sixty seventy eighty nin
 _WORD = "(?:" + "|".join([*_WORD_VALUES, "hundred", "thousand", "million", "point", "dot", "and"]) + ")"
 _WORD_AMOUNT = rf"{_WORD}(?:[ -]+{_WORD})*"
 _AMOUNT = rf"(?:{_NUM}|{_WORD_AMOUNT})"
+# Explicit currency codes are money, including when speech spells the code
+# instead of using a symbol. Keep a bounded real-code vocabulary: arbitrary
+# product identifiers (ABC 123) are not financial assertions.
+_ISO_CURRENCIES = ("GBP", "USD", "EUR", "CAD", "AUD", "NZD")
+_ISO = "(?:" + "|".join(_ISO_CURRENCIES) + ")"
 _MONEY = re.compile(
+    rf"(?<!\w)(?P<iso_prefix>{_ISO})\s*(?P<iso_amount>{_AMOUNT})(?!\w)|"
     rf"(?P<sign>[£$€])\s*(?P<signed>{_NUM})|"
-    rf"(?<![\w£$€.,])(?P<amount>{_AMOUNT})\s*(?P<currency>%|per\s?cent\b|percent\b|pounds?\b|quid\b|pence\b|p\b|dollars?\b|euros?\b)", re.I
+    rf"(?<![\w£$€.,])(?P<amount>{_AMOUNT})\s*(?P<currency>%|per\s?cent\b|percent\b|pounds?\b|quid\b|pence\b|p\b|dollars?\b|euros?\b|{_ISO}\b)", re.I
 )
 _CURRENCIES = {"£": "GBP", "$": "USD", "€": "EUR", "pound": "GBP", "pounds": "GBP", "quid": "GBP",
                "pence": "GBP_MINOR", "p": "GBP_MINOR", "dollar": "USD", "dollars": "USD",
                "euro": "EUR", "euros": "EUR", "%": "PERCENT", "percent": "PERCENT", "per cent": "PERCENT"}
+_CURRENCIES.update({code.lower(): code for code in _ISO_CURRENCIES})
 
 
 def _number(text: str) -> Decimal | None:
@@ -137,8 +144,8 @@ def _negated_amount(text: str, start: int, end: int) -> bool:
 
 def _figures(text: str):
     for match in _MONEY.finditer(text):
-        value = _number(match.group("signed") or match.group("amount"))
-        currency = _CURRENCIES[match.group("sign") or match.group("currency").lower()]
+        value = _number(match.group("iso_amount") or match.group("signed") or match.group("amount"))
+        currency = _CURRENCIES[(match.group("iso_prefix") or match.group("sign") or match.group("currency")).lower()]
         if currency == "GBP_MINOR":
             currency = "GBP"
             value = value / 100 if value is not None else None

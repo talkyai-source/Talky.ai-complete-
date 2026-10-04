@@ -130,7 +130,9 @@ async def test_interrupted_opening_does_not_mark_later_answer_as_delivered_ident
     assert bridge._opening_interrupted
     assert not bridge._identity_opening_pending
     assert bridge._live_state.identity_introduced is not True
-    assert "do not restart the greeting" in provider.update_live_state.call_args.args[0]
+    from app.domain.services.voice_pipeline.live_structured_state import replace_live_state_block
+    assert "opening=interrupted" in replace_live_state_block(
+        "BASE", provider.update_live_state.call_args.args[0])
     provider.truncate_response.assert_awaited()
     ended.assert_not_awaited()
     await bridge.stop()

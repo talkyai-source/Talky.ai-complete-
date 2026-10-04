@@ -1,0 +1,721 @@
+{
+  "version": 1,
+  "status": "proposed_synthetic_controls_not_human_approved",
+  "providers": [
+    "openai",
+    "xai"
+  ],
+  "campaign_guidance": "The target list contains existing terminal customers. Discuss an upgrade. Caller corrections take priority.",
+  "scenarios": [
+    {
+      "id": "native.grounded_answer",
+      "semantic_ids": [
+        "ag04.supported_price"
+      ],
+      "steps": [
+        {
+          "kind": "tool",
+          "name": "knowledge_lookup",
+          "arguments": {
+            "query": "Basic plan price"
+          }
+        },
+        {
+          "kind": "response",
+          "text": "The Basic plan costs £20 per month."
+        }
+      ],
+      "expect": {
+        "tool_statuses": [
+          "matched"
+        ],
+        "submissions": 1,
+        "repair_requests": 0
+      },
+      "source_facts": [
+        {
+          "id": "fixture-basic",
+          "version": 1,
+          "source_id": "fixture-approved",
+          "source_version": 1,
+          "heading": "Basic plan price",
+          "content": "The Basic plan costs £20 per month."
+        }
+      ]
+    },
+    {
+      "id": "native.customer_denial",
+      "semantic_ids": [
+        "ag04.new_prospect_no_product",
+        "ag04.explicit_customer_denial"
+      ],
+      "steps": [
+        {
+          "kind": "caller",
+          "text": "I am not your customer and have no card machine or payment provider."
+        },
+        {
+          "kind": "response",
+          "text": "Our records show you are an existing customer."
+        }
+      ],
+      "expect": {
+        "relationship": "denied",
+        "submissions": 0,
+        "repair_requests": 1
+      }
+    },
+    {
+      "id": "native.relationship_reversal",
+      "semantic_ids": [
+        "ag04.relationship_reversal"
+      ],
+      "steps": [
+        {
+          "kind": "caller",
+          "text": "I am not your customer."
+        },
+        {
+          "kind": "caller",
+          "text": "Actually, I am your customer."
+        },
+        {
+          "kind": "response",
+          "text": "Our records show you are an existing customer."
+        }
+      ],
+      "expect": {
+        "relationship": "affirmed",
+        "submissions": 1,
+        "repair_requests": 0
+      }
+    },
+    {
+      "id": "native.long_relationship",
+      "semantic_ids": [
+        "ag04.long_relationship_memory"
+      ],
+      "steps": [
+        {
+          "kind": "caller",
+          "text": "I am not your customer."
+        },
+        {
+          "kind": "ordinary_turns",
+          "count": 30
+        },
+        {
+          "kind": "response",
+          "text": "Our records show you are an existing customer."
+        }
+      ],
+      "expect": {
+        "relationship": "denied",
+        "submissions": 0,
+        "repair_requests": 1
+      }
+    },
+    {
+      "id": "native.quoted_relationship",
+      "semantic_ids": [
+        "ag04.quoted_relationship"
+      ],
+      "steps": [
+        {
+          "kind": "caller",
+          "text": "I am not your customer."
+        },
+        {
+          "kind": "caller",
+          "text": "You said \"I am your customer\", but that was wrong."
+        },
+        {
+          "kind": "response",
+          "text": "Our records show you are an existing customer."
+        }
+      ],
+      "expect": {
+        "relationship": "denied",
+        "submissions": 0,
+        "repair_requests": 1
+      }
+    },
+    {
+      "id": "native.stale_caller_final",
+      "semantic_ids": [
+        "ag04.stale_caller_final"
+      ],
+      "steps": [
+        {
+          "kind": "start",
+          "item": "old",
+          "offset": 1000
+        },
+        {
+          "kind": "start",
+          "item": "new",
+          "offset": 2000
+        },
+        {
+          "kind": "caller",
+          "text": "I am not your customer.",
+          "item": "new"
+        },
+        {
+          "kind": "caller",
+          "text": "I am your customer.",
+          "item": "old"
+        },
+        {
+          "kind": "response",
+          "text": "Our records show you are an existing customer."
+        }
+      ],
+      "expect": {
+        "relationship": "denied",
+        "submissions": 0,
+        "repair_requests": 1
+      }
+    },
+    {
+      "id": "native.current_revision",
+      "semantic_ids": [
+        "ag04.current_asr_revision"
+      ],
+      "steps": [
+        {
+          "kind": "caller",
+          "text": "I am your customer.",
+          "item": "current"
+        },
+        {
+          "kind": "caller",
+          "text": "I am not your customer.",
+          "item": "current",
+          "revision": true
+        },
+        {
+          "kind": "response",
+          "text": "Our records show you are an existing customer."
+        }
+      ],
+      "expect": {
+        "relationship": "denied",
+        "submissions": 0,
+        "repair_requests": 1
+      }
+    },
+    {
+      "id": "native.decline_email",
+      "semantic_ids": [
+        "ag04.decline_email_topic"
+      ],
+      "steps": [
+        {
+          "kind": "response",
+          "text": "Would you like details by email?"
+        },
+        {
+          "kind": "caller",
+          "text": "No thanks."
+        },
+        {
+          "kind": "tool",
+          "name": "end_call",
+          "arguments": {}
+        },
+        {
+          "kind": "response",
+          "text": "No problem. What would you like to know?"
+        }
+      ],
+      "expect": {
+        "shutdowns": 0,
+        "end_requested": false,
+        "tool_statuses": [
+          "caller_intent_unconfirmed"
+        ],
+        "submissions": 2
+      }
+    },
+    {
+      "id": "native.thanks",
+      "semantic_ids": [
+        "ag04.thanks_not_goodbye"
+      ],
+      "steps": [
+        {
+          "kind": "caller",
+          "text": "Thanks, that answers my question."
+        },
+        {
+          "kind": "tool",
+          "name": "end_call",
+          "arguments": {}
+        },
+        {
+          "kind": "response",
+          "text": "You are welcome."
+        }
+      ],
+      "expect": {
+        "shutdowns": 0,
+        "end_requested": false,
+        "tool_statuses": [
+          "caller_intent_unconfirmed"
+        ],
+        "submissions": 1
+      }
+    },
+    {
+      "id": "native.explicit_goodbye",
+      "semantic_ids": [
+        "ag04.explicit_goodbye"
+      ],
+      "steps": [
+        {
+          "kind": "caller",
+          "text": "Goodbye. Please end this call."
+        },
+        {
+          "kind": "response",
+          "text": "Goodbye."
+        }
+      ],
+      "expect": {
+        "shutdowns": 1,
+        "end_requested": true,
+        "dnc": false,
+        "submissions": 1
+      }
+    },
+    {
+      "id": "native.dnc_close",
+      "semantic_ids": [
+        "ag04.explicit_dnc_close"
+      ],
+      "steps": [
+        {
+          "kind": "caller",
+          "text": "Please stop calling me."
+        },
+        {
+          "kind": "response",
+          "text": "Understood. Goodbye."
+        }
+      ],
+      "expect": {
+        "shutdowns": 1,
+        "dnc": true,
+        "submissions": 1
+      }
+    },
+    {
+      "id": "native.dnc_question",
+      "semantic_ids": [
+        "ag04.dnc_with_question"
+      ],
+      "steps": [
+        {
+          "kind": "caller",
+          "text": "Do not call me again, but first I need help with my account."
+        },
+        {
+          "kind": "response",
+          "text": "What help do you need with your account?"
+        }
+      ],
+      "expect": {
+        "shutdowns": 0,
+        "end_requested": false,
+        "dnc": true,
+        "submissions": 1
+      }
+    },
+    {
+      "id": "native.quoted_dnc",
+      "semantic_ids": [
+        "ag04.quoted_dnc",
+        "ag04.negated_dnc"
+      ],
+      "steps": [
+        {
+          "kind": "caller",
+          "text": "The script says \"do not call me\", but I am not asking you to stop calling."
+        },
+        {
+          "kind": "tool",
+          "name": "end_call",
+          "arguments": {}
+        },
+        {
+          "kind": "response",
+          "text": "What would you like to know?"
+        }
+      ],
+      "expect": {
+        "shutdowns": 0,
+        "dnc": false,
+        "tool_statuses": [
+          "caller_intent_unconfirmed"
+        ]
+      }
+    },
+    {
+      "id": "native.unclear_email",
+      "semantic_ids": [
+        "ag04.unclear_email"
+      ],
+      "steps": [
+        {
+          "kind": "caller",
+          "text": "My email is alex, maybe alex two, at example dot com.",
+          "confidence": 0.2
+        },
+        {
+          "kind": "response",
+          "text": "Could you repeat just the email address?"
+        }
+      ],
+      "expect": {
+        "email_confirmed": false,
+        "shutdowns": 0
+      }
+    },
+    {
+      "id": "native.email_correction",
+      "semantic_ids": [
+        "ag04.email_correction"
+      ],
+      "steps": [
+        {
+          "kind": "caller",
+          "text": "My email is alex at example dot com."
+        },
+        {
+          "kind": "caller",
+          "text": "Correction, my email is blair at example dot com."
+        }
+      ],
+      "expect": {
+        "email": "blair@example.com",
+        "email_confirmed": false,
+        "shutdowns": 0
+      }
+    },
+    {
+      "id": "native.interrupted_opening",
+      "semantic_ids": [
+        "ag04.interrupted_opening"
+      ],
+      "steps": [
+        {
+          "kind": "response",
+          "text": "Hello, I am Ava from Northwind Systems.",
+          "audio_bytes": 640,
+          "wait": false
+        },
+        {
+          "kind": "wait_gateway"
+        },
+        {
+          "kind": "start",
+          "item": "interrupt",
+          "offset": 1000
+        },
+        {
+          "kind": "caller",
+          "text": "I have a question.",
+          "item": "interrupt"
+        },
+        {
+          "kind": "response",
+          "text": "What would you like to know?"
+        }
+      ],
+      "expect": {
+        "opening_interrupted": true,
+        "identity_introduced": null,
+        "submissions": 2,
+        "shutdowns": 0,
+        "opening_state_on_wire": true
+      },
+      "opening": true,
+      "gateway": {
+        "block": "send"
+      }
+    },
+    {
+      "id": "native.continued_goodbye",
+      "semantic_ids": [
+        "ag04.continuation_during_goodbye"
+      ],
+      "steps": [
+        {
+          "kind": "caller",
+          "text": "Goodbye."
+        },
+        {
+          "kind": "response",
+          "text": "Goodbye.",
+          "wait": false
+        },
+        {
+          "kind": "wait_gateway"
+        },
+        {
+          "kind": "start",
+          "item": "continue",
+          "offset": 2000
+        },
+        {
+          "kind": "caller",
+          "text": "Wait, do not hang up. I need help.",
+          "item": "continue"
+        },
+        {
+          "kind": "response",
+          "text": "What help do you need?"
+        }
+      ],
+      "expect": {
+        "shutdowns": 0,
+        "end_requested": false,
+        "submissions": 2
+      },
+      "gateway": {
+        "block": "finish"
+      }
+    },
+    {
+      "id": "native.late_asr_before_playout",
+      "semantic_ids": [
+        "ag04.late_asr_before_playout"
+      ],
+      "steps": [
+        {
+          "kind": "batch",
+          "events": [
+            {
+              "kind": "response",
+              "text": "Our records show you are an existing customer."
+            },
+            {
+              "kind": "caller",
+              "text": "I am not your customer."
+            }
+          ]
+        }
+      ],
+      "expect": {
+        "submissions": 0,
+        "repair_requests": 0,
+        "normal_continuations": 1,
+        "relationship": "denied"
+      }
+    },
+    {
+      "id": "native.late_asr_during_playout",
+      "semantic_ids": [
+        "ag04.late_asr_during_playout"
+      ],
+      "steps": [
+        {
+          "kind": "response",
+          "text": "Our records show you are an existing customer.",
+          "audio_bytes": 640,
+          "wait": false
+        },
+        {
+          "kind": "wait_gateway"
+        },
+        {
+          "kind": "caller",
+          "text": "I am not your customer."
+        }
+      ],
+      "expect": {
+        "submissions": 1,
+        "clears": 1,
+        "repair_requests": 0,
+        "normal_continuations": 1,
+        "relationship": "denied",
+        "delivered_text": ""
+      },
+      "gateway": {
+        "block": "send",
+        "swallow_cancel": true
+      }
+    },
+    {
+      "id": "native.stale_receipt",
+      "semantic_ids": [
+        "ag04.stale_playback_receipt"
+      ],
+      "steps": [
+        {
+          "kind": "caller",
+          "text": "My email is alex at example dot com."
+        },
+        {
+          "kind": "response",
+          "text": "I have alex@example.com. Is that correct?"
+        },
+        {
+          "kind": "caller",
+          "text": "Yes."
+        }
+      ],
+      "expect": {
+        "email_confirmed": false,
+        "delivered_text": ""
+      },
+      "gateway": {
+        "receipt": "stale"
+      }
+    },
+    {
+      "id": "native.unknown_receipt",
+      "semantic_ids": [
+        "ag04.unknown_playback_receipt"
+      ],
+      "steps": [
+        {
+          "kind": "caller",
+          "text": "My email is alex at example dot com."
+        },
+        {
+          "kind": "response",
+          "text": "I have alex@example.com. Is that correct?"
+        },
+        {
+          "kind": "caller",
+          "text": "Yes."
+        }
+      ],
+      "expect": {
+        "email_confirmed": false,
+        "delivered_text": ""
+      },
+      "gateway": {
+        "receipt": "unknown"
+      }
+    },
+    {
+      "id": "native.missing_knowledge",
+      "semantic_ids": [
+        "ag04.missing_knowledge",
+        "ag04.unsupported_price"
+      ],
+      "steps": [
+        {
+          "kind": "tool",
+          "name": "knowledge_lookup",
+          "arguments": {
+            "query": "Basic plan price"
+          }
+        },
+        {
+          "kind": "response",
+          "text": "The Basic plan costs £20 per month."
+        }
+      ],
+      "expect": {
+        "tool_statuses": [
+          "no_match"
+        ],
+        "submissions": 0,
+        "repair_requests": 1
+      }
+    },
+    {
+      "id": "native.unavailable_action",
+      "semantic_ids": [
+        "ag04.unavailable_action"
+      ],
+      "steps": [
+        {
+          "kind": "caller",
+          "text": "Please email me the details."
+        },
+        {
+          "kind": "tool",
+          "name": "send_email",
+          "arguments": {}
+        },
+        {
+          "kind": "response",
+          "text": "I have sent the email."
+        }
+      ],
+      "expect": {
+        "tool_statuses": [
+          "unavailable"
+        ],
+        "last_tool_success": false,
+        "submissions": 0,
+        "repair_requests": 1
+      }
+    },
+    {
+      "id": "native.incomplete_generation",
+      "semantic_ids": [
+        "ag04.provider_partial_length"
+      ],
+      "steps": [
+        {
+          "kind": "response",
+          "text": "First unfinished thought",
+          "status": "incomplete"
+        },
+        {
+          "kind": "response",
+          "text": "Second unfinished thought",
+          "status": "incomplete"
+        }
+      ],
+      "expect": {
+        "failure": true,
+        "submissions": 0,
+        "repair_requests": 1
+      },
+      "coverage_note": "Native adapter buffers incomplete generation; no partial speech is claimed by this case."
+    },
+    {
+      "id": "native.disconnect",
+      "semantic_ids": [
+        "ag04.transport_disconnect"
+      ],
+      "steps": [
+        {
+          "kind": "disconnect"
+        }
+      ],
+      "expect": {
+        "connection_lost": true,
+        "submissions": 0,
+        "shutdowns": 0
+      }
+    }
+  ],
+  "profiles": {
+    "openai": {
+      "model": "gpt-realtime-2",
+      "voice": "ash",
+      "settings": {
+        "reasoning_effort": "low"
+      }
+    },
+    "xai": {
+      "model": "grok-voice-think-fast-1.0",
+      "voice": "eve",
+      "settings": {
+        "reasoning_effort": "high",
+        "turn_detection": {
+          "type": "server_vad",
+          "threshold": 0.85
+        }
+      }
+    }
+  }
+}

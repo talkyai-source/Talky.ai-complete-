@@ -486,7 +486,7 @@ async def test_realtime_identity_requires_uninterrupted_opening_delivery(
         assert blocks and "identity_introduced=yes" in blocks[-1]
     else:
         assert blocks and "identity_introduced=unknown" in blocks[-1]
-        assert "opening was interrupted" in blocks[-1]
+        assert "opening=interrupted" in replace_live_state_block("BASE", blocks[-1])
         assert bridge._live_state.identity_introduced is None
 
 

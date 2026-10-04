@@ -652,7 +652,7 @@ def reduce_cascaded_session_live_state(
     return state
 
 
-def render_live_state_block(state: LiveConversationState) -> str:
+def render_live_state_block(state: LiveConversationState, *, opening_interrupted: bool = False) -> str:
     """Serialize in one fixed order with a hard maximum prompt footprint."""
     identity = (
         "unknown"
@@ -697,6 +697,7 @@ def render_live_state_block(state: LiveConversationState) -> str:
             f"confirmed_contacts={contact_text}",
             f"last_tool_result={tool_text}",
             f"sales_stage={state.sales_stage.value}",
+            *(("opening=interrupted",) if opening_interrupted else ()),
             LIVE_STATE_BLOCK_END,
         )
     )

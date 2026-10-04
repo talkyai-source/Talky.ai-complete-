@@ -425,7 +425,8 @@ def _extract_lead_in_email(text: str) -> Optional[str]:
     """
     body = str(text or "").lower()
     explicit_cue = re.match(
-        r"^\s*(?:(?:please\s+)?(?:note|use|take\s+down)\s+)?"
+        r"^\s*(?:(?:correction|actually)\b\s*[:,]?\s*)?"
+        r"(?:(?:please\s+)?(?:note|use|take\s+down)\s+)?"
         r"my\s+e-?mail(?:\s+address)?\b(?:\s+(?:is|should\s+be))?"
         r"\s*[:,]?\s*(?P<address>.+)$", body,
     )

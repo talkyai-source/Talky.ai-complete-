@@ -1,16 +1,16 @@
-"""Standalone smoke test for the OpenAI gpt-realtime-2 bridge (Phase 1).
+"""Direct-provider smoke utility for OpenAI gpt-realtime-2.
 
-Run this ON THE SERVER, where OPENAI_API_KEY lives in backend/.env. It proves
-the round-trip end to end WITHOUT touching the live gateway or the cascaded
-pipeline:
+This command makes a paid provider request using OPENAI_API_KEY. It captures
+one generated response, bypassing RealtimeBridge and the application's playback,
+knowledge, action and contact guards. It is not production qualification.
 
     session.connect()  ->  drive ONE exchange  ->  capture agent audio + text
 
 Two modes
 ---------
   TEXT-IN  (default): create a user text turn + response.create, then capture
-           the agent's spoken transcript (printed) and its μ-law audio (saved).
-           Proves voice + instructions + expressiveness with no mic.
+           generated transcript (printed) and μ-law audio (saved).
+           It does not measure human hearing, comprehension or naturalness.
 
   AUDIO-IN (bonus):   pass a raw μ-law/8kHz sample path as argv[1]; it is
            streamed via input_audio_buffer.append and the response captured.
@@ -31,6 +31,7 @@ audio received, function-call requests (if any), and any errors.
 from __future__ import annotations
 
 import asyncio
+from contextlib import aclosing
 import os
 import sys
 import wave
@@ -70,7 +71,7 @@ SAMPLE_PERSONA = RealtimePersona(
     agent_name="Alex",
     company_name="Talky",
     role="a warm, upbeat voice assistant",
-    goal="greet the caller, sound genuinely human, and be helpful",
+    goal="introduce yourself clearly and answer briefly",
 )
 
 
@@ -148,29 +149,36 @@ async def run() -> int:
     errors: list[str] = []
 
     async def collect() -> None:
-        async for ev in session.events():
-            if ev.kind == "audio" and ev.audio:
-                audio.extend(ev.audio)
-            elif ev.kind == "agent_transcript" and ev.text:
-                agent_words.append(ev.text)
-            elif ev.kind == "caller_transcript" and ev.text:
-                caller_words.append(ev.text)
-            elif ev.kind == "function_call" and ev.function_call:
-                fc = ev.function_call
-                function_calls.append(f"{fc.name}({fc.arguments})")
-                print(f"  [function_call] {fc.name} args={fc.arguments}")
-                # Fulfil with a stub so the model can finish speaking.
-                await session.send_function_result(
-                    fc.call_id, {"result": "No knowledge base wired in smoke test."}
-                )
-            elif ev.kind == "interrupted":
-                print("  [interrupted] caller barge-in — stale audio flushed")
-            elif ev.kind == "response_done":
-                print("  [response.done] model finished a response turn")
-                break
-            elif ev.kind == "error" and ev.text:
-                errors.append(ev.text)
-                print(f"  [error] {ev.text}")
+        async with aclosing(session.events()) as events:
+            async for ev in events:
+                if ev.kind == "response_candidate":
+                    # Current adapters emit only complete buffered candidates.
+                    # These have not passed application playback admission.
+                    if ev.audio:
+                        audio.extend(ev.audio)
+                    if ev.text:
+                        agent_words.append(ev.text)
+                elif ev.kind == "caller_transcript" and ev.text:
+                    caller_words.append(ev.text)
+                elif ev.kind == "function_call" and ev.function_call:
+                    fc = ev.function_call
+                    function_calls.append(f"{fc.name}({fc.arguments})")
+                    print(f"  [function_call] {fc.name} args={fc.arguments}")
+                    # Fulfil with a stub so the model can finish speaking.
+                    await session.send_function_result(
+                        fc.call_id, {"result": "No knowledge base wired in smoke test."}
+                    )
+                elif ev.kind == "interrupted":
+                    print("  [interrupted] caller barge-in — stale generation discarded")
+                elif ev.kind == "response_done":
+                    print("  [response.done] model finished a response turn")
+                    if agent_words or audio or errors:
+                        break
+                    # A tool-only response precedes its spoken continuation.
+                elif ev.kind in {"error", "generation_incomplete", "response_unplayable"}:
+                    errors.append(ev.text or ev.kind)
+                    print(f"  [error] {ev.text or ev.kind}")
+                    break
 
     try:
         await asyncio.wait_for(collect(), timeout=RESPONSE_COLLECT_TIMEOUT_S)
@@ -181,7 +189,7 @@ async def run() -> int:
     print("\n───────── RESULTS ─────────")
     if caller_words:
         print(f"Caller transcript:  {''.join(caller_words)!r}")
-    print(f"Agent transcript:   {''.join(agent_words)!r}")
+    print(f"Generated transcript: {''.join(agent_words)!r}")
     print(f"Audio received:     {len(audio)} μ-law bytes "
           f"(~{len(audio) / 8000:.2f}s @ 8kHz)")
     print(f"Function calls:     {function_calls or 'none'}")
@@ -198,9 +206,9 @@ async def run() -> int:
 
     await session.close()
     print("Closed cleanly.")
-    ok_overall = bool(agent_words or audio) and not errors
+    ok_overall = bool(agent_words and audio) and not errors
     print(f"\n{'PASS' if ok_overall else 'CHECK'}: "
-          f"{'round-trip proven' if ok_overall else 'review output above'}")
+          f"{'provider response received; application playback not exercised' if ok_overall else 'review output above'}")
     return 0 if ok_overall else 1
 
 

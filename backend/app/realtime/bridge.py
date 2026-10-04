@@ -1177,11 +1177,8 @@ class RealtimeBridge:
             )
             return
         try:
-            block = render_live_state_block(self._live_state)
-            if self._opening_interrupted:
-                block += ("\nThe opening was interrupted before delivery was confirmed. "
-                    "Follow the caller's latest words; do not restart the greeting or "
-                    "permission question. Identify yourself briefly only if still needed.")
+            block = render_live_state_block(
+                self._live_state, opening_interrupted=self._opening_interrupted)
             await publish(block)
         except Exception as exc:  # noqa: BLE001 - state steering is fail-soft
             logger.warning(
