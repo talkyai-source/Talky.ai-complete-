@@ -35,7 +35,7 @@ Public API
 
   save_call_transcript_on_hangup(voice_session, transcript_service, db_pool)
       Final persist: reads the buffer, writes to calls + transcripts tables,
-      clears the buffer. Idempotent; safe to call multiple times.
+      clears only after commit; retains bounded failed memory. Returns commit proof.
 
 Both functions swallow their own errors (log and continue) so a
 transient DB hiccup cannot tear down an otherwise-healthy telephony call.
@@ -48,7 +48,6 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-import json
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -288,156 +287,49 @@ async def bind_inbound_call(
 
 
 async def save_call_transcript_on_hangup(
-    *,
-    voice_session,
-    transcript_service,
-    db_pool,
-) -> None:
-    """Final persist. Reads the buffer (keyed by voice_session.call_id) and
-    writes to calls + transcripts rows keyed by voice_session._dialer_call_id.
+    *, voice_session, transcript_service, db_pool,
+) -> bool:
+    """Save one owned final snapshot with bounded existing-path retries.
 
-    Order of operations:
-      1. Read text/json/metrics from the in-memory buffer.
-      2. If no dialer binding or empty buffer, just clear and return.
-      3. UPDATE calls SET transcript/transcript_json/updated_at.
-      4. INSERT into transcripts (ON CONFLICT DO NOTHING).
-      5. Always clear the buffer.
-
-    Never raises. Logs on every failure path.
+    True means the calls/child transaction committed (or was already complete).
+    Failure retains only bounded process memory; it never claims durable retry
+    or clears a failed snapshot merely because call teardown must continue.
     """
     session_call_id = getattr(voice_session, "call_id", None)
     if not session_call_id:
-        logger.debug("save_call_transcript_on_hangup no session_call_id; skipping")
-        return
-
+        return False
     dialer_call_id = getattr(voice_session, "_dialer_call_id", None)
-    tenant_id_str = getattr(voice_session, "_dialer_tenant_id", None)
-
-    # 0. Structured lead capture (goals.md §7). Runs BEFORE the early-outs
-    #    below: a call whose transcript buffer is empty or already flushed can
-    #    still have established a fact on its final turn. The per-turn flush in
-    #    turn_ender covers completed turns; this covers the last one, which is
-    #    exactly the turn a hangup interrupts. Never raises.
+    tenant_id = getattr(voice_session, "_dialer_tenant_id", None)
     await _flush_lead_details_on_hangup(
-        voice_session=voice_session,
-        dialer_call_id=dialer_call_id,
-        tenant_id_str=tenant_id_str,
-        db_pool=db_pool,
+        voice_session=voice_session, dialer_call_id=dialer_call_id,
+        tenant_id_str=tenant_id, db_pool=db_pool,
     )
-
-    # 1. Read buffer
+    if not dialer_call_id or not tenant_id:
+        transcript_service.retain_failed_finalization(session_call_id)
+        return False
     try:
-        turns_json = transcript_service.get_transcript_json(session_call_id) or []
-        text = transcript_service.get_transcript_text(session_call_id) or ""
-        metrics = transcript_service.get_metrics(session_call_id) or {}
+        UUID(str(dialer_call_id))
+        UUID(str(tenant_id))
+        saved = await transcript_service.save_transcript(
+            session_call_id, db_pool=db_pool, tenant_id=str(tenant_id),
+            target_call_id=str(dialer_call_id),
+        )
     except Exception as exc:
-        logger.warning(
-            "save_call_transcript_on_hangup buffer read failed session=%s err=%s",
-            session_call_id[:8], exc,
-        )
-        return
-
-    # 2. Early outs
-    if not turns_json:
-        logger.debug(
-            "save_call_transcript_on_hangup no turns in buffer for %s",
-            session_call_id[:8],
-        )
-        _safe_clear(transcript_service, session_call_id)
-        return
-
-    if not dialer_call_id:
-        logger.info(
-            "save_call_transcript_on_hangup no dialer binding for %s; "
-            "transcript will not be persisted (non-campaign call)",
-            session_call_id[:8],
-        )
-        _safe_clear(transcript_service, session_call_id)
-        return
-
-    if db_pool is None:
-        logger.warning("save_call_transcript_on_hangup db_pool is None; skipping DB write")
-        _safe_clear(transcript_service, session_call_id)
-        return
-
-    # 3 & 4. Persist.
-    try:
-        dialer_uuid = UUID(dialer_call_id)
-    except (ValueError, TypeError) as exc:
-        logger.warning(
-            "save_call_transcript_on_hangup invalid dialer_call_id=%s err=%s",
-            dialer_call_id, exc,
-        )
-        _safe_clear(transcript_service, session_call_id)
-        return
-
-    tenant_uuid: Optional[UUID]
-    try:
-        tenant_uuid = UUID(tenant_id_str) if tenant_id_str else None
-    except (ValueError, TypeError):
-        tenant_uuid = None
-
-    turns_jsonb = json.dumps(turns_json)
-    word_count = int(metrics.get("word_count", 0))
-    turn_count = int(metrics.get("turn_count", 0))
-    user_words = int(metrics.get("user_word_count", 0))
-    assistant_words = int(metrics.get("assistant_word_count", 0))
-
-    try:
-        async with db_pool.acquire() as conn:
-            # The hangup hook is a platform-internal write — it has no
-            # request-scoped JWT to derive `app.current_tenant_id` from,
-            # so without bypassing RLS the calls/transcripts policies
-            # ("tenant_id = current_setting('app.current_tenant_id')")
-            # silently reject every UPDATE/INSERT and the transcript
-            # never lands. SET LOCAL keeps the bypass scoped to this
-            # implicit transaction only.
-            async with conn.transaction():
-                await conn.execute("SET LOCAL app.bypass_rls = 'true'")
-                await conn.execute(
-                    """
-                    UPDATE calls
-                    SET transcript = $1,
-                        transcript_json = $2::jsonb,
-                        updated_at = NOW()
-                    WHERE id = $3
-                    """,
-                    text,
-                    turns_jsonb,
-                    dialer_uuid,
-                )
-                await conn.execute(
-                    """
-                    INSERT INTO transcripts (
-                        call_id, tenant_id, turns, full_text,
-                        word_count, turn_count,
-                        user_word_count, assistant_word_count
-                    ) VALUES ($1, $2, $3::jsonb, $4, $5, $6, $7, $8)
-                    ON CONFLICT DO NOTHING
-                    """,
-                    dialer_uuid,
-                    tenant_uuid,
-                    turns_jsonb,
-                    text,
-                    word_count,
-                    turn_count,
-                    user_words,
-                    assistant_words,
-                )
-        logger.info(
-            "save_call_transcript_on_hangup persisted calls.id=%s turns=%d words=%d",
-            dialer_call_id[:8], turn_count, word_count,
-        )
-        # Transcript is now in the DB — schedule AI summary generation.
-        # Fire-and-forget: must not block or delay call teardown.
-        _schedule_call_summary(db_pool, tenant_id_str, dialer_call_id)
-    except Exception as exc:
-        logger.warning(
-            "save_call_transcript_on_hangup DB write failed calls.id=%s err=%s",
-            dialer_call_id[:8], exc,
-        )
-    finally:
-        _safe_clear(transcript_service, session_call_id)
+        logger.warning("final_transcript_failed session=%s error_type=%s",
+                       str(session_call_id)[:8], type(exc).__name__)
+        transcript_service.retain_failed_finalization(session_call_id)
+        return False
+    if not saved:
+        return False
+    # A transient DB failure before the successful transcript transaction must
+    # not strand the caller's last contact value. This is the same idempotent
+    # writer; its independent failure evidence is recorded by the slot helper.
+    await _flush_lead_details_on_hangup(
+        voice_session=voice_session, dialer_call_id=dialer_call_id,
+        tenant_id_str=tenant_id, db_pool=db_pool,
+    )
+    _schedule_call_summary(db_pool, str(tenant_id), str(dialer_call_id))
+    return True
 
 
 async def _flush_lead_details_on_hangup(
@@ -539,27 +431,6 @@ async def _safe_generate(pool, tenant_id, call_id) -> None:
         await run_crm_sync(str(call_id), tenant_id=str(tenant_id), reason="summary")
     except Exception as exc:  # noqa: BLE001 — never break the summary task
         logger.warning("crm sync after summary failed for %s: %s", call_id[:12], exc)
-
-
-def _safe_clear(transcript_service, session_call_id: str) -> None:
-    """Close the call's in-memory transcript, swallowing any error.
-
-    This runs only at hangup, so it SEALS rather than just clears: a late STT
-    final arriving after this point must not start a fresh buffer that the
-    per-turn flush then writes over the saved transcript (call 4291700f,
-    2026-09-24 — 34 turns overwritten by one line).
-    """
-    try:
-        transcript_service.clear_buffer(session_call_id)
-    except Exception:
-        pass
-    try:
-        from app.domain.services.transcript_service import TranscriptService
-
-        if isinstance(transcript_service, TranscriptService):
-            transcript_service.seal(session_call_id)
-    except Exception:
-        pass
 
 
 def _compute_duration_seconds(voice_session) -> int:

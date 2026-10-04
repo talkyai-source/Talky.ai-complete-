@@ -4542,12 +4542,12 @@ async def _on_transfer_connected(call_id: str, target_call_id: str) -> None:
             from app.core.container import get_container
 
             container = get_container()
-            await save_call_transcript_on_hangup(
+            transcript_saved = await save_call_transcript_on_hangup(
                 voice_session=voice_session,
                 transcript_service=transcript_service,
                 db_pool=container.db_pool if container.is_initialized else None,
             )
-            voice_session._transcript_saved_at_transfer = True
+            voice_session._transcript_saved_at_transfer = transcript_saved is True
     except Exception as exc:
         logger.warning("Transfer transcript persist failed for %s: %s", call_id[:12], exc)
 

@@ -19,9 +19,8 @@
  * MISSING IS ITS OWN STATE
  * -------------------------
  * A required field with no value is shown as an explicit gap, not an empty
- * row. And there are two kinds of empty, which the backend keeps apart and so
- * does this: a value of null means "we asked and they declined", an absent
- * field means "never established". Different follow-up.
+ * row. Empty values have several meanings; the recorded validation/evidence
+ * status, not NULL alone, determines the follow-up.
  */
 import { useCallback, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -53,6 +52,23 @@ function humanise(key: string) {
     return key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
+const CONTACT_STATUS_LABEL: Record<string, string> = {
+    awaiting_confirmation: "Awaiting caller confirmation",
+    needs_clarification: "Needs clarification",
+    invalid: "Invalid contact — needs correction",
+    cancelled: "Withdrawn or replaced — do not use",
+};
+
+function sourceReference(value: unknown): { caller_turn_order: number; revision_sha256: string } | null {
+    if (!value || typeof value !== "object") return null;
+    const source = value as Record<string, unknown>;
+    return typeof source.caller_turn_order === "number" && Number.isInteger(source.caller_turn_order)
+        && source.caller_turn_order >= 0 && typeof source.revision_sha256 === "string"
+        && /^[a-f0-9]{64}$/i.test(source.revision_sha256)
+        ? { caller_turn_order: source.caller_turn_order, revision_sha256: source.revision_sha256 }
+        : null;
+}
+
 function DetailRow({
     detail,
     callId,
@@ -79,9 +95,17 @@ function DetailRow({
             setError(e instanceof Error ? e.message : "Couldn't save that change"),
     });
 
-    // A value of null is NOT the same as never being asked — the backend keeps
-    // them apart and so does this line.
-    const declined = detail.value === null;
+    const empty = detail.value === null;
+    const contact = detail.field_type === "email" || detail.field_type === "phone";
+    const statusLabel = CONTACT_STATUS_LABEL[detail.validation_status ?? ""];
+    const confirmed = !empty && detail.confirmed
+        && (!contact || detail.validation_status === "confirmed");
+    const emptyLabel = statusLabel
+        || (detail.evidence?.status === "declined" ? "The caller declined to provide this"
+            : "No usable value was saved");
+    const valueSource = sourceReference(detail.evidence?.value_source);
+    const confirmationSource = sourceReference(detail.evidence?.confirmation_source);
+    const statusSource = sourceReference(detail.evidence?.status_source);
 
     return (
         <div className="flex flex-col gap-1 border-b border-border py-2.5 last:border-0">
@@ -134,8 +158,8 @@ function DetailRow({
                     )}
                 </div>
             ) : (
-                <p className={`text-sm leading-relaxed ${declined ? "italic text-muted-foreground" : "text-foreground"}`}>
-                    {declined ? "Asked — the caller didn't give one" : detail.value}
+                <p className={`text-sm leading-relaxed ${empty ? "italic text-muted-foreground" : "text-foreground"}`}>
+                    {empty ? emptyLabel : detail.value}
                 </p>
             )}
 
@@ -145,9 +169,9 @@ function DetailRow({
                 >
                     {SOURCE_LABEL[detail.source]}
                 </span>
-                {detail.source === "manual_edit" ? (
+                {detail.source === "manual_edit" && confirmed ? (
                     <span className="text-[10px] text-blue-600">Verified by a person</span>
-                ) : detail.confirmed ? (
+                ) : confirmed ? (
                     <span className="inline-flex items-center gap-1 text-[10px] font-medium text-emerald-600 dark:text-emerald-400">
                         <Check className="h-3 w-3" /> confirmed on the call
                     </span>
@@ -157,6 +181,23 @@ function DetailRow({
                     </span>
                 )}
             </div>
+            {!empty && statusLabel && <p className="text-xs text-muted-foreground">{statusLabel}</p>}
+            {(valueSource || confirmationSource || statusSource) && (
+                <details className="text-xs text-muted-foreground">
+                    <summary className="cursor-pointer">Source evidence</summary>
+                    {valueSource && <p>Captured from caller turn {valueSource.caller_turn_order}
+                        {" · Revision "}{valueSource.revision_sha256.slice(0, 12)}</p>}
+                    {confirmationSource && (
+                        <p>{confirmed ? "Confirmation" : "Previous confirmation"} from caller turn {confirmationSource.caller_turn_order}
+                            {" · Revision "}{confirmationSource.revision_sha256.slice(0, 12)}</p>
+                    )}
+                    {statusSource && <p>Status changed by caller turn {statusSource.caller_turn_order}
+                        {" · Revision "}{statusSource.revision_sha256.slice(0, 12)}</p>}
+                    {detail.evidence?.confirmation_evidence && (
+                        <p>{humanise(detail.evidence.confirmation_evidence)}</p>
+                    )}
+                </details>
+            )}
             {detail.evidence?.status && (
                 <p className="text-xs text-muted-foreground">
                     {humanise(detail.evidence.status)}
@@ -209,11 +250,17 @@ export function LeadDetailsPanel({
     const missing = query.data?.missing_required ?? [];
     const processing = query.data?.processing_status;
     const deliveries = query.data?.crm_deliveries ?? [];
+    const evidenceSubject = leadId ? "the latest call" : "this call";
+    const transcriptMessage = processing === "no_calls" ? undefined : ({
+        partial: `The final transcript save for ${evidenceSubject} is not confirmed. Saved text may be incomplete; review the call history before using it.`,
+        failed: `The final transcript for ${evidenceSubject} could not be saved. Earlier saved text may be incomplete; review the call history.`,
+        unknown: `Transcript completeness for ${evidenceSubject} has not been verified.`,
+    } as Record<string, string>)[query.data?.transcript_save_state ?? ""];
     const processingMessage = processing === "failed"
         ? "Some call details could not be processed. Saved details remain available."
         : processing === "pending" ? "Call details are awaiting analysis."
         : processing === "not_processed" ? "This older call has not been analyzed for captured details. Open its summary in call history to process it."
-        : processing === "no_transcript" ? "No usable transcript was recorded for this call." : null;
+        : processing === "no_transcript" ? "No usable transcript is available for this call." : null;
 
     // The badge comes from the post-call verdict, never from "some fields were
     // captured". A caller can give their name and still explicitly decline.
@@ -248,8 +295,9 @@ export function LeadDetailsPanel({
     if (!details.length && !missing.length && !deliveries.length) {
         return (
             <Panel>
+                {transcriptMessage && <p role="status" className="mb-3 text-sm text-muted-foreground">{transcriptMessage}</p>}
                 <p className="text-sm text-muted-foreground">
-                    {processingMessage || (processing === "no_calls" ? "No calls recorded for this contact." : "No supported details were provided in the recorded conversation.")}
+                    {processingMessage || (processing === "no_calls" ? "No calls recorded for this contact." : "No captured details are available from the saved evidence.")}
                 </p>
             </Panel>
         );
@@ -276,6 +324,7 @@ export function LeadDetailsPanel({
             </div>
 
             {processingMessage && <p role="status" className="mb-3 text-sm text-muted-foreground">{processingMessage}</p>}
+            {transcriptMessage && <p role="status" className="mb-3 text-sm text-muted-foreground">{transcriptMessage}</p>}
             {deliveries.length > 0 && (
                 <div className="mb-3 space-y-1 text-xs text-muted-foreground" aria-label="CRM delivery status">
                     {deliveries.map((delivery) => (
@@ -291,7 +340,7 @@ export function LeadDetailsPanel({
                     <p className="text-xs text-muted-foreground">
                         <strong className="text-foreground">Still missing:</strong>{" "}
                         {missing.map(humanise).join(", ")} — required by this campaign and
-                        never established on the call.
+                        not yet saved as usable information.
                     </p>
                 </div>
             )}

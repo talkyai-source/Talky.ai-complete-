@@ -32,7 +32,7 @@ def summary_snapshot(row) -> list:
 
 def transcript_revision(row) -> str:
     """Include structured turns and action receipts, not just rendered text."""
-    return hashlib.sha256(json.dumps(summary_snapshot(row), sort_keys=True, default=str).encode("utf-8")).hexdigest()
+    return hashlib.sha256(json.dumps({"canonical_version": 2, "snapshot": summary_snapshot(row)}, sort_keys=True, default=str).encode("utf-8")).hexdigest()
 
 
 def verified_details(details, transcript_json) -> list[dict]:
@@ -52,7 +52,9 @@ def verified_details(details, transcript_json) -> list[dict]:
         transcript_json = transcript_json.get("turns", [])
     if not isinstance(transcript_json, list) or not isinstance(details, list):
         return []
-    callers = [(i, str(t.get("content") or t.get("text") or ""))
+    from app.domain.services.transcript_service import conversation_turns
+    transcript_json = conversation_turns(transcript_json)
+    callers = [(i, str(t.get("content") or ""))
                for i, t in enumerate(transcript_json)
                if isinstance(t, dict) and t.get("role") == "user"
                and t.get("is_final") is not False

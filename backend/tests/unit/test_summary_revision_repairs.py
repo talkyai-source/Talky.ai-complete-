@@ -1,17 +1,18 @@
 """Cached analysis must describe this revision and never replace human notes."""
 from contextlib import asynccontextmanager
+import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from app.domain.services.call_summary import store
-from app.domain.services.call_summary.business_details import transcript_revision
+from app.domain.services.call_summary.business_details import transcript_revision, summary_snapshot
 from app.infrastructure.assistant.tools.leads import get_lead_followup
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("change", ["none", "plaintext", "structured", "actions", "legacy"])
+@pytest.mark.parametrize("change", ["none", "plaintext", "structured", "structured_text", "actions", "legacy"])
 async def test_summary_cache_requires_current_evidence_and_business_fields(monkeypatch, change):
     old = {"headline": "Old analysis", "business_details": []}
     row = {"transcript": "Caller: I use Stripe.", "transcript_json": [
@@ -21,6 +22,8 @@ async def test_summary_cache_requires_current_evidence_and_business_fields(monke
         row["transcript"] += "\nCaller: Actually I use SumUp."
     elif change == "structured":
         row["transcript_json"][0]["include_in_plaintext"] = False
+    elif change == "structured_text":
+        row["transcript_json"][0]["content"] = "Actually I use SumUp."
     elif change == "actions":
         row["action_results"] = {"send_email": {"status": "succeeded"}}
     elif change == "legacy":
@@ -36,14 +39,30 @@ async def test_summary_cache_requires_current_evidence_and_business_fields(monke
     monkeypatch.setattr(store, "_confirmed_contacts_for_call", AsyncMock(return_value={}))
     save = AsyncMock()
     monkeypatch.setattr(store, "save_summary_details", save)
-    monkeypatch.setattr(store, "mark_lead_from_summary", AsyncMock())
+    mark = AsyncMock()
+    monkeypatch.setattr(store, "mark_lead_from_summary", mark)
     refresh = AsyncMock()
     monkeypatch.setattr(store, "refresh_latest_analysis", refresh)
     result = await store.generate_and_store(object(), "tenant", "call")
+    if change == "structured":
+        # No usable current caller text: do not resurrect stale plaintext or
+        # return the previous analysis after its source was explicitly hidden.
+        assert result is None
+        summarize.assert_not_awaited()
+        save.assert_not_awaited()
+        refresh.assert_not_awaited()
+        mark.assert_not_awaited()
+        query, *args = conn.execute.await_args.args
+        assert "lead_details_status = 'no_transcript'" in query
+        assert "jsonb_build_array(COALESCE(transcript,''),transcript_json,action_results)=$4::jsonb" in query
+        assert json.loads(args[-1]) == summary_snapshot(row)
+        return
     assert result == (old if change == "none" else fresh)
     assert summarize.await_count == (0 if change == "none" else 1)
     assert refresh.await_args.args[-1] == transcript_revision(row)
     save.assert_awaited_once()
+    if change == "structured_text":
+        assert summarize.await_args.args[0] == "User: Actually I use SumUp."
 
 
 @pytest.mark.asyncio

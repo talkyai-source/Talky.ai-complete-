@@ -14,7 +14,8 @@ worse than not capturing it, because nobody knows to check.
 So every value carries:
 
     source     where it came from, one of four
-    confirmed  whether the caller heard it read back and agreed
+    confirmed  the capture machine accepted caller confirmation; receipt
+               provenance is separate and is never proof of human hearing
 
 `TRUST_ORDER` encodes the one rule that matters when the same field is captured
 twice on one call: a manual edit beats what the caller said, which beats what
@@ -28,7 +29,7 @@ ABSENT IS NOT NULL
 represented by writing NO ROW, not the string "unknown":
 
     no row          never established
-    row, NULL value asked, and the caller declined
+    row, NULL value no usable value; validation/evidence state explains why
 
 Those want different follow-up, and collapsing them loses the distinction
 permanently.
@@ -36,7 +37,9 @@ permanently.
 from __future__ import annotations
 
 import json
+import hashlib
 import logging
+import re
 from datetime import datetime, timezone
 from typing import Any, Optional, Sequence
 
@@ -60,6 +63,83 @@ CONTACT_VALIDATION_STATUSES = frozenset({
     "confirmed",
     "cancelled",
 })
+
+
+def project_contact_evidence(row: dict, transcript_json) -> dict:
+    """Do not present superseded caller evidence as an active saved contact.
+
+    The persisted row remains audit evidence; projection compares its bounded
+    source identities to the currently durable caller transcript. Manual edits
+    are independent. Legacy rows retain their historical claim, explicitly
+    unversioned rather than being promoted to newly verified evidence.
+    """
+    result = dict(row)
+    evidence = result.get("evidence") or {}
+    if isinstance(evidence, str):
+        try:
+            evidence = json.loads(evidence)
+        except ValueError:
+            evidence = {}
+    evidence = dict(evidence) if isinstance(evidence, dict) else {}
+    result["evidence"] = evidence
+    if result.get("field_type") not in {"email", "phone"} or result.get("source") != "caller_stated":
+        return result
+    owners = {name: evidence.get(name) for name in ("value_source", "confirmation_source", "status_source")}
+    if not any(owner is not None for owner in owners.values()):
+        evidence["provenance_status"] = "unversioned"
+        return result
+    if isinstance(transcript_json, str):
+        try:
+            transcript_json = json.loads(transcript_json)
+        except ValueError:
+            transcript_json = []
+    if isinstance(transcript_json, dict):
+        transcript_json = transcript_json.get("turns")
+    from app.domain.services.transcript_service import effective_turn
+    from app.domain.services.voice_pipeline.contact_capture import ContactSource
+    turns = [effective_turn(item) for item in (transcript_json or []) if isinstance(item, dict)] if isinstance(transcript_json, (list, tuple)) else []
+    checks = {}
+    if result.get("value") is not None and owners["value_source"] is None:
+        checks["value_source"] = "unavailable"
+    if result.get("confirmed") and owners["confirmation_source"] is None:
+        checks["confirmation_source"] = "unavailable"
+    for name, owner in owners.items():
+        if owner is None:
+            continue
+        try:
+            source = ContactSource(**owner)
+        except (ValueError, TypeError):
+            checks[name] = "unavailable"
+            continue
+        matches = [item for item in turns if item.get("role") == "user" and item.get("is_final") is not False
+                   and isinstance(item.get("metadata"), dict)
+                   and item["metadata"].get("provider_item_id") == source.provider_item_id
+                   and item["metadata"].get("caller_turn_order") == source.caller_turn_order]
+        if len(matches) != 1:
+            checks[name] = "unavailable"
+        elif matches[0].get("effective_content_status") == "unavailable":
+            checks[name] = "unavailable"
+        else:
+            content = str(matches[0].get("content") or "").strip()
+            digest = hashlib.sha256(content.encode("utf-8")).hexdigest()
+            checks[name] = "matched" if digest == source.revision_sha256 else "changed"
+    evidence["source_checks"] = checks
+    if all(status == "matched" for status in checks.values()):
+        evidence["provenance_status"] = "matched"
+        return result
+    evidence["provenance_status"] = "needs_review"
+    evidence["status"] = "needs_review"
+    if result.get("confirmed_at") is not None:
+        evidence["stored_confirmation_at"] = str(result["confirmed_at"])
+    result["confirmed"] = False
+    result["confirmed_at"] = None
+    if checks.get("value_source") != "matched":
+        result["value"] = None
+        result["normalized_value"] = None
+        result["validation_status"] = "needs_clarification"
+    elif result.get("value") is not None:
+        result["validation_status"] = "awaiting_confirmation"
+    return result
 
 
 class InvalidCaptureError(ValueError):
@@ -153,6 +233,7 @@ class LeadCaptureService:
         expected_transcript: Optional[str] = None,
         expected_summary_hash: Optional[str] = None,
         expected_summary_snapshot: Optional[list] = None,
+        expected_contact: Optional[dict] = None,
     ) -> bool:
         """Store one captured field. Returns True if it was written.
 
@@ -171,14 +252,40 @@ class LeadCaptureService:
         key = (field_key or "").strip()
         if not key:
             raise InvalidCaptureError("field_key is required")
+        contact_key = re.fullmatch(r"(email|phone)(?:_([2-9]|[1-9][0-9]+))?", key)
+        if contact_key and field_type != contact_key.group(1):
+            raise InvalidCaptureError("contact field_key requires its matching email/phone type")
 
         stored = normalise_value(value, field_type)
         is_contact = field_type in {"email", "phone"}
+        if expected_contact is not None and (not is_contact or source != "caller_stated"):
+            raise InvalidCaptureError("contact compare-and-set requires a caller-stated contact")
+        manual_withdrawal = (is_contact and source == "manual_edit" and value is None
+                             and validation_status == "cancelled" and not confirmed)
+        caller_null = (is_contact and source == "caller_stated" and value is None and not confirmed
+                       and validation_status in {"needs_clarification", "invalid", "cancelled"})
+        if caller_null:
+            from app.domain.services.voice_pipeline.contact_capture import ContactSource
+            try:
+                ContactSource(**((evidence or {}).get("status_source") or (evidence or {}).get("value_source") or {}))
+            except (ValueError, TypeError):
+                raise InvalidCaptureError("null caller contact requires explicit source evidence") from None
+            if normalized_value is not None or confirmed_at is not None:
+                raise InvalidCaptureError("unusable caller contact cannot contain a normalized value or confirmation")
         audit_status = validation_status
         audit_raw = None
         audit_normalized = None
         audit_confirmed_at = confirmed_at
-        if is_contact:
+        if manual_withdrawal:
+            if raw_value is not None or normalized_value is not None or confirmed_at is not None:
+                raise InvalidCaptureError("withdrawn manual contact cannot contain a value or confirmation")
+            stored = None
+            audit_status = "cancelled"
+            evidence = {**(evidence or {}), "status": "manually_withdrawn"}
+        elif caller_null:
+            stored = None
+            audit_raw = normalise_value(raw_value, field_type)
+        elif is_contact:
             audit_status = audit_status or (
                 "confirmed" if confirmed else "awaiting_confirmation"
             )
@@ -261,24 +368,34 @@ class LeadCaptureService:
                     (tenant_id, call_id, campaign_id, lead_id, field_key,
                      field_type, value, source, confirmed, is_required,
                      raw_value, normalized_value, validation_status, confirmed_at, evidence)
-                SELECT $1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, $6, $7, $8, $9, $10,
-                        $11, $12, $13, $14, $16::jsonb
-                 WHERE EXISTS (SELECT 1 FROM calls WHERE id = $2::uuid AND tenant_id = $1::uuid
+                SELECT $1::uuid, $2::uuid, c.campaign_id, c.lead_id, $5::text, $6, $7::text, $8, $9::boolean, $10,
+                        $11, $12, $13::text, $14, $16::jsonb
+                  FROM calls c WHERE c.id = $2::uuid AND c.tenant_id = $1::uuid
+                               AND ($3::uuid IS NULL OR c.campaign_id = $3::uuid)
+                               AND ($4::uuid IS NULL OR c.lead_id = $4::uuid)
                                AND ($17::text IS NULL OR transcript = $17)
                                AND ($18::text IS NULL OR summary_transcript_hash = $18)
-                               AND ($19::jsonb IS NULL OR jsonb_build_array(COALESCE(transcript,''), transcript_json, action_results) = $19::jsonb))
+                               AND ($19::jsonb IS NULL OR jsonb_build_array(COALESCE(transcript,''), transcript_json, action_results) = $19::jsonb)
+                               AND ($20::jsonb IS NULL OR $20->>'absent' = 'true'
+                                    OR EXISTS (SELECT 1 FROM call_lead_details d
+                                        WHERE d.call_id=$2::uuid AND d.tenant_id=$1::uuid AND d.field_key=$5::text
+                                          AND (jsonb_build_object('value',d.value,'evidence',d.evidence)=$20::jsonb
+                                               OR (d.value IS NOT DISTINCT FROM $7::text AND d.evidence=$16::jsonb
+                                                   AND d.confirmed=$9::boolean AND d.validation_status IS NOT DISTINCT FROM $13::text))))
                 ON CONFLICT (call_id, field_key) DO UPDATE
                    SET value      = EXCLUDED.value,
                        source     = EXCLUDED.source,
                        -- confirmed is sticky: once the caller has agreed a
                        -- value, a later unconfirmed write of the SAME value
                        -- must not quietly downgrade it to unconfirmed.
-                       confirmed  = call_lead_details.confirmed OR EXCLUDED.confirmed,
+                       confirmed  = CASE WHEN EXCLUDED.source='manual_edit' AND EXCLUDED.validation_status='cancelled'
+                                    THEN FALSE ELSE call_lead_details.confirmed OR EXCLUDED.confirmed END,
                        field_type = EXCLUDED.field_type,
                        raw_value = EXCLUDED.raw_value,
                        normalized_value = EXCLUDED.normalized_value,
                        validation_status = EXCLUDED.validation_status,
                        confirmed_at = CASE
+                           WHEN EXCLUDED.source='manual_edit' AND EXCLUDED.validation_status='cancelled' THEN NULL
                            WHEN EXCLUDED.confirmed
                            THEN COALESCE(
                                EXCLUDED.confirmed_at,
@@ -286,7 +403,9 @@ class LeadCaptureService:
                            )
                            ELSE call_lead_details.confirmed_at
                        END,
-                       evidence = CASE WHEN EXCLUDED.source = 'manual_edit'
+                       evidence = CASE WHEN EXCLUDED.source = 'manual_edit' AND EXCLUDED.validation_status='cancelled'
+                                  THEN EXCLUDED.evidence || '{"status":"manually_withdrawn"}'::jsonb
+                                  WHEN EXCLUDED.source = 'manual_edit'
                                   THEN EXCLUDED.evidence || '{"status":"manually_verified"}'::jsonb
                                   ELSE EXCLUDED.evidence END,
                        updated_at = NOW()
@@ -300,12 +419,18 @@ class LeadCaptureService:
                    -- whatever the source rank. Without this a same-source retry
                    -- passed the rank test, overwrote value, and the sticky OR
                    -- above kept confirmed=TRUE on a value nobody agreed.
-                   AND NOT (call_lead_details.confirmed AND NOT EXCLUDED.confirmed)
+                   AND (NOT (call_lead_details.confirmed AND NOT EXCLUDED.confirmed)
+                        OR (EXCLUDED.source='manual_edit' AND EXCLUDED.validation_status='cancelled'))
                    -- RLS is context, not a substitute for ownership in the
                    -- mutation itself. Keep the explicit tenant predicate so
                    -- this upsert cannot cross tenants under any privileged
                    -- maintenance context.
                    AND call_lead_details.tenant_id = $1::uuid
+                   AND ($20::jsonb IS NULL
+                        OR jsonb_build_object('value',call_lead_details.value,'evidence',call_lead_details.evidence)=$20::jsonb
+                        OR (call_lead_details.value IS NOT DISTINCT FROM EXCLUDED.value
+                            AND call_lead_details.evidence=EXCLUDED.evidence
+                            AND call_lead_details.confirmed=EXCLUDED.confirmed))
                    AND (EXCLUDED.source = 'manual_edit'
                         OR NOT (call_lead_details.evidence ? 'turn_index')
                         OR NOT (EXCLUDED.evidence ? 'turn_index')
@@ -320,6 +445,7 @@ class LeadCaptureService:
                 list(TRUST_ORDER), json.dumps(evidence or {}), expected_transcript,
                 expected_summary_hash,
                 json.dumps(expected_summary_snapshot, default=str) if expected_summary_snapshot is not None else None,
+                json.dumps(expected_contact) if expected_contact is not None else None,
             )
 
         if row is None:
@@ -341,6 +467,8 @@ class LeadCaptureService:
         call_id: str,
         field_key: str,
         validation_status: str,
+        expected_contact: Optional[dict] = None,
+        revocation_source: Optional[dict] = None,
     ) -> bool:
         """Tombstone a caller-stated contact that is no longer confirmed.
 
@@ -350,10 +478,20 @@ class LeadCaptureService:
         replacement.
         """
         key = str(field_key or "").strip()
-        if key not in {"email", "phone"}:
+        match = re.fullmatch(r"(email|phone)(?:_([2-9]|[1-9][0-9]+))?", key)
+        if not match:
             raise InvalidCaptureError("only email/phone can be revoked")
         if validation_status not in CONTACT_VALIDATION_STATUSES - {"confirmed"}:
             raise InvalidCaptureError("contact revocation requires a pending status")
+        if revocation_source is not None:
+            from app.domain.services.voice_pipeline.contact_capture import ContactSource
+            try:
+                ContactSource(**revocation_source)
+            except (ValueError, TypeError):
+                raise InvalidCaptureError("invalid revocation source evidence") from None
+        marker = {"status": "revoked"}
+        if revocation_source is not None:
+            marker["status_source"] = revocation_source
 
         from app.core.db_utils import acquire_with_tenant
 
@@ -367,18 +505,25 @@ class LeadCaptureService:
                        normalized_value = NULL,
                        validation_status = $4,
                        confirmed_at = NULL,
+                       evidence = evidence || $7::jsonb,
                        updated_at = NOW()
                  WHERE tenant_id = $1::uuid
                    AND call_id = $2::uuid
                    AND field_key = $3
-                   AND field_type IN ('email', 'phone')
+                   AND field_type = $5
                    AND source = 'caller_stated'
+                   AND ($6::jsonb IS NULL OR jsonb_build_object('value',value,'evidence',evidence)=$6::jsonb
+                        OR (value IS NULL AND NOT confirmed AND validation_status=$4
+                            AND evidence=(($6::jsonb->'evidence') || $7::jsonb)))
                 RETURNING id
                 """,
                 str(tenant_id),
                 str(call_id),
                 key,
                 validation_status,
+                match.group(1),
+                json.dumps(expected_contact) if expected_contact is not None else None,
+                json.dumps(marker),
             )
         return row is not None
 
@@ -402,6 +547,7 @@ class LeadCaptureService:
                     normalized_value=item.get("normalized_value"),
                     validation_status=item.get("validation_status"),
                     confirmed_at=item.get("confirmed_at"),
+                    evidence=item.get("evidence"),
                     **common,
                 ):
                     written += 1
@@ -420,11 +566,12 @@ class LeadCaptureService:
         async with acquire_with_tenant(self._pool, str(tenant_id)) as conn:
             rows = await conn.fetch(
                 """
-                SELECT field_key, field_type, value, source, confirmed,
-                       is_required, raw_value, normalized_value,
-                       validation_status, confirmed_at, evidence, updated_at
-                  FROM call_lead_details
-                 WHERE call_id = $1::uuid
+                SELECT d.field_key, d.field_type, d.value, d.source, d.confirmed,
+                       d.is_required, d.raw_value, d.normalized_value,
+                       d.validation_status, d.confirmed_at, d.evidence, d.updated_at,
+                       c.transcript_json AS _source_transcript
+                  FROM call_lead_details d JOIN calls c ON c.id=d.call_id AND c.tenant_id=d.tenant_id
+                 WHERE d.call_id = $1::uuid
                  ORDER BY is_required DESC, field_key
                 """,
                 str(call_id),
@@ -439,7 +586,8 @@ class LeadCaptureService:
                 result["evidence"] = json.loads(result["evidence"])
             except ValueError:
                 result["evidence"] = {}
-        return result
+        transcript = result.pop("_source_transcript", None)
+        return project_contact_evidence(result, transcript)
 
     async def details_for_lead(self, tenant_id: str, lead_id: str) -> list[dict]:
         from app.core.db_utils import acquire_with_tenant
@@ -447,11 +595,14 @@ class LeadCaptureService:
             rows = await conn.fetch(
                 """SELECT DISTINCT ON (d.field_key) d.field_key, d.field_type,
                           d.value, d.source, d.confirmed, d.is_required, d.updated_at,
-                          d.validation_status, d.evidence, d.call_id
+                          d.validation_status, d.evidence, d.call_id,
+                          d.raw_value, d.normalized_value, d.confirmed_at,
+                          c.transcript_json AS _source_transcript
                      FROM call_lead_details d
                      JOIN calls c ON c.id=d.call_id AND c.tenant_id=d.tenant_id
                     WHERE d.tenant_id=$1::uuid AND c.lead_id=$2::uuid
                     ORDER BY d.field_key, (d.source='manual_edit') DESC,
+                             CASE WHEN d.source='manual_edit' THEN d.updated_at END DESC,
                              c.created_at DESC, d.updated_at DESC""",
                 str(tenant_id), str(lead_id),
             )
@@ -485,29 +636,46 @@ class LeadCaptureService:
             )
         return result or "no_calls"
 
+    async def transcript_save_state(self, tenant_id: str, *, call_id=None, lead_id=None) -> str:
+        """Transcript durability is independent of analysis/Lead processing."""
+        from app.core.db_utils import acquire_with_tenant
+        async with acquire_with_tenant(self._pool, str(tenant_id)) as conn:
+            result = await conn.fetchval(
+                """SELECT transcript_save_state FROM calls WHERE tenant_id=$1::uuid
+                     AND (($2::uuid IS NOT NULL AND id=$2::uuid)
+                          OR ($2::uuid IS NULL AND lead_id=$3::uuid))
+                     ORDER BY created_at DESC LIMIT 1""",
+                str(tenant_id), call_id, lead_id,
+            )
+        return result or "no_calls"
+
     async def missing_required(
-        self, tenant_id: str, call_id: str, campaign_id: str
+        self, tenant_id: str, call_id: str, campaign_id: Optional[str] = None
     ) -> list[str]:
         """Required fields with no value — what the lead panel highlights.
 
-        A row whose value is NULL counts as missing for this purpose: the
-        caller was asked and declined, so the information is still absent even
-        though the question was put.
+        Campaign authority comes from the bound call. The optional legacy
+        argument is accepted for compatibility, never for authorization.
+        Required contact values must be confirmed; generic facts retain their
+        existing nonempty-value rule. A null alone does not prove refusal.
         """
         from app.core.db_utils import acquire_with_tenant
 
         async with acquire_with_tenant(self._pool, str(tenant_id)) as conn:
             rows = await conn.fetch(
                 """
-                SELECT f.field_key
-                  FROM campaign_lead_fields f
-             LEFT JOIN call_lead_details d
-                    ON d.call_id = $2::uuid AND d.field_key = f.field_key
-                 WHERE f.campaign_id = $1::uuid
+                SELECT f.field_key, f.field_type
+                  FROM calls c JOIN campaign_lead_fields f ON f.campaign_id=c.campaign_id
+                 WHERE c.id = $2::uuid AND c.tenant_id=$1::uuid
                    AND f.is_required
-                   AND (d.id IS NULL OR d.value IS NULL)
                  ORDER BY f.sort_order, f.field_key
                 """,
-                str(campaign_id), str(call_id),
+                str(tenant_id), str(call_id),
             )
-        return [r["field_key"] for r in rows]
+        if not rows:
+            return []
+        details = {row["field_key"]: row for row in await self.details_for_call(tenant_id, call_id)}
+        return [row["field_key"] for row in rows
+                if (saved := details.get(row["field_key"])) is None or saved.get("value") is None
+                or (row["field_type"] in {"email", "phone"}
+                    and (not saved.get("confirmed") or saved.get("validation_status") != "confirmed"))]

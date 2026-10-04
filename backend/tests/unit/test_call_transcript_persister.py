@@ -7,12 +7,12 @@ TranscriptService. They exercise three invariants:
      voice_session.call_id (provider connection keys depend on that).
   2. Missing-dialer-row and lookup-failure paths never raise.
   3. save_call_transcript_on_hangup reads the buffer, writes via asyncpg,
-     and clears the buffer even when the write fails.
+     and reports success only after an acknowledged save; failed evidence remains.
 """
 from __future__ import annotations
 
 from types import SimpleNamespace
-from typing import Any, Dict
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -202,103 +202,49 @@ class _AsyncPoolCM:
         return None
 
 
-def _make_transcript_service(turns, text="User: hi\nAssistant: hello", metrics=None):
+@pytest.mark.asyncio
+@pytest.mark.parametrize("receipt, expected", [("saved-row", True), (None, False)])
+async def test_hangup_reports_only_acknowledged_save_and_schedules_summary_after_commit(monkeypatch, receipt, expected):
+    vs = _voice_session("session-uuid")
+    vs._dialer_call_id = "00000000-0000-0000-0000-000000000001"
+    vs._dialer_tenant_id = "00000000-0000-0000-0000-0000000000b1"
     svc = MagicMock()
-    svc.get_transcript_json.return_value = turns
-    svc.get_transcript_text.return_value = text
-    svc.get_metrics.return_value = metrics or {
-        "word_count": 3,
-        "turn_count": 2,
-        "user_word_count": 1,
-        "assistant_word_count": 2,
-    }
-    svc.clear_buffer = MagicMock()
-    return svc
-
-
-@pytest.mark.asyncio
-async def test_save_persists_and_clears_buffer():
-    dialer_id = "00000000-0000-0000-0000-000000000001"
-    tenant_id = "00000000-0000-0000-0000-0000000000b1"
-
-    vs = _voice_session("session-uuid")
-    vs._dialer_call_id = dialer_id
-    vs._dialer_tenant_id = tenant_id
-
-    svc = _make_transcript_service(turns=[{"role": "user", "content": "hi"}])
-
-    conn = _make_fake_conn()
+    svc.save_transcript = AsyncMock(return_value=receipt)
+    schedule = MagicMock()
+    monkeypatch.setattr("app.services.scripts.call_transcript_persister._schedule_call_summary", schedule)
     pool = MagicMock()
-    pool.acquire = MagicMock(return_value=_AsyncPoolCM(conn))
-
-    await save_call_transcript_on_hangup(
-        voice_session=vs,
-        transcript_service=svc,
-        db_pool=pool,
+    result = await save_call_transcript_on_hangup(
+        voice_session=vs, transcript_service=svc, db_pool=pool,
     )
-
-    # Three execute calls inside the bypass transaction:
-    # 1. SET LOCAL app.bypass_rls = 'true'
-    # 2. UPDATE calls
-    # 3. INSERT INTO transcripts
-    assert conn.execute.await_count == 3
-    executed_sql = [c.args[0] for c in conn.execute.await_args_list if c.args]
-    assert any("bypass_rls" in sql for sql in executed_sql)
-    svc.clear_buffer.assert_called_once_with("session-uuid")
+    assert result is expected
+    svc.save_transcript.assert_awaited_once_with(
+        "session-uuid", db_pool=pool, tenant_id=vs._dialer_tenant_id,
+        target_call_id=vs._dialer_call_id,
+    )
+    assert schedule.called is expected
 
 
 @pytest.mark.asyncio
-async def test_save_skips_when_no_dialer_binding():
-    vs = _voice_session("session-uuid")  # no _dialer_call_id set
-    svc = _make_transcript_service(turns=[{"role": "user", "content": "hi"}])
-
-    pool = MagicMock()
-    pool.acquire = MagicMock()
-
-    await save_call_transcript_on_hangup(
-        voice_session=vs,
-        transcript_service=svc,
-        db_pool=pool,
+async def test_missing_binding_retains_evidence_without_unscoped_write():
+    svc = MagicMock()
+    svc.save_transcript = AsyncMock()
+    result = await save_call_transcript_on_hangup(
+        voice_session=_voice_session("session-uuid"), transcript_service=svc, db_pool=MagicMock(),
     )
-
-    pool.acquire.assert_not_called()
-    svc.clear_buffer.assert_called_once_with("session-uuid")
+    assert result is False
+    svc.save_transcript.assert_not_awaited()
+    svc.retain_failed_finalization.assert_called_once_with("session-uuid")
 
 
 @pytest.mark.asyncio
-async def test_save_skips_when_buffer_empty():
+async def test_unexpected_final_save_failure_retains_buffer_and_does_not_claim_success():
     vs = _voice_session("session-uuid")
     vs._dialer_call_id = "00000000-0000-0000-0000-000000000001"
-    svc = _make_transcript_service(turns=[])
-
-    pool = MagicMock()
-    pool.acquire = MagicMock()
-
-    await save_call_transcript_on_hangup(
-        voice_session=vs,
-        transcript_service=svc,
-        db_pool=pool,
-    )
-
-    pool.acquire.assert_not_called()
-    svc.clear_buffer.assert_called_once_with("session-uuid")
-
-
-@pytest.mark.asyncio
-async def test_save_clears_buffer_even_when_db_fails():
-    vs = _voice_session("session-uuid")
-    vs._dialer_call_id = "00000000-0000-0000-0000-000000000001"
-    svc = _make_transcript_service(turns=[{"role": "user", "content": "hi"}])
-
-    conn = _make_fake_conn(execute_side_effect=RuntimeError("db down"))
-    pool = MagicMock()
-    pool.acquire = MagicMock(return_value=_AsyncPoolCM(conn))
-
-    # Should NOT raise.
-    await save_call_transcript_on_hangup(
-        voice_session=vs,
-        transcript_service=svc,
-        db_pool=pool,
-    )
-
-    svc.clear_buffer.assert_called_once_with("session-uuid")
+    vs._dialer_tenant_id = "00000000-0000-0000-0000-0000000000b1"
+    svc = MagicMock()
+    svc.save_transcript = AsyncMock(side_effect=RuntimeError("synthetic DB failure"))
+    assert await save_call_transcript_on_hangup(
+        voice_session=vs, transcript_service=svc, db_pool=MagicMock(),
+    ) is False
+    svc.clear_buffer.assert_not_called()
+    svc.retain_failed_finalization.assert_called_once_with("session-uuid")

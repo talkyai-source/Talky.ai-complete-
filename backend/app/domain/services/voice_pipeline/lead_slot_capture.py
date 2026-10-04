@@ -22,10 +22,10 @@ forbids.
 audit values from the confirm-before-commit machine.  Since 2026-09-28 (owner
 decision) a value the machine parsed out of the caller's words and is reading
 back (``awaiting_confirmation``) is written too, as ``confirmed=FALSE``, so a
-number the caller gave is not lost when the read-back never completes. Nothing
-else is: a value needing clarification, invalid, cancelled, or seeded from the
-lead record (plain ``CallState.email`` without a capture) never leaves memory.
-For now only email and phone are captured live.
+number the caller gave is not lost when the read-back never completes.
+Caller-owned clarification, invalid and cancelled transitions are recorded as
+NULL values with explicit status/source evidence. Default or agent-seeded
+modes never create those rows. Only email and phone are captured live.
 
 WHAT MUST NOT HAPPEN
 --------------------
@@ -56,6 +56,8 @@ and the line drops — is not lost.
 from __future__ import annotations
 
 import logging
+import json
+from dataclasses import asdict
 from typing import Any, Optional
 from uuid import UUID
 
@@ -81,6 +83,21 @@ _KEPT_CAPTURE_STATES = ("confirmed", "awaiting_confirmation")
 _WRITTEN_ATTR = "_lead_capture_written"
 _IS_TEST_ATTR = "_lead_capture_is_test"
 _BINDING_ATTR = "_lead_capture_binding"
+_FAILED_ATTR = "_lead_capture_failed_fields"
+
+
+def contact_save_failed_fields(session: Any) -> tuple[str, ...]:
+    """Unacknowledged write failures, separate from caller confirmation."""
+    return tuple(sorted(getattr(session, _FAILED_ATTR, ()) or ()))
+
+
+def _save_failed(session: Any, keys, *, failed: bool = True) -> None:
+    current = set(contact_save_failed_fields(session))
+    if failed:
+        current.update(keys)
+    else:
+        current.difference_update(keys)
+    _stash(session, _FAILED_ATTR, current)
 
 
 def resolve_call_binding(session: Any) -> dict:
@@ -190,7 +207,15 @@ def _confirmed_row(capture: Any, field_type: str) -> dict:
         "normalized_value": capture.normalized_value,
         "validation_status": capture.validation_status,
         "confirmed_at": capture.confirmed_at,
-        "evidence": {"confirmation_evidence": getattr(capture, "confirmation_evidence", None)},
+        "evidence": contact_evidence(capture),
+    }
+
+
+def contact_evidence(capture: Any) -> dict:
+    return {
+        "confirmation_evidence": getattr(capture, "confirmation_evidence", None),
+        **{name: asdict(value) if (value := getattr(capture, name, None)) is not None else None
+           for name in ("value_source", "confirmation_source", "status_source", "readback")},
     }
 
 
@@ -224,6 +249,17 @@ def snapshot_slots(captured_slots: Any) -> dict[str, dict]:
                 CaptureStatus,
             )
 
+            if (capture.validation_status in {"needs_clarification", "invalid", "cancelled"}
+                    and capture.from_caller and (capture.value_source is not None or capture.status_source is not None)):
+                # A real caller-owned transition can be recorded without
+                # inventing a usable value. Default/agent-seeded modes have no
+                # source ownership and deliberately create no row.
+                out[field_key] = {"value": None, "field_type": field_type, "confirmed": False,
+                    "raw_value": capture.raw_value, "normalized_value": None,
+                    "validation_status": capture.validation_status, "confirmed_at": None,
+                    "evidence": contact_evidence(capture)}
+                continue
+
             # A value the machine parsed from the caller's words is kept while
             # it is confirmed or being read back; confirmed only once approved.
             if (
@@ -244,6 +280,7 @@ def snapshot_slots(captured_slots: Any) -> dict[str, dict]:
                 "normalized_value": capture.normalized_value,
                 "validation_status": capture.validation_status,
                 "confirmed_at": capture.confirmed_at if confirmed else None,
+                "evidence": contact_evidence(capture),
             }
             continue
         raw = getattr(captured_slots, attr, None)
@@ -299,14 +336,21 @@ def pending_contact_revocations(session: Any) -> dict[str, str]:
     from app.domain.services.voice_pipeline.contact_capture import CaptureStatus
 
     revocations: dict[str, str] = {}
+    capture_keys = set()
     for kind in ("email", "phone"):
+        capture_keys.update(kind if index == 0 else f"{kind}_{index + 1}"
+            for index, _ in enumerate(getattr(captured_slots, f"earlier_{kind}_captures", ()) or ()))
         capture = getattr(captured_slots, f"{kind}_capture", None)
         field_key = contact_field_key(captured_slots, kind)
+        capture_keys.add(field_key)
         previous = written.get(field_key)
         if previous is None or capture is None:
             continue
         previous_value = previous[0] if isinstance(previous, tuple) else None
         previous_confirmed = bool(previous[1]) if isinstance(previous, tuple) else True
+        if (previous_value is None and not previous_confirmed and len(previous) > 4
+                and previous[4] == capture.validation_status):
+            continue  # The same durable tombstone was already acknowledged.
         if capture.status in (CaptureStatus.CANCELLED, CaptureStatus.INVALID):
             withdrawn = True
         elif capture.status is CaptureStatus.NEEDS_CLARIFICATION:
@@ -322,12 +366,18 @@ def pending_contact_revocations(session: Any) -> dict[str, str]:
             withdrawn = previous_confirmed and capture.status is not CaptureStatus.CONFIRMED
         if withdrawn:
             revocations[field_key] = capture.validation_status
+    for key, previous in written.items():
+        if key not in capture_keys and isinstance(previous, tuple) and previous[0] is not None:
+            # A corrected current "additional contact" item can retract its
+            # extra slot. Only rows acknowledged by this session are owned.
+            if key.startswith(("email_", "phone_")) and key.rsplit("_", 1)[-1].isdigit():
+                revocations[key] = "needs_clarification"
     return revocations
 
 
 def _stash(session: Any, name: str, value: Any) -> None:
-    """Best-effort memo on the session. Losing it costs redundant writes, not
-    correctness — ``capture()`` is idempotent in SQL either way."""
+    """Best-effort bounded memo. SQL fences retries; missing prior ownership
+    may require review, never permission to overwrite an independent row."""
     try:
         setattr(session, name, value)
     except Exception:  # noqa: BLE001 - a memo must never break a call
@@ -385,6 +435,8 @@ async def capture_session_slots(
             reason=reason,
         )
     except Exception:  # noqa: BLE001 - see module docstring, rule 1
+        _save_failed(session, set(snapshot_slots(getattr(session, "captured_slots", None)))
+                     | set(pending_contact_revocations(session)))
         logger.warning(
             "lead_slot_capture_failed call=%s reason=%s",
             str(call_id or "?")[:8],
@@ -428,7 +480,14 @@ async def _capture(
             item.get("normalized_value"),
             item.get("validation_status"),
             item.get("confirmed_at"),
+            json.dumps(item.get("evidence") or {}, sort_keys=True),
         )
+
+    def expected_contact(previous) -> dict:
+        if previous is None:
+            return {"absent": True}
+        return {"value": previous[0],
+                "evidence": json.loads(previous[6]) if len(previous) > 6 else {}}
 
     changed = {
         key: item
@@ -470,13 +529,25 @@ async def _capture(
     campaign = _as_uuid(campaign_id)
     lead = _as_uuid(lead_id)
     count = 0
+    blocked = set()
     for field_key, validation_status in revocations.items():
+        expected = expected_contact(written.get(field_key))
+        cause = pending.get(field_key, {}).get("evidence", {}).get("status_source")
+        revision = getattr(session, "_lead_capture_revision_source", None)
+        if cause is None and revision is not None and any(
+            isinstance(owner := expected.get("evidence", {}).get(name), dict)
+            and owner.get("provider_item_id") == revision.provider_item_id
+            for name in ("value_source", "confirmation_source", "status_source")
+        ):
+            cause = asdict(revision)
         try:
             revoked = await service.revoke_caller_contact(
                 tenant_id=tenant,
                 call_id=target_call_id,
                 field_key=field_key,
                 validation_status=validation_status,
+                expected_contact=expected,
+                revocation_source=cause,
             )
         except Exception as exc:  # noqa: BLE001 - transient; retry next turn
             logger.warning(
@@ -485,12 +556,27 @@ async def _capture(
                 field_key,
                 exc,
             )
+            blocked.add(field_key)
+            _save_failed(session, (field_key,))
             continue
-        written.pop(field_key, None)
+        if not revoked:
+            # A newer/manual writer now owns the row. Never clear it or turn
+            # a rejected pending replacement into a successful local memo.
+            blocked.add(field_key)
+            _save_failed(session, (field_key,), failed=False)
+            continue
+        revoked_evidence = {**expected["evidence"], "status": "revoked"}
+        if cause is not None:
+            revoked_evidence["status_source"] = cause
+        written[field_key] = fingerprint({"value": None, "confirmed": False,
+            "validation_status": validation_status, "evidence": revoked_evidence})
         if revoked:
+            _save_failed(session, (field_key,), failed=False)
             count += 1
 
     for field_key, item in changed.items():
+        if field_key in blocked:
+            continue
         try:
             stored = await service.capture(
                 tenant_id=tenant,
@@ -505,19 +591,19 @@ async def _capture(
                 validation_status=item.get("validation_status"),
                 confirmed_at=item.get("confirmed_at"),
                 evidence=item.get("evidence"),
+                expected_contact=expected_contact(written.get(field_key)),
                 campaign_id=campaign,
                 lead_id=lead,
             )
         except InvalidCaptureError as exc:
-            # Permanently unwritable (e.g. an overlong note). Memoise it so the
-            # next 39 turns do not retry it, and keep the other fields.
+            # Keep an explicit failure, never a successful-write fingerprint.
             logger.warning(
                 "lead_slot_capture_rejected call=%s field=%s - %s",
                 target_call_id[:8],
                 field_key,
                 exc,
             )
-            written[field_key] = fingerprint(item)
+            _save_failed(session, (field_key,))
             continue
         except Exception as exc:  # noqa: BLE001 - transient; retry next turn
             logger.warning(
@@ -526,9 +612,11 @@ async def _capture(
                 field_key,
                 exc,
             )
+            _save_failed(session, (field_key,))
             continue
-        written[field_key] = fingerprint(item)
+        _save_failed(session, (field_key,), failed=False)
         if stored:
+            written[field_key] = fingerprint(item)
             count += 1
 
     _stash(session, _WRITTEN_ATTR, written)
@@ -605,7 +693,9 @@ async def record_contact_outcome(
             outcome["phone"], outcome["phone_attempts"], outcome["line_phone_known"],
         )
         pending = [f for f in ("email", "phone") if outcome[f] == "unconfirmed"]
-        if not pending or pool is None or not target_call_id or not tenant:
+        failed_fields = contact_save_failed_fields(session)
+        prior_failure_notice = bool(getattr(session, "_lead_capture_failure_notice", False))
+        if (not pending and not failed_fields and not prior_failure_notice) or pool is None or not target_call_id or not tenant:
             return
         is_test = getattr(session, _IS_TEST_ATTR, None)
         if is_test is None:
@@ -615,16 +705,25 @@ async def record_contact_outcome(
         from app.domain.services.lead_capture_service import LeadCaptureService
 
         names = " and ".join("email address" if f == "email" else "phone number" for f in pending)
-        await LeadCaptureService(pool).capture(
+        if failed_fields:
+            value = "Contact evidence could not be saved for: " + ", ".join(failed_fields) + ". Review the call before using these details."
+            evidence = {"status": "contact_save_failed", "failed_fields": list(failed_fields)}
+        else:
+            value = f"The caller's {names} could not be confirmed on the call. Please confirm it with them." if pending else None
+            evidence = {"status": "confirmation_pending" if pending else "contact_save_recovered"}
+        stored = await LeadCaptureService(pool).capture(
             tenant_id=tenant,
             call_id=target_call_id,
             field_key=FOLLOWUP_FIELD,
-            value=f"The caller's {names} could not be confirmed on the call. Please confirm it with them.",
+            value=value,
             source="agent_inferred",
             field_type="notes",
             confirmed=False,
             campaign_id=_as_uuid(campaign_id),
             lead_id=_as_uuid(lead_id),
+            evidence=evidence,
         )
+        if stored:
+            _stash(session, "_lead_capture_failure_notice", bool(failed_fields))
     except Exception as exc:  # noqa: BLE001 - teardown must never break
         logger.warning("contact_capture_outcome_failed call=%s err=%s", str(call_id)[:8], exc)

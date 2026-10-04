@@ -165,6 +165,24 @@ class TurnEnder:
     def __init__(self, pipeline) -> None:
         self._p = pipeline
 
+    async def _flush_transcript(self, session: CallSession) -> None:
+        """Use the same owned incremental save for normal and early replies."""
+        try:
+            from app.domain.services.voice_pipeline.lead_slot_capture import resolve_call_binding
+
+            container = get_container()
+            if container.is_initialized:
+                binding = resolve_call_binding(session)
+                await self._p.transcript_service.flush_to_database(
+                    call_id=session.call_id,
+                    db_pool=container.db_pool,
+                    tenant_id=binding.get("tenant_id"),
+                    talklee_call_id=session.talklee_call_id,
+                    target_call_id=binding.get("call_id") or _resolve_transcript_target_call_id(session),
+                )
+        except Exception as exc:
+            logger.warning("transcript_progress_save_failed call=%s error_type=%s", session.call_id, type(exc).__name__)
+
     async def handle(
         self,
         session: CallSession,
@@ -273,6 +291,13 @@ class TurnEnder:
                             _Msg(role=MessageRole.ASSISTANT, content=reprompt)
                         )
                         session._speculative_history_len = None
+                        self._p.transcript_service.accumulate_turn(
+                            call_id=call_id, role="assistant", content=reprompt,
+                            talklee_call_id=session.talklee_call_id, turn_index=session.turn_id,
+                            event_type="assistant_clarification", is_final=True,
+                            metadata={"delivery_evidence": "submitted"},
+                        )
+                        await self._flush_transcript(session)
                 except Exception:
                     pass
                 return
@@ -933,18 +958,7 @@ class TurnEnder:
                 # asyncpg.connect PER TURN, stalling every concurrent call.
                 # target_call_id maps to the dialer's real calls.id so OUTBOUND
                 # transcripts actually persist (session.call_id != calls.id).
-                try:
-                    container = get_container()
-                    if container.is_initialized:
-                        await self._p.transcript_service.flush_to_database(
-                            call_id=call_id,
-                            db_pool=container.db_pool,
-                            tenant_id=tenant_id,
-                            talklee_call_id=session.talklee_call_id,
-                            target_call_id=_resolve_transcript_target_call_id(session),
-                        )
-                except Exception as e:
-                    logger.warning(f"Failed to flush transcript for {call_id}: {e}")
+                await self._flush_transcript(session)
 
                 # Structured lead capture (goals.md §7). turn_runner has just
                 # updated session.captured_slots from this caller turn, so this

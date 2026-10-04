@@ -62,9 +62,14 @@ async def test_a_late_final_after_the_hangup_save_is_never_flushed(monkeypatch):
     vs = SimpleNamespace(
         call_id="sess-1",
         _dialer_call_id="00000000-0000-0000-0000-000000000001",
+        _dialer_tenant_id="00000000-0000-0000-0000-000000000002",
         call_session=SimpleNamespace(tenant_id="t", talklee_call_id=None),
     )
-    await save_call_transcript_on_hangup(voice_session=vs, transcript_service=ts, db_pool=pool)
+    writer = AsyncMock(return_value="committed-child-row")
+    monkeypatch.setattr(ts, "_write_calls_transcript", writer)
+    assert await save_call_transcript_on_hangup(voice_session=vs, transcript_service=ts, db_pool=pool)
+    writer.assert_awaited_once()
+    assert ts.get_turns("sess-1") == []
 
     # The late final arrives 44 ms after the save…
     ts.accumulate_turn("sess-1", "user", "Yes. But")
@@ -74,5 +79,6 @@ async def test_a_late_final_after_the_hangup_save_is_never_flushed(monkeypatch):
     await ts.flush_to_database(
         call_id="sess-1", db_pool=pool,
         target_call_id="00000000-0000-0000-0000-000000000001",
+        tenant_id=vs._dialer_tenant_id,
     )
     writes.assert_not_awaited()

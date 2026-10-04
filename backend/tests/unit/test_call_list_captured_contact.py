@@ -9,24 +9,15 @@ from __future__ import annotations
 
 import pytest
 
-from app.api.v1.endpoints.calls import CallListItem, _captured_contact_sql
+from app.api.v1.endpoints.calls import CallListItem, _captured_contact_rows_sql, _display_captured_contacts
 
 
-@pytest.mark.parametrize("kind", ["phone", "email"])
-def test_the_subquery_is_tenant_scoped_and_skips_rejected_values(kind):
-    sql = " ".join(_captured_contact_sql(kind).split())
-    assert "FROM call_lead_details d" in sql
-    assert "d.call_id = c.id" in sql
-    # The list query runs under bypass_rls: the tenant predicate is the guard.
-    assert "d.tenant_id = c.tenant_id" in sql
-    assert f"d.field_type = '{kind}' OR d.field_key = '{kind}'" in sql
-    assert "NOT IN ('invalid', 'cancelled', 'needs_clarification')" in sql
-    assert "ORDER BY d.confirmed DESC" in sql
-
-
-def test_only_known_kinds_are_accepted():
-    with pytest.raises(ValueError):
-        _captured_contact_sql("phone'; DROP TABLE calls; --")
+def test_the_candidate_query_is_tenant_scoped_and_bounded():
+    sql = " ".join(_captured_contact_rows_sql().split())
+    assert "d.call_id = c.id AND d.tenant_id = c.tenant_id" in sql
+    assert "LIMIT 64" in sql
+    assert "d.evidence" in sql
+    assert "NOT IN ('invalid','cancelled','needs_clarification')" in sql
 
 
 def test_the_list_item_carries_the_captured_contact():
@@ -37,16 +28,6 @@ def test_the_list_item_carries_the_captured_contact():
     assert item.model_dump()["captured_phone"] == "+923085397539"
 
 
-@pytest.mark.parametrize("kind", ["phone", "email"])
-def test_the_confirmed_flag_comes_from_the_same_row_as_the_value(kind):
-    """2026-09-28: a stated-but-unconfirmed contact is listed, so the list must
-    say which. The flag subquery picks the SAME row (same filter + order)."""
-    value_sql = " ".join(_captured_contact_sql(kind).split())
-    flag_sql = " ".join(_captured_contact_sql(kind, confirmed_flag=True).split())
-    assert flag_sql.startswith("(SELECT d.confirmed ")
-    assert value_sql.split(" FROM ", 1)[1] == flag_sql.split(" FROM ", 1)[1]
-
-
 def test_the_list_item_says_when_a_contact_is_unconfirmed():
     item = CallListItem(
         id="4291700f", timestamp="2026-09-24T11:10:00Z", to_number="+923001234567",
@@ -55,3 +36,49 @@ def test_the_list_item_says_when_a_contact_is_unconfirmed():
     dumped = item.model_dump()
     assert dumped["captured_phone_confirmed"] is False
     assert dumped["captured_email_confirmed"] is None
+
+
+@pytest.mark.parametrize("revised", ["confirmation", "value", None])
+def test_list_contact_uses_current_transcript_before_confirmed_selection(revised):
+    import hashlib
+    from app.domain.services.transcript_service import TranscriptService
+
+    service = TranscriptService()
+    service.clear_buffer("list-proof")
+    texts = ["My email is alex@example.com.", "Yes, that's correct."]
+    owners = []
+    try:
+        for index, text in enumerate(texts, 1):
+            service.accumulate_turn("list-proof", "user", text, is_final=True, turn_index=index,
+                metadata={"provider_item_id": f"item-{index}", "caller_turn_order": index})
+            owners.append({"provider_item_id": f"item-{index}", "caller_turn_order": index,
+                           "revision_sha256": hashlib.sha256(text.encode()).hexdigest()})
+        candidate = {"field_key": "email", "field_type": "email", "source": "caller_stated",
+                     "value": "alex@example.com", "normalized_value": "alex@example.com",
+                     "confirmed": True, "validation_status": "confirmed", "confirmed_at": "synthetic-time",
+                     "evidence": {"value_source": owners[0], "confirmation_source": owners[1]}}
+        if revised:
+            index = 2 if revised == "confirmation" else 1
+            service.annotate_turn_revision("list-proof", turn_index=index,
+                provider_item_id=f"item-{index}", caller_turn_order=index, content="No, that was wrong.")
+        result = _display_captured_contacts({"captured_contact_rows": [candidate],
+                                            "transcript_json": service.get_transcript_json("list-proof")})
+        assert result["captured_email"] == (None if revised == "value" else "alex@example.com")
+        assert result["captured_email_confirmed"] is (None if revised == "value" else revised is None)
+        assert set(result) == {"captured_phone", "captured_email", "captured_phone_confirmed", "captured_email_confirmed"}
+    finally:
+        service.clear_buffer("list-proof")
+
+
+def test_manual_contacts_and_existing_preference_are_preserved():
+    rows = [
+        {"field_key": "secondary", "field_type": "email", "value": "secondary@example.com",
+         "source": "manual_edit", "confirmed": True, "updated_at": "2026-10-06"},
+        {"field_key": "email", "field_type": "email", "value": "primary@example.com",
+         "source": "manual_edit", "confirmed": True, "updated_at": "2026-10-05"},
+        {"field_key": "email", "field_type": "email", "value": "unconfirmed@example.com",
+         "source": "caller_stated", "confirmed": False, "updated_at": "2026-10-07"},
+    ]
+    result = _display_captured_contacts({"captured_contact_rows": rows, "transcript_json": []})
+    assert result["captured_email"] == "primary@example.com"
+    assert result["captured_email_confirmed"] is True

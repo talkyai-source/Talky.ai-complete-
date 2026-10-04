@@ -15,6 +15,7 @@ import os
 from typing import Any, Optional
 
 from app.core.db_utils import acquire_with_tenant
+from app.domain.services.transcript_service import conversation_turns, transcript_text_from_turns
 from app.domain.services.call_summary.business_details import save_summary_details, transcript_revision, summary_snapshot
 from app.domain.services.call_summary.summarizer import (
     SUMMARY_UNAVAILABLE_HEADLINE,
@@ -25,14 +26,10 @@ logger = logging.getLogger(__name__)
 
 
 async def _confirmed_contacts_for_call(pool, tenant_id: str, call_id: str) -> dict[str, str]:
-    """Caller-confirmed email/phone for this call, straight from ``call_lead_details``.
+    """Confirmed contacts after the shared current-transcript evidence check.
 
-    ``lead_slot_capture.snapshot_slots`` only ever writes an email/phone row
-    once ``ContactCaptureState`` reaches CONFIRMED (contact_capture.py) — a
-    row existing here IS confirmed by construction, and its absence means the
-    field was never confirmed. That is exactly the distinction call 6aaeb4dd's
-    summary lost: it stated an unconfirmed, invalid phone number and email as
-    plain fact. Best-effort: a failed lookup must not block the summary.
+    A stored row alone is not confirmation: unconfirmed values and failed
+    revocations may both exist. Best-effort: a failed lookup supplies no facts.
     """
     try:
         from app.domain.services.lead_capture_service import LeadCaptureService
@@ -142,17 +139,27 @@ async def generate_and_store(
             # the outcome is a lead and the contact isn't already flagged).
             await save_summary_details(pool, tenant_id, call_id, existing_dict, row)
             await refresh_latest_analysis(pool, tenant_id, call_id, existing_dict, revision, snapshot=summary_snapshot(row))
-            await mark_lead_from_summary(pool, tenant_id, call_id, existing_dict)
+            await mark_lead_from_summary(pool, tenant_id, call_id, existing_dict,
+                                         revision=revision, snapshot=summary_snapshot(row))
             return existing_dict
 
     # --- Transcript check ---
-    transcript_text: str = row["transcript"] or ""
+    stored_transcript = row["transcript"] or ""
+    structured = row.get("transcript_json")
+    if isinstance(structured, str):
+        try:
+            structured = json.loads(structured)
+        except ValueError:
+            structured = None
+    structured_turns = structured.get("turns") if isinstance(structured, dict) else structured
+    transcript_text = transcript_text_from_turns(structured_turns) if isinstance(structured_turns, list) and structured_turns else stored_transcript
     if not transcript_text.strip():
         logger.debug("call_summary store: call %s has no transcript — skipping", call_id)
         async with acquire_with_tenant(pool, tenant_id) as conn:
             await conn.execute(
-                "UPDATE calls SET lead_details_status = 'no_transcript' WHERE id=$1::uuid AND tenant_id=$2::uuid AND transcript IS NOT DISTINCT FROM $3",
-                call_id, tenant_id, row.get("transcript"),
+                "UPDATE calls SET lead_details_status = 'no_transcript' WHERE id=$1::uuid AND tenant_id=$2::uuid AND transcript IS NOT DISTINCT FROM $3 "
+                "AND jsonb_build_array(COALESCE(transcript,''),transcript_json,action_results)=$4::jsonb",
+                call_id, tenant_id, row.get("transcript"), json.dumps(summary_snapshot(row), default=str),
             )
         return None
 
@@ -181,8 +188,9 @@ async def generate_and_store(
         )
         async with acquire_with_tenant(pool, tenant_id) as conn:
             await conn.execute(
-                "UPDATE calls SET lead_details_status = 'failed' WHERE id=$1::uuid AND tenant_id=$2::uuid AND transcript=$3",
-                call_id, tenant_id, transcript_text,
+                "UPDATE calls SET lead_details_status = 'failed' WHERE id=$1::uuid AND tenant_id=$2::uuid AND transcript=$3 "
+                "AND jsonb_build_array(COALESCE(transcript,''),transcript_json,action_results)=$4::jsonb",
+                call_id, tenant_id, stored_transcript, json.dumps(summary_snapshot(row), default=str),
             )
         return summary
 
@@ -203,7 +211,7 @@ async def generate_and_store(
             json.dumps(summary),
             summary.get("headline", ""),
             tenant_id,
-            transcript_text,
+            stored_transcript,
             revision,
             _json_parameter(row.get("transcript_json")),
             _json_parameter(row.get("action_results")),
@@ -216,7 +224,8 @@ async def generate_and_store(
     # summary return.
     await save_summary_details(pool, tenant_id, call_id, summary, row)
     await refresh_latest_analysis(pool, tenant_id, call_id, summary, revision, snapshot=summary_snapshot(row))
-    await mark_lead_from_summary(pool, tenant_id, call_id, summary)
+    await mark_lead_from_summary(pool, tenant_id, call_id, summary,
+                                 revision=revision, snapshot=summary_snapshot(row))
 
     return summary
 
@@ -282,19 +291,17 @@ def _caller_turns(transcript_json: Any) -> int:
             turns = json.loads(turns)
         except json.JSONDecodeError:
             return 0
-    if not isinstance(turns, list):
-        return 0
     count = 0
-    for turn in turns:
+    for turn in conversation_turns(turns):
         if not isinstance(turn, dict):
             continue
         # The transcript keeps every STT interim as its own row (is_final=False)
         # so one spoken sentence can appear 15 times while it is being
         # recognised. Only final recognitions are caller turns.
-        if turn.get("is_final") is False:
+        if turn.get("is_final") is False or not turn.get("include_in_plaintext", True):
             continue
         role = str(turn.get("role") or turn.get("speaker") or "").lower()
-        text = str(turn.get("content") or turn.get("text") or "").strip()
+        text = str(turn.get("content") or "").strip()
         if role in ("user", "caller", "customer") and len(text.split()) >= 2:
             count += 1
     return count
@@ -367,7 +374,7 @@ async def _emit_qualified_lead_alert(conn, tenant_id: str, call_id: str, row: di
 
 
 async def mark_lead_from_summary(
-    pool, tenant_id: str, call_id: str, summary: dict
+    pool, tenant_id: str, call_id: str, summary: dict, *, revision: str, snapshot: list,
 ) -> bool:
     """Flag the call's contact as a lead when the AI summary says so.
 
@@ -416,12 +423,16 @@ async def mark_lead_from_summary(
                    AND l.is_lead = false
                    AND c.tenant_id = $3::uuid
                    AND l.tenant_id = $3::uuid
+                   AND c.summary_transcript_hash=$4
+                   AND jsonb_build_array(COALESCE(c.transcript,''),c.transcript_json,c.action_results)=$5::jsonb
                 RETURNING l.id AS lead_id, l.first_name, l.last_name,
                           l.phone_number, l.campaign_id
                 """,
                 call_id,
                 note,
                 tenant_id,
+                revision,
+                json.dumps(snapshot, default=str) if snapshot is not None else None,
             )
             flagged = row is not None
             if flagged:

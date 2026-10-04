@@ -72,10 +72,25 @@ def test_the_saved_transcript_json_is_collapsed():
         svc.clear_buffer(call)
 
 
-def test_the_transcript_endpoint_collapses_stored_rows():
-    """Calls saved before this fix still read one line per turn."""
-    assert calls_endpoint.conversation_turns is conversation_turns
-    import inspect
+async def test_the_transcript_endpoint_collapses_stored_rows(monkeypatch):
+    """Call the actual endpoint against a legacy structured snapshot."""
+    from contextlib import asynccontextmanager
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    from uuid import uuid4
 
-    src = inspect.getsource(calls_endpoint.get_call_transcript)
-    assert src.count("conversation_turns(") == 2
+    conn = SimpleNamespace(fetchrow=AsyncMock(return_value={
+        "transcript": "obsolete flat representation", "transcript_json": B847_TAIL,
+        "transcript_save_state": "unknown", "updated_at": None,
+    }))
+    @asynccontextmanager
+    async def owned(*args, **kwargs):
+        yield conn
+    monkeypatch.setattr(calls_endpoint, "acquire_with_tenant", owned)
+    result = await calls_endpoint.get_call_transcript(
+        str(uuid4()), format="json", current_user=SimpleNamespace(tenant_id=str(uuid4())),
+        db_client=SimpleNamespace(pool=object()),
+    )
+    assert result["turns"] == conversation_turns(B847_TAIL)
+    assert result["transcript_save_state"] == "unknown"
+    assert result["metadata"]["turn_count"] == 3

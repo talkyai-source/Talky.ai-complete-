@@ -23,7 +23,7 @@ from app.domain.services.telephony.termination import (
     request_confirmed_hangup,
 )
 from app.utils.tenant_filter import verify_tenant_access
-from app.domain.services.transcript_service import conversation_turns
+from app.domain.services.transcript_service import conversation_turns, transcript_text_from_turns
 
 logger = logging.getLogger(__name__)
 
@@ -84,33 +84,48 @@ def _inbound_config_id(call: Any) -> Optional[str]:
     return str(value) if value else None
 
 
-def _captured_contact_sql(kind: str, *, confirmed_flag: bool = False) -> str:
-    """Scalar subquery: the contact of ``kind`` the caller gave on call ``c``.
+def _captured_contact_rows_sql() -> str:
+    """Read bounded owned candidates; apply current evidence before selection."""
+    return """(SELECT COALESCE(jsonb_agg(to_jsonb(contact)), '[]'::jsonb)
+                 FROM (SELECT d.field_key, d.field_type, d.source, d.value,
+                              d.normalized_value, d.confirmed, d.confirmed_at,
+                              d.validation_status, d.evidence, d.updated_at
+                         FROM call_lead_details d
+                        WHERE d.call_id = c.id AND d.tenant_id = c.tenant_id
+                          AND (d.field_type IN ('phone','email') OR d.field_key IN ('phone','email'))
+                          AND NULLIF(BTRIM(COALESCE(d.normalized_value,d.value,'')), '') IS NOT NULL
+                          AND COALESCE(d.validation_status,'confirmed')
+                              NOT IN ('invalid','cancelled','needs_clarification')
+                        ORDER BY (d.field_key IN ('phone','email')) DESC,
+                                 (d.source = 'manual_edit') DESC, d.confirmed DESC,
+                                 d.updated_at DESC, d.id DESC LIMIT 64) contact)"""
 
-    Prefers a confirmed value, then the most recent. Values the capture flow
-    rejected (invalid / cancelled / still being clarified) are never shown as
-    a lead's number. Tenant-scoped explicitly — this runs under bypass_rls.
-    With ``confirmed_flag`` it returns whether that same row was confirmed by
-    the caller (a stated-but-unconfirmed contact is shown, labelled).
-    """
-    if kind not in ("phone", "email"):
-        raise ValueError(kind)
-    selected = (
-        "d.confirmed"
-        if confirmed_flag
-        else "COALESCE(NULLIF(BTRIM(d.normalized_value), ''), BTRIM(d.value))"
-    )
-    return f"""(SELECT {selected}
-                  FROM call_lead_details d
-                 WHERE d.call_id = c.id
-                   AND d.tenant_id = c.tenant_id
-                   AND (d.field_type = '{kind}' OR d.field_key = '{kind}')
-                   AND NULLIF(BTRIM(COALESCE(d.normalized_value, d.value, '')), '') IS NOT NULL
-                   AND COALESCE(d.validation_status, 'confirmed')
-                       NOT IN ('invalid', 'cancelled', 'needs_clarification')
-                 ORDER BY d.confirmed DESC, (d.field_key = '{kind}') DESC,
-                          d.updated_at DESC
-                 LIMIT 1)"""
+
+def _display_captured_contacts(call: Any) -> dict:
+    from app.domain.services.lead_capture_service import project_contact_evidence
+
+    rows = call.get("captured_contact_rows") or []
+    if isinstance(rows, str):
+        try:
+            rows = json.loads(rows)
+        except ValueError:
+            rows = []
+    rows = rows if isinstance(rows, list) else []
+    projected = [project_contact_evidence(row, call.get("transcript_json"))
+                 for row in rows if isinstance(row, dict)]
+    result = {}
+    for kind in ("phone", "email"):
+        candidates = [row for row in projected
+                      if (row.get("field_type") == kind or row.get("field_key") == kind)
+                      and str(row.get("normalized_value") or row.get("value") or "").strip()
+                      and row.get("validation_status") not in {"invalid", "cancelled", "needs_clarification"}]
+        # A superseded confirmed row must not outrank a still-current one.
+        candidates.sort(key=lambda row: (row.get("confirmed") is True,
+                         row.get("field_key") == kind, str(row.get("updated_at") or "")), reverse=True)
+        selected = candidates[0] if candidates else None
+        result[f"captured_{kind}"] = str(selected.get("normalized_value") or selected.get("value")).strip() if selected else None
+        result[f"captured_{kind}_confirmed"] = selected.get("confirmed") is True if selected else None
+    return result
 
 
 def _display_from_number(call: Any) -> Optional[str]:
@@ -150,6 +165,11 @@ def _media_state(call: Any) -> Optional[str]:
 
 
 def _transcript_state(call: Any) -> Optional[str]:
+    saved = call.get("transcript_save_state")
+    if saved in {"partial", "failed", "unknown"}:
+        return saved
+    if saved == "complete":
+        return "done"
     if (call.get("direction") or "outbound") != "inbound":
         return None
     if bool(call.get("has_transcript")) or bool(call.get("transcript")):
@@ -258,6 +278,7 @@ class CallListItem(BaseModel):
     billing_hold_reason: Optional[str] = None
     recording_status: Optional[str] = None
     transcript_status: Optional[str] = None
+    transcript_save_state: str = "unknown"
     media_state: Optional[str] = None
 
 
@@ -301,6 +322,7 @@ class CallDetail(BaseModel):
     reserved_seconds: Optional[int] = None
     recording_status: Optional[str] = None
     transcript_status: Optional[str] = None
+    transcript_save_state: str = "unknown"
     media_state: Optional[str] = None
     answer_delay_seconds: Optional[int] = None
     conversation_duration_seconds: Optional[int] = None
@@ -1310,7 +1332,7 @@ async def list_calls(
                     f"""
                     SELECT c.id, c.talklee_call_id, c.created_at, c.phone_number,
                            c.status, c.duration_seconds, c.outcome, c.campaign_id,
-                           c.summary,
+                           c.summary, c.transcript_save_state, c.transcript_json,
                            to_jsonb(c)->'summary_json'->>'outcome' AS lead_outcome,
                            c.direction, c.caller_ani, c.caller_ani_private,
                            c.called_did, c.assignment_id, c.route_version,
@@ -1338,12 +1360,7 @@ async def list_calls(
                                AS has_transcript,
                            EXISTS (SELECT 1 FROM call_feedback f
                                     WHERE f.call_id = c.id) AS has_feedback,
-                           {_captured_contact_sql("phone")} AS captured_phone,
-                           {_captured_contact_sql("email")} AS captured_email,
-                           {_captured_contact_sql("phone", confirmed_flag=True)}
-                               AS captured_phone_confirmed,
-                           {_captured_contact_sql("email", confirmed_flag=True)}
-                               AS captured_email_confirmed
+                           {_captured_contact_rows_sql()} AS captured_contact_rows
                     FROM calls c
                     LEFT JOIN campaigns camp ON camp.id = c.campaign_id
                     WHERE {where}
@@ -1361,6 +1378,7 @@ async def list_calls(
 
         items = []
         for row in rows:
+            contacts = _display_captured_contacts(row)
             created_at = row["created_at"]
             snapshot, checksum, route_id = _route_metadata(row)
             row_direction = row["direction"] or "outbound"
@@ -1390,10 +1408,10 @@ async def list_calls(
                         str(row["recording_id"]) if row["recording_id"] is not None else None
                     ),
                     lead_outcome=row["lead_outcome"],
-                    captured_phone=row["captured_phone"],
-                    captured_email=row["captured_email"],
-                    captured_phone_confirmed=row["captured_phone_confirmed"],
-                    captured_email_confirmed=row["captured_email_confirmed"],
+                    captured_phone=contacts["captured_phone"],
+                    captured_email=contacts["captured_email"],
+                    captured_phone_confirmed=contacts["captured_phone_confirmed"],
+                    captured_email_confirmed=contacts["captured_email_confirmed"],
                     has_feedback=bool(row["has_feedback"]),
                     direction=row_direction,
                     caller_ani=inbound_from,
@@ -1412,6 +1430,7 @@ async def list_calls(
                     billing_hold_reason=row["billing_hold_reason"],
                     recording_status=_recording_state(row, snapshot),
                     transcript_status=_transcript_state(row),
+                    transcript_save_state=row.get("transcript_save_state") or "unknown",
                     media_state=_media_state(row),
                 )
             )
@@ -1656,6 +1675,7 @@ async def get_call(
             reserved_seconds=call.get("reserved_seconds"),
             recording_status=_recording_state(call, snapshot),
             transcript_status=_transcript_state(call),
+            transcript_save_state=call.get("transcript_save_state") or "unknown",
             media_state=_media_state(call),
             answer_delay_seconds=(
                 _duration_between(call.get("started_at"), call.get("answered_at"))
@@ -1702,74 +1722,53 @@ async def get_call_transcript(
         Text format: Plain text transcript
     """
     try:
-        # Verify call belongs to tenant before fetching transcript
-        if not verify_tenant_access(db_client, "calls", call_id, current_user.tenant_id):
-            raise HTTPException(status_code=404, detail="Call not found")
-
-        # First try the transcripts table (Day 10)
-        transcript_response = (
-            db_client.table("transcripts")
-            .select("turns, full_text, word_count, turn_count, created_at")
-            .eq("call_id", call_id)
-            .execute()
-        )
-
-        if transcript_response.data and len(transcript_response.data) > 0:
-            transcript_data = transcript_response.data[0]
-
-            if format == "text":
-                return {
-                    "format": "text",
-                    "transcript": transcript_data.get("full_text", ""),
-                    "call_id": call_id,
-                }
-            else:
-                return {
-                    "format": "json",
-                    # Older calls stored every STT partial as its own row;
-                    # show them one line per spoken turn.
-                    "turns": conversation_turns(transcript_data.get("turns") or []),
-                    "metadata": {
-                        "word_count": transcript_data.get("word_count", 0),
-                        "turn_count": transcript_data.get("turn_count", 0),
-                        "created_at": transcript_data.get("created_at"),
-                    },
-                    "call_id": call_id,
-                }
-
-        # Fallback to calls table transcript fields
-        call_response = (
-            db_client.table("calls")
-            .select("transcript, transcript_json")
-            .eq("id", call_id)
-            .single()
-            .execute()
-        )
-
-        if not call_response.data:
-            raise HTTPException(status_code=404, detail="Call not found")
-
-        call_data = call_response.data
-
+        async with acquire_with_tenant(db_client.pool, str(current_user.tenant_id)) as conn:
+            # The current owned calls snapshot wins over historical child rows.
+            call = await conn.fetchrow(
+                "SELECT transcript,transcript_json,transcript_save_state,updated_at "
+                "FROM calls WHERE id=$1::uuid AND tenant_id=$2::uuid",
+                call_id, str(current_user.tenant_id),
+            )
+            if call is None:
+                raise HTTPException(status_code=404, detail="Call not found")
+            raw = call["transcript_json"]
+            if isinstance(raw, str):
+                raw = json.loads(raw)
+            turns = raw if isinstance(raw, (list, dict)) else []
+            text = call["transcript"] or ""
+            saved_at = call["updated_at"]
+            # Only legacy rows with no current snapshot may use a child. Pick
+            # deterministically and pin tenant on the child too.
+            if not text and (raw is None or (raw == [] and call["transcript_save_state"] == "unknown")):
+                child = await conn.fetchrow(
+                    "SELECT turns,full_text,updated_at FROM transcripts "
+                    "WHERE call_id=$1::uuid AND tenant_id=$2::uuid "
+                    "ORDER BY updated_at DESC,id DESC LIMIT 1",
+                    call_id, str(current_user.tenant_id),
+                )
+                if child:
+                    raw = child["turns"]
+                    turns = json.loads(raw) if isinstance(raw, str) else (raw or [])
+                    text = child["full_text"] or ""
+                    saved_at = child["updated_at"]
+        canonical = conversation_turns(turns)
+        if turns:
+            text = transcript_text_from_turns(turns)
+        state = call["transcript_save_state"]
         if format == "text":
-            return {
-                "format": "text",
-                "transcript": call_data.get("transcript", ""),
-                "call_id": call_id,
-            }
-        else:
-            return {
-                "format": "json",
-                "turns": conversation_turns(call_data.get("transcript_json") or []),
-                "metadata": {},
-                "call_id": call_id,
-            }
-
+            return {"format": "text", "transcript": text, "call_id": call_id,
+                    "transcript_save_state": state}
+        visible = [t for t in canonical if t.get("include_in_plaintext", True) and t.get("content")]
+        return {"format": "json", "turns": canonical, "call_id": call_id,
+                "transcript_save_state": state,
+                "metadata": {"word_count": sum(len(t["content"].split()) for t in visible),
+                             "turn_count": len(visible), "created_at": saved_at,
+                             "transcript_save_state": state}}
     except HTTPException:
         raise
-    except Exception as e:
-        logger.error(f"Failed to fetch transcript for call {call_id}: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="Failed to fetch transcript")
+    except Exception as exc:
+        logger.error("Failed to fetch transcript error_type=%s", type(exc).__name__)
+        raise HTTPException(status_code=500, detail="Failed to fetch transcript") from exc
 
 
 @router.get(

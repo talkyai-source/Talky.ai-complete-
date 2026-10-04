@@ -378,7 +378,7 @@ class TestLeadMarking:
             "campaign_id": "C1",
         })
         with _patch_acquire(conn):
-            flagged = await mark_lead_from_summary(None, _TENANT_ID, _CALL_ID, _FAKE_SUMMARY)
+            flagged = await mark_lead_from_summary(None, _TENANT_ID, _CALL_ID, _FAKE_SUMMARY, revision="synthetic-revision", snapshot=["", [], None])
         assert flagged is True
         sql = conn.fetchrow.await_args.args[0]
         assert "UPDATE leads" in sql and "is_lead" in sql and "RETURNING" in sql
@@ -395,7 +395,7 @@ class TestLeadMarking:
         # fetchrow -> None (lead already flagged / no matching row): no alert.
         conn = _make_lead_conn(None)
         with _patch_acquire(conn):
-            flagged = await mark_lead_from_summary(None, _TENANT_ID, _CALL_ID, _FAKE_SUMMARY)
+            flagged = await mark_lead_from_summary(None, _TENANT_ID, _CALL_ID, _FAKE_SUMMARY, revision="synthetic-revision", snapshot=["", [], None])
         assert flagged is False
         conn.execute.assert_not_called()
 
@@ -404,7 +404,7 @@ class TestLeadMarking:
         from app.domain.services.call_summary.store import mark_lead_from_summary
         conn = _make_lead_conn({"lead_id": "L1"}, substance=_SUBSTANCE_THIN)
         with _patch_acquire(conn):
-            flagged = await mark_lead_from_summary(None, _TENANT_ID, _CALL_ID, _FAKE_SUMMARY)
+            flagged = await mark_lead_from_summary(None, _TENANT_ID, _CALL_ID, _FAKE_SUMMARY, revision="synthetic-revision", snapshot=["", [], None])
         assert flagged is False
         assert conn.fetchrow.await_count == 1          # never reached the UPDATE
         conn.execute.assert_not_called()               # no alert emitted
@@ -444,7 +444,8 @@ class TestLeadMarking:
         conn = _make_conn(None)
         with _patch_acquire(conn):
             flagged = await mark_lead_from_summary(
-                None, _TENANT_ID, _CALL_ID, {"outcome": "no_interest", "next_step": ""}
+                None, _TENANT_ID, _CALL_ID, {"outcome": "no_interest", "next_step": ""},
+                revision="synthetic-revision", snapshot=["", [], None]
             )
         assert flagged is False
         conn.execute.assert_not_called()  # no DB write for non-leads
@@ -454,7 +455,7 @@ class TestLeadMarking:
         conn = _make_conn(None)
         conn.fetchrow = AsyncMock(side_effect=RuntimeError("db down"))
         with _patch_acquire(conn):
-            flagged = await mark_lead_from_summary(None, _TENANT_ID, _CALL_ID, _FAKE_SUMMARY)
+            flagged = await mark_lead_from_summary(None, _TENANT_ID, _CALL_ID, _FAKE_SUMMARY, revision="synthetic-revision", snapshot=["", [], None])
         assert flagged is False  # swallowed, best-effort
 
     async def test_alert_emit_failure_never_breaks_qualification(self):
@@ -470,5 +471,5 @@ class TestLeadMarking:
         })
         conn.execute = AsyncMock(side_effect=RuntimeError("insert failed"))
         with _patch_acquire(conn):
-            flagged = await mark_lead_from_summary(None, _TENANT_ID, _CALL_ID, _FAKE_SUMMARY)
+            flagged = await mark_lead_from_summary(None, _TENANT_ID, _CALL_ID, _FAKE_SUMMARY, revision="synthetic-revision", snapshot=["", [], None])
         assert flagged is True

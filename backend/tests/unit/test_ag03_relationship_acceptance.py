@@ -504,7 +504,10 @@ def test_revision_annotation_is_bounded_preserves_original_evidence_and_respects
             content=text,
         )
         row = service.get_transcript_json(call_id)[0]
-        assert row["content"] == "I am your customer." and row["timestamp"] == original_timestamp
+        assert row["content"] == "" and row["timestamp"] == original_timestamp
+        assert row["original_content"] == "I am your customer."
+        assert row["effective_content_status"] == "unavailable"
+        assert service.get_turns(call_id)[0].content == "I am your customer."
         assert row["metadata"]["existing_evidence"] == "retain"
         revision = row["metadata"]["asr_latest_revision"]
         assert len(revision["content"]) == 4096 and revision["truncated"] is True
@@ -520,8 +523,8 @@ def test_revision_annotation_is_bounded_preserves_original_evidence_and_respects
         revision = service.get_transcript_json(call_id)[0]["metadata"]["asr_latest_revision"]
         assert revision["revision"] == 2 and revision["retracted"] is True
         assert len(service.get_turns(call_id)) == 1
-        # AG05 remains explicit: preserved metadata is not canonical rewrite.
-        assert service.get_transcript_text(call_id) == "User: I am your customer."
+        assert service.get_transcript_text(call_id) == ""
+        assert service.get_turns(call_id)[0].content == "I am your customer."
         service.seal(call_id)
         assert not service.annotate_turn_revision(
             call_id,

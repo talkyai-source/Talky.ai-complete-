@@ -38,7 +38,14 @@ logger = logging.getLogger(__name__)
 install_pii_log_redaction()
 
 
-def _accept_caller_turn(session: CallSession) -> int:
+def _bind_caller_turn(session, transcript_service, order) -> None:
+    bind = getattr(transcript_service, "bind_caller_turn", None)
+    if callable(bind):
+        bind(session.call_id, getattr(session, "_latest_final_transcript_turn", None),
+             caller_turn_order=order)
+
+
+def _accept_caller_turn(session: CallSession, transcript_service=None) -> int:
     """Stamp accepted finals, independently of suppressed/reused media seqs.
 
     Called synchronously before dispatch or queue insertion. Queue draining
@@ -46,6 +53,7 @@ def _accept_caller_turn(session: CallSession) -> int:
     """
     order = getattr(session, "_accepted_caller_turn_order", 0) + 1
     session._accepted_caller_turn_order = order
+    _bind_caller_turn(session, transcript_service, order)
     return order
 
 
@@ -252,6 +260,8 @@ class TranscriptHandler:
                     _new_text and _new_text != _existing_text
                 )
                 if not _is_distinct:
+                    _bind_caller_turn(session, self._p.transcript_service,
+                                      getattr(existing, "_caller_turn_order", None))
                     # Same utterance: two cases —
                     #  * speculative (started on EagerEndOfTurn) — Deepgram
                     #    guarantees this EndOfTurn's transcript matches that
@@ -283,8 +293,10 @@ class TranscriptHandler:
                 )
                 _caller_order = (
                     _previous_queue.get("caller_turn_order") if _queued_duplicate
-                    else _accept_caller_turn(session)
+                    else _accept_caller_turn(session, self._p.transcript_service)
                 )
+                if _queued_duplicate:
+                    _bind_caller_turn(session, self._p.transcript_service, _caller_order)
                 _preceding_relationship = (
                     _previous_queue.get("preceding_relationship") if _previous_queue else None
                 )
@@ -329,7 +341,7 @@ class TranscriptHandler:
             _alternatives = tuple(
                 getattr(session, "_last_transcript_alternatives", ()) or ()
             )
-            _caller_order = _accept_caller_turn(session)
+            _caller_order = _accept_caller_turn(session, self._p.transcript_service)
             task = asyncio.create_task(
                 self._p.handle_turn_end(
                     session, websocket, source="final", user_text=_user_text,
@@ -415,7 +427,7 @@ class TranscriptHandler:
             if transcript.is_final:
                 event_type = "end_of_turn"
 
-            self._p.transcript_service.accumulate_turn(
+            recorded_turn = self._p.transcript_service.accumulate_turn(
                 call_id=call_id,
                 role="user",
                 content=transcript.text,
@@ -429,6 +441,8 @@ class TranscriptHandler:
                 include_in_plaintext=transcript.is_final,
                 metadata=metadata,
             )
+            if transcript.is_final:
+                session._latest_final_transcript_turn = recorded_turn
             self._p.latency_tracker.mark_stt_first_transcript(call_id)
             session.current_user_input = transcript.text
             # Store confidence ONLY from a FINAL recognition (Case 2): the turn-0

@@ -709,6 +709,17 @@ class TurnRunner:
                 getattr(session, "_last_transcript_alternatives", ()),
             ),
         )
+        # Resolve the accepted dispatch identity to the exact raw caller row.
+        # An absent binding stays unknown; a session turn counter is not proof.
+        from app.domain.services.voice_pipeline.contact_capture import ContactSource, bind_contact_evidence
+        order = getattr(asyncio.current_task(), "_caller_turn_order", None)
+        source = None
+        if isinstance(order, int) and not isinstance(order, bool):
+            resolver = getattr(self._p.transcript_service, "caller_source", None)
+            evidence = resolver(call_id, order) if callable(resolver) else None
+            if isinstance(evidence, dict):
+                source = ContactSource(**evidence)
+        session.captured_slots = bind_contact_evidence(_pending, session.captured_slots, source)
 
         response_text = ""
         llm_latency_ms = 0.0

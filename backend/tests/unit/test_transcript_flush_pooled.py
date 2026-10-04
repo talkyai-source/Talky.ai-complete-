@@ -48,7 +48,11 @@ class _FakeConn:
 
     async def fetchrow(self, sql, *args):
         self.executed.append((sql, args))
-        return {"id": "new-transcript-id"}
+        return {"id": "owned-call", "transcript_save_state": "unknown"}
+
+    async def fetchval(self, sql, *args):
+        self.executed.append((sql, args))
+        return "owned-call"
 
 
 class _FakePool:
@@ -81,15 +85,16 @@ async def test_flush_targets_dialer_calls_id_not_session_id():
     await svc.flush_to_database(
         call_id="session-uuid",
         db_pool=pool,
+        tenant_id="00000000-0000-0000-0000-0000000000b1",
         target_call_id="dialer-calls-id",
     )
 
     updates = _calls_updates(conn)
     assert len(updates) == 1, "expected exactly one UPDATE calls"
     _sql, args = updates[0]
-    # The WHERE id bind is the last positional arg — it MUST be the dialer's
+    # The WHERE id bind precedes the tenant bind — it MUST be the dialer's
     # calls.id, never the voice-session UUID (the old, zero-row target).
-    assert args[-1] == "dialer-calls-id"
+    assert args[-2] == "dialer-calls-id"
     assert "session-uuid" not in args
     # Transcript text made it into the payload.
     assert any("Hello there" in str(a) for a in args)
@@ -108,12 +113,12 @@ async def test_flush_falls_back_to_call_id_when_no_target():
 
     # No target_call_id → browser / ask_ai / standalone semantics: the row id
     # is the session's own call_id (calls.id == call_id for those flows).
-    await svc.flush_to_database(call_id="session-uuid", db_pool=pool)
+    await svc.flush_to_database(call_id="session-uuid", db_pool=pool, tenant_id="00000000-0000-0000-0000-0000000000b1")
 
     updates = _calls_updates(conn)
     assert len(updates) == 1
     _sql, args = updates[0]
-    assert args[-1] == "session-uuid"
+    assert args[-2] == "session-uuid"
 
 
 @pytest.mark.asyncio
@@ -134,6 +139,7 @@ async def test_flush_never_touches_blocking_adapter():
         call_id="s",
         db_client=_BoomAdapter(),
         db_pool=pool,
+        tenant_id="00000000-0000-0000-0000-0000000000b1",
         target_call_id="t",
     )
 

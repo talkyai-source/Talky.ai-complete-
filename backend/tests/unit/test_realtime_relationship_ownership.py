@@ -232,7 +232,8 @@ async def test_late_prior_denial_survives_current_ordinary_transcript_replacemen
         final("new", "What services are available?")])
     assert not await admitted(bridge, "You are our existing customer.")
     assert bridge._latest_caller_text == "What services are available?"
-    assert bridge._observe_contact_turn.await_count == 1
+    assert bridge._observe_contact_turn.await_count == 2
+    assert bridge._observe_contact_turn.await_args_list[-1].kwargs == {"revision": True}
 
 
 @pytest.mark.asyncio
@@ -301,15 +302,16 @@ async def test_current_asr_revision_is_evidence_on_original_row_not_a_new_turn(r
         assert bridge._turn_index == transcript_index
         assert len(service.get_turns(call_id)) == 1
         retained = service.get_transcript_json(call_id)[0]
-        assert retained["content"] == "I am not your customer."
+        assert retained["content"] == replacement
+        assert retained["original_content"] == "I am not your customer."
+        assert service.get_turns(call_id)[0].content == "I am not your customer."
         assert retained["timestamp"] == timestamp
         assert retained["metadata"]["asr_latest_revision"]["content"] == replacement
         assert retained["metadata"]["asr_latest_revision"]["retracted"] is (not replacement)
         assert retained["metadata"]["provider_item_id"] == "current"
         assert retained["metadata"]["caller_turn_order"] == 1
-        # AG05 must add canonical revision projection. This proof intentionally
-        # verifies that the existing plaintext still preserves original ASR.
-        assert "I am not your customer." in service.get_transcript_text(call_id)
+        assert "I am not your customer." not in service.get_transcript_text(call_id)
+        assert service.get_transcript_text(call_id) == (f"User: {replacement}" if replacement else "")
     finally:
         service._buffers.pop(call_id, None)
         service._sealed.pop(call_id, None)
@@ -402,4 +404,5 @@ async def test_corrected_final_revokes_old_action_before_external_effect(monkeyp
     send.assert_not_awaited()
     result = bridge._rt.send_function_result.await_args.args[1]
     assert result["status"] == "confirmation_expired"
-    assert bridge._observe_contact_turn.await_count == 1
+    assert bridge._observe_contact_turn.await_count == 2
+    assert bridge._observe_contact_turn.await_args_list[-1].kwargs == {"revision": True}

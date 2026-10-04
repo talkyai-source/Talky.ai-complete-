@@ -48,12 +48,19 @@ export interface ContactFieldSpec {
 
 export interface CapturedDetail {
     call_id?: string;
+    raw_value?: string | null;
+    normalized_value?: string | null;
+    validation_status?: string | null;
+    confirmed_at?: string | null;
     evidence?: {
         source_quote?: string;
         status?: string;
         subject?: string;
         time_resolution?: string | null;
         confirmation_evidence?: string | null;
+        value_source?: { provider_item_id: string; caller_turn_order: number; revision_sha256: string } | null;
+        confirmation_source?: { provider_item_id: string; caller_turn_order: number; revision_sha256: string } | null;
+        status_source?: { provider_item_id: string; caller_turn_order: number; revision_sha256: string } | null;
     };
     field_key: string;
     field_type: string;
@@ -68,6 +75,7 @@ export interface LeadDetailsResponse {
     details: CapturedDetail[];
     missing_required: string[];
     processing_status?: string;
+    transcript_save_state?: "unknown" | "partial" | "complete" | "failed" | "no_calls";
     crm_deliveries?: { provider: string; status: string; attempts: number; updated_at: string }[];
 }
 

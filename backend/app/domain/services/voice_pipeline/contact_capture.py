@@ -71,6 +71,36 @@ _LOW_CONFIDENCE = 0.50
 
 
 @dataclass(frozen=True)
+class ContactSource:
+    """Bounded caller evidence identity, never an assertion of human hearing."""
+    provider_item_id: str
+    caller_turn_order: int
+    revision_sha256: str
+
+    def __post_init__(self) -> None:
+        if (not isinstance(self.provider_item_id, str) or not self.provider_item_id.strip()
+                or len(self.provider_item_id) > 256
+                or isinstance(self.caller_turn_order, bool)
+                or not isinstance(self.caller_turn_order, int) or self.caller_turn_order < 0
+                or not isinstance(self.revision_sha256, str)
+                or not re.fullmatch(r"[0-9a-f]{64}", self.revision_sha256)):
+            raise ValueError("invalid contact source identity")
+
+
+@dataclass(frozen=True)
+class ContactReadback:
+    utterance_id: str
+    status: str = "completed"
+    evidence: str = "transport_played"
+
+    def __post_init__(self) -> None:
+        if (not isinstance(self.utterance_id, str) or not self.utterance_id
+                or len(self.utterance_id) > 256 or self.status != "completed"
+                or self.evidence != "transport_played"):
+            raise ValueError("invalid contact readback receipt")
+
+
+@dataclass(frozen=True)
 class ContactCaptureState:
     kind: CaptureKind
     status: CaptureStatus
@@ -88,12 +118,44 @@ class ContactCaptureState:
     # confirms it (lead_slot_capture, 2026-09-28).
     from_caller: bool = True
     confirmation_evidence: Optional[str] = None
+    value_source: Optional[ContactSource] = None
+    confirmation_source: Optional[ContactSource] = None
+    status_source: Optional[ContactSource] = None
+    readback: Optional[ContactReadback] = None
 
     def __post_init__(self) -> None:
         # Status is the source of truth; keep the audit string impossible to
         # drift when dataclasses.replace changes a state.
         if self.validation_status != self.status.value:
             object.__setattr__(self, "validation_status", self.status.value)
+
+
+def bind_contact_evidence(before, after, source: Optional[ContactSource], *, readback=None):
+    """Attach accepted caller ownership without changing the parser's decision.
+
+    Confirmation and value provenance are separate: a yes never becomes the
+    source of a value. Existing unknown/legacy ownership remains unknown.
+    """
+    if source is None:
+        return after
+    changes = {}
+    for kind in ("email", "phone"):
+        old = getattr(before, f"{kind}_capture", None)
+        new = getattr(after, f"{kind}_capture", None)
+        if new is None or new == old:
+            continue
+        same_value = bool(old and old.normalized_value == new.normalized_value)
+        value_source = old.value_source if same_value else (source if new.from_caller else None)
+        confirmed_before = bool(same_value and old.status is CaptureStatus.CONFIRMED)
+        if new.status is CaptureStatus.CONFIRMED:
+            confirmation_source = old.confirmation_source if confirmed_before else source
+            receipt = old.readback if confirmed_before else (
+                readback if new.confirmation_evidence == "readback_and_caller_affirmation" else None)
+        else:
+            confirmation_source, receipt = None, None
+        changes[f"{kind}_capture"] = replace(new, value_source=value_source,
+            confirmation_source=confirmation_source, status_source=source, readback=receipt)
+    return replace(after, **changes) if changes else after
 
 
 _CANCEL_RE = re.compile(
@@ -773,6 +835,46 @@ def has_capture_intent(kind: CaptureKind, utterance: str) -> bool:
     return bool(pattern.search(str(utterance or "")))
 
 
+def _caller_contact_assertion(kind: CaptureKind, text: str) -> bool:
+    """Keep literal extraction behind the same caller-assertion boundary.
+
+    This is a conservative ownership gate, not a general recipient classifier.
+    A colleague's/action recipient must not become the caller's Lead contact.
+    Quoting just the address after a direct self cue remains valid syntax.
+    """
+    from app.domain.services.caller_assertions import assertion_matches
+    field = _EMAIL_FIELD_RE if kind == "email" else _PHONE_FIELD_RE
+    text = text.replace("’", "'")
+    if re.search(r"\b(?:e-?mail|send|forward|text|call)\s+(?:it\s+)?(?:(?:to|for)\s+)?"
+                 r"(?:him|her|them|(?:my|the)\s+(?!e-?mail\b|phone\b|number\b)[\w-]+)\b", text, re.I):
+        return False
+    fields = list(field.finditer(text))
+    if fields:
+        asserted = assertion_matches(text, field)
+        if not asserted:
+            return False
+        for match in fields:
+            prefix = text[:match.start()]
+            if re.search(r"\b(?:his|her|their)\s+$|\b[\w-]+'s\s+$", prefix, re.I):
+                return False
+            if (not _CANCEL_RE.search(text) and re.search(r"\b(?:don't|do\s+not|never)\s+(?:save|use|record|note|take(?:\s+down)?)\s+(?:my|our|the|this|that)\s+$", prefix, re.I)):
+                return False
+        if not contact_value_disowned(kind, text) and any(
+            re.match(r"\s+(?:is|was)\s+not\b", text[match.end():], re.I) for match in asserted
+        ):
+            return False
+        return True
+    pattern = _EMAIL_INTENT_RE if kind == "email" else _PHONE_INTENT_RE
+    if pattern.search(text):
+        # A bare quoted address is punctuation, unlike a reported/quoted
+        # sentence. Keep the established direct answer path available.
+        bare = text.strip().strip("\"' .")
+        if kind == "email" and _EMAIL_VALID_RE.fullmatch(bare):
+            return True
+        return bool(assertion_matches(text, pattern))
+    return True  # A yes/no or a segment answer uses the existing active mode.
+
+
 def _has_whole_value_correction_intent(kind: CaptureKind, utterance: str) -> bool:
     """Recognise a correction without turning incidental contacts into writes."""
     if _CORRECTION_INTENT_RE.search(utterance):
@@ -916,8 +1018,12 @@ def advance_capture(
     text = str(utterance or "").strip()
     if not text:
         return previous
+    if not _caller_contact_assertion(kind, text):
+        return previous
 
     if contact_value_disowned(kind, text):
+        return _state(kind, CaptureStatus.CANCELLED, raw=text)
+    if _has_explicit_confirmed_cancellation(kind, text):
         return _state(kind, CaptureStatus.CANCELLED, raw=text)
 
     # A confirmed fact is sticky. Generic cancellations, a low-confidence

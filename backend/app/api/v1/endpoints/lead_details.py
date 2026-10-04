@@ -338,11 +338,12 @@ async def get_lead_details(
     tenant_id = _tenant(current_user)
     svc = _service()
     details = await svc.details_for_call(tenant_id, call_id)
-    missing: list[str] = []
-    if campaign_id:
-        missing = await svc.missing_required(tenant_id, call_id, campaign_id)
+    # Campaign ownership comes from this call, not optional browser context.
+    # Retain the old query argument for existing clients without trusting it.
+    missing = await svc.missing_required(tenant_id, call_id)
     return {"details": details, "missing_required": missing,
             "processing_status": await svc.processing_status(tenant_id, call_id=call_id),
+            "transcript_save_state": await svc.transcript_save_state(tenant_id, call_id=call_id),
             "crm_deliveries": await svc.crm_deliveries(tenant_id, call_id=call_id)}
 
 
@@ -352,6 +353,7 @@ async def get_contact_lead_details(lead_id: str, current_user=Depends(get_curren
     svc = _service()
     return {"details": await svc.details_for_lead(tenant_id, lead_id), "missing_required": [],
             "processing_status": await svc.processing_status(tenant_id, lead_id=lead_id),
+            "transcript_save_state": await svc.transcript_save_state(tenant_id, lead_id=lead_id),
             "crm_deliveries": await svc.crm_deliveries(tenant_id, lead_id=lead_id)}
 
 
@@ -376,11 +378,13 @@ async def correct_lead_detail(
     the trust ordering.
     """
     try:
+        withdrawn = body.value is None and body.field_type in {"email", "phone"}
         written = await _service().capture(
             tenant_id=_tenant(current_user), call_id=call_id,
             field_key=field_key, value=body.value,
             source="manual_edit", field_type=body.field_type,
-            confirmed=body.confirmed,
+            confirmed=False if withdrawn else body.confirmed,
+            validation_status="cancelled" if withdrawn else None,
         )
     except InvalidCaptureError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
