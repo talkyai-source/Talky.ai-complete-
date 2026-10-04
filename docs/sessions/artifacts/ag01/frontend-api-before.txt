@@ -1,0 +1,36 @@
+✖ AI Options GET and save response preserve all tuning including explicit null eager mode (6.5758ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2877.6853
+
+✖ failing tests:
+
+test at src\lib\ai-options-api.test.ts:2:1047
+✖ AI Options GET and save response preserve all tuning including explicit null eager mode (6.5758ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+  + undefined
+  - {
+  -   stt_eager_eot_threshold: null,
+  -   stt_eot_threshold: 0.83,
+  -   stt_eot_timeout_ms: 900,
+  -   turn_0_min_alpha_chars: 4,
+  -   turn_0_min_confidence: 0.6
+  - }
+  
+      at TestContext.<anonymous> (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\lib\ai-options-api.test.ts:22:12)
+      at async Test.run (node:internal/test_runner/test:1208:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: { stt_eot_threshold: 0.83, stt_eager_eot_threshold: null, stt_eot_timeout_ms: 900, turn_0_min_confidence: 0.6, turn_0_min_alpha_chars: 4 },
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }

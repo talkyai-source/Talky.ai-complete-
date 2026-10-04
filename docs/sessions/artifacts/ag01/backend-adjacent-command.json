@@ -1,0 +1,31 @@
+{
+  "candidate": "4f47123f18af3cb01f2330138c635c76aae7182c",
+  "cwd": "backend",
+  "files": [
+    "tests/unit/test_ai_options_llm_menu.py",
+    "tests/unit/test_groq_incomplete_response.py",
+    "tests/unit/test_groq_llm.py",
+    "tests/unit/test_groq_message_builder.py",
+    "tests/unit/test_groq_production_defaults.py",
+    "tests/unit/test_groq_usage_observability.py",
+    "tests/unit/test_llm_timeout_excludes_playback.py",
+    "tests/unit/test_openai_chat_provider.py",
+    "tests/unit/test_resilient_llm_timeout.py"
+  ],
+  "command": [
+    "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\backend\\.venv\\Scripts\\python.exe",
+    "-m",
+    "pytest",
+    "tests/unit/test_ai_options_llm_menu.py",
+    "tests/unit/test_groq_incomplete_response.py",
+    "tests/unit/test_groq_llm.py",
+    "tests/unit/test_groq_message_builder.py",
+    "tests/unit/test_groq_production_defaults.py",
+    "tests/unit/test_groq_usage_observability.py",
+    "tests/unit/test_llm_timeout_excludes_playback.py",
+    "tests/unit/test_openai_chat_provider.py",
+    "tests/unit/test_resilient_llm_timeout.py",
+    "-q",
+    "--tb=short"
+  ]
+}

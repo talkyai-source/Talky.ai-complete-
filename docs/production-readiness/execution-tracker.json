@@ -30,7 +30,8 @@
     "cp02_implementation_commit": "6ca82160e7f1ffc62229f0b5bd09c684db255936",
     "cp03_implementation_commit": "9eb2ac8d49442619dbdd26235c67de264a2e8e79",
     "cp04_implementation_commit": "4ec7f51eb05ed00b4ffea68fd77c2ba5649c3c5d",
-    "cp07_implementation_commit": "40232996372305b8ab100bc8fc57a3957296f4e4"
+    "cp07_implementation_commit": "40232996372305b8ab100bc8fc57a3957296f4e4",
+    "ag01_implementation_commit": "4f47123f18af3cb01f2330138c635c76aae7182c"
   },
   "status_rules": {
     "execution": [
@@ -351,9 +352,9 @@
       "id": "AG01",
       "title": "Make the saved profile equal the effective runtime profile",
       "owner_role": "Voice platform and AI Options lead",
-      "assigned_person": null,
-      "reviewer": null,
-      "status": "planned",
+      "assigned_person": "Codex implementation team",
+      "reviewer": "Independent provider/audio/Realtime reviews; release and live selected-profile acceptance pending",
+      "status": "in_progress",
       "start_after_milestone": "RG01 baseline recorded",
       "dependencies_and_tests": "See package text; coordination and final acceptance dependencies are distinct from entry milestones.",
       "finding_ids": [
@@ -369,10 +370,14 @@
         "A07"
       ],
       "plan_anchor": "ag01-make-the-saved-profile-equal-the-effective-runtime-profile",
-      "evidence": [],
+      "evidence": [
+        "docs/sessions/2026-10-05-ag01-implementation.md",
+        "docs/sessions/artifacts/ag01/verification.json"
+      ],
       "blocker": null,
-      "next_action": "Assign owner and confirm the baseline reproduction or evidence gap.",
-      "target_date": null
+      "next_action": "Verify coordinated release and designated live profiles; retain CP08 shared HTTP identity boundary and outstanding full-repository checks. Continue AG02 knowledge correctness next; no readiness closure.",
+      "target_date": null,
+      "execution_note": "Local candidate 4f47123f: 818 backend passes/1 skip, 38 focused frontend passes, typecheck/build/CI-rule Ruff/scoped ESLint pass. Broader frontend 673 passes/1 baseline failure/2 skips; full lint has baseline configuration error. No real provider calls, migration, push or deployment."
     },
     {
       "id": "AG02",
@@ -1294,9 +1299,12 @@
         "AG01",
         "AG02"
       ],
-      "status": "planned",
-      "evidence": [],
-      "disposition": null
+      "status": "in_progress",
+      "evidence": [
+        "docs/sessions/2026-10-05-ag01-implementation.md",
+        "docs/sessions/artifacts/ag01/verification.json"
+      ],
+      "disposition": "Safe effective instruction/request hashes and explicit known/unversioned knowledge identity recorded; AG02 version correctness and released acceptance remain open."
     },
     {
       "id": "A08",
@@ -1667,10 +1675,13 @@
       "work_packages": [
         "AG01"
       ],
-      "execution_status": "planned",
-      "actual_owner": null,
-      "evidence_of_completion": [],
-      "closure_disposition": null,
+      "execution_status": "in_progress",
+      "actual_owner": "Codex implementation team",
+      "evidence_of_completion": [
+        "docs/sessions/2026-10-05-ag01-implementation.md",
+        "docs/sessions/artifacts/ag01/verification.json"
+      ],
+      "closure_disposition": "Local AG01 contract repairs tested; released/live-profile acceptance and other owning work packages remain unfinished.",
       "contained": false,
       "pilot_or_release_evidence": null,
       "baseline_next_acceptance": "Save each supported configuration, reload, assign it to a campaign and verify the effective runtime model/voice/prompt without silently changing defaults."
@@ -1697,10 +1708,13 @@
         "AG01",
         "AG04"
       ],
-      "execution_status": "planned",
-      "actual_owner": null,
-      "evidence_of_completion": [],
-      "closure_disposition": null,
+      "execution_status": "in_progress",
+      "actual_owner": "Codex implementation team",
+      "evidence_of_completion": [
+        "docs/sessions/2026-10-05-ag01-implementation.md",
+        "docs/sessions/artifacts/ag01/verification.json"
+      ],
+      "closure_disposition": "Local AG01 contract repairs tested; released/live-profile acceptance and other owning work packages remain unfinished.",
       "contained": false,
       "pilot_or_release_evidence": null,
       "baseline_next_acceptance": "For each offered model, verify streaming, nullable tool inputs, continuation, provider error/EOF behavior and no side-effect replay using the actual supported configuration. Record effective temperature, reasoning and output budgets for the chosen model; do not infer semantic correctness from low temperature."
@@ -1730,10 +1744,13 @@
         "AG04",
         "OP03"
       ],
-      "execution_status": "planned",
-      "actual_owner": null,
-      "evidence_of_completion": [],
-      "closure_disposition": null,
+      "execution_status": "in_progress",
+      "actual_owner": "Codex implementation team",
+      "evidence_of_completion": [
+        "docs/sessions/2026-10-05-ag01-implementation.md",
+        "docs/sessions/artifacts/ag01/verification.json"
+      ],
+      "closure_disposition": "Local AG01 contract repairs tested; released/live-profile acceptance and other owning work packages remain unfinished.",
       "contained": false,
       "pilot_or_release_evidence": null,
       "baseline_next_acceptance": "Preserve explicit relationship corrections beyond the contact buffer until a genuine caller reversal; prove both cases, then validate persona, knowledge/actions, interruption and closure on an owned call without effect replay. Verify the provider-specific effective VAD, noise, speed and token settings; legacy temperature must not leak into the native payload."

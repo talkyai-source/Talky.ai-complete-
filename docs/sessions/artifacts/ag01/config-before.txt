@@ -1,0 +1,42 @@
+FFFF                                                                     [100%]
+================================== FAILURES ===================================
+_ test_viewing_saved_profile_does_not_replace_missing_catalog_voice[deepgram-aura-2-_get_deepgram_voices_for_current_key] _
+tests\unit\test_ai_options_profile_roundtrip.py:37: in test_viewing_saved_profile_does_not_replace_missing_catalog_voice
+    assert actual.model_dump() == expected
+E   AssertionError: assert {'llm_max_tok...re': 0.6, ...} == {'llm_max_tok...re': 0.6, ...}
+E     Omitting 16 identical items, use -vv to show
+E     Differing items:
+E     {'tts_voice_id': 'different-voice'} != {'tts_voice_id': 'saved-voice'}
+E     Use -v to get more diff
+_ test_viewing_saved_profile_does_not_replace_missing_catalog_voice[cartesia-sonic-3-_get_live_cartesia_voices] _
+tests\unit\test_ai_options_profile_roundtrip.py:37: in test_viewing_saved_profile_does_not_replace_missing_catalog_voice
+    assert actual.model_dump() == expected
+E   AssertionError: assert {'llm_max_tok...re': 0.6, ...} == {'llm_max_tok...re': 0.6, ...}
+E     Omitting 16 identical items, use -vv to show
+E     Differing items:
+E     {'tts_voice_id': 'different-voice'} != {'tts_voice_id': 'saved-voice'}
+E     Use -v to get more diff
+_ test_viewing_saved_profile_does_not_replace_missing_catalog_voice[elevenlabs-eleven_flash_v2_5-get_elevenlabs_voices_for_current_key] _
+tests\unit\test_ai_options_profile_roundtrip.py:37: in test_viewing_saved_profile_does_not_replace_missing_catalog_voice
+    assert actual.model_dump() == expected
+E   AssertionError: assert {'llm_max_tok...re': 0.6, ...} == {'llm_max_tok...re': 0.6, ...}
+E     Omitting 16 identical items, use -vv to show
+E     Differing items:
+E     {'tts_voice_id': 'different-voice'} != {'tts_voice_id': 'saved-voice'}
+E     Use -v to get more diff
+_________ test_persisted_tuning_matches_returned_and_reloaded_profile _________
+tests\unit\test_ai_options_profile_roundtrip.py:61: in test_persisted_tuning_matches_returned_and_reloaded_profile
+    assert saved.model_dump() == reloaded.model_dump()
+E   AssertionError: assert {'llm_max_tok...re': 0.6, ...} == {'llm_max_tok...re': 0.6, ...}
+E     Omitting 16 identical items, use -vv to show
+E     Differing items:
+E     {'voice_tuning': {'stt_eager_eot_threshold': None, 'stt_eot_threshold': 4, 'stt_eot_timeout_ms': '900', 'unknown': 7}} != {'voice_tuning': {'stt_eager_eot_threshold': None, 'stt_eot_threshold': 4.0, 'stt_eot_timeout_ms': 900}}
+E     Use -v to get more diff
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.voice_tuning:voice_tuning.py:307 voice_tuning_unknown_field scope=api name=unknown � ignored
+=========================== short test summary info ===========================
+FAILED tests/unit/test_ai_options_profile_roundtrip.py::test_viewing_saved_profile_does_not_replace_missing_catalog_voice[deepgram-aura-2-_get_deepgram_voices_for_current_key]
+FAILED tests/unit/test_ai_options_profile_roundtrip.py::test_viewing_saved_profile_does_not_replace_missing_catalog_voice[cartesia-sonic-3-_get_live_cartesia_voices]
+FAILED tests/unit/test_ai_options_profile_roundtrip.py::test_viewing_saved_profile_does_not_replace_missing_catalog_voice[elevenlabs-eleven_flash_v2_5-get_elevenlabs_voices_for_current_key]
+FAILED tests/unit/test_ai_options_profile_roundtrip.py::test_persisted_tuning_matches_returned_and_reloaded_profile
+4 failed in 2.12s

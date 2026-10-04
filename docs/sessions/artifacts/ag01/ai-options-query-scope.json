@@ -1,0 +1,18 @@
+{
+  "as_of": "2026-10-05",
+  "base_commit": "7c0ffac7",
+  "scope": "AI Options only: verified authentication identity, React Query cache and post-login prefetch",
+  "environment": "Local Node test runner and jsdom, real AuthProvider/QueryClient/hooks, synthetic API responses; no external HTTP or customer data",
+  "test_command": "node --test --import tsx --import ./src/test-utils/setup.ts src/lib/queries/ai-options-queries.test.tsx",
+  "result": { "passed": 5, "failed": 0, "skipped": 0 },
+  "verified": [
+    "A verified account switch refetches configuration, provider catalog and voice catalog without reusing the previous account's data",
+    "A held response from the previous identity cannot populate the current profile or restore the departed identity's cache",
+    "Unverified and tenantless identities start neither queries nor prefetch",
+    "Post-login prefetch repeats after a tenant switch even when the user ID is unchanged and the editor is not mounted",
+    "React StrictMode effect replay with an already verified identity keeps active observers usable and discards the canceled first response"
+  ],
+  "lint_command": "node ./node_modules/eslint/bin/eslint.js src/lib/queries/ai-options-queries.ts src/lib/queries/ai-options-queries.test.tsx src/components/providers/prefetch-on-auth.tsx",
+  "lint_result": "passed",
+  "remaining_boundary": "CP08: these responses do not carry authenticated ownership stamps. This evidence does not close the interval where another tab replaces cookies before the local identity-change marker is received. It does not certify all cross-tab HTTP attribution or production readiness."
+}

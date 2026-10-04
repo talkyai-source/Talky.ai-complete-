@@ -1,0 +1,634 @@
+{
+  "scope": "Offline synthetic serializers/fake transport only. No provider acceptance, hearing, latency, or deployed configuration proof.",
+  "transport_adaptations": [
+    {
+      "path": "SIP / campaign browser",
+      "configured_tts_hz": 48000,
+      "effective_stt_tts_hz": 16000,
+      "reason": "Existing mono PCM gateway transport contract"
+    },
+    {
+      "path": "Twilio",
+      "configured_tts_hz": 48000,
+      "effective_stt_tts_hz": 8000,
+      "reason": "Existing 8kHz mu-law transport; internal STT decoded linear16"
+    },
+    {
+      "path": "Vonage",
+      "configured_tts_hz": 48000,
+      "effective_stt_tts_hz": 16000,
+      "reason": "Existing 16kHz linear16 websocket transport"
+    }
+  ],
+  "stt_wire": {
+    "flux": {
+      "model": "flux-general-en",
+      "encoding": "linear16",
+      "sample_rate": "16000",
+      "eot_threshold": "0.8",
+      "eot_timeout_ms": "900",
+      "eager_eot_threshold": "0.6",
+      "mip_opt_out": "true",
+      "tag": "call:synthetic-call"
+    },
+    "nova": {
+      "model": "nova-3",
+      "encoding": "linear16",
+      "sample_rate": "16000",
+      "language": "es",
+      "vad_events": "true",
+      "endpointing": "300",
+      "utterance_end_ms": "1000",
+      "interim_results": "true",
+      "smart_format": "true",
+      "mip_opt_out": "true",
+      "numerals": "true"
+    }
+  },
+  "tts_wire": {
+    "cartesia": {
+      "model_id": "sonic-3",
+      "voice": {
+        "mode": "id",
+        "id": "f786b574-daa5-4673-aa0c-cbe3e8534c02"
+      },
+      "output_format": {
+        "container": "raw",
+        "encoding": "pcm_s16le",
+        "sample_rate": 16000
+      },
+      "language": "en",
+      "continue": false
+    },
+    "deepgram": {
+      "model": "aura-2-thalia-en",
+      "encoding": "linear16",
+      "sample_rate": "16000",
+      "container": "none"
+    },
+    "google": {
+      "voice": "en-US-Chirp3-HD-Orus",
+      "language": "en-US",
+      "encoding": "PCM",
+      "sample_rate_hz": 16000,
+      "speaking_rate": 1.0
+    }
+  },
+  "elevenlabs_wire": {
+    "evidence": "test_elevenlabs_wire_format_matches_returned_audio_rate captures actual HTTP request for each supported rate",
+    "rates_hz": [
+      8000,
+      16000,
+      22050,
+      24000,
+      44100
+    ],
+    "model": "eleven_multilingual_v2",
+    "voice": "selected-voice",
+    "format": "pcm_<selected rate>"
+  },
+  "static_voice_inventory": {
+    "cartesia_fallback": [
+      {
+        "id": "f786b574-daa5-4673-aa0c-cbe3e8534c02",
+        "name": "Katie",
+        "language": "en"
+      },
+      {
+        "id": "6ccbfb76-1fc6-48f7-b71d-91ac6298247b",
+        "name": "Aurora",
+        "language": "en"
+      },
+      {
+        "id": "a0e99841-438c-4a64-b679-ae501e7d6091",
+        "name": "Sarah",
+        "language": "en"
+      },
+      {
+        "id": "228fca29-3a0a-435c-8728-5cb483251068",
+        "name": "Kiefer",
+        "language": "en"
+      },
+      {
+        "id": "41534e16-2966-4c6b-9670-111411def906",
+        "name": "Ryan",
+        "language": "en"
+      },
+      {
+        "id": "b7d50908-b17c-442d-ad8d-810c63997ed9",
+        "name": "James",
+        "language": "en"
+      },
+      {
+        "id": "c45bc5ec-dc68-4feb-8829-6e6b2748095d",
+        "name": "Adam",
+        "language": "en"
+      },
+      {
+        "id": "bd9120b6-7761-47a6-a446-77ca49132781",
+        "name": "Susie",
+        "language": "en"
+      }
+    ],
+    "google": [
+      {
+        "id": "en-US-Chirp3-HD-Orus",
+        "name": "Orus",
+        "language": "en"
+      },
+      {
+        "id": "en-US-Chirp3-HD-Charon",
+        "name": "Charon",
+        "language": "en"
+      },
+      {
+        "id": "en-US-Chirp3-HD-Fenrir",
+        "name": "Fenrir",
+        "language": "en"
+      },
+      {
+        "id": "en-US-Chirp3-HD-Puck",
+        "name": "Puck",
+        "language": "en"
+      },
+      {
+        "id": "en-US-Chirp3-HD-Kore",
+        "name": "Kore",
+        "language": "en"
+      },
+      {
+        "id": "en-US-Chirp3-HD-Aoede",
+        "name": "Aoede",
+        "language": "en"
+      },
+      {
+        "id": "en-US-Chirp3-HD-Leda",
+        "name": "Leda",
+        "language": "en"
+      },
+      {
+        "id": "en-US-Chirp3-HD-Zephyr",
+        "name": "Zephyr",
+        "language": "en"
+      }
+    ],
+    "deepgram": [
+      {
+        "id": "aura-2-amalthea-en",
+        "name": "Amalthea",
+        "language": "en"
+      },
+      {
+        "id": "aura-2-andromeda-en",
+        "name": "Andromeda",
+        "language": "en"
+      },
+      {
+        "id": "aura-2-apollo-en",
+        "name": "Apollo",
+        "language": "en"
+      },
+      {
+        "id": "aura-2-arcas-en",
+        "name": "Arcas",
+        "language": "en"
+      },
+      {
+        "id": "aura-2-aries-en",
+        "name": "Aries",
+        "language": "en"
+      },
+      {
+        "id": "aura-2-asteria-en",
+        "name": "Asteria",
+        "language": "en"
+      },
+      {
+        "id": "aura-2-athena-en",
+        "name": "Athena",
+        "language": "en"
+      },
+      {
+        "id": "aura-2-atlas-en",
+        "name": "Atlas",
+        "language": "en"
+      },
+      {
+        "id": "aura-2-aurora-en",
+        "name": "Aurora",
+        "language": "en"
+      },
+      {
+        "id": "aura-2-callista-en",
+        "name": "Callista",
+        "language": "en"
+      },
+      {
+        "id": "aura-2-cora-en",
+        "name": "Cora",
+        "language": "en"
+      },
+      {
+        "id": "aura-2-cordelia-en",
+        "name": "Cordelia",
+        "language": "en"
+      },
+      {
+        "id": "aura-2-delia-en",
+        "name": "Delia",
+        "language": "en"
+      },
+      {
+        "id": "aura-2-draco-en",
+        "name": "Draco",
+        "language": "en"
+      },
+      {
+        "id": "aura-2-electra-en",
+        "name": "Electra",
+        "language": "en"
+      },
+      {
+        "id": "aura-2-harmonia-en",
+        "name": "Harmonia",
+        "language": "en"
+      },
+      {
+        "id": "aura-2-helena-en",
+        "name": "Helena",
+        "language": "en"
+      },
+      {
+        "id": "aura-2-hera-en",
+        "name": "Hera",
+        "language": "en"
+      },
+      {
+        "id": "aura-2-hermes-en",
+        "name": "Hermes",
+        "language": "en"
+      },
+      {
+        "id": "aura-2-hyperion-en",
+        "name": "Hyperion",
+        "language": "en"
+      },
+      {
+        "id": "aura-2-iris-en",
+        "name": "Iris",
+        "language": "en"
+      },
+      {
+        "id": "aura-2-janus-en",
+        "name": "Janus",
+        "language": "en"
+      },
+      {
+        "id": "aura-2-juno-en",
+        "name": "Juno",
+        "language": "en"
+      },
+      {
+        "id": "aura-2-jupiter-en",
+        "name": "Jupiter",
+        "language": "en"
+      },
+      {
+        "id": "aura-2-luna-en",
+        "name": "Luna",
+        "language": "en"
+      },
+      {
+        "id": "aura-2-mars-en",
+        "name": "Mars",
+        "language": "en"
+      },
+      {
+        "id": "aura-2-minerva-en",
+        "name": "Minerva",
+        "language": "en"
+      },
+      {
+        "id": "aura-2-neptune-en",
+        "name": "Neptune",
+        "language": "en"
+      },
+      {
+        "id": "aura-2-odysseus-en",
+        "name": "Odysseus",
+        "language": "en"
+      },
+      {
+        "id": "aura-2-ophelia-en",
+        "name": "Ophelia",
+        "language": "en"
+      },
+      {
+        "id": "aura-2-orion-en",
+        "name": "Orion",
+        "language": "en"
+      },
+      {
+        "id": "aura-2-orpheus-en",
+        "name": "Orpheus",
+        "language": "en"
+      },
+      {
+        "id": "aura-2-pandora-en",
+        "name": "Pandora",
+        "language": "en"
+      },
+      {
+        "id": "aura-2-phoebe-en",
+        "name": "Phoebe",
+        "language": "en"
+      },
+      {
+        "id": "aura-2-pluto-en",
+        "name": "Pluto",
+        "language": "en"
+      },
+      {
+        "id": "aura-2-saturn-en",
+        "name": "Saturn",
+        "language": "en"
+      },
+      {
+        "id": "aura-2-selene-en",
+        "name": "Selene",
+        "language": "en"
+      },
+      {
+        "id": "aura-2-thalia-en",
+        "name": "Thalia",
+        "language": "en"
+      },
+      {
+        "id": "aura-2-theia-en",
+        "name": "Theia",
+        "language": "en"
+      },
+      {
+        "id": "aura-2-vesta-en",
+        "name": "Vesta",
+        "language": "en"
+      },
+      {
+        "id": "aura-2-zeus-en",
+        "name": "Zeus",
+        "language": "en"
+      },
+      {
+        "id": "aura-2-sirio-es",
+        "name": "Sirio",
+        "language": "es"
+      },
+      {
+        "id": "aura-2-nestor-es",
+        "name": "Nestor",
+        "language": "es"
+      },
+      {
+        "id": "aura-2-carina-es",
+        "name": "Carina",
+        "language": "es"
+      },
+      {
+        "id": "aura-2-celeste-es",
+        "name": "Celeste",
+        "language": "es"
+      },
+      {
+        "id": "aura-2-alvaro-es",
+        "name": "Alvaro",
+        "language": "es"
+      },
+      {
+        "id": "aura-2-diana-es",
+        "name": "Diana",
+        "language": "es"
+      },
+      {
+        "id": "aura-2-aquila-es",
+        "name": "Aquila",
+        "language": "es"
+      },
+      {
+        "id": "aura-2-selena-es",
+        "name": "Selena",
+        "language": "es"
+      },
+      {
+        "id": "aura-2-estrella-es",
+        "name": "Estrella",
+        "language": "es"
+      },
+      {
+        "id": "aura-2-javier-es",
+        "name": "Javier",
+        "language": "es"
+      },
+      {
+        "id": "aura-2-agustina-es",
+        "name": "Agustina",
+        "language": "es"
+      },
+      {
+        "id": "aura-2-antonia-es",
+        "name": "Antonia",
+        "language": "es"
+      },
+      {
+        "id": "aura-2-gloria-es",
+        "name": "Gloria",
+        "language": "es"
+      },
+      {
+        "id": "aura-2-luciano-es",
+        "name": "Luciano",
+        "language": "es"
+      },
+      {
+        "id": "aura-2-olivia-es",
+        "name": "Olivia",
+        "language": "es"
+      },
+      {
+        "id": "aura-2-silvia-es",
+        "name": "Silvia",
+        "language": "es"
+      },
+      {
+        "id": "aura-2-valerio-es",
+        "name": "Valerio",
+        "language": "es"
+      },
+      {
+        "id": "aura-2-beatrix-nl",
+        "name": "Beatrix",
+        "language": "nl"
+      },
+      {
+        "id": "aura-2-daphne-nl",
+        "name": "Daphne",
+        "language": "nl"
+      },
+      {
+        "id": "aura-2-cornelia-nl",
+        "name": "Cornelia",
+        "language": "nl"
+      },
+      {
+        "id": "aura-2-sander-nl",
+        "name": "Sander",
+        "language": "nl"
+      },
+      {
+        "id": "aura-2-hestia-nl",
+        "name": "Hestia",
+        "language": "nl"
+      },
+      {
+        "id": "aura-2-lars-nl",
+        "name": "Lars",
+        "language": "nl"
+      },
+      {
+        "id": "aura-2-roman-nl",
+        "name": "Roman",
+        "language": "nl"
+      },
+      {
+        "id": "aura-2-rhea-nl",
+        "name": "Rhea",
+        "language": "nl"
+      },
+      {
+        "id": "aura-2-leda-nl",
+        "name": "Leda",
+        "language": "nl"
+      },
+      {
+        "id": "aura-2-agathe-fr",
+        "name": "Agathe",
+        "language": "fr"
+      },
+      {
+        "id": "aura-2-hector-fr",
+        "name": "Hector",
+        "language": "fr"
+      },
+      {
+        "id": "aura-2-elara-de",
+        "name": "Elara",
+        "language": "de"
+      },
+      {
+        "id": "aura-2-aurelia-de",
+        "name": "Aurelia",
+        "language": "de"
+      },
+      {
+        "id": "aura-2-lara-de",
+        "name": "Lara",
+        "language": "de"
+      },
+      {
+        "id": "aura-2-julius-de",
+        "name": "Julius",
+        "language": "de"
+      },
+      {
+        "id": "aura-2-fabian-de",
+        "name": "Fabian",
+        "language": "de"
+      },
+      {
+        "id": "aura-2-kara-de",
+        "name": "Kara",
+        "language": "de"
+      },
+      {
+        "id": "aura-2-viktoria-de",
+        "name": "Viktoria",
+        "language": "de"
+      },
+      {
+        "id": "aura-2-melia-it",
+        "name": "Melia",
+        "language": "it"
+      },
+      {
+        "id": "aura-2-elio-it",
+        "name": "Elio",
+        "language": "it"
+      },
+      {
+        "id": "aura-2-flavio-it",
+        "name": "Flavio",
+        "language": "it"
+      },
+      {
+        "id": "aura-2-maia-it",
+        "name": "Maia",
+        "language": "it"
+      },
+      {
+        "id": "aura-2-cinzia-it",
+        "name": "Cinzia",
+        "language": "it"
+      },
+      {
+        "id": "aura-2-cesare-it",
+        "name": "Cesare",
+        "language": "it"
+      },
+      {
+        "id": "aura-2-livia-it",
+        "name": "Livia",
+        "language": "it"
+      },
+      {
+        "id": "aura-2-perseo-it",
+        "name": "Perseo",
+        "language": "it"
+      },
+      {
+        "id": "aura-2-dionisio-it",
+        "name": "Dionisio",
+        "language": "it"
+      },
+      {
+        "id": "aura-2-demetra-it",
+        "name": "Demetra",
+        "language": "it"
+      },
+      {
+        "id": "aura-2-uzume-ja",
+        "name": "Uzume",
+        "language": "ja"
+      },
+      {
+        "id": "aura-2-ebisu-ja",
+        "name": "Ebisu",
+        "language": "ja"
+      },
+      {
+        "id": "aura-2-fujin-ja",
+        "name": "Fujin",
+        "language": "ja"
+      },
+      {
+        "id": "aura-2-izanami-ja",
+        "name": "Izanami",
+        "language": "ja"
+      },
+      {
+        "id": "aura-2-ama-ja",
+        "name": "Ama",
+        "language": "ja"
+      }
+    ]
+  },
+  "catalog_limits": "Cartesia/Deepgram catalogs may be filtered/refreshed by account; ElevenLabs account catalog and clones are dynamic and were not queried. Static inventory is not a live availability claim."
+}

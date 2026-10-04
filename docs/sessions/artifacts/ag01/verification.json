@@ -1,0 +1,149 @@
+{
+  "package": "AG01",
+  "date": "2026-10-05",
+  "candidate": "4f47123f18af3cb01f2330138c635c76aae7182c",
+  "base": "7c0ffac7db5ea02baca152a91f291fc83e605f1a",
+  "status": "local implementation verified; package in_progress, release/live acceptance open",
+  "source_integrity": "source-integrity.json",
+  "source_files": 63,
+  "checks": {
+    "backend_final": {
+      "command": "backend-final-command.json",
+      "modules": 42,
+      "passed": 716,
+      "skipped": 1,
+      "warnings": 337,
+      "exit_code": 0,
+      "log": "backend-final-tests.txt"
+    },
+    "backend_additional_non_overlapping": {
+      "command": "backend-adjacent-command.json",
+      "modules": 9,
+      "passed": 102,
+      "skipped": 0,
+      "warnings": 24,
+      "exit_code": 0,
+      "log": "backend-adjacent-tests.txt"
+    },
+    "frontend_final": {
+      "command": "node --test --test-concurrency=3 --import tsx --import ./src/test-utils/setup.ts src/app/ai-options/page.test.tsx src/lib/ai-options-api.test.ts src/lib/queries/ai-options-queries.test.tsx src/components/ai-options/controls.test.tsx src/components/realtime/controls.test.tsx src/lib/temperature-advice.test.ts src/lib/notifications-isolation.test.tsx",
+      "cwd": "Talk-Leee",
+      "passed": 38,
+      "failed": 0,
+      "skipped": 0,
+      "exit_code": 0,
+      "log": "frontend-final-tests.txt"
+    },
+    "frontend_typecheck": {
+      "command": "npm run typecheck",
+      "cwd": "Talk-Leee",
+      "exit_code": 0,
+      "log": "frontend-typecheck.txt"
+    },
+    "frontend_build": {
+      "command": "npm run build",
+      "cwd": "Talk-Leee",
+      "exit_code": 0,
+      "log": "frontend-build.txt",
+      "warning": "Existing custom Cache-Control warning"
+    },
+    "backend_lint": {
+      "command": "python -m ruff check app/ --select F --extend-ignore F401,F841",
+      "cwd": "backend",
+      "ruff_version": "0.6.9",
+      "exit_code": 0,
+      "log": "backend-ruff.txt"
+    },
+    "frontend_scoped_lint": {
+      "command": "npx eslint src/app/ai-options/page.tsx src/app/ai-options/page.test.tsx src/lib/ai-options-api.ts src/lib/ai-options-api.test.ts src/lib/queries/ai-options-queries.ts src/lib/queries/ai-options-queries.test.tsx src/components/providers/prefetch-on-auth.tsx",
+      "cwd": "Talk-Leee",
+      "exit_code": 0,
+      "warnings": 1,
+      "log": "frontend-scoped-lint.txt",
+      "warning": "Intentional numeric preview-generation ref mutation in cleanup; no lint errors"
+    },
+    "broader_frontend_exploration": {
+      "command": "node --test --test-concurrency=3 --import tsx --import ./src/test-utils/setup.ts src/**/*.test.ts src/**/*.test.tsx test/**/*.test.mjs tests/**/*.test.mjs",
+      "cwd": "Talk-Leee",
+      "passed": 673,
+      "failed": 1,
+      "skipped": 2,
+      "exit_code": 1,
+      "log": "frontend-tests-bounded.txt",
+      "failure_evidence": "frontend-campaign-baseline.json",
+      "qualification": "Run while implementation was ongoing; not final-candidate whole-suite acceptance"
+    },
+    "full_frontend_lint": {
+      "command": "npm run lint",
+      "cwd": "Talk-Leee",
+      "result": "configuration_error",
+      "log": "frontend-lint.txt",
+      "evidence": "lint-baseline.json"
+    }
+  },
+  "plan_counts": {
+    "in_progress": 7,
+    "planned": 24
+  },
+  "acceptance_gates": {
+    "not_run": 15
+  },
+  "feature_freeze_active": true,
+  "external_provider_requests": 0,
+  "customer_calls": 0,
+  "database_migrations": 0,
+  "pushed": false,
+  "deployed": false,
+  "limits": [
+    "No fresh real-DB/RLS integration, remote CI, released profile, listening/latency or real provider acceptance",
+    "CP08 pre-marker cookie/unstamped-response identity boundary remains open",
+    "Dynamic catalogs and pinned xAI model availability not certified",
+    "Knowledge references may be explicitly unversioned; retrieval correctness remains AG02",
+    "Full repository lint and stale campaign test remain unresolved; no global green claim"
+  ],
+  "artifact_classification": {
+    "before_logs": "Expected failed reproduction evidence",
+    "frontend-tests.txt": "Unrestricted exploratory run stopped for host contention; not acceptance",
+    "agent_artifacts": "Frozen slices feed this integrated candidate; own prior run totals are not added to final totals"
+  },
+  "sha256": {
+    "docs/production ready.md": "59b75436cf2afc92a77ec9645454ef56b4d3d41651ff97e03e0b7990979bcdd8",
+    "docs/production-readiness/execution-tracker.json": "f242de9cd1d1e3039e54759fe19cf8024fc3b0976d93a1a4bad97bcfa30c63df",
+    "docs/sessions/2026-10-05-ag01-implementation.md": "20301f797e88ab1bcd044fead6fe1e675529759b2f42b98c0375a73ab90eb30e",
+    "docs/sessions/artifacts/ag01/ai-options-query-scope.json": "2d48bf07dccb5a074d146473a06c5c5cea2084fecfaf660c406a55f38417d53c",
+    "docs/sessions/artifacts/ag01/audio-builder-regression.txt": "c57f268b4232dc39139f134a54718e76da3fd01e924fa737545186460e23a0f7",
+    "docs/sessions/artifacts/ag01/audio-profile-notes.md": "51feb19ec4b451d1d43dace15dc1eedf17f2cb4ba23795df5987331c617e45b7",
+    "docs/sessions/artifacts/ag01/audio-tests.txt": "d6be37956726f6cf96b58cff4a0e195124f8c8afee21e9f94bc6ff8ac5a4d062",
+    "docs/sessions/artifacts/ag01/audio-wire-profile.json": "c29c378dc68b1e53dfd60ad882882eccadc14626ad94dd32612197667023f962",
+    "docs/sessions/artifacts/ag01/backend-adjacent-command.json": "0894a5c18f7af83dd40883095b7dc050dfadbbfa293389749455577efd37cfa8",
+    "docs/sessions/artifacts/ag01/backend-adjacent-tests.txt": "17e3850f89169d8edfc833f74141db06ae299fe5367910232a26c842bf4c6815",
+    "docs/sessions/artifacts/ag01/backend-final-command.json": "1da0199d85ab48538f14371bdc6e589918497b3545a57191f7a607e21480f7f6",
+    "docs/sessions/artifacts/ag01/backend-final-tests.txt": "54581b20fb3ac75f24596cea19d1070ea157341778a534eab2035652b7c0b5bd",
+    "docs/sessions/artifacts/ag01/backend-ruff.txt": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18",
+    "docs/sessions/artifacts/ag01/config-before.txt": "a63c6ddbfef84f671a5a087e612883802bb0edb02a7d4556b3d278ffbb613b1f",
+    "docs/sessions/artifacts/ag01/frontend-api-before.txt": "72ab84687b7b83750b3e3aec0ae9c0ce56c67148ce609ee95eeae0920cb98464",
+    "docs/sessions/artifacts/ag01/frontend-build.txt": "0bdeb0a4903b8203cbeee39aea0deb27605d74517964e80a76830d490d01ddf5",
+    "docs/sessions/artifacts/ag01/frontend-campaign-baseline.json": "130103e9724bb8c06cfbd32d4e21871b789fedec4ecfaf1f6c6e6af33c8860d8",
+    "docs/sessions/artifacts/ag01/frontend-campaign-readiness-isolated.txt": "fd929290aa6cd9e76d9fab217ba26f7338e955d0dca993c5d3c225f855dcb4dd",
+    "docs/sessions/artifacts/ag01/frontend-final-tests.txt": "8415f7a0ecd5e80c4fd83c828eb21d19447499f381f67265efcbc4b551a5f726",
+    "docs/sessions/artifacts/ag01/frontend-lint.txt": "8c0e0c7d00d943a68792dfc7b2fe1ccf8d0aeb04c4506953f0b9ac48ca2b7d48",
+    "docs/sessions/artifacts/ag01/frontend-page-before.txt": "76a670442680652df30d167b807f0cbbeceac1f5826c5519a20d69e2436cdaf6",
+    "docs/sessions/artifacts/ag01/frontend-scoped-lint.txt": "f9c3a07e3e272dd4e7ec7f24d721d108c77ee24af3a83ff8484aa079b65ebc7a",
+    "docs/sessions/artifacts/ag01/frontend-tests-bounded.txt": "6b2e8038373cc84951547d813a54d9cddcc3d1804e177b2df20277d1163c92fe",
+    "docs/sessions/artifacts/ag01/frontend-tests.txt": "8e5b08581cd613d03d9a4c5f9a6d76dc6c65cb191be3b2afea147eda66eec8b2",
+    "docs/sessions/artifacts/ag01/frontend-typecheck.txt": "49fa35a9273f9da77f027b6f1eaa8a7b25708171fe58f9b9f9af6c1dcde116ae",
+    "docs/sessions/artifacts/ag01/lint-baseline.json": "4d6c5c4596dc3b27e7dd3aa0f595190f594ee66155290c084d8a7a01fd257f24",
+    "docs/sessions/artifacts/ag01/native-realtime-notes.md": "089f8593ab3677e31fccc2f71c6092a29189c5648d32dff89cdf6ce5b133c0ae",
+    "docs/sessions/artifacts/ag01/native-realtime-profiles.json": "0ee1b5fd6ae2caa12c623838d96434b2c12b7ad5b6c5dd9f1b9c260827312784",
+    "docs/sessions/artifacts/ag01/native-realtime-verification.json": "8a0cd0bf57cc2c98e62303ac8b1c40fb37a63eab813ecfa8eb6364b0377750ee",
+    "docs/sessions/artifacts/ag01/realtime-before.txt": "a8f51f7c602795f890d26fc11f77403fded970bdf8d33556eb83435e06c82a40",
+    "docs/sessions/artifacts/ag01/realtime-focused.txt": "99e51a91b58e038e1a56bb643d66e80ecd81a85737f63d91a3018f4834aa06ef",
+    "docs/sessions/artifacts/ag01/realtime-regression.txt": "bc6743b91b91b0651e0a7f77f9456525f1656d347b0828f902aa27cc70e97e19",
+    "docs/sessions/artifacts/ag01/realtime-ruff.txt": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18",
+    "docs/sessions/artifacts/ag01/realtime-wire-before.txt": "e11c7d2916f6ad62f89a8932088b9b5bef3d6bdc15909164e32ab029b34b5ded",
+    "docs/sessions/artifacts/ag01/source-candidate.json": "8f39ab7b5663c0b95fd14cca14fdedf5eb37968b89274beee916247d86867910",
+    "docs/sessions/artifacts/ag01/source-integrity.json": "fa6773a64a7fa76ce62c61c90e84a45c90ff7aab86f9100274ef1585215c12ee",
+    "docs/sessions/artifacts/ag01/traditional-wire.json": "4f0cf631880678f66e8874721e65f0d45ad6d3874d4af05e2f59fe8f591153a3"
+  },
+  "artifact_hash_normalization": "CRLF to LF only; snapshot at AG01 documentation commit, later plan edits may change current plan/tracker normally"
+}

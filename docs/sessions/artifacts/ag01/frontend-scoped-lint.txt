@@ -1,0 +1,6 @@
+
+C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\app\ai-options\page.tsx
+  352:31  warning  The ref value 'previewRequestRef.current' will likely have changed by the time this effect cleanup function runs. If this ref points to a node rendered by React, copy 'previewRequestRef.current' to a variable inside the effect, and use that variable in the cleanup function  react-hooks/exhaustive-deps
+
+✖ 1 problem (0 errors, 1 warning)
+

@@ -1,0 +1,6 @@
+{
+  "baseline": "7c0ffac7db5ea02baca152a91f291fc83e605f1a",
+  "config_unchanged": true,
+  "sha256": "87b8467faae13159adb086cb05ac2c8833dccf3c3291f9e121bb10e0ec5b1670",
+  "full_lint_result": "ESLint configuration error: react/no-unescaped-entities references missing plugin for an included file; see frontend-lint.txt. Changed frontend TypeScript files lint independently."
+}
