@@ -207,7 +207,7 @@ Exit evidence: dated baseline manifest, owner list, selected supported profiles/
 
 ### CP05 Complete existing white label controls behind truthful containment
 
-**Sequencing update — 4 October 2026:** Deferred for now at the user’s request. CP05 remains planned and unfinished; its findings and acceptance requirements stay in scope. CP06 is the next implementation package.
+**Sequencing update — 4 October 2026:** Deferred for now at the user’s request. CP05 remains planned and unfinished; its findings and acceptance requirements stay in scope. CP06 was also subsequently deferred; CP07 is the next implementation package.
 
 **Scope and classification:** confirmed demo behavior F37, separate from real core Admin/RBAC capabilities. Partner tenant creation/edit/suspension is React/localStorage-only; billing contains fixed sample usage and paid invoices without visible demo disclosure. Evidence: `Talk-Leee/src/app/white-label/[partner]/tenants/tenants-client.tsx:118`, `:189`; `Talk-Leee/src/app/white-label/[partner]/billing/page.tsx:70`.
 
@@ -228,6 +228,8 @@ Exit evidence: dated baseline manifest, owner list, selected supported profiles/
 **Closure evidence:** full server/database/two-browser receipt proof for every existing control, documented scoped authorization and real billing evidence. Paid-surface/direct-route containment checks are interim evidence only. Missing contracts and unavailable controls remain individually blocked/not done, with their decision recorded; an excluded offering cannot be reported as completed CP05/F37.
 
 ### CP06 Accessible cancellation and dependable billing communication
+
+**Sequencing update — 4 October 2026:** Deferred for later at the user’s request. CP06 remains planned and unfinished; its findings and acceptance requirements stay in scope. CP07 is next.
 
 **Scope and classification:** missing self-service connection F12; legacy recipient lookup in F33; partial F09 support/refund journey. Existing portal and period-end cancel APIs are real. No customer UI caller was found; manual email is a stated alternative, so cancellation is not wholly absent. Payment receipts search for `owner` while canonical signup creates `tenant_admin`. Evidence: `backend/app/api/v1/endpoints/billing.py:267`, `:314`; `backend/app/domain/services/billing_service.py:951`; `Talk-Leee/src/app/terms/terms-content.ts:351`.
 
