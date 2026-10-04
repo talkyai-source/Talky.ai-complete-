@@ -874,7 +874,7 @@ function CampaignSection({
                             <div
                                 ref={scrollRef}
                                 data-call-grid="rows-scroll"
-                                className={`space-y-2 md:mt-0 ${rowsScrollCapped ? "overflow-y-auto overscroll-contain pr-1" : ""}`}
+                                className={`relative space-y-2 md:mt-0 ${rowsScrollCapped ? "overflow-y-auto overscroll-contain pr-1" : ""}`}
                                 style={rowsScrollCapped ? { maxHeight: rowsMaxHeightPx ?? undefined } : undefined}
                             >
                                 {group.calls.map((call, index) => (
