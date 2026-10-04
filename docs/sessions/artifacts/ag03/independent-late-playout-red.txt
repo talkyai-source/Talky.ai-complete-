@@ -1,0 +1,37 @@
+F                                                                        [100%]
+================================== FAILURES ===================================
+______ test_delayed_denial_prevents_already_admitted_audio_from_starting ______
+
+    @pytest.mark.asyncio
+    async def test_delayed_denial_prevents_already_admitted_audio_from_starting():
+        provider = Provider()
+        submitted = []
+
+        async def send_audio(call_id, audio):
+            submitted.append(audio)
+
+        bridge = RealtimeBridge(
+            call_id="synthetic-ag03-late-before-playback",
+            realtime_session=provider,
+            media_gateway=SimpleNamespace(send_audio=send_audio),
+            greet_on_start=False,
+            call_direction="inbound",
+        )
+        response = candidate()
+        response.audio = b"\xff" * 320
+        # Provider text/audio and asynchronous ASR can complete in this order.
+        # The real playback task has not started submitting audio when denial
+        # arrives; a stale validation decision must not survive that boundary.
+        provider.pending.extend([
+            committed("current"), response, final("I am not your customer.", "current")
+        ])
+        await bridge._pump_model_events()
+        if bridge._playback_task:
+            await asyncio.gather(bridge._playback_task, return_exceptions=True)
+>       assert not submitted
+E       AssertionError: assert not [b'\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x0...0\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00']
+
+tests\unit\test_ag03_relationship_acceptance.py:202: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/unit/test_ag03_relationship_acceptance.py::test_delayed_denial_prevents_already_admitted_audio_from_starting
+1 failed, 29 deselected in 1.93s

@@ -1,0 +1,114 @@
+FF                                                                       [100%]
+================================== FAILURES ===================================
+_ test_current_replacement_restores_prior_relationship_without_undoing_other_evidence[] _
+
+replacement = ''
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("replacement", ["", "What information is available?"])
+    async def test_current_replacement_restores_prior_relationship_without_undoing_other_evidence(
+        replacement,
+    ):
+        from app.domain.services.voice_pipeline.live_structured_state import (
+            ConfirmedContactsEvidence,
+            IdentityEvidence,
+            ToolResultEvidence,
+            reduce_live_state,
+        )
+
+        bridge, provider, played = bridge_fixture()
+        await pump(
+            bridge,
+            provider,
+            [
+                committed("old"),
+                final("I am not your customer.", "old"),
+                committed("current", "old"),
+                final("I am your customer.", "current"),
+            ],
+        )
+        for evidence in (
+            IdentityEvidence(True),
+            ConfirmedContactsEvidence(email="synthetic@example.invalid", email_confirmed=True),
+            ToolResultEvidence("send_email", True, "accepted"),
+        ):
+            bridge._live_state = reduce_live_state(bridge._live_state, evidence)
+        action_turn = bridge._action_session._voice_action_user_turn
+        caller_order = bridge._live_state.last_user_turn_order
+        contact_count = len(bridge._contact_history)
+        await pump(bridge, provider, [final(replacement, "current"), candidate()])
+        assert not played and len(provider.repairs) == 1
+        assert bridge._live_state.identity_introduced is True
+        assert bridge._live_state.confirmed_email == "synthetic@example.invalid"
+        assert bridge._live_state.last_tool_name == "send_email"
+        assert bridge._live_state.last_tool_success is True
+        assert bridge._live_state.last_user_turn_order == caller_order
+        assert len(bridge._contact_history) == contact_count
+        # Replacing ASR invalidates pending action admission, without becoming a
+        # second caller turn or undoing an already completed action/contact.
+>       assert bridge._action_session._voice_action_user_turn > action_turn
+E       assert 2 > 2
+E        +  where 2 = <app.realtime.bridge.RealtimeBridge object at 0x000001FA45CEF770>._voice_action_user_turn
+E        +    where <app.realtime.bridge.RealtimeBridge object at 0x000001FA45CEF770> = <app.realtime.bridge.RealtimeBridge object at 0x000001FA45CEF770>._action_session
+
+tests\unit\test_ag03_relationship_acceptance.py:248: AssertionError
+------------------------------ Captured log call ------------------------------
+WARNING  app.realtime.bridge:bridge.py:524 realtime_playout_rejected call=synthetic-ag03 reason=contradicted_customer_relationship
+_ test_current_replacement_restores_prior_relationship_without_undoing_other_evidence[What information is available?] _
+
+replacement = 'What information is available?'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("replacement", ["", "What information is available?"])
+    async def test_current_replacement_restores_prior_relationship_without_undoing_other_evidence(
+        replacement,
+    ):
+        from app.domain.services.voice_pipeline.live_structured_state import (
+            ConfirmedContactsEvidence,
+            IdentityEvidence,
+            ToolResultEvidence,
+            reduce_live_state,
+        )
+
+        bridge, provider, played = bridge_fixture()
+        await pump(
+            bridge,
+            provider,
+            [
+                committed("old"),
+                final("I am not your customer.", "old"),
+                committed("current", "old"),
+                final("I am your customer.", "current"),
+            ],
+        )
+        for evidence in (
+            IdentityEvidence(True),
+            ConfirmedContactsEvidence(email="synthetic@example.invalid", email_confirmed=True),
+            ToolResultEvidence("send_email", True, "accepted"),
+        ):
+            bridge._live_state = reduce_live_state(bridge._live_state, evidence)
+        action_turn = bridge._action_session._voice_action_user_turn
+        caller_order = bridge._live_state.last_user_turn_order
+        contact_count = len(bridge._contact_history)
+        await pump(bridge, provider, [final(replacement, "current"), candidate()])
+        assert not played and len(provider.repairs) == 1
+        assert bridge._live_state.identity_introduced is True
+        assert bridge._live_state.confirmed_email == "synthetic@example.invalid"
+        assert bridge._live_state.last_tool_name == "send_email"
+        assert bridge._live_state.last_tool_success is True
+        assert bridge._live_state.last_user_turn_order == caller_order
+        assert len(bridge._contact_history) == contact_count
+        # Replacing ASR invalidates pending action admission, without becoming a
+        # second caller turn or undoing an already completed action/contact.
+>       assert bridge._action_session._voice_action_user_turn > action_turn
+E       assert 2 > 2
+E        +  where 2 = <app.realtime.bridge.RealtimeBridge object at 0x000001FA45CEFF80>._voice_action_user_turn
+E        +    where <app.realtime.bridge.RealtimeBridge object at 0x000001FA45CEFF80> = <app.realtime.bridge.RealtimeBridge object at 0x000001FA45CEFF80>._action_session
+
+tests\unit\test_ag03_relationship_acceptance.py:248: AssertionError
+------------------------------ Captured log call ------------------------------
+WARNING  app.realtime.bridge:bridge.py:524 realtime_playout_rejected call=synthetic-ag03 reason=contradicted_customer_relationship
+=========================== short test summary info ===========================
+FAILED tests/unit/test_ag03_relationship_acceptance.py::test_current_replacement_restores_prior_relationship_without_undoing_other_evidence[]
+FAILED tests/unit/test_ag03_relationship_acceptance.py::test_current_replacement_restores_prior_relationship_without_undoing_other_evidence[What information is available?]
+2 failed, 27 deselected in 1.31s

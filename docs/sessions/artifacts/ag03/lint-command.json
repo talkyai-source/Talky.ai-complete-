@@ -1,0 +1,32 @@
+{
+  "command": [
+    "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\backend\\.venv\\Scripts\\python.exe",
+    "-m",
+    "ruff",
+    "check",
+    "--select",
+    "F",
+    "--ignore",
+    "F401,F841",
+    "backend/app/domain/services/caller_assertions.py",
+    "backend/app/domain/services/transcript_service.py",
+    "backend/app/domain/services/voice_pipeline/action_execution.py",
+    "backend/app/domain/services/voice_pipeline/conversation_guards.py",
+    "backend/app/domain/services/voice_pipeline/live_structured_state.py",
+    "backend/app/domain/services/voice_pipeline/transcript_handler.py",
+    "backend/app/domain/services/voice_pipeline/turn_ender.py",
+    "backend/app/domain/services/voice_pipeline/turn_streamer.py",
+    "backend/app/domain/services/voice_pipeline_service.py",
+    "backend/app/realtime/bridge.py",
+    "backend/app/realtime/openai.py",
+    "backend/tests/unit/test_ag03_caller_dispatch_order.py",
+    "backend/tests/unit/test_ag03_cascaded_relationship.py",
+    "backend/tests/unit/test_ag03_relationship_acceptance.py",
+    "backend/tests/unit/test_ag03_relationship_state.py",
+    "backend/tests/unit/test_realtime_lifecycle_repairs.py",
+    "backend/tests/unit/test_realtime_relationship_ownership.py"
+  ],
+  "cwd": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\production-ready-20261004",
+  "file_count": 17,
+  "exit_code": 0
+}

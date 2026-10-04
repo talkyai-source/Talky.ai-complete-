@@ -1,0 +1,25 @@
+FF.                                                                      [100%]
+================================== FAILURES ===================================
+_ test_prior_explicit_relationship_survives_pruned_cascaded_history[What would signing up involve?-True] _
+tests\unit\test_ag03_cascaded_relationship.py:56: in test_prior_explicit_relationship_survives_pruned_cascaded_history
+    assert "You are an existing customer." not in submitted
+E   AssertionError: assert 'You are an existing customer.' not in ['You are an existing customer.']
+_ test_prior_explicit_relationship_survives_pruned_cascaded_history[The script says "I am your customer".-True] _
+tests\unit\test_ag03_cascaded_relationship.py:56: in test_prior_explicit_relationship_survives_pruned_cascaded_history
+    assert "You are an existing customer." not in submitted
+E   AssertionError: assert 'You are an existing customer.' not in ['You are an existing customer.']
+============================== warnings summary ===============================
+tests/unit/test_ag03_cascaded_relationship.py::test_prior_explicit_relationship_survives_pruned_cascaded_history[What would signing up involve?-True]
+tests/unit/test_ag03_cascaded_relationship.py::test_prior_explicit_relationship_survives_pruned_cascaded_history[What would signing up involve?-True]
+tests/unit/test_ag03_cascaded_relationship.py::test_prior_explicit_relationship_survives_pruned_cascaded_history[The script says "I am your customer".-True]
+tests/unit/test_ag03_cascaded_relationship.py::test_prior_explicit_relationship_survives_pruned_cascaded_history[The script says "I am your customer".-True]
+tests/unit/test_ag03_cascaded_relationship.py::test_prior_explicit_relationship_survives_pruned_cascaded_history[Actually, I am your customer.-False]
+tests/unit/test_ag03_cascaded_relationship.py::test_prior_explicit_relationship_survives_pruned_cascaded_history[Actually, I am your customer.-False]
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\backend\.venv\Lib\site-packages\pydantic\main.py:250: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/unit/test_ag03_cascaded_relationship.py::test_prior_explicit_relationship_survives_pruned_cascaded_history[What would signing up involve?-True]
+FAILED tests/unit/test_ag03_cascaded_relationship.py::test_prior_explicit_relationship_survives_pruned_cascaded_history[The script says "I am your customer".-True]
+2 failed, 1 passed, 6 warnings in 1.75s

@@ -1,0 +1,94 @@
+{
+  "scope": "AG03 native deterministic relationship lifetime and caller-event ordering; synthetic provider events, fake websocket and external-effect spies only",
+  "base_revision": "8fa3774c86e3516aa1f0a8a0027f792b92d0b74b",
+  "includes_uncommitted_changes": true,
+  "owned_files": [
+    "backend/app/realtime/bridge.py",
+    "backend/app/realtime/openai.py",
+    "backend/app/domain/services/transcript_service.py",
+    "backend/app/domain/services/voice_pipeline/action_execution.py",
+    "backend/tests/unit/test_realtime_relationship_ownership.py",
+    "backend/tests/unit/test_realtime_lifecycle_repairs.py"
+  ],
+  "owned_source_and_tests_sha256": "8d671ccf5386e6f4edcb79afe346d2800777640cdf77d19c738e3ffd7e1f7f9c",
+  "checks": [
+    {
+      "name": "initial native regression reproduction",
+      "failed_before_repair": 5,
+      "log": "native-before.txt"
+    },
+    {
+      "name": "stale action confirmation before repair",
+      "failed_before_repair": 2,
+      "log": "native-action-before.txt"
+    },
+    {
+      "name": "stale action confirmation after repair",
+      "passed": 2,
+      "log": "native-action-after.txt"
+    },
+    {
+      "name": "native and boundary regression before late-playout repair",
+      "passed": 581,
+      "warnings": 644,
+      "log": "native-regression.txt",
+      "command": "python -m pytest tests/unit/test_realtime_audio_format.py tests/unit/test_realtime_end_call_ownership.py tests/unit/test_realtime_fallback.py tests/unit/test_realtime_identity_voice.py tests/unit/test_realtime_inbound_opening.py tests/unit/test_realtime_independent.py tests/unit/test_realtime_knowledge_evidence.py tests/unit/test_realtime_lifecycle_repairs.py tests/unit/test_realtime_profile_contract.py tests/unit/test_realtime_quality_pass.py tests/unit/test_realtime_relationship_ownership.py tests/unit/test_realtime_session_type_0930.py tests/unit/test_xai_realtime.py tests/unit/test_ag03_relationship_acceptance.py tests/unit/test_live_structured_state.py tests/unit/test_call_experience_end_scope.py tests/unit/test_contact_pause_and_punctuation.py tests/unit/test_voice_action_contract.py tests/unit/test_voice_action_execution.py tests/unit/test_voice_action_spoken_confirmation.py tests/unit/test_transcript_conversation_turns.py tests/unit/test_transcript_sealed_after_hangup.py tests/unit/test_agent_first_transcript_persistence.py tests/unit/test_call_transcript_persister.py tests/unit/test_caller_authorized_end_call.py tests/unit/test_end_call.py tests/unit/test_end_call_streaming.py -q --tb=short",
+      "scope_note": "Preserved earlier run; final late-playout delta verified by the following focused checks."
+    },
+    {
+      "name": "owned-file CI F lint",
+      "result": "passed",
+      "log": "native-lint.txt",
+      "command": "python -m ruff check --select F --ignore F401,F841 app/realtime/bridge.py app/realtime/openai.py app/domain/services/transcript_service.py app/domain/services/voice_pipeline/action_execution.py tests/unit/test_realtime_relationship_ownership.py tests/unit/test_realtime_lifecycle_repairs.py"
+    },
+    {
+      "name": "final native late-playout and independent acceptance",
+      "passed": 88,
+      "warnings": 7,
+      "log": "native-late-playout-focused.txt",
+      "command": "python -m pytest tests/unit/test_realtime_relationship_ownership.py tests/unit/test_ag03_relationship_acceptance.py tests/unit/test_realtime_lifecycle_repairs.py -q --tb=short"
+    },
+    {
+      "name": "final interruption, end, wire and action boundaries",
+      "passed": 148,
+      "warnings": 281,
+      "log": "native-late-playout-regression.txt",
+      "command": "python -m pytest tests/unit/test_realtime_end_call_ownership.py tests/unit/test_realtime_independent.py tests/unit/test_realtime_inbound_opening.py tests/unit/test_realtime_audio_format.py tests/unit/test_xai_realtime.py tests/unit/test_voice_action_execution.py tests/unit/test_call_experience_end_scope.py -q --tb=short"
+    }
+  ],
+  "contracts": {
+    "relationship_memory": "Existing typed live state supplies the guard; the 12-message contact history remains bounded and is not relationship authority.",
+    "caller_order": "Speech-start/committed item IDs establish bounded turn ownership; an earlier first final may supply a relationship only when newer explicit evidence has not superseded it.",
+    "duplicate_and_revision": "Exact duplicates and stale revisions cannot advance current state. A changed current final replaces only relationship contribution against a saved prior baseline; unrelated tool/contact/delivery facts remain.",
+    "action_revision": "Changed current final increments the independent action-admission token. The action executor freezes it before async policy reads and checks it before claim and external effect.",
+    "opt_out": "Provider-final caller DNC passes the existing assertion filter before order admission; opt-out remains monotonic while old text cannot hang up a newer question.",
+    "bounded_state": "At most64 provider item metadata/digests, one pre-current relationship baseline, existing12-message contact buffer. Valid supplied audio offsets use a session-relative floor; malformed/negative/nonfinite offsets are rejected.",
+    "transcript_evidence": "One latest ASR revision is attached to the matching original user row, preserving original speech/timestamp and othermetadata. Revision content capped4096characters with full digest/count and truncation/retraction flags; sealed calls cannot be revived.",
+    "late_relationship_playout": "Accepted relationship evidence revalidates unfinished audio before first and subsequent transport submissions. Local utterance identity/status is rechecked after gateway awaits; swallowed cancellation cannot authorize later chunks, late completed receipts or contact confirmation. Completed historical utterances stay historical.",
+    "late_relationship_continuation": "Cancellation retains interrupted/unknown partial-delivery evidence and uses receipt-based truncation. After publishing current state, one ordinary request_response continuation shares the existing repair budget. It never uses withheld/not-heard repair for an utterance that may have been submitted."
+  },
+  "limitations": [
+    "Canonical transcript JSON/plaintext and downstream Lead extraction do not yet apply the latest-ASR-revision metadata. This is an explicit AG05 handoff, not a completed transcript-correction feature.",
+    "An initial empty transcription has no original text row under the existing TranscriptService contract; canonical handling of such retractions/revisions remains AG05.",
+    "Metadata-poor providers rely on the existing single ordered, non-replayed websocket connection. Unknown assistant previous_item_id is not rejected. There is no reconnect/resume or unbounded replay ledger.",
+    "Pure caller assertion matching is deliberately conservative; these tests do not certify all language or qualitative model claims.",
+    "No live OpenAI/xAI session, PSTN call, production mutation or default-model change was performed. xAI remains hidden/opt-in with existing availability limitations.",
+    "Traditional accepted-dispatch ordering and the authoritative combined validation are owned by the parent/shared-state agent; native-only counts do not certify that later source delta.",
+    "Transport submission cannot prove human hearing; already-emitted audio cannot be undone. Tests use synthetic PCM and fake gateway receipts, not acoustic or real call validation."
+  ],
+  "primary_sources": [
+    {
+      "url": "https://developers.openai.com/api/docs/guides/realtime-transcription",
+      "used_for": "Final transcription completions can arrive out of speech order; item identity is needed for reconciliation."
+    },
+    {
+      "url": "https://raw.githubusercontent.com/openai/openai-python/main/src/openai/types/realtime/input_audio_buffer_speech_started_event.py",
+      "used_for": "Generated official GA schema defines audio_start_ms against all input audio in the session, including prefix padding."
+    },
+    {
+      "url": "https://docs.x.ai/developers/model-capabilities/audio/speech-to-speech",
+      "used_for": "Provider documents shared Realtime event compatibility and cumulative transcription updates; no new model or resumption feature was adopted."
+    }
+  ],
+  "hash_method": "SHA256 of ordered owned_files path UTF-8, NUL, file bytes, NUL per file"
+}

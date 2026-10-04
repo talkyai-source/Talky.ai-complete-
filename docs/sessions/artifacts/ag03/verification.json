@@ -1,0 +1,138 @@
+{
+  "package": "AG03",
+  "candidate": "27c04347b2f0d5d0eccf83b3c31663eb3cfbd145",
+  "status": "candidate_verified",
+  "not_release_or_profile_approval": true,
+  "backend": {
+    "passed": 1588,
+    "skipped": 0,
+    "warnings": 1404,
+    "modules": 106,
+    "command": "backend-final-command.json",
+    "output": "backend-final.txt"
+  },
+  "lint": {
+    "result": "passed",
+    "changed_python_files": 17
+  },
+  "independent_review": "independent-review.md",
+  "source_integrity": "source-integrity.json",
+  "live_provider_calls": 0,
+  "database_runs": 0,
+  "frontend_changes": false,
+  "push_or_deployment": false,
+  "remaining": [
+    "AG04 real-profile semantic/audio acceptance",
+    "AG05 canonical transcript/contact/Lead revision handling",
+    "Metadata-poor ordering and call-lifetime state limits documented",
+    "AG02 unmet retrieval gate",
+    "Final release gates not run"
+  ],
+  "artifact_files": [
+    {
+      "path": "docs/sessions/artifacts/ag03/backend-final-command.json",
+      "sha256_lf": "0d0e4e24eb81bc415689476e358d29d749125f6c17ccb04bf51100e22292189e"
+    },
+    {
+      "path": "docs/sessions/artifacts/ag03/backend-final.txt",
+      "sha256_lf": "bdaa0d5473d03106d0a6f8adbcfc9c0dea5d08cab48c41c0bcf95c3042e163fd"
+    },
+    {
+      "path": "docs/sessions/artifacts/ag03/cascaded-before.txt",
+      "sha256_lf": "aef89c846c2c899a55f3c32e0c523afee7f34dfa2670170e7323515de84165bb"
+    },
+    {
+      "path": "docs/sessions/artifacts/ag03/independent-acceptance-pre-action-fence.txt",
+      "sha256_lf": "dc5d58295633946ac517b9eeb1b77d06227094084ea803150127060c7aee413e"
+    },
+    {
+      "path": "docs/sessions/artifacts/ag03/independent-acceptance.txt",
+      "sha256_lf": "c109813375cac3d1c96579f939efef90eef81a98b82a250328e89e544cd0474e"
+    },
+    {
+      "path": "docs/sessions/artifacts/ag03/independent-action-fence-red.txt",
+      "sha256_lf": "d5c47c5b61887d29eca07f38b1a8efced701be106c3dc38c77c3381a9d66e806"
+    },
+    {
+      "path": "docs/sessions/artifacts/ag03/independent-baseline.json",
+      "sha256_lf": "069921c030f677569f1b61c00a07b929186f6fe26924c347d928e5a5bfef239d"
+    },
+    {
+      "path": "docs/sessions/artifacts/ag03/independent-late-playout-red.txt",
+      "sha256_lf": "af5aab41e0f9a2ce9bf54627c52911c7ed91dc505d3b3ac5555a897f7d223444"
+    },
+    {
+      "path": "docs/sessions/artifacts/ag03/independent-mid-playout-draft-fixture.txt",
+      "sha256_lf": "33f1bb77dd70e9c7cd7c57ea375d1bc91fdfac54bc276f08609423c846059a70"
+    },
+    {
+      "path": "docs/sessions/artifacts/ag03/independent-mid-playout-red.txt",
+      "sha256_lf": "33f1bb77dd70e9c7cd7c57ea375d1bc91fdfac54bc276f08609423c846059a70"
+    },
+    {
+      "path": "docs/sessions/artifacts/ag03/independent-review.md",
+      "sha256_lf": "3a6ba578d8284ef3d85ba21867f76f9e0f46d77126aabab1bf75c87befc77cac"
+    },
+    {
+      "path": "docs/sessions/artifacts/ag03/lint-command.json",
+      "sha256_lf": "3bf2325c5de2b106b0a8d8613da9814c3339b591d5c3d5d15e3d0e62f275e127"
+    },
+    {
+      "path": "docs/sessions/artifacts/ag03/lint.txt",
+      "sha256_lf": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18"
+    },
+    {
+      "path": "docs/sessions/artifacts/ag03/native-action-after.txt",
+      "sha256_lf": "74d62bcf9c826c236a598b4ac9a723d33f23dfa8061e15f9434e61c066951516"
+    },
+    {
+      "path": "docs/sessions/artifacts/ag03/native-action-before.txt",
+      "sha256_lf": "0c6559e25c7912cdf9d01401e5ab14686b5cb45bbd6d9946119273c177f20aa3"
+    },
+    {
+      "path": "docs/sessions/artifacts/ag03/native-before.txt",
+      "sha256_lf": "754e85953f4a362ee7fedde6e8b70200a60da8dd37436f7c58f4156d07e6f226"
+    },
+    {
+      "path": "docs/sessions/artifacts/ag03/native-focused.txt",
+      "sha256_lf": "27142abbb096ff4917b7340bae49c399b1a2e6d1a959d9ee30fdda047e8dc1a2"
+    },
+    {
+      "path": "docs/sessions/artifacts/ag03/native-late-playout-after.txt",
+      "sha256_lf": "f22abab6f95db58ca83b404685fa9685ea93f8ab57888b8056f2d56e2a000681"
+    },
+    {
+      "path": "docs/sessions/artifacts/ag03/native-late-playout-focused.txt",
+      "sha256_lf": "49ea0edb82cd264d2da5deb1ff7539ec68c092efce94f4353145b7f6529cb395"
+    },
+    {
+      "path": "docs/sessions/artifacts/ag03/native-late-playout-regression.txt",
+      "sha256_lf": "510ddeffceaf78d011fb2131fc80d11c5b8f7b7d00a900c8552354e06c2b5e69"
+    },
+    {
+      "path": "docs/sessions/artifacts/ag03/native-lint.txt",
+      "sha256_lf": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18"
+    },
+    {
+      "path": "docs/sessions/artifacts/ag03/native-regression.txt",
+      "sha256_lf": "e5b65ff9410fb86af916a0ae097e2f82937f6a3f2c6348baa586a3082b593290"
+    },
+    {
+      "path": "docs/sessions/artifacts/ag03/native-verification.json",
+      "sha256_lf": "4e19105ff637b3ee4aa813f92b1919322ec8b9b94475afb56d1659d037414816"
+    },
+    {
+      "path": "docs/sessions/artifacts/ag03/next-package-inputs.md",
+      "sha256_lf": "b872a088a53eba41cca164fc613c9f0a162b9cf92a67720f3904486477983a89"
+    },
+    {
+      "path": "docs/sessions/artifacts/ag03/shared-relationship-state.json",
+      "sha256_lf": "7173066aa146d511f3e2ad3bc4b529f4917dac7d363fe0475f3b94675764dfbb"
+    },
+    {
+      "path": "docs/sessions/artifacts/ag03/source-integrity.json",
+      "sha256_lf": "6c3eeb9203810b2a11949883341994494a95be8442165f3c78d966aab1482fa2"
+    }
+  ],
+  "console_formatting": "Console logs retain observed content/outcomes; trailing horizontal whitespace and line endings normalized for repository storage."
+}

@@ -32,7 +32,8 @@
     "cp04_implementation_commit": "4ec7f51eb05ed00b4ffea68fd77c2ba5649c3c5d",
     "cp07_implementation_commit": "40232996372305b8ab100bc8fc57a3957296f4e4",
     "ag01_implementation_commit": "4f47123f18af3cb01f2330138c635c76aae7182c",
-    "ag02_implementation_commit": "69d09fe575831c42a14b28c0a7417ca1b388c492"
+    "ag02_implementation_commit": "69d09fe575831c42a14b28c0a7417ca1b388c492",
+    "ag03_implementation_commit": "27c04347b2f0d5d0eccf83b3c31663eb3cfbd145"
   },
   "status_rules": {
     "execution": [
@@ -239,7 +240,7 @@
       "plan_anchor": "cp05-complete-existing-white-label-controls-behind-truthful-containment",
       "evidence": [],
       "blocker": null,
-      "next_action": "Deferred for now at the user\u2019s request on 4 October 2026. Leave unfinished and retain all existing findings and acceptance requirements; CP06 was also deferred and CP07 local implementation and its remaining delivery gap are now recorded.",
+      "next_action": "Deferred for now at the user’s request on 4 October 2026. Leave unfinished and retain all existing findings and acceptance requirements; CP06 was also deferred and CP07 local implementation and its remaining delivery gap are now recorded.",
       "target_date": null
     },
     {
@@ -265,7 +266,7 @@
       "plan_anchor": "cp06-accessible-cancellation-and-dependable-billing-communication",
       "evidence": [],
       "blocker": null,
-      "next_action": "Deferred for later at the user\u2019s request on 4 October 2026. Leave unfinished and retain all existing findings and acceptance requirements; CP07 local implementation and its remaining delivery gap are now recorded.",
+      "next_action": "Deferred for later at the user’s request on 4 October 2026. Leave unfinished and retain all existing findings and acceptance requirements; CP07 local implementation and its remaining delivery gap are now recorded.",
       "target_date": null
     },
     {
@@ -346,7 +347,7 @@
       "plan_anchor": "cp09-supportability-and-decisive-customer-ux-acceptance",
       "evidence": [],
       "blocker": null,
-      "next_action": "Deferred for later at the user\u2019s request on 5 October 2026. Leave unfinished and retain all existing findings and acceptance requirements. AG01 is the next package to discuss; CP08 remains planned and unstarted, without an explicit deferral. Existing CP07 gaps and the feature freeze remain unchanged.",
+      "next_action": "Deferred for later at the user’s request on 5 October 2026. Leave unfinished and retain all existing findings and acceptance requirements. AG01 is the next package to discuss; CP08 remains planned and unstarted, without an explicit deferral. Existing CP07 gaps and the feature freeze remain unchanged.",
       "target_date": null
     },
     {
@@ -413,8 +414,8 @@
       "title": "Preserve explicit Realtime relationship corrections beyond 12 messages",
       "owner_role": "Realtime engineering lead",
       "assigned_person": "Codex implementation team",
-      "reviewer": "Independent ordering and assertion review in progress",
-      "status": "in_progress",
+      "reviewer": "Independent assertion, ordering, playback and action-admission review; provider/release qualification remains AG04/OP08",
+      "status": "candidate_verified",
       "start_after_milestone": "RG01 baseline recorded",
       "dependencies_and_tests": "See package text; coordination and final acceptance dependencies are distinct from entry milestones.",
       "finding_ids": [
@@ -427,18 +428,22 @@
         "A06"
       ],
       "plan_anchor": "ag03-preserve-explicit-realtime-relationship-corrections-beyond-12-messages",
-      "evidence": [],
+      "evidence": [
+        "docs/sessions/2026-10-05-ag03-implementation.md",
+        "docs/sessions/artifacts/ag03/verification.json"
+      ],
       "blocker": null,
-      "next_action": "Reproduce long-call correction loss and implement bounded typed relationship provenance with stable caller-turn ordering; no completion claimed.",
-      "target_date": null
+      "next_action": "Retain deterministic candidate evidence; qualify real provider/telephone behavior under AG04 and consume saved ASR revision evidence under AG05. No release or feature closure.",
+      "target_date": null,
+      "execution_note": "Local candidate 27c04347b2f0d5d0eccf83b3c31663eb3cfbd145: 1588 focused backend tests passed, zero skips; CI-rule Ruff on all17 changed files and staged diff checks passed. No migration, live provider/audio, push or deployment."
     },
     {
       "id": "AG04",
       "title": "Qualify actual conversation profiles, including failure and interruption",
       "owner_role": "Conversation QA lead",
-      "assigned_person": null,
-      "reviewer": null,
-      "status": "planned",
+      "assigned_person": "Codex implementation team",
+      "reviewer": "Independent scenario and qualification-gate review underway",
+      "status": "in_progress",
       "start_after_milestone": "RG01 baseline recorded",
       "dependencies_and_tests": "See package text; coordination and final acceptance dependencies are distinct from entry milestones.",
       "finding_ids": [
@@ -457,7 +462,7 @@
       "plan_anchor": "ag04-qualify-actual-conversation-profiles-including-failure-and-interruption",
       "evidence": [],
       "blocker": null,
-      "next_action": "Assign owner and confirm the baseline reproduction or evidence gap.",
+      "next_action": "Replay captured and synthetic conversation cases through actual traditional/native runtime boundaries; preserve known Groq semantic failure and keep live/human approval separate.",
       "target_date": null
     },
     {
@@ -928,7 +933,7 @@
   "findings": [
     {
       "id": "C01",
-      "baseline_label": "P1 \u2014 Contact enquiries can be silently lost.",
+      "baseline_label": "P1 — Contact enquiries can be silently lost.",
       "baseline_detail": "The public contact form waits 1.5 seconds, clears its inputs and displays success without sending a request or persisting an enquiry. This is a real false-success path, separate from CRM contact import. A prospective buyer can lose a sales or support enquiry before creating an account. Wire it to one durable intake path, or provide an honest email link until ready. Success must require a server receipt; failures must retain the draft. Acceptance: double-click, retry, reload and service failure produce either one accepted enquiry or a visible unsent state. [Contact implementation](https://github.com/talkyai-source/Talky.ai-complete-/blob/d7b58405/Talk-Leee/src/components/home/contact-section.tsx#L39).",
       "work_packages": [
         "CP01"
@@ -939,7 +944,7 @@
     },
     {
       "id": "C02",
-      "baseline_label": "P1 \u2014 Annual pricing is presentation without a matching purchase contract.",
+      "baseline_label": "P1 — Annual pricing is presentation without a matching purchase contract.",
       "baseline_detail": "The plans screen advertises approximately 17% savings and calculates a yearly display, but checkout submits only `plan_id` and return URLs. The backend reads that plan's single Stripe price ID; changing the toggle does not change the purchase request. This establishes a mismatch without knowing the live price configured in Stripe. Hide the annual choice until the catalog supports it, or pass a server-validated price option with its interval. Acceptance: amount, currency, interval, renewal date and provider price agree from selection through invoice. [Plans screen](https://github.com/talkyai-source/Talky.ai-complete-/blob/d7b58405/Talk-Leee/src/app/billing/plans/page.tsx#L55), [checkout service](https://github.com/talkyai-source/Talky.ai-complete-/blob/d7b58405/backend/app/domain/services/billing_service.py#L147).",
       "work_packages": [
         "CP02"
@@ -950,7 +955,7 @@
     },
     {
       "id": "C03",
-      "baseline_label": "P1 \u2014 A failed subscription webhook can become permanently ignored.",
+      "baseline_label": "P1 — A failed subscription webhook can become permanently ignored.",
       "baseline_detail": "The service claims an event before business processing. Top-up failures release that claim, but ordinary subscription/invoice handlers do not provide equivalent recovery. The actual method, exercised with an in-memory claim and a transient failing handler, produced `handler_failed`, then `duplicate`, with only one handler attempt. A paid customer could remain incorrectly activated or invoiced despite provider retries. This is a reproduced failure boundary, not evidence of an existing customer loss. Use recoverable event states and idempotent business updates; simply deleting a claim after partly applied work is not a complete fix. Acceptance must inject failures before and after each durable mutation, then verify safe retry and reconciliation. Stripe documents duplicate and unordered delivery, so both belong in the test contract. [Handler](https://github.com/talkyai-source/Talky.ai-complete-/blob/d7b58405/backend/app/domain/services/billing_service.py#L465), [Stripe delivery behavior](https://docs.stripe.com/webhooks), [offline evidence](artifacts/2026-10-02-maturity-billing-repro.json).",
       "work_packages": [
         "CP03"
@@ -961,7 +966,7 @@
     },
     {
       "id": "C04",
-      "baseline_label": "P1 \u2014 Invoice details can present invented facts.",
+      "baseline_label": "P1 — Invoice details can present invented facts.",
       "baseline_detail": "The detail endpoint substitutes plan allowance for used minutes, sets tax, overage and peak concurrency to zero, constructs a plan line from the invoice total, and joins current subscription/plan data. Adjustments return an empty list; a separate overage estimate falls back to 10 cents per minute without a stored rate. These are not authoritative invoice facts. Prefer the actual provider invoice/PDF and recorded totals; show unavailable where detail was not captured. Preserve immutable invoice items before presenting a detailed breakdown. Acceptance: tax, credits, discounts, top-ups and plan changes match the provider invoice, and historical detail does not change when the current plan changes. [Invoice projection](https://github.com/talkyai-source/Talky.ai-complete-/blob/d7b58405/backend/app/api/v1/endpoints/billing.py#L542).",
       "work_packages": [
         "CP04"
@@ -972,7 +977,7 @@
     },
     {
       "id": "C05",
-      "baseline_label": "P1 for reseller sales \u2014 White-label operational screens are still prototypes.",
+      "baseline_label": "P1 for reseller sales — White-label operational screens are still prototypes.",
       "baseline_detail": "Partner tenant creation, editing and suspension update React/localStorage state, although tooltips describe ability to place calls. Partner billing hardcodes usage, cost and paid invoices. These reviewed screens do not visibly disclose their local/demo nature. Existing core Admin APIs and tenant isolation do not make these particular controls operational. Hide or explicitly isolate the demo surfaces from paid use; wire the real authorized backend when that offering is ready. Acceptance: another browser sees the created tenant, real membership and entitlements exist, suspension blocks server-side work, and every invoice is real. [Tenant state](https://github.com/talkyai-source/Talky.ai-complete-/blob/d7b58405/Talk-Leee/src/app/white-label/%5Bpartner%5D/tenants/tenants-client.tsx#L118), [partner billing](https://github.com/talkyai-source/Talky.ai-complete-/blob/d7b58405/Talk-Leee/src/app/white-label/%5Bpartner%5D/billing/page.tsx#L70).",
       "work_packages": [
         "CP05"
@@ -983,7 +988,7 @@
     },
     {
       "id": "C06",
-      "baseline_label": "P1 for promised self-service cancellation; otherwise P2 \u2014 Cancellation and billing communication are incomplete journeys.",
+      "baseline_label": "P1 for promised self-service cancellation; otherwise P2 — Cancellation and billing communication are incomplete journeys.",
       "baseline_detail": "Backend billing portal and period-end cancellation exist, but no customer frontend consumer was found; the UI links to plan selection instead. Email support remains a stated alternative, so cancellation is not categorically impossible. Payment-email recipient selection also uses legacy `owner`, while canonical signup uses `tenant_admin`. Expose one clear authorized manage/cancel route and align recipient roles. Acceptance: the owner sees the effective end date, cancellation survives reload, renewal stops, paid access continues appropriately, and a failure never produces a success claim. [Billing endpoints](https://github.com/talkyai-source/Talky.ai-complete-/blob/d7b58405/backend/app/api/v1/endpoints/billing.py#L267), [recipient selection](https://github.com/talkyai-source/Talky.ai-complete-/blob/d7b58405/backend/app/domain/services/billing_service.py#L951).",
       "work_packages": [
         "CP06",
@@ -995,7 +1000,7 @@
     },
     {
       "id": "C07",
-      "baseline_label": "P1 for sold automated alerts; otherwise P2, with a potentially higher privacy impact \u2014 Notifications are not durable server automation.",
+      "baseline_label": "P1 for sold automated alerts; otherwise P2, with a potentially higher privacy impact — Notifications are not durable server automation.",
       "baseline_detail": "The reviewed external notification path posts from the browser and discards failures. Its storage keys are not scoped by authenticated tenant/user, and logout does not visibly clear that store. Closed browsers, CORS and network failures can lose delivery. A cross-account history/destination exposure is a specific risk requiring browser reproduction, not an observed disclosure. Scope and clear local state on identity changes; use existing durable server delivery for operational notifications. Acceptance: tenant A's history and destination never appear after tenant B signs in; failed delivery has a visible, retryable status. [Notification store](https://github.com/talkyai-source/Talky.ai-complete-/blob/d7b58405/Talk-Leee/src/lib/notifications.ts#L80).",
       "work_packages": [
         "CP07",
@@ -1010,7 +1015,7 @@
     },
     {
       "id": "C08",
-      "baseline_label": "P2 \u2014 Published legacy signup still conflicts with the canonical schema.",
+      "baseline_label": "P2 — Published legacy signup still conflicts with the canonical schema.",
       "baseline_detail": "The current verified-code signup has meaningful repairs and membership creation. A separately mounted legacy registration path inserts `owner`, which is outside the canonical role constraint, and does not use the same membership invariant. Retire that route or delegate to the canonical implementation. Acceptance: every published registration route works against the migrated database and cannot leave an orphan tenant or grant incorrect membership. This is not a claim that current normal signup is entirely broken. [Legacy registration](https://github.com/talkyai-source/Talky.ai-complete-/blob/d7b58405/backend/app/api/v1/endpoints/auth/registration.py#L125).",
       "work_packages": [
         "CP08"
@@ -1021,7 +1026,7 @@
     },
     {
       "id": "C09",
-      "baseline_label": "P1 for promised managed support; otherwise P2 \u2014 Parts of the operating console remain unavailable.",
+      "baseline_label": "P1 for promised managed support; otherwise P2 — Parts of the operating console remain unavailable.",
       "baseline_detail": "Actions Log and Incidents contain Coming Soon surfaces; selected customer Admin consoles explicitly report unavailable functionality. Other call, tenant, user, connector and audit APIs are real. A support promise must match what an operator can actually diagnose and repair. Prioritize tracing a complaint across call, lead, action receipt and billing before expanding the console. Acceptance: an authorized support operator resolves a failed follow-up or billing mismatch with audit evidence and no guessed database edits. [Actions log](https://github.com/talkyai-source/Talky.ai-complete-/blob/d7b58405/Admin/frontend/src/pages/ActionsLogPage.tsx#L31), [incidents](https://github.com/talkyai-source/Talky.ai-complete-/blob/d7b58405/Admin/frontend/src/pages/IncidentsPage.tsx#L31).",
       "work_packages": [
         "CP09",
@@ -1033,7 +1038,7 @@
     },
     {
       "id": "V01",
-      "baseline_label": "P1 \u2014 Real telephone quality and performance remain unproven for this release.",
+      "baseline_label": "P1 — Real telephone quality and performance remain unproven for this release.",
       "baseline_detail": "Cartesia first-audio observations of 169 and 205 milliseconds describe two provider responses, not total conversational delay. The Realtime smoke used synthetic text and a simulated gateway. An earlier capacity/soak report explicitly invalidates its SIP-only/no-RTP evidence. No current concurrency ceiling or human-rated naturalness claim follows from these tests. Use the existing harnesses, the intended carrier and actual selected voice profiles for bidirectional audio acceptance. [Provider fixture scope](artifacts/2026-10-01-audio-provider-eval.json), [invalidated load evidence](../../telephony/docs/phase_3/day10_concurrency_soak_evidence.md).",
       "work_packages": [
         "OP08",
@@ -1045,7 +1050,7 @@
     },
     {
       "id": "V02",
-      "baseline_label": "P1 for approving the affected model profile \u2014 Groq still demonstrated a comprehension failure.",
+      "baseline_label": "P1 for approving the affected model profile — Groq still demonstrated a comprehension failure.",
       "baseline_detail": "The synthetic provider exercise showed a misremembered previous question even though captured request history contained the exact preceding question. This is not explained by a lost-history bug. Small Luna/Gemini/Cerebras samples do not establish universal superiority or readiness either. Approve a complete model/prompt/voice/knowledge profile only against the same reviewed scenarios; keep unsuccessful profiles experimental for that use case. Do not make an automatic larger-model switch the default remedy. [Recorded provider evidence](artifacts/2026-10-02-call-experience-model-probe.json).",
       "work_packages": [
         "AG04",
@@ -1057,7 +1062,7 @@
     },
     {
       "id": "V03",
-      "baseline_label": "P1/P2 \u2014 Traditional no/weak-match turns can include a conflicting knowledge fallback.",
+      "baseline_label": "P1/P2 — Traditional no/weak-match turns can include a conflicting knowledge fallback.",
       "baseline_detail": "The fallback instructions tell the agent it will check and ensure confirmation, even when available tools provide no follow-up route. Other instructions forbid unsupported future promises. This is a confirmed instruction contradiction; it does not prove an external action occurred. Replace that fallback with a short honest inability to confirm and only an actually available next step. Acceptance must evaluate the assembled prompt with no tools, unavailable tools and working tools, rather than testing one template sentence alone. [Knowledge fallback](https://github.com/talkyai-source/Talky.ai-complete-/blob/d7b58405/backend/app/domain/services/voice_pipeline/turn_streamer.py#L193).",
       "work_packages": [
         "AG02"
@@ -1068,7 +1073,7 @@
     },
     {
       "id": "V04",
-      "baseline_label": "P2 defect; P1 before approving the affected profile \u2014 Realtime relationship corrections can leave a bounded guard's memory.",
+      "baseline_label": "P2 defect; P1 before approving the affected profile — Realtime relationship corrections can leave a bounded guard's memory.",
       "baseline_detail": "The relationship guard reads a 12-message buffer, and typed live state has no persistent field for an explicit denial of a customer relationship. In a bounded offline test, the guard rejected an existing-customer claim immediately after a denial, but no longer rejected it after the denial aged out. This is a confirmed guard coverage gap, not proof that the live model necessarily repeats the claim. Store the latest explicit relationship correction in existing typed state, with provenance and a valid later reversal. Acceptance: the correction still constrains an incompatible claim after 30 turns; a later explicit caller correction updates it appropriately. [Realtime buffer](https://github.com/talkyai-source/Talky.ai-complete-/blob/d7b58405/backend/app/realtime/bridge.py#L678), [offline proof](artifacts/2026-10-02-maturity-realtime-memory-repro.json).",
       "work_packages": [
         "AG03"
@@ -1079,7 +1084,7 @@
     },
     {
       "id": "V05",
-      "baseline_label": "P1 for a transfer-dependent customer \u2014 Controlled inbound human transfer is unavailable in production.",
+      "baseline_label": "P1 for a transfer-dependent customer — Controlled inbound human transfer is unavailable in production.",
       "baseline_detail": "The controlled inbound transfer declaration is false, with a narrow staging proof path. The UI correctly disables it. Do not present production receptionist-to-human handoff as included. Either exclude it explicitly or complete the existing two-leg, restart, hangup and settlement proofs before enabling it. [Capability declaration](https://github.com/talkyai-source/Talky.ai-complete-/blob/d7b58405/backend/app/domain/services/telephony/inbound_transfer.py#L20).",
       "work_packages": [
         "OP06"
@@ -1090,7 +1095,7 @@
     },
     {
       "id": "V06",
-      "baseline_label": "P2 \u2014 Recovery has real limits that should be explicit.",
+      "baseline_label": "P2 — Recovery has real limits that should be explicit.",
       "baseline_detail": "Traditional provider failover is opt-in. STT fallback can use another engine from the same vendor/account, so it is not independent protection from a shared vendor outage. TTS fallback requires credentials and a voice mapping; replay after partial output is intentionally avoided. STT recovery has a bounded replay buffer and can require repetition. Realtime unexpected disconnect ends the session rather than transparently reconnecting mid-call. These are mostly deliberate tradeoffs. Show effective fallback readiness and test the chosen configuration; avoid adding unsafe replay to make recovery appear seamless. [Voice orchestration](https://github.com/talkyai-source/Talky.ai-complete-/blob/d7b58405/backend/app/domain/services/voice_orchestrator.py#L1164), [Realtime connection](https://github.com/talkyai-source/Talky.ai-complete-/blob/d7b58405/backend/app/realtime/openai.py#L766).",
       "work_packages": [
         "OP03"
@@ -1101,7 +1106,7 @@
     },
     {
       "id": "O01",
-      "baseline_label": "P1 where sold as a hard allowance \u2014 Outbound minute limits are not guaranteed during a narrow metering failure.",
+      "baseline_label": "P1 where sold as a hard allowance — Outbound minute limits are not guaranteed during a narrow metering failure.",
       "baseline_detail": "The shared minute lookup can return unlimited after a query error; the worker's check also passes on lookup failure. A later CallGuard can fall back to a stored usage value that is not reliably current. Other DNC, platform, spend and concurrency guards remain, and a total database outage can still stop calling. The precise exposure is a failed usage query with other checks working and stale stored usage below the limit. Introduce an explicit metering-unavailable state and a documented bounded continuity policy. A customer-visible hard cap must stop new admission when its authority is unknown. Also define whether the allowance resets on the calendar month or subscription anniversary; the current usage query uses the calendar month. [Shared lookup](https://github.com/talkyai-source/Talky.ai-complete-/blob/d7b58405/backend/app/domain/services/minutes_quota.py#L115), [worker check](https://github.com/talkyai-source/Talky.ai-complete-/blob/d7b58405/backend/app/workers/dialer_worker.py#L1522), [additional guard](https://github.com/talkyai-source/Talky.ai-complete-/blob/d7b58405/backend/app/domain/services/call_guard.py#L1002).",
       "work_packages": [
         "OP01",
@@ -1114,7 +1119,7 @@
     },
     {
       "id": "O02",
-      "baseline_label": "P1 for promised hard limits; otherwise P2 \u2014 Provider account limits and global limits have different coverage.",
+      "baseline_label": "P1 for promised hard limits; otherwise P2 — Provider account limits and global limits have different coverage.",
       "baseline_detail": "The provider concurrency registry is per-process. Flux's prewarm and streaming sockets do not use the guard that the Nova path uses, so the named Deepgram guard setting does not constrain that selected path. Global/per-pod call slots still exist; this is not unlimited calling. Separately, ordinary outbound global-lease acquisition can fail open on Redis failure, while inbound uses a stricter policy. Prove configured limits at the actual process/account boundary, with cancellation-safe release and a documented Redis-degraded admission policy. Do not add a distributed scheduler before it is needed. [Provider guard](https://github.com/talkyai-source/Talky.ai-complete-/blob/d7b58405/backend/app/infrastructure/providers/provider_concurrency.py#L18), [Flux socket](https://github.com/talkyai-source/Talky.ai-complete-/blob/d7b58405/backend/app/infrastructure/stt/deepgram_flux.py#L489), [global policy](https://github.com/talkyai-source/Talky.ai-complete-/blob/d7b58405/backend/app/domain/services/global_concurrency.py#L104).",
       "work_packages": [
         "OP02"
@@ -1125,7 +1130,7 @@
     },
     {
       "id": "O03",
-      "baseline_label": "P1 for recovery promises \u2014 Backup job success is not restored-service proof.",
+      "baseline_label": "P1 for recovery promises — Backup job success is not restored-service proof.",
       "baseline_detail": "A fresh backup job reported success. Scripts provide checksums and other useful checks, but independent archive restoration, production-shaped migration and off-host survivability were not demonstrated in the inspected evidence. A usable daily dump leaves up to roughly a day's changes exposed between successful backups; failed or unusable dumps can widen that gap. Achieved recovery point and recovery time remain unverified and require agreed targets. Use the existing isolated restore procedure and record timings, tenant isolation, object storage and key recovery. No current uptime or recovery SLA should be inferred from the age of a running container. [Recovery procedure](../RUNBOOK.md#backups), [deployment requirements](../DEPLOYMENT.md).",
       "work_packages": [
         "OP10"
@@ -1136,7 +1141,7 @@
     },
     {
       "id": "O04",
-      "baseline_label": "P1 for managed reliability \u2014 Alert instrumentation exists, but delivery to a person is unproven.",
+      "baseline_label": "P1 for managed reliability — Alert instrumentation exists, but delivery to a person is unproven.",
       "baseline_detail": "Metrics, worker heartbeats and healthwatch are real. The checked Alertmanager example has empty delivery receivers; no on-host Prometheus/Alertmanager process was observed. External monitoring was not enumerated, so this is not a claim that none exists. A working log message does not prove on-call notification. Inject a controlled failure and retain receipt, acknowledgement and recovery evidence. [Alertmanager configuration](../../telephony/observability/alertmanager/alertmanager.yml), [healthwatch](../../backend/deploy/healthwatch.sh).",
       "work_packages": [
         "OP09"
@@ -1147,7 +1152,7 @@
     },
     {
       "id": "O05",
-      "baseline_label": "P2 \u2014 Some latency measurements end before the caller can hear speech.",
+      "baseline_label": "P2 — Some latency measurements end before the caller can hear speech.",
       "baseline_detail": "The first provider audio chunk can mark `audio_start` before gateway transmission. Asterisk correctly describes its receipt as transmitted rather than heard. Preserve that distinction. Measure endpoint audio separately before using latency as a customer promise. [Playback measurement](https://github.com/talkyai-source/Talky.ai-complete-/blob/d7b58405/backend/app/domain/services/voice_pipeline/tts_playback.py#L469).",
       "work_packages": [
         "OP08",
@@ -1159,7 +1164,7 @@
     },
     {
       "id": "O06",
-      "baseline_label": "P2 \u2014 A setup-crash cleanup boundary needs proof.",
+      "baseline_label": "P2 — A setup-crash cleanup boundary needs proof.",
       "baseline_detail": "Lifecycle code documents that an Asterisk channel without a local session is not reconciled by that routine. Other cleanup and timeout paths exist, so permanent leakage is not established. Reproduce a crash between channel arrival and local registration, prove whether existing cleanup covers it, and add ownership-aware reconciliation only if needed. Never hang up every unmatched channel indiscriminately. [Lifecycle reconciliation](https://github.com/talkyai-source/Talky.ai-complete-/blob/d7b58405/backend/app/domain/services/telephony/lifecycle.py#L819).",
       "work_packages": [
         "OP05",
@@ -1171,7 +1176,7 @@
     },
     {
       "id": "O07",
-      "baseline_label": "P1 for release readiness \u2014 Deployment and rollback remain coupled to external operational proof.",
+      "baseline_label": "P1 for release readiness — Deployment and rollback remain coupled to external operational proof.",
       "baseline_detail": "Frontends auto-deploy from main while the backend/gateway use a separate coordinated release. The new UI fails closed when required readiness fields are absent; old backend and new UI can temporarily disable operations. Current-topology ingress freeze, zero-call drain, compatible rollback/code-forward, generated SIP reconciliation and restored migration proof are necessary. The old production revision is not automatically a safe rollback target for the new gateway contract. Use one recorded release procedure and a rehearsed compatible artifact; adding another deployment platform is unnecessary. [Supported release procedure](../DEPLOYMENT.md).",
       "work_packages": [
         "OP12",
@@ -1183,7 +1188,7 @@
     },
     {
       "id": "O08",
-      "baseline_label": "P2 \u2014 Security and financial telemetry have bounded assurance.",
+      "baseline_label": "P2 — Security and financial telemetry have bounded assurance.",
       "baseline_detail": "API and Python workers were observed running as root on a shared host. This increases the impact of a compromise; it is not evidence of one. Move ordinary services toward the minimum necessary permissions after testing the privileged PBX/configuration operations they depend on. Separately, provider cost telemetry uses an in-memory buffer and can drop events on overflow or process loss. It is useful operational telemetry, but not sufficient by itself as an auditable supplier-cost ledger. Reconcile usage/costs against durable call records and provider statements; do not infer that customer invoices are necessarily wrong from this telemetry design. [Service definitions](../../backend/systemd/), [cost recorder](https://github.com/talkyai-source/Talky.ai-complete-/blob/d7b58405/backend/app/domain/services/provider_cost_ledger.py#L90).",
       "work_packages": [
         "OP11"
@@ -1194,7 +1199,7 @@
     },
     {
       "id": "G01",
-      "baseline_label": "P1 for the affected marketing promise \u2014 Performance and regulated-use claims need evidence.",
+      "baseline_label": "P1 for the affected marketing promise — Performance and regulated-use claims need evidence.",
       "baseline_detail": "Public source contains under-500-millisecond response, 1,000-plus concurrent calls and 94% completion claims; industry pages add uptime and AI-accuracy figures. Healthcare content makes HIPAA/BAA statements. No corresponding measured cohort, denominator, signed agreement or approved compliance package was established here. These claims are unsupported by the inspected evidence, not proven false merely because they are constants. Remove or qualify unsubstantiated promises; require a dated artifact and accountable owner before publishing them. [Home claims](https://github.com/talkyai-source/Talky.ai-complete-/blob/d7b58405/Talk-Leee/src/components/home/home-lazy-sections.tsx#L312), [healthcare claims](https://github.com/talkyai-source/Talky.ai-complete-/blob/d7b58405/Talk-Leee/src/app/industries/healthcare/page.tsx#L65).",
       "work_packages": [
         "CP01",
@@ -1207,7 +1212,7 @@
     },
     {
       "id": "G02",
-      "baseline_label": "P1/P2 \u2014 Privacy descriptions need reconciliation with the actual product.",
+      "baseline_label": "P1/P2 — Privacy descriptions need reconciliation with the actual product.",
       "baseline_detail": "The supplier list does not describe OpenAI/Cerebras paths supported by the candidate and still lists Supabase database hosting, whereas the inspected production stack uses self-hosted PostgreSQL. Storage supports S3-compatible and local paths; the public wording describes AWS S3. Retention wording promises permanent deletion, but the nightly cleanup worker only targets three telemetry tables and defaults to dry-run; recording lifecycle retention is delegated to bucket configuration. Real permissioned recording deletion exists, so it would be wrong to say deletion is wholly missing. The unresolved requirement is proof across recordings, transcripts, leads, backups and account termination, including policy exceptions and actual configuration. The terms' DPA link could not be verified through the browser tool. Contract existence, lawful calling policies and recording-consent requirements need the responsible owner's review; this report does not certify legal compliance. [Privacy statements](https://github.com/talkyai-source/Talky.ai-complete-/blob/d7b58405/Talk-Leee/src/app/privacy/privacy-content.ts#L190), [cleanup scope](https://github.com/talkyai-source/Talky.ai-complete-/blob/d7b58405/backend/app/workers/cleanup_worker.py#L7), [recording lifecycle configuration](https://github.com/talkyai-source/Talky.ai-complete-/blob/d7b58405/backend/app/domain/services/recording_service.py#L28).",
       "work_packages": [
         "OP07",
@@ -2905,7 +2910,7 @@
     {
       "id": "GT06",
       "name": "Perceived voice quality",
-      "proposed_acceptance": "At least two reviewers rate clarity, pronunciation, pacing, turn-taking and appropriateness on a defined 1\u20135 rubric; proposed mean at least 4 and no critical intelligibility failure. Report disagreement and subgroup results. Do not replace listening with transcript-only scoring.",
+      "proposed_acceptance": "At least two reviewers rate clarity, pronunciation, pacing, turn-taking and appropriateness on a defined 1–5 rubric; proposed mean at least 4 and no critical intelligibility failure. Report disagreement and subgroup results. Do not replace listening with transcript-only scoring.",
       "status": "not_run",
       "ratified_target": null,
       "observed_result": null,

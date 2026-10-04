@@ -1,0 +1,102 @@
+{
+  "as_of": "2026-10-05",
+  "baseline_source_commit": "69d09fe575831c42a14b28c0a7417ca1b388c492",
+  "scope": "AG03 shared relationship parser/state, traditional current-transcript replacement, accepted-final dispatch ordering and bounded coalesced relationship evidence",
+  "before": {
+    "command": "python -m pytest -q tests/unit/test_ag03_relationship_state.py",
+    "failed": 18,
+    "passed": 2,
+    "actual_method_control": {
+      "denial_before_contact_buffer_eviction_blocked": true,
+      "denial_after_30_ordinary_messages_blocked": false,
+      "quoted_affirmation_after_denial_still_blocked": false
+    }
+  },
+  "after": {
+    "owned_command": "python -m pytest -q tests/unit/test_ag03_relationship_state.py",
+    "owned_passed": 40,
+    "owned_failed": 0,
+    "combined_command": "python -m pytest -q tests/unit/test_ag03_relationship_state.py tests/unit/test_ag03_relationship_acceptance.py tests/unit/test_ag03_caller_dispatch_order.py tests/unit/test_live_structured_state.py tests/unit/test_live_capability_offers.py tests/unit/test_caller_authorized_end_call.py tests/unit/test_ag03_cascaded_relationship.py tests/unit/test_voice_pipeline_service.py tests/unit/test_false_barge_in_resume.py tests/unit/test_bargein_silence.py tests/unit/test_caller_speaking_cleared_on_end_of_turn.py",
+    "combined_failed": 0,
+    "prompt_budget_max_chars": 768,
+    "max_populated_fixture_chars": 741,
+    "owned_result_provenance": "40 shared relationship cases and12 actual scheduling cases included in final277-case combined run.",
+    "combined_passed": 277,
+    "scheduler_passed": 12
+  },
+  "behavior": [
+    "Only direct final caller assertions set denied/affirmed; unknown remains unknown. Shared assertion filter retains default call-control behavior and opts into conservative direct-prefix checks for relationship facts.",
+    "Quoted, reported, conditional, negated and third-party assertions cannot overwrite the caller position. Merchant business type and customer-support occupation are not company relationships.",
+    "A genuine newer caller assertion supersedes an older one; ordinary questions never erase relationship evidence.",
+    "Explicit provider turn order prevents old assertion replay. A delayed first final can supply a newer relationship assertion than the last known relationship without replaying old action/contact/refusal fields.",
+    "Traditional first use bootstraps only earlier available caller history. A corrected current transcript reapplies only its relationship contribution against the bounded pre-current-turn snapshot, preserving later tool/contact/action state.",
+    "Typed UNKNOWN is authoritative; the guard never reimports a retracted assertion from the contact buffer. Legacy history API uses the same shared parser.",
+    "Depth-one response coalescing retains onlythe latest explicit relationship assertion from overwritten accepted queue entries, never dropped contact/action/refusal/stage state or fulltranscript. Current neutral replacement restores the predecessor; queue duplicates and false-barge replay preserve identity."
+  ],
+  "limitations": [
+    "State lives for the existing call lifecycle; this does not add database persistence or transparent restart recovery.",
+    "No provider, PSTN, TTS or customer calls occurred. Native event ownership and submitted-speech integration have separate owner artifacts.",
+    "Deterministic relationship assertion coverage is conservative; these tests do not establish open-ended language comprehension or prevent every model invention.",
+    "Traditional compatibility callers without handler-owned accepted-dispatch metadata still use session counter/history length for current-turn identity only; they cannot prove cross-task temporal order. Raw media sequence is never used as that proof."
+  ],
+  "lint": {
+    "command": "python -m ruff check app/domain/services/caller_assertions.py app/domain/services/voice_pipeline/conversation_guards.py app/domain/services/voice_pipeline/live_structured_state.py tests/unit/test_ag03_relationship_state.py app/domain/services/voice_pipeline/transcript_handler.py app/domain/services/voice_pipeline/turn_ender.py app/domain/services/voice_pipeline_service.py tests/unit/test_ag03_caller_dispatch_order.py --select E9,F63,F7,F82",
+    "result": "passed on final source and test files"
+  },
+  "files": [
+    {
+      "path": "backend/app/domain/services/caller_assertions.py",
+      "sha256_lf": "d839b4967c6dc84d217f84d5a97916edfe7ae6d805480b6511804ab91004d8f7"
+    },
+    {
+      "path": "backend/app/domain/services/voice_pipeline/conversation_guards.py",
+      "sha256_lf": "8232983711262271747492d13928813df7428c58efafa00508b804a2c6b5bc8a"
+    },
+    {
+      "path": "backend/app/domain/services/voice_pipeline/live_structured_state.py",
+      "sha256_lf": "997aec61b27466aef094922c3a4066f5a77b3b7a5745d3cc4deb5e412da98b46"
+    },
+    {
+      "path": "backend/tests/unit/test_ag03_relationship_state.py",
+      "sha256_lf": "a2e74d8a817106ae94698d8bb308b5f67897ae8d8188cca3053b47648baaafbc"
+    },
+    {
+      "path": "backend/app/domain/services/voice_pipeline/transcript_handler.py",
+      "sha256_lf": "5dd21743d8dde5ec1cfedd795ef06ff3d333fc9d63129fb059e78c5c892ddd6d"
+    },
+    {
+      "path": "backend/app/domain/services/voice_pipeline/turn_ender.py",
+      "sha256_lf": "6b68b634937ac011bb2c822c3bf32fe8a284567dae321e7e413a7f26ce768a4a"
+    },
+    {
+      "path": "backend/app/domain/services/voice_pipeline_service.py",
+      "sha256_lf": "920d2588b4e3db45610947d5d77c63c86ad5c1ad6dab5c51e645734be7e33168"
+    },
+    {
+      "path": "backend/tests/unit/test_ag03_caller_dispatch_order.py",
+      "sha256_lf": "c6d7d777ef5d7fd56fe8f9b8ed6e277dcaaab3e608756a3905d5947ee16b21a2"
+    }
+  ],
+  "ordering_followup": {
+    "before_command": "python -m pytest -q tests/unit/test_ag03_relationship_state.py -k \"older_owned or late_first_traditional\"",
+    "before_failed": 2,
+    "before_passed": 0,
+    "after_combined_passed": 277,
+    "after_combined_failed": 0,
+    "contract": "Use handler-owned task._caller_turn_order, allocated synchronously at accepted final or queue insertion; raw _utterance_seq is media-only. Exact duplicates retain accepted order, queue drain copies order, false-barge replay preserves it and rejects newer accepted turns. Stale owned tasks cannot replace current observation identity/digest. Latest explicit relationship from overwritten queue entries is retained as one immutable enum/order/id record; onlythree relationship fields are applied before current replacement baseline.",
+    "scheduling_before": {
+      "command": "python -m pytest -q tests/unit/test_ag03_caller_dispatch_order.py",
+      "failed": 5,
+      "passed": 0,
+      "note": "Initial five tests before dispatch-stamp implementation; sixth real cancellation/replay control added afterward."
+    },
+    "coalescing_before": {
+      "command": "python -m pytest -q tests/unit/test_ag03_caller_dispatch_order.py -k coalesced_queued_denial",
+      "failed": 1,
+      "passed": 0,
+      "symptom": "Accepted queued denial overwritten by ordinary queue entry was lost before reduction."
+    },
+    "final_scheduler_cases": 12
+  },
+  "warnings": "Final run retained existing datetime.utcnow deprecations and one AsyncMock capture-mode warning in test_voice_pipeline_service; no application/provider/network operations occurred."
+}
