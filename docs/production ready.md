@@ -163,6 +163,8 @@ Exit evidence: dated baseline manifest, owner list, selected supported profiles/
 
 ### CP03 Recoverable billing webhooks without duplicate financial effects
 
+**Execution checkpoint — 4 October 2026:** Local implementation and failure/concurrency verification recorded in candidate `9eb2ac8d49442619dbdd26235c67de264a2e8e79`. Package remains **in progress** pending designated-provider, deployed-candidate and operational acceptance. See [CP03 evidence](sessions/2026-10-04-cp03-implementation.md) and [recovery procedure](production-readiness/billing-webhook-recovery.md).
+
 **Scope and classification:** reproduced ordinary webhook retry loss F10; preservation/acceptance of monthly and top-up/refund flows F07/F09. A claimed event whose subscription/invoice handler fails is treated as a duplicate on retry. Claim-storage failure deliberately processes without a durable claim. These boundaries can lose updates or repeat secondary work; they are not proof of double charging. Invoice upsert and top-up ledger uniqueness already protect specific effects. Evidence: `backend/app/domain/services/billing_service.py:465`, `:480`, `:500`, `:507`; `backend/database/migrations/20260610_processed_webhook_events.sql:7`; `backend/app/domain/services/topup_service.py:202`; saved `docs/sessions/artifacts/2026-10-02-maturity-billing-repro.py` and `.json`.
 
 **Bounded implementation:**

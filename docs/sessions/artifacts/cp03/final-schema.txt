@@ -1,0 +1,10 @@
+ current_database |          version_num
+------------------+-------------------------------
+ cp03_final_test  | 0054_billing_webhook_receipts
+(1 row)
+
+ column_name  |      column_default       | is_nullable
+--------------+---------------------------+-------------
+ legacy_claim | true                      | NO
+ state        | 'legacy_unverified'::text | NO
+(2 rows)

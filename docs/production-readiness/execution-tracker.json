@@ -27,7 +27,8 @@
       "docs/production-readiness/baseline-feature-maturity-2026-10-02.json": "356f1f164ffcba36b7799a3cb7110389a65a173a0fd39da51fb9d862160793de"
     },
     "baseline_hash_note": "The original authoring hash fields are retained as historical metadata; they do not match the portable frozen copies and their original byte convention is unverified. frozen_git_blob_sha256 records the verified SHA-256 of each LF-normalized checked-in frozen artifact. Frozen findings/content were not edited during CP01.",
-    "cp02_implementation_commit": "6ca82160e7f1ffc62229f0b5bd09c684db255936"
+    "cp02_implementation_commit": "6ca82160e7f1ffc62229f0b5bd09c684db255936",
+    "cp03_implementation_commit": "9eb2ac8d49442619dbdd26235c67de264a2e8e79"
   },
   "status_rules": {
     "execution": [
@@ -134,9 +135,9 @@
       "id": "CP03",
       "title": "Recoverable billing webhooks without duplicate financial effects",
       "owner_role": "Billing engineering lead",
-      "assigned_person": null,
-      "reviewer": null,
-      "status": "planned",
+      "assigned_person": "Codex implementation team",
+      "reviewer": "Independent Codex state, financial, transport and PostgreSQL reviews; designated-provider/release acceptance pending",
+      "status": "in_progress",
       "start_after_milestone": "RG01 baseline recorded",
       "dependencies_and_tests": "See package text; coordination and final acceptance dependencies are distinct from entry milestones.",
       "finding_ids": [
@@ -149,9 +150,26 @@
       ],
       "architecture_ids": [],
       "plan_anchor": "cp03-recoverable-billing-webhooks-without-duplicate-financial-effects",
-      "evidence": [],
-      "blocker": null,
-      "next_action": "Assign owner and confirm the baseline reproduction or evidence gap.",
+      "evidence": [
+        {
+          "path": "docs/sessions/2026-10-04-cp03-implementation.md",
+          "kind": "local_implementation_and_verification",
+          "candidate": "9eb2ac8d49442619dbdd26235c67de264a2e8e79",
+          "status": "partial_acceptance"
+        },
+        {
+          "path": "docs/production-readiness/billing-webhook-recovery.md",
+          "kind": "bounded_recovery_procedure",
+          "candidate": "9eb2ac8d49442619dbdd26235c67de264a2e8e79"
+        },
+        {
+          "path": "docs/sessions/artifacts/cp03/verification.json",
+          "kind": "commands_and_artifact_digests",
+          "candidate": "9eb2ac8d49442619dbdd26235c67de264a2e8e79"
+        }
+      ],
+      "blocker": "Local implementation and final synthetic verification passed. Designated Stripe/mail-account acceptance, deployed configuration, legacy reconciliation, partial-refund allocation policy and operational ownership remain unverified. CP06 recipients and CP04 invoice truth remain billing-journey dependencies.",
+      "next_action": "Perform the recorded deployment/recovery gates and designated-account acceptance before CP03 closure; retain the feature freeze and the bounded billing work sequence.",
       "target_date": null
     },
     {

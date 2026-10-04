@@ -1,0 +1,172 @@
+{
+  "package": "CP03",
+  "date": "2026-10-04",
+  "implementation_commit": "9eb2ac8d49442619dbdd26235c67de264a2e8e79",
+  "base_commit": "10e45b73ad316afd67df379854156b90b840a227",
+  "branch": "codex/production-ready-20261004",
+  "package_status": "in_progress",
+  "scope": "Existing billing event recovery, ordering, financial idempotency, separate notification receipts and bounded reconciliation.",
+  "reviews": [
+    "Root orchestration, historical delivery and integration review",
+    "llm_audit state and cross-review of payment binding",
+    "audio_audit top-up ledger and delivery reuse review",
+    "realtime_audit migration, actual RLS and signed HTTP/recovery verification"
+  ],
+  "checks": [
+    {
+      "cwd": "backend",
+      "command": "python -m pytest tests/unit/test_billing_catalog.py tests/unit/test_billing_checkout_contract.py tests/unit/test_billing_checkout_http.py tests/unit/test_billing_mode.py tests/unit/test_billing_plan_change_preserves_topup_minutes.py tests/unit/test_billing_topup_webhook_routing.py tests/unit/test_billing_minutes_agree_with_gate.py tests/unit/test_topup_service.py tests/unit/test_billing_state_events.py tests/unit/test_billing_topup_events.py tests/unit/test_billing_webhook_http.py tests/unit/test_billing_webhook_identity.py tests/unit/test_inbound_activation_gaps.py tests/unit/test_subscription_status_vocabulary.py tests/unit/test_call_guard_subscription_cache.py tests/unit/test_prod_gate_stripe.py tests/unit/test_prod_fail_closed.py tests/security/test_kms_master_key_gate.py tests/unit/test_rls_set_local_invariant.py tests/unit/test_endpoint_auth_audit.py tests/unit/test_reminder_worker_heartbeat.py tests/unit/test_reminder_recipient_resolution.py tests/unit/test_csrf_middleware.py -q",
+      "exit_code": 0,
+      "passed": 1571,
+      "skipped": 1,
+      "artifact": "backend-focused.txt",
+      "limit": "Existing stale public-route inventory skip and eight deprecation warnings. Before final legacy-delivery delta; final targeted/database checks cover that delta."
+    },
+    {
+      "cwd": "backend",
+      "command": "python -m pytest tests/unit/test_billing_state_events.py tests/unit/test_billing_topup_events.py tests/unit/test_topup_service.py tests/unit/test_billing_topup_webhook_routing.py tests/unit/test_billing_webhook_http.py tests/unit/test_billing_webhook_identity.py tests/unit/test_billing_checkout_contract.py -q --tb=short",
+      "exit_code": 0,
+      "passed": 147,
+      "artifact": "backend-financial-final.txt"
+    },
+    {
+      "cwd": "backend",
+      "command": "psql -v ON_ERROR_STOP=1 -f database/complete_schema.sql; python -m alembic stamp 0008_tenant_voice_tuning; python -m alembic upgrade head",
+      "environment": {
+        "DATABASE_URL": "postgresql://talky@127.0.0.1:55434/cp03_final_test"
+      },
+      "exit_code": 0,
+      "artifact": "fresh-bootstrap.txt",
+      "limit": "New disposable local database; final 0054 includes superseded notification state and retained legacy_claim flag."
+    },
+    {
+      "cwd": "backend",
+      "command": "python -m pytest tests/integration/test_billing_price_options.py tests/integration/test_billing_checkout.py tests/integration/test_billing_state_events.py tests/integration/test_billing_topup_events.py tests/integration/test_billing_webhook_migration.py tests/integration/test_billing_webhook_receipts.py tests/integration/test_billing_webhook_reconciliation.py tests/integration/test_billing_webhook_http.py -q --tb=short",
+      "environment": {
+        "TEST_DATABASE_URL": "postgresql://talky@127.0.0.1:55434/cp03_final_test",
+        "ENVIRONMENT": "test"
+      },
+      "exit_code": 0,
+      "passed": 116,
+      "skipped": 0,
+      "artifact": "backend-postgres-final.txt",
+      "limit": "Actual PostgreSQL/RLS and four full-stack signed HTTP cases; only external Stripe reads are synthetic. No real Stripe or email account operations."
+    },
+    {
+      "cwd": "backend",
+      "command": "python -m pytest tests/unit/test_billing_notification_transport.py tests/unit/test_billing_webhook_identity.py tests/unit/test_reminder_worker_heartbeat.py -q --tb=short",
+      "exit_code": 0,
+      "passed": 21,
+      "artifact": "notification-transport-final.txt",
+      "limit": "Adapter constructors/sends are mocked; validates billing-only timeout/retry settings, not provider acceptance or delivery."
+    },
+    {
+      "cwd": ".",
+      "command": "python -m ruff check --select F,E9 <changed Python paths in implementation commit>",
+      "exit_code": 0,
+      "artifact": "backend-lint.txt"
+    },
+    {
+      "cwd": ".",
+      "command": "git diff --cached --check",
+      "exit_code": 0
+    }
+  ],
+  "intermediate_results": [
+    {
+      "artifact": "backend-focused-initial-failed.txt",
+      "status": "superseded_failed_run",
+      "cause": "Eight currency-case comparison failures and protected-table inventory drift; corrected and rerun green."
+    },
+    {
+      "artifact": "backend-postgres-stale-fixture.txt",
+      "status": "superseded_failed_run",
+      "cause": "115 passed; one queue-count failure from a prior synthetic notification orphan left after concurrent fixture permission-catalog cleanup errors. Final proof uses a fresh database; prior history retained."
+    },
+    {
+      "artifact": "topup-checks.txt",
+      "status": "intermediate_agent_evidence",
+      "limit": "Includes intermediate successes and concurrent fixture setup/teardown failures; final source is certified by root fresh serial batch."
+    },
+    {
+      "artifact": "receipt-http-tests.txt",
+      "status": "intermediate_agent_evidence",
+      "passed": 74,
+      "limit": "Predates final legacy-claim flag and full-stack financial HTTP tests; superseded by final root runs."
+    }
+  ],
+  "not_run": [
+    "Complete backend test suite on this package",
+    "Frontend build/browser acceptance (no frontend changes)",
+    "Real designated Stripe account or mail transport acceptance",
+    "Production deployment, remote CI and customer/finance acceptance"
+  ],
+  "release_dependencies": [
+    "Correct deployed account/mode, secret and exact FastAPI provider endpoint",
+    "Legacy claims/open purchases reconciliation",
+    "Finance-approved partial-refund and inconsistent-balance treatment",
+    "Actual email SDK/configuration, delivery evidence and CP06 recipient policy",
+    "Backup, compatible rollback, recovery owner and receipt retention",
+    "CP02 provider/catalog and CP04 invoice acceptance"
+  ],
+  "cleanup": "Disposable PostgreSQL server stopped; synthetic immutable ledgers retained in stopped local databases. No task application server or tests left running.",
+  "digest_convention": "SHA-256 of LF-normalized UTF-8 artifact Git blob bytes; terminal trailing whitespace removed without changing test outcomes.",
+  "artifacts": {
+    "backend-financial-final.txt": {
+      "path": "docs/sessions/artifacts/cp03/backend-financial-final.txt",
+      "sha256_git_blob": "f9cc6fe758dccc0f39e1870b3d6048aaa43ac9a1a4346c41592834bfb3d84773"
+    },
+    "backend-focused-initial-failed.txt": {
+      "path": "docs/sessions/artifacts/cp03/backend-focused-initial-failed.txt",
+      "sha256_git_blob": "305e886c2dcc1c6ffce7915ba2930c9b10a02f945f80de555d7d10a55986bc9e"
+    },
+    "backend-focused.txt": {
+      "path": "docs/sessions/artifacts/cp03/backend-focused.txt",
+      "sha256_git_blob": "ad3c35f2da1a1c7e2435d356d4a590b282bb57241015920f8f2a18a2844fa13a"
+    },
+    "backend-lint.txt": {
+      "path": "docs/sessions/artifacts/cp03/backend-lint.txt",
+      "sha256_git_blob": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18"
+    },
+    "backend-postgres-final.txt": {
+      "path": "docs/sessions/artifacts/cp03/backend-postgres-final.txt",
+      "sha256_git_blob": "6c3463ae879f38a06ff97827ac00b1f56ec5f5561371083006932cd6e1d42bea"
+    },
+    "backend-postgres-stale-fixture.txt": {
+      "path": "docs/sessions/artifacts/cp03/backend-postgres-stale-fixture.txt",
+      "sha256_git_blob": "741bf2ea4bf24d00bbcc33ed19738bb35adbde2d3c6d5ff1037113244903fbdb"
+    },
+    "final-schema.txt": {
+      "path": "docs/sessions/artifacts/cp03/final-schema.txt",
+      "sha256_git_blob": "f8a2239277ac563db1deff032aff3840fbdc19b429b08357081662e1ac02bc6b"
+    },
+    "fresh-bootstrap.txt": {
+      "path": "docs/sessions/artifacts/cp03/fresh-bootstrap.txt",
+      "sha256_git_blob": "fe5c16c74832008e7e8560fe156d877109a773a2ed21af00959d79393d8aa75b"
+    },
+    "local-cleanup.txt": {
+      "path": "docs/sessions/artifacts/cp03/local-cleanup.txt",
+      "sha256_git_blob": "ca19178a35ab4153b75b494963b66ce8243e1b94c173107c87b44d09db23652d"
+    },
+    "migration-tests.txt": {
+      "path": "docs/sessions/artifacts/cp03/migration-tests.txt",
+      "sha256_git_blob": "a8e90840c7a81e50806e4fb17a56f52e38861bebe382b24089dc0e719bc09d83"
+    },
+    "migration-upgrade.txt": {
+      "path": "docs/sessions/artifacts/cp03/migration-upgrade.txt",
+      "sha256_git_blob": "2a74545a0e4faf3df046da5b8fef75ec886e8f43db814985a59acc9a965fc7ea"
+    },
+    "notification-transport-final.txt": {
+      "path": "docs/sessions/artifacts/cp03/notification-transport-final.txt",
+      "sha256_git_blob": "f7177969e6a919f369ede90d629fff1841715401e19e4f3750d99ace5b29a888"
+    },
+    "receipt-http-tests.txt": {
+      "path": "docs/sessions/artifacts/cp03/receipt-http-tests.txt",
+      "sha256_git_blob": "9a4c40fda447acd1b5a3da1dbced57fb683174d2685df6ee0106bebd02ca8475"
+    },
+    "topup-checks.txt": {
+      "path": "docs/sessions/artifacts/cp03/topup-checks.txt",
+      "sha256_git_blob": "897c7c728eaa97ff592e7f115173769286558bdcfb245c5e00c5c1691968b75c"
+    }
+  }
+}

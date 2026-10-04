@@ -1,0 +1,638 @@
+CREATE DATABASE
+CREATE EXTENSION
+CREATE EXTENSION
+CREATE TABLE
+CREATE TABLE
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE TABLE
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+DO
+CREATE TABLE
+ALTER TABLE
+psql:database/complete_schema.sql:177: NOTICE:  constraint "refresh_tokens_revoked_reason_check" of relation "refresh_tokens" does not exist, skipping
+ALTER TABLE
+ALTER TABLE
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE TABLE
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE TABLE
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE TABLE
+CREATE INDEX
+CREATE TABLE
+CREATE INDEX
+CREATE TABLE
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE TABLE
+CREATE INDEX
+CREATE INDEX
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE INDEX
+CREATE INDEX
+CREATE TABLE
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE TABLE
+CREATE INDEX
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE TABLE
+CREATE TABLE
+CREATE INDEX
+CREATE INDEX
+CREATE TABLE
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE TABLE
+COMMENT
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE TABLE
+CREATE INDEX
+CREATE INDEX
+CREATE TABLE
+CREATE INDEX
+CREATE INDEX
+CREATE TABLE
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE TABLE
+CREATE INDEX
+CREATE INDEX
+CREATE TABLE
+CREATE INDEX
+CREATE INDEX
+ALTER TABLE
+ALTER TABLE
+psql:database/complete_schema.sql:754: NOTICE:  policy "call_legs_tenant_isolation" for relation "call_legs" does not exist, skipping
+DROP POLICY
+CREATE POLICY
+ALTER TABLE
+ALTER TABLE
+psql:database/complete_schema.sql:779: NOTICE:  policy "call_events_tenant_isolation" for relation "call_events" does not exist, skipping
+DROP POLICY
+CREATE POLICY
+CREATE FUNCTION
+DROP TRIGGER
+psql:database/complete_schema.sql:819: NOTICE:  trigger "call_events_immutable" for relation "call_events" does not exist, skipping
+CREATE TRIGGER
+CREATE TABLE
+CREATE INDEX
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE INDEX
+CREATE TABLE
+DO
+CREATE TABLE
+CREATE TABLE
+CREATE INDEX
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE INDEX
+CREATE TABLE
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE TABLE
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE TABLE
+CREATE INDEX
+CREATE INDEX
+CREATE TABLE
+CREATE INDEX
+CREATE INDEX
+CREATE TABLE
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE TABLE
+CREATE INDEX
+CREATE INDEX
+CREATE TABLE
+CREATE INDEX
+CREATE INDEX
+CREATE TABLE
+CREATE INDEX
+CREATE INDEX
+INSERT 0 0
+INSERT 0 0
+CREATE TABLE
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE TABLE
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE FUNCTION
+CREATE FUNCTION
+CREATE FUNCTION
+ALTER TABLE
+ALTER TABLE
+ALTER TABLE
+ALTER TABLE
+ALTER TABLE
+ALTER TABLE
+ALTER TABLE
+ALTER TABLE
+ALTER TABLE
+ALTER TABLE
+ALTER TABLE
+ALTER TABLE
+ALTER TABLE
+ALTER TABLE
+ALTER TABLE
+ALTER TABLE
+ALTER TABLE
+ALTER TABLE
+ALTER TABLE
+ALTER TABLE
+DROP POLICY
+psql:database/complete_schema.sql:1584: NOTICE:  policy "p_tenant_sip_trunks_select" for relation "tenant_sip_trunks" does not exist, skipping
+psql:database/complete_schema.sql:1585: NOTICE:  policy "p_tenant_sip_trunks_insert" for relation "tenant_sip_trunks" does not exist, skipping
+DROP POLICY
+psql:database/complete_schema.sql:1586: NOTICE:  policy "p_tenant_sip_trunks_update" for relation "tenant_sip_trunks" does not exist, skipping
+DROP POLICY
+psql:database/complete_schema.sql:1587: NOTICE:  policy "p_tenant_sip_trunks_delete" for relation "tenant_sip_trunks" does not exist, skipping
+DROP POLICY
+CREATE POLICY
+CREATE POLICY
+CREATE POLICY
+CREATE POLICY
+psql:database/complete_schema.sql:1602: NOTICE:  policy "p_tenant_codec_policies_select" for relation "tenant_codec_policies" does not exist, skipping
+DROP POLICY
+DROP POLICY
+psql:database/complete_schema.sql:1603: NOTICE:  policy "p_tenant_codec_policies_insert" for relation "tenant_codec_policies" does not exist, skipping
+psql:database/complete_schema.sql:1604: NOTICE:  policy "p_tenant_codec_policies_update" for relation "tenant_codec_policies" does not exist, skipping
+DROP POLICY
+psql:database/complete_schema.sql:1605: NOTICE:  policy "p_tenant_codec_policies_delete" for relation "tenant_codec_policies" does not exist, skipping
+DROP POLICY
+CREATE POLICY
+CREATE POLICY
+CREATE POLICY
+CREATE POLICY
+psql:database/complete_schema.sql:1620: NOTICE:  policy "p_tenant_route_policies_select" for relation "tenant_route_policies" does not exist, skipping
+DROP POLICY
+psql:database/complete_schema.sql:1621: NOTICE:  policy "p_tenant_route_policies_insert" for relation "tenant_route_policies" does not exist, skipping
+DROP POLICY
+psql:database/complete_schema.sql:1622: NOTICE:  policy "p_tenant_route_policies_update" for relation "tenant_route_policies" does not exist, skipping
+DROP POLICY
+psql:database/complete_schema.sql:1623: NOTICE:  policy "p_tenant_route_policies_delete" for relation "tenant_route_policies" does not exist, skipping
+DROP POLICY
+CREATE POLICY
+CREATE POLICY
+CREATE POLICY
+CREATE POLICY
+psql:database/complete_schema.sql:1638: NOTICE:  policy "p_tenant_telephony_idempotency_select" for relation "tenant_telephony_idempotency" does not exist, skipping
+DROP POLICY
+psql:database/complete_schema.sql:1639: NOTICE:  policy "p_tenant_telephony_idempotency_insert" for relation "tenant_telephony_idempotency" does not exist, skipping
+DROP POLICY
+psql:database/complete_schema.sql:1640: NOTICE:  policy "p_tenant_telephony_idempotency_update" for relation "tenant_telephony_idempotency" does not exist, skipping
+DROP POLICY
+psql:database/complete_schema.sql:1641: NOTICE:  policy "p_tenant_telephony_idempotency_delete" for relation "tenant_telephony_idempotency" does not exist, skipping
+DROP POLICY
+CREATE POLICY
+CREATE POLICY
+CREATE POLICY
+CREATE POLICY
+psql:database/complete_schema.sql:1656: NOTICE:  policy "p_tenant_runtime_policy_versions_select" for relation "tenant_runtime_policy_versions" does not exist, skipping
+DROP POLICY
+psql:database/complete_schema.sql:1657: NOTICE:  policy "p_tenant_runtime_policy_versions_insert" for relation "tenant_runtime_policy_versions" does not exist, skipping
+DROP POLICY
+psql:database/complete_schema.sql:1658: NOTICE:  policy "p_tenant_runtime_policy_versions_update" for relation "tenant_runtime_policy_versions" does not exist, skipping
+DROP POLICY
+psql:database/complete_schema.sql:1659: NOTICE:  policy "p_tenant_runtime_policy_versions_delete" for relation "tenant_runtime_policy_versions" does not exist, skipping
+DROP POLICY
+CREATE POLICY
+CREATE POLICY
+CREATE POLICY
+CREATE POLICY
+psql:database/complete_schema.sql:1674: NOTICE:  policy "p_tenant_runtime_policy_events_select" for relation "tenant_runtime_policy_events" does not exist, skipping
+DROP POLICY
+psql:database/complete_schema.sql:1675: NOTICE:  policy "p_tenant_runtime_policy_events_insert" for relation "tenant_runtime_policy_events" does not exist, skipping
+DROP POLICY
+psql:database/complete_schema.sql:1676: NOTICE:  policy "p_tenant_runtime_policy_events_update" for relation "tenant_runtime_policy_events" does not exist, skipping
+DROP POLICY
+psql:database/complete_schema.sql:1677: NOTICE:  policy "p_tenant_runtime_policy_events_delete" for relation "tenant_runtime_policy_events" does not exist, skipping
+DROP POLICY
+CREATE POLICY
+CREATE POLICY
+CREATE POLICY
+CREATE POLICY
+DROP POLICY
+psql:database/complete_schema.sql:1692: NOTICE:  policy "p_tenant_sip_trust_policies_select" for relation "tenant_sip_trust_policies" does not exist, skipping
+psql:database/complete_schema.sql:1693: NOTICE:  policy "p_tenant_sip_trust_policies_insert" for relation "tenant_sip_trust_policies" does not exist, skipping
+DROP POLICY
+psql:database/complete_schema.sql:1694: NOTICE:  policy "p_tenant_sip_trust_policies_update" for relation "tenant_sip_trust_policies" does not exist, skipping
+DROP POLICY
+psql:database/complete_schema.sql:1695: NOTICE:  policy "p_tenant_sip_trust_policies_delete" for relation "tenant_sip_trust_policies" does not exist, skipping
+DROP POLICY
+CREATE POLICY
+CREATE POLICY
+CREATE POLICY
+CREATE POLICY
+psql:database/complete_schema.sql:1710: NOTICE:  policy "p_tenant_telephony_threshold_policies_select" for relation "tenant_telephony_threshold_policies" does not exist, skipping
+DROP POLICY
+psql:database/complete_schema.sql:1711: NOTICE:  policy "p_tenant_telephony_threshold_policies_insert" for relation "tenant_telephony_threshold_policies" does not exist, skipping
+DROP POLICY
+psql:database/complete_schema.sql:1712: NOTICE:  policy "p_tenant_telephony_threshold_policies_update" for relation "tenant_telephony_threshold_policies" does not exist, skipping
+DROP POLICY
+psql:database/complete_schema.sql:1713: NOTICE:  policy "p_tenant_telephony_threshold_policies_delete" for relation "tenant_telephony_threshold_policies" does not exist, skipping
+DROP POLICY
+CREATE POLICY
+CREATE POLICY
+CREATE POLICY
+CREATE POLICY
+psql:database/complete_schema.sql:1728: NOTICE:  policy "p_tenant_telephony_quota_events_select" for relation "tenant_telephony_quota_events" does not exist, skipping
+DROP POLICY
+psql:database/complete_schema.sql:1729: NOTICE:  policy "p_tenant_telephony_quota_events_insert" for relation "tenant_telephony_quota_events" does not exist, skipping
+DROP POLICY
+psql:database/complete_schema.sql:1730: NOTICE:  policy "p_tenant_telephony_quota_events_update" for relation "tenant_telephony_quota_events" does not exist, skipping
+DROP POLICY
+psql:database/complete_schema.sql:1731: NOTICE:  policy "p_tenant_telephony_quota_events_delete" for relation "tenant_telephony_quota_events" does not exist, skipping
+DROP POLICY
+CREATE POLICY
+CREATE POLICY
+CREATE POLICY
+CREATE POLICY
+psql:database/complete_schema.sql:1746: NOTICE:  policy "p_tenant_policy_audit_log_select" for relation "tenant_policy_audit_log" does not exist, skipping
+DROP POLICY
+psql:database/complete_schema.sql:1747: NOTICE:  policy "p_tenant_policy_audit_log_insert" for relation "tenant_policy_audit_log" does not exist, skipping
+DROP POLICY
+DROP POLICY
+psql:database/complete_schema.sql:1748: NOTICE:  policy "p_tenant_policy_audit_log_update" for relation "tenant_policy_audit_log" does not exist, skipping
+DROP POLICY
+psql:database/complete_schema.sql:1749: NOTICE:  policy "p_tenant_policy_audit_log_delete" for relation "tenant_policy_audit_log" does not exist, skipping
+CREATE POLICY
+CREATE POLICY
+CREATE POLICY
+CREATE POLICY
+DROP TRIGGER
+psql:database/complete_schema.sql:1765: NOTICE:  trigger "trg_prevent_tenant_policy_audit_log_update" for relation "tenant_policy_audit_log" does not exist, skipping
+CREATE TRIGGER
+psql:database/complete_schema.sql:1772: NOTICE:  trigger "trg_prevent_tenant_policy_audit_log_delete" for relation "tenant_policy_audit_log" does not exist, skipping
+DROP TRIGGER
+CREATE TRIGGER
+psql:database/complete_schema.sql:1778: NOTICE:  trigger "trg_audit_tenant_sip_trunks" for relation "tenant_sip_trunks" does not exist, skipping
+DROP TRIGGER
+CREATE TRIGGER
+DROP TRIGGER
+psql:database/complete_schema.sql:1784: NOTICE:  trigger "trg_audit_tenant_codec_policies" for relation "tenant_codec_policies" does not exist, skipping
+CREATE TRIGGER
+psql:database/complete_schema.sql:1790: NOTICE:  trigger "trg_audit_tenant_route_policies" for relation "tenant_route_policies" does not exist, skipping
+DROP TRIGGER
+CREATE TRIGGER
+psql:database/complete_schema.sql:1796: NOTICE:  trigger "trg_audit_tenant_sip_trust_policies" for relation "tenant_sip_trust_policies" does not exist, skipping
+DROP TRIGGER
+CREATE TRIGGER
+psql:database/complete_schema.sql:1802: NOTICE:  trigger "trg_audit_tenant_runtime_policy_versions" for relation "tenant_runtime_policy_versions" does not exist, skipping
+DROP TRIGGER
+CREATE TRIGGER
+DROP TRIGGER
+psql:database/complete_schema.sql:1808: NOTICE:  trigger "trg_audit_tenant_telephony_threshold_policies" for relation "tenant_telephony_threshold_policies" does not exist, skipping
+CREATE TRIGGER
+CREATE TABLE
+CREATE INDEX
+CREATE TABLE
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+ALTER TABLE
+CREATE INDEX
+CREATE TABLE
+CREATE INDEX
+CREATE INDEX
+CREATE TABLE
+CREATE INDEX
+ALTER TABLE
+ALTER TABLE
+CREATE INDEX
+CREATE INDEX
+CREATE TABLE
+CREATE INDEX
+CREATE INDEX
+CREATE TABLE
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE TABLE
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE TABLE
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE TABLE
+CREATE INDEX
+DO
+CREATE TABLE
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+ set_config
+------------
+ on
+(1 row)
+
+              set_config
+--------------------------------------
+ 00000000-0000-0000-0000-000000000000
+(1 row)
+
+CREATE TABLE
+psql:database/complete_schema.sql:2345: NOTICE:  column "attempt_actor_ids" of relation "admin_media_deletion_intents" already exists, skipping
+ALTER TABLE
+UPDATE 0
+ALTER TABLE
+DO
+CREATE INDEX
+CREATE INDEX
+ALTER TABLE
+ALTER TABLE
+psql:database/complete_schema.sql:2377: NOTICE:  policy "admin_media_deletion_intents_select" for relation "admin_media_deletion_intents" does not exist, skipping
+DROP POLICY
+DROP POLICY
+psql:database/complete_schema.sql:2378: NOTICE:  policy "admin_media_deletion_intents_insert" for relation "admin_media_deletion_intents" does not exist, skipping
+psql:database/complete_schema.sql:2379: NOTICE:  policy "admin_media_deletion_intents_update" for relation "admin_media_deletion_intents" does not exist, skipping
+DROP POLICY
+psql:database/complete_schema.sql:2380: NOTICE:  policy "admin_media_deletion_intents_delete" for relation "admin_media_deletion_intents" does not exist, skipping
+DROP POLICY
+CREATE POLICY
+CREATE POLICY
+CREATE POLICY
+CREATE POLICY
+CREATE FUNCTION
+psql:database/complete_schema.sql:2427: NOTICE:  trigger "trg_maintain_admin_media_deletion_attempt_actors" for relation "admin_media_deletion_intents" does not exist, skipping
+DROP TRIGGER
+CREATE TRIGGER
+CREATE FUNCTION
+psql:database/complete_schema.sql:2476: NOTICE:  trigger "trg_protect_admin_media_deletion_intent_update" for relation "admin_media_deletion_intents" does not exist, skipping
+DROP TRIGGER
+CREATE TRIGGER
+DROP TRIGGER
+psql:database/complete_schema.sql:2481: NOTICE:  trigger "trg_protect_admin_media_deletion_intent_delete" for relation "admin_media_deletion_intents" does not exist, skipping
+CREATE TRIGGER
+CREATE TABLE
+CREATE FUNCTION
+CREATE FUNCTION
+DROP TRIGGER
+psql:database/complete_schema.sql:2553: NOTICE:  trigger "trg_guard_admin_media_deletion_origin_key" for relation "admin_media_deletion_intents" does not exist, skipping
+CREATE TRIGGER
+psql:database/complete_schema.sql:2558: NOTICE:  trigger "trg_guard_admin_media_deletion_request_key" for relation "admin_media_deletion_request_keys" does not exist, skipping
+DROP TRIGGER
+CREATE TRIGGER
+INSERT 0 0
+DO
+CREATE INDEX
+ALTER TABLE
+ALTER TABLE
+psql:database/complete_schema.sql:2592: NOTICE:  policy "admin_media_deletion_request_keys_select" for relation "admin_media_deletion_request_keys" does not exist, skipping
+DROP POLICY
+DROP POLICY
+psql:database/complete_schema.sql:2594: NOTICE:  policy "admin_media_deletion_request_keys_insert" for relation "admin_media_deletion_request_keys" does not exist, skipping
+psql:database/complete_schema.sql:2596: NOTICE:  policy "admin_media_deletion_request_keys_update" for relation "admin_media_deletion_request_keys" does not exist, skipping
+DROP POLICY
+psql:database/complete_schema.sql:2598: NOTICE:  policy "admin_media_deletion_request_keys_delete" for relation "admin_media_deletion_request_keys" does not exist, skipping
+DROP POLICY
+CREATE POLICY
+CREATE POLICY
+CREATE POLICY
+CREATE POLICY
+CREATE FUNCTION
+psql:database/complete_schema.sql:2631: NOTICE:  trigger "trg_protect_admin_media_deletion_request_key_update" for relation "admin_media_deletion_request_keys" does not exist, skipping
+DROP TRIGGER
+CREATE TRIGGER
+psql:database/complete_schema.sql:2636: NOTICE:  trigger "trg_protect_admin_media_deletion_request_key_delete" for relation "admin_media_deletion_request_keys" does not exist, skipping
+DROP TRIGGER
+CREATE TRIGGER
+ set_config
+------------
+ off
+(1 row)
+
+ set_config
+------------
+
+(1 row)
+
+CREATE TABLE
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE TABLE
+CREATE INDEX
+CREATE INDEX
+CREATE FUNCTION
+psql:database/complete_schema.sql:2763: NOTICE:  trigger "trg_serialize_compliance_media_hold" for relation "suspension_events" does not exist, skipping
+DROP TRIGGER
+CREATE TRIGGER
+CREATE FUNCTION
+DROP TRIGGER
+psql:database/complete_schema.sql:2787: NOTICE:  trigger "trg_serialize_tenant_partner_membership" for relation "tenants" does not exist, skipping
+CREATE TRIGGER
+CREATE TABLE
+CREATE INDEX
+INSERT 0 8
+ALTER TABLE
+ALTER TABLE
+ALTER TABLE
+ALTER TABLE
+ALTER TABLE
+psql:database/complete_schema.sql:2878: NOTICE:  policy "campaigns_tenant_isolation" for relation "campaigns" does not exist, skipping
+DROP POLICY
+CREATE POLICY
+DROP POLICY
+psql:database/complete_schema.sql:2885: NOTICE:  policy "leads_tenant_isolation" for relation "leads" does not exist, skipping
+CREATE POLICY
+DROP POLICY
+psql:database/complete_schema.sql:2892: NOTICE:  policy "calls_tenant_isolation" for relation "calls" does not exist, skipping
+CREATE POLICY
+psql:database/complete_schema.sql:2899: NOTICE:  policy "conversations_tenant_isolation" for relation "conversations" does not exist, skipping
+DROP POLICY
+CREATE POLICY
+psql:database/complete_schema.sql:2906: NOTICE:  policy "connectors_tenant_isolation" for relation "connectors" does not exist, skipping
+DROP POLICY
+CREATE POLICY
+CREATE FUNCTION
+CREATE FUNCTION
+psql:database/complete_schema.sql:3042: NOTICE:  trigger "update_plans_updated_at" for relation "plans" does not exist, skipping
+psql:database/complete_schema.sql:3042: NOTICE:  trigger "update_tenants_updated_at" for relation "tenants" does not exist, skipping
+psql:database/complete_schema.sql:3042: NOTICE:  trigger "update_user_profiles_updated_at" for relation "user_profiles" does not exist, skipping
+psql:database/complete_schema.sql:3042: NOTICE:  trigger "update_tenant_secrets_updated_at" for relation "tenant_secrets" does not exist, skipping
+psql:database/complete_schema.sql:3042: NOTICE:  trigger "update_webhook_configs_updated_at" for relation "webhook_configs" does not exist, skipping
+psql:database/complete_schema.sql:3042: NOTICE:  trigger "update_user_mfa_updated_at" for relation "user_mfa" does not exist, skipping
+psql:database/complete_schema.sql:3042: NOTICE:  trigger "update_roles_updated_at" for relation "roles" does not exist, skipping
+psql:database/complete_schema.sql:3042: NOTICE:  trigger "update_tenant_users_updated_at" for relation "tenant_users" does not exist, skipping
+psql:database/complete_schema.sql:3042: NOTICE:  trigger "update_campaigns_updated_at" for relation "campaigns" does not exist, skipping
+psql:database/complete_schema.sql:3042: NOTICE:  trigger "update_leads_updated_at" for relation "leads" does not exist, skipping
+psql:database/complete_schema.sql:3042: NOTICE:  trigger "update_calls_updated_at" for relation "calls" does not exist, skipping
+psql:database/complete_schema.sql:3042: NOTICE:  trigger "update_conversations_updated_at" for relation "conversations" does not exist, skipping
+psql:database/complete_schema.sql:3042: NOTICE:  trigger "update_transcripts_updated_at" for relation "transcripts" does not exist, skipping
+psql:database/complete_schema.sql:3042: NOTICE:  trigger "update_call_legs_updated_at" for relation "call_legs" does not exist, skipping
+psql:database/complete_schema.sql:3042: NOTICE:  trigger "update_connectors_updated_at" for relation "connectors" does not exist, skipping
+psql:database/complete_schema.sql:3042: NOTICE:  trigger "update_connector_accounts_updated_at" for relation "connector_accounts" does not exist, skipping
+psql:database/complete_schema.sql:3042: NOTICE:  trigger "update_assistant_conversations_updated_at" for relation "assistant_conversations" does not exist, skipping
+psql:database/complete_schema.sql:3042: NOTICE:  trigger "update_action_plans_updated_at" for relation "action_plans" does not exist, skipping
+psql:database/complete_schema.sql:3042: NOTICE:  trigger "update_meetings_updated_at" for relation "meetings" does not exist, skipping
+psql:database/complete_schema.sql:3042: NOTICE:  trigger "update_tenant_quotas_updated_at" for relation "tenant_quotas" does not exist, skipping
+psql:database/complete_schema.sql:3042: NOTICE:  trigger "update_tenant_quota_usage_updated_at" for relation "tenant_quota_usage" does not exist, skipping
+psql:database/complete_schema.sql:3042: NOTICE:  trigger "update_subscriptions_updated_at" for relation "subscriptions" does not exist, skipping
+psql:database/complete_schema.sql:3042: NOTICE:  trigger "update_tenant_settings_updated_at" for relation "tenant_settings" does not exist, skipping
+psql:database/complete_schema.sql:3042: NOTICE:  trigger "update_tenant_ai_configs_updated_at" for relation "tenant_ai_configs" does not exist, skipping
+psql:database/complete_schema.sql:3042: NOTICE:  trigger "update_tenant_sip_trunks_updated_at" for relation "tenant_sip_trunks" does not exist, skipping
+psql:database/complete_schema.sql:3042: NOTICE:  trigger "update_tenant_codec_policies_updated_at" for relation "tenant_codec_policies" does not exist, skipping
+psql:database/complete_schema.sql:3042: NOTICE:  trigger "update_tenant_route_policies_updated_at" for relation "tenant_route_policies" does not exist, skipping
+psql:database/complete_schema.sql:3042: NOTICE:  trigger "update_tenant_runtime_policy_versions_updated_at" for relation "tenant_runtime_policy_versions" does not exist, skipping
+psql:database/complete_schema.sql:3042: NOTICE:  trigger "update_tenant_runtime_policy_events_updated_at" for relation "tenant_runtime_policy_events" does not exist, skipping
+psql:database/complete_schema.sql:3042: NOTICE:  trigger "update_tenant_sip_trust_policies_updated_at" for relation "tenant_sip_trust_policies" does not exist, skipping
+psql:database/complete_schema.sql:3042: NOTICE:  trigger "update_tenant_telephony_threshold_policies_updated_at" for relation "tenant_telephony_threshold_policies" does not exist, skipping
+psql:database/complete_schema.sql:3042: NOTICE:  trigger "update_clients_updated_at" for relation "clients" does not exist, skipping
+psql:database/complete_schema.sql:3042: NOTICE:  trigger "update_dialer_jobs_updated_at" for relation "dialer_jobs" does not exist, skipping
+psql:database/complete_schema.sql:3042: NOTICE:  trigger "update_tenant_call_limits_updated_at" for relation "tenant_call_limits" does not exist, skipping
+psql:database/complete_schema.sql:3042: NOTICE:  trigger "update_partner_limits_updated_at" for relation "partner_limits" does not exist, skipping
+psql:database/complete_schema.sql:3042: NOTICE:  trigger "update_abuse_detection_rules_updated_at" for relation "abuse_detection_rules" does not exist, skipping
+psql:database/complete_schema.sql:3042: NOTICE:  trigger "update_white_label_partners_updated_at" for relation "white_label_partners" does not exist, skipping
+psql:database/complete_schema.sql:3042: NOTICE:  trigger "update_admin_media_deletion_intents_updated_at" for relation "admin_media_deletion_intents" does not exist, skipping
+DO
+INSERT 0 3
+INSERT 0 5
+INSERT 0 36
+INSERT 0 131
+INSERT 0 0
+INSERT 0 1
+CREATE VIEW
+CREATE VIEW
+psql:database/complete_schema.sql:3257: NOTICE:  relation "tenant_call_limits" already exists, skipping
+CREATE TABLE
+CREATE INDEX
+psql:database/complete_schema.sql:3283: NOTICE:  relation "partner_limits" already exists, skipping
+CREATE TABLE
+CREATE INDEX
+CREATE TABLE
+psql:database/complete_schema.sql:3299: NOTICE:  relation "dnc_entries" already exists, skipping
+CREATE INDEX
+psql:database/complete_schema.sql:3301: NOTICE:  relation "idx_dnc_entries_number" already exists, skipping
+CREATE INDEX
+psql:database/complete_schema.sql:3318: NOTICE:  relation "call_guard_decisions" already exists, skipping
+CREATE TABLE
+CREATE INDEX
+psql:database/complete_schema.sql:3321: NOTICE:  relation "idx_call_guard_decisions_phone" already exists, skipping
+CREATE INDEX
+psql:database/complete_schema.sql:3337: NOTICE:  relation "abuse_events" already exists, skipping
+CREATE TABLE
+CREATE INDEX
+psql:database/complete_schema.sql:3340: NOTICE:  relation "idx_abuse_events_unresolved" already exists, skipping
+CREATE INDEX
+INSERT 0 0
+psql:database/complete_schema.sql:3357: NOTICE:  ==========================================================
+psql:database/complete_schema.sql:3357: NOTICE:  Talky.ai PostgreSQL Schema Applied Successfully!
+psql:database/complete_schema.sql:3357: NOTICE:  No Supabase dependencies. Auth via local JWT + bcrypt.
+psql:database/complete_schema.sql:3357: NOTICE:  ==========================================================
+DO
+INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.
+INFO  [alembic.runtime.migration] Will assume transactional DDL.
+INFO  [alembic.runtime.migration] Running stamp_revision  -> 0008_tenant_voice_tuning
+INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.
+INFO  [alembic.runtime.migration] Will assume transactional DDL.
+INFO  [alembic.runtime.migration] Running upgrade 0008_tenant_voice_tuning -> 0009_dialer_failure_class, add failure_category + failure_reason to dialer_jobs (Track 2 retry classifier)
+INFO  [alembic.runtime.migration] Running upgrade 0009_dialer_failure_class -> 0010_campaign_knowledge, campaign knowledge tree (vectorless RAG)
+INFO  [alembic.runtime.migration] Running upgrade 0010_campaign_knowledge -> 0011_campaign_tts_provider, per-campaign TTS provider
+INFO  [alembic.runtime.migration] Running upgrade 0011_campaign_tts_provider -> 0012_call_feedback, durable call feedback audio and transcription state
+INFO  [alembic.runtime.migration] Running upgrade 0012_call_feedback -> 0013_canonical_rls_policies, one canonical tenant-isolation policy per table, and FORCE it
+INFO  [alembic.runtime.migration] Running upgrade 0013_canonical_rls_policies -> 0014_admin_media_controls, admin media access and persistent outbound-call pause control
+INFO  [alembic.runtime.migration] Running upgrade 0014_admin_media_controls -> 0015_conversation_reviews, per-conversation reviews, a reward ledger, and prompt identity on the call
+INFO  [alembic.runtime.migration] Running upgrade 0015_conversation_reviews -> 0016_prompt_version_rollback, store prompt bodies so a version can actually be rolled back to
+INFO  [alembic.runtime.migration] Running upgrade 0016_prompt_version_rollback -> 0017_test_calls, mark test calls so they can be reviewed but never billed
+INFO  [alembic.runtime.migration] Running upgrade 0017_test_calls -> 0018_calls_lead_id_nullable, make calls.lead_id nullable � a call does not always come from a lead
+INFO  [alembic.runtime.migration] Running upgrade 0018_calls_lead_id_nullable -> 0019_ai_config_migration_records, move the internal Dojo tenant onto the MVP pair, and repair the dead-Llama five
+INFO  [alembic.runtime.migration] Running upgrade 0019_ai_config_migration_records -> 0020_contact_and_lead_capture, expanded contact fields (goals.md �11) + structured lead capture (�7)
+INFO  [alembic.runtime.migration] Running upgrade 0020_contact_and_lead_capture -> 0021_billing_topup, minute top-ups: packages, orders, and an immutable ledger (goals.md �9)
+INFO  [alembic.runtime.migration] Running upgrade 0021_billing_topup -> 0022_inbound_calling_foundation, strict inbound calling foundation
+INFO  [alembic.runtime.migration] Running upgrade 0022_inbound_calling_foundation -> 0023_admin_media_deletion_safety, durable, idempotent admin media deletion intents
+INFO  [alembic.runtime.migration] Running upgrade 0023_admin_media_deletion_safety -> 0024_recording_permissions, granular recording access permissions
+INFO  [alembic.runtime.migration] Running upgrade 0024_recording_permissions -> 0025_media_hold_serialization, serialize compliance holds with irreversible media deletion
+INFO  [alembic.runtime.migration] Running upgrade 0025_media_hold_serialization -> 0026_media_delete_recovery, allow audited recovery of incomplete permanent media deletions
+INFO  [alembic.runtime.migration] Running upgrade 0026_media_delete_recovery -> 0027_media_delete_request_keys, bind every permanent-delete idempotency key to one durable intent
+INFO  [alembic.runtime.migration] Running upgrade 0027_media_delete_request_keys -> 0028_call_terminal_settle_cas, make outbound terminal settlement monotonic and exactly once
+INFO  [alembic.runtime.migration] Running upgrade 0028_call_terminal_settle_cas -> 0029_trunk_runtime_status, track live Asterisk trunk runtime evidence in the Alembic chain
+INFO  [alembic.runtime.migration] Running upgrade 0029_trunk_runtime_status -> 0030_inbound_transfer_leg_usage, add durable usage settlement for inbound transfer legs
+INFO  [alembic.runtime.migration] Running upgrade 0030_inbound_transfer_leg_usage -> 0031_inbound_lease_safety, enforce a safe inbound concurrency heartbeat window
+INFO  [alembic.runtime.migration] Running upgrade 0031_inbound_lease_safety -> 0032_inbound_billing_hold, persist and recover reasoned inbound billing holds
+INFO  [alembic.runtime.migration] Running upgrade 0032_inbound_billing_hold -> 0033_bootstrap_contract_repair, repair schema contracts skipped by the documented 0021 bootstrap stamp
+INFO  [alembic.runtime.migration] Running upgrade 0033_bootstrap_contract_repair -> 0034_inbound_billing_four_eye, require four-eye approval for manual inbound charge finalization
+INFO  [alembic.runtime.migration] Running upgrade 0034_inbound_billing_four_eye -> 0035_user_profiles_role_widen, widen the user_profiles.role CHECK to every UserRole
+INFO  [alembic.runtime.migration] Running upgrade 0035_user_profiles_role_widen -> 0036_inbound_rejection_log, durable pre-row inbound rejection log
+INFO  [alembic.runtime.migration] Running upgrade 0036_inbound_rejection_log -> 0037_inbound_duration_quarantine, quarantine inbound duration with no durable Answer proof
+INFO  [alembic.runtime.migration] Running upgrade 0037_inbound_duration_quarantine -> 0038_tenant_table_rls_backfill, force canonical tenant isolation on legacy tenant-scoped tables
+INFO  [alembic.runtime.migration] Running upgrade 0038_tenant_table_rls_backfill -> 0039_contact_capture_audit, Add auditable contact-capture values and state.
+INFO  [alembic.runtime.migration] Running upgrade 0039_contact_capture_audit -> 0040_calls_campaign_nullable, Allow inbound and PBX-originated calls without a campaign.
+INFO  [alembic.runtime.migration] Running upgrade 0040_calls_campaign_nullable -> 0041_tenant_campaign_fk, Enforce tenant-safe campaign and authoritative ownership relationships.
+INFO  [alembic.runtime.migration] Running upgrade 0041_tenant_campaign_fk -> 0042_dialer_origination_guard, pin one durable calls row to each dialer job attempt
+INFO  [alembic.runtime.migration] Running upgrade 0042_dialer_origination_guard -> 0043_campaign_direction_lock, serialize every campaign direction change with the canonical advisory lock
+INFO  [alembic.runtime.migration] Running upgrade 0043_campaign_direction_lock -> 0044_webhook_null_tenant_rls, Make unowned webhook rows platform-only without deleting global records.
+INFO  [alembic.runtime.migration] Running upgrade 0044_webhook_null_tenant_rls -> 0045_refresh_session_binding, Bind each refresh-token family to the login session it was issued for.
+INFO  [alembic.runtime.migration] Running upgrade 0045_refresh_session_binding -> 0046_inbound_extension_bindings, Give one assignment table two kinds of address: a public DID or an extension.
+INFO  [alembic.runtime.migration] Running upgrade 0046_inbound_extension_bindings -> 0047_protect_ai_config_backup, Put the leftover AI-config backup table behind the same tenant policy.
+INFO  [alembic.runtime.migration] Running upgrade 0047_protect_ai_config_backup -> 0048_crm_deliveries, Durable per-provider CRM receipts, queued in the call transaction.
+INFO  [alembic.runtime.migration] Running upgrade 0048_crm_deliveries -> 0049_lead_detail_evidence, Keep source and confirmation evidence with captured lead details.
+INFO  [alembic.runtime.migration] Running upgrade 0049_lead_detail_evidence -> 0050_assistant_execution_perms, Separate communication execution from connector configuration permissions.
+INFO  [alembic.runtime.migration] Running upgrade 0050_assistant_execution_perms -> 0051_crm_destination_identity, Retain the verified CRM account owning each durable remote receipt.
+INFO  [alembic.runtime.migration] Running upgrade 0051_crm_destination_identity -> 0052_public_contact_enquiries, Own the durable public enquiry intake; its content is platform-only.
+INFO  [alembic.runtime.migration] Running upgrade 0052_public_contact_enquiries -> 0053_billing_price_options, Approved recurring price choices and durable checkout identities.
+INFO  [alembic.runtime.migration] Running upgrade 0053_billing_price_options -> 0054_billing_webhook_receipts, Recoverable webhook receipts and separate delivery/review records.
+  tenant_ai_configs is empty (schema-only bootstrap); skipping historical six-tenant AI data move
