@@ -64,11 +64,13 @@ def build_realtime_persona(config):
     )
 
 
-def prepare_realtime_prompt(config):
+def prepare_realtime_prompt(config, *, capability_instructions: str = ""):
     """Compose and identify the exact independent instructions sent to the model."""
     import hashlib
     from app.realtime.prompts import PROMPT_VERSION, build_realtime_instructions
     instructions = build_realtime_instructions(build_realtime_persona(config))
+    if capability_instructions:
+        instructions += "\n\n" + capability_instructions
     config.system_prompt = instructions
     config.prompt_template = "realtime_voice"
     config.prompt_version = PROMPT_VERSION

@@ -172,12 +172,12 @@ def test_provider_is_registered_and_enumerated():
 def test_ai_options_validation_accepts_cerebras_models():
     """The save-config validator rejects any model outside its union, so a
     missing entry here would make Cerebras unselectable in global config."""
-    import app.api.v1.endpoints.ai_options.config as cfg
+    from app.domain.models.ai_config import validate_traditional_llm_selection
 
-    src = cfg.__file__
-    with open(src, encoding="utf-8") as fh:
-        body = fh.read()
-    assert '"cerebras": [m.id for m in CEREBRAS_MODELS]' in body
+    for model in CEREBRAS_MODELS:
+        validate_traditional_llm_selection("cerebras", model.id)
+    with pytest.raises(ValueError, match="Invalid LLM model"):
+        validate_traditional_llm_selection("cerebras", "unrelated-model")
 
 
 def test_assistant_allows_cerebras_ids_even_without_key(monkeypatch):

@@ -242,7 +242,11 @@ async def _build_twilio_session_config(to_number: str | None = None):
         resolve_ai_config_for_did,
     )
 
+    from app.domain.services.telephony_session_config import resolve_stt_selection
+    from app.domain.services.voice_tuning import get_voice_tuning_resolver
+
     tenant_id, config = await resolve_ai_config_for_did(to_number)
+    tuning = await get_voice_tuning_resolver().for_tenant_async(tenant_id, require_available=bool(tenant_id))
     llm_provider_type = (
         getattr(config.llm_provider, "value", None)
         or str(config.llm_provider)
@@ -250,15 +254,16 @@ async def _build_twilio_session_config(to_number: str | None = None):
     )
     return VoiceSessionConfig(
         gateway_type="twilio",
-        stt_provider_type="deepgram_flux",
+        **resolve_stt_selection(config, campaign_id="twilio"),
         llm_provider_type=llm_provider_type,
         tts_provider_type=config.tts_provider,
-        stt_model="flux-general-en",
         stt_sample_rate=8000,          # Twilio Media Streams = 8 kHz
         stt_encoding="linear16",       # we decode mu-law -> linear16 before STT
-        stt_eot_threshold=0.85,
-        stt_eot_timeout_ms=1500,
-        stt_eager_eot_threshold=None,
+        stt_eot_threshold=tuning.stt_eot_threshold,
+        stt_eot_timeout_ms=tuning.stt_eot_timeout_ms,
+        stt_eager_eot_threshold=tuning.stt_eager_eot_threshold,
+        turn_0_min_confidence=tuning.turn_0_min_confidence,
+        turn_0_min_alpha_chars=tuning.turn_0_min_alpha_chars,
         llm_model=config.llm_model,
         llm_temperature=config.llm_temperature,
         llm_max_tokens=config.llm_max_tokens,
@@ -283,7 +288,6 @@ async def _build_twilio_session_config(to_number: str | None = None):
         realtime_voice=getattr(config, "realtime_voice", "marin"),
         realtime_settings=getattr(config, "realtime_settings", None),
     )
-
 
 def _twiml_stream_response(
     call_sid: str,

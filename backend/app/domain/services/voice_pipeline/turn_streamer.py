@@ -17,6 +17,7 @@ were only used by this method.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import re
@@ -615,6 +616,11 @@ class TurnStreamer:
             captured_slots=session.captured_slots,
             has_callback_executor="schedule_callback" in enabled_voice_actions(session),
         )
+
+        from app.domain.services.voice_pipeline.profile import turn_profile
+        logger.info("voice_turn_profile %s", json.dumps(
+            turn_profile(session, system_prompt, None if kb_tools else knowledge_block), sort_keys=True,
+        ))
 
         max_sentences = self._p._response_max_sentences_for_turn(
             session,

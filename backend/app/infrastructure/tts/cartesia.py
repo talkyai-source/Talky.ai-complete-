@@ -22,6 +22,14 @@ from app.infrastructure.tts.elevenlabs_tts import _SingleKeyLease
 
 logger = logging.getLogger(__name__)
 
+# Raw PCM values in Cartesia's published RawOutputFormat schema.
+CARTESIA_SAMPLE_RATES = frozenset({8000, 16000, 22050, 24000, 44100, 48000})
+
+
+def _validate_sample_rate(sample_rate: int) -> None:
+    if sample_rate not in CARTESIA_SAMPLE_RATES:
+        raise ValueError(f"Unsupported Cartesia sample rate: {sample_rate}")
+
 # How long a sentence's WS lock wait is allowed to block before we give up
 # waiting on it and force a fresh lock. The lock is normally released within
 # a handful of event-loop ticks even when a barge-in abandons a generation
@@ -87,6 +95,7 @@ class CartesiaTTSProvider(TTSProvider):
         self._model_id = config.get("model_id", "sonic-3")
         self._voice_id = config.get("voice_id", "6ccbfb76-1fc6-48f7-b71d-91ac6298247b")
         self._sample_rate = config.get("sample_rate", 24000)
+        _validate_sample_rate(self._sample_rate)
         self._encoding = config.get("encoding", "pcm_s16le")
         self._language = config.get("language", "en")
         
@@ -112,6 +121,7 @@ class CartesiaTTSProvider(TTSProvider):
         speed,
         emotion,
     ) -> Dict[str, Any]:
+        _validate_sample_rate(sample_rate)
         voice_config: Dict[str, Any] = {"mode": "id", "id": voice_id}
         payload: Dict[str, Any] = {
             "model_id": self._model_id,
@@ -235,6 +245,7 @@ class CartesiaTTSProvider(TTSProvider):
         if not self._session:
             raise RuntimeError("Cartesia client not initialized. Call initialize() first.")
 
+        _validate_sample_rate(sample_rate)
         selected_voice_id = voice_id or self._voice_id
         language = kwargs.get("language", self._language)
         speed = kwargs.get("speed")
@@ -455,6 +466,7 @@ class CartesiaTTSProvider(TTSProvider):
         if not self._session:
             raise RuntimeError("Cartesia client not initialized")
         
+        _validate_sample_rate(sample_rate)
         selected_voice_id = voice_id or self._voice_id
         language = kwargs.get("language", self._language)
         speed = kwargs.get("speed")

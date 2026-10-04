@@ -199,6 +199,8 @@ class VoiceInfo(BaseModel):
     accent_color: str = "#6366f1"  # For UI avatar display
     preview_text: str = "Hello, I am your AI voice assistant. How can I help you today?"
     provider: str = "cartesia"
+    # Server-derived provider metadata, never an ownership claim from a request.
+    provider_is_public: bool = False
     tags: List[str] = []
     preview_url: Optional[str] = None
 
@@ -605,6 +607,26 @@ CEREBRAS_MODELS_HIDDEN = [
     "gemma-4-31b",   # p95 1133ms, worst turn 1671ms — too erratic for voice
     "zai-glm-4.7",   # NOT SERVED by this account (live /v1/models, 2026-08-24)
 ]
+
+
+def validate_traditional_llm_selection(provider: str, model: str) -> None:
+    """Use the same offered + saved-legacy contract at save and call startup."""
+    provider = getattr(provider, "value", provider)
+    models_by_provider = {
+        "openai": [item.id for item in OPENAI_MODELS],
+        "groq": [item.id for item in GROQ_MODELS] + GROQ_MODELS_HIDDEN,
+        "gemini": [item.id for item in GEMINI_MODELS],
+        "cerebras": [item.id for item in CEREBRAS_MODELS] + CEREBRAS_MODELS_HIDDEN,
+    }
+    if provider not in models_by_provider:
+        raise ValueError(
+            f"Invalid LLM provider '{provider}'. Supported: {sorted(models_by_provider)}"
+        )
+    if model not in models_by_provider[provider]:
+        raise ValueError(
+            f"Invalid LLM model '{model}' for provider '{provider}'. "
+            f"Must be one of: {models_by_provider[provider]}"
+        )
 
 
 # =============================================================================

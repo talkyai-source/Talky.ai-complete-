@@ -46,6 +46,7 @@ import {
     useVoicesQuery,
     useConfigQuery,
     aiOptionsKeys,
+    useAiOptionsScope,
 } from "@/lib/queries/ai-options-queries";
 
 interface LatencyMetrics {
@@ -134,6 +135,12 @@ function SectionHeader({ icon, title, subtitle, right }: { icon: React.ReactNode
 }
 
 export default function AIOptionsPage() {
+    const scope = useAiOptionsScope();
+    if (!scope) return <DashboardLayout><p role="status" className="p-6">Verifying your account before loading AI settings…</p></DashboardLayout>;
+    return <AIOptionsEditor key={scope} scope={scope} />;
+}
+
+function AIOptionsEditor({ scope }: { scope: string }) {
     // Cached, deduped, stale-while-revalidate queries (global cache → instant
     // on revisit, warmed by the post-login prefetch). Catalogs are read-only;
     // the config is fetched here but EDITED via a local draft (below).
@@ -195,47 +202,21 @@ export default function AIOptionsPage() {
     const [accentFilter, setAccentFilter] = useState<"All" | AccentBucket>("All");
     const [applyModal, setApplyModal] = useState<{ provider: string; voiceId: string; voiceLabel?: string } | null>(null);
 
+    const activeRef = useRef(true);
+    const previewRequestRef = useRef(0);
     const voicePreviewAudioRef = useRef<HTMLAudioElement | null>(null);
+    const voicePreviewContextRef = useRef<AudioContext | null>(null);
     const saveInFlightRef = useRef(false);
 
-    // Seed the editable draft exactly ONCE — after providers + config load and
-    // voices have settled (success or failure), so the picked voice/model are
-    // validated against the real voice list. React Query owns fetching/retry/
-    // caching; this just derives the initial form state.
+    // Seed once from the saved record. A partial or unavailable catalog must
+    // never silently replace a customer's selected voice, model or audio rate.
     const seededRef = useRef(false);
     useEffect(() => {
-        if (seededRef.current) return;
-        if (!providersQuery.data || !configQuery.data) return;
-        if (configQuery.data.pipeline_mode !== "realtime" && voicesQuery.isLoading) return; // let voices finish (or error) first
-
-        const providersData = providersQuery.data;
-        const configData = configQuery.data;
-        const uniqueVoices = dedupeVoicesById(voicesQuery.data?.voices ?? []);
-        const providerVoices = uniqueVoices.filter((v) => v.provider === configData.tts_provider);
-        const providerModels = getProviderTtsModels(configData.tts_provider, providersData);
-        const normalizedConfig: AIProviderConfig = configData.pipeline_mode === "realtime" ? configData : {
-            ...configData,
-            tts_model: providerModels.some((m) => m.id === configData.tts_model)
-                ? configData.tts_model
-                : getDefaultTtsModel(configData.tts_provider, providersData),
-            tts_sample_rate: getDefaultTtsSampleRate(configData.tts_provider),
-            tts_voice_id: providerVoices.some((v) => v.id === configData.tts_voice_id)
-                ? configData.tts_voice_id
-                : (providerVoices[0]?.id ?? configData.tts_voice_id),
-        };
-        const providerOptions = new Set([
-            ...providersData.tts.providers,
-            ...uniqueVoices.map((v) => v.provider),
-        ]);
-        const initialProvider = providerOptions.has(normalizedConfig.tts_provider)
-            ? normalizedConfig.tts_provider
-            : (uniqueVoices[0]?.provider ?? normalizedConfig.tts_provider);
-
-        // eslint-disable-next-line react-hooks/set-state-in-effect -- one-shot draft seed once async providers/config/voices queries have all settled
-        setConfig(normalizedConfig);
-        setTtsProvider(initialProvider);
+        if (seededRef.current || !configQuery.data) return;
+        setConfig(configQuery.data);
+        setTtsProvider(configQuery.data.tts_provider);
         seededRef.current = true;
-    }, [providersQuery.data, configQuery.data, voicesQuery.data, voicesQuery.isLoading]);
+    }, [configQuery.data]);
 
     async function handleSaveConfig() {
         if (!config || saveInFlightRef.current) return;
@@ -249,20 +230,12 @@ export default function AIOptionsPage() {
         setSaveSuccess(false);
         setLatencyWarnings([]);
         try {
-            const normalizedConfig: AIProviderConfig = config.pipeline_mode === "realtime" ? config : {
-                ...config,
-                tts_model: config.tts_model || getDefaultTtsModel(config.tts_provider, providers),
-                tts_sample_rate: getDefaultTtsSampleRate(config.tts_provider),
-            };
-            const { config: saved, latency_warnings } = await aiOptionsApi.saveConfig(normalizedConfig);
+            const { config: saved, latency_warnings } = await aiOptionsApi.saveConfig(config);
+            if (!activeRef.current) return;
             // Keep the query cache authoritative so other surfaces + a revisit
             // see the saved config without a refetch.
-            queryClient.setQueryData(aiOptionsKeys.config(), saved);
-            setConfig(saved.pipeline_mode === "realtime" ? saved : {
-                ...saved,
-                tts_model: saved.tts_model || getDefaultTtsModel(saved.tts_provider, providers),
-                tts_sample_rate: getDefaultTtsSampleRate(saved.tts_provider),
-            });
+            queryClient.setQueryData(aiOptionsKeys.config(scope), saved);
+            setConfig(saved);
             setTtsProvider(saved.tts_provider);
             setSaveSuccess(true);
             if (saved.pipeline_mode !== "realtime") setApplyModal({
@@ -271,13 +244,14 @@ export default function AIOptionsPage() {
                 voiceLabel: voices.find((v) => v.id === saved.tts_voice_id)?.name,
             });
             setLatencyWarnings(latency_warnings);
-            setTimeout(() => setSaveSuccess(false), 3000);
-            if (latency_warnings.length > 0) setTimeout(() => setLatencyWarnings([]), 8000);
+            setTimeout(() => { if (activeRef.current) setSaveSuccess(false); }, 3000);
+            if (latency_warnings.length > 0) setTimeout(() => { if (activeRef.current) setLatencyWarnings([]); }, 8000);
         } catch (err) {
+            if (!activeRef.current) return;
             setError(err instanceof Error ? err.message : "Failed to save configuration");
         } finally {
             saveInFlightRef.current = false;
-            setSaving(false);
+            if (activeRef.current) setSaving(false);
         }
     }
 
@@ -292,21 +266,28 @@ export default function AIOptionsPage() {
                 temperature: config.llm_temperature,
                 max_tokens: config.llm_max_tokens,
             });
+            if (!activeRef.current) return;
             setTestResponse(response.response);
             setLatencyMetrics((prev) => ({ ...prev, llm_first_token_ms: response.first_token_ms, llm_total_ms: response.latency_ms }));
         } catch (err) {
+            if (!activeRef.current) return;
             setError(err instanceof Error ? err.message : "LLM test failed");
         } finally {
-            setTesting(false);
+            if (activeRef.current) setTesting(false);
         }
     }
 
     async function handlePreviewVoiceById(voiceId: string, opts?: { provider?: string }) {
+        const requestId = ++previewRequestRef.current;
         const isRealtime = opts?.provider === "realtime";
         const selectedVoice = voices.find((voice) => voice.id === voiceId);
         try {
             setPreviewingVoiceId(voiceId);
             setError("");
+            if (voicePreviewContextRef.current) {
+                void voicePreviewContextRef.current.close();
+                voicePreviewContextRef.current = null;
+            }
             if (voicePreviewAudioRef.current) {
                 voicePreviewAudioRef.current.pause();
                 voicePreviewAudioRef.current.currentTime = 0;
@@ -315,30 +296,34 @@ export default function AIOptionsPage() {
             if (selectedVoice?.preview_url) {
                 const audio = new Audio(selectedVoice.preview_url);
                 voicePreviewAudioRef.current = audio;
-                audio.onended = () => { if (voicePreviewAudioRef.current === audio) voicePreviewAudioRef.current = null; setPreviewingVoiceId(null); };
-                audio.onerror = () => { if (voicePreviewAudioRef.current === audio) voicePreviewAudioRef.current = null; setPreviewingVoiceId(null); };
+                audio.onended = () => { if (voicePreviewAudioRef.current === audio) voicePreviewAudioRef.current = null; if (activeRef.current && requestId === previewRequestRef.current) setPreviewingVoiceId(null); };
+                audio.onerror = () => { if (voicePreviewAudioRef.current === audio) voicePreviewAudioRef.current = null; if (activeRef.current && requestId === previewRequestRef.current) setPreviewingVoiceId(null); };
                 await audio.play();
                 return;
             }
             const response = await aiOptionsApi.previewVoice({ voice_id: voiceId, text: "Hello, I am your AI voice assistant. How can I help you today?", provider: opts?.provider });
+            if (!activeRef.current || requestId !== previewRequestRef.current) return;
             const audioData = atob(response.audio_base64);
             const audioArray = new Float32Array(audioData.length / 4);
             const dataView = new DataView(new ArrayBuffer(audioData.length));
             for (let i = 0; i < audioData.length; i++) dataView.setUint8(i, audioData.charCodeAt(i));
             for (let i = 0; i < audioArray.length; i++) audioArray[i] = dataView.getFloat32(i * 4, true);
             if (audioArray.length === 0) throw new Error("This voice returned no audio — it may be deprecated or unavailable.");
-            // Realtime previews come from OpenAI's speech endpoint at 24 kHz;
+            // Native Realtime preview and the cascaded samples are decoded at 24 kHz;
             // cascaded providers also emit 24 kHz float32, everything else 16 kHz.
             const sampleRate = isRealtime || selectedVoice?.provider === "cartesia" || selectedVoice?.provider === "google" || selectedVoice?.provider === "deepgram" || selectedVoice?.provider === "elevenlabs" ? 24000 : 16000;
             const audioContext = new AudioContext({ sampleRate });
+            voicePreviewContextRef.current = audioContext;
             const audioBuffer = audioContext.createBuffer(1, audioArray.length, sampleRate);
             audioBuffer.getChannelData(0).set(audioArray);
             const source = audioContext.createBufferSource();
             source.buffer = audioBuffer;
             source.connect(audioContext.destination);
             source.start();
-            source.onended = () => { audioContext.close(); setPreviewingVoiceId(null); };
+            source.onended = () => { if (voicePreviewContextRef.current === audioContext) voicePreviewContextRef.current = null; void audioContext.close(); if (activeRef.current && requestId === previewRequestRef.current) setPreviewingVoiceId(null); };
         } catch (err) {
+            if (!activeRef.current) return;
+            if (requestId !== previewRequestRef.current) return;
             setError(err instanceof Error ? err.message : "Voice preview failed");
             setPreviewingVoiceId(null);
         }
@@ -350,16 +335,25 @@ export default function AIOptionsPage() {
             setBenchmarking(true);
             setError("");
             const result = await aiOptionsApi.runBenchmark(config);
+            if (!activeRef.current) return;
             setLatencyMetrics(result);
         } catch (err) {
+            if (!activeRef.current) return;
             setError(err instanceof Error ? err.message : "Benchmark failed");
         } finally {
-            setBenchmarking(false);
+            if (activeRef.current) setBenchmarking(false);
         }
     }
 
     useEffect(() => {
+        activeRef.current = true;
         return () => {
+            activeRef.current = false;
+            previewRequestRef.current++;
+            if (voicePreviewContextRef.current) {
+                void voicePreviewContextRef.current.close();
+                voicePreviewContextRef.current = null;
+            }
             if (voicePreviewAudioRef.current) {
                 voicePreviewAudioRef.current.pause();
                 voicePreviewAudioRef.current = null;
@@ -396,7 +390,7 @@ export default function AIOptionsPage() {
         setTtsProvider(providerName);
         setAccentFilter("All");
         setConfig((prev) => {
-            if (!prev) return prev;
+            if (!prev || prev.tts_provider === providerName) return prev;
             const providerVoices = voices.filter((voice) => voice.provider === providerName);
             const nextVoiceId = providerVoices.some((voice) => voice.id === prev.tts_voice_id) ? prev.tts_voice_id : (providerVoices[0]?.id ?? prev.tts_voice_id);
             return { ...prev, tts_provider: providerName, tts_model: getDefaultTtsModel(providerName, providers), tts_voice_id: nextVoiceId, tts_sample_rate: getDefaultTtsSampleRate(providerName) };
@@ -725,8 +719,11 @@ export default function AIOptionsPage() {
 
                         <div className={`mb-4 grid gap-3 ${showAccentFilter ? "sm:grid-cols-2" : ""}`}>
                             <div>
-                                <label className="mb-1.5 block text-sm font-medium text-muted-foreground">TTS Model</label>
-                                <select value={config.tts_model} onChange={(e) => setConfig({ ...config, tts_model: e.target.value })} className={selectCls}>
+                                <label htmlFor="tts-model" className="mb-1.5 block text-sm font-medium text-muted-foreground">TTS Model</label>
+                                <select id="tts-model" value={config.tts_model} onChange={(e) => setConfig({ ...config, tts_model: e.target.value })} className={selectCls}>
+                                    {!ttsModelsForSelectedProvider.some((model) => model.id === config.tts_model) && (
+                                        <option value={config.tts_model}>{config.tts_model} (currently unavailable)</option>
+                                    )}
                                     {ttsModelsForSelectedProvider.map((model) => (<option key={model.id} value={model.id}>{model.name}</option>))}
                                 </select>
                             </div>
@@ -744,6 +741,12 @@ export default function AIOptionsPage() {
                                 <p className="text-sm text-foreground">{ttsModelInfo.description}</p>
                                 <p className="mt-1 text-xs text-muted-foreground">Speed: {ttsModelInfo.speed || "n/a"}</p>
                             </div>
+                        )}
+
+                        {!voicesQuery.isLoading && !voices.some((voice) => voice.id === config.tts_voice_id && voice.provider === config.tts_provider) && (
+                            <p role="status" className="mb-4 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm">
+                                Saved voice {config.tts_voice_id} is currently unavailable in the catalog. Reload the catalog or select a voice explicitly. Your saved selection has been kept.
+                            </p>
                         )}
 
                         {/* Voice grid — compact */}
@@ -768,8 +771,8 @@ export default function AIOptionsPage() {
                                             ...config,
                                             tts_voice_id: voice.id,
                                             tts_provider: voice.provider,
-                                            tts_model: ttsModelsForSelectedProvider.some((m) => m.id === config.tts_model) ? config.tts_model : getDefaultTtsModel(voice.provider, providers),
-                                            tts_sample_rate: getDefaultTtsSampleRate(voice.provider),
+                                            tts_model: voice.provider === config.tts_provider ? config.tts_model : getDefaultTtsModel(voice.provider, providers),
+                                            tts_sample_rate: voice.provider === config.tts_provider ? config.tts_sample_rate : getDefaultTtsSampleRate(voice.provider),
                                         })}
                                         whileHover={{ y: -2 }}
                                         className={`relative rounded-xl border p-2.5 text-left transition-colors ${selected ? "border-emerald-500 bg-emerald-500/10 ring-1 ring-emerald-500/40" : "border-border bg-background hover:border-emerald-500/40 hover:bg-muted/50"}`}
@@ -851,6 +854,7 @@ export default function AIOptionsPage() {
                         <SectionHeader icon={<SlidersHorizontal className="h-5 w-5" />} title="Voice tuning" subtitle="Optional · falls back to defaults when unset" />
                         <p className="mb-4 text-xs text-muted-foreground">Conversational rhythm tuning for this tenant. Each field is optional — “Reset to default” clears the override. Changes apply on the next call after Save.</p>
                         {config && (() => {
+                            const fluxActive = config.stt_engine === "deepgram_flux" && ["en", "en-us", "en-gb", "en-au", "en-in", "en-nz"].includes(config.stt_language.toLowerCase());
                             const tuning = config.voice_tuning ?? {};
                             const eot = tuning.stt_eot_threshold;
                             const timeout = tuning.stt_eot_timeout_ms;
@@ -863,24 +867,27 @@ export default function AIOptionsPage() {
                             const numCls = "mt-1 w-full rounded border border-border bg-background px-3 py-2 text-sm text-foreground";
                             return (
                                 <div className="grid gap-5 md:grid-cols-2">
+                                    {!fluxActive && <p className="md:col-span-2 text-xs text-muted-foreground">Flux turn-detection controls are inactive for Nova or non-English transcription. Saved overrides are kept for Flux calls.</p>}
+                                    <fieldset disabled={!fluxActive} aria-label="Flux turn detection" className="contents disabled:opacity-50">
                                     <div>
                                         <div className="flex items-center justify-between text-xs"><span className="font-medium text-foreground">End-of-turn confidence <span className="ml-1 text-muted-foreground">default 0.85</span></span><span className="font-mono text-emerald-500">{eot !== undefined ? eot.toFixed(2) : "—"}</span></div>
-                                        <input type="range" min={0.5} max={0.9} step={0.05} value={eot ?? 0.85} onChange={(e) => updateVoiceTuningField("stt_eot_threshold", parseFloat(e.target.value))} className={rangeCls} />
+                                        <input aria-label="Flux end-of-turn confidence" type="range" min={0.5} max={0.9} step={0.05} value={eot ?? 0.85} onChange={(e) => updateVoiceTuningField("stt_eot_threshold", parseFloat(e.target.value))} className={rangeCls} />
                                         {eot !== undefined && <button type="button" onClick={() => resetVoiceTuningField("stt_eot_threshold")} className={resetLink}>Reset to default</button>}
                                     </div>
                                     <div>
                                         <div className="flex items-center justify-between text-xs"><span className="font-medium text-foreground">End-of-turn silence timeout (ms) <span className="ml-1 text-muted-foreground">default 500</span></span><span className="font-mono text-emerald-500">{timeout !== undefined ? timeout : "—"}</span></div>
-                                        <input type="number" min={500} max={10000} step={100} value={timeout ?? 500} onChange={(e) => { const v = parseInt(e.target.value, 10); if (!Number.isNaN(v)) updateVoiceTuningField("stt_eot_timeout_ms", v); }} className={numCls} />
+                                        <input aria-label="Flux silence timeout" type="number" min={500} max={10000} step={100} value={timeout ?? 500} onChange={(e) => { const v = parseInt(e.target.value, 10); if (!Number.isNaN(v)) updateVoiceTuningField("stt_eot_timeout_ms", v); }} className={numCls} />
                                         {timeout !== undefined && <button type="button" onClick={() => resetVoiceTuningField("stt_eot_timeout_ms")} className={resetLink}>Reset to default</button>}
                                     </div>
                                     <div>
                                         <div className="flex items-center justify-between text-xs"><span className="font-medium text-foreground">Eager-mode threshold <span className="ml-1 text-muted-foreground">default 0.7</span></span><span className="font-mono text-emerald-500">{!eagerExplicit ? "—" : eager === null ? "disabled" : (eager as number).toFixed(2)}</span></div>
-                                        <input type="range" min={0.3} max={0.9} step={0.05} value={(eager ?? 0.7) as number} onChange={(e) => updateVoiceTuningField("stt_eager_eot_threshold", parseFloat(e.target.value))} disabled={eager === null} className={`${rangeCls} disabled:opacity-40`} />
+                                        <input aria-label="Flux eager threshold" type="range" min={0.3} max={0.9} step={0.05} value={(eager ?? 0.7) as number} onChange={(e) => updateVoiceTuningField("stt_eager_eot_threshold", parseFloat(e.target.value))} disabled={eager === null} className={`${rangeCls} disabled:opacity-40`} />
                                         <div className="mt-1 flex flex-wrap items-center gap-3">
                                             <label className="flex items-center gap-1 text-[11px] text-muted-foreground"><input type="checkbox" checked={eager === null} onChange={(e) => updateVoiceTuningField("stt_eager_eot_threshold", e.target.checked ? null : 0.7)} className="accent-emerald-500" />Disable eager mode</label>
                                             {eagerExplicit && <button type="button" onClick={() => resetVoiceTuningField("stt_eager_eot_threshold")} className={resetLink}>Reset to default</button>}
                                         </div>
                                     </div>
+                                    </fieldset>
                                     <div>
                                         <div className="flex items-center justify-between text-xs"><span className="font-medium text-foreground">Turn-0 minimum confidence <span className="ml-1 text-muted-foreground">default 0.4</span></span><span className="font-mono text-emerald-500">{minConf !== undefined ? minConf.toFixed(2) : "—"}</span></div>
                                         <input type="range" min={0} max={1} step={0.05} value={minConf ?? 0.4} onChange={(e) => updateVoiceTuningField("turn_0_min_confidence", parseFloat(e.target.value))} className={rangeCls} />
@@ -919,7 +926,7 @@ export default function AIOptionsPage() {
             <VoiceCloneModal
                 open={cloneOpen}
                 onClose={() => setCloneOpen(false)}
-                onCloned={() => { void queryClient.invalidateQueries({ queryKey: aiOptionsKeys.voices() }); }}
+                onCloned={() => { void queryClient.invalidateQueries({ queryKey: aiOptionsKeys.voices(scope) }); }}
             />
         </DashboardLayout>
     );

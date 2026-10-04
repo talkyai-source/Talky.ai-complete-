@@ -15,6 +15,9 @@ from fastapi.responses import FileResponse
 
 from app.api.v1.dependencies import get_current_user, get_db_client
 from app.core.postgres_adapter import Client
+from app.domain.services.voice_eligibility import (
+    VoiceEligibilityError, filter_tenant_voices, require_elevenlabs_voice_eligible,
+)
 
 from app.domain.models.ai_config import (
     CARTESIA_MODELS,
@@ -136,21 +139,9 @@ async def list_voices(
     voices = await _get_all_tts_voices()
 
     try:
-        from app.domain.services import voice_clone_service as vcs
-        tenant_id = getattr(current_user, "tenant_id", None)
-        if tenant_id:
-            owned = await vcs.owned_voice_ids(db_client.pool, str(tenant_id))
-            all_clones = await vcs.all_platform_voice_ids(db_client.pool)
-            hidden = all_clones - owned
-            if hidden:
-                voices = [
-                    v for v in voices
-                    if not (v.provider == "elevenlabs" and v.id in hidden)
-                ]
-    except Exception as exc:
-        # Never let scoping break the catalog — worst case the user just
-        # doesn't see clones; log and serve the unfiltered library voices.
-        logger.warning("voice clone scoping failed: %s", exc)
+        voices = await filter_tenant_voices(db_client.pool, getattr(current_user, "tenant_id", None), voices)
+    except VoiceEligibilityError as exc:
+        raise HTTPException(exc.status_code, str(exc)) from exc
 
     el_error = get_elevenlabs_last_error() if elevenlabs_enabled() else None
     response: dict = {"voices": [v.model_dump() for v in voices]}
@@ -160,10 +151,14 @@ async def list_voices(
 
 
 @router.get("/voices/{voice_id}/sample")
-async def get_voice_sample(voice_id: str):
+async def get_voice_sample(voice_id: str, current_user=Depends(get_current_user), db_client: Client = Depends(get_db_client)):
     """
     Serve a cached ElevenLabs preview sample without generating fresh TTS.
     """
+    try:
+        await require_elevenlabs_voice_eligible(db_client.pool, getattr(current_user, "tenant_id", None), voice_id)
+    except VoiceEligibilityError as exc:
+        raise HTTPException(exc.status_code, str(exc)) from exc
     voice = await _find_elevenlabs_voice(voice_id)
     if voice is None or voice.provider != "elevenlabs":
         raise HTTPException(
@@ -182,5 +177,5 @@ async def get_voice_sample(voice_id: str):
         sample_path,
         media_type="audio/mpeg",
         filename=f"{voice_id}.mp3",
-        headers={"cache-control": "public, max-age=86400"},
+        headers={"cache-control": "private, no-store"},
     )

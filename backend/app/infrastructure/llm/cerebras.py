@@ -14,9 +14,8 @@ The API is OpenAI-compatible, so this mirrors the Groq provider's shape closely
 (circuit breaker, bounded retries, shared concurrency guard) rather than
 inventing a different structure.
 
-THINKING IS DISABLED BY DEFAULT — see ``_reasoning_effort``. This is the whole
-point for a voice agent: reasoning tokens are spent BEFORE the first spoken
-word, so they land directly on time-to-first-token.
+Thinking uses the lowest supported per-model effort — see ``_reasoning_effort``.
+The offered GPT-OSS model cannot disable it; its floor is ``low``.
 
 Docs: https://inference-docs.cerebras.ai/api-reference/chat-completions
 Models are declared in app/domain/models/ai_config.py (CEREBRAS_MODELS).
@@ -36,9 +35,10 @@ from app.domain.models.ai_config import (
 from app.domain.models.conversation import Message
 from app.infrastructure.providers.provider_concurrency import get_provider_guard
 from app.utils.resilience import CircuitBreaker
+from app.infrastructure.llm.request_profile import record_traditional_request
 
 from app.infrastructure.llm.streaming import (
-    stream_with_timeout, stream_tool_turn, close_stream, execute_tool_call,
+    LLMStreamStalled, stream_with_timeout, stream_tool_turn, close_stream, execute_tool_call,
     accumulate_tool_calls as _accumulate_tool_call_frags,
     finalize_tool_calls as _finalize_tool_calls,
     assistant_tool_message as _assistant_tool_call_message,
@@ -55,7 +55,8 @@ _LLM_MAX_RETRIES = 2
 # on the live account (2026-09-06 audit, F01), and knowledge-grounded answers
 # were cut or empty ("zero_token_turn"). Groq has had the same reserve since
 # the GPT-OSS rollout (GROQ_THINKING_RESERVE_TOKENS); this mirrors it so the
-# caller's max_tokens stays fully available for the spoken reply.
+# caller's configured reply target has additional shared headroom. This is not
+# a separate visible-token allowance: reasoning can still consume the ceiling.
 _THINKING_RESERVE_TOKENS = int(os.getenv("CEREBRAS_THINKING_RESERVE_TOKENS", "1024"))
 _LLM_RETRY_BASE_DELAY = 0.3  # match Groq — fast first retry inside the voice budget
 
@@ -278,6 +279,11 @@ class CerebrasLLMProvider(LLMProvider):
             raise ValueError("Cerebras provider not initialized")
 
         model = kwargs.get("model") or self._model
+        effort = kwargs.get("reasoning_effort")
+        if effort is not None and effort != self._reasoning_effort(model):
+            raise ValueError(
+                f"Cerebras voice reasoning_effort is fixed at {self._reasoning_effort(model)!r} for {model}"
+            )
         tools = kwargs.get("tools")
         tool_calls_sink = kwargs.get("tool_calls_sink")
         # Campaign id when the caller threads one — see _build_request for why
@@ -306,8 +312,14 @@ class CerebrasLLMProvider(LLMProvider):
             for attempt in range(_LLM_MAX_RETRIES + 1):
                 try:
                     async with self._circuit:
+                        record_traditional_request(
+                            provider=self.name, request=request, instructions=system_prompt,
+                            configured_temperature=self._temperature if temperature is None else temperature,
+                            configured_max_tokens=self._max_tokens if max_tokens is None else max_tokens,
+                        )
                         stream = await self._client.chat.completions.create(**request)
                         tc_acc: Dict[int, dict] = {}
+                        terminal_seen = False
                         try:
                             async for chunk in stream:
                                 # The usage block rides the FINAL frame, which has
@@ -320,6 +332,13 @@ class CerebrasLLMProvider(LLMProvider):
                                 choices = getattr(chunk, "choices", None)
                                 if not choices:
                                     continue
+                                reason = getattr(choices[0], "finish_reason", None)
+                                if reason is not None:
+                                    if reason not in {"stop", "tool_calls"}:
+                                        raise LLMStreamStalled(
+                                            f"Cerebras response incomplete: {reason}"
+                                        )
+                                    terminal_seen = True
                                 delta = choices[0].delta
                                 content = getattr(delta, "content", None)
                                 if content:
@@ -329,6 +348,10 @@ class CerebrasLLMProvider(LLMProvider):
                                     frags = getattr(delta, "tool_calls", None)
                                     if frags:
                                         _accumulate_tool_call_frags(tc_acc, frags)
+                            if not terminal_seen:
+                                raise LLMStreamStalled(
+                                    "Cerebras stream ended without a terminal reason"
+                                )
                         finally:
                             await close_stream(stream)
                         if tool_calls_sink is not None and tc_acc:
@@ -337,6 +360,10 @@ class CerebrasLLMProvider(LLMProvider):
                             else:  # compatibility for direct SDK callers
                                 tool_calls_sink.update(tc_acc)
                     return
+                except LLMStreamStalled:
+                    # An incomplete decision is neither success nor permission
+                    # to request a replacement decision, even before text.
+                    raise
                 except Exception as exc:  # noqa: BLE001 - classified below
                     last_err = exc
                     # Once any token has been emitted the caller has already

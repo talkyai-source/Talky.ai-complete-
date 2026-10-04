@@ -1177,6 +1177,24 @@ def _lead_context_lines(lead_context: Optional[dict]) -> str:
     )
 
 
+def resolve_stt_selection(config, *, campaign_id="telephony") -> dict:
+    """Reuse the selected engine/language policy across existing transports."""
+    engine = str(getattr(config, "stt_engine", None) or "deepgram_flux").strip().lower()
+    if engine not in {"deepgram_flux", "deepgram_nova", "deepgram-nova", "nova", "nova-3"}:
+        raise ValueError("Unsupported STT engine; select deepgram_flux or deepgram_nova")
+    language = str(getattr(config, "stt_language", None) or "en").strip().lower() or "en"
+    english = language in ("en", "en-us", "en-gb", "en-au", "en-in", "en-nz")
+    nova = engine in ("deepgram_nova", "deepgram-nova", "nova", "nova-3")
+    if not nova and not english:
+        logger.info("stt_language_forces_nova campaign=%s language=%s (selected Flux model is English-only)", campaign_id, language)
+        nova = True
+    return {
+        "stt_provider_type": "deepgram_nova" if nova else "deepgram_flux",
+        "stt_model": "nova-3" if nova else "flux-general-en",
+        "stt_language": language,
+    }
+
+
 def build_telephony_session_config(
     gateway_type: str = "telephony",
     campaign: Optional[Any] = None,
@@ -1661,24 +1679,7 @@ def build_telephony_session_config(
     else:
         _tuning = get_voice_tuning_resolver().for_tenant(_tenant_id)
 
-    # STT engine choice (AI Options): Flux (semantic turn-detection) vs Nova-3
-    # (acoustic VAD/endpointing). The orchestrator builds the matching primary;
-    # the failover secondary is wired separately. Default = Flux (prior behaviour).
-    _stt_engine = (getattr(source_config, "stt_engine", None) or "deepgram_flux").lower()
-    # Saved STT language (F09). Flux is English-only, so anything else routes
-    # the primary to Nova-3 — the setting used to be stored and then ignored.
-    _stt_language = str(getattr(source_config, "stt_language", None) or "en").strip().lower() or "en"
-    _english = _stt_language in ("en", "en-us", "en-gb", "en-au", "en-in", "en-nz")
-    if _stt_engine in ("deepgram_nova", "deepgram-nova", "nova", "nova-3"):
-        _stt_provider_type, _stt_model = "deepgram_nova", "nova-3"
-    elif not _english:
-        logger.info(
-            "stt_language_forces_nova campaign=%s language=%s (Flux is English-only)",
-            str(_campaign_id(campaign)) if campaign else "telephony", _stt_language,
-        )
-        _stt_provider_type, _stt_model = "deepgram_nova", "nova-3"
-    else:
-        _stt_provider_type, _stt_model = "deepgram_flux", "flux-general-en"
+    stt_selection = resolve_stt_selection(source_config, campaign_id=str(_campaign_id(campaign)) if campaign else "telephony")
 
     # ── Pipeline mode (Realtime add-on) ─────────────────────────────────
     # Tenant-level default comes from the AI-Options global config (which is a
@@ -1720,11 +1721,9 @@ def build_telephony_session_config(
 
     return VoiceSessionConfig(
         gateway_type=gateway_type,
-        stt_provider_type=_stt_provider_type,
+        **stt_selection,
         llm_provider_type=_llm_provider_type,
         tts_provider_type=tts_provider_type,
-        stt_model=_stt_model,
-        stt_language=_stt_language,
         stt_sample_rate=16000,
         stt_encoding="linear16",
         # Conversational-rhythm tunables come from the tenant resolver.

@@ -238,7 +238,11 @@ async def _build_vonage_session_config(to_number: Optional[str] = None):
         resolve_ai_config_for_did,
     )
 
+    from app.domain.services.telephony_session_config import resolve_stt_selection
+    from app.domain.services.voice_tuning import get_voice_tuning_resolver
+
     tenant_id, config = await resolve_ai_config_for_did(to_number)
+    tuning = await get_voice_tuning_resolver().for_tenant_async(tenant_id, require_available=bool(tenant_id))
     llm_provider_type = (
         getattr(config.llm_provider, "value", None)
         or str(config.llm_provider)
@@ -247,15 +251,16 @@ async def _build_vonage_session_config(to_number: Optional[str] = None):
 
     return VoiceSessionConfig(
         gateway_type="browser",
-        stt_provider_type="deepgram_flux",
+        **resolve_stt_selection(config, campaign_id="vonage"),
         llm_provider_type=llm_provider_type,
         tts_provider_type=config.tts_provider,
-        stt_model="flux-general-en",       # was nova-2 — use Flux for better EOT detection
         stt_sample_rate=16000,
         stt_encoding="linear16",
-        stt_eot_threshold=0.85,            # was default 0.7 — stop cutting users off
-        stt_eot_timeout_ms=1500,           # was 5000 — industry min is 1000ms; Flux integrated EOT handles accuracy
-        stt_eager_eot_threshold=None,      # disable eager — no speculative LLM yet
+        stt_eot_threshold=tuning.stt_eot_threshold,
+        stt_eot_timeout_ms=tuning.stt_eot_timeout_ms,
+        stt_eager_eot_threshold=tuning.stt_eager_eot_threshold,
+        turn_0_min_confidence=tuning.turn_0_min_confidence,
+        turn_0_min_alpha_chars=tuning.turn_0_min_alpha_chars,
         llm_model=config.llm_model,
         llm_temperature=config.llm_temperature,
         llm_max_tokens=config.llm_max_tokens,

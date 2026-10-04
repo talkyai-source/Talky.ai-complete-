@@ -133,12 +133,13 @@ async def delete_cloned_voice(
     if not row:
         raise HTTPException(status_code=404, detail="Voice not found")
 
-    # Best-effort EL delete (a 404 there is fine — already gone). If EL is
-    # unreachable we still drop our row so the user isn't stuck.
+    # A provider 404 confirms absence. An uncertain failure must retain the
+    # ownership row so the surviving private voice never becomes shared stock.
     try:
         await delete_elevenlabs_voice(row["voice_id"])
     except ElevenLabsCloneError as exc:
         logger.warning("voice_clone delete EL failed voice_id=%s: %s", row["voice_id"], exc)
+        raise HTTPException(502, "Voice deletion could not be confirmed; ownership was retained. Retry later.") from exc
 
     await vcs.delete_owned(db_client.pool, tenant_id, clone_id)
     invalidate_elevenlabs_voices_cache()

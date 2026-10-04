@@ -3,6 +3,13 @@ from typing import Literal, Optional, Dict, Any
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
+def _xai_number(value, field):
+    try:
+        return float(value)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(f"xAI {field} must be numeric") from exc
+
+
 class RealtimePrompt(BaseModel):
     model_config = ConfigDict(extra="forbid")
     persona: Literal["assistant", "sales", "support", "receptionist"] = "assistant"
@@ -72,15 +79,24 @@ def normalize_realtime_settings(settings: dict | None = None) -> dict:
             raise ValueError("xAI requires server_vad settings")
         if set(td) - {"type", "threshold", "prefix_padding_ms", "silence_duration_ms"}:
             raise ValueError("Unsupported xAI VAD setting")
-        if not .1 <= float(td.get("threshold", .85)) <= .9:
+        td = dict(td)
+        td["threshold"] = _xai_number(td.get("threshold", .85), "VAD threshold")
+        if not .1 <= td["threshold"] <= .9:
             raise ValueError("xAI VAD threshold must be between 0.1 and 0.9")
         for key in ("prefix_padding_ms", "silence_duration_ms"):
-            if key in td and not 0 <= int(td[key]) <= 10000:
-                raise ValueError("xAI VAD duration is outside the supported bounds")
+            if key in td:
+                number = _xai_number(td[key], "VAD duration")
+                if not number.is_integer() or not 0 <= number <= 10000:
+                    raise ValueError("xAI VAD duration is outside the supported bounds")
+                td[key] = int(number)
+        data["turn_detection"] = td
         if data.get("reasoning_effort", "high") not in {"high", "none"}:
             raise ValueError("xAI reasoning effort must be high or none")
-        if not .7 <= float(data.get("speed", 1)) <= 1.5:
+        speed = _xai_number(data.get("speed", 1), "speech speed")
+        if not .7 <= speed <= 1.5:
             raise ValueError("xAI speech speed must be between 0.7 and 1.5")
+        if "speed" in data:
+            data["speed"] = speed
         if "prompt" in data:
             data["prompt"] = RealtimePrompt.model_validate(data["prompt"]).model_dump()
         return data
@@ -97,6 +113,8 @@ def validate_realtime(model: str, voice: str, settings: dict | None = None) -> d
     # settings remain provider-specific and it is not advertised in the GPT UI.
     provider = str((settings or {}).get("provider") or "openai").lower()
     if provider == "xai":
+        if not voice or voice != voice.strip() or voice.lower() in {v["id"] for v in REALTIME_VOICES}:
+            raise ValueError("Select an xAI Realtime voice; an inherited OpenAI voice is not supported")
         return normalize_realtime_settings(settings)
     if provider != "openai":
         raise ValueError("Unsupported Realtime provider")

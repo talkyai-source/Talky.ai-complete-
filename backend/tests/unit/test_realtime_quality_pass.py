@@ -367,7 +367,7 @@ class _ScriptedWS:
         has_reasoning = "reasoning" in payload.get("session", {})
         if has_reasoning:
             self._inbox.append(json.dumps(
-                {"type": "error", "error": {"message": "unknown parameter: reasoning"}}
+                {"type": "error", "error": {"code": "unknown_parameter", "param": "session.reasoning", "message": "unknown parameter: reasoning"}}
             ))
         else:
             self._inbox.append(json.dumps({"type": "session.updated"}))

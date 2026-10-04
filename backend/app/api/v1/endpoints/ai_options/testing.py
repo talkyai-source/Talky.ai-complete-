@@ -7,6 +7,8 @@ Endpoints:
 """
 from __future__ import annotations
 
+from app.domain.services.voice_eligibility import VoiceEligibilityError, require_elevenlabs_voice_eligible
+
 import asyncio
 import base64
 import logging
@@ -16,7 +18,7 @@ from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from app.api.v1.dependencies import get_current_user
+from app.api.v1.dependencies import get_current_user, get_db_client
 
 from app.domain.models.ai_config import (
     CEREBRAS_MODELS,
@@ -163,7 +165,7 @@ async def test_llm(request: LLMTestRequest, current_user=Depends(get_current_use
 
 
 @router.post("/test/tts", response_model=TTSTestResponse)
-async def test_tts(request: TTSTestRequest, current_user=Depends(get_current_user)):
+async def test_tts(request: TTSTestRequest, current_user=Depends(get_current_user), db_client=Depends(get_db_client)):
     """
     Test TTS with text and measure latency.
 
@@ -234,6 +236,10 @@ async def test_tts(request: TTSTestRequest, current_user=Depends(get_current_use
             output_is_linear16 = True
             model_name = "aura-2"
         elif elevenlabs_voice is not None:
+            try:
+                await require_elevenlabs_voice_eligible(db_client.pool, getattr(current_user, "tenant_id", None), voice_id, voices=[elevenlabs_voice])
+            except VoiceEligibilityError as exc:
+                raise HTTPException(exc.status_code, str(exc)) from exc
             if not os.getenv("ELEVENLABS_API_KEY"):
                 raise HTTPException(
                     status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

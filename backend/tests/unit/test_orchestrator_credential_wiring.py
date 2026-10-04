@@ -44,7 +44,7 @@ def _resolver_returning(value: str | None):
 async def test_llm_provider_uses_resolver_with_tenant(orch):
     cfg = VoiceSessionConfig(
         llm_provider_type="groq",
-        llm_model="llama-3.1-8b-instant",
+        llm_model="openai/gpt-oss-20b",
         tenant_id="tenant-A",
     )
     fake_resolver = _resolver_returning("tenant-A-key")
@@ -135,7 +135,7 @@ async def test_tts_elevenlabs_uses_resolver(orch):
     fake_instance = MagicMock(initialize=AsyncMock())
     fake_provider_cls = MagicMock(return_value=fake_instance)
 
-    with patch(
+    with patch("app.domain.services.voice_eligibility.require_elevenlabs_voice_eligible", AsyncMock()) as eligible, patch(
         "app.domain.services.credential_resolver.get_credential_resolver",
         return_value=fake_resolver,
     ), patch(
@@ -144,6 +144,7 @@ async def test_tts_elevenlabs_uses_resolver(orch):
     ):
         await orch._create_tts_provider(cfg)
 
+    eligible.assert_awaited_once_with(None, "tenant-C", "voice-1")
     call_args = fake_resolver.resolve.await_args
     assert call_args.args[0] == "elevenlabs"
     assert call_args.kwargs["tenant_id"] == "tenant-C"

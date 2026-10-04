@@ -31,7 +31,9 @@ class _FakeChunk:
 
 class _FakeStream:
     def __init__(self, chunks):
-        self._chunks = list(chunks)
+        # These successful SDK fixtures end with the provider's decision receipt.
+        terminal = SimpleNamespace(candidates=[SimpleNamespace(finish_reason="STOP")])
+        self._chunks = [*chunks, terminal]
 
     def __aiter__(self):
         self._it = iter(self._chunks)
@@ -62,7 +64,7 @@ def _run(agen):
     return asyncio.run(_collect())
 
 
-class _StubPart:
+class _StubPart(SimpleNamespace):
     def __init__(self, text=None, function_call=None):
         self.text = text
         self.function_call = function_call

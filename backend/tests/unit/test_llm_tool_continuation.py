@@ -104,14 +104,16 @@ async def test_execution_timeout_is_unknown_not_success_or_retry():
 
 
 async def test_cerebras_wire_reassembles_fragmented_calls_and_continues():
-    def chunk(content=None, fragments=None):
-        return NS(choices=[NS(delta=NS(content=content, tool_calls=fragments))])
+    def chunk(content=None, fragments=None, reason=None):
+        return NS(choices=[NS(delta=NS(content=content, tool_calls=fragments), finish_reason=reason)])
     async def first():
         yield chunk("Checking. ")
         yield chunk(fragments=[NS(index=0, id="call-1", function=NS(name="lookup", arguments='{"query":'))])
         yield chunk(fragments=[NS(index=0, id=None, function=NS(name=None, arguments='"price"}'))])
+        yield chunk(reason="tool_calls")
     async def second():
         yield chunk("£12 confirmed.")
+        yield chunk(reason="stop")
     provider = CerebrasLLMProvider()
     create = AsyncMock(side_effect=[first(), second()])
     provider._client = NS(chat=NS(completions=NS(create=create)))
@@ -240,7 +242,7 @@ async def test_gemini_mixed_tools_preserve_signature_and_low_thinking(monkeypatc
     call = NS(name="lookup", args={"query": "price"})
     signed = Part(function_call=call, thought_signature=b"opaque-signature")
     def chunk(parts, calls=None):
-        return NS(candidates=[NS(content=NS(parts=parts))], function_calls=calls or [])
+        return NS(candidates=[NS(content=NS(parts=parts), finish_reason="STOP")], function_calls=calls or [])
     requests = []
     closed = []
     async def create(**kwargs):

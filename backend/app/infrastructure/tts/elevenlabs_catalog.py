@@ -201,6 +201,11 @@ def _normalize_elevenlabs_voice(payload: dict[str, Any]) -> Optional[VoiceInfo]:
     if preview_url:
         _elevenlabs_preview_url_cache[voice_id] = preview_url
 
+    sharing = payload.get("sharing") if isinstance(payload.get("sharing"), dict) else {}
+    is_public = payload.get("category") == "premade" or (
+        sharing.get("status") == "enabled" and sharing.get("enabled_in_library") is True
+    )
+
     return VoiceInfo(
         id=voice_id,
         name=name,
@@ -211,6 +216,7 @@ def _normalize_elevenlabs_voice(payload: dict[str, Any]) -> Optional[VoiceInfo]:
         accent_color=_voice_accent_color(gender),
         preview_text="Hello, I am your AI voice assistant. How can I help you today?",
         provider="elevenlabs",
+        provider_is_public=is_public,
         tags=sorted(set(tags)),
         preview_url=elevenlabs_preview_proxy_url(voice_id) if preview_url else None,
     )

@@ -276,12 +276,13 @@ def test_audio_ingest_passes_the_session_language_to_the_stt_stream():
     assert 'language=getattr(session, "stt_language", None) or "en"' in src
 
 
-def test_builder_forces_nova_for_non_english_and_carries_the_language():
-    from app.domain.services import telephony_session_config as tsc
+def test_telephony_builder_carries_non_english_stt_selection():
+    from app.domain.models.ai_config import AIProviderConfig
+    from app.domain.services.telephony_session_config import build_telephony_session_config
 
-    src = inspect.getsource(tsc.build_telephony_session_config)
-    assert "stt_language=_stt_language" in src
-    assert "stt_language_forces_nova" in src
+    cfg = build_telephony_session_config(ai_config_override=AIProviderConfig(stt_language="es", stt_engine="deepgram_flux"))
+    assert (cfg.stt_provider_type, cfg.stt_model, cfg.stt_language) == ("deepgram_nova", "nova-3", "es")
+
 
 
 # ---------------------------------------------------------------------------

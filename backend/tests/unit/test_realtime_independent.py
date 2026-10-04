@@ -214,7 +214,7 @@ async def test_availability_resolves_tenant_credential(monkeypatch):
 
 def test_existing_xai_opt_in_is_retained():
     from app.realtime.config import validate_realtime
-    validate_realtime("grok-voice-think-fast-1.0", "ash", {"provider": "xai", "agent_id": "fixture-agent"})
+    validate_realtime("grok-voice-think-fast-1.0", "eve", {"provider": "xai", "agent_id": "fixture-agent"})
 
 
 @pytest.mark.asyncio

@@ -53,8 +53,9 @@ async def create_realtime_voice_session(
         # realtime_settings["provider"] = "openai" (default, unchanged) |
         # "xai". Every existing tenant/campaign that has never set this
         # key gets byte-for-byte the same OpenAI path as before.
-        from app.realtime.config import normalize_realtime_settings
-        rt_settings = config.realtime_settings = normalize_realtime_settings(config.realtime_settings)
+        from app.realtime.config import validate_realtime
+        rt_settings = config.realtime_settings = validate_realtime(
+            config.realtime_model, config.realtime_voice, config.realtime_settings)
         provider = str(rt_settings.get("provider") or "openai").strip().lower()
 
         if provider == "xai":
@@ -82,7 +83,6 @@ async def create_realtime_voice_session(
 
         # Persona/company/goal → clean realtime instructions. Pull from the
         # campaign agent_config when present; fall back to sane defaults.
-        instructions = prepare_realtime_prompt(config)
         from types import SimpleNamespace
         from app.domain.services.voice_pipeline.action_execution import prepare_voice_action_context
         action_context = SimpleNamespace(tenant_id=config.tenant_id, campaign_id=config.campaign_id,
@@ -90,7 +90,8 @@ async def create_realtime_voice_session(
         await prepare_voice_action_context(action_context)
         from app.domain.services.voice_pipeline.action_execution import enabled_voice_actions
         from app.domain.services.voice_pipeline.action_tools import action_tool_system_addendum
-        instructions += "\n\n" + action_tool_system_addendum(enabled_voice_actions(action_context))
+        instructions = prepare_realtime_prompt(config, capability_instructions=
+            action_tool_system_addendum(enabled_voice_actions(action_context)))
 
         # Media gateway at 8 kHz internal so the μ-law wire needs NO
         # resampling — only the codec conversion in the bridge.
@@ -118,6 +119,7 @@ async def create_realtime_voice_session(
                 api_key=api_key,
                 model=xai_model,
                 agent_id=rt_settings.get("agent_id"),
+                voice=config.realtime_voice,
                 instructions=instructions,
                 tools=[knowledge_lookup_tool(), *realtime_voice_action_tools(action_context)],
                 settings=config.realtime_settings,
@@ -133,6 +135,7 @@ async def create_realtime_voice_session(
                 settings=config.realtime_settings,
                 call_id=call_id,
             )
+        rt._prompt_identity = {"template": config.prompt_template, "version": config.prompt_version}
         connected = await rt.connect()
         if not connected:
             logger.warning(
@@ -190,6 +193,10 @@ async def create_realtime_voice_session(
         call_session._voice_action_context = action_context._voice_action_context
         call_session._voice_action_capabilities = action_context._voice_action_capabilities
         call_session._voice_action_context_loaded = True
+        # Knowledge is injected after assembly on supported call paths. Read
+        # only its validated checksum when later evidence is requested; never
+        # assume the initial handshake contained a pinned knowledge snapshot.
+        rt._knowledge_reference_session = call_session
 
         # Transcript accumulation for the realtime path. The speech-to-speech
         # model emits no transcript on its own, so the bridge feeds the

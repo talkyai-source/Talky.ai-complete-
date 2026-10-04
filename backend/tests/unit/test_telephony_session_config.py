@@ -600,6 +600,8 @@ class TestBuildCallGreeting:
 class TestBuildTelephonySessionConfig:
     def _mock_global_config(self):
         cfg = MagicMock()
+        cfg.stt_engine = "deepgram_flux"
+        cfg.stt_language = "en"
         cfg.tts_provider = "cartesia"
         cfg.tts_voice_id = "test-voice-id"
         cfg.tts_model = "sonic-3"
@@ -757,6 +759,8 @@ class TestTenantPromptCap:
 
     def _mock_global_config(self):
         cfg = MagicMock()
+        cfg.stt_engine = "deepgram_flux"
+        cfg.stt_language = "en"
         cfg.tts_provider = "cartesia"
         cfg.tts_voice_id = "test-voice-id"
         cfg.tts_model = "sonic-3"

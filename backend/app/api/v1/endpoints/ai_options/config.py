@@ -1,7 +1,7 @@
 """Tenant AI-config endpoints.
 
 Endpoints:
-  GET /config   - read current config; auto-correct stale voice IDs
+  GET /config   - read current config without replacing saved selections
   POST /config  - validate and persist new config; return latency advisories
 """
 from __future__ import annotations
@@ -19,13 +19,7 @@ from app.domain.models.ai_config import (
     AIProviderConfig,
     CARTESIA_MODELS,
     DEEPGRAM_TTS_MODELS,
-    CEREBRAS_MODELS,
-    CEREBRAS_MODELS_HIDDEN,
-    GEMINI_MODELS,
-    OPENAI_MODELS,
     GOOGLE_TTS_MODELS,
-    GROQ_MODELS,
-    GROQ_MODELS_HIDDEN,
 )
 from app.infrastructure.tts.elevenlabs_catalog import (
     get_elevenlabs_tts_models_for_current_key,
@@ -80,62 +74,14 @@ async def get_config(
             from app.realtime.config import normalize_realtime_settings
             config.realtime_settings = normalize_realtime_settings(config.realtime_settings)
             return config
-        elif config.tts_provider == "deepgram":
-            deepgram_voices = await _get_deepgram_voices_for_current_key()
-            valid_voice_ids = {voice.id for voice in deepgram_voices}
-            if valid_voice_ids and config.tts_voice_id not in valid_voice_ids:
-                old_voice_id = config.tts_voice_id
-                config.tts_voice_id = deepgram_voices[0].id
-                config.tts_model = "aura-2"
-                if config.tts_sample_rate not in {8000, 16000, 24000, 32000, 48000}:
-                    config.tts_sample_rate = 24000
-                await _upsert_tenant_config(conn, tenant_id, config)
-                logger.info(
-                    "Auto-corrected invalid Deepgram voice id '%s' to '%s' for tenant %s",
-                    old_voice_id,
-                    config.tts_voice_id,
-                    tenant_id,
-                )
-        elif config.tts_provider == "cartesia":
-            cartesia_voices = await _get_live_cartesia_voices()
-            valid_voice_ids = {voice.id for voice in cartesia_voices}
-            if valid_voice_ids and config.tts_voice_id not in valid_voice_ids:
-                old_voice_id = config.tts_voice_id
-                config.tts_voice_id = cartesia_voices[0].id
-                config.tts_model = "sonic-3"
-                if config.tts_sample_rate not in {8000, 16000, 24000, 32000, 44100}:
-                    config.tts_sample_rate = 24000
-                await _upsert_tenant_config(conn, tenant_id, config)
-                logger.info(
-                    "Auto-corrected stale Cartesia voice id '%s' to '%s' for tenant %s",
-                    old_voice_id,
-                    config.tts_voice_id,
-                    tenant_id,
-                )
-        elif config.tts_provider == "elevenlabs":
-            elevenlabs_voices = await get_elevenlabs_voices_for_current_key()
-            valid_voice_ids = {voice.id for voice in elevenlabs_voices}
-            if valid_voice_ids and config.tts_voice_id not in valid_voice_ids:
-                elevenlabs_models = await get_elevenlabs_tts_models_for_current_key()
-                old_voice_id = config.tts_voice_id
-                config.tts_voice_id = elevenlabs_voices[0].id
-                config.tts_model = elevenlabs_models[0].id if elevenlabs_models else "eleven_flash_v2_5"
-                if config.tts_sample_rate not in {8000, 16000, 22050, 24000, 44100}:
-                    config.tts_sample_rate = 24000
-                await _upsert_tenant_config(conn, tenant_id, config)
-                logger.info(
-                    "Auto-corrected invalid ElevenLabs voice id '%s' to '%s' for tenant %s",
-                    old_voice_id,
-                    config.tts_voice_id,
-                    tenant_id,
-                )
 
     # NOTE: this GET handler MUST NOT mutate any process-global state. It used
     # to call set_global_config(config), which meant merely VIEWING the
     # AI-Options page overwrote the model/provider/pipeline that every OTHER
     # tenant's live call read off the shared singleton (cross-tenant model
     # bleed). Per-call config is now sourced per-tenant from tenant_ai_configs
-    # via tenant_ai_config_resolver, so viewing config is a pure read.
+    # via tenant_ai_config_resolver. Existing selections stay intact even if
+    # a provider catalog is temporarily incomplete; explicit saves validate them.
     return config
 
 
@@ -146,9 +92,9 @@ async def save_config(
     db_client: Client = Depends(get_db_client),
 ):
     """
-    Save AI provider configuration GLOBALLY.
+    Save AI provider configuration for the authenticated tenant.
 
-    This configuration is used for ALL voice interactions:
+    This configuration supplies this tenant's defaults for voice interactions:
     - Dummy calls
     - Real phone calls
     - SIP calls
@@ -168,6 +114,12 @@ async def save_config(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="User is not associated with a tenant",
         )
+
+    from app.domain.services.voice_tuning import get_voice_tuning_resolver
+    try:
+        config.voice_tuning = get_voice_tuning_resolver().validate_user_partial_for_tenant(config.voice_tuning or {}, tenant_id) or None
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
 
     if config.pipeline_mode not in {"cascaded", "realtime"}:
         raise HTTPException(400, "Invalid voice pipeline")
@@ -191,45 +143,14 @@ async def save_config(
             detail="Invalid TTS provider. Supported providers: cartesia, google, deepgram, elevenlabs.",
         )
 
-    # Validate LLM provider + model. Sourced from a single union so adding a
-    # new provider only requires extending GEMINI_MODELS / GROQ_MODELS — never
-    # editing this validator.
-    # OFFERED is not the same set as ACCEPTED, deliberately.
-    #
-    # The MVP menu shows one model per provider (docs/MODEL-SELECTION.md), but
-    # validation also accepts the ids we stopped offering. A tenant who already
-    # has an older model stored would otherwise be 400'd on a value they never
-    # chose to have — locked out of their own settings page to enforce a menu
-    # change. Hidden means "you cannot pick this any more", not "you cannot
-    # save".
-    _llm_models_by_provider: dict[str, list[str]] = {
-        "openai": [m.id for m in OPENAI_MODELS],
-        "groq": [m.id for m in GROQ_MODELS] + GROQ_MODELS_HIDDEN,
-        "gemini": [m.id for m in GEMINI_MODELS],
-        "cerebras": [m.id for m in CEREBRAS_MODELS] + CEREBRAS_MODELS_HIDDEN,
-    }
-
-    if config.llm_provider not in _llm_models_by_provider:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=(
-                f"Invalid LLM provider '{config.llm_provider}'. "
-                f"Supported: {sorted(_llm_models_by_provider.keys())}"
-            ),
-        )
-
-    # Cross-field check: model must belong to the selected provider, otherwise
-    # the orchestrator will pass a Groq model name to Gemini (or vice-versa)
-    # and fail at first stream call.
-    valid_llm_models = _llm_models_by_provider[config.llm_provider]
-    if config.llm_model not in valid_llm_models:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=(
-                f"Invalid LLM model '{config.llm_model}' for provider "
-                f"'{config.llm_provider}'. Must be one of: {valid_llm_models}"
-            ),
-        )
+    # Save and runtime use the same offered + legacy provider/model contract.
+    from app.domain.models.ai_config import validate_traditional_llm_selection
+    from app.domain.services.telephony_session_config import resolve_stt_selection
+    try:
+        resolve_stt_selection(config)
+        validate_traditional_llm_selection(config.llm_provider, config.llm_model)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
 
     # Refuse to save a Gemini config if the API key isn't present — caught
     # here gives a clear 503 instead of a confusing pipeline error mid-call.
@@ -261,8 +182,15 @@ async def save_config(
         deepgram_voices = await _get_deepgram_voices_for_current_key()
         valid_voice_ids = {voice.id for voice in deepgram_voices}
     else:
+        from app.domain.services.voice_eligibility import (
+            VoiceEligibilityError, require_elevenlabs_voice_eligible,
+        )
         valid_tts_models = [m.id for m in await get_elevenlabs_tts_models_for_current_key()]
         elevenlabs_voices = await get_elevenlabs_voices_for_current_key()
+        try:
+            await require_elevenlabs_voice_eligible(db_client.pool, tenant_id, config.tts_voice_id, voices=elevenlabs_voices)
+        except VoiceEligibilityError as exc:
+            raise HTTPException(exc.status_code, str(exc)) from exc
         valid_voice_ids = {voice.id for voice in elevenlabs_voices}
 
     if config.tts_model not in valid_tts_models:
@@ -273,8 +201,13 @@ async def save_config(
     if config.tts_voice_id not in valid_voice_ids:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid TTS voice for current provider or not available for this Deepgram key",
+            detail="The selected voice is not available for this TTS provider. Reload the catalog or select another voice.",
         )
+
+    if config.tts_provider == "cartesia":
+        from app.infrastructure.tts.cartesia import CARTESIA_SAMPLE_RATES
+        if config.tts_sample_rate not in CARTESIA_SAMPLE_RATES:
+            raise HTTPException(400, f"Cartesia sample_rate must be one of {sorted(CARTESIA_SAMPLE_RATES)}")
 
     if (
         config.tts_provider == "google"
@@ -283,7 +216,7 @@ async def save_config(
     ):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Chirp3-HD requires sample rate 24000",
+            detail="Google TTS settings use sample rate 24000; phone calls adapt audio to their transport",
         )
 
     if (

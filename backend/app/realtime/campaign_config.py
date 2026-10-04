@@ -19,7 +19,9 @@ def _with_campaign_context(prompt, script, attr):
     information." and opened with a generic line that had nothing to do with
     the campaign. Realtime-specific instructions, when set, still win.
     """
-    campaign_rt = script.get("realtime_prompt") or {}
+    campaign_rt = script.get("realtime_prompt")
+    if campaign_rt is None:
+        campaign_rt = (script.get("realtime_settings") or {}).get("prompt") or {}
     if isinstance(campaign_rt, dict) and str(campaign_rt.get("instructions") or "").strip():
         return prompt
     guidance = (
@@ -65,27 +67,21 @@ def build_realtime_campaign_config(*, source, campaign, script, gateway_type,
     def clean(value):
         return " ".join(str(value or "").replace("{", "").replace("}", "").split())[:160]
 
-    prompt = RealtimePrompt.model_validate(script.get("realtime_prompt") or (source.realtime_settings or {}).get("prompt") or {})
+    prompt_data = script.get("realtime_prompt")
+    if prompt_data is None:
+        prompt_data = (script.get("realtime_settings") or {}).get("prompt")
+    if prompt_data is None:
+        prompt_data = (source.realtime_settings or {}).get("prompt")
+    prompt = RealtimePrompt.model_validate(prompt_data or {})
     prompt = _with_campaign_context(prompt, script, attr)
     model = script.get("realtime_model") or source.realtime_model
     voice = script.get("realtime_voice") or source.realtime_voice
     settings = script.get("realtime_settings")
     if settings is None:
         settings = source.realtime_settings
-    try:
-        settings = validate_realtime(model, voice, settings)
-    except ValueError as exc:
-        # A saved voice the catalog no longer lists must not stop a call from
-        # starting; saving is where an unsupported voice is refused. Use the
-        # default voice and say so.
-        if "voice" not in str(exc).lower():
-            raise
-        import logging
-        logging.getLogger(__name__).warning(
-            "realtime_voice_unsupported voice=%r -- using the default voice", voice
-        )
-        voice = "marin"
-        settings = validate_realtime(model, voice, settings)
+    # The saved identity must remain the requested identity. Unsupported legacy
+    # selections require correction instead of silently changing the voice.
+    settings = validate_realtime(model, voice, settings)
     names = script.get("agent_names") or ["Alex"]
     name = clean(agent_name_override or names[0])
     company = clean(script.get("company_name")) or "the company"

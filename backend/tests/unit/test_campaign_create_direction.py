@@ -64,7 +64,7 @@ async def test_create_endpoint_persists_the_requested_direction(monkeypatch):
     async def _cfg(conn, tenant_id):
         return SimpleNamespace(tts_provider="cartesia", pipeline_mode="cascaded")
 
-    async def _voices(provider):
+    async def _voices(provider, *, pool=None, tenant_id=None):
         return {"voice-1"}
 
     monkeypatch.setattr("app.api.v1.endpoints.ai_options._fetch_tenant_config", _cfg)

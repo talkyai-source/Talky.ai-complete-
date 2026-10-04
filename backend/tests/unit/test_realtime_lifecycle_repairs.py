@@ -148,7 +148,7 @@ def test_legacy_settings_normalize_to_effective_wire_values():
     payload = OpenAIRealtimeSession(api_key="test", settings=settings)._build_session_update()["session"]
     assert settings["noise_reduction"] == "none"
     assert "temperature" not in payload
-    assert "noise_reduction" not in payload["audio"]["input"]
+    assert payload["audio"]["input"]["noise_reduction"] is None
     assert payload["max_output_tokens"] == settings["max_output_tokens"] == 1024
     assert payload["audio"]["input"]["turn_detection"] == settings["turn_detection"]
 

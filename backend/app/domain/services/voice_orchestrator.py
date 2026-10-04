@@ -1286,11 +1286,15 @@ class VoiceOrchestrator:
         tenant deploys keep working.
         """
         from app.infrastructure.llm.factory import LLMFactory
+        from app.domain.models.ai_config import validate_traditional_llm_selection
         from app.domain.services.credential_resolver import (
             get_credential_resolver,
         )
 
-        provider_type = config.llm_provider_type or "groq"
+        provider_type = config.llm_provider_type
+        # Invalid saved profiles must not turn into first-token failures that
+        # silently invoke an unrelated secondary model.
+        validate_traditional_llm_selection(provider_type, config.llm_model)
         api_key_env = self._LLM_API_KEY_ENV.get(provider_type)
         api_key = await get_credential_resolver().resolve(
             provider_type,
@@ -1469,6 +1473,8 @@ class VoiceOrchestrator:
         elif config.tts_provider_type == "elevenlabs":
             from app.infrastructure.tts.elevenlabs_tts import ElevenLabsTTSProvider
 
+            from app.domain.services.voice_eligibility import require_elevenlabs_voice_eligible
+            await require_elevenlabs_voice_eligible(getattr(self._db_client, "pool", None), config.tenant_id, config.voice_id)
             api_key = await resolver.resolve("elevenlabs", tenant_id=config.tenant_id)
             provider = ElevenLabsTTSProvider()
             await provider.initialize(
@@ -1566,6 +1572,8 @@ class VoiceOrchestrator:
                 from app.infrastructure.tts.elevenlabs_tts import (
                     ElevenLabsTTSProvider,
                 )
+                from app.domain.services.voice_eligibility import require_elevenlabs_voice_eligible
+                await require_elevenlabs_voice_eligible(getattr(self._db_client, "pool", None), config.tenant_id, secondary_voice)
                 provider = ElevenLabsTTSProvider()
                 await provider.initialize({
                     "api_key": api_key,

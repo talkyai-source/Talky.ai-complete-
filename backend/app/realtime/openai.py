@@ -244,6 +244,12 @@ class OpenAIRealtimeSession:
         self._tools = list(tools or [])
         from app.realtime.config import normalize_realtime_settings
         self._settings = normalize_realtime_settings(settings)
+        self._handshake_error = None
+        self._requested_profile = None
+        self._submitted_profile = None
+        self._acknowledged_profile = None
+        self._session_update_acknowledged = False
+        self._compatibility_changes = []
         self._call_id = call_id or "realtime"
 
         self._ws: Optional[Any] = None
@@ -327,18 +333,19 @@ class OpenAIRealtimeSession:
 
             # 2+3. Send our session.update and wait for session.updated.
             ok = await self._send_session_update(include_reasoning=True)
-            # CRITICAL fail-soft: if the handshake was rejected (e.g. the server
-            # doesn't accept the reasoning field on this model), RETRY ONCE
-            # without it so a single unknown field never drops the whole call to
-            # cascaded. The socket is still open (an `error` event is a normal
-            # message, not a close), so a re-sent session.update can succeed.
-            if not ok:
+            # Preserve the bounded legacy compatibility retry only when the
+            # provider explicitly identifies this exact unsupported field.
+            # Auth, model, capacity and unclassified errors cannot change a
+            # selected setting. Record the omission as unapplied, not as proof
+            # that the requested reasoning effort is effective.
+            if not ok and self._reasoning_field_unsupported():
                 reff = self._settings.get("reasoning_effort", _DEFAULT_REASONING_EFFORT)
                 if reff and str(reff).lower() != "none":
                     logger.warning(
                         "realtime: session.update rejected; retrying once WITHOUT "
                         "reasoning field call=%s", self._call_id,
                     )
+                    self._compatibility_changes.append("reasoning_field_unsupported_omitted")
                     ok = await self._send_session_update(include_reasoning=False)
             if not ok:
                 logger.error("realtime: session.update not confirmed call=%s",
@@ -360,7 +367,42 @@ class OpenAIRealtimeSession:
             "realtime session ready call=%s model=%s voice=%s tools=%d",
             self._call_id, self._model, self._voice, len(self._tools),
         )
+        logger.info("realtime_effective_profile call=%s profile=%s",
+                    self._call_id, json.dumps(self.effective_profile(), sort_keys=True))
         return True
+
+    def _reasoning_field_unsupported(self) -> bool:
+        error = self._handshake_error or {}
+        return (error.get("code") in {"unknown_parameter", "unsupported_parameter"}
+                and error.get("param") in {"session.reasoning", "session.reasoning.effort"})
+
+    def effective_profile(self) -> dict:
+        """Serialized/acknowledged evidence; no assumed provider defaults."""
+        from app.realtime.profile import instruction_digest, knowledge_reference
+        return {
+            "engine": "native_realtime", "provider": self._settings.get("provider", "openai"),
+            "agent_selection": bool(getattr(self, "_agent_id", None)),
+            "temperature": "not_applicable",
+            "prompt_identity": getattr(self, "_prompt_identity", None),
+            "requested_controls": {
+                "model": self._model,
+                "reasoning_effort": self._settings.get("reasoning_effort", "high" if self._settings.get("provider") == "xai" else _DEFAULT_REASONING_EFFORT),
+            },
+            "knowledge_reference": knowledge_reference(getattr(self, "_knowledge_reference_session", None)),
+            "requested": self._requested_profile,
+            "submitted": self._submitted_profile,
+            "acknowledged": self._acknowledged_profile,
+            "session_update_acknowledged": self._session_update_acknowledged,
+            "compatibility_changes": list(self._compatibility_changes),
+            "last_submitted_instructions_sha256": instruction_digest(self._last_published_instructions),
+        }
+
+    def _record_instruction_submission(self, instructions: str) -> None:
+        from app.realtime.profile import instruction_digest, knowledge_reference
+        self._last_published_instructions = instructions
+        logger.info("realtime_instructions_submitted call=%s sha256=%s knowledge=%s",
+                    self._call_id, instruction_digest(instructions),
+                    json.dumps(knowledge_reference(getattr(self, "_knowledge_reference_session", None)), sort_keys=True))
 
     def _instruction_update(self, instructions):
         return {"type": "realtime", "instructions": instructions}
@@ -381,9 +423,8 @@ class OpenAIRealtimeSession:
         our voice, our clean instructions, turn detection, noise reduction,
         reasoning effort, and the tool list.
 
-        ``include_reasoning=False`` builds the payload WITHOUT the reasoning
-        field — the fail-soft retry connect() uses if the first handshake is
-        rejected, so an unsupported field can never kill the whole call.
+        ``include_reasoning=False`` is the single compatibility retry for an
+        explicitly unsupported reasoning field, never an unrelated rejection.
         """
         # Accept both the full API objects and the simple values the AI-Options
         # frontend sends (eagerness "low|medium|high|auto"; noise "near_field|
@@ -406,7 +447,8 @@ class OpenAIRealtimeSession:
 
         nr = self._settings.get("noise_reduction")
         if isinstance(nr, str):
-            # "none" disables noise reduction (omit the block).
+            # Explicit null disables noise reduction; omission would delegate
+            # to the provider/session's default instead of stating the choice.
             noise_reduction = None if nr == "none" else {"type": nr}
         elif isinstance(nr, dict):
             noise_reduction = nr
@@ -439,8 +481,7 @@ class OpenAIRealtimeSession:
                     "format": {"type": "audio/pcmu"},
                     "transcription": {"model": transcription_model},
                     "turn_detection": turn_detection,
-                    # noise_reduction omitted when the caller chose "none".
-                    **({"noise_reduction": noise_reduction} if noise_reduction else {}),
+                    "noise_reduction": noise_reduction,
                 },
                 "output": output_block,
             },
@@ -455,8 +496,8 @@ class OpenAIRealtimeSession:
 
         # Reasoning effort — the voice default is "low" for latency (research).
         # Shape: session["reasoning"] = {"effort": …}. Fail-soft: omitted when
-        # falsy/"none", and dropped entirely on the retry path (include_reasoning
-        # False) so a rejected field never kills the handshake.
+        # falsy/"none" (provider default), and omitted on the exact supported
+        # compatibility retry. The profile records that omission separately.
         reasoning_effort = self._settings.get("reasoning_effort", _DEFAULT_REASONING_EFFORT)
         if include_reasoning and reasoning_effort and str(reasoning_effort).lower() != "none":
             session["reasoning"] = {"effort": reasoning_effort}
@@ -472,9 +513,16 @@ class OpenAIRealtimeSession:
         (fail-soft) or give up, so the socket stays usable for a retry."""
         if self._ws is None:
             return False
-        await self._ws.send(json.dumps(
-            self._build_session_update(include_reasoning=include_reasoning)
-        ))
+        from app.realtime.profile import session_profile
+        payload = self._build_session_update(include_reasoning=include_reasoning)
+        self._handshake_error = None
+        # A console agent chooses its own model; the local label does not prove
+        # that model was submitted or selected by the provider.
+        selected_model = None if getattr(self, "_agent_id", None) else self._model
+        self._submitted_profile = session_profile(payload["session"], model=selected_model)
+        if self._requested_profile is None:
+            self._requested_profile = self._submitted_profile
+        await self._ws.send(json.dumps(payload))
         # Ignore interleaved non-terminal events while we wait for the terminal
         # session.updated / error.
         for _ in range(10):
@@ -484,10 +532,17 @@ class OpenAIRealtimeSession:
             if not msg:
                 return False
             if msg.get("type") == "session.updated":
+                self._session_update_acknowledged = True
+                echo = msg.get("session")
+                self._acknowledged_profile = session_profile(echo) if isinstance(echo, dict) else None
                 return True
             if msg.get("type") == "error":
-                logger.error("realtime handshake error call=%s: %s",
-                             self._call_id, msg.get("error"))
+                error = msg.get("error")
+                self._handshake_error = error if isinstance(error, dict) else {}
+                # Provider error messages can contain submitted user content.
+                # Only the bounded compatibility classification is logged.
+                logger.error("realtime handshake rejected call=%s reasoning_field_unsupported=%s",
+                             self._call_id, self._reasoning_field_unsupported())
                 return False
         return False
 
@@ -552,7 +607,7 @@ class OpenAIRealtimeSession:
                     }
                 )
             )
-            self._last_published_instructions = updated
+            self._record_instruction_submission(updated)
         except websockets.exceptions.ConnectionClosed:
             self._closed.set()
         except Exception as exc:  # noqa: BLE001 - state update is fail-soft
@@ -723,7 +778,7 @@ class OpenAIRealtimeSession:
                     }
                 )
             )
-            self._last_published_instructions = updated
+            self._record_instruction_submission(updated)
             if was_active:
                 self._pending_response_create = True
                 await self._ws.send(json.dumps({"type": "response.cancel"}))

@@ -10,6 +10,8 @@ Endpoints:
 """
 from __future__ import annotations
 
+from app.domain.services.voice_eligibility import VoiceEligibilityError, require_elevenlabs_voice_eligible, filter_tenant_voices
+
 import asyncio
 import base64
 import logging
@@ -19,7 +21,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from app.api.v1.dependencies import get_current_user
+from app.api.v1.dependencies import get_current_user, get_db_client
 from pydantic import BaseModel
 
 from app.domain.models.ai_config import VoiceInfo
@@ -97,7 +99,7 @@ class VoicePreviewResponse(BaseModel):
 
 
 @router.post("/voices/preview", response_model=VoicePreviewResponse)
-async def preview_voice(request: VoicePreviewRequest, current_user=Depends(get_current_user)):
+async def preview_voice(request: VoicePreviewRequest, current_user=Depends(get_current_user), db_client=Depends(get_db_client)):
     """
     Generate a voice preview audio sample.
 
@@ -122,19 +124,6 @@ async def preview_voice(request: VoicePreviewRequest, current_user=Depends(get_c
         return VoicePreviewResponse(**await preview_voice(request.voice_id, request.text, tenant_id=getattr(current_user, "tenant_id", None)))
 
     try:
-        # Serve from disk cache when available — no external API call needed.
-        cached = _load_preview_cache(request.voice_id)
-        if cached:
-            audio_base64 = base64.b64encode(cached).decode("utf-8")
-            duration_seconds = len(cached) / (24000 * 4)
-            return VoicePreviewResponse(
-                voice_id=request.voice_id,
-                voice_name=request.voice_id,
-                audio_base64=audio_base64,
-                duration_seconds=duration_seconds,
-                latency_ms=0.0,
-            )
-
         tts = None
         cartesia_voices, deepgram_voices = await asyncio.gather(
             _get_live_cartesia_voices(),
@@ -165,6 +154,27 @@ async def preview_voice(request: VoicePreviewRequest, current_user=Depends(get_c
             or elevenlabs_voice
         )
         voice_name = voice_info.name if voice_info else "Unknown Voice"
+        if voice_info is None:
+            raise HTTPException(400, "Unknown voice_id")
+        if elevenlabs_voice is not None:
+            try:
+                await require_elevenlabs_voice_eligible(db_client.pool, getattr(current_user, "tenant_id", None), voice_id, voices=[elevenlabs_voice])
+            except VoiceEligibilityError as exc:
+                raise HTTPException(exc.status_code, str(exc)) from exc
+
+        # Serve from disk cache when available — no external API call needed.
+        cached = _load_preview_cache(request.voice_id)
+        if cached:
+            audio_base64 = base64.b64encode(cached).decode("utf-8")
+            duration_seconds = len(cached) / (24000 * 4)
+            return VoicePreviewResponse(
+                voice_id=request.voice_id,
+                voice_name=request.voice_id,
+                audio_base64=audio_base64,
+                duration_seconds=duration_seconds,
+                latency_ms=0.0,
+            )
+
 
         if is_cartesia:
             if not os.getenv("CARTESIA_API_KEY"):
@@ -314,7 +324,7 @@ async def get_prefetch_status():
 
 
 @router.post("/voices/prefetch")
-async def prefetch_all_voice_samples():
+async def prefetch_all_voice_samples(current_user=Depends(get_current_user), db_client=Depends(get_db_client)):
     """
     Pre-download and cache preview samples for every available voice.
 
@@ -326,6 +336,10 @@ async def prefetch_all_voice_samples():
     without hitting any external API.
     """
     all_voices = await _get_all_tts_voices()
+    try:
+        all_voices = await filter_tenant_voices(db_client.pool, getattr(current_user, "tenant_id", None), all_voices)
+    except VoiceEligibilityError as exc:
+        raise HTTPException(exc.status_code, str(exc)) from exc
     sample_rate = 24000
 
     results: dict = {"ok": [], "failed": [], "skipped": []}

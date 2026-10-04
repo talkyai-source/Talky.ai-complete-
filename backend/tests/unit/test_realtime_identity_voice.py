@@ -33,8 +33,8 @@ def test_realtime_catalogue_metadata_is_used_without_guessing(voice, gender):
     assert resolve_voice_gender(voice) == gender
 
 
-def test_unknown_realtime_voice_does_not_borrow_cascaded_voice_gender():
+def test_neutral_realtime_voice_does_not_borrow_cascaded_voice_gender():
     cfg = build_telephony_session_config(campaign=campaign(), ai_config_override=AIProviderConfig(
-        pipeline_mode="realtime", realtime_voice="future-unknown", tts_voice_id="aura-2-zeus-en",
+        pipeline_mode="realtime", realtime_voice="alloy", tts_voice_id="aura-2-zeus-en",
     ))
     assert cfg.agent_config.agent_name == "Sarah"

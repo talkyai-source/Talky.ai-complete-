@@ -140,7 +140,12 @@ async def test_get_config_bootstraps_missing_row_with_tenant_context():
 @pytest.mark.asyncio
 async def test_save_config_writes_with_tenant_context(monkeypatch):
     from app.api.v1.endpoints.ai_options import config as cfg_mod
-    from app.domain.models.ai_config import AIProviderConfig
+    from app.domain.models.ai_config import AIProviderConfig, GROQ_MODELS
+
+    from unittest.mock import AsyncMock
+    from app.domain.services import voice_clone_service
+    monkeypatch.setattr(voice_clone_service, "owned_voice_ids", AsyncMock(return_value=set()))
+    monkeypatch.setattr(voice_clone_service, "all_platform_voice_ids", AsyncMock(return_value=set()))
 
     # save_config validates model + voice against the ElevenLabs live catalog;
     # keep the test off the network.
@@ -148,7 +153,7 @@ async def test_save_config_writes_with_tenant_context(monkeypatch):
         return [SimpleNamespace(id="eleven_flash_v2_5")]
 
     async def _voices():
-        return [SimpleNamespace(id="lfPTQbwnu1oXQ9g6V0r4")]
+        return [SimpleNamespace(id="lfPTQbwnu1oXQ9g6V0r4", provider="elevenlabs", provider_is_public=True)]
 
     monkeypatch.setattr(cfg_mod, "get_elevenlabs_tts_models_for_current_key", _models)
     monkeypatch.setattr(cfg_mod, "get_elevenlabs_voices_for_current_key", _voices)
@@ -158,7 +163,7 @@ async def test_save_config_writes_with_tenant_context(monkeypatch):
     user = SimpleNamespace(tenant_id=TENANT, id="user-1")
     row = {k: v for k, v in _existing_row().items()
            if k not in {"voice_tuning", "realtime_settings"} and v is not None}
-    row["llm_model"] = cfg_mod.GROQ_MODELS[0].id
+    row["llm_model"] = GROQ_MODELS[0].id
     body = AIProviderConfig(**row)
 
     await cfg_mod.save_config(config=body, current_user=user, db_client=db_client)

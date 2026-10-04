@@ -104,6 +104,7 @@ async def _upsert_tenant_config(conn, tenant_id: str, config: AIProviderConfig) 
     import json as _json
     from app.domain.services.voice_tuning import get_voice_tuning_resolver
 
+    coerced = {}
     if config.voice_tuning:
         coerced = get_voice_tuning_resolver().coerce_user_partial(
             config.voice_tuning
@@ -181,6 +182,8 @@ async def _upsert_tenant_config(conn, tenant_id: str, config: AIProviderConfig) 
         config.realtime_voice,
         realtime_settings_json,
     )
+    # The save response must describe the same canonical values a reload reads.
+    config.voice_tuning = coerced or None
 
 
 # --- audio format helper ----------------------------------------------

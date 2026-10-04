@@ -227,6 +227,14 @@ const RawProviderListSchema = z
     })
     .passthrough();
 
+const VoiceTuningSchema = z.object({
+    stt_eot_threshold: z.number().optional(),
+    stt_eager_eot_threshold: z.number().nullable().optional(),
+    stt_eot_timeout_ms: z.number().optional(),
+    turn_0_min_confidence: z.number().optional(),
+    turn_0_min_alpha_chars: z.number().optional(),
+});
+
 const RawConfigSchema = z
     .object({
         llm_provider: z.string().optional(),
@@ -253,6 +261,8 @@ const RawConfigSchema = z
         ttsVoiceId: z.string().optional(),
         tts_sample_rate: z.number().optional(),
         ttsSampleRate: z.number().optional(),
+        voice_tuning: VoiceTuningSchema.nullish(),
+        voiceTuning: VoiceTuningSchema.nullish(),
         pipeline_mode: z.enum(["cascaded", "realtime"]).optional(),
         pipelineMode: z.enum(["cascaded", "realtime"]).optional(),
         realtime_model: z.string().optional(),
@@ -429,6 +439,7 @@ function normalizeConfig(raw: z.infer<typeof RawConfigSchema>): AIProviderConfig
         tts_model: requireNonEmptyString("tts_model", raw.tts_model, raw.ttsModel),
         tts_voice_id: requireNonEmptyString("tts_voice_id", raw.tts_voice_id, raw.ttsVoiceId),
         tts_sample_rate: requireFiniteNumber("tts_sample_rate", raw.tts_sample_rate, raw.ttsSampleRate),
+        voice_tuning: raw.voice_tuning !== undefined ? raw.voice_tuning : raw.voiceTuning,
         // Phase 2 — optional; missing means "cascaded" (today's behavior).
         pipeline_mode: raw.pipeline_mode ?? raw.pipelineMode,
         realtime_model: pickNonEmptyString(raw.realtime_model, raw.realtimeModel),

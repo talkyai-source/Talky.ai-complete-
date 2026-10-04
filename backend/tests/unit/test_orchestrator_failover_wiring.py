@@ -203,7 +203,7 @@ async def test_tts_failover_enabled_cartesia_wraps_with_elevenlabs_default(monke
         return_value=_resolver("k"),
     ), patch(
         "app.infrastructure.tts.cartesia.CartesiaTTSProvider", cart_cls,
-    ), patch(
+    ), patch("app.domain.services.voice_eligibility.require_elevenlabs_voice_eligible", AsyncMock()), patch(
         "app.infrastructure.tts.elevenlabs_tts.ElevenLabsTTSProvider", eleven_cls,
     ):
         result = await VoiceOrchestrator()._create_tts_provider(cfg)
@@ -265,7 +265,7 @@ async def test_tts_voice_map_flows_into_policy(monkeypatch):
     ), patch(
         "app.infrastructure.tts.cartesia.CartesiaTTSProvider",
         MagicMock(return_value=cart),
-    ), patch(
+    ), patch("app.domain.services.voice_eligibility.require_elevenlabs_voice_eligible", AsyncMock()), patch(
         "app.infrastructure.tts.elevenlabs_tts.ElevenLabsTTSProvider",
         MagicMock(return_value=eleven),
     ):

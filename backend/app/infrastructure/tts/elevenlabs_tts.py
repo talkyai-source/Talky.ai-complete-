@@ -99,6 +99,7 @@ class ElevenLabsTTSProvider(TTSProvider):
         self._model_id = config.get("model_id") or config.get("model") or "eleven_flash_v2_5"
         self._voice_id = config.get("voice_id", "")
         self._sample_rate = int(config.get("sample_rate", 24000))
+        self._output_format_for_rate(self._sample_rate)
 
         # keepalive_timeout=30s keeps the connection to ElevenLabs alive between
         # sentences so subsequent synthesis calls skip the TLS handshake.
@@ -345,4 +346,6 @@ class ElevenLabsTTSProvider(TTSProvider):
             24000: "pcm_24000",
             44100: "pcm_44100",
         }
-        return mapping.get(sample_rate, "pcm_24000")
+        if sample_rate not in mapping:
+            raise ValueError(f"Unsupported ElevenLabs sample rate: {sample_rate}")
+        return mapping[sample_rate]

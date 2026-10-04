@@ -25,9 +25,9 @@ Resolution priority (highest first, T4-C3):
 3. Global env default — ``TELEPHONY_TUNING_DEFAULT_JSON``.
 4. Hard-coded defaults matching pre-T3.9 production values.
 
-Bad JSON, unknown keys, and wrong types are logged and skipped — the
-resolver never raises. A misconfigured DB row, env var, or code default
-must not take a tenant's calls offline.
+Malformed legacy fields are logged and skipped. API writes reject invalid
+known values. An incompatible final eager/EOT pair is rejected before connecting
+rather than silently changing the saved turn-detection policy.
 
 Example operator setups:
 
@@ -48,6 +48,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 import threading
 from dataclasses import asdict, dataclass
@@ -87,13 +88,39 @@ _DEFAULT_TUNING_DICT: Dict[str, Any] = asdict(VoiceTuning())
 # The set of fields the resolver knows how to coerce. Anything outside
 # this set in operator JSON is logged and ignored — protects against a
 # typo silently taking effect when a future field name lands.
-_FIELD_COERCERS: Dict[str, Any] = {
-    "stt_eot_threshold": float,
-    "stt_eager_eot_threshold": lambda v: None if v is None else float(v),
-    "stt_eot_timeout_ms": int,
-    "turn_0_min_confidence": float,
-    "turn_0_min_alpha_chars": int,
+_FIELD_RANGES = {
+    "stt_eot_threshold": (0.5, 0.9),
+    "stt_eager_eot_threshold": (0.3, 0.9),
+    "stt_eot_timeout_ms": (500, 10000),
+    "turn_0_min_confidence": (0.0, 1.0),
+    "turn_0_min_alpha_chars": (1, 10),
 }
+_INTEGER_FIELDS = {"stt_eot_timeout_ms", "turn_0_min_alpha_chars"}
+
+
+def _coerce_value(key, value):
+    if key == "stt_eager_eot_threshold" and value is None:
+        return None
+    if isinstance(value, bool):
+        raise ValueError(f"{key} must be numeric")
+    try:
+        number = float(value)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(f"{key} must be numeric") from exc
+    low, high = _FIELD_RANGES[key]
+    if not math.isfinite(number) or not low <= number <= high:
+        raise ValueError(f"{key} must be within the app-supported range {low} to {high}")
+    if key in _INTEGER_FIELDS:
+        if not number.is_integer():
+            raise ValueError(f"{key} must be an integer")
+        return int(number)
+    return number
+
+
+def _validate_threshold_order(data):
+    eager, end = data.get("stt_eager_eot_threshold"), data.get("stt_eot_threshold")
+    if eager is not None and end is not None and eager > end:
+        raise ValueError("stt_eager_eot_threshold must not exceed stt_eot_threshold")
 
 
 class VoiceTuningResolver:
@@ -147,6 +174,7 @@ class VoiceTuningResolver:
             if tenant_partial:
                 merged.update(tenant_partial)
 
+        _validate_threshold_order(merged)
         return VoiceTuning(**merged)
 
     async def for_tenant_async(self, tenant_id: Optional[str], *, require_available: bool = False) -> VoiceTuning:
@@ -207,6 +235,7 @@ class VoiceTuningResolver:
                 if coerced:
                     merged.update(coerced)
 
+        _validate_threshold_order(merged)
         return VoiceTuning(**merged)
 
     def reset_cache(self) -> None:
@@ -217,13 +246,22 @@ class VoiceTuningResolver:
             self._cached_overrides = None
 
     def coerce_user_partial(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """Public entry point for validating a partial tuning dict
-        coming from the API or another untrusted source. Drops unknown
-        keys and clamps wrong-typed values the same way env loads do —
-        callers can hand the result straight to a SQL INSERT without
-        worrying about malformed JSON poisoning the DB.
+        """Validate known API fields without silently dropping invalid input.
+
+        Unknown legacy keys remain ignored. A missing threshold partner is
+        validated after DB/env/default resolution, never guessed here.
         """
-        return self._coerce_partial(data, scope="api")
+        coerced = {key: _coerce_value(key, value) for key, value in data.items() if key in _FIELD_RANGES}
+        _validate_threshold_order(coerced)
+        return coerced
+
+    def validate_user_partial_for_tenant(self, data: Dict[str, Any], tenant_id: str) -> Dict[str, Any]:
+        """Check the tuple that will resolve after replacing the saved override."""
+        partial = self.coerce_user_partial(data)
+        defaults, overrides = self._ensure_loaded()
+        merged = {**defaults, **overrides.get(str(tenant_id), {}), **partial}
+        _validate_threshold_order(merged)
+        return partial
 
     # ------------------------------------------------------------------
     # internals
@@ -302,15 +340,14 @@ class VoiceTuningResolver:
     def _coerce_partial(self, data: Dict[str, Any], *, scope: str) -> Dict[str, Any]:
         coerced: Dict[str, Any] = {}
         for key, value in data.items():
-            coercer = _FIELD_COERCERS.get(key)
-            if coercer is None:
+            if key not in _FIELD_RANGES:
                 logger.warning(
                     "voice_tuning_unknown_field scope=%s name=%s — ignored", scope, key,
                 )
                 continue
             try:
-                coerced[key] = coercer(value)
-            except (TypeError, ValueError) as exc:
+                coerced[key] = _coerce_value(key, value)
+            except (TypeError, ValueError, OverflowError) as exc:
                 logger.warning(
                     "voice_tuning_field_skipped scope=%s name=%s value=%r err=%s",
                     scope, key, value, exc,

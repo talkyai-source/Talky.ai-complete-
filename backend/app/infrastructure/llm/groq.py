@@ -26,6 +26,7 @@ from app.domain.models.conversation import Message, MessageRole
 from app.infrastructure.providers.key_pool import KeyPool, parse_keys_csv
 from app.infrastructure.providers.provider_concurrency import get_provider_guard
 from app.utils.resilience import CircuitBreaker, CircuitOpenError
+from app.infrastructure.llm.request_profile import record_traditional_request
 
 from app.infrastructure.llm.streaming import (
     stream_with_timeout, stream_tool_turn, close_stream,
@@ -47,7 +48,8 @@ _LLM_RETRY_BASE_DELAY = 0.3  # 300ms — fast first retry for voice latency budg
 # thinking can't be fully disabled (GPT-OSS floors at reasoning_effort="low";
 # Qwen3 only when run with effort != "none") a tight cap can be eaten by
 # reasoning, leaving zero answer tokens. Mirror the Gemini fix: reserve thinking
-# headroom ON TOP of the answer budget so reasoning never starves the reply.
+# headroom ON TOP of the configured reply target. The shared ceiling does not
+# guarantee a separate visible-token allowance; truncation is still possible.
 # Models with thinking fully OFF (llama/kimi, or Qwen3 effort="none") get NO
 # reserve — their max_tokens is purely the answer. Env-tunable.
 _THINKING_RESERVE_TOKENS = int(os.getenv("GROQ_THINKING_RESERVE_TOKENS", "1024"))
@@ -502,6 +504,7 @@ class GroqLLMProvider(LLMProvider):
         if not self._client:
             raise RuntimeError("Groq client not initialized. Call initialize() first.")
         
+        configured_temperature = self._temperature if temperature is None else temperature
         # Apply deterministic mode settings if enabled
         if self._deterministic_mode:
             temperature = 0.0
@@ -513,6 +516,9 @@ class GroqLLMProvider(LLMProvider):
         
         # Get model from kwargs or use configured default
         model = kwargs.get("model", self._model)
+        effort = kwargs.get("reasoning_effort")
+        if self._is_gpt_oss_model(model) and effort is not None and effort not in {"low", "medium", "high"}:
+            raise ValueError("Groq GPT-OSS reasoning_effort must be low, medium, or high")
 
         # On-demand tool-calling (opt-in, see voice_pipeline/knowledge_tool.py).
         # All default None → the normal non-tool path is byte-for-byte unchanged.
@@ -653,9 +659,9 @@ class GroqLLMProvider(LLMProvider):
                 thinking_floored = reasoning_effort not in (None, "none")
 
             # Reasoning tokens share the max_completion_tokens ceiling with the
-            # answer. When thinking is on, add a reserve on top so the caller's
-            # max_tokens stays fully available for the visible reply (mirrors the
-            # Gemini additive-budget fix). Non-thinking models keep max_tokens as-is.
+            # answer. Add headroom when thinking is on, without promising a
+            # separate visible-token allowance. Non-thinking models keep the
+            # configured ceiling as-is.
             if thinking_floored:
                 request_kwargs["max_completion_tokens"] = (
                     max_tokens + _THINKING_RESERVE_TOKENS
@@ -687,6 +693,11 @@ class GroqLLMProvider(LLMProvider):
                         )
                         try:
                             async with self._circuit:
+                                record_traditional_request(
+                                    provider=self.name, request=request_kwargs, instructions=system_prompt,
+                                    configured_temperature=configured_temperature,
+                                    configured_max_tokens=max_tokens,
+                                )
                                 stream = await chosen_client.chat.completions.create(
                                     **request_kwargs
                                 )

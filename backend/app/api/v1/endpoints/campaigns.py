@@ -365,7 +365,7 @@ def _build_validated_script_config(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-async def _valid_voice_ids_for_provider(provider: str) -> set[str]:
+async def _valid_voice_ids_for_provider(provider: str, *, pool=None, tenant_id=None) -> set[str]:
     """The set of voice ids valid for a given TTS provider.
 
     Single source of truth for create/update/bulk-apply so a campaign's
@@ -386,7 +386,12 @@ async def _valid_voice_ids_for_provider(provider: str) -> set[str]:
         from app.api.v1.endpoints.ai_options._catalog import _get_live_cartesia_voices
         return {v.id for v in await _get_live_cartesia_voices()}
     # default / "elevenlabs"
-    return {v.id for v in await get_elevenlabs_voices_for_current_key()}
+    from app.domain.services.voice_eligibility import VoiceEligibilityError, filter_tenant_voices
+    try:
+        voices = await filter_tenant_voices(pool, tenant_id, await get_elevenlabs_voices_for_current_key())
+    except VoiceEligibilityError as exc:
+        raise HTTPException(exc.status_code, str(exc)) from exc
+    return {v.id for v in voices}
 
 
 @router.get("/")
@@ -599,7 +604,7 @@ async def create_campaign(
         from app.api.v1.endpoints.campaign_voice_config import build_campaign_voice_config
         existing_script = None
         script_config, selected_voice_id = await build_campaign_voice_config(
-            campaign_data, ai_config, existing=existing_script,
+            campaign_data, ai_config, existing=existing_script, pool=db_client.pool, tenant_id=current_user.tenant_id,
         )
         if campaign_data.agent_name_genders:
             script_config["agent_name_genders"] = campaign_data.agent_name_genders
@@ -661,7 +666,7 @@ async def apply_tts_config(
 
     provider = (body.tts_provider or "").strip()
     voice_id = (body.tts_voice_id or "").strip()
-    valid_voice_ids = await _valid_voice_ids_for_provider(provider)
+    valid_voice_ids = await _valid_voice_ids_for_provider(provider, pool=db_client.pool, tenant_id=current_user.tenant_id)
     if voice_id not in valid_voice_ids:
         raise HTTPException(
             status_code=400,
@@ -762,7 +767,7 @@ async def update_campaign(
             import json
             existing_script = json.loads(existing_script)
         script_config, selected_voice_id = await build_campaign_voice_config(
-            campaign_data, ai_config, existing=existing_script,
+            campaign_data, ai_config, existing=existing_script, pool=db_client.pool, tenant_id=current_user.tenant_id,
         )
         if campaign_data.agent_name_genders:
             script_config["agent_name_genders"] = campaign_data.agent_name_genders

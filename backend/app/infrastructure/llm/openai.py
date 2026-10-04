@@ -14,6 +14,7 @@ import os
 import httpx
 
 from app.domain.interfaces.llm_provider import LLMProvider
+from app.infrastructure.llm.request_profile import record_traditional_request
 from app.infrastructure.llm.streaming import (
     LLMStreamStalled, LLMTimeoutError, accumulate_tool_calls, finalize_tool_calls,
     stream_tool_turn, stream_with_timeout,
@@ -94,6 +95,11 @@ class OpenAILLMProvider(LLMProvider):
         received = False
         try:
             async with self._guard.acquire():
+                record_traditional_request(
+                    provider=self.name, request=request, instructions=system_prompt,
+                    configured_temperature=request["temperature"],
+                    configured_max_tokens=request["max_completion_tokens"],
+                )
                 async with self._client.stream("POST", "chat/completions", json=request) as response:
                     response.raise_for_status()
                     async for line in response.aiter_lines():

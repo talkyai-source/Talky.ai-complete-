@@ -21,9 +21,10 @@ from typing import AsyncIterator, List, Optional
 from app.domain.interfaces.llm_provider import LLMProvider
 from app.domain.models.conversation import Message, MessageRole
 from app.utils.resilience import CircuitBreaker, CircuitOpenError
+from app.infrastructure.llm.request_profile import record_traditional_request
 
 from app.infrastructure.llm.streaming import (
-    stream_with_timeout, close_stream, execute_tool_call,
+    LLMStreamStalled, stream_with_timeout, close_stream, execute_tool_call,
 )
 
 logger = logging.getLogger(__name__)
@@ -41,9 +42,9 @@ _LLM_RETRY_BASE_DELAY = 0.3  # 300ms — fast first retry for voice latency budg
 # thinking can't be fully disabled (3.x "minimal" floor) a tight cap gets eaten
 # by thinking and the model yields zero text → a silent agent. So we reserve
 # room for thinking ON TOP of the caller's answer budget: max_output_tokens =
-# thinking_reserve + ai_config.max_tokens. The configured max_tokens then caps
-# the ANSWER, untouched by thinking. Pad is generous because "minimal" thinking
-# length is non-deterministic; env-tunable for operators.
+# thinking_reserve + ai_config.max_tokens. This is shared headroom, not a
+# separate visible-token cap or a guarantee against truncation. The reserve
+# is env-tunable for operators.
 _THINKING_RESERVE_TOKENS = int(os.getenv("GEMINI_THINKING_RESERVE_TOKENS", "1024"))
 
 # Imported for the base class below, aliased so the name `LLMTimeoutError`
@@ -267,11 +268,11 @@ class GeminiLLMProvider(LLMProvider):
     def _effective_max_output_tokens(
         cls, model: str, thinking_budget: Optional[int], max_tokens: int
     ) -> int:
-        """max_output_tokens that keeps the ANSWER budget intact under thinking.
+        """Shared max_output_tokens ceiling with headroom for thinking.
 
         Gemini's single ceiling is shared by thinking + answer, so we send
-        ``thinking_reserve + max_tokens`` whenever thinking is on, leaving the
-        caller's ``max_tokens`` entirely for the visible reply:
+        ``thinking_reserve + max_tokens`` whenever thinking is on. This does
+        not reserve a guaranteed visible-token allowance:
           - thinking OFF (2.5, budget 0)          -> no reserve, answer gets it all
           - thinking BUDGETED (2.5, budget N>0)   -> reserve exactly N
           - thinking FLOORED (3.x 'minimal')      -> reserve a fixed pad
@@ -289,6 +290,25 @@ class GeminiLLMProvider(LLMProvider):
     # ------------------------------------------------------------------
     # Streaming
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _validate_reasoning_kwargs(kwargs) -> None:
+        if kwargs.get("reasoning_effort") is not None:
+            raise ValueError(
+                "Gemini does not support reasoning_effort; use its thinking_budget control"
+            )
+
+    @staticmethod
+    def _completed_chunk(chunk) -> bool:
+        """Validate the decision before exposing its text or function calls."""
+        candidate = (getattr(chunk, "candidates", None) or [None])[0]
+        reason = getattr(candidate, "finish_reason", None)
+        if reason is None:
+            return False
+        reason = getattr(reason, "value", reason)
+        if reason != "STOP":
+            raise LLMStreamStalled(f"Gemini response incomplete: {reason}")
+        return True
 
     async def stream_chat(
         self,
@@ -318,6 +338,7 @@ class GeminiLLMProvider(LLMProvider):
         if not self._client:
             raise RuntimeError("Gemini client not initialized. Call initialize() first.")
 
+        self._validate_reasoning_kwargs(kwargs)
         from google.genai import types as genai_types
 
         temperature = temperature if temperature is not None else self._temperature
@@ -374,8 +395,8 @@ class GeminiLLMProvider(LLMProvider):
         # Per-call thinking budget override, falling back to the provider default.
         thinking_budget = kwargs.get("thinking_budget", self._thinking_budget)
 
-        # Reserve thinking headroom on top of the answer budget so thinking can
-        # never starve the reply to empty (see _effective_max_output_tokens).
+        # Add shared thinking headroom to the reply target. Terminal-status
+        # checks still reject empty or partial responses cut by this ceiling.
         eff_max_output_tokens = self._effective_max_output_tokens(
             model, thinking_budget, max_tokens
         )
@@ -408,21 +429,31 @@ class GeminiLLMProvider(LLMProvider):
         for _attempt in range(_LLM_MAX_RETRIES + 1):
             try:
                 async with self._circuit:
+                    record_traditional_request(
+                        provider=self.name,
+                        request={"model": model, "contents": contents, "config": gen_config},
+                        instructions=system_prompt, configured_temperature=temperature,
+                        configured_max_tokens=max_tokens,
+                    )
                     stream = await self._client.aio.models.generate_content_stream(
                         model=model,
                         contents=contents,
                         config=gen_config,
                     )
-
+                    terminal_seen = False
                     try:
                         async for chunk in stream:
+                            terminal_seen = self._completed_chunk(chunk) or terminal_seen
                             # chunk.text may be None for safety-flag chunks or
                             # response-metadata chunks that carry no content.
                             text = getattr(chunk, "text", None)
                             if text:
                                 tokens_yielded += 1
                                 yield text
-
+                        if not terminal_seen:
+                            raise LLMStreamStalled(
+                                "Gemini stream ended without a terminal reason"
+                            )
                     finally:
                         await close_stream(stream)
                     logger.debug(
@@ -435,7 +466,8 @@ class GeminiLLMProvider(LLMProvider):
 
             except CircuitOpenError:
                 raise
-
+            except LLMStreamStalled:
+                raise
             except Exception as e:  # noqa: BLE001 — broad on purpose, mirrors Groq
                 last_err = e
                 if tokens_yielded > 0:
@@ -496,6 +528,7 @@ class GeminiLLMProvider(LLMProvider):
 
         if not self._client:
             raise RuntimeError("Gemini client not initialized. Call initialize() first.")
+        self._validate_reasoning_kwargs(kwargs)
         from google.genai import types as genai_types
 
         temperature = temperature if temperature is not None else self._temperature
@@ -552,6 +585,12 @@ class GeminiLLMProvider(LLMProvider):
 
         async def _stream(cfg, fcalls_out):
             async def chunks():
+                record_traditional_request(
+                    provider=self.name,
+                    request={"model": model, "contents": contents, "config": cfg},
+                    instructions=system_prompt, configured_temperature=temperature,
+                    configured_max_tokens=max_tokens,
+                )
                 stream = await self._client.aio.models.generate_content_stream(
                     model=model, contents=contents, config=cfg)
                 try:
@@ -560,8 +599,10 @@ class GeminiLLMProvider(LLMProvider):
                 finally:
                     await close_stream(stream)
 
+            terminal_seen = False
             async with self._circuit, aclosing(stream_with_timeout(chunks(), timeout_seconds, timeout_error=LLMTimeoutError)) as stream:
                 async for chunk in stream:
+                    terminal_seen = self._completed_chunk(chunk) or terminal_seen
                     candidate = (getattr(chunk, "candidates", None) or [None])[0]
                     parts = getattr(getattr(candidate, "content", None), "parts", None) or []
                     # Keep provider-returned parts intact (including thought signatures).
@@ -573,6 +614,10 @@ class GeminiLLMProvider(LLMProvider):
                     for fc in (getattr(chunk, "function_calls", None) or []):
                         if fc and fc.name:
                             fcalls_out.append(fc)
+                if not terminal_seen:
+                    raise LLMStreamStalled(
+                        "Gemini stream ended without a terminal reason"
+                    )
 
         # Round 0 — offer the tool; the model answers directly or calls it.
         round0_cfg = genai_types.GenerateContentConfig(tools=gemini_tools, **base_cfg)
