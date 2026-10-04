@@ -127,7 +127,7 @@ export function NotificationCenter({
                 {ordered.length === 0 ? (
                     <div className="rounded-2xl border border-dashed border-border px-5 py-8 text-center">
                         <div className="text-sm font-semibold text-foreground">No notifications</div>
-                        <div className="mt-1 text-sm text-muted-foreground">You’re all caught up.</div>
+                        <div className="mt-1 text-sm text-muted-foreground">No notifications saved for this account in this browser.</div>
                     </div>
                 ) : (
                     <div

@@ -9,7 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { sharedHttpClient } from "@/lib/api";
 import { isApiClientError } from "@/lib/http-client";
-import { notificationsStore } from "@/lib/notifications";
+import { useNotificationsActions } from "@/lib/notifications-client";
 import { cn } from "@/lib/utils";
 
 export type RecordingConsentMode = "disabled" | "one_party" | "two_party";
@@ -218,6 +218,7 @@ export function RecordingPolicyView({
 }
 
 export function RecordingPolicySection({ canEdit }: { canEdit: boolean }) {
+    const { create: createNotification } = useNotificationsActions();
     const [policy, setPolicy] = useState<RecordingPolicy | undefined>(undefined);
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
@@ -245,7 +246,7 @@ export function RecordingPolicySection({ canEdit }: { canEdit: boolean }) {
         try {
             const saved = await saveRecordingPolicy(input);
             setPolicy(saved);
-            notificationsStore.create({ type: "success", title: "Recording policy saved", message: saved.effect });
+            createNotification({ type: "success", title: "Recording policy saved", message: saved.effect });
             return saved;
         } finally {
             setSaving(false);

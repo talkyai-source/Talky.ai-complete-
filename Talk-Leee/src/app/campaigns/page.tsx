@@ -8,25 +8,27 @@ import { EventStream } from "@/components/campaigns/event-stream";
 import { AlertTimeline } from "@/components/campaigns/alert-timeline";
 import { CommandBar } from "@/components/campaigns/command-bar";
 import { queryKeys, useOutboundCampaigns } from "@/lib/api-hooks";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { notificationsStore } from "@/lib/notifications";
+import { useQueryClient } from "@tanstack/react-query";
+import { useNotificationMutation } from "@/lib/notification-mutations";
+import { useNotificationsActions } from "@/lib/notifications-client";
 
 export default function CampaignsPage() {
+    const { create: createNotification } = useNotificationsActions();
     const qc = useQueryClient();
     const campaignsQuery = useOutboundCampaigns();
     const campaigns = useMemo(() => campaignsQuery.data ?? [], [campaignsQuery.data]);
     const loading = campaignsQuery.isLoading;
     const error = campaignsQuery.isError ? (campaignsQuery.error instanceof Error ? campaignsQuery.error.message : "Failed to load campaigns") : "";
 
-    const pause = useMutation({
+    const pause = useNotificationMutation({
         mutationFn: (id: string) => dashboardApi.pauseCampaign(id),
         onSuccess: (res, id) => {
             qc.setQueryData<Campaign[]>(queryKeys.campaigns(), (prev) => (prev ?? []).map((c) => (c.id === id ? { ...c, status: "paused" } : c)));
             const termination = res.termination_summary;
             if (termination.status === "confirmed") {
-                notificationsStore.create({ type: "success", title: "Campaign paused", message: res.message });
+                createNotification({ type: "success", title: "Campaign paused", message: res.message });
             } else {
-                notificationsStore.create({
+                createNotification({
                     type: "warning",
                     title: termination.status === "partial" ? "Campaign paused — calls ending" : "Campaign paused — cleanup unverified",
                     message: res.message,
@@ -35,7 +37,7 @@ export default function CampaignsPage() {
         },
         onError: (err) => {
             void qc.invalidateQueries({ queryKey: queryKeys.campaigns() });
-            notificationsStore.create({
+            createNotification({
                 type: "error",
                 title: "Can't pause campaign",
                 message: err instanceof Error ? err.message : "Could not pause the campaign.",
@@ -43,13 +45,13 @@ export default function CampaignsPage() {
         },
     });
 
-    const resume = useMutation({
+    const resume = useNotificationMutation({
         mutationFn: (id: string) => dashboardApi.startCampaign(id),
         onSuccess: (_res, id) => {
             qc.setQueryData<Campaign[]>(queryKeys.campaigns(), (prev) =>
                 (prev ?? []).map((c) => (c.id === id ? { ...c, status: "running", started_at: c.started_at || new Date().toISOString() } : c))
             );
-            notificationsStore.create({ type: "success", title: "Campaign resumed", message: "Campaign started successfully." });
+            createNotification({ type: "success", title: "Campaign resumed", message: "Campaign started successfully." });
         },
         onError: (err) => {
             // The out-of-minutes 402 ships a structured detail the http
@@ -58,24 +60,24 @@ export default function CampaignsPage() {
             const message =
                 (detail && typeof detail.message === "string" && detail.message) ||
                 (err instanceof Error ? err.message : "Could not start the campaign.");
-            notificationsStore.create({ type: "error", title: "Can't start campaign", message });
+            createNotification({ type: "error", title: "Can't start campaign", message });
         },
     });
 
-    const removeCampaign = useMutation({
+    const removeCampaign = useNotificationMutation({
         // Real delete (soft-delete on the backend). Previously this called
         // stopCampaign and only filtered the row from the local cache, so the
         // campaign reappeared on refresh — the "delete doesn't work" bug.
         mutationFn: (id: string) => dashboardApi.deleteCampaign(id),
         onSuccess: (_res, id) => {
             qc.setQueryData<Campaign[]>(queryKeys.campaigns(), (prev) => (prev ?? []).filter((c) => c.id !== id));
-            notificationsStore.create({ type: "success", title: "Campaign deleted", message: "Campaign removed." });
+            createNotification({ type: "success", title: "Campaign deleted", message: "Campaign removed." });
         },
         onError: (err) => {
             // Refetch so the row that failed to delete stays visible/accurate.
             void qc.invalidateQueries({ queryKey: queryKeys.campaigns() });
             const message = err instanceof Error ? err.message : "Could not delete the campaign.";
-            notificationsStore.create({ type: "error", title: "Can't delete campaign", message });
+            createNotification({ type: "error", title: "Can't delete campaign", message });
         },
     });
 

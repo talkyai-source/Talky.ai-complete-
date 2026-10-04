@@ -1,6 +1,6 @@
 "use client";
 
-import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { backendApi, type AdminResourceListInput, type AuditLogsListInput, type SecurityEventsListInput } from "@/lib/backend-api";
 import { dashboardApi, type Call, type CallListFilters } from "@/lib/dashboard-api";
 import { isActiveCallStatus } from "@/lib/call-history-workflow";
@@ -9,6 +9,7 @@ import { extendedApi } from "@/lib/extended-api";
 import type { AssistantRun, CalendarEvent, Connector, PartnerSummary, Reminder, TenantSummary } from "@/lib/models";
 import { emailAuditStore } from "@/lib/email-audit";
 import { notificationsStore } from "@/lib/notifications";
+import { useNotificationMutation } from "@/lib/notification-mutations";
 import { captureException } from "@/lib/monitoring";
 
 function randomId() {
@@ -91,7 +92,7 @@ export function useSalesforceSettings(options?: { enabled?: boolean }) {
 
 export function useUpdateSalesforceSettings() {
     const qc = useQueryClient();
-    return useMutation({
+    return useNotificationMutation({
         mutationFn: backendApi.salesforce.updateSettings,
         onSuccess: (data) => {
             qc.setQueryData(queryKeys.salesforceSettings(), data);
@@ -105,7 +106,7 @@ export function useUpdateSalesforceSettings() {
 
 export function useRevealSalesforceWebhookToken() {
     const qc = useQueryClient();
-    return useMutation({
+    return useNotificationMutation({
         mutationFn: backendApi.salesforce.revealWebhookToken,
         onSuccess: (data) => {
             qc.setQueryData(queryKeys.salesforceSettings(), data);
@@ -118,7 +119,7 @@ export function useRevealSalesforceWebhookToken() {
 
 export function useRotateSalesforceWebhookToken() {
     const qc = useQueryClient();
-    return useMutation({
+    return useNotificationMutation({
         mutationFn: backendApi.salesforce.rotateWebhookToken,
         onSuccess: (data) => {
             qc.setQueryData(queryKeys.salesforceSettings(), data);
@@ -131,7 +132,7 @@ export function useRotateSalesforceWebhookToken() {
 }
 
 export function useTestSalesforceConnection() {
-    return useMutation({
+    return useNotificationMutation({
         mutationFn: backendApi.salesforce.test,
         onError: (err) => {
             notificationsStore.create({ type: "error", title: "Salesforce test failed", message: err instanceof Error ? err.message : "Request failed" });
@@ -141,7 +142,7 @@ export function useTestSalesforceConnection() {
 
 export function useImportSalesforcePeople() {
     const qc = useQueryClient();
-    return useMutation({
+    return useNotificationMutation({
         mutationFn: backendApi.salesforce.importPeople,
         onSuccess: (data) => {
             void qc.invalidateQueries({ queryKey: queryKeys.campaigns() });
@@ -159,7 +160,7 @@ export function useImportSalesforcePeople() {
 }
 
 export function useAuthorizeConnector() {
-    return useMutation({
+    return useNotificationMutation({
         mutationFn: backendApi.connectors.authorize,
         retry: (failureCount, err) => {
             if (failureCount >= 2) return false;
@@ -177,7 +178,7 @@ export function useAuthorizeConnector() {
 
 export function useDisconnectConnector() {
     const qc = useQueryClient();
-    return useMutation({
+    return useNotificationMutation({
         mutationFn: backendApi.connectors.disconnect,
         onError: () => {
             notificationsStore.create({ type: "error", title: "Disconnect failed", message: "Could not disconnect. Please try again." });
@@ -193,7 +194,7 @@ export function useDisconnectConnector() {
 
 export function useCreateConnector() {
     const qc = useQueryClient();
-    return useMutation({
+    return useNotificationMutation({
         mutationFn: backendApi.connectors.create,
         onMutate: async (input) => {
             await qc.cancelQueries({ queryKey: queryKeys.connectors() });
@@ -240,7 +241,7 @@ export function useCalendarEvents(options?: { enabled?: boolean }) {
 
 export function useCreateCalendarEvent() {
     const qc = useQueryClient();
-    return useMutation({
+    return useNotificationMutation({
         mutationFn: backendApi.calendarEvents.create,
         onMutate: async (input) => {
             await qc.cancelQueries({ queryKey: queryKeys.calendarEvents() });
@@ -275,7 +276,7 @@ export function useCreateCalendarEvent() {
 
 export function useCancelCalendarEvent() {
     const qc = useQueryClient();
-    return useMutation({
+    return useNotificationMutation({
         mutationFn: backendApi.calendarEvents.cancel,
         onMutate: async (id) => {
             await qc.cancelQueries({ queryKey: queryKeys.calendarEvents() });
@@ -320,7 +321,7 @@ export function useEmailTemplates(options?: { enabled?: boolean }) {
 }
 
 export function useSendEmail() {
-    return useMutation({
+    return useNotificationMutation({
         mutationFn: backendApi.email.send,
         onMutate: async (input) => {
             const auditId = emailAuditStore.createAttempt({ to: input.to, templateId: input.templateId, subject: input.subject });
@@ -340,7 +341,7 @@ export function useSendEmail() {
 
 export function useCreateReminder() {
     const qc = useQueryClient();
-    return useMutation({
+    return useNotificationMutation({
         mutationFn: backendApi.reminders.create,
         onMutate: async (input) => {
             await qc.cancelQueries({ queryKey: queryKeys.reminders() });
@@ -393,7 +394,7 @@ export function useCreateReminder() {
 
 export function useCancelReminder() {
     const qc = useQueryClient();
-    return useMutation({
+    return useNotificationMutation({
         mutationFn: backendApi.reminders.cancel,
         onMutate: async (id) => {
             await qc.cancelQueries({ queryKey: queryKeys.reminders() });
@@ -478,7 +479,7 @@ export function useAssistantRuns(q: AssistantRunsQuery) {
 
 export function useAssistantExecute() {
     const qc = useQueryClient();
-    return useMutation({
+    return useNotificationMutation({
         mutationFn: backendApi.assistant.execute,
         onMutate: async (input) => {
             const optimistic: AssistantRun = {
@@ -526,7 +527,7 @@ export function useAssistantExecute() {
 }
 
 export function useAssistantPlan() {
-    return useMutation({
+    return useNotificationMutation({
         mutationFn: backendApi.assistant.plan,
         onError: () => {
             notificationsStore.create({ type: "error", title: "Planning failed", message: "Could not generate a plan." });
@@ -536,7 +537,7 @@ export function useAssistantPlan() {
 
 export function useAssistantRunRetry() {
     const qc = useQueryClient();
-    return useMutation({
+    return useNotificationMutation({
         mutationFn: backendApi.assistantRuns.retry,
         onError: () => {
             notificationsStore.create({ type: "error", title: "Retry failed", message: "Could not retry. Please try again." });
@@ -588,7 +589,7 @@ export function useAdminTenants(q: AdminResourceListInput, options?: { enabled?:
 
 export function useSuspendPartner() {
     const qc = useQueryClient();
-    return useMutation({
+    return useNotificationMutation({
         mutationFn: backendApi.admin.partners.suspend,
         onSuccess: (updated) => {
             qc.setQueriesData<{ items: PartnerSummary[]; total?: number; page?: number; page_size?: number }>({ queryKey: ["adminPartners"] }, (cur) => {
@@ -609,7 +610,7 @@ export function useSuspendPartner() {
 
 export function useReactivatePartner() {
     const qc = useQueryClient();
-    return useMutation({
+    return useNotificationMutation({
         mutationFn: backendApi.admin.partners.reactivate,
         onSuccess: (updated) => {
             qc.setQueriesData<{ items: PartnerSummary[]; total?: number; page?: number; page_size?: number }>({ queryKey: ["adminPartners"] }, (cur) => {
@@ -630,7 +631,7 @@ export function useReactivatePartner() {
 
 export function useSuspendTenant() {
     const qc = useQueryClient();
-    return useMutation({
+    return useNotificationMutation({
         mutationFn: backendApi.admin.tenants.suspend,
         onSuccess: (updated) => {
             qc.setQueriesData<{ items: TenantSummary[]; total?: number; page?: number; page_size?: number }>({ queryKey: ["adminTenants"] }, (cur) => {
@@ -651,7 +652,7 @@ export function useSuspendTenant() {
 
 export function useReactivateTenant() {
     const qc = useQueryClient();
-    return useMutation({
+    return useNotificationMutation({
         mutationFn: backendApi.admin.tenants.reactivate,
         onSuccess: (updated) => {
             qc.setQueriesData<{ items: TenantSummary[]; total?: number; page?: number; page_size?: number }>({ queryKey: ["adminTenants"] }, (cur) => {
@@ -801,7 +802,7 @@ export function useRecordings(page: number, pageSize: number) {
 }
 
 export function useUploadContactsCsv() {
-    return useMutation({
+    return useNotificationMutation({
         mutationFn: (payload: { campaignId: string; file: File; skipDuplicates?: boolean }) =>
             extendedApi.uploadCSV(payload.campaignId, payload.file, payload.skipDuplicates ?? true),
         onError: () => {

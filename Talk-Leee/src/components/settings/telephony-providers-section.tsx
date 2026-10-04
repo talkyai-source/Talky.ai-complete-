@@ -26,7 +26,7 @@ import {
     type ProviderRow,
     type TelephonyProvider,
 } from "@/lib/telephony-api";
-import { notificationsStore } from "@/lib/notifications";
+import { useNotificationsActions } from "@/lib/notifications-client";
 import { SipTrunksList } from "@/components/settings/sip-trunks-list";
 
 function ActiveBanner({ active }: { active: ActiveProvider }) {
@@ -92,6 +92,7 @@ function ProviderCard({
     existing?: ProviderRow;
     active: ActiveProvider;
 }) {
+    const { create: createNotification } = useNotificationsActions();
     const def = provider === "twilio" ? TWILIO_FORM : VONAGE_FORM;
     const [creds, setCreds] = useState<Record<string, string>>({ ...def.initial });
     const [fromNumber, setFromNumber] = useState<string>(existing?.from_number ?? "");
@@ -121,7 +122,7 @@ function ProviderCard({
                 credentials: creds as never,
                 from_number: fromNumber || undefined,
             });
-            notificationsStore.create({
+            createNotification({
                 type: "success",
                 title: `${iconLabel} credentials saved`,
                 message: "Click Test to verify them with the provider.",
@@ -129,7 +130,7 @@ function ProviderCard({
             setCreds({ ...def.initial });
             setShowSaved(true);
         } catch (e: unknown) {
-            notificationsStore.create({
+            createNotification({
                 type: "error",
                 title: "Save failed",
                 message: e instanceof Error ? e.message : "Unknown error",
@@ -141,20 +142,20 @@ function ProviderCard({
         try {
             const r = await testMutation.mutateAsync(provider);
             if (r.ok) {
-                notificationsStore.create({
+                createNotification({
                     type: "success",
                     title: `${iconLabel} credentials OK`,
                     message: `${r.latency_ms ?? 0} ms${r.account_status ? ` · status ${r.account_status}` : ""}`,
                 });
             } else {
-                notificationsStore.create({
+                createNotification({
                     type: "error",
                     title: `${iconLabel} test failed`,
                     message: r.error || "Provider rejected the credentials",
                 });
             }
         } catch (e: unknown) {
-            notificationsStore.create({
+            createNotification({
                 type: "error",
                 title: `${iconLabel} test failed`,
                 message: e instanceof Error ? e.message : "Unknown error",
@@ -166,7 +167,7 @@ function ProviderCard({
         if (!confirm(`Forget ${iconLabel} credentials for this tenant?`)) return;
         try {
             await deleteMutation.mutateAsync(provider);
-            notificationsStore.create({
+            createNotification({
                 type: "success",
                 title: `${iconLabel} disconnected`,
                 message: "Credentials removed.",
@@ -174,7 +175,7 @@ function ProviderCard({
             setShowSaved(false);
             setFromNumber("");
         } catch (e: unknown) {
-            notificationsStore.create({
+            createNotification({
                 type: "error",
                 title: "Delete failed",
                 message: e instanceof Error ? e.message : "Unknown error",
@@ -185,13 +186,13 @@ function ProviderCard({
     async function handleActivate() {
         try {
             await activateMutation.mutateAsync(provider);
-            notificationsStore.create({
+            createNotification({
                 type: "success",
                 title: `${iconLabel} is now active`,
                 message: "Outbound calls will route through this provider.",
             });
         } catch (e: unknown) {
-            notificationsStore.create({
+            createNotification({
                 type: "error",
                 title: "Activate failed",
                 message: e instanceof Error ? e.message : "Unknown error",
@@ -327,6 +328,7 @@ function ProviderCard({
 }
 
 export function TelephonyProvidersSection() {
+    const { create: createNotification } = useNotificationsActions();
     const query = useTelephonyProviders();
     const activateMutation = useActivateTelephonyProvider();
 
@@ -359,13 +361,13 @@ export function TelephonyProvidersSection() {
     async function handleDeactivate() {
         try {
             await activateMutation.mutateAsync("none");
-            notificationsStore.create({
+            createNotification({
                 type: "success",
                 title: "Telephony provider deactivated",
                 message: "Outbound calls fall back to the platform default.",
             });
         } catch (e: unknown) {
-            notificationsStore.create({
+            createNotification({
                 type: "error",
                 title: "Deactivate failed",
                 message: e instanceof Error ? e.message : "Unknown error",

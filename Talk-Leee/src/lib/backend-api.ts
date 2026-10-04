@@ -137,6 +137,8 @@ export const backendApi = {
             input: { categories?: string[]; severities?: string[]; since?: string; cursor?: string; limit?: number },
             signal?: AbortSignal,
         ): Promise<{
+            tenant_id: string;
+            user_id: string;
             items: Array<{
                 id: string;
                 category: string;

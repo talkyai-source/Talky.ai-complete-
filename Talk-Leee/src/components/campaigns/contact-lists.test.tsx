@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import React from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -9,6 +9,7 @@ import { ContactLists } from "@/components/campaigns/contact-lists";
 import { dashboardApi, type ContactList } from "@/lib/dashboard-api";
 import { ApiClientError } from "@/lib/http-client";
 import { api } from "@/lib/api";
+import { notificationsStore } from "@/lib/notifications";
 
 const originalList = dashboardApi.listContactLists;
 const originalCall = dashboardApi.callContactList;
@@ -39,6 +40,7 @@ afterEach(() => {
     dashboardApi.listContactLists = originalList;
     dashboardApi.callContactList = originalCall;
     window.confirm = originalConfirm;
+    notificationsStore.setIdentity(null);
 });
 
 test("call this list is disabled before a ready route without asking to place calls", async () => {
@@ -107,4 +109,27 @@ test("partial 503 applies is_active from structured server details", async () =>
 
     await waitFor(() => assert.ok(screen.getByText("Active")));
     assert.equal(screen.queryByText("Inactive"), null);
+});
+
+test("a pending account-A call-list response cannot publish its private message into B's history", async () => {
+    notificationsStore.setIdentity({ tenantId: "tenant-a", userId: "user-a" });
+    const user = userEvent.setup({ document: globalThis.document });
+    dashboardApi.listContactLists = async () => [inactiveList];
+    let resolveCall!: (value: Awaited<ReturnType<typeof dashboardApi.callContactList>>) => void;
+    let started = false;
+    dashboardApi.callContactList = async () => {
+        started = true;
+        return new Promise((resolve) => { resolveCall = resolve; });
+    };
+    window.confirm = () => true;
+    mountLists();
+    await waitFor(() => assert.equal((screen.getByRole("button", { name: "Call this list" }) as HTMLButtonElement).disabled, false));
+    await user.click(screen.getByRole("button", { name: "Call this list" }));
+    await waitFor(() => assert.equal(started, true));
+    await act(async () => { notificationsStore.setIdentity({ tenantId: "tenant-b", userId: "user-b" }); });
+    await act(async () => {
+        resolveCall({ list_id: inactiveList.id, is_active: true, eligible_count: 3, jobs_enqueued: 3,
+            started: true, message: "Account A private campaign details" });
+    });
+    assert.deepEqual(notificationsStore.getSnapshot().notifications, []);
 });

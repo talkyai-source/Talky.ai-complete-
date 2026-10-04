@@ -50,6 +50,10 @@ class StreamEventOut(BaseModel):
 
 
 class StreamEventsResponse(BaseModel):
+    # The authenticated recipient, not the actor that created an event. Browser
+    # tabs validate both fields before attributing this response to local history.
+    tenant_id: str
+    user_id: str
     items: list[StreamEventOut]
     next_cursor: Optional[str] = None
 
@@ -170,4 +174,9 @@ async def list_stream_events(
         last = page[-1]
         next_cursor = _encode_cursor(last["created_at"], last["id"])
 
-    return StreamEventsResponse(items=items, next_cursor=next_cursor)
+    return StreamEventsResponse(
+        tenant_id=current_user.tenant_id,
+        user_id=current_user.id,
+        items=items,
+        next_cursor=next_cursor,
+    )

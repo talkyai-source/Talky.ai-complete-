@@ -11,7 +11,7 @@ import { ViewportDrawer } from "@/components/ui/viewport-drawer";
 import { RouteGuard } from "@/components/guards/route-guard";
 import { EmptyState, ErrorState, LoadingState } from "@/components/states/page-states";
 import { useCalendarEvents, useCancelCalendarEvent, useCreateCalendarEvent } from "@/lib/api-hooks";
-import { notificationsStore } from "@/lib/notifications";
+import { useNotificationsActions } from "@/lib/notifications-client";
 import { cn } from "@/lib/utils";
 import {
     splitAndSortMeetings,
@@ -115,6 +115,7 @@ function localDateTimeInputToIso(value: string) {
 }
 
 function MeetingsContent() {
+    const { create: createNotification } = useNotificationsActions();
     const q = useCalendarEvents();
     const createM = useCreateCalendarEvent();
     const cancelM = useCancelCalendarEvent();
@@ -834,7 +835,7 @@ function MeetingsContent() {
                                     setConfirmCancelId(null);
                                     setDrawerId(null);
                                 } catch (e) {
-                                    notificationsStore.create({ type: "error", title: "Cancel failed", message: formatError(e) });
+                                    createNotification({ type: "error", title: "Cancel failed", message: formatError(e) });
                                 }
                             }}
                         >
@@ -905,6 +906,7 @@ function MeetingRow({ meeting, onOpen }: { meeting: CalendarEvent; onOpen: () =>
 }
 
 function LinkRow({ label, href, variant }: { label: string; href: string; variant: "default" | "secondary" }) {
+    const { create: createNotification } = useNotificationsActions();
     return (
         <div className="flex items-center justify-between gap-2 rounded-xl border border-border bg-background/70 p-3">
             <div className="min-w-0">
@@ -927,9 +929,9 @@ function LinkRow({ label, href, variant }: { label: string; href: string; varian
                     onClick={async () => {
                         try {
                             await copyText(href);
-                            notificationsStore.create({ type: "success", title: "Copied", message: "Link copied to clipboard." });
+                            createNotification({ type: "success", title: "Copied", message: "Link copied to clipboard." });
                         } catch (e) {
-                            notificationsStore.create({ type: "error", title: "Copy failed", message: formatError(e) });
+                            createNotification({ type: "error", title: "Copy failed", message: formatError(e) });
                         }
                     }}
                 >
@@ -942,6 +944,7 @@ function LinkRow({ label, href, variant }: { label: string; href: string; varian
 }
 
 function InfoRow({ label, value }: { label: string; value: string }) {
+    const { create: createNotification } = useNotificationsActions();
     return (
         <div className="flex items-center justify-between gap-2 rounded-xl border border-border bg-background/70 p-3">
             <div className="min-w-0">
@@ -955,9 +958,9 @@ function InfoRow({ label, value }: { label: string; value: string }) {
                     onClick={async () => {
                         try {
                             await copyText(value);
-                            notificationsStore.create({ type: "success", title: "Copied", message: "Copied to clipboard." });
+                            createNotification({ type: "success", title: "Copied", message: "Copied to clipboard." });
                         } catch (e) {
-                            notificationsStore.create({ type: "error", title: "Copy failed", message: formatError(e) });
+                            createNotification({ type: "error", title: "Copy failed", message: formatError(e) });
                         }
                     }}
                 >

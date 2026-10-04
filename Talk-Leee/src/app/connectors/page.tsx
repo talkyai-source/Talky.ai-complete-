@@ -12,7 +12,6 @@ import { useConnectorStatuses, queryKeys } from "@/lib/api-hooks";
 import { isApiClientError } from "@/lib/http-client";
 import type { ConnectorProviderStatus } from "@/lib/models";
 import type { ConnectorProviderType } from "@/lib/connectors-utils";
-import { notificationsStore } from "@/lib/notifications";
 import { cn } from "@/lib/utils";
 import { CalendarDays, Cloud, Mail, UsersRound, HardDrive } from "lucide-react";
 
@@ -89,13 +88,8 @@ export default function ConnectorsPage() {
                 seenEvents.current.add(eventId);
             }
 
-            const ok = Boolean(obj.ok);
-            const message = typeof obj.message === "string" ? obj.message : undefined;
-            notificationsStore.create({
-                type: ok ? "success" : "error",
-                title: ok ? "Connector connected" : "Connector connection failed",
-                message: message ?? (ok ? "Connection completed successfully." : "Authorization failed. Please try again."),
-            });
+            // Popup/storage broadcasts do not prove the current account owns this
+            // connection. Refresh authoritative status without publishing their payload.
 
             void qc.invalidateQueries({ queryKey: queryKeys.connectorStatuses() });
         };

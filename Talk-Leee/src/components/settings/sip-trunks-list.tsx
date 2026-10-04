@@ -36,7 +36,7 @@ import {
     type SipTrunkInput,
     type SipTrunkRow,
 } from "@/lib/telephony-api";
-import { notificationsStore } from "@/lib/notifications";
+import { useNotificationsActions } from "@/lib/notifications-client";
 
 type DtmfMode = "rfc2833" | "sip-info" | "inband" | "auto";
 
@@ -156,6 +156,7 @@ function TestStatusBadge({ trunk }: { trunk: SipTrunkRow }) {
  * outbound calls dial on that account with no own trunk / registration needed.
  */
 function PoolAccountSelector() {
+    const { create: createNotification } = useNotificationsActions();
     const poolQuery = usePoolTrunks();
     const assignmentQuery = usePoolAssignment();
     const setAssignment = useSetPoolAssignment();
@@ -169,7 +170,7 @@ function PoolAccountSelector() {
     async function onChange(value: string) {
         try {
             await setAssignment.mutateAsync(value || null);
-            notificationsStore.create({
+            createNotification({
                 type: "success",
                 title: value ? "Shared account assigned" : "Shared account cleared",
                 message: value
@@ -177,7 +178,7 @@ function PoolAccountSelector() {
                     : "This tenant will use its own trunk (or the default).",
             });
         } catch (e) {
-            notificationsStore.create({
+            createNotification({
                 type: "error",
                 title: "Couldn't update",
                 message: e instanceof Error ? e.message : "Failed to set the shared account.",
@@ -225,6 +226,7 @@ function PoolAccountSelector() {
 }
 
 export function SipTrunksList() {
+    const { create: createNotification } = useNotificationsActions();
     const trunksQuery = useSipTrunks();
     const createMutation = useCreateSipTrunk();
     const updateMutation = useUpdateSipTrunk();
@@ -328,7 +330,7 @@ export function SipTrunksList() {
                     return;
                 }
                 await createMutation.mutateAsync(payload);
-                notificationsStore.create({
+                createNotification({
                     type: "success",
                     title: "SIP trunk added",
                     message: `${form.trunk_name} is saved disabled. Enable it and wait for Ready before calling.`,
@@ -350,7 +352,7 @@ export function SipTrunksList() {
                     patch.auth_password = form.auth_password;
                 }
                 await updateMutation.mutateAsync({ id: editingId, patch });
-                notificationsStore.create({
+                createNotification({
                     type: "success",
                     title: "SIP trunk updated",
                     message: form.trunk_name,
@@ -368,13 +370,13 @@ export function SipTrunksList() {
         try {
             const r = await testMutation.mutateAsync(t.id);
             if (r.ok) {
-                notificationsStore.create({
+                createNotification({
                     type: "success",
                     title: `${t.trunk_name} is reachable`,
                     message: `${r.latency_ms ?? 0} ms · ${r.detail || `${t.transport.toUpperCase()} ${r.target}`}`,
                 });
             } else {
-                notificationsStore.create({
+                createNotification({
                     type: "error",
                     title: r.inconclusive ? `${t.trunk_name}: probe inconclusive` : `${t.trunk_name}: probe failed`,
                     message: r.detail || r.error || "Probe failed",
@@ -382,7 +384,7 @@ export function SipTrunksList() {
             }
         } catch (e: unknown) {
             const msg = e instanceof Error ? e.message : "Test failed";
-            notificationsStore.create({ type: "error", title: "Test failed", message: msg });
+            createNotification({ type: "error", title: "Test failed", message: msg });
         } finally {
             setTestingId(null);
         }
@@ -392,14 +394,14 @@ export function SipTrunksList() {
         try {
             if (t.is_active) {
                 await deactivateMutation.mutateAsync(t.id);
-                notificationsStore.create({
+                createNotification({
                     type: "success",
                     title: "Trunk deactivated",
                     message: t.trunk_name,
                 });
             } else {
                 const enabled = await activateMutation.mutateAsync(t.id);
-                notificationsStore.create({
+                createNotification({
                     type: enabled.runtime_ready ? "success" : "warning",
                     title: enabled.runtime_ready ? "Trunk runtime ready" : "Trunk enabled; runtime check pending",
                     message: enabled.runtime_ready
@@ -409,14 +411,14 @@ export function SipTrunksList() {
             }
         } catch (e: unknown) {
             const msg = e instanceof Error ? e.message : "Operation failed";
-            notificationsStore.create({ type: "error", title: "Operation failed", message: msg });
+            createNotification({ type: "error", title: "Operation failed", message: msg });
         }
     }
 
     async function handleDelete(t: SipTrunkRow) {
         if (t.is_active) await deactivateMutation.mutateAsync(t.id);
         await deleteMutation.mutateAsync(t.id);
-        notificationsStore.create({ type: "success", title: "SIP trunk deleted", message: t.trunk_name });
+        createNotification({ type: "success", title: "SIP trunk deleted", message: t.trunk_name });
     }
     return (
         <Card>

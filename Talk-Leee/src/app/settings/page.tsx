@@ -18,7 +18,6 @@ import { RecordingPolicySection } from "@/components/settings/recording-policy-s
 import { useAuth } from "@/lib/auth-context";
 import { useAccessToken } from "@/lib/auth-hooks";
 import { api } from "@/lib/api";
-import { notificationsStore } from "@/lib/notifications";
 import { Loader2 } from "lucide-react";
 
 function clampNumber(n: number, min: number, max: number) {
@@ -27,11 +26,11 @@ function clampNumber(n: number, min: number, max: number) {
 
 const notificationTypes: NotificationType[] = ["success", "warning", "error", "info"];
 const priorities: NotificationPriority[] = ["low", "normal", "high"];
-const routings: NotificationRouting[] = ["inApp", "webhook", "both", "none"];
+const routings: NotificationRouting[] = ["inApp", "none"];
 
 export default function SettingsPage() {
-    const { settings } = useNotificationsState();
-    const { setSettings, setCategory } = useNotificationsActions();
+    const { settings, hydrated, persistence } = useNotificationsState();
+    const { setSettings, setCategory, create: createNotification } = useNotificationsActions();
     // Phase 5 universal-auth-state: token now comes from AuthContext via
     // the reactive useAccessToken() hook. The previous implementation
     // dynamically imported `getBrowserAuthToken` inside a mount-time
@@ -76,13 +75,13 @@ export default function SettingsPage() {
             if (Object.keys(payload).length === 0) return;
             await api.updateMe(payload);
             await refreshUser();
-            notificationsStore.create({
+            createNotification({
                 type: "success",
                 title: "Profile updated",
                 message: "Your changes have been saved.",
             });
         } catch (e: unknown) {
-            notificationsStore.create({
+            createNotification({
                 type: "error",
                 title: "Save failed",
                 message: e instanceof Error ? e.message : "Unknown error",
@@ -153,6 +152,7 @@ export default function SettingsPage() {
                                     min={1200}
                                     max={30000}
                                     value={settings.toastDurationMs}
+                                    disabled={!hydrated}
                                     onChange={(e) =>
                                         setSettings({ toastDurationMs: clampNumber(Number(e.target.value) || 0, 1200, 30000) })
                                     }
@@ -164,6 +164,7 @@ export default function SettingsPage() {
                                     <div className="text-sm font-semibold text-gray-900 dark:text-zinc-100">Enable sounds</div>
                                     <Switch
                                         checked={settings.soundsEnabled}
+                                        disabled={!hydrated}
                                         onCheckedChange={(v) => setSettings({ soundsEnabled: v })}
                                         ariaLabel="Enable notification sounds"
                                     />
@@ -176,7 +177,10 @@ export default function SettingsPage() {
                 <Card className="dark:border-white/10 dark:bg-white/5 dark:text-white dark:hover:bg-white/10 dark:hover:shadow-[0_10px_30px_rgba(0,0,0,0.22)]">
                     <CardHeader>
                         <CardTitle className="dark:text-white">Notification Preferences</CardTitle>
-                        <CardDescription>Enable categories, tune priority, and configure routing.</CardDescription>
+                        <CardDescription>
+                            Alerts and history belong to your signed-in account in this browser. Live lead alerts require an open, visible dashboard. External webhook delivery is unavailable.
+                            {!hydrated ? " Notifications need a verified account and workspace." : persistence === "memory" ? " Browser storage is unavailable; local history may be lost when you leave." : ""}
+                        </CardDescription>
                     </CardHeader>
                     <CardContent className="space-y-4">
                         {notificationTypes.map((type) => (
@@ -184,13 +188,14 @@ export default function SettingsPage() {
                                 <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                                     <div className="min-w-0">
                                         <div className="text-sm font-semibold capitalize text-gray-900 dark:text-zinc-100">{type}</div>
-                                    <div className="mt-1 text-sm text-muted-foreground">Toggle delivery and adjust priority.</div>
+                                    <div className="mt-1 text-sm text-muted-foreground">Choose whether to show a popup and adjust its priority.</div>
                                     </div>
                                     <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
                                         <div className="flex items-center justify-between gap-3 rounded-xl border border-gray-200 bg-white px-4 py-2 shadow-sm transition-[transform,background-color,box-shadow,border-color] duration-150 ease-out hover:-translate-y-0.5 hover:bg-gray-50 hover:shadow-md dark:border-white/10 dark:bg-white/5 dark:hover:bg-white/10 dark:hover:shadow-[0_10px_30px_rgba(0,0,0,0.22)] sm:w-[220px]">
                                             <div className="text-sm font-semibold text-gray-900 dark:text-zinc-100">Enabled</div>
                                             <Switch
                                                 checked={settings.category[type].enabled}
+                                                disabled={!hydrated}
                                                 onCheckedChange={(v) => setCategory(type, { enabled: v })}
                                                 ariaLabel={`Enable ${type} notifications`}
                                             />
@@ -198,6 +203,7 @@ export default function SettingsPage() {
                                         <div className="sm:w-[220px]">
                                             <Select
                                                 value={settings.category[type].priority}
+                                                disabled={!hydrated}
                                                 onChange={(v) => setCategory(type, { priority: v as NotificationPriority })}
                                                 ariaLabel={`${type} priority`}
                                             >
@@ -211,12 +217,13 @@ export default function SettingsPage() {
                                         <div className="sm:w-[220px]">
                                             <Select
                                                 value={settings.category[type].routing}
+                                                disabled={!hydrated}
                                                 onChange={(v) => setCategory(type, { routing: v as NotificationRouting })}
                                                 ariaLabel={`${type} routing`}
                                             >
                                                 {routings.map((r) => (
                                                     <option key={r} value={r}>
-                                                        {r}
+                                                        {r === "inApp" ? "In-app popup" : "History only"}
                                                     </option>
                                                 ))}
                                             </Select>

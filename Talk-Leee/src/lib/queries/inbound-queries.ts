@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef } from "react";
-import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
     inboundApi,
@@ -15,6 +15,7 @@ import {
 import { inboundStateForError } from "@/lib/inbound/inbound-types";
 import { fetchEffectivePermissions } from "@/lib/inbound-permissions";
 import { notificationsStore } from "@/lib/notifications";
+import { useNotificationMutation } from "@/lib/notification-mutations";
 import { dashboardApi } from "@/lib/dashboard-api";
 
 export const inboundQueryKeys = {
@@ -132,7 +133,7 @@ export function useInboundRuntimeCapabilities(configId?: string, enabled = true)
 
 export function useSetTenantInboundControls() {
     const qc = useQueryClient();
-    return useMutation({
+    return useNotificationMutation({
         mutationFn: (input: { inbound_enabled: boolean; expected_version: number; reason: string }) => inboundApi.setControls(input),
         onSuccess: (controls) => {
             qc.setQueryData(inboundQueryKeys.controls, controls);
@@ -166,7 +167,7 @@ export function useEffectivePermissions() {
 
 export function useCreateInboundCampaign() {
     const qc = useQueryClient();
-    return useMutation({
+    return useNotificationMutation({
         mutationFn: ({ input, didNumber }: { input: InboundCampaignInput; didNumber: string }) => inboundApi.create(input, didNumber),
         onSuccess: (created) => {
             commitInboundCampaignCache(qc, created);
@@ -183,7 +184,7 @@ export function useCreateInboundCampaign() {
 export function useUpdateInboundCampaign(id: string) {
     const qc = useQueryClient();
     const retryKeys = useRef(new Map<string, { update: string; assignment: string; expiresAt: number }>());
-    return useMutation({
+    return useNotificationMutation({
         mutationFn: async (variables: {
             input: InboundCampaignInput;
             expectedVersion: number;
@@ -241,7 +242,7 @@ export function useUpdateInboundCampaign(id: string) {
 
 function useLifecycleMutation(id: string, action: "activate" | "deactivate" | "archive") {
     const qc = useQueryClient();
-    return useMutation({
+    return useNotificationMutation({
         mutationFn: (expectedVersion: number) => action === "activate"
             ? inboundApi.activate(id, expectedVersion)
             : action === "archive"

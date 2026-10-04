@@ -22,7 +22,7 @@ import { AlertCircle, Loader2, Phone, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { dashboardApi, ContactList } from "@/lib/dashboard-api";
 import { isApiClientError } from "@/lib/http-client";
-import { notificationsStore } from "@/lib/notifications";
+import { useNotificationsActions } from "@/lib/notifications-client";
 import { CampaignReadinessNotice, useCampaignReadiness } from "@/components/campaigns/campaign-readiness";
 
 export const UNGROUPED_LIST_ID = "ungrouped";
@@ -61,6 +61,7 @@ export function ContactLists({
     /** Fired after a "Call this list" enqueues jobs, so the parent can refresh stats. */
     onCallStarted?: () => void;
 }) {
+    const { create: createNotification } = useNotificationsActions();
     const [lists, setLists] = useState<ContactList[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState("");
@@ -110,7 +111,7 @@ export function ContactLists({
         try {
             const updated = await dashboardApi.updateContactList(list.id, next);
             setLists((prev) => prev.map((l) => (l.id === list.id ? { ...l, ...updated } : l)));
-            notificationsStore.create({
+            createNotification({
                 type: "success",
                 title: next ? "List activated" : "List paused",
                 message: `“${list.name}” is now ${next ? "active" : "inactive"}.`,
@@ -118,7 +119,7 @@ export function ContactLists({
         } catch (err) {
             // Revert to the server-truth value we started from.
             setLists((prev) => prev.map((l) => (l.id === list.id ? { ...l, is_active: list.is_active } : l)));
-            notificationsStore.create({
+            createNotification({
                 type: "error",
                 title: "Couldn't update list",
                 message: errText(err, "The active state was reverted."),
@@ -144,7 +145,7 @@ export function ContactLists({
             setLists((current) => current.map((item) => (
                 item.id === list.id ? { ...item, is_active: res.is_active } : item
             )));
-            notificationsStore.create({
+            createNotification({
                 type: res.jobs_enqueued > 0 ? "success" : "warning",
                 title: res.jobs_enqueued > 0 ? "Calls started" : "No calls placed",
                 message:
@@ -162,7 +163,7 @@ export function ContactLists({
                     item.id === list.id ? { ...item, is_active: active } : item
                 )));
             }
-            notificationsStore.create({
+            createNotification({
                 type: "error",
                 title: "Couldn't start calls",
                 message: errText(err, "The list was not called."),

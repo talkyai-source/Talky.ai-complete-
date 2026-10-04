@@ -138,7 +138,7 @@ async def test_webhook(
     current_user: CurrentUser = Depends(require_admin_tenant),
     db_client: Client = Depends(get_db_client),
 ):
-    """Test a webhook endpoint belonging to the caller's tenant."""
+    """Report unavailable delivery without inventing a successful test send."""
     try:
         result = (
             db_client.table("webhook_endpoints")
@@ -147,14 +147,36 @@ async def test_webhook(
             .eq("tenant_id", current_user.tenant_id)
             .execute()
         )
-        if result.error or not result.data:
+        if result.error:
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "code": "webhook_configuration_unavailable",
+                    "message": "Webhook configuration is temporarily unavailable.",
+                },
+            )
+        if not result.data:
             raise HTTPException(status_code=404, detail="Webhook not found")
-        return {"success": True, "delivery_id": webhook_id}
+        # Configuration ownership does not prove a delivery. This router is
+        # currently unmounted and no tenant webhook dispatcher is implemented.
+        raise HTTPException(
+            status_code=501,
+            detail={
+                "code": "outbound_webhook_delivery_unavailable",
+                "message": "Outbound webhook delivery is not available. No test notification was sent.",
+            },
+        )
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to test webhook: {e}")
-        raise HTTPException(status_code=500, detail="Failed to test webhook")
+        logger.error("Webhook test configuration unavailable error_type=%s", type(e).__name__)
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "webhook_configuration_unavailable",
+                "message": "Webhook configuration is temporarily unavailable.",
+            },
+        ) from e
 
 
 @router.get("/webhooks/deliveries", response_model=List[WebhookDelivery])
