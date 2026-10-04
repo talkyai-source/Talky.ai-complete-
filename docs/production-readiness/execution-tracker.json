@@ -21,7 +21,12 @@
     "implementation_branch": "codex/production-ready-20261004",
     "integrated_base": "a63a20b9",
     "integrated_origin_main": "0a64828c23a17a8ab84c566d9739487606f26b64",
-    "cp01_implementation_commit": "ce43b268a108e6afe1a8e49d9f4e25d36e9849a2"
+    "cp01_implementation_commit": "ce43b268a108e6afe1a8e49d9f4e25d36e9849a2",
+    "frozen_git_blob_sha256": {
+      "docs/production-readiness/baseline-assessment-2026-10-02.md": "bda97d35ea426c184b536357abfaa6ad327be52afb7dfad1b3afe66c047a125e",
+      "docs/production-readiness/baseline-feature-maturity-2026-10-02.json": "356f1f164ffcba36b7799a3cb7110389a65a173a0fd39da51fb9d862160793de"
+    },
+    "baseline_hash_note": "The original authoring hash fields are retained as historical metadata; they do not match the portable frozen copies and their original byte convention is unverified. frozen_git_blob_sha256 records the verified SHA-256 of each LF-normalized checked-in frozen artifact. Frozen findings/content were not edited during CP01."
   },
   "status_rules": {
     "execution": [
