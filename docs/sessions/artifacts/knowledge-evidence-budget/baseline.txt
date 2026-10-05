@@ -1,0 +1,74 @@
+FFFFFFFFFF......                                                         [100%]
+================================== FAILURES ===================================
+_____ test_weak_hit_cannot_spend_the_budget_before_sufficient_source[0.0] _____
+tests\unit\test_knowledge_evidence_budget_order.py:24: in test_weak_hit_cannot_spend_the_budget_before_sufficient_source
+    assert result["status"] == "matched"
+E   AssertionError: assert 'weak_match' == 'matched'
+E     - matched
+E     + weak_match
+_____ test_weak_hit_cannot_spend_the_budget_before_sufficient_source[0.2] _____
+tests\unit\test_knowledge_evidence_budget_order.py:24: in test_weak_hit_cannot_spend_the_budget_before_sufficient_source
+    assert result["status"] == "matched"
+E   AssertionError: assert 'weak_match' == 'matched'
+E     - matched
+E     + weak_match
+____ test_weak_hit_cannot_spend_the_budget_before_sufficient_source[0.49] _____
+tests\unit\test_knowledge_evidence_budget_order.py:24: in test_weak_hit_cannot_spend_the_budget_before_sufficient_source
+    assert result["status"] == "matched"
+E   AssertionError: assert 'weak_match' == 'matched'
+E     - matched
+E     + weak_match
+____ test_weak_hit_cannot_spend_the_budget_before_sufficient_source[None] _____
+tests\unit\test_knowledge_evidence_budget_order.py:24: in test_weak_hit_cannot_spend_the_budget_before_sufficient_source
+    assert result["status"] == "matched"
+E   AssertionError: assert 'weak_match' == 'matched'
+E     - matched
+E     + weak_match
+____ test_weak_hit_cannot_spend_the_budget_before_sufficient_source[True] _____
+tests\unit\test_knowledge_evidence_budget_order.py:24: in test_weak_hit_cannot_spend_the_budget_before_sufficient_source
+    assert result["status"] == "matched"
+E   AssertionError: assert 'weak_match' == 'matched'
+E     - matched
+E     + weak_match
+_____ test_weak_hit_cannot_spend_the_budget_before_sufficient_source[bad] _____
+tests\unit\test_knowledge_evidence_budget_order.py:24: in test_weak_hit_cannot_spend_the_budget_before_sufficient_source
+    assert result["status"] == "matched"
+E   AssertionError: assert 'weak_match' == 'matched'
+E     - matched
+E     + weak_match
+_____ test_weak_hit_cannot_spend_the_budget_before_sufficient_source[nan] _____
+tests\unit\test_knowledge_evidence_budget_order.py:24: in test_weak_hit_cannot_spend_the_budget_before_sufficient_source
+    assert result["status"] == "matched"
+E   AssertionError: assert 'weak_match' == 'matched'
+E     - matched
+E     + weak_match
+_______ test_default_budget_preserves_answer_after_two_large_weak_hits ________
+tests\unit\test_knowledge_evidence_budget_order.py:40: in test_default_budget_preserves_answer_after_two_large_weak_hits
+    assert result["status"] == "matched"
+E   AssertionError: assert 'weak_match' == 'matched'
+E     - matched
+E     + weak_match
+_______________ test_oversized_heading_skips_only_its_own_node ________________
+tests\unit\test_knowledge_evidence_budget_order.py:48: in test_oversized_heading_skips_only_its_own_node
+    assert result["status"] == "matched"
+E   AssertionError: assert 'no_match' == 'matched'
+E     - matched
+E     + no_match
+_____________ test_sufficient_hits_preserve_their_retrieval_order _____________
+tests\unit\test_knowledge_evidence_budget_order.py:57: in test_sufficient_hits_preserve_their_retrieval_order
+    assert [p["node_id"] for p in result["passages"]] == ["first", "second"]
+E   AssertionError: assert ['first'] == ['first', 'second']
+E     Right contains one more item: 'second'
+E     Use -v to get more diff
+=========================== short test summary info ===========================
+FAILED tests/unit/test_knowledge_evidence_budget_order.py::test_weak_hit_cannot_spend_the_budget_before_sufficient_source[0.0]
+FAILED tests/unit/test_knowledge_evidence_budget_order.py::test_weak_hit_cannot_spend_the_budget_before_sufficient_source[0.2]
+FAILED tests/unit/test_knowledge_evidence_budget_order.py::test_weak_hit_cannot_spend_the_budget_before_sufficient_source[0.49]
+FAILED tests/unit/test_knowledge_evidence_budget_order.py::test_weak_hit_cannot_spend_the_budget_before_sufficient_source[None]
+FAILED tests/unit/test_knowledge_evidence_budget_order.py::test_weak_hit_cannot_spend_the_budget_before_sufficient_source[True]
+FAILED tests/unit/test_knowledge_evidence_budget_order.py::test_weak_hit_cannot_spend_the_budget_before_sufficient_source[bad]
+FAILED tests/unit/test_knowledge_evidence_budget_order.py::test_weak_hit_cannot_spend_the_budget_before_sufficient_source[nan]
+FAILED tests/unit/test_knowledge_evidence_budget_order.py::test_default_budget_preserves_answer_after_two_large_weak_hits
+FAILED tests/unit/test_knowledge_evidence_budget_order.py::test_oversized_heading_skips_only_its_own_node
+FAILED tests/unit/test_knowledge_evidence_budget_order.py::test_sufficient_hits_preserve_their_retrieval_order
+10 failed, 6 passed in 1.23s

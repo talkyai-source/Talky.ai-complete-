@@ -578,3 +578,34 @@ no default approval is inferred. CP05, CP06 and CP09 remain deferred. Counts sta
 27 eligible unfinished plus AG03 candidate verified and three deferred; all
 fifteen final and twenty-two scenario gates remain not run. Local commits do not
 lift the freeze or establish a paid-production release.
+
+
+## Knowledge enrichment ownership and passage budget (6 October)
+
+Source `fe1ad226` repairs enrichment results attaching metadata to nodes outside
+their requested batch and malformed single retries escaping the fail-soft
+boundary. Source `3c6ac038` prevents weak passages exhausting space before useful
+source evidence, and lets later candidates survive an oversized heading. Neither
+changes source facts, retrieval thresholds, providers or dependencies.
+
+The [combined evidence](artifacts/knowledge-evidence-budget/verification.md)
+records **210 passing tests across twelve modules**, zero failures/skips and ten
+warnings on committed `d3821a0b`. Twenty-one source/test/fixture hashes stayed
+unchanged; the guarded run recorded zero prohibited connection attempts. The
+separate budget baseline has 10 failures/6 passes; the enrichment owner baseline
+has 36 failures/12 passes. These are parameterized controls, not counts of distinct
+product defects. Root and independent source reviews cleared both repairs.
+
+The unchanged raw-source pinned quality evaluator still exits **1**, with 42/45
+expected-source recall and 32/45 sufficient passages. Its full final per-case
+report is retained; the threshold and gold were not changed. These fixes address
+reproduced routing/budget failures, not the remaining paraphrase/source-answer
+quality gap. No new PostgreSQL score, model-answer fidelity, customer-corpus
+approval, live voice outcome or readiness-gate closure is claimed.
+
+Independent parity review checked all twenty-one executed input hashes, ten root
+artifact hashes and seven enrichment-owner artifact hashes with no unexpected
+mismatch. The owner's older budget dependency is the sole intentional changed
+dependency; both changed source/test pairs match their reviewed commits. Every
+gold case result equals the earlier preserved pinned result. This was read-only
+evidence verification, not another test execution.
