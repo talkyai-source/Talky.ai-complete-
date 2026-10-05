@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 import React from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { AppRouterContext } from "next/dist/shared/lib/app-router-context.shared-runtime";
 import { api } from "@/lib/api";
 import type { Campaign } from "@/lib/dashboard-api";
@@ -80,19 +80,26 @@ test("a closed or nonlaunch surface performs no readiness request", () => {
 
 const campaign = { id: "campaign-a", name: "Example campaign", status: "paused", direction: "outbound", created_at: "2026-10-02T00:00:00Z", total_leads: 1, calls_completed: 0, calls_failed: 0 } as Campaign;
 
-test("table row resume is disabled but viewing details stays available", async () => {
+test("table selection and details block resume while the route is unavailable", async () => {
     api.request = async <T,>() => ({ ready: false, reason: "Selected trunk unavailable" }) as T;
     let resumed = 0;
     mount(<CampaignPerformanceTable campaigns={[campaign]} loading={false} error="" onPause={async () => {}} onResume={async () => { resumed++; }} onDelete={async () => {}} onDuplicate={async () => {}} />);
-    fireEvent.click(screen.getByRole("button", { name: "Row actions" }));
+    // Finish the table's initial preference hydration and selection-reset frames.
+    await act(async () => { await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve())); });
+    await act(async () => { await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve())); });
+    fireEvent.click(screen.getByRole("checkbox", { name: `Select ${campaign.name}` }));
     await screen.findByText(/Selected trunk unavailable/);
-    const button = screen.getByRole("menuitem", { name: "Resume Campaign" });
+    const button = screen.getByRole("button", { name: "Resume Selected" });
     assert.equal((button as HTMLButtonElement).disabled, true);
     fireEvent.click(button);
     assert.equal(resumed, 0);
-    fireEvent.click(screen.getByRole("menuitem", { name: "View Details" }));
-    assert.ok(screen.getByRole("dialog"));
-    assert.equal((screen.getByRole("button", { name: "Resume" }) as HTMLButtonElement).disabled, true);
+    fireEvent.click(screen.getByRole("button", { name: new RegExp(campaign.name) }));
+    const dialog = within(screen.getByRole("dialog"));
+    await dialog.findByText(/Selected trunk unavailable/);
+    const detailResume = dialog.getByRole("button", { name: "Resume" });
+    assert.equal((detailResume as HTMLButtonElement).disabled, true);
+    fireEvent.click(detailResume);
+    assert.equal(resumed, 0);
 });
 
 test("command-bar keyboard execution cannot bypass unavailable resume routes", async () => {

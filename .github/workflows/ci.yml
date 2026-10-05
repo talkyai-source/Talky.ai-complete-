@@ -269,6 +269,8 @@ jobs:
             tests/integration/test_op01_metering.py \
             tests/integration/test_op01_auth_metering.py \
             tests/integration/test_op04_trunk_lifecycle.py \
+            tests/integration/test_op05_active_job_migration.py \
+            tests/integration/test_op05_pre_attempt_holds.py \
             -q
         env:
           TEST_DATABASE_URL: postgresql://talky:testpassword@localhost:5432/talky_alembic_test

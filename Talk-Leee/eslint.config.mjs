@@ -56,6 +56,8 @@ const eslintConfig = defineConfig([
     "storybook-static/**",
     "playwright-report/**",
     "test-results/**",
+    // Local validation probes are gitignored scratch files, not app sources.
+    "tmp/**",
     "next-env.d.ts",
     "next.config.js",
   ]),
