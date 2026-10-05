@@ -91,51 +91,8 @@ _PUBLIC = {
     ),
 }
 
-# ---------------------------------------------------------------------
-# KNOWN TECH-DEBT — auth-gap bugs we have not yet fixed
-# ---------------------------------------------------------------------
-#
-# These endpoints DO need auth but currently lack ``Depends(get_current_user)``
-# at the route level. They are admin-only / RBAC-management /
-# audit-related routes that are likely guarded at the router level by
-# a different mechanism, OR they're genuine bugs nobody has hit yet.
-#
-# This list is the explicit punch-list — every entry should either be
-# removed (because the auth dep was added) or moved to ``_PUBLIC``
-# (because it was deemed intentionally public after audit).
-#
-# The test allows these to pass so the regression-prevention property
-# of this file holds for new endpoints, while the technical debt
-# stays visible in source instead of silently lurking.
-_KNOWN_AUTH_GAPS = {
-    # (Abuse-monitoring endpoints FIXED 2026-07-06 — the /admin/abuse router
-    # now Depends(require_admin); the 9 entries were removed so this gate
-    # PROVES the fix rather than laundering the vuln.)
-    # Audit-log statistics — should require_admin.
-    "GET /api/v1/admin/audit/stats/events-by-type": "TODO: add require_admin",
-    "GET /api/v1/admin/audit/stats/failed-logins": "TODO: add require_admin",
-    # Security-events admin — should require_admin.
-    "GET /api/v1/admin/security-events/events": "TODO: add require_admin",
-    "GET /api/v1/admin/security-events/events/{event_id}": "TODO: add require_admin",
-    "POST /api/v1/admin/security-events/events": "TODO: add require_admin",
-    "PATCH /api/v1/admin/security-events/events/{event_id}": "TODO: add require_admin",
-    "POST /api/v1/admin/security-events/events/{event_id}/resolve": "TODO: add require_admin",
-    "GET /api/v1/admin/security-events/alerts/open": "TODO: add require_admin",
-    "GET /api/v1/admin/security-events/alerts/overdue": "TODO: add require_admin",
-    "POST /api/v1/admin/security-events/events/{event_id}/escalate": "TODO: add require_admin",
-    # RBAC management — should require_admin (managing other users' access).
-    "POST /api/v1/rbac/roles/{role_id}/permissions": "TODO: add require_admin",
-    "DELETE /api/v1/rbac/roles/{role_id}/permissions/{permission_id}": "TODO: add require_admin",
-    "DELETE /api/v1/rbac/roles/{role_id}/permissions": "TODO: add require_admin",
-    "GET /api/v1/rbac/users/{user_id}/permissions": "TODO: add require_admin",
-    "GET /api/v1/rbac/tenant-users": "TODO: add require_admin",
-    "POST /api/v1/rbac/tenant-users": "TODO: add require_admin",
-    "PATCH /api/v1/rbac/tenant-users/{tenant_user_id}": "TODO: add require_admin",
-    "DELETE /api/v1/rbac/tenant-users/{tenant_user_id}": "TODO: add require_admin",
-}
-
 KNOWN_PUBLIC_ROUTES: dict[str, str] = {
-    **_AUTH_FLOWS, **_WEBHOOKS, **_PUBLIC, **_KNOWN_AUTH_GAPS,
+    **_AUTH_FLOWS, **_WEBHOOKS, **_PUBLIC,
 }
 
 
@@ -310,12 +267,10 @@ def test_known_public_routes_actually_exist():
             real_routes.add(_norm_route_key(method, path))
 
     stale = [k for k in KNOWN_PUBLIC_ROUTES if k not in real_routes]
-    # Don't fail on stale entries — endpoint paths drift; flag for cleanup.
-    if stale:
-        pytest.skip(
-            "KNOWN_PUBLIC_ROUTES has stale entries (clean these up):\n  "
-            + "\n  ".join(stale)
-        )
+    assert not stale, (
+        "KNOWN_PUBLIC_ROUTES has stale entries (remove or correct these):\n  "
+        + "\n  ".join(sorted(stale))
+    )
 
 
 def test_contact_intake_exception_does_not_exempt_admin_read_or_update():
