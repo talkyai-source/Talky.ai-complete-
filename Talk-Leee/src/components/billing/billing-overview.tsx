@@ -291,7 +291,7 @@ function PlanDisplay({ subscription }: { subscription: Subscription | null }) {
     },
     {
       label: "Included minutes",
-      value: subscription.minutes_allocated <= 0 ? "Unlimited" : subscription.minutes_allocated.toLocaleString(),
+      value: subscription.minutes_state === "unlimited" ? "Unlimited" : subscription.minutes_state === "known" ? subscription.minutes_allocated.toLocaleString() : "Unavailable",
       icon: Phone,
       large: true,
     },

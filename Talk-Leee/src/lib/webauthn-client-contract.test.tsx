@@ -42,7 +42,7 @@ test("passkey login preserves the backend RP, allowed key, timeout and required 
     api.completePasskeyLogin = async id => {
         ceremony = id;
         return { access_token: "synthetic", token_type: "bearer", user_id: "user-a", tenant_id: "tenant-a",
-            email: "a@example.com", role: "tenant_admin", minutes_remaining: 1, message: "", mfa_required: false,
+            email: "a@example.com", role: "tenant_admin", minutes_remaining: 1, minutes_state: "known", message: "", mfa_required: false,
             mfa_challenge_token: undefined, business_name: undefined };
     };
     render(<PasskeyLogin onSuccess={() => { success++; }} />);

@@ -413,6 +413,8 @@ async def signup_complete(
         user_agent=ua,
     )
 
+    from app.services.scripts.tenant_minutes import compute_tenant_minutes_status
+    meter = await compute_tenant_minutes_status(db_client.pool, str(tenant["id"]))
     return AuthTokenResponse(
         access_token=token,
         user_id=user_id,
@@ -420,6 +422,6 @@ async def signup_complete(
         email=email,
         role="tenant_admin",
         business_name=pending["business_name"],
-        minutes_remaining=plan["minutes"],
+        **meter.allowance(),
         message="Account created successfully.",
     )

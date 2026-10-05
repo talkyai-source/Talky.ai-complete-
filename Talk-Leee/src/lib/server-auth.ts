@@ -10,7 +10,8 @@ export type ServerMe = {
     name?: string;
     business_name?: string;
     role: string;
-    minutes_remaining?: number;
+    minutes_remaining?: number | null;
+    minutes_state?: "known" | "unlimited" | "unavailable";
 };
 
 function isLocalHostHostHeader(hostHeader: string | null) {

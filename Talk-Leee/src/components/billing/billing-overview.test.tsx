@@ -221,7 +221,7 @@ test("malformed successful usage is a load failure instead of zero consumption",
 });
 
 test("an unlimited subscription does not duplicate a false zero remaining or percentage meter", async () => {
-    globalThis.fetch = routeFetch({ ...ALL_EMPTY_OK, "/billing/subscription": () => json({ ...EMPTY_SUBSCRIPTION, status: "active", plan_id: "unlimited", plan_name: "Unlimited plan", minutes_used: 99999 }),
+    globalThis.fetch = routeFetch({ ...ALL_EMPTY_OK, "/billing/subscription": () => json({ ...EMPTY_SUBSCRIPTION, status: "active", plan_id: "unlimited", plan_name: "Unlimited plan", minutes_state: "unlimited", minutes_used: 99999 }),
         "/billing/usage": () => json({ ...EMPTY_USAGE, total_used: 37 }) }) as typeof fetch;
     renderWithQueryClient(<BillingOverview />);
     await screen.findByText("Unlimited plan");
@@ -273,3 +273,14 @@ test("actual PostgreSQL ledger endpoints agree and render signed linked accounti
     }
     assert.ok(screen.getByText(/A reversal is not proof that funds reached a bank/));
 });
+
+for (const minutes_state of ["known", undefined]) {
+  test(`zero subscription allocation with state ${minutes_state} is not inferred unlimited`, async () => {
+    globalThis.fetch = routeFetch({ ...ALL_EMPTY_OK, "/billing/subscription": () => json({ ...EMPTY_SUBSCRIPTION, status: "active", plan_name: "Finite plan", minutes_state }) }) as typeof fetch;
+    renderWithQueryClient(<BillingOverview />);
+    await screen.findByText("Finite plan");
+    const row = screen.getByText("Included minutes").parentElement!;
+    assert.ok(within(row).getByText(minutes_state === "known" ? "0" : "Unavailable"));
+    assert.equal(within(row).queryByText("Unlimited"), null);
+  });
+}

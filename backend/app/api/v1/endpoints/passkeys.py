@@ -49,7 +49,7 @@ Two-step login flow with fallback:
 # natively, so the future import isn't needed for syntax anyway.
 
 import logging
-from typing import Any, Optional
+from typing import Literal, Any, Optional
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field
@@ -205,7 +205,8 @@ class LoginCompleteResponse(BaseModel):
     role: str
     tenant_id: Optional[str] = None
     business_name: Optional[str]
-    minutes_remaining: int
+    minutes_remaining: Optional[int] = None
+    minutes_state: Literal["known", "unlimited", "unavailable"] = "unavailable"
     message: str
 
 
@@ -618,11 +619,10 @@ async def login_complete(
     #   from app.api.v1.dependencies import resolve_db_client
     # was a typo for get_db_client AND unnecessary anyway since db_client
     # is already a Depends parameter on this endpoint).
-    from app.services.scripts.tenant_minutes import compute_tenant_minutes_remaining
-    minutes_remaining = await compute_tenant_minutes_remaining(
+    from app.services.scripts.tenant_minutes import compute_tenant_minutes_status
+    meter = await compute_tenant_minutes_status(
         db_client.pool,
-        tenant_id=str(user_row["tenant_id"]) if user_row["tenant_id"] else None,
-        minutes_allocated=user_row["minutes_allocated"],
+        str(user_row["tenant_id"]) if user_row["tenant_id"] else None,
     )
 
     logger.info(
@@ -637,7 +637,7 @@ async def login_complete(
         role=user_row["role"],
         tenant_id=tenant_id,
         business_name=user_row["business_name"],
-        minutes_remaining=minutes_remaining,
+        **meter.allowance(),
         message="Login successful.",
     )
 

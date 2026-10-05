@@ -9,7 +9,7 @@ What this file still covers:
   * `_compute_duration_seconds` — wall-clock helper still used by the
     lifecycle hook.
   * `compute_tenant_minutes_used` / `compute_tenant_minutes_remaining`
-    — the dashboard's live deduction logic (unchanged behaviour)."""
+    — the dashboard's live deduction logic (unknown data remains unavailable)."""
 from __future__ import annotations
 
 from datetime import datetime, timezone, timedelta
@@ -39,9 +39,14 @@ class _FakeConn:
     Includes a no-op .transaction() context manager so the persister's
     SET LOCAL bypass-RLS wrapping works in tests."""
 
-    def __init__(self, fetchval_value: Any = None):
+    def __init__(self, fetchval_value: Any = None, allocated: int = 120):
+        self.allocated = allocated
         self.fetchval_value = fetchval_value
         self.calls: list[tuple] = []
+
+    async def fetchrow(self, query: str, *args):
+        self.calls.append(("fetchrow", query, args))
+        return {"minutes_allocated": self.allocated, "plan_minutes": self.allocated}
 
     async def fetchval(self, query: str, *args):
         self.calls.append(("fetchval", query, args))
@@ -127,20 +132,20 @@ def test_compute_duration_handles_aware_datetime():
 
 
 @pytest.mark.asyncio
-async def test_compute_minutes_returns_zero_for_no_pool():
-    assert await compute_tenant_minutes_used(None, "abc") == 0
+async def test_compute_minutes_returns_unknown_for_no_pool():
+    assert await compute_tenant_minutes_used(None, "abc") is None
 
 
 @pytest.mark.asyncio
-async def test_compute_minutes_returns_zero_for_no_tenant():
+async def test_compute_minutes_returns_unknown_for_no_tenant():
     pool = _FakePool(_FakeConn(fetchval_value=600))
-    assert await compute_tenant_minutes_used(pool, None) == 0
+    assert await compute_tenant_minutes_used(pool, None) is None
 
 
 @pytest.mark.asyncio
-async def test_compute_minutes_returns_zero_for_invalid_uuid():
+async def test_compute_minutes_returns_unknown_for_invalid_uuid():
     pool = _FakePool(_FakeConn(fetchval_value=600))
-    assert await compute_tenant_minutes_used(pool, "not-a-uuid") == 0
+    assert await compute_tenant_minutes_used(pool, "not-a-uuid") is None
 
 
 @pytest.mark.asyncio
@@ -151,7 +156,7 @@ async def test_compute_minutes_floors_seconds_to_minutes():
     out = await compute_tenant_minutes_used(pool, str(uuid4()))
     assert out == 5
     # The aggregation runs inside a transaction that first issues a
-    # `SET LOCAL app.bypass_rls` execute(), so the SUM lands on a fetchval —
+    # tenant-scoped `SET LOCAL app.tenant_id` execute(), so the SUM lands on a fetchval —
     # locate it by kind rather than a fixed index.
     #
     # Since 2026-08-03 this delegates to `minutes_quota.compute_minutes_status`,
@@ -168,21 +173,21 @@ async def test_compute_minutes_floors_seconds_to_minutes():
     assert "c.status" not in sums[0]
     assert " status IN " not in sums[0]
     assert "leg.billing_status='finalized'" in sums[0]
-    assert any("minutes_allocated" in q for q in fetchval_queries), (
+    assert any("minutes_allocated" in q for kind, q, _ in conn.calls if kind == "fetchrow"), (
         "delegation should also read the tenant's allocation"
     )
 
 
 @pytest.mark.asyncio
-async def test_compute_minutes_handles_db_error_as_zero():
-    class _BoomConn:
+async def test_compute_minutes_handles_usage_query_error_as_unknown():
+    class _BoomConn(_FakeConn):
         async def fetchval(self, *a, **k):
             raise RuntimeError("db down")
 
     pool = _FakePool(_BoomConn())  # type: ignore[arg-type]
-    # Must not raise; treat as 0 used.
+    # Auth may continue, but usage must not become zero.
     out = await compute_tenant_minutes_used(pool, str(uuid4()))
-    assert out == 0
+    assert out is None
 
 
 @pytest.mark.asyncio

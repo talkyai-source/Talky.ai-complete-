@@ -1,0 +1,27 @@
+....F..F                                                                 [100%]
+================================== FAILURES ===================================
+_____________ test_missing_entitlement_is_unavailable[allocation] _____________
+tests\integration\test_op01_metering.py:103: in test_missing_entitlement_is_unavailable
+    await meter_db.admin.execute("UPDATE tenants SET minutes_allocated=NULL WHERE id=$1", meter_db.tenants[0])
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:353: in execute
+    _, status, _ = await self._execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1794: in _execute
+    result, _ = await self.__execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1892: in __execute
+    result, stmt = await self._do_execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1948: in _do_execute
+    result = await executor(stmt, timeout)
+asyncpg\protocol\protocol.pyx:207: in bind_execute
+    ???
+E   asyncpg.exceptions.NotNullViolationError: null value in column "minutes_allocated" of relation "tenants" violates not-null constraint
+E   DETAIL:  Failing row contains (05cd53aa-876b-4462-9fd3-a12edcae7561, Synthetic OP01, op01_7af3a96e796e4b4198fd08eb26c610e4, null, 0, {"skip_dnc": true, "timezone": "America/New_York", "allowed_days..., null, null, inactive, active, null, null, null, null, 2026-10-05 07:18:08.042484+05, 2026-10-05 07:18:08.086861+05, null, f).
+___________ test_tenant_scoped_parent_and_finalized_transfer_usage ____________
+tests\integration\test_op01_metering.py:134: in test_tenant_scoped_parent_and_finalized_transfer_usage
+    assert (await compute_minutes_status(conn, str(meter_db.tenants[1]))).state == "unavailable"
+E   AssertionError: assert 'known' == 'unavailable'
+E     - unavailable
+E     + known
+=========================== short test summary info ===========================
+FAILED tests/integration/test_op01_metering.py::test_missing_entitlement_is_unavailable[allocation]
+FAILED tests/integration/test_op01_metering.py::test_tenant_scoped_parent_and_finalized_transfer_usage
+2 failed, 6 passed in 4.67s

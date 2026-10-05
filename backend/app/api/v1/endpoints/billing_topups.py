@@ -148,8 +148,11 @@ async def get_balance(current_user: CurrentUser = Depends(get_current_user)):
     tenant_id = _tenant(current_user)
     svc = _service()
     c = get_container()
-    async with acquire_with_tenant(c.db_pool, tenant_id) as conn:
-        st = await compute_minutes_status(conn, tenant_id)
+    try:
+        async with acquire_with_tenant(c.db_pool, tenant_id) as conn:
+            st = (await compute_minutes_status(conn, tenant_id)).require_available()
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail={"code": "usage_unavailable", "message": "Minute allowance is temporarily unavailable."}) from exc
     return BalanceOut(**st.as_dict(), purchased_minutes=await svc.purchased_total(tenant_id))
 
 

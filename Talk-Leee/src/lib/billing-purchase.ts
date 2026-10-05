@@ -26,6 +26,7 @@ export const billingSubscriptionSchema = z.object({
   status: z.string(), plan_id: z.string().nullable().optional(), plan_name: z.string().nullable().optional(),
   current_period_start: z.string().nullable().optional(), current_period_end: z.string().nullable().optional(),
   cancel_at_period_end: z.boolean().default(false),
+  minutes_state: z.enum(["known", "unlimited", "unavailable"]).default("unavailable"),
   minutes_allocated: z.number(), minutes_used: z.number(), minutes_remaining: z.number(),
   purchased_price_option: purchasedPriceSchema.nullable().default(null), billing_portal_available: z.boolean().default(false),
 });

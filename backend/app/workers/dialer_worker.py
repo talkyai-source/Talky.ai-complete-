@@ -341,7 +341,14 @@ class DialerWorker:
             # 0.5 Minutes quota gate. Stop originating once the tenant has burned
             # its plan minutes for the month. Minute tracking was previously
             # display-only, so tenants could overrun the plan with no cap.
-            if await self._tenant_minutes_exhausted(job.tenant_id):
+            from app.domain.services.minutes_quota import MeteringUnavailable
+            try:
+                minutes_exhausted = await self._tenant_minutes_exhausted(job.tenant_id)
+            except MeteringUnavailable:
+                await self._publish_block(job, "metering_unavailable")
+                await self._redefer_before_intent_resolution(job, reason="metering_unavailable")
+                return
+            if minutes_exhausted:
                 logger.info(
                     "Skipping job %s — tenant %s is out of plan minutes",
                     job.job_id,
@@ -765,6 +772,10 @@ class DialerWorker:
                 logger.warning(f"Call guard decision for job {job.job_id}: {guard_decision}")
                 await release_tenant_dial_slot(self._redis, job.tenant_id)
 
+                if guard_decision == "metering_unavailable":
+                    await self._publish_block(job, "metering_unavailable", rules=rules)
+                    await self._redefer_before_intent_resolution(job, reason="metering_unavailable")
+                    return
                 if guard_decision == "block":
                     # Block the call - mark job as blocked, don't retry
                     await self._publish_block(job, "call_guard_blocked", rules=rules)
@@ -853,6 +864,14 @@ class DialerWorker:
                     rules,
                     call_intent=call_intent,
                 )
+
+                if provider_call_id == self._METERING_UNAVAILABLE:
+                    # The bridge explicitly rejected before provider admission.
+                    # Preserve the committed intent and the same queue attempt.
+                    await release_tenant_dial_slot(self._redis, job.tenant_id)
+                    await self._publish_block(job, "metering_unavailable", rules=rules)
+                    await self._redefer_before_intent_resolution(job, reason="metering_unavailable")
+                    return
 
                 if provider_call_id == self._ORIGINATION_UNCERTAIN:
                     await self._park_uncertain_origination(job, call_intent)
@@ -1146,6 +1165,7 @@ class DialerWorker:
     # so process_job can apply infrastructure-aware backoff without
     # consuming the job's retry budget.
     _PIPELINE_UNAVAILABLE = "__pipeline_unavailable__"
+    _METERING_UNAVAILABLE = "__metering_unavailable__"
 
     # The HTTP result is unknown after a transport timeout/disconnect, or the
     # bridge explicitly reports proof-aware cleanup in progress. Retrying as a
@@ -1313,6 +1333,13 @@ class DialerWorker:
                 ) as resp:
                     body = await resp.text()
                     if resp.status == 503:
+                        try:
+                            parsed = json.loads(body)
+                            error = parsed.get("error", parsed.get("detail", {}))
+                            if isinstance(error, dict) and error.get("code") == "metering_unavailable":
+                                return self._METERING_UNAVAILABLE
+                        except (ValueError, TypeError, AttributeError):
+                            pass
                         logger.warning(
                             "Voice pipeline unavailable (503) — will retry "
                             "without consuming attempt budget. dest=%s body=%s",
@@ -1416,6 +1443,9 @@ class DialerWorker:
                 call_type="outbound",
             )
 
+            if any(not check.passed and check.reason == "metering_unavailable"
+                   for check in guard_result.check_results):
+                return "metering_unavailable"
             return guard_result.decision.value
 
         except Exception as e:
@@ -1520,23 +1550,14 @@ class DialerWorker:
             return []
 
     async def _tenant_minutes_exhausted(self, tenant_id: str) -> bool:
-        """True when the tenant has used >= its plan's monthly minute allocation.
-
-        Delegates to the shared ``minutes_quota`` helper — the single source
-        of truth also used by the start-campaign endpoint and the frontend
-        quota display — so the per-job skip and the start-block can never
-        disagree. Returns False (do NOT block) on any error: a quota lookup
-        failure must never wedge the dialer.
-        """
+        """Exhaustion is known; unavailable metering defers the same attempt."""
+        from app.domain.services.minutes_quota import compute_minutes_status, MeteringUnavailable
         try:
-            from app.domain.services.minutes_quota import compute_minutes_status
-
             async with self._acquire_db() as conn:
-                status = await compute_minutes_status(conn, tenant_id)
-                return status.exhausted
-        except Exception as e:  # noqa: BLE001
-            logger.warning("minutes quota check failed for tenant %s: %s", tenant_id, e)
-            return False
+                result = await compute_minutes_status(conn, tenant_id)
+                return result.require_available().exhausted
+        except Exception as exc:
+            raise MeteringUnavailable("metering_unavailable") from exc
 
     async def _emit_out_of_minutes_event(self, job) -> None:
         """Surface an out-of-minutes alert in the UI (throttled 5 min per tenant)."""
@@ -2092,6 +2113,10 @@ class DialerWorker:
                 job.job_id,
                 outcome="duplicate_terminal_attempt",
             )
+            return
+        if provider_call_id == self._METERING_UNAVAILABLE:
+            await self._publish_block(job, "metering_unavailable", rules=rules)
+            await self._redefer_before_intent_resolution(job, reason="metering_unavailable")
             return
         if provider_call_id == self._PIPELINE_UNAVAILABLE:
             if not await self._mark_call_intent_not_originated(

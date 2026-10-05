@@ -85,15 +85,8 @@ def test_guard_and_dialer_share_one_source_of_truth():
     )
 
 
-def test_live_lookup_failure_falls_back_rather_than_blocking():
-    """The method's stated contract is that a metering hiccup never strands a
-    legitimate call. Adding a DB round trip must not change that."""
-    quota = _method_body(
-        _read("app/domain/services/call_guard.py"), "_check_minutes_quota"
-    )
-    assert "except Exception" in quota
-    assert "falling back" in quota.lower()
-
+# Failure and stale-counter fallback are tested through actual guard/worker calls
+# in test_op01_metering_unavailable, replacing the former source-text assertion.
 
 @pytest.mark.parametrize(
     "allocated,used_seconds,should_be_exhausted",
@@ -107,7 +100,7 @@ def test_live_lookup_failure_falls_back_rather_than_blocking():
 def test_status_maths(allocated, used_seconds, should_be_exhausted):
     from app.domain.services.minutes_quota import _status_from
 
-    st = _status_from(allocated, used_seconds)
+    st = _status_from(allocated, used_seconds, unlimited=allocated == 0)
     assert st.exhausted is should_be_exhausted
     assert st.used_minutes == used_seconds // 60
 

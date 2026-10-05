@@ -48,7 +48,8 @@ type LoginTokens = {
     tenant_id?: string;
     email?: string;
     business_name?: string | null;
-    minutes_remaining?: number;
+    minutes_remaining?: number | null;
+    minutes_state?: "known" | "unlimited" | "unavailable";
 };
 
 // ─── Validation ──────────────────────────────────────────────────────────────
@@ -237,6 +238,7 @@ export default function LoginClientPage() {
                         role: tokens.role!,
                         business_name: tokens.business_name,
                         minutes_remaining: tokens.minutes_remaining,
+                        minutes_state: tokens.minutes_state,
                         access_token: tokens.access_token,
                     });
                 });

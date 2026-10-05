@@ -297,101 +297,22 @@ async def test_summary_swallows_dialer_jobs_table_missing():
 
 
 @pytest.mark.asyncio
-async def test_summary_adds_only_finalized_transfer_leg_actual_seconds():
-    leg_builder = _FakeBuilder(
-        data=[
-            {"duration_seconds": 25},
-            {"duration_seconds": 30},
-        ]
-    )
-    builders = {
-        "calls": [
-            _FakeBuilder(count=1, data=[]),
-            _FakeBuilder(
-                data=[
-                    {
-                        "id": "11111111-1111-1111-1111-111111111111",
-                        "outcome": "answered",
-                        "duration_seconds": 70,
-                    }
-                ]
-            ),
-            _FakeBuilder(count=0, data=[]),
-        ],
-        "call_legs": [leg_builder],
-        "campaigns": [_FakeBuilder(count=0, data=[])],
-        "tenants": [_FakeBuilder(data=[{"minutes_allocated": 5}])],
-        "dialer_jobs": [_FakeBuilder(count=0, data=[])],
-    }
-
+@pytest.mark.parametrize("allocated,seconds", [(5, 125), (10, 120)])
+async def test_summary_uses_canonical_settled_meter_not_display_call_subset(allocated, seconds):
+    from tests.unit.test_op01_metering_unavailable import Meter, Pool
+    db = _FakeClient({})  # No loaded call rows; meter remains authoritative.
+    db.pool = Pool(Meter(allocated=allocated, used=seconds, plan_minutes=allocated))
     result = await get_dashboard_summary(
-        current_user=_user(),
-        db_client=_FakeClient(builders),
+        current_user=_user("11111111-1111-4111-8111-111111111111"), db_client=db,
     )
-
-    # Parent 70s + finalized children 55s = 125s = 2 whole minutes.
-    assert result.minutes_used == 2
-    assert result.minutes_remaining == 3
-    assert ("in_", ("call_id", ["11111111-1111-1111-1111-111111111111"]), {}) in leg_builder.calls
-    assert ("eq", ("leg_type", "transfer"), {}) in leg_builder.calls
-    assert ("eq", ("billing_status", "finalized"), {}) in leg_builder.calls
+    assert result.minutes_state == "known"
+    assert result.minutes_used == seconds // 60
+    assert result.minutes_remaining == allocated - seconds // 60
 
 
 @pytest.mark.asyncio
-async def test_summary_minutes_exclude_unsettled_inbound_but_keep_outbound():
-    """The dashboard's minutes KPI must equal the quota/billing definition."""
-    month_builder = _FakeBuilder(
-        data=[
-            {
-                "id": "11111111-1111-1111-1111-111111111111",
-                "outcome": "answered",
-                "duration_seconds": 60,
-                "is_test": False,
-                "direction": "outbound",
-                "billing_status": "none",
-            },
-            {
-                "id": "22222222-2222-2222-2222-222222222222",
-                "outcome": "answered",
-                "duration_seconds": 60,
-                "is_test": False,
-                "direction": "inbound",
-                "billing_status": "finalized",
-            },
-            {
-                "id": "33333333-3333-3333-3333-333333333333",
-                "outcome": "answered",
-                "duration_seconds": 3600,
-                "is_test": False,
-                "direction": "inbound",
-                "billing_status": "held",
-            },
-            {
-                "id": "44444444-4444-4444-4444-444444444444",
-                "outcome": None,
-                "duration_seconds": 3600,
-                "is_test": False,
-                "direction": "inbound",
-                "billing_status": "reserved",
-            },
-        ]
-    )
-    builders = {
-        "calls": [
-            _FakeBuilder(count=4, data=[]),
-            month_builder,
-            _FakeBuilder(count=0, data=[]),
-        ],
-        "campaigns": [_FakeBuilder(count=0, data=[])],
-        "tenants": [_FakeBuilder(data=[{"minutes_allocated": 10}])],
-        "dialer_jobs": [_FakeBuilder(count=0, data=[])],
-    }
-
-    result = await get_dashboard_summary(
-        current_user=_user(),
-        db_client=_FakeClient(builders),
-    )
-
-    # Legacy outbound 60s + settled inbound 60s. Held/reserved inbound is 0.
-    assert result.minutes_used == 2
-    assert result.minutes_remaining == 8
+async def test_summary_without_meter_pool_does_not_invent_zero_usage_or_unlimited():
+    result = await get_dashboard_summary(current_user=_user(), db_client=_FakeClient({}))
+    assert result.minutes_state == "unavailable"
+    assert result.minutes_used is None and result.minutes_remaining is None
+    assert result.minutes_included is None

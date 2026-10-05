@@ -84,6 +84,7 @@ function AuthCallbackInner() {
                             role: me.role,
                             business_name: me.business_name,
                             minutes_remaining: me.minutes_remaining,
+                        minutes_state: me.minutes_state,
                             access_token: accessToken,
                         });
                     });

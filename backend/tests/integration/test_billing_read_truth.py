@@ -134,6 +134,10 @@ async def seed_usage(fixture, *, allocated=350):
         await conn.execute(
             "UPDATE tenants SET minutes_allocated=$2 WHERE id=$1", fixture.tenants[0], allocated
         )
+        if allocated == 0:
+            # Unlimited is a recorded product entitlement, not a missing/default
+            # tenant allocation. Keep this positive fixture explicit.
+            await conn.execute("UPDATE plans SET minutes=0 WHERE id=$1", fixture.plan)
         await conn.executemany(
             "INSERT INTO campaigns(id,tenant_id,name,direction) VALUES($1,$2,'Synthetic metering',$3)",
             [

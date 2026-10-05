@@ -1168,9 +1168,10 @@ async def list_call_issues(
     try:
         from app.domain.services.minutes_quota import tenant_minutes_status
 
-        minutes_ok = not (await tenant_minutes_status(current_user.tenant_id)).exhausted
+        meter = await tenant_minutes_status(current_user.tenant_id)
+        minutes_ok = meter.state != "unavailable" and not meter.exhausted
     except Exception:
-        minutes_ok = True  # fail open — never hide a real issue on a lookup glitch
+        minutes_ok = False  # Unavailable metering cannot prove a recorded issue resolved.
 
     # Effective calling rules per campaign, so a schedule issue can quote the
     # user's OWN window ("Mon & Fri, 14:00-17:00 Europe/London") and compute

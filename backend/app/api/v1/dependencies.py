@@ -19,7 +19,7 @@ Day 4 RBAC Additions:
 """
 import logging
 import os
-from typing import Optional, Set
+from typing import Literal, Optional, Set
 from dataclasses import dataclass, field
 
 from fastapi import Cookie, Depends, HTTPException, Header, status, Request
@@ -47,7 +47,8 @@ class CurrentUser:
     role: str = "user"
     name: Optional[str] = None
     business_name: Optional[str] = None
-    minutes_remaining: int = 0
+    minutes_remaining: Optional[int] = None
+    minutes_state: Literal["known", "unlimited", "unavailable"] = "unavailable"
 
     # Day 4: RBAC cache
     _permissions: Optional[Set[str]] = field(default=None, repr=False)
@@ -258,11 +259,10 @@ async def get_current_user(
     request.state.authenticated_session_id = str(session["id"])
     request.state.authenticated_user_id = str(user_id)
 
-    from app.services.scripts.tenant_minutes import compute_tenant_minutes_remaining
-    minutes_remaining = await compute_tenant_minutes_remaining(
+    from app.services.scripts.tenant_minutes import compute_tenant_minutes_status
+    meter = await compute_tenant_minutes_status(
         client.pool,
-        tenant_id=str(row["tenant_id"]) if row["tenant_id"] else None,
-        minutes_allocated=row["minutes_allocated"],
+        str(row["tenant_id"]) if row["tenant_id"] else None,
     )
 
     resolved_tenant_id = str(row["tenant_id"]) if row["tenant_id"] else None
@@ -289,7 +289,7 @@ async def get_current_user(
         role=row["role"] or "user",
         name=row["name"],
         business_name=row["business_name"],
-        minutes_remaining=minutes_remaining,
+        **meter.allowance(),
     )
 
 

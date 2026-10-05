@@ -261,10 +261,8 @@ async def verify_mfa_challenge(
                 session_id=session_id, ip=ip, user_agent=ua)
 
     # --- Build response -------------------------------------------------------
-    minutes_remaining = max(
-        0,
-        (user_row["minutes_allocated"] or 0) - (user_row["minutes_used"] or 0),
-    )
+    from app.services.scripts.tenant_minutes import compute_tenant_minutes_status
+    meter = await compute_tenant_minutes_status(db_client.pool, tenant_id)
 
     _set_session_cookie(response, raw_session_token)
 
@@ -277,7 +275,7 @@ async def verify_mfa_challenge(
         role=user_row["role"],
         tenant_id=tenant_id,
         business_name=user_row["business_name"],
-        minutes_remaining=minutes_remaining,
+        **meter.allowance(),
         mfa_verified=True,
         message="Login successful.",
     )

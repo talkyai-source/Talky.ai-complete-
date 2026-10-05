@@ -535,7 +535,7 @@ class BillingService:
             exists = await conn.fetchval("SELECT EXISTS(SELECT 1 FROM tenants WHERE id=$1)", tenant_uuid)
             if not exists:
                 raise RuntimeError("Usage tenant unavailable")
-            quota = await compute_minutes_status(conn, tenant_uuid)
+            quota = (await compute_minutes_status(conn, tenant_uuid)).require_available()
         return {
             "usage_type": usage_type,
             "total_used": quota.used_minutes,

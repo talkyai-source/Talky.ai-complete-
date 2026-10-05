@@ -1,3 +1,4 @@
+import { normalizeMinutesAllowance } from "@/lib/minutes-allowance";
 import { z } from "zod";
 import { createHttpClient, ApiClientError, resetSessionExpiredLatch, type RequestIdentity } from "@/lib/http-client";
 import { apiBaseUrl } from "@/lib/env";
@@ -15,7 +16,8 @@ export const LoginResponseSchema = z
         email: z.string().email(),
         role: z.string(),
         business_name: z.string().optional().nullable(),
-        minutes_remaining: z.number().optional(),
+        minutes_remaining: z.number().int().nonnegative().nullable().optional(),
+        minutes_state: z.enum(["known", "unlimited", "unavailable"]).optional(),
         message: z.string().optional(),
         mfa_required: z.boolean().optional(),
         mfa_challenge_token: z.string().optional().nullable(),
@@ -29,7 +31,7 @@ export const LoginResponseSchema = z
         email: v.email,
         role: v.role,
         business_name: v.business_name ?? undefined,
-        minutes_remaining: v.minutes_remaining ?? 0,
+        ...normalizeMinutesAllowance(v),
         message: v.message ?? "",
         mfa_required: v.mfa_required ?? false,
         mfa_challenge_token: v.mfa_challenge_token ?? undefined,
@@ -75,7 +77,8 @@ export const MeResponseSchema = z
         name: z.string().optional().nullable(),
         business_name: z.string().optional().nullable(),
         role: z.string(),
-        minutes_remaining: z.number(),
+        minutes_remaining: z.number().int().nonnegative().nullable().optional(),
+        minutes_state: z.enum(["known", "unlimited", "unavailable"]).optional(),
         // Admin / suspension fields populated when the user has elevated
         // permissions or the tenant/partner is in a non-active state.
         // All optional — missing fields just mean "not suspended" /
@@ -91,6 +94,7 @@ export const MeResponseSchema = z
     .passthrough()
     .transform((v) => ({
         ...v,
+        ...normalizeMinutesAllowance(v),
         name: v.name ?? undefined,
         business_name: v.business_name ?? undefined,
         partner_id: v.partner_id ?? undefined,

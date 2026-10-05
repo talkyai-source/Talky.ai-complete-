@@ -1,5 +1,6 @@
 "use client";
 
+import { remainingMinutesLabel } from "@/lib/minutes-allowance";
 import { useState, useEffect } from "react";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -299,7 +300,7 @@ export default function SettingsPage() {
                                                 <div>
                                                     <div className="font-semibold text-muted-foreground">Minutes remaining</div>
                                                     <div className="mt-0.5 text-foreground tabular-nums">
-                                                        {user.minutes_remaining.toLocaleString()}
+                                                        {remainingMinutesLabel(user)}
                                                     </div>
                                                 </div>
                                                 <div>

@@ -1928,6 +1928,12 @@ async def make_call(request: Request, body: MakeCallRequest):
             call_id=guard_result.call_id,
         )
 
+    # Metering uncertainty is retryable before any provider admission.
+    if any(not check.passed and check.reason == "metering_unavailable"
+           for check in guard_result.check_results):
+        raise HTTPException(status_code=503, headers={"Retry-After": "60"},
+            detail={"code": "metering_unavailable", "message": "Minute allowance is temporarily unavailable. Retry this request later."})
+
     # Handle guard decisions
     if guard_result.decision == GuardDecision.BLOCK:
         logger.warning(

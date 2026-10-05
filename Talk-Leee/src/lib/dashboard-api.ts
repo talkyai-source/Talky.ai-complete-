@@ -1,3 +1,4 @@
+import type { MinutesState } from "@/lib/minutes-allowance";
 import type { CampaignVoiceSettingsValue } from "@/components/realtime/types";
 import { sharedHttpClient } from "@/lib/api";
 import type { CampaignBrief } from "@/lib/campaign-brief";
@@ -7,11 +8,12 @@ export interface DashboardSummary {
     total_calls: number;
     answered_calls: number;
     failed_calls: number;
-    minutes_used: number;
+    minutes_used: number | null;
     // Plan allowance — Hisham's dashboard renders this in the usage gauge.
     // Optional for back-compat with older backends that don't return it.
-    minutes_included?: number;
-    minutes_remaining: number;
+    minutes_included?: number | null;
+    minutes_remaining: number | null;
+    minutes_state?: MinutesState;
     active_campaigns: number;
 
     // Live + monthly aggregate fields exposed by /dashboard/summary.

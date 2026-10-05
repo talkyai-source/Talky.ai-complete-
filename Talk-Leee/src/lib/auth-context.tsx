@@ -1,5 +1,6 @@
 "use client";
 
+import { normalizeMinutesAllowance, type MinutesState } from "@/lib/minutes-allowance";
 import React, { createContext, useContext, useEffect, useMemo, useRef, useState, ReactNode, useCallback } from "react";
 import { api } from "@/lib/api";
 import { clearFreshLoginGrace, resetSessionExpiredLatch, isWithinFreshLoginGrace, setTokenProvider, isApiClientError, setRequestIdentity, invalidateRequestIdentity, ApiClientError } from "@/lib/http-client";
@@ -25,7 +26,8 @@ interface MeResponse {
     name?: string;
     business_name?: string;
     role: string;
-    minutes_remaining: number;
+    minutes_remaining: number | null;
+    minutes_state?: MinutesState;
     // Admin / suspension fields populated by the backend's /me endpoint
     // when the user has elevated permissions or the tenant/partner is in
     // a non-active state. All optional — older sessions without these
@@ -67,7 +69,8 @@ interface AuthContextType {
         email: string;
         role: string;
         business_name?: string | null;
-        minutes_remaining?: number;
+        minutes_remaining?: number | null;
+        minutes_state?: MinutesState;
         access_token?: string;
     }) => void;
 }
@@ -402,7 +405,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             email: res.email,
             role: res.role,
             business_name: res.business_name,
-            minutes_remaining: res.minutes_remaining ?? 0,
+            ...normalizeMinutesAllowance(res),
         });
         setLoading(false);
         broadcastIdentityChange("changed");
@@ -557,7 +560,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         email: string;
         role: string;
         business_name?: string | null;
-        minutes_remaining?: number;
+        minutes_remaining?: number | null;
+        minutes_state?: MinutesState;
         access_token?: string;
     }) => {
         invalidateIdentity();
@@ -586,7 +590,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             email: res.email,
             role: res.role,
             business_name: res.business_name ?? undefined,
-            minutes_remaining: res.minutes_remaining ?? 0,
+            ...normalizeMinutesAllowance(res),
         });
         setLoading(false);
         broadcastIdentityChange("changed");

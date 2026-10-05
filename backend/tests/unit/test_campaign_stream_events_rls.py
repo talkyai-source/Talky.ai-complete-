@@ -185,6 +185,7 @@ class _FakeCampaignService:
 
 async def _fake_minutes_status(_tenant_id):
     class _Minutes:
+        state = "known"
         exhausted = False
 
     return _Minutes()

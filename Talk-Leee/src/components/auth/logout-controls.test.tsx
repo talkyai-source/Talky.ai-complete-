@@ -15,7 +15,7 @@ const originalGetMe = api.getMe;
 const originalLogout = api.logout;
 const originalWindow = window;
 const account = {
-  id: "synthetic-a", tenant_id: "tenant-a", email: "a@example.test", role: "tenant_admin", minutes_remaining: 10,
+  id: "synthetic-a", tenant_id: "tenant-a", email: "a@example.test", role: "tenant_admin", minutes_remaining: 10, minutes_state: "known",
   name: undefined, business_name: undefined, partner_id: undefined, partner_status: undefined,
   tenant_status: undefined, suspended_scope: undefined, suspension_reason: undefined, suspended_at: undefined,
 } satisfies Awaited<ReturnType<typeof api.getMe>>;

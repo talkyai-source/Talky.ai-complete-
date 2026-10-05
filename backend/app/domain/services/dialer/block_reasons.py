@@ -44,6 +44,7 @@ class BlockCode(str, Enum):
     # Campaign / account level
     CAMPAIGN_NOT_RUNNING = "campaign_not_running"
     OUT_OF_MINUTES = "out_of_minutes"
+    METERING_UNAVAILABLE = "metering_unavailable"
 
     # Schedule (compliance-relevant — see the COMPLIANCE note in
     # dialer/testing_override.py before changing anything here)
@@ -357,6 +358,13 @@ def classify(
         return _schedule_reason(BlockCode.SCHEDULE_OUTSIDE_WINDOW, raw, rules, now)
 
     # ---- account / campaign --------------------------------------------
+    if "metering_unavailable" in low:
+        return BlockReason(
+            BlockCode.METERING_UNAVAILABLE,
+            "Minute allowance could not be verified. This queued call is deferred; "
+            "the same request will be checked again when metering recovers.",
+            severity="warning", stage="quota", details=extra,
+        )
     if "out_of_minutes" in low:
         return BlockReason(
             BlockCode.OUT_OF_MINUTES,

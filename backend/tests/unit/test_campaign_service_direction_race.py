@@ -90,7 +90,7 @@ async def test_start_endpoint_maps_typed_direction_error_without_message_matchin
     monkeypatch.setattr(campaigns, "_reject_inbound_campaign_mutation", lambda *_a, **_k: None)
     monkeypatch.setattr(
         "app.domain.services.minutes_quota.tenant_minutes_status",
-        AsyncMock(return_value=SimpleNamespace(exhausted=False)),
+        AsyncMock(return_value=SimpleNamespace(exhausted=False, state="known")),
     )
 
     with pytest.raises(HTTPException) as exc:

@@ -149,7 +149,7 @@ async def test_omitted_direction_preserves_outbound_dialer_job_feed(monkeypatch)
         yield Conn()
 
     async def minutes_available(_tenant_id):
-        return SimpleNamespace(exhausted=False)
+        return SimpleNamespace(exhausted=False, state="known")
 
     monkeypatch.setattr(calls_module, "acquire_with_tenant", acquire)
     monkeypatch.setattr(

@@ -1,0 +1,61 @@
+FFFF.FFF                                                                 [100%]
+================================== FAILURES ===================================
+______________ test_missing_entitlement_is_not_unlimited[meter0] ______________
+tests\unit\test_op01_metering_unavailable.py:50: in test_missing_entitlement_is_not_unlimited
+    assert result.unlimited is False
+E   assert True is False
+E    +  where True = MinutesStatus(allocated=0, used_minutes=2, remaining_minutes=0, unlimited=True, exhausted=False).unlimited
+______________ test_missing_entitlement_is_not_unlimited[meter1] ______________
+tests\unit\test_op01_metering_unavailable.py:50: in test_missing_entitlement_is_not_unlimited
+    assert result.unlimited is False
+E   assert True is False
+E    +  where True = MinutesStatus(allocated=0, used_minutes=2, remaining_minutes=0, unlimited=True, exhausted=False).unlimited
+______________ test_missing_entitlement_is_not_unlimited[meter2] ______________
+tests\unit\test_op01_metering_unavailable.py:50: in test_missing_entitlement_is_not_unlimited
+    assert result.unlimited is False
+E   assert True is False
+E    +  where True = MinutesStatus(allocated=0, used_minutes=2, remaining_minutes=0, unlimited=True, exhausted=False).unlimited
+_______ test_zero_allocation_on_finite_plan_is_exhausted_not_unlimited ________
+tests\unit\test_op01_metering_unavailable.py:57: in test_zero_allocation_on_finite_plan_is_exhausted_not_unlimited
+    assert result.unlimited is False and result.exhausted is True
+E   assert (True is False)
+E    +  where True = MinutesStatus(allocated=0, used_minutes=2, remaining_minutes=0, unlimited=True, exhausted=False).unlimited
+___________ test_final_guard_does_not_admit_using_stale_stored_zero ___________
+tests\unit\test_op01_metering_unavailable.py:69: in test_final_guard_does_not_admit_using_stale_stored_zero
+    assert result.passed is False
+E   AssertionError: assert True is False
+E    +  where True = CheckResult(check=<GuardCheck.MINUTES_QUOTA: 'minutes_quota'>, passed=True, latency_ms=0, reason=None, details={'minutes_used': 0, 'minutes_allocated': 30, 'remaining': 30}).passed
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.call_guard:call_guard.py:1067 call_guard: live minutes lookup failed for tenant=syntheti (badly formed hexadecimal UUID string) � falling back to the stored counter, which may be stale
+__________ test_profile_query_failure_does_not_return_full_remaining __________
+tests\unit\test_op01_metering_unavailable.py:76: in test_profile_query_failure_does_not_return_full_remaining
+    assert result is None
+E   assert 30 is None
+------------------------------ Captured log call ------------------------------
+WARNING  app.services.scripts.tenant_minutes:tenant_minutes.py:103 compute_tenant_minutes_used failed tenant=11111111 err=synthetic selective usage-query failure
+____ test_worker_defers_same_job_on_selective_meter_failure_then_recovers _____
+tests\unit\test_op01_metering_unavailable.py:92: in test_worker_defers_same_job_on_selective_meter_failure_then_recovers
+    worker._make_call.assert_not_awaited()
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:2429: in assert_not_awaited
+    raise AssertionError(msg)
+E   AssertionError: Expected mock to not have been awaited. Awaited 1 times.
+------------------------------ Captured log call ------------------------------
+WARNING  app.workers.dialer_worker:dialer_worker.py:1538 minutes quota check failed for tenant tenant-123: synthetic selective usage-query failure
+WARNING  app.workers.dialer_worker:dialer_worker.py:1785 Failed to get lead timezone: synthetic selective usage-query failure
+WARNING  app.domain.services.call_status:call_status.py:369 call_status.update_failed call=call-1 state=dialing err='NoneType' object has no attribute 'acquire'
+============================== warnings summary ===============================
+tests/unit/test_op01_metering_unavailable.py::test_worker_defers_same_job_on_selective_meter_failure_then_recovers
+tests/unit/test_op01_metering_unavailable.py::test_worker_defers_same_job_on_selective_meter_failure_then_recovers
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\backend\.venv\Lib\site-packages\pydantic\main.py:250: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/unit/test_op01_metering_unavailable.py::test_missing_entitlement_is_not_unlimited[meter0]
+FAILED tests/unit/test_op01_metering_unavailable.py::test_missing_entitlement_is_not_unlimited[meter1]
+FAILED tests/unit/test_op01_metering_unavailable.py::test_missing_entitlement_is_not_unlimited[meter2]
+FAILED tests/unit/test_op01_metering_unavailable.py::test_zero_allocation_on_finite_plan_is_exhausted_not_unlimited
+FAILED tests/unit/test_op01_metering_unavailable.py::test_final_guard_does_not_admit_using_stale_stored_zero
+FAILED tests/unit/test_op01_metering_unavailable.py::test_profile_query_failure_does_not_return_full_remaining
+FAILED tests/unit/test_op01_metering_unavailable.py::test_worker_defers_same_job_on_selective_meter_failure_then_recovers
+7 failed, 1 passed, 2 warnings in 3.96s

@@ -976,6 +976,8 @@ async def start_campaign(
         if tenant_id:
             from app.domain.services.minutes_quota import tenant_minutes_status
             minutes = await tenant_minutes_status(tenant_id)
+            if minutes.state == "unavailable":
+                raise HTTPException(status_code=503, detail={"code": "metering_unavailable", "message": "Minute allowance is temporarily unavailable. Retry later."})
             if minutes.exhausted:
                 raise HTTPException(
                     status_code=402,
@@ -1401,12 +1403,9 @@ async def get_minutes_status(
     """
     from app.domain.services.minutes_quota import tenant_minutes_status
     tenant_id = current_user.tenant_id
-    if not tenant_id:
-        return {
-            "allocated": 0, "used_minutes": 0, "remaining_minutes": 0,
-            "unlimited": True, "exhausted": False,
-        }
-    status = await tenant_minutes_status(tenant_id)
+    status = await tenant_minutes_status(tenant_id) if tenant_id else None
+    if status is None or status.state == "unavailable":
+        raise HTTPException(status_code=503, detail={"code": "metering_unavailable", "message": "Minute allowance is temporarily unavailable."})
     return status.as_dict()
 
 

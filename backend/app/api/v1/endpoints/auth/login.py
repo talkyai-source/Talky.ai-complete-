@@ -280,7 +280,8 @@ async def login(
                 "email": row["email"],
                 "role": row["role"],
                 "business_name": row["business_name"],
-                "minutes_remaining": 0,
+                "minutes_remaining": None,
+                "minutes_state": "unavailable",
                 "mfa_required": True,
                 "mfa_challenge_token": mfa_challenge_token,
                 "message": "MFA verification required. Use mfa_challenge_token with POST /auth/mfa/verify.",
@@ -300,10 +301,21 @@ async def login(
         )
 
         # --- build response --------------------------------------------------------
-        minutes_remaining = max(
-            0,
-            (row["minutes_allocated"] or 0) - (row["minutes_used"] or 0),
+        from app.domain.services.minutes_quota import (
+            MeteringUnavailable, compute_minutes_status, unavailable_minutes,
         )
+
+        meter = unavailable_minutes("allowance_unavailable")
+        if row["tenant_id"]:
+            try:
+                # Reuse the credential transaction's connection (including a
+                # one-slot pool). A failed optional meter query must roll back
+                # its savepoint, not poison atomic session/refresh issuance.
+                async with conn.transaction():
+                    meter = await compute_minutes_status(conn, row["tenant_id"])
+                    meter.require_available()
+            except MeteringUnavailable:
+                pass
         tenant_id = str(row["tenant_id"]) if row["tenant_id"] else None
         token = create_jwt(user_id, row["email"], row["role"], tenant_id, session_id)
 
@@ -315,7 +327,7 @@ async def login(
             "email": row["email"],
             "role": row["role"],
             "business_name": row["business_name"],
-            "minutes_remaining": minutes_remaining,
+            **meter.allowance(),
             "message": "Login successful.",
             "mfa_required": False,
         })

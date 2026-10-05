@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel
 
@@ -56,7 +56,8 @@ class MFAChallengeVerifyResponse(BaseModel):
     role: str
     tenant_id: Optional[str] = None
     business_name: Optional[str]
-    minutes_remaining: int
+    minutes_remaining: Optional[int] = None
+    minutes_state: Literal["known", "unlimited", "unavailable"] = "unavailable"
     mfa_verified: bool = True
     message: str
 

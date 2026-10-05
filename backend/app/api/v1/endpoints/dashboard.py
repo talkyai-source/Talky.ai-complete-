@@ -4,7 +4,7 @@ Provides aggregated metrics for the dashboard overview
 """
 import logging
 from datetime import datetime, timezone
-from typing import Dict
+from typing import Literal, Optional, Dict
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, Field
 from app.core.postgres_adapter import Client
@@ -17,9 +17,8 @@ from app.utils.tenant_filter import apply_tenant_filter
 def _start_of_current_month_utc() -> str:
     """First instant of the current calendar month in UTC, ISO-8601.
 
-    Used to scope minutes-used aggregations to the current billing window.
-    Plans bill monthly (`plans.billing_period = 'monthly'`), so usage resets
-    at 00:00 UTC on the 1st of each month.
+    Existing calendar-month dashboard window. This does not establish a
+    paid subscription anniversary/reset policy; OP01 leaves that decision open.
     """
     now = datetime.now(timezone.utc)
     return now.replace(day=1, hour=0, minute=0, second=0, microsecond=0).isoformat()
@@ -46,14 +45,14 @@ class DashboardSummary(BaseModel):
     total_calls: int
     answered_calls: int
     failed_calls: int
-    minutes_used: int
-    minutes_remaining: int
-    minutes_included: int = Field(
-        default=0,
+    minutes_used: Optional[int] = None
+    minutes_remaining: Optional[int] = None
+    minutes_state: Literal["known", "unlimited", "unavailable"] = "unavailable"
+    minutes_included: Optional[int] = Field(
+        default=None,
         description=(
-            "The tenant's plan minute allocation (minutes_used + "
-            "minutes_remaining). Drives the dashboard minutes-gauge total so "
-            "the frontend stops defaulting to a hardcoded 5000."
+            "Current recorded allocation; null when unavailable. Zero is unlimited "
+            "only when minutes_state explicitly says unlimited."
         ),
     )
     active_campaigns: int
@@ -167,42 +166,9 @@ async def get_dashboard_summary(
             for row in performance_month_rows
             if (row.get("outcome") or "") in _FAILED_OUTCOMES
         )
-        billable_parent_rows = [
-            row
-            for row in customer_month_rows
-            if (
-                row.get("direction") != "inbound"
-                or row.get("billing_status") == "finalized"
-            )
-        ]
-        parent_duration_seconds = sum(
-            int(r.get("duration_seconds") or 0) for r in billable_parent_rows
-        )
-        # Child transfer usage settles independently of its parent. Keep every
-        # non-test parent ID here, then retain the finalized-only child filter.
-        month_call_ids = [
-            r.get("id") for r in customer_month_rows if r.get("id")
-        ]
-        transfer_duration_seconds = 0
-        if month_call_ids:
-            # Transfer legs inherit tenant/month/test ownership from the
-            # already-scoped parent rows above. Only terminally finalized
-            # actual duration is customer-visible usage; active reserved/held
-            # seconds remain admission capacity, not completed usage.
-            transfer_q = db_client.table("call_legs").select("duration_seconds")
-            transfer_q = transfer_q.in_("call_id", month_call_ids)
-            transfer_q = transfer_q.eq("leg_type", "transfer")
-            transfer_q = transfer_q.eq("billing_status", "finalized")
-            transfer_rows = transfer_q.execute().data or []
-            transfer_duration_seconds = sum(
-                int(row.get("duration_seconds") or 0)
-                for row in transfer_rows
-            )
-
-        # Convert seconds to minutes
-        minutes_used = (
-            parent_duration_seconds + transfer_duration_seconds
-        ) // 60
+        from app.services.scripts.tenant_minutes import compute_tenant_minutes_status
+        meter = await compute_tenant_minutes_status(getattr(db_client, "pool", None), current_user.tenant_id)
+        minutes_used = meter.used_minutes
 
         # Get active campaigns count with tenant filtering
         campaigns_query = (
@@ -215,20 +181,8 @@ async def get_dashboard_summary(
         campaigns_response = campaigns_query.execute()
         active_campaigns = campaigns_response.count or 0
 
-        # Live minutes-remaining: allocation from the tenant's plan minus the
-        # current month's actual parent + finalized transfer-leg usage. The
-        # tenants.minutes_used column is intentionally not consulted — it is
-        # never written by a call-end hook and would always read 0.
-        tenant_q = db_client.table("tenants").select("minutes_allocated").eq(
-            "id", current_user.tenant_id
-        )
-        tenant_resp = tenant_q.execute()
-        minutes_allocated = (
-            (tenant_resp.data[0].get("minutes_allocated") or 0)
-            if tenant_resp.data
-            else 0
-        )
-        minutes_remaining = max(0, minutes_allocated - minutes_used)
+        minutes_allocated = meter.allocated
+        minutes_remaining = meter.allowance()["minutes_remaining"]
 
         # 4. Active calls — anything currently being placed / on the line
         # for this tenant. Used as the Dashboard's "Active Calls" KPI.
@@ -284,6 +238,7 @@ async def get_dashboard_summary(
             failed_calls=failed_calls,
             minutes_used=minutes_used,
             minutes_remaining=minutes_remaining,
+            minutes_state=meter.state,
             minutes_included=minutes_allocated,
             active_campaigns=active_campaigns,
             active_calls=active_calls,

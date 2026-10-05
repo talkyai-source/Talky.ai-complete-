@@ -59,7 +59,7 @@ async def test_usage_reads_canonical_quota_under_tenant_context(
     async def quota(conn, tenant_id):
         assert conn is pool.conn and str(tenant_id) == tenant
         assert any("app.current_tenant_id" in sql and tenant in sql for sql, _ in pool.queries)
-        return _status_from(allocated, used * 60)
+        return _status_from(allocated, used * 60, unlimited=unlimited)
 
     monkeypatch.setattr("app.domain.services.minutes_quota.compute_minutes_status", quota)
     result = await service(pool).get_usage_summary(tenant)

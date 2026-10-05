@@ -84,6 +84,7 @@ async def get_me(
         business_name=current_user.business_name,
         role=current_user.role,
         minutes_remaining=current_user.minutes_remaining,
+        minutes_state=current_user.minutes_state,
         partner_id=partner_id,
         tenant_id=tenant_id or current_user.tenant_id,
         partner_status=partner_status,
@@ -122,6 +123,7 @@ async def update_me(
             business_name=current_user.business_name,
             role=current_user.role,
             minutes_remaining=current_user.minutes_remaining,
+            minutes_state=current_user.minutes_state,
         )
 
     async with acquire_with_tenant(db_client.pool, current_user.tenant_id) as conn:
@@ -161,15 +163,14 @@ async def update_me(
             detail="User profile not found.",
         )
 
-    minutes_remaining = max(
-        0,
-        (row["minutes_allocated"] or 0) - (row["minutes_used"] or 0),
-    )
+    from app.services.scripts.tenant_minutes import compute_tenant_minutes_status
+    meter = await compute_tenant_minutes_status(db_client.pool, current_user.tenant_id)
+
     return MeResponse(
         id=str(row["id"]),
         email=row["email"],
         name=row["name"],
         business_name=row["business_name"],
         role=row["role"],
-        minutes_remaining=minutes_remaining,
+        **meter.allowance(),
     )

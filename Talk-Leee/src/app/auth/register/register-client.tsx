@@ -133,6 +133,7 @@ export default function RegisterClientPage() {
                     role: response.role,
                     business_name: response.business_name,
                     minutes_remaining: response.minutes_remaining,
+                        minutes_state: response.minutes_state,
                     access_token: response.access_token,
                 });
             });

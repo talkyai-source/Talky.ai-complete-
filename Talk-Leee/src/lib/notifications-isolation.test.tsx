@@ -15,7 +15,7 @@ const originalFallback = process.env.NEXT_PUBLIC_BEARER_FALLBACK;
 const originalStorageDescriptor = Object.getOwnPropertyDescriptor(window, "localStorage")!;
 const originalBroadcastDescriptor = Object.getOwnPropertyDescriptor(window, "BroadcastChannel");
 const accountA = {
-    id: "user-a", tenant_id: "tenant-a", email: "a@example.test", role: "tenant_admin", minutes_remaining: 10,
+    id: "user-a", tenant_id: "tenant-a", email: "a@example.test", role: "tenant_admin", minutes_remaining: 10, minutes_state: "known" as const,
     name: undefined, business_name: undefined, partner_id: undefined, partner_status: undefined,
     tenant_status: undefined, suspended_scope: undefined, suspension_reason: undefined, suspended_at: undefined,
 } satisfies Awaited<ReturnType<typeof api.getMe>>;

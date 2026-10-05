@@ -1,0 +1,25 @@
+........................................................................ [ 37%]
+........................................................................ [ 74%]
+.................................................                        [100%]
+============================== warnings summary ===============================
+tests/unit/test_op01_metering_unavailable.py: 8 warnings
+tests/unit/test_dialer_worker_guard_ordering.py: 10 warnings
+tests/unit/test_dialer_origination_durability.py: 48 warnings
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\backend\.venv\Lib\site-packages\pydantic\main.py:250: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+
+tests/unit/test_call_metrics_persist.py::test_compute_duration_handles_naive_datetime
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-op01-20261005\backend\tests\unit\test_call_metrics_persist.py:112: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    started = datetime.utcnow() - timedelta(seconds=125)
+
+tests/unit/test_campaign_service_direction_race.py::test_outbound_start_status_update_fails_if_campaign_changed_direction
+tests/unit/test_campaign_service_direction_race.py::test_outbound_start_status_update_accepts_one_outbound_row
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-op01-20261005\backend\app\domain\services\campaign_service.py:1157: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "started_at": datetime.utcnow().isoformat()
+
+tests/unit/test_campaign_service_direction_race.py::test_outbound_lifecycle_refuses_conversion_winner_before_side_effects[stop]
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-op01-20261005\backend\app\domain\services\campaign_service.py:659: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "completed_at": datetime.utcnow().isoformat()
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+193 passed, 70 warnings in 21.33s

@@ -104,6 +104,7 @@ _FAIL_CLOSED_ON_ERROR_CHECKS = frozenset(
         GuardCheck.PLATFORM_CALLS_ENABLED,
         GuardCheck.DNC_CHECK,
         GuardCheck.SPEND_LIMIT,
+        GuardCheck.MINUTES_QUOTA,
     }
 )
 
@@ -369,7 +370,9 @@ class CallGuard:
                     passed=not fail_closed,
                     latency_ms=int((time.time() - check_start) * 1000),
                     reason=(
-                        f"check_error_blocked: {str(e)}"
+                        "metering_unavailable"
+                        if check_type == GuardCheck.MINUTES_QUOTA
+                        else f"check_error_blocked: {str(e)}"
                         if fail_closed
                         else f"check_error_skipped: {str(e)}"
                     ),
@@ -1008,68 +1011,19 @@ class CallGuard:
         estimated_duration_seconds: Optional[int] = None,
         **kwargs,
     ) -> CheckResult:
-        """Block origination once the tenant's monthly minutes are exhausted.
-
-        Closes the direct-origination revenue leak: campaigns + dialer enforce
-        minutes elsewhere, but ``POST /sip/telephony/call`` reached the carrier
-        with NO minutes gate, so an exhausted tenant billed unmetered calls.
-
-        Fail-OPEN by design (matches _check_spend_limit): a missing/zero
-        allocation = "no quota configured" -> pass; any load/logic error is
-        caught by evaluate()'s per-check try/except and treated as passed, so a
-        metering hiccup never strands legitimate calls.
-        """
-        allocated = (tenant_limits.monthly_minutes_allocated if tenant_limits else 0) or 0
-        if not tenant_limits or allocated <= 0:
-            return CheckResult(
-                check=GuardCheck.MINUTES_QUOTA,
-                passed=True,
-                reason="no_minutes_quota",
-            )
-
-        # LIVE usage, not the stored column (2026-08-03).
-        #
-        # `tenant_call_limits.monthly_minutes_used` is written by exactly ONE
-        # thing in this codebase: the admin PUT /admin/tenants/{id}/call-limits
-        # endpoint. NOTHING increments it when a call actually happens. So this
-        # check was comparing an estimate against a number frozen at whatever
-        # an operator last typed in — usually 0.
-        #
-        # That matters because POST /sip/telephony/call is reachable by any
-        # logged-in user, not just the dialer, and this guard was its only
-        # quota gate. The docstring above claimed it "closes the direct-
-        # origination revenue leak"; it did not, because the counter never
-        # moved. Unmetered calls, indefinitely.
-        #
-        # `compute_minutes_status` is the same live computation the dialer's
-        # own gate uses — summed from the `calls` table — so the two paths now
-        # agree instead of enforcing against different realities.
-        used = tenant_limits.monthly_minutes_used or 0
+        """Use the canonical live allowance; uncertainty defers new admission."""
         try:
             from app.domain.services.minutes_quota import compute_minutes_status
-
-            # RLS is real now (Alembic 0013 + the app role losing BYPASSRLS):
-            # a bare pool.acquire() sees ZERO rows in `calls`/`call_legs`, so
-            # this read returned 0 used minutes for every tenant and the gate
-            # never fired. The usage read must carry the tenant GUC.
             async with acquire_with_tenant(self._db_pool, str(tenant_id)) as conn:
-                _status = await compute_minutes_status(conn, str(tenant_id))
-            if _status.used_minutes is not None:
-                used = int(_status.used_minutes)
-        except Exception as exc:  # noqa: BLE001
-            # Fails OPEN to the stored value, matching this method's stated
-            # contract that a metering hiccup never strands legitimate calls.
-            # Unchanged on purpose — but note the live read above now returns
-            # real usage, so this fallback (to a column nothing increments) is
-            # the one remaining path that lets an over-quota tenant through.
-            # Making it fail-closed is an operator decision that must be paired
-            # with a per-tenant usage review.
-            logger.warning(
-                "call_guard: live minutes lookup failed for tenant=%s (%s) — "
-                "falling back to the stored counter, which may be stale",
-                str(tenant_id)[:8],
-                exc,
-            )
+                quota = await compute_minutes_status(conn, str(tenant_id))
+            quota.require_available()
+        except Exception:
+            return CheckResult(check=GuardCheck.MINUTES_QUOTA, passed=False,
+                               reason="metering_unavailable", details={"minutes_state": "unavailable"})
+        if quota.unlimited:
+            return CheckResult(check=GuardCheck.MINUTES_QUOTA, passed=True,
+                               reason="verified_unlimited", details={"minutes_state": "unlimited"})
+        allocated, used = quota.allocated, quota.used_minutes
 
         # Round this call's minutes UP (carriers bill per started minute).
         est_minutes = -(-(estimated_duration_seconds or 60) // 60)  # ceil division

@@ -85,6 +85,7 @@ class SubscriptionResponse(BaseModel):
     minutes_allocated: int = 0
     minutes_used: int = 0
     minutes_remaining: int = 0
+    minutes_state: Literal["known", "unlimited", "unavailable"] = "unavailable"
     purchased_price_option: Optional[dict[str, Any]] = None
     billing_portal_available: bool = False
 
@@ -299,7 +300,7 @@ async def get_subscription(
         from app.domain.services.minutes_quota import compute_minutes_status
 
         async with acquire_with_tenant(db_pool, current_user.tenant_id) as conn:
-            quota = await compute_minutes_status(conn, current_user.tenant_id)
+            quota = (await compute_minutes_status(conn, current_user.tenant_id)).require_available()
         minutes_used = quota.used_minutes
 
         if not subscription:
@@ -308,6 +309,7 @@ async def get_subscription(
                 minutes_allocated=quota.allocated,
                 minutes_used=minutes_used,
                 minutes_remaining=quota.remaining_minutes,
+                minutes_state=quota.state,
             )
 
         # Get plan info
@@ -333,11 +335,15 @@ async def get_subscription(
             minutes_allocated=allocated,
             minutes_used=minutes_used,
             minutes_remaining=minutes_remaining,
+            minutes_state=quota.state,
             purchased_price_option=subscription.get("purchased_price_option"),
             billing_portal_available=bool(subscription.get("billing_portal_available")),
         )
 
     except Exception as e:
+        from app.domain.services.minutes_quota import MeteringUnavailable
+        if isinstance(e, MeteringUnavailable):
+            raise HTTPException(status_code=503, detail={"code": "usage_unavailable", "message": "Minute allowance is temporarily unavailable."}) from e
         logger.error(f"Failed to get subscription: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

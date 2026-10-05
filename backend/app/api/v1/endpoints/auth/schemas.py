@@ -1,7 +1,7 @@
 """Request / response Pydantic models for /auth endpoints."""
 from __future__ import annotations
 
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, EmailStr
 
@@ -33,7 +33,8 @@ class AuthTokenResponse(BaseModel):
     email: str
     role: str
     business_name: Optional[str] = None
-    minutes_remaining: int = 0
+    minutes_remaining: Optional[int] = None
+    minutes_state: Literal["known", "unlimited", "unavailable"] = "unavailable"
     message: str
     # MFA two-step login fields (only present when mfa_required=True)
     mfa_required: bool = False
@@ -63,7 +64,8 @@ class MeResponse(BaseModel):
     name: Optional[str] = None
     business_name: Optional[str] = None
     role: str
-    minutes_remaining: int
+    minutes_remaining: Optional[int] = None
+    minutes_state: Literal["known", "unlimited", "unavailable"] = "unavailable"
 
     # Suspension fields — sourced from tenants + white_label_partners.
     # Returning these on /auth/me lets the frontend's SuspensionStateProvider
