@@ -146,10 +146,10 @@ def _is_origin_allowed(websocket: WebSocket) -> bool:
     return origin in get_settings().allowed_origins
 
 
-async def _session_is_active(db_pool, user_id: str, session_id: str) -> bool:
+async def _session_is_active(db_pool, user_id: str, session_id: str, tenant_id=None) -> bool:
     """Use REST's revocable session lookup, bound to the signed user."""
     from app.core.db_utils import acquire_with_tenant
-    from app.core.security.sessions import get_session_by_id
+    from app.core.security.principal import PrincipalUnavailable, load_session_principal
 
     try:
         uuid.UUID(user_id)
@@ -157,13 +157,17 @@ async def _session_is_active(db_pool, user_id: str, session_id: str) -> bool:
     except (ValueError, TypeError, AttributeError):
         return False
     async with acquire_with_tenant(db_pool, None, user_id=user_id, timeout=_AUTH_TIMEOUT_SECONDS) as conn:
-        return await get_session_by_id(conn, session_id, user_id=user_id) is not None
+        try:
+            await load_session_principal(conn, {"sub": user_id, "sid": session_id, "tenant_id": tenant_id})
+        except PrincipalUnavailable:
+            return False
+        return True
 
 
-async def _check_login_session(websocket, pool, user_id, session_id) -> bool:
+async def _check_login_session(websocket, pool, user_id, session_id, tenant_id=None) -> bool:
     try:
         active = bool(session_id) and await asyncio.wait_for(
-            _session_is_active(pool, user_id, session_id), timeout=_AUTH_TIMEOUT_SECONDS,
+            _session_is_active(pool, user_id, session_id, tenant_id), timeout=_AUTH_TIMEOUT_SECONDS,
         )
     except Exception:
         logger.warning("campaign_test_session_check_failed", exc_info=True)
@@ -227,7 +231,7 @@ async def _check_campaign_permission(websocket, pool, user_id, tenant_id) -> boo
 async def _watch_login_session(websocket, pool, user_id, session_id, tenant_id):
     while True:
         await asyncio.sleep(_AUTH_RECHECK_SECONDS)
-        if not await _check_login_session(websocket, pool, user_id, session_id):
+        if not await _check_login_session(websocket, pool, user_id, session_id, tenant_id):
             return
         if not await _check_campaign_permission(websocket, pool, user_id, tenant_id):
             return
@@ -570,7 +574,7 @@ async def campaign_test_websocket(
 
     try:
         db_client = get_db_client()
-        if not await _check_login_session(websocket, db_client.pool, user_id, payload.get("sid")):
+        if not await _check_login_session(websocket, db_client.pool, user_id, payload.get("sid"), payload.get("tenant_id")):
             return
         tenant_id = await _resolve_user_tenant(db_client.pool, user_id)
     except Exception:  # noqa: BLE001 — return a stable, non-sensitive WS error
@@ -700,6 +704,12 @@ async def campaign_test_websocket(
             )
 
             orchestrator = container.voice_orchestrator
+            # Configuration resolution awaited I/O. Recheck the original
+            # login/tenant and current grants immediately before provider use.
+            if not await _check_login_session(websocket, db_client.pool, user_id, payload.get("sid"), tenant_id):
+                return
+            if not await _check_campaign_permission(websocket, container.db_pool, user_id, tenant_id):
+                return
             voice_session = await orchestrator.create_voice_session(config)
 
             # ── Give the test call a real row (Alembic 0017) ──────────────

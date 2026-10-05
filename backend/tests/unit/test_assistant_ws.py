@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import uuid
 from types import SimpleNamespace
+from contextlib import asynccontextmanager
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import WebSocketDisconnect
@@ -16,7 +18,7 @@ def _stub_auth_and_model(monkeypatch):
     tenant's model via get_tenant_assistant_model. Stub both so these tests
     exercise the post-auth conversation flow they target."""
     monkeypatch.setattr(
-        assistant_ws, "decode_and_validate_token", lambda _token: {"sub": "user-1"}
+        assistant_ws, "decode_and_validate_token", lambda _token: {"sub": "user-1", "sid": "session-1"}
     )
 
     async def _fake_model(_db, _tenant):
@@ -27,10 +29,15 @@ def _stub_auth_and_model(monkeypatch):
     # The tenant bootstrap goes through the pooled user-scoped path (see
     # app.api.v1.ws_tenant), never the tenant-scoped .table() adapter — the
     # fake table below raises on any user_profiles query to keep it that way.
-    async def _fake_resolve(_pool, _user_id):
-        return "tenant-1"
+    async def _fake_resolve(_conn, _claims):
+        return {"tenant_id": "tenant-1"}
 
-    monkeypatch.setattr(assistant_ws, "resolve_user_tenant", _fake_resolve)
+    monkeypatch.setattr(assistant_ws, "load_session_principal", _fake_resolve)
+    @asynccontextmanager
+    async def acquire(*_):
+        yield None
+    monkeypatch.setattr(assistant_ws, "acquire_with_tenant", acquire)
+    monkeypatch.setattr(assistant_ws, "check_assistant_session", AsyncMock())
 
 
 def _stub_stream(events, captured=None):
@@ -279,9 +286,9 @@ async def test_assistant_chat_closes_with_1008_when_user_has_no_tenant(monkeypat
     fake_websocket = _FakeWebSocket()
 
     async def _no_tenant(_pool, _user_id):
-        return None
+        return {"tenant_id": None}
 
-    monkeypatch.setattr(assistant_ws, "resolve_user_tenant", _no_tenant)
+    monkeypatch.setattr(assistant_ws, "load_session_principal", _no_tenant)
     monkeypatch.setattr(assistant_ws, "get_db_client", lambda: fake_db)
 
     await assistant_ws.assistant_chat(fake_websocket, token="test-token", conversation_id=None)
@@ -300,7 +307,7 @@ async def test_assistant_chat_distinguishes_lookup_failure_from_missing_profile(
     async def _boom(_pool, _user_id):
         raise RuntimeError("pool exhausted")
 
-    monkeypatch.setattr(assistant_ws, "resolve_user_tenant", _boom)
+    monkeypatch.setattr(assistant_ws, "load_session_principal", _boom)
     monkeypatch.setattr(assistant_ws, "get_db_client", lambda: fake_db)
 
     await assistant_ws.assistant_chat(fake_websocket, token="test-token", conversation_id=None)

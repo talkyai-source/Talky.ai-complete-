@@ -79,6 +79,7 @@ function AuthCallbackInner() {
                     flushSync(() => {
                         applyLoginResult({
                             user_id: me.id,
+                            tenant_id: me.tenant_id,
                             email: me.email,
                             role: me.role,
                             business_name: me.business_name,

@@ -230,6 +230,17 @@ async def dispatch_tool(
     come back as ``{"error": ...}`` so the agent loop can keep going and the
     model can react to the failure.
     """
+    from app.core.security.principal import check_assistant_session
+    async def session_failure():
+        try:
+            await check_assistant_session(getattr(db_client, "pool", None), actor_user_id, tenant_id)
+        except Exception:
+            return _authorization_failure("session_unavailable", "Your login session or account access changed. Please sign in again.")
+        return None
+    denied_session = await session_failure()
+    if denied_session is not None:
+        return denied_session
+
     entry = ALL_TOOLS.get(func_name)
     if not entry or not entry.get("function"):
         return {"error": f"Unknown tool: {func_name}"}
@@ -292,6 +303,9 @@ async def dispatch_tool(
             denied = await _authorize_action_tool(func_name, tenant_id, db_client, actor_user_id, call_args)
             if denied is not None:
                 return {**denied, "success": False, "status": "failed"}
+        denied_session = await session_failure()
+        if denied_session is not None:
+            return {**denied_session, "success": False, "status": "failed"}
         if func_name in _ACTOR_AWARE:
             return await fn(
                 tenant_id,

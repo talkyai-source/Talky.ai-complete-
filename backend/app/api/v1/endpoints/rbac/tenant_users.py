@@ -21,12 +21,12 @@ from app.api.v1.dependencies import (
     UserRole,
     get_audit_logger,
     get_db_client,
+    get_current_user,
     require_role,
-    require_tenant_member,
 )
 from app.core.db_utils import acquire_with_tenant
 from app.core.postgres_adapter import Client
-from app.core.security.rbac import normalize_role
+from app.core.security.rbac import normalize_role, get_user_role_in_tenant
 from app.domain.services.audit_logger import AuditEvent, AuditLogger
 
 from .schemas import (
@@ -42,11 +42,26 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["rbac"])
 
 
+async def _current_target_admin(conn, current_user, tenant_id):
+    """Recheck the exact target membership before membership mutations."""
+    if normalize_role(current_user.role) == UserRole.PLATFORM_ADMIN:
+        return UserRole.PLATFORM_ADMIN
+    role = await get_user_role_in_tenant(conn, current_user.id, str(tenant_id))
+    if role not in {UserRole.TENANT_ADMIN, UserRole.PARTNER_ADMIN}:
+        raise HTTPException(status_code=403, detail="Current administrator access to this tenant is required")
+    return role
+
+
+def _check_role_ceiling(actor_role, target_role):
+    if target_role and normalize_role(target_role, strict=True).level > actor_role.level:
+        raise HTTPException(status_code=403, detail="Cannot modify a member above your own tier")
+
+
 @router.get("/tenant-users", response_model=List[TenantMemberResponse])
 async def list_tenant_members(
     tenant_id: Optional[str] = Query(None, description="Tenant ID (defaults to user's tenant)"),
     status: Optional[str] = Query("active", pattern="^(pending|active|suspended|removed)$"),
-    current_user: CurrentUser = Depends(require_tenant_member),
+    current_user: CurrentUser = Depends(get_current_user),
     db_client: Client = Depends(get_db_client),
 ) -> List[TenantMemberResponse]:
     """
@@ -57,15 +72,18 @@ async def list_tenant_members(
     """
     # Determine tenant to query
     query_tenant_id = tenant_id or current_user.tenant_id
-
-    # Check permissions
-    user_role = normalize_role(current_user.role)
-    is_admin = user_role in {UserRole.TENANT_ADMIN, UserRole.PARTNER_ADMIN, UserRole.PLATFORM_ADMIN}
-
-    # Regular users can only see active members
-    effective_status = ["active"] if not is_admin else [status]
+    if not query_tenant_id:
+        raise HTTPException(status_code=400, detail="Tenant ID required")
 
     async with acquire_with_tenant(db_client.pool, str(query_tenant_id)) as conn:
+        # Authorize the exact queried tenant, not a different header/default.
+        user_role = normalize_role(current_user.role)
+        if user_role != UserRole.PLATFORM_ADMIN:
+            user_role = await get_user_role_in_tenant(conn, current_user.id, str(query_tenant_id))
+            if user_role is None:
+                raise HTTPException(status_code=403, detail="Access denied to this tenant")
+        is_admin = user_role in {UserRole.TENANT_ADMIN, UserRole.PARTNER_ADMIN, UserRole.PLATFORM_ADMIN}
+        effective_status = [status] if is_admin else ["active"]
         rows = await conn.fetch(
             """
             SELECT
@@ -135,6 +153,14 @@ async def add_user_to_tenant(
         )
 
     async with acquire_with_tenant(db_client.pool, str(request.tenant_id)) as conn:
+        user_role = await _current_target_admin(conn, current_user, request.tenant_id)
+        _check_role_ceiling(user_role, request.role_name)
+        existing_role = await conn.fetchval(
+            """SELECT r.name FROM tenant_users tu JOIN roles r ON r.id=tu.role_id
+               WHERE tu.user_id=$1 AND tu.tenant_id=$2""",
+            request.user_id, request.tenant_id,
+        )
+        _check_role_ceiling(user_role, existing_role)
         # Verify user exists
         user_row = await conn.fetchrow(
             "SELECT id FROM user_profiles WHERE id = $1",
@@ -244,9 +270,10 @@ async def update_tenant_user(
         # Get current record
         current = await conn.fetchrow(
             """
-            SELECT tu.*, t.id as tenant_id
+            SELECT tu.*, t.id as tenant_id, r.name AS current_role
             FROM tenant_users tu
             JOIN tenants t ON t.id = tu.tenant_id
+            JOIN roles r ON r.id = tu.role_id
             WHERE tu.id = $1
             """,
             tenant_user_id,
@@ -265,6 +292,9 @@ async def update_tenant_user(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="Can only modify users in your own tenant",
                 )
+
+        user_role = await _current_target_admin(conn, current_user, current["tenant_id"])
+        _check_role_ceiling(user_role, current["current_role"])
 
         # Build update
         updates = []
@@ -385,9 +415,10 @@ async def remove_user_from_tenant(
         # Get current record
         current = await conn.fetchrow(
             """
-            SELECT tu.*, t.id as tenant_id
+            SELECT tu.*, t.id as tenant_id, r.name AS current_role
             FROM tenant_users tu
             JOIN tenants t ON t.id = tu.tenant_id
+            JOIN roles r ON r.id = tu.role_id
             WHERE tu.id = $1
             """,
             tenant_user_id,
@@ -413,6 +444,9 @@ async def remove_user_from_tenant(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="Cannot remove yourself as primary tenant member",
                 )
+
+        user_role = await _current_target_admin(conn, current_user, current["tenant_id"])
+        _check_role_ceiling(user_role, current["current_role"])
 
         # Soft delete
         await conn.execute(

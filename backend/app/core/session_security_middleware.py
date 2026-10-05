@@ -149,6 +149,9 @@ class SessionSecurityMiddleware(BaseHTTPMiddleware):
                 request.url.path,
             )
             response = await call_next(request)
+            if response.status_code in {401, 403, 409} or request.headers.get("X-Talky-Expected-User") is not None:
+                # A late rejected request must not erase a newer browser login.
+                return response
             response.delete_cookie(
                 key=SESSION_COOKIE_NAME,
                 httponly=True,

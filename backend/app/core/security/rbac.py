@@ -562,6 +562,7 @@ async def get_user_permissions(
             """
             SELECT DISTINCT p.name
             FROM tenant_users tu
+            JOIN user_profiles profile ON profile.id=tu.user_id AND profile.is_active AND profile.is_verified
             JOIN roles r ON r.id = tu.role_id
             JOIN role_permissions rp ON rp.role_id = r.id
             JOIN permissions p ON p.id = rp.permission_id
@@ -578,6 +579,7 @@ async def get_user_permissions(
             """
             SELECT DISTINCT p.name
             FROM tenant_users tu
+            JOIN user_profiles profile ON profile.id=tu.user_id AND profile.is_active AND profile.is_verified
             JOIN roles r ON r.id = tu.role_id
             JOIN role_permissions rp ON rp.role_id = r.id
             JOIN permissions p ON p.id = rp.permission_id
@@ -599,10 +601,15 @@ async def get_user_permissions(
         """
         SELECT p.name
         FROM user_permissions up
+        JOIN user_profiles profile ON profile.id=up.user_id AND profile.is_active AND profile.is_verified
         JOIN permissions p ON p.id = up.permission_id
         WHERE up.user_id = $1
           AND (up.tenant_id IS NULL OR up.tenant_id = $2)
           AND (up.expires_at IS NULL OR up.expires_at > NOW())
+          AND ($2::uuid IS NULL OR EXISTS (
+              SELECT 1 FROM tenant_users member WHERE member.user_id=up.user_id
+                AND member.tenant_id=$2::uuid AND member.status='active'
+          ))
         """,
         user_id,
         tenant_id,

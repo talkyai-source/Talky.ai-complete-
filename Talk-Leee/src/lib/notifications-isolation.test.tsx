@@ -4,12 +4,13 @@ import { useLayoutEffect } from "react";
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { AUTH_IDENTITY_EVENT_KEY, AuthProvider, useAuth } from "@/lib/auth-context";
 import { api } from "@/lib/api";
-import { clearFreshLoginGrace } from "@/lib/http-client";
+import { clearFreshLoginGrace, createHttpClient, ApiClientError } from "@/lib/http-client";
 import { defaultNotificationsSettings, notificationsStore, notificationScopeKey } from "@/lib/notifications";
 import { NotificationsIdentityProvider, useNotificationsActions, useNotificationsState } from "@/lib/notifications-client";
 
 const originalGetMe = api.getMe;
 const originalLogout = api.logout;
+const originalFetch = globalThis.fetch;
 const originalFallback = process.env.NEXT_PUBLIC_BEARER_FALLBACK;
 const originalStorageDescriptor = Object.getOwnPropertyDescriptor(window, "localStorage")!;
 const originalBroadcastDescriptor = Object.getOwnPropertyDescriptor(window, "BroadcastChannel");
@@ -60,12 +61,88 @@ function installBroadcastChannel() {
 }
 afterEach(() => {
     cleanup(); notificationsStore.setIdentity(null); api.getMe = originalGetMe; api.logout = originalLogout;
+    globalThis.fetch = originalFetch;
     Object.defineProperty(window, "localStorage", originalStorageDescriptor);
     if (originalBroadcastDescriptor) Object.defineProperty(window, "BroadcastChannel", originalBroadcastDescriptor);
     else Reflect.deleteProperty(window, "BroadcastChannel");
     window.localStorage.clear(); clearFreshLoginGrace();
     if (originalFallback === undefined) delete process.env.NEXT_PUBLIC_BEARER_FALLBACK;
     else process.env.NEXT_PUBLIC_BEARER_FALLBACK = originalFallback;
+});
+
+test("AuthProvider pins verified cookie-only tenant on writes and blocks them during account verification", async () => {
+    process.env.NEXT_PUBLIC_BEARER_FALLBACK = "false";
+    api.getMe = async () => ({ ...accountA }); mount(); await screen.findByText("user-a");
+    const client = createHttpClient({ baseUrl: "http://example.test" });
+    const seen: Headers[] = [];
+    globalThis.fetch = (async (_url, init) => { seen.push(new Headers(init?.headers)); return Response.json({ saved: true }); }) as typeof fetch;
+    await client.request({ path: "/campaigns", method: "POST" });
+    assert.equal(seen[0].get("X-Talky-Expected-User"), "user-a");
+    assert.equal(seen[0].get("X-Talky-Expected-Tenant"), "tenant-a");
+    const next = deferred<typeof accountB>(); api.getMe = () => next.promise;
+    act(() => { emitStorage(AUTH_IDENTITY_EVENT_KEY, JSON.stringify({ kind: "changed", nonce: "cp08-cookie-switch" })); });
+    assert.equal(auth.user, null);
+    await assert.rejects(client.request({ path: "/campaigns", method: "POST" }),
+        (error: unknown) => error instanceof ApiClientError && error.code === "identity_unverified");
+    assert.equal(seen.length, 1);
+    await act(async () => { next.resolve(accountB); await next.promise; });
+    await client.request({ path: "/campaigns", method: "POST" });
+    assert.equal(seen[1].get("X-Talky-Expected-Tenant"), "tenant-b");
+});
+
+test("a failed logout marker never submits an unbound logout for the next browser session", async () => {
+    process.env.NEXT_PUBLIC_BEARER_FALLBACK = "false";
+    localStorage.setItem("talky.logout.pending", "1");
+    let logouts = 0;
+    api.logout = async () => { logouts++; };
+    api.getMe = async () => ({ ...accountB });
+    mount();
+    await act(async () => { await Promise.resolve(); });
+    assert.equal(logouts, 0);
+});
+
+test("a legacy optimistic login verifies its missing tenant without pinning it to no tenant", async () => {
+    api.getMe = originalGetMe;
+    const headers: Headers[] = [];
+    globalThis.fetch = (async (_url, init) => { headers.push(new Headers(init?.headers)); return Response.json(accountB); }) as typeof fetch;
+    mount();
+    await act(async () => {
+        auth.applyLoginResult({ user_id: accountB.id, email: accountB.email, role: accountB.role, access_token: "synthetic-b" });
+    });
+    await waitFor(() => assert.equal(auth.user?.tenant_id, "tenant-b"));
+    assert.equal(headers[0].has("X-Talky-Expected-Tenant"), false);
+    const client = createHttpClient({ baseUrl: "http://example.test" });
+    await client.request({ path: "/campaigns", method: "POST" });
+    assert.equal(headers.at(-1)?.get("X-Talky-Expected-Tenant"), "tenant-b");
+});
+
+test("refresh rotation updates the token owned by AuthProvider before retrying", async () => {
+    await verifiedA();
+    let refreshes = 0;
+    const tokens: Array<string | null> = [];
+    globalThis.fetch = (async (url, init) => {
+        if (String(url).endsWith("/auth/refresh")) { refreshes++; return Response.json({ access_token: "rotated-a", user_id: "user-a", tenant_id: "tenant-a" }); }
+        const token = new Headers(init?.headers).get("authorization"); tokens.push(token);
+        return token === "Bearer rotated-a" ? Response.json({ saved: true }) : new Response(null, { status: 401 });
+    }) as typeof fetch;
+    const client = createHttpClient({ baseUrl: "http://example.test" });
+    await act(async () => { await client.request({ path: "/contacts" }); });
+    assert.equal(auth.accessToken, "rotated-a");
+    assert.equal(refreshes, 1);
+    assert.deepEqual(tokens, ["Bearer synthetic-a", "Bearer rotated-a"]);
+    assert.equal(auth.user?.tenant_id, "tenant-a");
+});
+
+test("callback token commitment reaches the live HTTP owner before its profile lookup", async () => {
+    mount(); api.getMe = originalGetMe;
+    const tokens: Array<string | null> = [];
+    globalThis.fetch = (async (_url, init) => {
+        tokens.push(new Headers(init?.headers).get("authorization"));
+        return Response.json(accountB);
+    }) as typeof fetch;
+    await act(async () => { api.setToken("callback-b"); await api.getMe(); });
+    assert.deepEqual(tokens, ["Bearer callback-b"]);
+    assert.equal(auth.accessToken, "callback-b");
 });
 
 test("confirmed B scope loads and creates normally without importing legacy A history or destination", async () => {
@@ -88,7 +165,7 @@ test("logout clears notifications before server response and stale bootstrap can
     const oldProfile = deferred<typeof accountA>(); const logout = deferred<void>();
     api.getMe = () => oldProfile.promise; api.logout = () => logout.promise;
     mount();
-    let completion!: Promise<void>;
+    let completion!: ReturnType<typeof auth.logout>;
     act(() => { completion = auth.logout(); });
     assert.equal(auth.status, "anonymous");
     assert.equal(notificationsStore.getSnapshot().scopeKey, null);
@@ -179,7 +256,7 @@ test("cookie-only logout broadcasts an identity boundary even with no stored bea
     api.getMe = async () => ({ ...accountA }); const logout = deferred<void>(); api.logout = () => logout.promise;
     mount(); await screen.findByText("user-a");
     act(() => { actions.create({ type: "info", title: "Cookie-only A" }); });
-    const old = notificationsStore.capture(); let completion!: Promise<void>;
+    const old = notificationsStore.capture(); let completion!: ReturnType<typeof auth.logout>;
     act(() => { completion = auth.logout(); });
     assert.equal(window.localStorage.getItem("talklee.auth.token"), null);
     assert.equal(JSON.parse(window.localStorage.getItem(AUTH_IDENTITY_EVENT_KEY)!).kind, "logout");
@@ -222,7 +299,7 @@ test("logout then login as A creates a new generation that rejects pre-logout A 
 
 test("a profile refresh started by an old timer after logout begins cannot restore the logged-out account", async () => {
     await verifiedA(); const logout = deferred<void>(); api.logout = () => logout.promise;
-    const oldRefresh = auth.refreshUser; let completion!: Promise<void>;
+    const oldRefresh = auth.refreshUser; let completion!: ReturnType<typeof auth.logout>;
     act(() => { completion = auth.logout(); });
     await act(async () => { await oldRefresh({ silent: true }); });
     assert.equal(auth.user, null);

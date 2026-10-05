@@ -5,7 +5,12 @@ import { proxy } from "./proxy";
 
 const originalFetch = globalThis.fetch;
 const originalEnv = process.env.NODE_ENV;
-afterEach(() => { globalThis.fetch = originalFetch; Object.assign(process.env, { NODE_ENV: originalEnv }); });
+const originalBase = process.env.NEXT_PUBLIC_API_BASE_URL;
+afterEach(() => {
+  globalThis.fetch = originalFetch; Object.assign(process.env, { NODE_ENV: originalEnv });
+  if (originalBase === undefined) delete process.env.NEXT_PUBLIC_API_BASE_URL;
+  else process.env.NEXT_PUBLIC_API_BASE_URL = originalBase;
+});
 
 it("serves public contact anonymously and with existing auth without role lookup or redirection", async () => {
   Object.assign(process.env, { NODE_ENV: "production" });
@@ -22,7 +27,7 @@ it("serves public contact anonymously and with existing auth without role lookup
 });
 
 it("does not expand contact permission to the authenticated contacts dashboard", async () => {
-  Object.assign(process.env, { NODE_ENV: "production" });
+  Object.assign(process.env, { NODE_ENV: "production", NEXT_PUBLIC_API_BASE_URL: "https://backend.example/api/v1" });
   let calls = 0;
   globalThis.fetch = async () => { calls++; return Response.json({ role: "white_label_admin" }); };
   const result = await proxy(new NextRequest("https://app.example/contacts/", { headers: { Cookie: "talky_at=synthetic-token" } }));

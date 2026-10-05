@@ -12,13 +12,14 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.api.v1.dependencies import CurrentUser, get_current_user, get_db_client
 from app.core.postgres_adapter import Client
+from app.core.db_utils import acquire_with_tenant
 from app.core.security.recovery import (
     format_recovery_code,
     generate_recovery_codes,
     invalidate_all_codes,
     store_recovery_codes,
 )
-from app.core.security.totp import decrypt_totp_secret, verify_totp_code
+from app.core.security.totp import decrypt_totp_secret, verify_totp_step
 
 from .schemas import MFARegenerateCodesRequest, MFARegenerateCodesResponse
 
@@ -46,9 +47,9 @@ async def regenerate_recovery_codes(
     Use case: user is running low on recovery codes, or suspects a code
     was compromised.
     """
-    async with db_client.pool.acquire() as conn:
+    async with acquire_with_tenant(db_client.pool, current_user.tenant_id) as conn:
         mfa_row = await conn.fetchrow(
-            "SELECT totp_secret_enc, enabled, last_used_at FROM user_mfa WHERE user_id = $1",
+            "SELECT totp_secret_enc, enabled, last_used_at FROM user_mfa WHERE user_id = $1 FOR UPDATE",
             current_user.id,
         )
 
@@ -67,13 +68,13 @@ async def regenerate_recovery_codes(
                 detail="MFA configuration error.",
             )
 
-        code_valid = verify_totp_code(
+        matched_step = verify_totp_step(
             raw_secret,
             body.code,
             last_used_at=mfa_row["last_used_at"],
         )
 
-        if not code_valid:
+        if matched_step is None:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid TOTP code.",
@@ -81,8 +82,8 @@ async def regenerate_recovery_codes(
 
         # Update last_used_at after verification
         await conn.execute(
-            "UPDATE user_mfa SET last_used_at = NOW() WHERE user_id = $1",
-            current_user.id,
+            "UPDATE user_mfa SET last_used_at = $2 WHERE user_id = $1",
+            current_user.id, matched_step,
         )
 
         # Invalidate existing codes and generate fresh batch

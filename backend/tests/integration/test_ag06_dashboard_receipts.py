@@ -65,7 +65,7 @@ async def lookup(db, proposal="prop_synthetic", tenant=None, actor=None):
 
 async def test_committed_concurrent_claim_and_lost_response_recovery(receipt_db):
     db = receipt_db
-    assert db.migration_head == "0058_crm_contact_effect"
+    assert db.migration_head in {"0058_crm_contact_effect", "0059_auth_identity_contract"}
     entered, release = asyncio.Event(), asyncio.Event()
     effects = []
 

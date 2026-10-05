@@ -44,3 +44,10 @@ test("wrong login password remains an invalid-credentials error, not duplicate s
     assert.equal((await screen.findByRole("alert")).textContent, "Invalid email or password");
     assert.equal(screen.queryByText(/You are already registered/), null);
 });
+
+test("an unconfirmed logout is explained without claiming server revocation", async () => {
+    localStorage.setItem("talky.logout.pending", "synthetic-pending");
+    mount(<LoginClientPage />);
+    assert.match((await screen.findByRole("status")).textContent ?? "", /could not confirm that the server session ended/);
+    assert.match(screen.getByRole("status").textContent ?? "", /revoke other sessions/);
+});

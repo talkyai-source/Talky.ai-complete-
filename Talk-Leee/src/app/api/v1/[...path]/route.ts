@@ -741,10 +741,20 @@ function shouldUseIdempotency(method: string, path: string) {
 async function handle(request: Request, segments: string[]) {
     const method = request.method.toUpperCase();
     const path = `/${segments.join("/")}`;
+    // Identity has one authority: the configured backend. Do not inspect
+    // credentials or mutate the legacy users/session/idempotency tables here.
+    if (path === "/auth" || path.startsWith("/auth/") || path === "/me") {
+        return json({ error: { code: "auth_backend_unavailable", message: "Authentication requires the configured backend service." } }, { status: 503 });
+    }
     // Billing has one authority: FastAPI. Never claim a local webhook receipt
     // or write generic idempotency state for a request this route cannot apply.
     if (path === "/billing" || path.startsWith("/billing/")) {
         return json({ error: { code: "billing_backend_unavailable", message: "Billing requires the configured backend service." } }, { status: 503 });
+    }
+    // Production must not authorize old local sessions against a separate
+    // users/sessions store after the canonical backend revoked their access.
+    if (process.env.NODE_ENV === "production") {
+        return json({ error: { code: "api_backend_unavailable", message: "This service is unavailable. Please contact support." } }, { status: 503 });
     }
     const token = authTokenFromRequest(request);
     const cachedAuth = token && !isSessionMutationRequest(method, path) ? await authMeFromRequest(request) : null;

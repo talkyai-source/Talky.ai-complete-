@@ -147,41 +147,33 @@ function isAdminOrInfrastructurePath(pathname: string) {
     return false;
 }
 
-function apiBaseUrlForRequest(req: NextRequest) {
-    const configured = process.env.NEXT_PUBLIC_API_BASE_URL;
-    if (configured && configured.trim().length > 0) return configured.replace(/\/+$/, "");
-    return `${req.nextUrl.origin}/api/v1`;
-}
-
-async function fetchUserContextFromBackend(input: { req: NextRequest; cookieHeader: string }): Promise<{ role: string; partnerId: string | null } | null> {
-    const baseUrl = apiBaseUrlForRequest(input.req);
-    const endpoints = [`${baseUrl}/auth/me`, `${baseUrl}/me`];
-    for (const url of endpoints) {
-        try {
-            const res = await fetch(url, {
-                method: "GET",
-                headers: {
-                    // Forward the full incoming cookie header so the
-                    // backend sees BOTH the new httpOnly `talky_at`
-                    // access cookie (Phase A) and any legacy cookies.
-                    cookie: input.cookieHeader,
-                    accept: "application/json",
-                    [INTERNAL_BYPASS_HEADER]: "1",
-                },
-                next: { revalidate: 30 },
-            });
-            if (!res.ok) continue;
-            const data = (await res.json().catch(() => null)) as unknown;
-            if (!data || typeof data !== "object") continue;
-            const role = (data as { role?: unknown }).role;
-            if (typeof role !== "string" || role.trim().length === 0) continue;
-            const partnerId =
-                (data as { partner_id?: unknown }).partner_id ?? (data as { partnerId?: unknown }).partnerId ?? (data as { partner?: unknown }).partner;
-            return { role, partnerId: typeof partnerId === "string" && partnerId.trim().length > 0 ? partnerId : null };
-        } catch {
-        }
+async function fetchUserContextFromBackend(input: { cookieHeader: string }): Promise<{ role: string; partnerId: string | null } | null> {
+    const configured = process.env.NEXT_PUBLIC_API_BASE_URL?.trim();
+    if (!configured) return null;
+    try {
+        const res = await fetch(`${configured.replace(/\/+$/, "")}/auth/me`, {
+            method: "GET",
+            headers: {
+                // Forward the full incoming cookie header so the
+                // backend sees BOTH the new httpOnly `talky_at`
+                // access cookie (Phase A) and any legacy cookies.
+                cookie: input.cookieHeader,
+                accept: "application/json",
+                [INTERNAL_BYPASS_HEADER]: "1",
+            },
+            cache: "no-store",
+        });
+        if (!res.ok) return null;
+        const data = (await res.json().catch(() => null)) as unknown;
+        if (!data || typeof data !== "object") return null;
+        const role = (data as { role?: unknown }).role;
+        if (typeof role !== "string" || role.trim().length === 0) return null;
+        const partnerId =
+            (data as { partner_id?: unknown }).partner_id ?? (data as { partnerId?: unknown }).partnerId ?? (data as { partner?: unknown }).partner;
+        return { role, partnerId: typeof partnerId === "string" && partnerId.trim().length > 0 ? partnerId : null };
+    } catch {
+        return null;
     }
-    return null;
 }
 
 function whiteLabelPartnerFromPath(pathname: string): string | null {
@@ -314,7 +306,7 @@ export async function proxy(req: NextRequest) {
             !pathname.startsWith("/site.webmanifest");
 
         if (shouldCheckRole) {
-            const ctx = await fetchUserContextFromBackend({ req, cookieHeader });
+            const ctx = await fetchUserContextFromBackend({ cookieHeader });
             const role = ctx?.role ?? null;
             const partnerId = ctx?.partnerId ?? null;
 

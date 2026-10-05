@@ -145,7 +145,7 @@ async def test_signup_creates_primary_membership_and_returns_canonical_role(monk
 
     assert profile_index < membership_index
     assert "is_primary, status, joined_at" in conn.statements[membership_index]
-    assert scopes == [None, TENANT_ID]
+    assert scopes == [None]
     assert result.role == "tenant_admin"
     assert result.access_token == "access-token"
     assert redis.deleted == [signup._signup_redis_key("owner@example.com")]

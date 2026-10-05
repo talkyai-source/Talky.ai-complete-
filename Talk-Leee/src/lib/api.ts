@@ -1,6 +1,5 @@
 import { z } from "zod";
-import { setBrowserAuthToken } from "@/lib/auth-token";
-import { createHttpClient, ApiClientError, resetSessionExpiredLatch } from "@/lib/http-client";
+import { createHttpClient, ApiClientError, resetSessionExpiredLatch, type RequestIdentity } from "@/lib/http-client";
 import { apiBaseUrl } from "@/lib/env";
 
 /* ------------------------------------------------------------------ */
@@ -12,6 +11,7 @@ export const LoginResponseSchema = z
         access_token: z.string(),
         token_type: z.string().optional(),
         user_id: z.string(),
+        tenant_id: z.string().nullish(),
         email: z.string().email(),
         role: z.string(),
         business_name: z.string().optional().nullable(),
@@ -25,6 +25,7 @@ export const LoginResponseSchema = z
         access_token: v.access_token,
         token_type: v.token_type ?? "bearer",
         user_id: v.user_id,
+        ...(v.tenant_id ? { tenant_id: v.tenant_id } : {}),
         email: v.email,
         role: v.role,
         business_name: v.business_name ?? undefined,
@@ -35,41 +36,6 @@ export const LoginResponseSchema = z
     }));
 
 export type LoginResponse = z.infer<typeof LoginResponseSchema>;
-
-// POST /auth/register no longer issues a session — the response shape
-// changed to {user_id, email, verification_required, verification_email_sent, message}.
-// Users must verify their email and then sign in via /auth/login.
-//
-// Kept the LoginResponse-shaped fallback so a future re-enable of
-// session-on-register doesn't immediately crash the parser.
-export const RegisterResponseSchema = z
-    .object({
-        user_id: z.string(),
-        email: z.string().email(),
-        business_name: z.string().optional().nullable(),
-        verification_required: z.boolean().optional(),
-        verification_email_sent: z.boolean().optional(),
-        message: z.string().optional(),
-        // Legacy fields — null in the new response, present if a future
-        // backend reverts to session-on-register.
-        access_token: z.string().optional().nullable(),
-        token_type: z.string().optional(),
-        role: z.string().optional(),
-        minutes_remaining: z.number().optional(),
-    })
-    .passthrough()
-    .transform((v) => ({
-        user_id: v.user_id,
-        email: v.email,
-        business_name: v.business_name ?? undefined,
-        verification_required: v.verification_required ?? true,
-        verification_email_sent: v.verification_email_sent ?? false,
-        message: v.message ?? "",
-        access_token: v.access_token ?? null,
-        role: v.role ?? null,
-        minutes_remaining: v.minutes_remaining ?? 0,
-    }));
-export type RegisterResponse = z.infer<typeof RegisterResponseSchema>;
 
 export const SignupStartResponseSchema = z
     .object({
@@ -336,7 +302,7 @@ class ApiClient {
     }
 
     setToken(token: string) {
-        setBrowserAuthToken(token);
+        this.client().setToken(token);
         // A fresh token re-arms the http-client's session-expired
         // latch.  Without this, login → expire → login → expire only
         // bounces to /auth/login on the FIRST expiry of the process.
@@ -344,7 +310,7 @@ class ApiClient {
     }
 
     clearToken() {
-        setBrowserAuthToken(null);
+        this.client().setToken(null);
     }
 
     /**
@@ -459,48 +425,11 @@ class ApiClient {
         return this.parseOrThrow(SignupCompleteResponseSchema, data, { url: `${apiBaseUrl()}${path}`, method });
     }
 
-    async register(
-        email: string,
-        password: string,
-        businessName: string,
-        planId: string = "basic",
-        name?: string,
-    ): Promise<RegisterResponse> {
-        const path = "/auth/register";
-        const method = "POST" as const;
-        const data = await this.client().request({
-            path,
-            method,
-            body: {
-                email,
-                password,
-                business_name: businessName,
-                plan_id: planId,
-                ...(name ? { name } : {}),
-            },
-            timeoutMs: 12_000,
-        });
-        return this.parseOrThrow(RegisterResponseSchema, data, { url: `${apiBaseUrl()}${path}`, method });
-    }
-
     async getMe(): Promise<MeResponse> {
+        const path = "/auth/me";
         const method = "GET" as const;
-        try {
-            const path = "/auth/me";
-            // Auth PROBE: a 401 means "not logged in", not "session expired".
-            // suppressAuthRedirect lets the auth-context decide (anonymous shell
-            // vs requireAuth bounce) instead of the http-client hard-redirecting
-            // every cold/anonymous visitor to /login.
-            const data = await this.client().request({ path, method, timeoutMs: 12_000, suppressAuthRedirect: true });
-            return this.parseOrThrow(MeResponseSchema, data, { url: `${apiBaseUrl()}${path}`, method });
-        } catch (err) {
-            if (err instanceof ApiClientError && err.status === 404) {
-                const path = "/me";
-                const data = await this.client().request({ path, method, timeoutMs: 12_000, suppressAuthRedirect: true });
-                return this.parseOrThrow(MeResponseSchema, data, { url: `${apiBaseUrl()}${path}`, method });
-            }
-            throw err;
-        }
+        const data = await this.client().request({ path, method, timeoutMs: 12_000, suppressAuthRedirect: true });
+        return this.parseOrThrow(MeResponseSchema, data, { url: `${apiBaseUrl()}${path}`, method });
     }
 
     async updateMe(input: { name?: string; business_name?: string }): Promise<MeResponse> {
@@ -530,18 +459,12 @@ class ApiClient {
         return this.parseOrThrow(ChangePasswordResponseSchema, data, { url: `${apiBaseUrl()}${path}`, method });
     }
 
-    async logout(): Promise<void> {
-        try {
-            await this.client().request({ path: "/auth/logout", method: "POST", timeoutMs: 12_000 });
-        } catch (err) {
-            if (err instanceof ApiClientError && (err.status === 404 || err.status === 405)) {
-                // Ignore
-            } else {
-                throw err;
-            }
-        } finally {
-            this.clearToken();
-        }
+    async logout(expectedIdentity?: RequestIdentity): Promise<void> {
+        // AuthContext clears local state for this specific logout attempt.
+        // A late API response must never clear a newer session.
+        await this.client().request({ path: "/auth/logout", method: "POST", timeoutMs: 12_000,
+            headers: expectedIdentity ? { "X-Talky-Expected-User": expectedIdentity.userId,
+                "X-Talky-Expected-Tenant": expectedIdentity.tenantId ?? "" } : undefined });
     }
 
     async health(): Promise<{ status: string }> {

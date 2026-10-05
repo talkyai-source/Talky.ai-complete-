@@ -29,6 +29,7 @@ class AuthTokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
     user_id: str
+    tenant_id: Optional[str] = None
     email: str
     role: str
     business_name: Optional[str] = None

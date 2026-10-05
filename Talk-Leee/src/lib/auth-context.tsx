@@ -2,7 +2,7 @@
 
 import React, { createContext, useContext, useEffect, useMemo, useRef, useState, ReactNode, useCallback } from "react";
 import { api } from "@/lib/api";
-import { clearFreshLoginGrace, resetSessionExpiredLatch, isWithinFreshLoginGrace, setTokenProvider, isApiClientError } from "@/lib/http-client";
+import { clearFreshLoginGrace, resetSessionExpiredLatch, isWithinFreshLoginGrace, setTokenProvider, isApiClientError, setRequestIdentity, invalidateRequestIdentity, ApiClientError } from "@/lib/http-client";
 import { consumeLegacyAuthCookie, getBrowserAuthToken, isBearerFallbackEnabled, setBrowserAuthToken } from "@/lib/auth-token";
 import { notificationsStore } from "@/lib/notifications";
 
@@ -15,6 +15,9 @@ function publishIdentityChange(kind: "changed" | "logout", channel: BroadcastCha
     try { window.localStorage.setItem(AUTH_IDENTITY_EVENT_KEY, JSON.stringify(message)); delivered = true; } catch { /* BroadcastChannel can still notify cookie-only tabs. */ }
     try { if (channel) { channel.postMessage(message); delivered = true; } } catch { /* Fail closed below if neither transport works. */ }
     return delivered;
+}
+function clearUnconfirmedLogout() {
+    try { window.localStorage.removeItem("talky.logout.pending"); } catch { /* Storage may be unavailable. */ }
 }
 interface MeResponse {
     id: string;
@@ -55,12 +58,12 @@ interface AuthContextType {
     status: AuthStatus;
     notificationSyncAvailable: boolean;
     login: (email: string, password: string) => Promise<void>;
-    register: (email: string, password: string, businessName: string, name?: string) => Promise<void>;
-    logout: () => Promise<void>;
+    logout: () => Promise<{ serverConfirmed: boolean; identityCurrent: boolean }>;
     setToken: (token: string) => void;
     refreshUser: (opts?: { silent?: boolean }) => Promise<void>;
     applyLoginResult: (res: {
         user_id: string;
+        tenant_id?: string;
         email: string;
         role: string;
         business_name?: string | null;
@@ -72,7 +75,14 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-    const [user, setUser] = useState<MeResponse | null>(null);
+    const [user, setUserState] = useState<MeResponse | null>(null);
+    const setUser = useCallback((next: MeResponse | null) => {
+        // Optimistic legacy login payloads can omit tenant identity. Only /me
+        // may complete that scope; a platform administrator can be tenantless.
+        setRequestIdentity(next && (next.tenant_id || next.role === "platform_admin")
+            ? { userId: next.id, tenantId: next.tenant_id } : null);
+        setUserState(next);
+    }, []);
     const [loading, setLoading] = useState(true);
     const [notificationSyncAvailable, setNotificationSyncAvailable] = useState(false);
     const identityChannel = useRef<BroadcastChannel | null>(null);
@@ -137,6 +147,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // while the logout request is in flight.
     const profileReadsAllowed = useRef(true);
     const invalidateIdentity = useCallback(() => {
+        invalidateRequestIdentity();
         profileReadsAllowed.current = false;
         identityEpoch.current += 1;
         profileRead.current += 1;
@@ -151,7 +162,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // AuthProvider doesn't leak state across tests.
     useEffect(() => {
         profileReadsAllowed.current = true;
-        setTokenProvider(() => accessTokenRef.current);
+        setTokenProvider(() => accessTokenRef.current, token => {
+            accessTokenRef.current = token;
+            setBrowserAuthToken(token);
+            setAccessTokenState(token);
+        });
         return () => {
             profileReadsAllowed.current = false;
             identityEpoch.current += 1;
@@ -169,6 +184,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (typeof window === "undefined") return;
         const seen = new Set<string>();
         function handleIdentityChange(kind: "changed" | "logout") {
+            invalidateRequestIdentity();
+            setUser(null);
             const epoch = ++identityEpoch.current;
             const read = ++profileRead.current;
             if (kind === "logout") {
@@ -241,44 +258,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             identityChannel.current = null;
             channel?.close();
         };
-    }, []);
+    }, [setUser]);
 
-    // AH-Phase-E: retry a previously-failed logout on mount. If the user
-    // clicked Sign Out and the backend call failed (offline, 5xx,
-    // timeout), AuthContext.logout queued a `talky.logout.pending`
-    // localStorage flag. Re-fire api.logout silently — the server
-    // invalidates the refresh_tokens row, clearing the cookies, and
-    // narrows the window where a leaked JWT could still be used.
-    // Runs once per mount, before the /auth/me bootstrap.
-    useEffect(() => {
-        if (typeof window === "undefined") return;
-        let pending: string | null = null;
-        try { pending = window.localStorage.getItem("talky.logout.pending"); } catch { /* ignore */ }
-        if (!pending) return;
-        let cancelled = false;
-        (async () => {
-            try {
-                await api.logout();
-                if (cancelled) return;
-                try { window.localStorage.removeItem("talky.logout.pending"); } catch { /* ignore */ }
-                if (process.env.NODE_ENV !== "production") {
-                    console.debug("[auth] retried pending logout, server confirmed");
-                }
-            } catch (err) {
-                if (cancelled) return;
-                if (isApiClientError(err) && (err.status === 401 || err.status === 403)) {
-                    // Server already considers us logged out — success.
-                    try { window.localStorage.removeItem("talky.logout.pending"); } catch { /* ignore */ }
-                } else {
-                    // Still failing; leave the flag for the next mount.
-                    if (process.env.NODE_ENV !== "production") {
-                        console.debug("[auth] pending logout retry still failing — will retry on next mount");
-                    }
-                }
-            }
-        })();
-        return () => { cancelled = true; };
-    }, []);
+    // A failed logout has an unknown server outcome. Do not replay a timestamp
+    // against current cookies: they may now belong to a different session.
 
     // Bootstrap auth state from the server.
     //
@@ -320,6 +303,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const epoch = identityEpoch.current;
         const read = ++profileRead.current;
         const current = () => !cancelled && identityEpoch.current === epoch && profileRead.current === read;
+        try {
+            if (window.localStorage.getItem("talky.logout.pending")) {
+                profileReadsAllowed.current = false;
+                // Settle the client-only bootstrap after reading its persisted receipt.
+                // eslint-disable-next-line react-hooks/set-state-in-effect
+                setLoading(false);
+                return;
+            }
+        } catch { /* Continue the usual bootstrap when storage is unavailable. */ }
         const legacyToken = accessTokenRef.current ?? getBrowserAuthToken();
         const inCookieOnlyMode = !isBearerFallbackEnabled();
         if (!legacyToken && !inCookieOnlyMode) {
@@ -369,10 +361,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
         void loadMe(0);
         return () => { cancelled = true; };
-    }, []);
+    }, [setUser]);
 
     // The ONE writer that touches the persisted token + the reactive state.
-    // Every other action (login, register, logout, setToken, applyLoginResult)
+    // Every other action (login, logout, setToken, applyLoginResult)
     // delegates to this so localStorage and React state can't drift out of
     // sync. Marked `setAccessToken` (not `setAccessTokenState`) to remind
     // readers that this is the canonical mutation, not the raw setState.
@@ -391,6 +383,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const epoch = invalidateIdentity();
         const res = await api.login(email, password);
         if (identityEpoch.current !== epoch) return;
+        if (res.mfa_required || !res.access_token) {
+            throw new ApiClientError({ code: "mfa_required", message: "Complete two-factor authentication on the sign-in page.",
+                url: "/auth/login", method: "POST" });
+        }
+        clearUnconfirmedLogout();
         profileReadsAllowed.current = true;
         profileRead.current += 1;
         setAccessToken(res.access_token);
@@ -401,6 +398,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         resetSessionExpiredLatch();
         setUser({
             id: res.user_id,
+            tenant_id: res.tenant_id,
             email: res.email,
             role: res.role,
             business_name: res.business_name,
@@ -408,68 +406,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         });
         setLoading(false);
         broadcastIdentityChange("changed");
-    }, [setAccessToken, invalidateIdentity, broadcastIdentityChange]);
-
-    const register = useCallback(async (
-        email: string,
-        password: string,
-        businessName: string,
-        name?: string,
-    ) => {
-        // /auth/register no longer issues a session: the user must verify
-        // their email and then sign in via /auth/login. We resolve without
-        // setting any auth state — callers should redirect to the "check
-        // your email" screen after this resolves.
-        //
-        // The legacy session-on-register branch is preserved in case a
-        // future backend reverts the behaviour, so this callback stays
-        // forward-compatible.
-        const epoch = identityEpoch.current;
-        const res = await api.register(email, password, businessName, "basic", name);
-        if (identityEpoch.current !== epoch) return;
-        if (res.access_token && res.role) {
-            invalidateIdentity();
-            profileReadsAllowed.current = true;
-            setAccessToken(res.access_token);
-            resetSessionExpiredLatch();
-            setUser({
-                id: res.user_id,
-                email: res.email,
-                role: res.role,
-                business_name: res.business_name,
-                minutes_remaining: res.minutes_remaining ?? 0,
-            });
-            setLoading(false);
-            broadcastIdentityChange("changed");
-        }
-    }, [setAccessToken, invalidateIdentity, broadcastIdentityChange]);
+    }, [setAccessToken, invalidateIdentity, broadcastIdentityChange, setUser]);
 
     const logout = useCallback(async () => {
+        const expectedIdentity = user ? { userId: user.id, tenantId: user.tenant_id } : undefined;
         const epoch = invalidateIdentity();
         setUser(null);
         setLoading(false);
         clearFreshLoginGrace();
         broadcastIdentityChange("logout");
-        // AH-Phase-E: distinguish "logout actually invalidated the
-        // server-side session" from "logout call failed and the row may
-        // still be alive". On failure (network drop, 5xx) we set a
-        // localStorage flag so the NEXT page load (or AuthProvider mount)
-        // retries silently. 401/403 from the backend means the server
-        // already considers us logged out — that's a success state and
-        // the flag is cleared.
+        // Keep an unconfirmed outcome visible; never replay it against a
+        // future session. Only a successful acknowledgment confirms revocation.
         let serverConfirmedLogout = false;
         try {
-            await api.logout();
+            await api.logout(expectedIdentity);
             serverConfirmedLogout = true;
         } catch (err) {
-            if (isApiClientError(err) && (err.status === 401 || err.status === 403)) {
-                // Server already considers this session gone. Treat as success.
-                serverConfirmedLogout = true;
-            } else {
-                serverConfirmedLogout = false;
-                if (process.env.NODE_ENV !== "production") {
-                    console.warn("[auth] logout call failed; queued for retry on next mount", err);
-                }
+            serverConfirmedLogout = false;
+            if (process.env.NODE_ENV !== "production") {
+                console.warn("[auth] local sign-out completed; server revocation is unconfirmed", err);
             }
         } finally {
             // A later login owns the current local identity. This older logout
@@ -498,16 +453,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                     if (serverConfirmedLogout) {
                         localStorage.removeItem("talky.logout.pending");
                     } else {
-                        // Queue the retry. Bootstrap effect on next mount
-                        // (or a focus-driven retry) will re-fire api.logout
-                        // until the server confirms.
+                        // Preserve uncertainty without replaying an unbound logout.
                         localStorage.setItem("talky.logout.pending", String(Date.now()));
                     }
                 } catch { /* ignore */ }
                 setUser(null);
             }
         }
-    }, [setAccessToken, invalidateIdentity, broadcastIdentityChange]);
+        return { serverConfirmed: serverConfirmedLogout, identityCurrent: identityEpoch.current === epoch };
+    }, [setAccessToken, invalidateIdentity, broadcastIdentityChange, setUser, user]);
 
     const setToken = useCallback((token: string) => {
         const epoch = invalidateIdentity();
@@ -536,7 +490,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 setAccessToken(null);
                 setUser(null);
             }).finally(() => { if (current()) setLoading(false); });
-    }, [setAccessToken, invalidateIdentity, broadcastIdentityChange]);
+    }, [setAccessToken, invalidateIdentity, broadcastIdentityChange, setUser]);
 
     // `silent: true` callers (Phase 3 suspension-freshness loop, any future
     // background poll) MUST NOT flip authLoading or tear down auth state
@@ -590,7 +544,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             // the loading state. The winning read settles that state too.
             if (current()) setLoading(false);
         }
-    }, [setAccessToken, invalidateIdentity]);
+    }, [setAccessToken, invalidateIdentity, setUser]);
 
     // Synchronous user-state population from a login response. The login
     // POST returns enough fields to render the dashboard shell; we use
@@ -599,6 +553,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // still run on next reload to refresh any drifted fields.
     const applyLoginResult = useCallback((res: {
         user_id: string;
+        tenant_id?: string;
         email: string;
         role: string;
         business_name?: string | null;
@@ -606,6 +561,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         access_token?: string;
     }) => {
         invalidateIdentity();
+        clearUnconfirmedLogout();
         profileReadsAllowed.current = true;
         // When a caller passes the access_token, we commit it through the
         // single writer so the new accessToken state stays in sync with
@@ -626,6 +582,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
         setUser({
             id: res.user_id,
+            tenant_id: res.tenant_id,
             email: res.email,
             role: res.role,
             business_name: res.business_name ?? undefined,
@@ -633,7 +590,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         });
         setLoading(false);
         broadcastIdentityChange("changed");
-    }, [invalidateIdentity, broadcastIdentityChange]);
+    }, [invalidateIdentity, broadcastIdentityChange, setUser]);
 
     // Compute the AuthStatus from the underlying state. Order matters:
     // `loading` wins over presence checks because a freshly-mounted
@@ -657,8 +614,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }, [loading, user]);
 
     const value = useMemo(
-        () => ({ user, loading, accessToken, status, notificationSyncAvailable, login, register, logout, setToken, refreshUser, applyLoginResult }),
-        [loading, user, accessToken, status, notificationSyncAvailable, login, register, logout, setToken, refreshUser, applyLoginResult],
+        () => ({ user, loading, accessToken, status, notificationSyncAvailable, login, logout, setToken, refreshUser, applyLoginResult }),
+        [loading, user, accessToken, status, notificationSyncAvailable, login, logout, setToken, refreshUser, applyLoginResult],
     );
 
     return (
@@ -681,9 +638,6 @@ const SSR_FALLBACK_AUTH_CONTEXT: AuthContextType = {
     status: "uninitialized",
     notificationSyncAvailable: false,
     login: async () => {
-        throw new Error("useAuth used outside AuthProvider on client");
-    },
-    register: async () => {
         throw new Error("useAuth used outside AuthProvider on client");
     },
     logout: async () => {

@@ -179,3 +179,20 @@ async def test_a_lookup_failure_runs_the_request_exactly_once(monkeypatch, caplo
     assert response.status_code == 200
     assert count == {"call_next": 1}
     assert any("TimeoutError" in r.getMessage() for r in caplog.records), "the error is named, not blank"
+
+
+@pytest.mark.parametrize("status,expected",[(401,False),(403,False),(409,False),(200,True)])
+async def test_late_stale_request_does_not_clear_newer_cookie(monkeypatch,status,expected):
+    @asynccontextmanager
+    async def acquire(*args,**kwargs):
+        yield _Conn()
+    async def invalid(*args,**kwargs): return None
+    async def downstream(_): return Response(status_code=status)
+    monkeypatch.setattr("app.core.db_utils.acquire_with_tenant",acquire)
+    monkeypatch.setattr(mw,"get_db_pool_from_container",lambda:object())
+    monkeypatch.setattr(mw,"validate_session",invalid)
+    request=_request()
+    if expected:
+        request.scope['headers'].append((b'x-talky-expected-user',b'old-account'))
+    result=await mw.SessionSecurityMiddleware(app=None).dispatch(request,downstream)
+    assert not result.headers.get('set-cookie')

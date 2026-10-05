@@ -1,7 +1,5 @@
 import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
-import { authTokenCookieName } from "@/lib/auth-token";
-import { apiBaseUrl } from "@/lib/env";
 
 export const WHITE_LABEL_ADMIN_ROLE = "white_label_admin";
 export const WHITE_LABEL_DASHBOARD_PATH = "/white-label/dashboard";
@@ -29,34 +27,35 @@ export async function shouldBypassAuthOnThisRequest() {
 }
 
 export async function getServerMe(): Promise<ServerMe | null> {
-    const token = (await cookies()).get(authTokenCookieName())?.value;
-    if (!token || token.trim().length === 0) return null;
+    const configured = process.env.NEXT_PUBLIC_API_BASE_URL?.trim();
+    if (!configured) return null;
+    const store = await cookies();
+    const cookieHeader = ["talky_at", "talky_sid"]
+        .map((name) => ({ name, value: store.get(name)?.value }))
+        .filter(({ value }) => value && value.trim().length > 0)
+        .map(({ name, value }) => `${name}=${encodeURIComponent(value!)}`)
+        .join("; ");
+    if (!cookieHeader) return null;
 
-    const baseUrl = apiBaseUrl().replace(/\/+$/, "");
-    const endpoints = [`${baseUrl}/auth/me`, `${baseUrl}/me`];
-
-    for (const url of endpoints) {
-        try {
-            const res = await fetch(url, {
-                method: "GET",
-                headers: {
-                    cookie: `${authTokenCookieName()}=${encodeURIComponent(token)}`,
-                    accept: "application/json",
-                    "x-talklee-mw-internal": "1",
-                },
-                cache: "no-store",
-            });
-            if (!res.ok) continue;
-            const data = (await res.json().catch(() => null)) as unknown;
-            if (!data || typeof data !== "object") continue;
-            const role = (data as { role?: unknown }).role;
-            if (typeof role !== "string" || role.trim().length === 0) continue;
-            return data as ServerMe;
-        } catch {
-        }
+    try {
+        const res = await fetch(`${configured.replace(/\/+$/, "")}/auth/me`, {
+            method: "GET",
+            headers: {
+                cookie: cookieHeader,
+                accept: "application/json",
+                "x-talklee-mw-internal": "1",
+            },
+            cache: "no-store",
+        });
+        if (!res.ok) return null;
+        const data = (await res.json().catch(() => null)) as unknown;
+        if (!data || typeof data !== "object") return null;
+        const me = data as Partial<ServerMe>;
+        if (![me.id, me.email, me.role].every((value) => typeof value === "string" && value.trim().length > 0)) return null;
+        return me as ServerMe;
+    } catch {
+        return null;
     }
-
-    return null;
 }
 
 export async function requireServerMe(input: { redirectTo: string }) {

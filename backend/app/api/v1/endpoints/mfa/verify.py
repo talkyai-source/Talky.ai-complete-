@@ -8,6 +8,7 @@ records the attempt.
 from __future__ import annotations
 
 import logging
+from contextlib import asynccontextmanager
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
@@ -17,12 +18,13 @@ from app.core.db_utils import acquire_with_tenant
 from app.core.jwt_security import encode_access_token as _encode_access_token
 from app.core.postgres_adapter import Client
 from app.core.security.lockout import check_account_locked, record_login_attempt
+from app.core.security.principal import load_current_principal, PrincipalUnavailable, assert_expected_identity
 from app.core.security.recovery import (
     mark_recovery_code_used,
     verify_recovery_code_returning_id,
 )
 from app.core.security.sessions import create_session, hash_session_token
-from app.core.security.totp import decrypt_totp_secret, verify_totp_code
+from app.core.security.totp import decrypt_totp_secret, verify_totp_step
 
 from app.api.v1.endpoints.auth._shared import issue_cookie_auth
 
@@ -39,6 +41,22 @@ from .schemas import MFAChallengeVerifyRequest, MFAChallengeVerifyResponse
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["mfa"])
+
+
+class _RejectedFactor(Exception):
+    """Commit the recorded failed attempt, then return the generic denial."""
+
+
+@asynccontextmanager
+async def _verification_transaction(pool):
+    rejected = False
+    async with acquire_with_tenant(pool, None) as conn:
+        try:
+            yield conn
+        except _RejectedFactor:
+            rejected = True
+    if rejected:
+        raise HTTPException(status_code=401, detail=GENERIC_MFA_ERROR)
 
 
 @router.post("/verify", response_model=MFAChallengeVerifyResponse)
@@ -76,7 +94,7 @@ async def verify_mfa_challenge(
         )
 
     # The signed challenge must be resolved before its tenant is known.
-    async with acquire_with_tenant(db_client.pool, None) as conn:
+    async with _verification_transaction(db_client.pool) as conn:
         # --- Resolve and validate the challenge token -------------------------
         challenge = await resolve_mfa_challenge(conn, body.challenge_token)
 
@@ -89,42 +107,22 @@ async def verify_mfa_challenge(
         user_id: str = str(challenge["user_id"])
 
         # --- Load user and MFA record -----------------------------------------
-        user_row = await conn.fetchrow(
-            """
-            SELECT up.id, up.email, up.name, up.role, up.tenant_id,
-                   up.is_active,
-                   t.business_name, t.minutes_allocated, t.minutes_used
-            FROM   user_profiles up
-            LEFT   JOIN tenants t ON t.id = up.tenant_id
-            WHERE  up.id = $1
-            """,
-            user_id,
-        )
-
-        if not user_row or not user_row["is_active"]:
-            await record_login_attempt(
-                conn,
-                email=user_row["email"] if user_row else "unknown",
-                user_id=user_id,
-                ip_address=ip,
-                success=False,
-                failure_reason="account_inactive",
-            )
+        try:
+            user_row = await load_current_principal(conn, user_id)
+            assert_expected_identity(request, user_row)
+        except PrincipalUnavailable as exc:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail=GENERIC_MFA_ERROR,
-            )
+            ) from exc
 
         mfa_row = await conn.fetchrow(
-            "SELECT totp_secret_enc, enabled, last_used_at FROM user_mfa WHERE user_id = $1",
+            "SELECT totp_secret_enc, enabled, last_used_at FROM user_mfa WHERE user_id = $1 FOR UPDATE",
             user_id,
         )
 
         if not mfa_row or not mfa_row["enabled"]:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail=GENERIC_MFA_ERROR,
-            )
+            raise _RejectedFactor()
 
         # --- Per-account lockout check ----------------------------------------
         normalised_email = user_row["email"].lower()
@@ -138,10 +136,7 @@ async def verify_mfa_challenge(
                 success=False,
                 failure_reason="account_locked",
             )
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail=GENERIC_MFA_ERROR,
-            )
+            raise _RejectedFactor()
 
         # --- Verify the second factor ------------------------------------------
         # Two paths share the success branch — TOTP doesn't have a separate
@@ -150,6 +145,7 @@ async def verify_mfa_challenge(
         # transaction below so a mid-flow failure can't strand a burned
         # recovery code while leaving the user without a session.
         mfa_ok = False
+        matched_step = None
         recovery_code_id: Optional[str] = None
         challenge_id = str(challenge["id"])
 
@@ -162,11 +158,13 @@ async def verify_mfa_challenge(
                     detail="MFA configuration error.",
                 )
 
-            mfa_ok = verify_totp_code(
+            matched_step = verify_totp_step(
                 raw_secret,
                 body.code,
                 last_used_at=mfa_row["last_used_at"],
             )
+
+            mfa_ok = matched_step is not None
 
         elif body.recovery_code:
             recovery_code_id = await verify_recovery_code_returning_id(
@@ -190,10 +188,7 @@ async def verify_mfa_challenge(
                 success=False,
                 failure_reason="mfa_failed",
             )
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail=GENERIC_MFA_ERROR,
-            )
+            raise _RejectedFactor()
 
         # --- SUCCESS: consume + create session — all in ONE transaction ---
         async with conn.transaction():
@@ -216,11 +211,12 @@ async def verify_mfa_challenge(
                 # TOTP path: replay-prevention timestamp updated inside the
                 # same tx as session creation so the two land together.
                 await conn.execute(
-                    "UPDATE user_mfa SET last_used_at = NOW() WHERE user_id = $1",
-                    user_id,
+                    "UPDATE user_mfa SET last_used_at = $2 WHERE user_id = $1",
+                    user_id, matched_step,
                 )
 
-            await consume_mfa_challenge(conn, challenge_id)
+            if not await consume_mfa_challenge(conn, challenge_id):
+                raise HTTPException(status_code=401, detail=GENERIC_MFA_ERROR)
 
             raw_session_token, session_id = await create_session(
                 conn,
@@ -254,51 +250,23 @@ async def verify_mfa_challenge(
                 user_id,
             )
 
+            tenant_id = str(user_row["tenant_id"]) if user_row["tenant_id"] else None
+            token = _encode_access_token(
+                user_id=user_id, email=user_row["email"], role=user_row["role"],
+                tenant_id=tenant_id, session_id=session_id,
+            )
+
+            await issue_cookie_auth(response, conn, user_id=user_id,
+                email=user_row["email"], role=user_row["role"], tenant_id=user_row["tenant_id"],
+                session_id=session_id, ip=ip, user_agent=ua)
+
     # --- Build response -------------------------------------------------------
-    tenant_id = str(user_row["tenant_id"]) if user_row["tenant_id"] else None
     minutes_remaining = max(
         0,
         (user_row["minutes_allocated"] or 0) - (user_row["minutes_used"] or 0),
     )
 
-    token = _encode_access_token(
-        user_id=user_id,
-        email=user_row["email"],
-        role=user_row["role"],
-        tenant_id=tenant_id,
-        session_id=session_id,
-    )
-
     _set_session_cookie(response, raw_session_token)
-
-    # Issue the httpOnly access/refresh cookie pair, exactly as the non-MFA
-    # login path does (auth/login.py). Its own docstring says it is "called by
-    # every successful authentication path" — but this path did not call it,
-    # so MFA users received ONLY the legacy talky_sid session cookie plus a
-    # body JWT, and never got talky_at.
-    #
-    # That broke every surface that authenticates by cookie rather than by
-    # Authorization header — most visibly WebSockets, because a browser cannot
-    # attach headers to a WS upgrade. Symptom (observed 2026-07-28): the
-    # campaign "Test agent" connected and then logged
-    # "campaign_test_ws: no auth frame within 5s" for MFA users on every
-    # attempt, while non-MFA users on the same build worked. It was 100%
-    # reproducible and scoped exactly to accounts with mfa_enabled.
-    #
-    # A fresh connection is acquired because the one used above is scoped to
-    # the transaction block that created the session and is already released.
-    async with acquire_with_tenant(db_client.pool, tenant_id) as cookie_conn:
-        await issue_cookie_auth(
-            response,
-            cookie_conn,
-            user_id=user_id,
-            email=user_row["email"],
-            role=user_row["role"],
-            tenant_id=tenant_id,
-            session_id=session_id,
-            ip=ip,
-            user_agent=ua,
-        )
 
     logger.info("MFA challenge verified — full session issued for user=%s", user_id)
 
@@ -307,6 +275,7 @@ async def verify_mfa_challenge(
         user_id=user_id,
         email=user_row["email"],
         role=user_row["role"],
+        tenant_id=tenant_id,
         business_name=user_row["business_name"],
         minutes_remaining=minutes_remaining,
         mfa_verified=True,

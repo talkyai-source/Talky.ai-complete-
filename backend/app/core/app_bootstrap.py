@@ -90,6 +90,8 @@ def configure_middleware(app: FastAPI) -> None:
             "Idempotency-Key",
             "X-Request-ID",
             "X-CSRF-Token",
+            "X-Talky-Expected-User",
+            "X-Talky-Expected-Tenant",
         ],
         expose_headers=["X-Request-ID"],
     )

@@ -51,12 +51,12 @@ class TenantUserResponse(BaseModel):
 class AddTenantUserRequest(BaseModel):
     user_id: str
     tenant_id: str
-    role_name: str = Field(default="user", pattern="^(platform_admin|partner_admin|tenant_admin|user|readonly)$")
+    role_name: str = Field(default="user", pattern="^(platform_admin|partner_admin|tenant_admin|campaign_manager|user|agent|billing_user|readonly)$")
     is_primary: bool = False
 
 
 class UpdateTenantUserRequest(BaseModel):
-    role_name: Optional[str] = Field(None, pattern="^(platform_admin|partner_admin|tenant_admin|user|readonly)$")
+    role_name: Optional[str] = Field(None, pattern="^(platform_admin|partner_admin|tenant_admin|campaign_manager|user|agent|billing_user|readonly)$")
     is_primary: Optional[bool] = None
     status: Optional[str] = Field(None, pattern="^(pending|active|suspended|removed)$")
 

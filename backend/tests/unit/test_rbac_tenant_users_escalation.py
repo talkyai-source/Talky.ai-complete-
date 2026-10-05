@@ -46,6 +46,16 @@ class _FakeTransaction:
 
 
 def _fake_db_client(conn) -> MagicMock:
+    original = conn.fetchrow
+    async def fetchrow(sql, *args):
+        if "SELECT r.name" in sql:
+            return {"name": "tenant_admin"}
+        row = await original(sql, *args)
+        if isinstance(row, dict) and "tenant_id" in row:
+            return {"current_role": "user", **row}
+        return row
+    conn.fetchrow = AsyncMock(side_effect=fetchrow)
+    conn.fetchval.return_value = None
     conn.transaction = MagicMock(return_value=_FakeTransaction())
     db_client = MagicMock()
     db_client.pool.acquire = MagicMock(return_value=_FakeConnCtx(conn))

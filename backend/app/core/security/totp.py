@@ -20,16 +20,16 @@ Security rules applied from these sources:
      Key loaded from TOTP_ENCRYPTION_KEY env var — never hardcoded.
 
   2. Replay-attack prevention (pyotp checklist, RFC 6238 §5.2):
-     The last_used_at timestamp of the most recent successful verification
-     is stored in user_mfa.  If a code is presented in the same 30-second
-     time slot, it is rejected even if pyotp.verify() returns True.
+     The accepted counter start is stored in user_mfa.last_used_at under a
+     row lock. The same or any older counter cannot be accepted again,
+     including a code in the previous clock-skew window.
 
   3. Clock-skew tolerance (Authgear 2026, RFC 6238 §5.2):
      valid_window=1 accepts codes ±30 seconds from the current slot —
      enough for real-world clock drift without widening the attack window.
 
   4. Constant-time comparison:
-     pyotp.TOTP.verify() internally calls utils.strings_equal(), which is
+     Accepted counters are compared using pyotp.utils.strings_equal(), which is
      an HMAC-based constant-time comparison — safe against timing attacks.
 
   5. Secrets are never logged.
@@ -335,6 +335,43 @@ def is_replay_attack(
     return current_slot == last_slot
 
 
+def verify_totp_step(
+    raw_secret: str,
+    code: str,
+    *,
+    last_used_at: Optional[datetime] = None,
+    valid_window: int = TOTP_VALID_WINDOW,
+) -> Optional[datetime]:
+    """Return the accepted counter's UTC start, never a previously used step.
+
+    Callers persist this value under the same row lock/transaction as the
+    protected operation. Existing wall-clock timestamps remain conservative
+    high-water marks until the next successful verification.
+    """
+    if not raw_secret or not isinstance(code, str):
+        return None
+    normalised = code.replace(" ", "").replace("-", "").strip()
+    if not normalised.isdigit() or len(normalised) != TOTP_DIGITS:
+        return None
+    try:
+        current_step = int(datetime.now(timezone.utc).timestamp()) // TOTP_INTERVAL
+        previous_step = -1
+        if last_used_at is not None:
+            used = last_used_at if last_used_at.tzinfo else last_used_at.replace(tzinfo=timezone.utc)
+            previous_step = int(used.timestamp()) // TOTP_INTERVAL
+        otp = pyotp.TOTP(raw_secret, digits=TOTP_DIGITS, interval=TOTP_INTERVAL)
+        # Match before comparing the high-water mark. A rare identical code
+        # in adjacent slots must not turn a known replay into a fresh use.
+        for step in range(current_step - valid_window, current_step + valid_window + 1):
+            if step >= 0 and pyotp.utils.strings_equal(otp.generate_otp(step), normalised):
+                if step <= previous_step:
+                    return None
+                return datetime.fromtimestamp(step * TOTP_INTERVAL, timezone.utc)
+    except Exception as exc:
+        logger.warning("TOTP verification failed: %s", type(exc).__name__)
+    return None
+
+
 def verify_totp_code(
     raw_secret: str,
     code: str,
@@ -342,67 +379,6 @@ def verify_totp_code(
     last_used_at: Optional[datetime] = None,
     valid_window: int = TOTP_VALID_WINDOW,
 ) -> bool:
-    """
-    Verify a user-submitted TOTP code.
-
-    Applies both pyotp verification AND replay-attack prevention.
-
-    Steps
-    -----
-    1. Normalise the code (strip spaces / hyphens / whitespace).
-    2. Reject if the code is clearly not a 6-digit numeric string.
-    3. Reject if the current time slot matches last_used_at (replay guard).
-    4. Verify with pyotp.TOTP.verify(valid_window=1) — constant-time.
-
-    Parameters
-    ----------
-    raw_secret:
-        The PLAINTEXT base32 TOTP secret (must be decrypted before passing).
-    code:
-        The 6-digit OTP submitted by the user.
-    last_used_at:
-        The UTC datetime of the last successful TOTP use, loaded from
-        user_mfa.last_used_at.  Used for replay prevention.
-    valid_window:
-        Number of 30-second windows to accept on either side of the current
-        window.  Default=1 (±30 s clock skew tolerance, RFC 6238 §5.2).
-
-    Returns
-    -------
-    bool
-        True if the code is valid AND is not a replay.  False otherwise.
-        Never raises — all exceptions are caught and False is returned.
-    """
-    if not raw_secret or not code:
-        return False
-
-    # Normalise: strip spaces and hyphens that some apps display
-    normalised = code.replace(" ", "").replace("-", "").strip()
-
-    # Reject obviously malformed input without touching crypto
-    if not normalised.isdigit() or len(normalised) != TOTP_DIGITS:
-        return False
-
-    # Replay-attack check (same 30-second slot as last verified use)
-    if is_replay_attack(last_used_at):
-        logger.warning(
-            "TOTP replay attack detected — code submitted in same time slot as last_used_at=%s",
-            last_used_at,
-        )
-        return False
-
-    try:
-        totp = pyotp.TOTP(
-            raw_secret,
-            digits=TOTP_DIGITS,
-            interval=TOTP_INTERVAL,
-        )
-        # valid_window=1 → accept [-1, 0, +1] time steps (±30 s)
-        # pyotp.TOTP.verify uses utils.strings_equal() — constant-time
-        return totp.verify(normalised, valid_window=valid_window)
-    except Exception as exc:
-        # Log without exposing the secret
-        logger.warning(
-            "TOTP verification error (non-secret details): %s", type(exc).__name__
-        )
-        return False
+    """Compatibility predicate; mutating callers must persist verify_totp_step."""
+    return verify_totp_step(raw_secret, code, last_used_at=last_used_at,
+                            valid_window=valid_window) is not None

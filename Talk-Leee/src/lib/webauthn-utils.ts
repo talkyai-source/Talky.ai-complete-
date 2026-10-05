@@ -14,9 +14,8 @@
  *   DELETE /api/v1/auth/passkeys/{id}              (authenticated)
  *
  * Backend register/login `begin` returns `{ ceremony_id, options[, has_passkeys] }`.
- * The frontend needs that `ceremony_id` to call `complete`, so we flatten
- * `options` onto the return value alongside `ceremony_id` so callers can
- * read `.challenge` / `.rp` / etc. directly.
+ * The frontend retains the ceremony ID and the server options separately.
+ * The browser receives those options after binary fields are decoded.
  */
 
 import { api } from "@/lib/api";
@@ -29,34 +28,8 @@ export interface PasskeyCredential {
   transports?: string[];
 }
 
-export interface WebAuthnStartResponse {
-  ceremony_id: string;
-  challenge: string;
-  rp: {
-    name: string;
-    id: string;
-  };
-  user?: {
-    id: string;
-    name: string;
-    displayName: string;
-  };
-  pubKeyCredParams?: Array<{
-    type: string;
-    alg: number;
-  }>;
-  authenticatorSelection?: {
-    authenticatorAttachment?: string;
-    residentKey?: string;
-    userVerification?: string;
-  };
-  allowCredentials?: Array<{
-    type: string;
-    id: string;
-    transports?: string[];
-  }>;
-  has_passkeys?: boolean;
-}
+type RegistrationStartResponse = { ceremony_id: string; options: PublicKeyCredentialCreationOptionsJSON };
+type AuthenticationStartResponse = { ceremony_id: string; options: PublicKeyCredentialRequestOptionsJSON; has_passkeys: boolean };
 
 export interface WebAuthnCompleteResponse {
   success: boolean;
@@ -152,14 +125,9 @@ export function arrayBufferToBase64(buffer: ArrayBuffer): string {
 /**
  * Starts passkey registration process
  */
-export async function startPasskeyRegistration(_token?: string): Promise<WebAuthnStartResponse> {
+export async function startPasskeyRegistration(_token?: string): Promise<RegistrationStartResponse> {
   const data = await api.beginPasskeyRegistration("any");
-  // Flatten options onto the return so callers can read .challenge directly,
-  // and keep ceremony_id so the caller can pass it to complete().
-  return {
-    ceremony_id: data.ceremony_id,
-    ...(data.options as Omit<WebAuthnStartResponse, "ceremony_id">),
-  };
+  return { ceremony_id: data.ceremony_id, options: data.options as unknown as PublicKeyCredentialCreationOptionsJSON };
 }
 
 /**
@@ -182,43 +150,17 @@ export async function completePasskeyRegistration(
 /**
  * Starts passkey authentication process
  */
-export async function startPasskeyAuth(email?: string): Promise<WebAuthnStartResponse> {
+export async function startPasskeyAuth(email?: string): Promise<AuthenticationStartResponse> {
   const data = await api.beginPasskeyLogin(email);
-  return {
-    ceremony_id: data.ceremony_id,
-    has_passkeys: data.has_passkeys,
-    ...(data.options as Omit<WebAuthnStartResponse, "ceremony_id" | "has_passkeys">),
-  };
+  return { ceremony_id: data.ceremony_id, has_passkeys: data.has_passkeys,
+    options: data.options as unknown as PublicKeyCredentialRequestOptionsJSON };
 }
 
 /**
  * Completes passkey authentication
  */
-export async function completePasskeyAuth(
-  ceremonyId: string,
-  credentialData: Record<string, unknown>
-): Promise<{
-  access_token: string;
-  role?: string;
-  user_id?: string;
-  email?: string;
-  business_name?: string | null;
-  minutes_remaining?: number;
-}> {
-  // AH-Phase-G hygiene: refresh_token dropped from the return type.
-  // The backend still emits the field in the body (Zod schema in
-  // lib/api.ts keeps parsing it) but nothing on the frontend reads
-  // it after Phase 7 — the HttpOnly talky_rt cookie is the canonical
-  // refresh-token store. The vestigial type field was misleading.
-  const data = await api.completePasskeyLogin(ceremonyId, credentialData);
-  return data as unknown as {
-    access_token: string;
-    role?: string;
-    user_id?: string;
-    email?: string;
-    business_name?: string | null;
-    minutes_remaining?: number;
-  };
+export async function completePasskeyAuth(ceremonyId: string, credentialData: Record<string, unknown>) {
+  return api.completePasskeyLogin(ceremonyId, credentialData);
 }
 
 /**
@@ -258,14 +200,15 @@ export async function renamePasskey(
 /**
  * Performs WebAuthn credential creation (registration)
  */
-export async function createWebAuthnCredential(options: PublicKeyCredentialCreationOptions): Promise<PublicKeyCredential> {
+export async function createWebAuthnCredential(options: PublicKeyCredentialCreationOptionsJSON): Promise<PublicKeyCredential> {
   // Convert challenge and user ID from base64 to ArrayBuffer
   const modifiedOptions = {
     ...options,
-    challenge: base64toArrayBuffer(options.challenge as unknown as string),
+    challenge: base64toArrayBuffer(options.challenge),
+    excludeCredentials: options.excludeCredentials?.map(value => ({ ...value, id: base64toArrayBuffer(value.id) })),
     user: {
-      ...options.user!,
-      id: base64toArrayBuffer((options.user?.id as unknown as string) || ""),
+      ...options.user,
+      id: base64toArrayBuffer(options.user.id),
     },
   };
 
@@ -283,11 +226,12 @@ export async function createWebAuthnCredential(options: PublicKeyCredentialCreat
 /**
  * Performs WebAuthn credential assertion (authentication)
  */
-export async function getWebAuthnCredential(options: PublicKeyCredentialRequestOptions): Promise<PublicKeyCredential> {
+export async function getWebAuthnCredential(options: PublicKeyCredentialRequestOptionsJSON): Promise<PublicKeyCredential> {
   // Convert challenge from base64 to ArrayBuffer
   const modifiedOptions = {
     ...options,
-    challenge: base64toArrayBuffer(options.challenge as unknown as string),
+    allowCredentials: options.allowCredentials?.map(value => ({ ...value, id: base64toArrayBuffer(value.id) })),
+    challenge: base64toArrayBuffer(options.challenge),
   };
 
   const assertion = await navigator.credentials.get({

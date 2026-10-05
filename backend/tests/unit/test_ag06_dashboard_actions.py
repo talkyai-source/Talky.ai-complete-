@@ -378,16 +378,22 @@ async def test_actual_websocket_lost_response_recovers_without_redispatch(
     monkeypatch.setattr(
         assistant_ws,
         "decode_and_validate_token",
-        lambda _: {"sub": "00000000-0000-0000-0000-000000000002"},
+        lambda _: {"sub": "00000000-0000-0000-0000-000000000002", "sid": "synthetic-session"},
     )
     monkeypatch.setattr(
         assistant_ws,
-        "resolve_user_tenant",
-        AsyncMock(return_value="00000000-0000-0000-0000-000000000001"),
+        "load_session_principal",
+        AsyncMock(return_value={"tenant_id":"00000000-0000-0000-0000-000000000001"}),
     )
     monkeypatch.setattr(
         assistant_ws, "get_tenant_assistant_model", AsyncMock(return_value="unused")
     )
+    from contextlib import asynccontextmanager
+    @asynccontextmanager
+    async def auth_acquire(*_):
+        yield None
+    monkeypatch.setattr(assistant_ws, "acquire_with_tenant", auth_acquire)
+    monkeypatch.setattr(assistant_ws, "check_assistant_session", AsyncMock())
     monkeypatch.setattr(dispatch, "dispatch_tool", execute)
     socket = Socket()
     await assistant_ws.assistant_chat(socket, token=None, conversation_id=None)

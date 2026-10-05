@@ -135,6 +135,8 @@ export function Sidebar({ className }: { className?: string }) {
 
     const measureRef = useRef<HTMLDivElement | null>(null);
     const [openDropdowns, setOpenDropdowns] = useState<Set<string>>(new Set());
+    const [logoutPending, setLogoutPending] = useState(false);
+    const [logoutError, setLogoutError] = useState("");
 
     const toggleDropdown = (name: string) => {
         setOpenDropdowns(prev => {
@@ -266,13 +268,21 @@ export function Sidebar({ className }: { className?: string }) {
     }, [collapsed]);
 
     const handleLogout = () => {
-        void logout().finally(() => {
+        if (logoutPending) return;
+        setLogoutPending(true);
+        setLogoutError("");
+        void logout().then((result) => {
+            if (!result.identityCurrent) return;
             // A full page reload is required here: it tears down all
             // in-memory React state/providers and clears client caches so no
             // stale authenticated state survives into the logged-out view.
             // Absolute destination satisfies next/next/no-location-assign-relative-destination.
-            window.location.href = new URL("/", window.location.origin).toString();
-        });
+            const destination = result.serverConfirmed ? "/auth/login" : "/auth/login?logout=unconfirmed";
+            window.location.href = new URL(destination, window.location.origin).toString();
+        }).catch(() => {
+            // No identity ownership proof: do not navigate a newer login.
+            setLogoutError("Sign-out could not be confirmed. Please try again.");
+        }).finally(() => setLogoutPending(false));
     };
 
     const onClose = () => {
@@ -492,6 +502,7 @@ export function Sidebar({ className }: { className?: string }) {
                 <button
                     type="button"
                     onClick={handleLogout}
+                    disabled={logoutPending}
                     className={cn(
                         "w-full group flex min-w-0 items-center gap-2 rounded-xl font-semibold text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground transition-colors border border-transparent hover:border-sidebar-border/60",
                         rowSizeClass,
@@ -505,6 +516,7 @@ export function Sidebar({ className }: { className?: string }) {
                     <span className={cn("min-w-0 whitespace-nowrap leading-tight", desktopTextClass)}>Logout</span>
                     {collapsed ? <span className="sr-only">Logout</span> : null}
                 </button>
+                {logoutError ? <p role="alert" className="px-2 text-xs text-red-600">{logoutError}</p> : null}
             </div>
 
             <div className="shrink-0 px-2 pb-[var(--sb-tpb)]">

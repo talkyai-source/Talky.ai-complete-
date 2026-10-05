@@ -95,6 +95,7 @@ async def resolve_mfa_challenge(conn, raw_token: str) -> Optional[dict[str, str]
         WHERE  challenge_hash = $1
           AND  used           = FALSE
           AND  expires_at     > $2
+        FOR UPDATE
         """,
         token_hash,
         now,
@@ -113,20 +114,24 @@ async def resolve_mfa_challenge(conn, raw_token: str) -> Optional[dict[str, str]
     return dict(row)
 
 
-async def consume_mfa_challenge(conn, challenge_id: str) -> None:
+async def consume_mfa_challenge(conn, challenge_id: str) -> bool:
     """Mark a challenge as used so it cannot be replayed."""
     now = datetime.now(timezone.utc)
-    await conn.execute(
+    result = await conn.execute(
         """
         UPDATE mfa_challenges
            SET used    = TRUE,
                used_at = $1
          WHERE id      = $2
            AND used    = FALSE
+           AND expires_at > $1
+           AND attempts < $3
         """,
         now,
         challenge_id,
+        MFA_VERIFY_MAX_ATTEMPTS,
     )
+    return result == "UPDATE 1"
 
 
 async def record_failed_mfa_attempt(conn, challenge_id: str) -> int:

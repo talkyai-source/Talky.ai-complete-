@@ -60,6 +60,9 @@ from fastapi.encoders import jsonable_encoder
 from app.api.v1.dependencies import get_db_client
 from app.api.v1.endpoints.assistant_ws import (_is_origin_allowed, _resolve_ws_token, _proposal_status, proposal_apply_result, proposal_outcome_note)
 from app.core.jwt_security import JWTValidationError, decode_and_validate_token
+from app.core.db_utils import acquire_with_tenant
+from app.core.security.principal import (PrincipalUnavailable, load_session_principal,
+    assistant_session_context, check_assistant_session)
 from app.domain.models.conversation import AudioChunk
 from app.infrastructure.assistant.model_config import get_tenant_assistant_model
 from app.infrastructure.assistant.proposals import (
@@ -158,7 +161,17 @@ async def assistant_voice(
     user_id = str(user_id)
 
     db_client = get_db_client()
-    tenant_id = await _resolve_tenant(user_id, db_client)
+    try:
+        async with acquire_with_tenant(db_client.pool, None) as conn:
+            principal = await load_session_principal(conn, payload)
+        tenant_id = principal["tenant_id"]
+    except PrincipalUnavailable:
+        await websocket.send_json({"type": "error", "content": "Your account access or login session has ended. Please sign in again."})
+        await websocket.close(code=1008, reason="Session unavailable")
+        return
+    except Exception:
+        await websocket.close(code=1011, reason="Account verification unavailable")
+        return
     if not tenant_id:
         logger.warning("assistant_voice: no tenant profile for user %s", user_id)
         await websocket.send_json({"type": "error", "content": "User profile not found."})
@@ -174,15 +187,22 @@ async def assistant_voice(
 
     session_id = f"voice_{uuid.uuid4().hex[:12]}"
 
-    async with sem:
-        await _run_voice_session(
-            websocket=websocket,
-            session_id=session_id,
-            tenant_id=tenant_id,
-            user_id=user_id,
-            conversation_id=conversation_id,
-            db_client=db_client,
-        )
+    identity_context = assistant_session_context.set({
+        "sub": user_id, "sid": payload["sid"], "tenant_id": tenant_id,
+    })
+    try:
+        async with sem:
+            await _run_voice_session(
+                websocket=websocket,
+                session_id=session_id,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                conversation_id=conversation_id,
+                db_client=db_client,
+            )
+    finally:
+        assistant_session_context.reset(identity_context)
+
 
 
 async def _run_voice_session(
@@ -212,6 +232,16 @@ async def _run_voice_session(
             await websocket.send_json(jsonable_encoder(data))
         except (WebSocketDisconnect, RuntimeError):
             active = False
+
+    async def require_current_socket():
+        nonlocal active
+        try:
+            await check_assistant_session(db_client.pool, user_id, tenant_id)
+        except Exception:
+            await send_json({"type": "error", "content": "Your account access or login session changed. Please sign in again."})
+            active = False
+            await websocket.close(code=1008, reason="Session unavailable")
+            raise WebSocketDisconnect(code=1008)
 
     async def send_bytes(data: bytes) -> None:
         nonlocal active
@@ -420,6 +450,8 @@ async def _run_voice_session(
                 model=tenant_model,
             ):
                 etype = ev.get("type")
+                if etype != "token":
+                    await require_current_socket()
                 if etype == "token":
                     if current_msg_id is None:
                         current_msg_id = str(uuid.uuid4())
@@ -564,6 +596,7 @@ async def _run_voice_session(
                     await prev
                 except (asyncio.CancelledError, Exception):
                     pass
+            await require_current_socket()
             current_turn["task"] = asyncio.create_task(run_agent_turn(user_text))
             try:
                 await current_turn["task"]
@@ -571,6 +604,7 @@ async def _run_voice_session(
                 pass
 
     async def apply_proposal(proposal_id: Optional[str], mode: Optional[str] = None) -> None:
+        await require_current_socket()
         # Atomic consume (Case 4): pop so two concurrent applies of the same
         # proposal can't both dispatch and double-create.
         proposal = (
@@ -654,6 +688,7 @@ async def _run_voice_session(
             except json.JSONDecodeError:
                 continue
             mtype = data.get("type")
+            await require_current_socket()
             if mtype == "ping":
                 await send_json({"type": "pong"})
             elif mtype == "proposal_status":

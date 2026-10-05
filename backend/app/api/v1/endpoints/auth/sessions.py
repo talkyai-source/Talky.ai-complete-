@@ -17,9 +17,10 @@ The boundary in one line:
 """
 from __future__ import annotations
 
+import hashlib
 from typing import Optional
 
-from fastapi import APIRouter, Cookie, Depends, Request, Response
+from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response
 
 from app.api.v1.dependencies import CurrentUser, get_current_user, get_db_client
 from app.core.db_utils import acquire_with_tenant
@@ -29,7 +30,7 @@ from app.core.security.refresh_tokens import revoke_family_by_token
 from app.core.security.sessions import (
     SESSION_COOKIE_NAME,
     revoke_all_user_sessions,
-    revoke_session_by_token,
+    revoke_session_by_id,
 )
 
 from ._shared import clear_session_cookie, limiter
@@ -53,10 +54,33 @@ async def logout(
     2. Revoke the refresh token family so the cookie-auth chain stops.
     3. Clear all auth cookies (legacy talky_sid + new talky_at/talky_rt).
     """
-    async with acquire_with_tenant(db_client.pool, current_user.tenant_id) as conn:
-        if talky_sid:
-            await revoke_session_by_token(conn, talky_sid, reason="logout")
+    session_id = getattr(request.state, "authenticated_session_id", None)
+    if not session_id:
+        raise HTTPException(status_code=401, detail="A current login session is required.")
+    # The dependency already checked access/legacy-cookie agreement and the
+    # browser's expected identity. Refresh ownership must agree too, before any
+    # revocation or cookie mutation; it is never an alternate identity selector.
+    async with acquire_with_tenant(db_client.pool, None) as conn:
         if talky_rt:
+            refresh_owner = await conn.fetchrow(
+                "SELECT user_id,session_id FROM refresh_tokens WHERE token_hash=$1",
+                hashlib.sha256(talky_rt.encode()).hexdigest(),
+            )
+            if refresh_owner and (
+                str(refresh_owner["user_id"]) != current_user.id
+                or (refresh_owner["session_id"] and str(refresh_owner["session_id"]) != str(session_id))
+            ):
+                raise HTTPException(status_code=409, detail={
+                    "code": "identity_changed",
+                    "message": "Your signed-in account changed. Refresh this page before continuing.",
+                })
+        await revoke_session_by_id(conn, session_id, current_user.id, reason="logout")
+        await conn.execute(
+            """UPDATE refresh_tokens SET revoked_at=NOW(),revoked_reason='logout'
+               WHERE user_id=$1 AND session_id=$2 AND revoked_at IS NULL""",
+            current_user.id, session_id,
+        )
+        if talky_rt and refresh_owner:
             await revoke_family_by_token(conn, presented_token=talky_rt, reason="logout")
 
     clear_session_cookie(response)

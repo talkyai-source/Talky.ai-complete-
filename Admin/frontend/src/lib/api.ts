@@ -669,6 +669,8 @@ export interface AdminUserItem {
     email: string;
     name: string | null;
     role: string;
+    effective_role?: string | null;
+    membership_status?: string | null;
     tenant_id: string | null;
     tenant_name?: string | null;
     is_active?: boolean;        // false => blocked

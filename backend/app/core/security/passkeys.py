@@ -28,8 +28,6 @@ Security controls (OWASP + W3C):
 
 from __future__ import annotations
 
-import base64
-import hashlib
 import logging
 import os
 import secrets
@@ -51,7 +49,7 @@ from webauthn import (
     verify_authentication_response,
     verify_registration_response,
 )
-from webauthn.helpers import bytes_to_base64url, parse_client_data_json
+from webauthn.helpers import bytes_to_base64url
 from webauthn.helpers.structs import (
     AttestationConveyancePreference,
     AuthenticatorAttachment,
@@ -228,6 +226,7 @@ async def get_and_validate_challenge(
     ceremony_id: str,
     expected_ceremony: str,
     ip_address: Optional[str] = None,
+    expected_user_id: Optional[str] = None,
 ) -> Optional[bytes]:
     """
     Retrieve and validate a challenge from the database.
@@ -271,6 +270,15 @@ async def get_and_validate_challenge(
         )
         return None
 
+    # Registration always belongs to its authenticated initiator. A login
+    # challenge may be discoverable (no user yet), otherwise it is bound too.
+    owner = str(row["user_id"]) if row["user_id"] else None
+    if expected_user_id is not None and (
+        (expected_ceremony == "registration" and owner != str(expected_user_id))
+        or (owner is not None and owner != str(expected_user_id))
+    ):
+        return None
+
     # Log IP anomaly (don't block, just audit)
     if ip_address and row["ip_address"] and ip_address != row["ip_address"]:
         logger.warning(
@@ -292,13 +300,14 @@ async def consume_challenge(conn, ceremony_id: str) -> bool:
                used_at = $1
          WHERE id      = $2
            AND used    = FALSE
+           AND expires_at > $1
         """,
         now,
         uuid.UUID(ceremony_id) if ceremony_id else None,
     )
 
     # asyncpg returns 'UPDATE N' string
-    return result and "UPDATE 1" in result
+    return result == "UPDATE 1"
 
 
 async def cleanup_expired_challenges(conn, older_than_minutes: int = 60) -> int:
@@ -484,6 +493,7 @@ async def verify_registration(
     expected_origin: Optional[str] = None,
     expected_rp_id: Optional[str] = None,
     ip_address: Optional[str] = None,
+    expected_user_id: Optional[str] = None,
 ) -> VerifiedCredential:
     """
     Verify a WebAuthn registration response and return the verified credential.
@@ -508,6 +518,7 @@ async def verify_registration(
         ceremony_id=ceremony_id,
         expected_ceremony="registration",
         ip_address=ip_address,
+        expected_user_id=expected_user_id,
     )
 
     if expected_challenge is None:
@@ -520,25 +531,15 @@ async def verify_registration(
             expected_challenge=expected_challenge,
             expected_origin=expected_origin or RP_ORIGIN,
             expected_rp_id=expected_rp_id or RP_ID,
-            # Linux/Chrome with software-stored passkeys frequently fails to
-        # set the WebAuthn UV (User Verified) flag on the credential even
-        # when the user typed a PIN at the OS prompt. That makes UV-required
-        # verification reject otherwise-valid signatures. Until we can
-        # reliably depend on UV across all platforms, accept the credential
-        # as long as the cryptographic signature is valid; the PIN/biometric
-        # was still enforced at the OS layer, just not surfaced in the
-        # protocol. Make this env-configurable so production can re-enable.
-        require_user_verification=(
-            __import__("os").getenv("PASSKEY_REQUIRE_USER_VERIFICATION", "false").lower()
-            in {"1", "true", "yes"}
-        ),
+            require_user_verification=True,
         )
     except InvalidRegistrationResponse as e:
         logger.warning("Registration verification failed: %s", e)
         raise ValueError(f"Registration verification failed: {e}") from e
 
     # Consume the challenge (single-use)
-    await consume_challenge(conn, ceremony_id)
+    if not await consume_challenge(conn, ceremony_id):
+        raise ValueError("Registration challenge was already consumed or expired")
 
     # Extract credential data
     credential_id = bytes_to_base64url(verification.credential_id)
@@ -650,6 +651,7 @@ async def verify_authentication(
     expected_origin: Optional[str] = None,
     expected_rp_id: Optional[str] = None,
     ip_address: Optional[str] = None,
+    expected_user_id: Optional[str] = None,
 ) -> AuthenticationResult:
     """
     Verify a WebAuthn authentication response.
@@ -677,6 +679,7 @@ async def verify_authentication(
         ceremony_id=ceremony_id,
         expected_ceremony="authentication",
         ip_address=ip_address,
+        expected_user_id=expected_user_id,
     )
 
     if expected_challenge is None:
@@ -691,25 +694,15 @@ async def verify_authentication(
             expected_rp_id=expected_rp_id or RP_ID,
             credential_public_key=base64url_to_bytes(credential_public_key),
             credential_current_sign_count=current_sign_count,
-            # Linux/Chrome with software-stored passkeys frequently fails to
-        # set the WebAuthn UV (User Verified) flag on the credential even
-        # when the user typed a PIN at the OS prompt. That makes UV-required
-        # verification reject otherwise-valid signatures. Until we can
-        # reliably depend on UV across all platforms, accept the credential
-        # as long as the cryptographic signature is valid; the PIN/biometric
-        # was still enforced at the OS layer, just not surfaced in the
-        # protocol. Make this env-configurable so production can re-enable.
-        require_user_verification=(
-            __import__("os").getenv("PASSKEY_REQUIRE_USER_VERIFICATION", "false").lower()
-            in {"1", "true", "yes"}
-        ),
+            require_user_verification=True,
         )
     except InvalidAuthenticationResponse as e:
         logger.warning("Authentication verification failed: %s", e)
         raise ValueError(f"Authentication verification failed: {e}") from e
 
     # Consume the challenge (single-use)
-    await consume_challenge(conn, ceremony_id)
+    if not await consume_challenge(conn, ceremony_id):
+        raise ValueError("Authentication challenge was already consumed or expired")
 
     # Clone detection (W3C §6.1.3). If the authenticator's monotonic
     # sign-count went backwards or stayed the same, the credential has
@@ -759,7 +752,7 @@ async def verify_authentication(
     return AuthenticationResult(
         credential_id=credential_id,
         new_sign_count=new_sign_count,
-        user_verified=True,
+        user_verified=verification.user_verified,
         authenticator_attachment=_attach_str,
     )
 
@@ -829,6 +822,7 @@ async def store_credential(
 async def get_credential_by_id(
     conn,
     credential_id: str,
+    *, for_update: bool = False,
 ) -> Optional[dict[str, Any]]:
     """Retrieve a credential by its credential_id (base64url)."""
     row = await conn.fetchrow(
@@ -838,7 +832,7 @@ async def get_credential_by_id(
                display_name, created_at, last_used_at
         FROM   user_passkeys
         WHERE  credential_id = $1
-        """,
+        """ + (" FOR UPDATE" if for_update else ""),
         credential_id,
     )
     return dict(row) if row else None
@@ -866,6 +860,7 @@ async def update_credential_sign_count(
     conn,
     credential_id: str,
     new_sign_count: int,
+    *, expected_sign_count: Optional[int] = None,
 ) -> bool:
     """Update the sign count after successful authentication."""
     result = await conn.execute(
@@ -874,9 +869,12 @@ async def update_credential_sign_count(
            SET sign_count   = $1,
                last_used_at = NOW()
          WHERE credential_id = $2
+           AND sign_count <= $1
+           AND ($3::bigint IS NULL OR sign_count=$3)
         """,
         new_sign_count,
         credential_id,
+        expected_sign_count,
     )
     return "UPDATE 1" in result
 

@@ -40,12 +40,7 @@ export default function PasskeyLogin({ onSuccess, onError, disabled = false }: P
       const startResponse = await startPasskeyAuth();
 
       // Get credential from user
-      const assertion = await getWebAuthnCredential({
-        challenge: startResponse.challenge as unknown as BufferSource,
-        rp: startResponse.rp,
-        timeout: 60000,
-        userVerification: "preferred",
-      } as PublicKeyCredentialRequestOptions);
+      const assertion = await getWebAuthnCredential(startResponse.options);
 
       // Extract assertion data
       const assertionData = extractCredentialAssertionData(assertion);

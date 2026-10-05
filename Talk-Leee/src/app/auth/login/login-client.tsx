@@ -45,6 +45,7 @@ type LoginTokens = {
     // login-client doesn't consume it.
     role?: string;
     user_id?: string;
+    tenant_id?: string;
     email?: string;
     business_name?: string | null;
     minutes_remaining?: number;
@@ -188,6 +189,14 @@ export default function LoginClientPage() {
     const [mfaChallengeToken, setMfaChallengeToken] = useState<string | null>(null);
 
     const { applyLoginResult } = useAuth();
+    const [logoutUnconfirmed, setLogoutUnconfirmed] = useState(false);
+    useEffect(() => {
+        let pending = new URLSearchParams(window.location.search).get("logout") === "unconfirmed";
+        try { pending ||= !!localStorage.getItem("talky.logout.pending"); } catch { /* Query marker still works without storage. */ }
+        // The persisted logout receipt is available only after hydration.
+        // eslint-disable-next-line react-hooks/set-state-in-effect
+        setLogoutUnconfirmed(pending);
+    }, []);
     const emailInputRef = useRef<HTMLInputElement | null>(null);
     const errorId = useId();
 
@@ -223,6 +232,7 @@ export default function LoginClientPage() {
                 flushSync(() => {
                     applyLoginResult({
                         user_id: tokens.user_id!,
+                        tenant_id: tokens.tenant_id,
                         email: tokens.email!,
                         role: tokens.role!,
                         business_name: tokens.business_name,
@@ -403,6 +413,10 @@ export default function LoginClientPage() {
                             <h1>Welcome back</h1>
                         </CardTitle>
                         <CardDescription>{getStepDescription()}</CardDescription>
+                        {logoutUnconfirmed && <p role="status" className="mt-3 text-sm text-amber-700 dark:text-amber-300">
+                            You signed out on this device, but we could not confirm that the server session ended.
+                            Sign in again to review and revoke other sessions in Security settings.
+                        </p>}
                     </CardHeader>
 
                     <AnimatePresence mode="wait" custom={direction}>

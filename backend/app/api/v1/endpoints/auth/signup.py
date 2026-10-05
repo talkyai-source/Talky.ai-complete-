@@ -131,9 +131,7 @@ async def signup_start(
         json.dumps(pending_payload),
     )
 
-    # Send email. We tolerate send failures (logged) so a misconfigured
-    # SMTP setup doesn't block development. In production, the SMTP env
-    # vars must be set or no codes will ever reach users — see README.
+    # A stored code is not evidence that the mailbox provider accepted it.
     email_service = get_email_service()
     sent = await email_service.send_signup_code_email(
         recipient_email=email,
@@ -142,11 +140,10 @@ async def signup_start(
         expires_in_minutes=_SIGNUP_CODE_TTL_SECONDS // 60,
     )
     if not sent:
-        logger.warning(
-            "signup_start_email_send_failed email=%s — "
-            "code stored in Redis but no email was delivered. "
-            "Check SMTP_HOST / SMTP_USER / SMTP_PASSWORD env vars.",
-            email,
+        logger.warning("signup_start_email_send_unconfirmed")
+        raise HTTPException(
+            status_code=503,
+            detail="We could not confirm sending your verification email. Please try again shortly.",
         )
 
     return SignupStartResponse(
@@ -215,7 +212,7 @@ async def signup_complete(
 ) -> AuthTokenResponse:
     """Step 2 of signup. Validate the code stored in Redis, then
     create tenant + user_profiles (plan_id always "free") and issue
-    a JWT + session cookie just like /register does."""
+    a session-bound JWT and cookie pair atomically."""
 
     email = body.email.strip().lower()
 
@@ -383,24 +380,22 @@ async def signup_complete(
                 return_session_id=True,
             )
 
-    # Pending record served its purpose — drop it from Redis.
-    await redis.delete(_signup_redis_key(email))
+            # Account, membership, login session and refresh family are one
+            # transaction. A cookie-auth persistence failure leaves no orphan
+            # account that the customer cannot finish creating.
+            token = create_jwt(user_id, email, "tenant_admin", str(tenant["id"]), session_id)
+            set_session_cookie(response, raw_session_token)
+            await issue_cookie_auth(
+                response, conn, user_id=user_id, email=email, role="tenant_admin",
+                tenant_id=str(tenant["id"]), session_id=session_id, ip=ip, user_agent=ua,
+            )
 
-    token = create_jwt(user_id, email, "tenant_admin", str(tenant["id"]), session_id)
-    set_session_cookie(response, raw_session_token)
-
-    async with acquire_with_tenant(db_client.pool, str(tenant["id"])) as conn:
-        await issue_cookie_auth(
-            response,
-            conn,
-            user_id=user_id,
-            email=email,
-            role="tenant_admin",
-            tenant_id=str(tenant["id"]),
-            session_id=session_id,
-            ip=ip,
-            user_agent=ua,
-        )
+    # The database unique email constraint is the durable one-account fence.
+    # Cleanup failure after commit must not misreport successful registration.
+    try:
+        await redis.delete(_signup_redis_key(email))
+    except Exception:
+        logger.warning("signup_pending_cleanup_failed")
 
     await audit_logger.log(
         event_type=AuditEvent.USER_CREATED,
@@ -421,6 +416,7 @@ async def signup_complete(
     return AuthTokenResponse(
         access_token=token,
         user_id=user_id,
+        tenant_id=str(tenant["id"]),
         email=email,
         role="tenant_admin",
         business_name=pending["business_name"],

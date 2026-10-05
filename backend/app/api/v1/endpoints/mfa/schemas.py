@@ -54,6 +54,7 @@ class MFAChallengeVerifyResponse(BaseModel):
     user_id: str
     email: str
     role: str
+    tenant_id: Optional[str] = None
     business_name: Optional[str]
     minutes_remaining: int
     mfa_verified: bool = True

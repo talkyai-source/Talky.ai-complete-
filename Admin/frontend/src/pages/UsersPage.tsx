@@ -214,9 +214,9 @@ export function UsersPage() {
                                             <tr>
                                                 <th>Name</th>
                                                 <th>Email</th>
-                                                <th>Role</th>
+                                                <th>Access role</th>
                                                 <th>Tenant</th>
-                                                <th>Status</th>
+                                                <th>Account status</th>
                                                 <th>MFA</th>
                                                 <th>Created</th>
                                                 <th style={{ textAlign: 'right' }}>Actions</th>
@@ -229,7 +229,15 @@ export function UsersPage() {
                                                     <tr key={u.id} className={active ? '' : 'row-blocked'}>
                                                         <td>{u.name || '-'}</td>
                                                         <td>{u.email}</td>
-                                                        <td><RoleBadge role={u.role} /></td>
+                                                        <td>
+                                                            {u.effective_role ? <RoleBadge role={u.effective_role} /> : <>
+                                                                <span className="status-badge status-error">
+                                                                    {u.effective_role === null ? 'Access unavailable' : 'Access unverified'}
+                                                                </span>
+                                                                <div className="text-muted">Stored assignment: {ROLE_LABELS[u.role] || u.role}</div>
+                                                                {u.membership_status && <div className="text-muted">Membership: {u.membership_status}</div>}
+                                                            </>}
+                                                        </td>
                                                         <td>
                                                             <div className="tenant-name-cell">
                                                                 <Building2 size={14} />

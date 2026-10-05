@@ -128,6 +128,7 @@ export default function RegisterClientPage() {
             flushSync(() => {
                 applyLoginResult({
                     user_id: response.user_id,
+                    tenant_id: response.tenant_id,
                     email: response.email,
                     role: response.role,
                     business_name: response.business_name,

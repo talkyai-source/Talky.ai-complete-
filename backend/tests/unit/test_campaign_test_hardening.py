@@ -42,10 +42,16 @@ async def test_login_session_database_failure_is_retryable_and_closed():
 @pytest.mark.asyncio
 async def test_login_session_query_uses_revocable_user_bound_lookup():
     uid, sid = str(uuid.uuid4()), str(uuid.uuid4())
-    conn = SimpleNamespace(fetchrow=AsyncMock(return_value={"id": sid, "user_id": uid}))
+    conn = SimpleNamespace(fetchrow=AsyncMock(side_effect=[
+        {"id": sid, "user_id": uid},
+        {"id":uid,"email":"synthetic@example.com","name":None,"tenant_id":str(uuid.uuid4()),
+         "profile_role":"tenant_admin","is_active":True,"is_verified":True,
+         "membership_status":"active","membership_role":"tenant_admin",
+         "business_name":None,"minutes_allocated":0,"minutes_used":0},
+    ]))
     with patch("app.core.db_utils.acquire_with_tenant", return_value=_FakeAcquire(conn)):
         assert await ep._session_is_active(object(), uid, sid)
-    sql, *params = conn.fetchrow.await_args.args
+    sql, *params = conn.fetchrow.await_args_list[0].args
     assert "revoked = FALSE" in sql and "expires_at > $2" in sql
     assert "user_id = $3" in sql
     assert params[0] == sid and params[2] == uid
@@ -55,7 +61,7 @@ async def test_login_session_query_uses_revocable_user_bound_lookup():
 async def test_open_test_stops_when_login_is_revoked(monkeypatch):
     monkeypatch.setattr(ep, "_AUTH_RECHECK_SECONDS", 0, raising=False)
     with _Harness(tenant_cfg=AIProviderConfig(), campaign_row=_CAMPAIGN) as h:
-        with patch.object(ep, "_session_is_active", AsyncMock(side_effect=[True, False]), create=True):
+        with patch.object(ep, "_session_is_active", AsyncMock(side_effect=[True, True, False]), create=True):
             ws = FakeWebSocket(cookies={"talky_at": "signed"})
             ws.receive = AsyncMock(side_effect=lambda: asyncio.sleep(1, result={"type": "websocket.disconnect"}))
             # AsyncMock does not await a coroutine returned by a regular side effect.
@@ -259,7 +265,7 @@ async def test_membership_lookup_checks_active_tenant_or_explicit_platform_role(
 async def test_open_test_stops_when_membership_is_removed(monkeypatch):
     monkeypatch.setattr(ep, "_AUTH_RECHECK_SECONDS", 0)
     with _Harness(tenant_cfg=AIProviderConfig(), campaign_row=_CAMPAIGN) as h:
-        with patch.object(ep, "_has_test_membership", AsyncMock(side_effect=[True, False]), create=True):
+        with patch.object(ep, "_has_test_membership", AsyncMock(side_effect=[True, True, False]), create=True):
             ws = FakeWebSocket(cookies={"talky_at": "signed"})
             async def receive():
                 await asyncio.sleep(1)

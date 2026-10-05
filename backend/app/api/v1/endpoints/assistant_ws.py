@@ -16,7 +16,10 @@ from fastapi.encoders import jsonable_encoder
 from app.core.postgres_adapter import Client
 
 from app.api.v1.dependencies import CurrentUser, get_current_user, get_db_client
-from app.api.v1.ws_tenant import resolve_user_tenant
+from app.core.db_utils import acquire_with_tenant
+from app.core.security.principal import (
+    PrincipalUnavailable, load_session_principal, assistant_session_context, check_assistant_session,
+)
 from app.core.config import get_settings
 from app.core.jwt_security import JWTValidationError, decode_and_validate_token
 from app.infrastructure.assistant.agent import assistant_graph, AgentState
@@ -289,6 +292,7 @@ async def assistant_chat(
 
     # STEP 1: Accept WebSocket connection (per FastAPI docs)
     await manager.connect(websocket, connection_id)
+    identity_context = None
 
     try:
         # STEP 2: Resolve auth token (first-message preferred, ?token= fallback for 24h soak)
@@ -329,7 +333,13 @@ async def assistant_chat(
         # profile is invisible (every socket closed here 2026-08-30 → 09-08).
         db_client = get_db_client()
         try:
-            tenant_id = await resolve_user_tenant(db_client.pool, user_id)
+            async with acquire_with_tenant(db_client.pool, None) as conn:
+                principal = await load_session_principal(conn, payload)
+            tenant_id = principal["tenant_id"]
+        except PrincipalUnavailable:
+            await manager.send_json(connection_id, {"type": "error", "content": "Your account access or login session has ended. Please sign in again."})
+            await websocket.close(code=1008, reason="Session unavailable")
+            return
         except Exception as profile_err:
             logger.error("assistant_ws: profile lookup failed: %s", profile_err)
             await manager.send_json(connection_id, {
@@ -347,6 +357,18 @@ async def assistant_chat(
             })
             await websocket.close(code=1008, reason="No tenant")
             return
+
+        identity_context = assistant_session_context.set({
+            "sub": user_id, "sid": payload["sid"], "tenant_id": tenant_id,
+        })
+
+        async def require_current_socket():
+            try:
+                await check_assistant_session(db_client.pool, user_id, tenant_id)
+            except Exception:
+                await manager.send_json(connection_id, {"type": "error", "content": "Your account access or login session changed. Please sign in again."})
+                await websocket.close(code=1008, reason="Session unavailable")
+                raise WebSocketDisconnect(code=1008)
 
         # Set the RLS tenant context for this WS connection's task. The agent's
         # tools and the conversation-history queries below go through
@@ -441,6 +463,7 @@ async def assistant_chat(
         while True:
             # Wait for message from client
             data = await websocket.receive_json()
+            await require_current_socket()
             
             if data.get("type") == "user_message":
                 user_content = data.get("content", "").strip()
@@ -493,6 +516,8 @@ async def assistant_chat(
                         model=tenant_model,
                     ):
                         etype = ev.get("type")
+                        if etype != "token":
+                            await require_current_socket()
 
                         if etype == "token":
                             if current_msg_id is None:
@@ -731,6 +756,8 @@ async def assistant_chat(
         logger.error(f"WebSocket error: {e}", exc_info=True)
     
     finally:
+        if identity_context is not None:
+            assistant_session_context.reset(identity_context)
         manager.disconnect(connection_id)
 
 

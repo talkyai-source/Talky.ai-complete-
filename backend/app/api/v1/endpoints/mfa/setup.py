@@ -21,7 +21,7 @@ from app.core.security.totp import (
     generate_qr_code_data_uri,
     generate_totp_secret,
     get_provisioning_uri,
-    verify_totp_code,
+    verify_totp_step,
 )
 
 from .schemas import (
@@ -80,7 +80,7 @@ async def setup_mfa(
         qr_data_uri = generate_qr_code_data_uri(provisioning_uri)
 
         # Upsert any existing (unconfirmed) MFA record with a fresh secret.
-        await conn.execute(
+        stored = await conn.execute(
             """
             INSERT INTO user_mfa
                    (user_id, totp_secret_enc, enabled, verified_at,
@@ -93,10 +93,16 @@ async def setup_mfa(
                 verified_at     = NULL,
                 updated_at      = NOW(),
                 last_used_at    = NULL
+            WHERE user_mfa.enabled = FALSE
             """,
             current_user.id,
             encrypted_secret,
         )
+        if stored != "INSERT 0 1":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="MFA is already enabled. Disable it before starting setup again.",
+            )
 
         # Also mark user_profiles.mfa_enabled = FALSE (pending confirmation)
         await conn.execute(
@@ -143,7 +149,7 @@ async def confirm_mfa(
             """
             SELECT id, totp_secret_enc, enabled, last_used_at
             FROM   user_mfa
-            WHERE  user_id = $1
+            WHERE  user_id = $1 FOR UPDATE
             """,
             current_user.id,
         )
@@ -170,13 +176,13 @@ async def confirm_mfa(
             )
 
         last_used_at = row["last_used_at"]
-        code_valid = verify_totp_code(
+        matched_step = verify_totp_step(
             raw_secret,
             body.code,
             last_used_at=last_used_at,
         )
 
-        if not code_valid:
+        if matched_step is None:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Invalid TOTP code. Check your authenticator app and try again.",
@@ -191,11 +197,12 @@ async def confirm_mfa(
                SET enabled      = TRUE,
                    verified_at  = $1,
                    updated_at   = $1,
-                   last_used_at = $1
+                   last_used_at = $3
              WHERE user_id      = $2
             """,
             now,
             current_user.id,
+            matched_step,
         )
 
         # Sync the denormalized flag

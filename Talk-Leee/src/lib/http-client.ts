@@ -1,3 +1,5 @@
+import { getBrowserAuthToken, setBrowserAuthToken } from "@/lib/auth-token";
+
 export type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
 export type UnifiedApiError = {
@@ -165,9 +167,33 @@ let _freshLoginUntil = 0;
 // the SSR + first-paint paths are unchanged.
 // ──────────────────────────────────────────────────────────────────────────
 let _externalTokenProvider: (() => string | null) | null = null;
+let _externalTokenWriter: ((token: string | null) => void) | null = null;
+export type RequestIdentity = { userId: string; tenantId?: string };
+let _requestIdentity: RequestIdentity | null = null;
+let _identityEpoch = 0;
+const PUBLIC_AUTH_PATHS = new Set([
+    "/auth/login", "/auth/verify-otp", "/auth/signup/start", "/auth/signup/verify-code",
+    "/auth/signup/complete", "/auth/register", "/auth/forgot-password", "/auth/reset-password",
+    "/auth/passkey-check", "/auth/passkeys/login/begin", "/auth/passkeys/login/complete", "/auth/mfa/verify",
+]);
+function managesSession(path: string) {
+    return PUBLIC_AUTH_PATHS.has(path) || path === "/auth/logout" || path === "/auth/refresh";
+}
 
-export function setTokenProvider(fn: (() => string | null) | null) {
+export function setRequestIdentity(identity: RequestIdentity | null) {
+    if (JSON.stringify(identity) !== JSON.stringify(_requestIdentity)) _identityEpoch += 1;
+    _requestIdentity = identity ? { ...identity } : null;
+}
+
+export function invalidateRequestIdentity() {
+    _identityEpoch += 1;
+    _requestIdentity = null;
+}
+
+export function setTokenProvider(fn: (() => string | null) | null, writer?: (token: string | null) => void) {
     _externalTokenProvider = fn;
+    _externalTokenWriter = fn ? writer ?? null : null;
+    if (!fn) invalidateRequestIdentity();
 }
 
 
@@ -250,44 +276,27 @@ function fireSessionExpired() {
 
 function defaultTokenStorage(): TokenStorage {
     let mem: string | null = null;
-    const key = "talklee.auth.token";
     return {
         get: () => {
-            // Phase 2 universal-auth-state: AuthContext installs itself as
-            // the provider so token rotations are reactive. BUT if the
-            // provider returns null we MUST fall through to localStorage —
-            // otherwise a legacy api.setToken() write (which goes through
-            // localStorage but not the React state) is invisible to the
-            // HTTP client and every request goes out without a Bearer
-            // header. That's exactly what caused the post-Phase-3 login
-            // bounce regression: the provider returned its stale null
-            // while localStorage already had the freshly-minted token from
-            // /auth/login. The "if (v) return v" form treats null as
-            // "provider doesn't have an answer", falls through to the
-            // localStorage read, and keeps reactivity for real values.
+            // AuthContext owns the current identity, including an explicit
+            // absence. Never revive a stale stored token after local logout.
             if (_externalTokenProvider) {
                 try {
-                    const v = _externalTokenProvider();
-                    if (v) return v;
+                    return _externalTokenProvider();
                 } catch {
-                    // Provider threw — fall through to localStorage.
+                    return null;
                 }
             }
             if (typeof window === "undefined") return mem;
-            try {
-                return window.localStorage.getItem(key);
-            } catch {
-                return mem;
-            }
+            return getBrowserAuthToken();
         },
         set: (token) => {
-            mem = token;
-            if (typeof window === "undefined") return;
-            try {
-                if (token) window.localStorage.setItem(key, token);
-                else window.localStorage.removeItem(key);
-            } catch {
+            if (_externalTokenWriter) {
+                _externalTokenWriter(token);
+                return;
             }
+            mem = token;
+            setBrowserAuthToken(token);
         },
     };
 }
@@ -298,29 +307,38 @@ function defaultTokenStorage(): TokenStorage {
 // HTTP client retries any first-time 401 once, after a successful
 // refresh. Concurrent 401s share a single in-flight refresh promise so
 // a thundering herd doesn't trigger N rotations.
-let _refreshInFlight: Promise<boolean> | null = null;
+type RefreshResult = { ok: boolean; status?: number; accessToken?: string; userId?: string; tenantId?: string };
+const _refreshInFlight = new Map<string, Promise<RefreshResult>>();
 
-async function tryRefresh(refreshUrl: string): Promise<boolean> {
-    if (_refreshInFlight) return _refreshInFlight;
-    _refreshInFlight = (async () => {
+async function tryRefresh(refreshUrl: string, key: string, headers: Record<string, string>): Promise<RefreshResult> {
+    const existing = _refreshInFlight.get(key);
+    if (existing) return existing;
+    const promise = (async () => {
         try {
             const res = await fetch(refreshUrl, {
                 method: "POST",
                 credentials: "include",
+                headers,
             });
-            return res.ok;
+            const body = res.ok && res.headers.get("content-type")?.includes("application/json")
+                ? await res.json() as Record<string, unknown> : undefined;
+            return { ok: res.ok, status: res.status,
+                accessToken: typeof body?.access_token === "string" ? body.access_token : undefined,
+                userId: typeof body?.user_id === "string" ? body.user_id : undefined,
+                tenantId: typeof body?.tenant_id === "string" ? body.tenant_id : undefined };
         } catch {
-            return false;
+            return { ok: false };
         } finally {
-            setTimeout(() => { _refreshInFlight = null; }, 0);
+            setTimeout(() => { _refreshInFlight.delete(key); }, 0);
         }
     })();
-    return _refreshInFlight;
+    _refreshInFlight.set(key, promise);
+    return promise;
 }
 
 /** Test-only: reset module-level refresh state between tests. */
 export function __resetRefreshStateForTests() {
-    _refreshInFlight = null;
+    _refreshInFlight.clear();
 }
 
 export function createHttpClient(config: HttpClientConfig) {
@@ -338,17 +356,83 @@ export function createHttpClient(config: HttpClientConfig) {
     // routed through the Next.js proxy).
     const refreshUrl = `${baseUrl}/auth/refresh`;
 
-    async function raw<TBody = unknown>(opts: HttpRequestOptions<TBody>) {
+    function captureScope() {
+        return { token: getToken(), epoch: _identityEpoch, identity: _requestIdentity ? { ..._requestIdentity } : null };
+    }
+    type RequestScope = ReturnType<typeof captureScope>;
+    function assertScope(scope: RequestScope, opts: HttpRequestOptions) {
+        if (_identityEpoch !== scope.epoch || getToken() !== scope.token) {
+            throw new ApiClientError({ code: "identity_changed",
+                message: "Your sign-in changed while this request was pending. Check saved results before submitting it again.",
+                url: buildUrl(baseUrl, opts.path, opts.query ?? opts.params), method: opts.method ?? "GET" });
+        }
+    }
+    function identityHeaders(scope: RequestScope) {
+        const headers: Record<string, string> = {};
+        if (scope.identity) {
+            headers["X-Talky-Expected-User"] = scope.identity.userId;
+            headers["X-Talky-Expected-Tenant"] = scope.identity.tenantId ?? "";
+        }
+        return headers;
+    }
+    async function refreshForScope(scope: RequestScope, opts: HttpRequestOptions) {
+        assertScope(scope, opts);
+        const key = JSON.stringify([refreshUrl, scope.epoch, scope.identity, scope.token]);
+        const result = await tryRefresh(refreshUrl, key, identityHeaders(scope));
+        // A concurrent request in this same scope can adopt the same refresh.
+        if (result.accessToken && getToken() === result.accessToken && _identityEpoch === scope.epoch) scope.token = result.accessToken;
+        assertScope(scope, opts);
+        if (result.status === 409) {
+            throw new ApiClientError({ code: "identity_changed", message: "Your sign-in changed. Refresh the page before continuing.",
+                url: refreshUrl, method: "POST" });
+        }
+        if (result.ok && result.accessToken) {
+            if (scope.identity && (result.userId !== scope.identity.userId
+                || (result.tenantId ?? "") !== (scope.identity.tenantId ?? ""))) {
+                throw new ApiClientError({ code: "identity_changed", message: "Your sign-in changed. Refresh the page before continuing.",
+                    url: refreshUrl, method: "POST" });
+            }
+            setToken(result.accessToken);
+            scope.token = result.accessToken;
+        }
+        return result.ok;
+    }
+
+    function guardResponseBody(res: Response, scope: RequestScope, opts: HttpRequestOptions): Response {
+        // Existing binary/import callers read the body after requestRaw resolves.
+        // Their identity must still match when that asynchronous read finishes.
+        const guarded = <T>(read: () => Promise<T>) => async () => {
+            assertScope(scope, opts);
+            const value = await read();
+            assertScope(scope, opts);
+            return value;
+        };
+        res.blob = guarded(res.blob.bind(res));
+        res.json = guarded(res.json.bind(res));
+        res.text = guarded(res.text.bind(res));
+        res.arrayBuffer = guarded(res.arrayBuffer.bind(res));
+        res.formData = guarded(res.formData.bind(res));
+        const clone = res.clone.bind(res);
+        res.clone = () => { assertScope(scope, opts); return guardResponseBody(clone(), scope, opts); };
+        return res;
+    }
+
+    async function raw<TBody = unknown>(opts: HttpRequestOptions<TBody>, scope = captureScope()) {
         const method = opts.method ?? "GET";
         const queryParams = opts.query ?? opts.params; // Support both query and params
         const url = buildUrl(baseUrl, opts.path, queryParams);
+        const bootstrap = method === "GET" && (opts.path === "/auth/me" || opts.path === "/me" || opts.path === "/health");
+        if (_externalTokenProvider && !scope.identity && !managesSession(opts.path) && !bootstrap) {
+            throw new ApiClientError({ code: "identity_unverified", message: "Please wait while your sign-in is checked, then try again.", url, method });
+        }
         const headers: Record<string, string> = {};
         for (const [k, v] of Object.entries(opts.headers ?? {})) {
             if (v === undefined) continue;
             headers[k] = v;
         }
 
-        const token = getToken();
+        Object.assign(headers, identityHeaders(scope));
+        const token = scope.token;
         if (token && !headers.Authorization && !headers.authorization) {
             headers.Authorization = `Bearer ${token}`;
         }
@@ -403,10 +487,13 @@ export function createHttpClient(config: HttpClientConfig) {
         }
 
         try {
+            assertScope(scope, opts);
             let res = await fetch(cur.url, cur.init);
             for (const interceptor of responseInterceptors) {
+                assertScope(scope, opts);
                 res = await interceptor(res);
             }
+            assertScope(scope, opts);
 
             if (process.env.NODE_ENV === "development") {
                 const end = typeof performance !== "undefined" ? performance.now() : Date.now();
@@ -424,24 +511,26 @@ export function createHttpClient(config: HttpClientConfig) {
     }
 
     async function request<TResponse = unknown, TBody = unknown>(opts: HttpRequestOptions<TBody>): Promise<TResponse> {
+        const scope = captureScope();
         const method = opts.method ?? "GET";
         const queryParams = opts.query ?? opts.params; // Support both query and params
         const url = buildUrl(baseUrl, opts.path, queryParams);
 
         // Don't try to refresh the refresh endpoint itself — that would
         // recurse forever on a genuinely expired refresh token.
-        const isRefreshCall = opts.path === "/auth/refresh" || opts.path.endsWith("/auth/refresh");
+        const isRefreshCall = managesSession(opts.path);
 
         let res: Response;
         try {
-            res = await raw(opts);
+            res = await raw(opts, scope);
             if (res.status === 401 && !isRefreshCall) {
-                const refreshed = await tryRefresh(refreshUrl);
+                const refreshed = await refreshForScope(scope, opts);
                 if (refreshed) {
-                    res = await raw(opts);
+                    res = await raw(opts, scope);
                 }
             }
         } catch (err) {
+            if (err instanceof ApiClientError) throw err;
             if (err instanceof DOMException && err.name === "AbortError") {
                 throw new ApiClientError({ code: "aborted", message: "Request aborted", url, method });
             }
@@ -461,6 +550,7 @@ export function createHttpClient(config: HttpClientConfig) {
             const retryAfterMs = res.status === 429 ? readRetryAfterMs(res) : undefined;
             const requestId = res.headers.get("x-request-id") ?? res.headers.get("x-correlation-id") ?? undefined;
             const body = await readBody(res);
+            assertScope(scope, opts);
 
             // Canonical envelope from backend: { error: { code, message, details, request_id } }.
             // Falls back to the legacy { detail: string|dict } shape (FastAPI default)
@@ -511,7 +601,7 @@ export function createHttpClient(config: HttpClientConfig) {
             // redirect-to-login behaviour. The handler is
             // idempotent — parallel requests racing on 401 trigger
             // exactly one redirect.
-            if (res.status === 401 && !opts.suppressAuthRedirect) {
+            if (res.status === 401 && !opts.suppressAuthRedirect && !managesSession(opts.path)) {
                 // Inside the fresh-login grace window, keep the bearer
                 // token in storage — wiping it would force the next
                 // call to use cookie-only auth even though localStorage
@@ -540,9 +630,13 @@ export function createHttpClient(config: HttpClientConfig) {
 
         const ct = res.headers.get("content-type") ?? "";
         if (ct.includes("application/json")) {
-            return (await res.json()) as TResponse;
+            const result = await res.json();
+            assertScope(scope, opts);
+            return result as TResponse;
         }
-        return (await res.text()) as unknown as TResponse;
+        const result = await res.text();
+        assertScope(scope, opts);
+        return result as unknown as TResponse;
     }
 
     /**
@@ -561,20 +655,22 @@ export function createHttpClient(config: HttpClientConfig) {
      * Throws {@link ApiClientError} on a non-OK response.
      */
     async function requestRaw<TBody = unknown>(opts: HttpRequestOptions<TBody>): Promise<Response> {
+        const scope = captureScope();
         const method = opts.method ?? "GET";
         const url = buildUrl(baseUrl, opts.path, opts.query ?? opts.params);
-        const isRefreshCall = opts.path === "/auth/refresh" || opts.path.endsWith("/auth/refresh");
+        const isRefreshCall = managesSession(opts.path);
 
         let res: Response;
         try {
-            res = await raw(opts);
+            res = await raw(opts, scope);
             if (res.status === 401 && !isRefreshCall) {
-                const refreshed = await tryRefresh(refreshUrl);
+                const refreshed = await refreshForScope(scope, opts);
                 if (refreshed) {
-                    res = await raw(opts);
+                    res = await raw(opts, scope);
                 }
             }
         } catch (err) {
+            if (err instanceof ApiClientError) throw err;
             if (err instanceof DOMException && err.name === "AbortError") {
                 throw new ApiClientError({ code: "aborted", message: "Request aborted", url, method });
             }
@@ -588,20 +684,6 @@ export function createHttpClient(config: HttpClientConfig) {
                 method,
                 details: err,
             });
-        }
-
-        // Same session-expiry handling as `request`: a genuine 401 (refresh
-        // also failed) clears the stale token and fires the global
-        // session-expired redirect so the user lands back on login.
-        if (res.status === 401 && !opts.suppressAuthRedirect) {
-            if (!isWithinFreshLoginGrace()) {
-                try {
-                    setToken(null);
-                } catch {
-                    // ignore — clearing storage must not derail the throw
-                }
-            }
-            fireSessionExpired();
         }
 
         if (!res.ok) {
@@ -620,6 +702,13 @@ export function createHttpClient(config: HttpClientConfig) {
             // caller won't read it as binary. Surface the backend's detail
             // (e.g. CSV validation errors) instead of a generic status line.
             const body = await readBody(res);
+            assertScope(scope, opts);
+            if (res.status === 401 && !opts.suppressAuthRedirect && !managesSession(opts.path)) {
+                if (!isWithinFreshLoginGrace()) {
+                    try { setToken(null); } catch { /* Preserve the original failure. */ }
+                }
+                fireSessionExpired();
+            }
             const envelope =
                 body && typeof body === "object" && "error" in (body as Record<string, unknown>)
                     ? ((body as { error?: unknown }).error as { code?: unknown; message?: unknown; details?: unknown } | undefined)
@@ -653,7 +742,7 @@ export function createHttpClient(config: HttpClientConfig) {
             });
         }
 
-        return res;
+        return guardResponseBody(res, scope, opts);
     }
 
     return {

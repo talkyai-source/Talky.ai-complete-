@@ -108,6 +108,13 @@ CREATE TABLE IF NOT EXISTS user_profiles (
     failed_login_count INTEGER NOT NULL DEFAULT 0,
     last_login_at TIMESTAMPTZ,
     mfa_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+    is_verified BOOLEAN NOT NULL DEFAULT FALSE,
+    verification_token TEXT,
+    verification_token_expires_at TIMESTAMPTZ,
+    email_verified_at TIMESTAMPTZ,
+    CONSTRAINT chk_email_verification_consistency CHECK (
+        NOT is_verified OR (verification_token IS NULL AND email_verified_at IS NOT NULL)
+    ),
 
     -- Day 3: Passkey denormalized count
     passkey_count INTEGER NOT NULL DEFAULT 0 CHECK (passkey_count >= 0),
@@ -394,6 +401,7 @@ CREATE TABLE IF NOT EXISTS mfa_challenges (
     user_agent          TEXT,
     expires_at          TIMESTAMPTZ NOT NULL,
     used                BOOLEAN     NOT NULL DEFAULT FALSE,
+    attempts            INTEGER     NOT NULL DEFAULT 0 CONSTRAINT mfa_challenges_attempts_bounds CHECK (attempts >= 0 AND attempts <= 100),
     used_at             TIMESTAMPTZ,
     created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CONSTRAINT chk_mfa_challenge_used_at CHECK ((used = FALSE AND used_at IS NULL) OR (used = TRUE AND used_at IS NOT NULL)),

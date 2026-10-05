@@ -61,27 +61,24 @@ from app.core.db_utils import acquire_with_tenant
 from app.core.jwt_security import encode_access_token
 from app.core.postgres_adapter import Client
 from app.core.security.lockout import check_account_locked, record_login_attempt
+from app.core.security.principal import load_current_principal, PrincipalUnavailable, assert_expected_identity
 from app.core.security.passkeys import (
     generate_authentication_options,
     generate_registration_options,
     get_allowed_origins,
     get_credential_by_id,
     get_user_credentials,
-    get_user_id_by_credential_id,
     store_credential,
     update_credential_display_name,
     update_credential_sign_count,
     delete_credential,
     verify_authentication,
     verify_registration,
-    AuthenticationResult,
-    VerifiedCredential,
 )
 from app.api.v1.endpoints.auth._shared import issue_cookie_auth
 from app.core.security.sessions import (
     SESSION_COOKIE_NAME,
     create_session,
-    hash_session_token,
 )
 
 logger = logging.getLogger(__name__)
@@ -206,6 +203,7 @@ class LoginCompleteResponse(BaseModel):
     user_id: str
     email: str
     role: str
+    tenant_id: Optional[str] = None
     business_name: Optional[str]
     minutes_remaining: int
     message: str
@@ -319,6 +317,7 @@ async def register_complete(
                 credential_response=body.credential_response,
                 expected_origin=expected_origin,
                 ip_address=ip,
+                expected_user_id=current_user.id,
             )
         except ValueError as e:
             logger.warning(
@@ -493,7 +492,7 @@ async def login_complete(
     # The credential must be resolved before its owning tenant is known.
     async with acquire_with_tenant(db_client.pool, None) as conn:
         # Look up the credential
-        credential = await get_credential_by_id(conn, raw_credential_id)
+        credential = await get_credential_by_id(conn, raw_credential_id, for_update=True)
 
         if not credential:
             logger.warning(
@@ -509,37 +508,14 @@ async def login_complete(
         # Load user details. minutes_used intentionally omitted — see
         # auth.py / dependencies.py for the rationale; we compute live
         # from the calls table via compute_tenant_minutes_remaining.
-        user_row = await conn.fetchrow(
-            """
-            SELECT up.id, up.email, up.name, up.role, up.tenant_id,
-                   up.is_active, up.mfa_enabled,
-                   t.business_name, t.minutes_allocated
-            FROM   user_profiles up
-            LEFT   JOIN tenants t ON t.id = up.tenant_id
-            WHERE  up.id = $1
-            """,
-            credential["user_id"],
-        )
-
-        if not user_row:
+        try:
+            user_row = await load_current_principal(conn, user_id)
+            assert_expected_identity(request, user_row)
+        except PrincipalUnavailable as exc:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid credentials.",
-            )
-
-        if not user_row["is_active"]:
-            await record_login_attempt(
-                conn,
-                email=user_row["email"],
-                user_id=user_id,
-                ip_address=ip,
-                success=False,
-                failure_reason="account_inactive",
-            )
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid credentials.",
-            )
+            ) from exc
 
         # Check account lockout
         locked_until = await check_account_locked(conn, user_row["email"].lower())
@@ -568,6 +544,7 @@ async def login_complete(
                 current_sign_count=credential["sign_count"],
                 expected_origin=expected_origin,
                 ip_address=ip,
+                expected_user_id=user_id,
             )
         except ValueError as e:
             await record_login_attempt(
@@ -587,9 +564,11 @@ async def login_complete(
             ) from e
 
         # Update sign count
-        await update_credential_sign_count(
-            conn, credential["credential_id"], auth_result.new_sign_count
-        )
+        if not await update_credential_sign_count(
+            conn, credential["credential_id"], auth_result.new_sign_count,
+            expected_sign_count=credential["sign_count"],
+        ):
+            raise HTTPException(status_code=401, detail="Invalid credentials.")
 
         # Record successful login
         await record_login_attempt(
@@ -626,39 +605,13 @@ async def login_complete(
             session_id=session_id,
         )
 
+        # Factor consumption, session and refresh receipt commit together.
+        await issue_cookie_auth(response, conn, user_id=user_id,
+            email=user_row["email"], role=user_row["role"], tenant_id=tenant_id,
+            session_id=session_id, ip=ip, user_agent=ua)
+
     # Set session cookie
     _set_session_cookie(response, raw_session_token)
-
-    # Issue the httpOnly access + refresh cookie pair, same as the password and
-    # MFA login paths. Passkey login previously set ONLY the legacy talky_sid
-    # cookie and returned the JWT in the response body, which produced a
-    # half-authenticated session with two distinct failures:
-    #
-    #   1. No talky_at -> every cookie-authenticated surface breaks. Both
-    #      assistant_ws.py and campaign_test_ws.py read ONLY talky_at (or a
-    #      first-frame bearer); neither falls back to talky_sid. A browser
-    #      cannot set an Authorization header on a WS upgrade, so passkey
-    #      users silently lost the Test agent and assistant sockets — the
-    #      identical failure MFA users hit ("no auth frame within 5s").
-    #
-    #   2. No talky_rt -> POST /auth/refresh (auth/refresh.py) unconditionally
-    #      401s, so the session cannot renew silently and dies when the body
-    #      JWT expires, forcing a hard re-login.
-    #
-    # A fresh connection is acquired because the one above is scoped to the
-    # transaction that created the session and is already released.
-    async with acquire_with_tenant(db_client.pool, tenant_id) as cookie_conn:
-        await issue_cookie_auth(
-            response,
-            cookie_conn,
-            user_id=user_id,
-            email=user_row["email"],
-            role=user_row["role"],
-            tenant_id=tenant_id,
-            session_id=session_id,
-            ip=ip,
-            user_agent=ua,
-        )
 
     # Use the already-injected db_client instead of trying to import a
     # non-existent resolve_db_client helper (the original
@@ -682,6 +635,7 @@ async def login_complete(
         user_id=user_id,
         email=user_row["email"],
         role=user_row["role"],
+        tenant_id=tenant_id,
         business_name=user_row["business_name"],
         minutes_remaining=minutes_remaining,
         message="Login successful.",

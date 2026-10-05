@@ -31,10 +31,10 @@ class _Conn:
 
 
 @pytest.mark.asyncio
-async def test_no_session_on_family_mints_without_sid_as_before():
+async def test_unbound_legacy_family_requires_fresh_login():
     conn = _Conn(session_row=None)
     sid, alive = await refresh_ep.bind_refresh_to_session(conn, {"user_id": "u1", "session_id": None})
-    assert (sid, alive) == (None, True)
+    assert (sid, alive) == (None, False)
     assert conn.executed == []
 
 

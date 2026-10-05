@@ -189,152 +189,74 @@ async def get_current_user(
     access_cookie: Optional[str] = Cookie(None, alias="talky_at"),
 ) -> CurrentUser:
     """
-    Resolve the authenticated user from (in priority order):
+    Resolve a current session-bound account from access JWT or legacy session.
 
-      1. ``talky_at`` httpOnly cookie     — new short-lived access JWT
-      2. ``talky_sid`` httpOnly cookie    — legacy server-side session token
-      3. ``Authorization: Bearer <jwt>``  — legacy header path
+    A supplied Bearer and access cookie must agree on user, session and tenant;
+    neither silently overrides a conflicting identity. Legacy session cookies
+    must agree too. All paths recheck the active, verified profile and current
+    membership; optional expected-identity headers only detect inconsistency.
 
     JWT is signed with JWT_SECRET (HS256).
     """
-    user_id: Optional[str] = None
-    db_client: Optional[Client] = None
+    from app.core.security.principal import (
+        PrincipalUnavailable, assert_expected_identity, load_current_principal,
+    )
 
-    def resolve_db_client() -> Client:
-        nonlocal db_client
-        if db_client is None:
-            db_client = get_db_client()
-        return db_client
-
-    # ---- New cookie path: talky_at access JWT ---------------------------------
-    if access_cookie and not authorization:
-        try:
-            payload = decode_and_validate_token(access_cookie)
-        except JWTValidationError as e:
-            if e.status_code == status.HTTP_503_SERVICE_UNAVAILABLE:
-                logger.error(e.detail)
-                raise HTTPException(status_code=e.status_code, detail=e.detail)
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail=e.detail,
-            )
-
-        user_id = payload.get("sub")
-        if not user_id:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid token: missing subject",
-            )
-    elif authorization:
-        parts = authorization.split()
-        if len(parts) != 2 or parts[0].lower() != "bearer":
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid authorization format. Expected: Bearer <token>",
-            )
-
-        token = parts[1]
-
+    client = get_db_client()
+    payload = None
+    session = None
+    if authorization or access_cookie:
+        token = access_cookie
+        if authorization:
+            parts = authorization.split()
+            if len(parts) != 2 or parts[0].lower() != "bearer":
+                raise HTTPException(status_code=401, detail="Invalid authorization format")
+            token = parts[1]
         try:
             payload = decode_and_validate_token(token)
-        except JWTValidationError as e:
-            if e.status_code == status.HTTP_503_SERVICE_UNAVAILABLE:
-                logger.error(e.detail)
-            else:
-                logger.warning("Token verification failed: %s", e.detail)
-            raise HTTPException(
-                status_code=e.status_code,
-                detail=e.detail,
-            )
-
+            if authorization and access_cookie:
+                cookie_payload = decode_and_validate_token(access_cookie)
+                if any(cookie_payload.get(key) != payload.get(key) for key in ("sub", "sid", "tenant_id")):
+                    raise HTTPException(status_code=409, detail={"code": "identity_changed",
+                        "message": "Your signed-in account changed. Refresh this page before continuing."})
+        except JWTValidationError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
         user_id = payload.get("sub")
-        if not user_id:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid token: missing subject",
-            )
-
-        token_session_id = payload.get("sid")
-        if isinstance(token_session_id, str) and token_session_id.strip():
-            request_session_id = getattr(request.state, "session_id", None)
-            if request_session_id is not None:
-                if str(request_session_id) != token_session_id:
-                    raise HTTPException(
-                        status_code=status.HTTP_401_UNAUTHORIZED,
-                        detail="Session mismatch",
-                    )
-                request_session_user_id = getattr(request.state, "session_user_id", None)
-                if request_session_user_id is not None and str(request_session_user_id) != user_id:
-                    raise HTTPException(
-                        status_code=status.HTTP_401_UNAUTHORIZED,
-                        detail="Session mismatch",
-                    )
-            else:
-                # JWT/session binding is pre-tenant and restricted by both IDs.
-                async with acquire_with_tenant(
-                    resolve_db_client().pool, None
-                ) as conn:
-                    session = await get_session_by_id(conn, token_session_id, user_id=user_id)
-                if not session:
-                    raise HTTPException(
-                        status_code=status.HTTP_401_UNAUTHORIZED,
-                        detail="Invalid or expired token",
-                    )
-        elif session_cookie:
-            session = await _resolve_cookie_session(request, session_cookie, resolve_db_client())
-            if not session or str(session.get("user_id")) != user_id:
-                raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail="Invalid or expired token",
-                )
-        else:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Session-bound token required",
-            )
-    elif session_cookie:
-        session = await _resolve_cookie_session(request, session_cookie, resolve_db_client())
+        session_id = payload.get("sid")
+        if not user_id or not isinstance(session_id, str) or not session_id.strip():
+            raise HTTPException(status_code=401, detail="Session-bound token required. Please sign in again.")
+        async with acquire_with_tenant(client.pool, None) as conn:
+            session = await get_session_by_id(conn, session_id, user_id=user_id)
         if not session:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Session has expired or is invalid",
-            )
+            raise HTTPException(status_code=401, detail="Your login session has ended. Please sign in again.")
+        if session_cookie:
+            cookie_session = await _resolve_cookie_session(request, session_cookie, client)
+            if (not cookie_session or str(cookie_session.get("id")) != str(session["id"])
+                    or str(cookie_session.get("user_id")) != str(user_id)):
+                raise HTTPException(status_code=401, detail="Session mismatch. Please sign in again.")
+    elif session_cookie:
+        session = await _resolve_cookie_session(request, session_cookie, client)
+        if not session:
+            raise HTTPException(status_code=401, detail="Session has expired or is invalid")
         user_id = str(session["user_id"])
     else:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authorization required",
-        )
+        raise HTTPException(status_code=401, detail="Authorization required")
 
-    # Fetch user profile with tenant info from PostgreSQL.
-    # NOTE: `t.minutes_used` is no longer read here — that column has
-    # historically been left at zero (no call-end hook wrote to it),
-    # which made `minutes_remaining` always equal full allocation. Live
-    # usage is now computed from the `calls` table via
-    # compute_tenant_minutes_used(), matching the dashboard endpoint.
     try:
-        client = resolve_db_client()
-        # The profile is what discovers the tenant for this authenticated user.
         async with acquire_with_tenant(client.pool, None) as conn:
-            row = await conn.fetchrow(
-                """
-                SELECT up.id, up.email, up.name, up.role, up.tenant_id,
-                       t.business_name, t.minutes_allocated
-                FROM user_profiles up
-                LEFT JOIN tenants t ON t.id = up.tenant_id
-                WHERE up.id = $1
-                """,
-                user_id,
-            )
-    except Exception as e:
-        logger.warning(f"Failed to fetch user profile: {e}")
-        row = None
-
-    if not row:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="User profile not found",
-        )
+            row = await load_current_principal(conn, user_id,
+                tenant_id=payload.get("tenant_id") if payload else None)
+    except PrincipalUnavailable as exc:
+        detail = ("Your tenant membership is no longer active. Contact your account administrator."
+                  if exc.code in {"membership_required", "membership_role_unavailable"}
+                  else "Your account or login context is no longer available. Please sign in again.")
+        raise HTTPException(status_code=401, detail=detail) from exc
+    except Exception as exc:
+        logger.error("Current account lookup failed type=%s", type(exc).__name__)
+        raise HTTPException(status_code=503, detail="Account verification is temporarily unavailable") from exc
+    assert_expected_identity(request, row)
+    request.state.authenticated_session_id = str(session["id"])
+    request.state.authenticated_user_id = str(user_id)
 
     from app.services.scripts.tenant_minutes import compute_tenant_minutes_remaining
     minutes_remaining = await compute_tenant_minutes_remaining(

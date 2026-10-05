@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-_ROLE_PATTERN = r"^(platform_admin|partner_admin|tenant_admin|user|readonly)$"
+_ROLE_PATTERN = r"^(platform_admin|partner_admin|tenant_admin|campaign_manager|user|agent|billing_user|readonly)$"
 
 
 # =============================================================================
@@ -47,6 +47,9 @@ class AdminUserItem(AdminResponseModel):
     email: str
     name: Optional[str] = None
     role: str
+    # role is an assignment (historical for missing membership), not access proof.
+    effective_role: Optional[str] = None
+    membership_status: Optional[str] = None
     tenant_id: Optional[str] = None
     tenant_name: Optional[str] = None
     is_active: bool = True
@@ -74,13 +77,28 @@ class UpdateUserRequest(BaseModel):
 # Helpers
 # =============================================================================
 
-_USER_SELECT = """
-    SELECT up.id, up.email, up.name, up.role, up.tenant_id,
+_EFFECTIVE_ROLE_SQL = """CASE
+    WHEN NOT COALESCE(up.is_active,FALSE) OR NOT COALESCE(up.is_verified,FALSE) THEN NULL
+    WHEN up.role='platform_admin' THEN 'platform_admin'
+    WHEN tu.status='active' AND r.name IN
+         ('partner_admin','tenant_admin','campaign_manager','user','agent','billing_user','readonly')
+    THEN r.name ELSE NULL END"""
+
+_USER_SELECT = f"""
+    SELECT up.id, up.email, up.name,
+           CASE WHEN up.role='platform_admin' THEN up.role
+                ELSE COALESCE(r.name,up.role) END AS role,
+           {_EFFECTIVE_ROLE_SQL} AS effective_role,
+           CASE WHEN up.role='platform_admin' THEN 'not_required'
+                ELSE COALESCE(tu.status,'missing') END AS membership_status,
+           up.tenant_id,
            t.business_name AS tenant_name,
            up.is_active, up.mfa_enabled, up.is_verified,
            up.last_login_at, up.created_at
     FROM   user_profiles up
     LEFT   JOIN tenants t ON t.id = up.tenant_id
+    LEFT   JOIN tenant_users tu ON tu.user_id=up.id AND tu.tenant_id=up.tenant_id
+    LEFT   JOIN roles r ON r.id=tu.role_id
 """
 
 
@@ -119,7 +137,7 @@ async def list_users(
     admin_user: CurrentUser = Depends(require_platform_admin),
     db_client: Client = Depends(get_db_client),
     search: Optional[str] = Query(None, description="Match email or name"),
-    role: Optional[str] = Query(None, description="Filter by role"),
+    role: Optional[str] = Query(None, description="Filter by current effective role"),
     limit: int = Query(200, ge=1, le=1000),
     offset: int = Query(0, ge=0),
 ):
@@ -133,7 +151,7 @@ async def list_users(
         conditions.append(f"(up.email ILIKE ${idx} OR up.name ILIKE ${idx})")
     if role:
         params.append(role)
-        conditions.append(f"up.role = ${len(params)}")
+        conditions.append(f"({_EFFECTIVE_ROLE_SQL}) = ${len(params)}")
 
     where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
     params.append(limit)
@@ -184,6 +202,8 @@ async def create_user(
     """
     email = body.email.strip().lower()
     name = body.name.strip()
+    if body.role != "platform_admin" and not body.tenant_id:
+        raise HTTPException(status_code=400, detail="Select a tenant for this account role.")
     pw_hash = hash_password(body.password)
 
     # Platform admins may create a tenant-less platform user; otherwise scope
@@ -196,6 +216,11 @@ async def create_user(
             if not tenant:
                 raise HTTPException(status_code=404, detail="Tenant not found")
 
+        role_id = None
+        if body.role != "platform_admin":
+            role_id = await conn.fetchval("SELECT id FROM roles WHERE name=$1", body.role)
+            if role_id is None:
+                raise HTTPException(status_code=503, detail="Account role configuration is unavailable.")
         existing = await conn.fetchrow(
             "SELECT id FROM user_profiles WHERE lower(email) = $1", email
         )
@@ -217,6 +242,13 @@ async def create_user(
         except asyncpg.UniqueViolationError:
             raise HTTPException(status_code=409, detail="A user with this email already exists")
 
+        if role_id is not None:
+            await conn.execute(
+                """INSERT INTO tenant_users
+                   (user_id,tenant_id,role_id,is_primary,status,joined_at)
+                   VALUES($1,$2,$3,TRUE,'active',NOW())""",
+                new_id, body.tenant_id, role_id,
+            )
         user = await _fetch_user(conn, str(new_id))
 
     await _safe_audit(
@@ -249,7 +281,7 @@ async def update_user(
     # The platform-admin route resolves an ID before its tenant is known.
     async with acquire_with_tenant(db_client.pool, None) as conn:
         current = await conn.fetchrow(
-            "SELECT id, role, is_active FROM user_profiles WHERE id = $1", user_id
+            "SELECT id, role, is_active, tenant_id FROM user_profiles WHERE id = $1 FOR UPDATE", user_id
         )
         if not current:
             raise HTTPException(status_code=404, detail="User not found")
@@ -275,6 +307,21 @@ async def update_user(
                 status_code=400,
                 detail="Cannot remove the last active platform admin",
             )
+
+        if body.role is not None and body.role != "platform_admin":
+            # Existing admin role edits must change the same membership used by
+            # current authorization. Do not silently create or reactivate a
+            # historical missing/suspended membership as a side effect.
+            role_id = await conn.fetchval("SELECT id FROM roles WHERE name=$1", body.role)
+            if role_id is None:
+                raise HTTPException(status_code=503, detail="Account role configuration is unavailable.")
+            updated = await conn.fetchval(
+                """UPDATE tenant_users SET role_id=$1,updated_at=NOW()
+                   WHERE user_id=$2 AND tenant_id=$3 AND status='active' RETURNING id""",
+                role_id, user_id, current["tenant_id"],
+            )
+            if updated is None:
+                raise HTTPException(status_code=409, detail="Resolve this account's active tenant membership before changing its role.")
 
         sets: list[str] = []
         values: list = []
