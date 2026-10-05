@@ -368,7 +368,8 @@ async def test_actual_outbound_postanswer_admission_rejects_without_global_proof
         raise ReachedVoiceSetup()
 
     state = SimpleNamespace(strict_ownership_active=False, voice_session_count=lambda: 0,
-                            has_ringing_warmup=lambda _cid: False)
+                            has_ringing_warmup=lambda _cid: False,
+                            get_voice_session=lambda _cid: None, get_first_speaker=lambda _cid: None)
     monkeypatch.setenv("POD_ID", "synthetic-pod")
     monkeypatch.setattr(lifecycle, "_state", lambda: state)
     monkeypatch.setattr(lifecycle, "_get_orchestrator", voice_setup)

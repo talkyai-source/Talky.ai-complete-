@@ -171,6 +171,25 @@ def _get_orchestrator():
     return get_container().voice_orchestrator
 
 
+def _outbound_terminal_seen(adapter: Any, call_id: str) -> bool:
+    terminal_event = getattr(adapter, "has_terminal_event", None)
+    return call_id in _ended_calls_in_flight or (
+        callable(terminal_event) and terminal_event(call_id) is True
+    )
+
+
+def _requires_selected_outbound_session(state: Any, adapter: Any, call_id: str) -> bool:
+    # These are existing local origination/authoritative Answer markers, not
+    # a guess from channel names or from the absence of inbound metadata.
+    answer_clock = getattr(adapter, "get_answered_at_monotonic", None)
+    answered_at = answer_clock(call_id) if callable(answer_clock) else None
+    return state.get_first_speaker(call_id) in {"agent", "user"} or (
+        isinstance(answered_at, (int, float))
+        and not isinstance(answered_at, bool)
+        and math.isfinite(answered_at)
+    )
+
+
 # ---------------------------------------------------------------------------
 # Audio pipeline lifecycle (called when a new call arrives on any B2BUA)
 # ---------------------------------------------------------------------------
@@ -795,6 +814,15 @@ async def _session_watchdog() -> None:
             await asyncio.sleep(30)
             now = asyncio.get_event_loop().time()
             _sb = _state()
+            # Capture ownership before provider/status awaits. An answer can
+            # consume this tuple, or a new warmup can replace it while ARI is
+            # queried; neither belongs to this stale sweep afterwards.
+            stale_ringing = [
+                (cid, created_at, _sb.get_ringing_warmup(cid))
+                for cid, created_at in _sb.iter_ringing_started_at_items()
+                if (now - created_at) > _RINGING_MAX_AGE_S
+            ]
+            _live_ids = None  # A failed new probe must never reuse old absence.
 
             # ----- Active session inactivity + max-duration sweep -----
             _session_pairs = list(_sb.iter_voice_session_items())
@@ -906,17 +934,23 @@ async def _session_watchdog() -> None:
             # calls that are simply mid-setup.
 
             # ----- Orphaned ringing-warmup sweep (bug #3 / #7) -----
-            stale_ringing = [
-                cid
-                for cid, created_at in _sb.iter_ringing_started_at_items()
-                if (now - created_at) > _RINGING_MAX_AGE_S
-            ]
-            for cid in stale_ringing:
-                ringing = _pop_ringing_warmup(cid)
+            for cid, created_at, ringing in stale_ringing:
+                # Age is not proof of a failed call: a configured ring window
+                # can exceed this resource sweep. Keep the selected profile
+                # while its channel is live or provider presence is unknown.
+                if _live_ids is None or cid in _live_ids:
+                    continue
+                if (
+                    ringing is None
+                    or _sb.get_ringing_warmup(cid) is not ringing
+                    or _sb.get_ringing_started_at(cid) != created_at
+                ):
+                    continue
+                _pop_ringing_warmup(cid)
                 _sb.pop_ringing_event(cid)
                 logger.warning(
-                    "telephony_watchdog: orphaned ringing_warmup %s "
-                    "(age >%ds) — releasing STT/TTS sockets",
+                    "telephony_watchdog: absent ringing_warmup %s "
+                    "(age >%ds, provider absence verified) — releasing STT/TTS sockets",
                     cid[:12],
                     _RINGING_MAX_AGE_S,
                     extra={"call_id": cid, "alert": "ringing_warmup_orphan"},
@@ -2094,9 +2128,9 @@ async def _on_ringing(call_id: str) -> None:
     handling (in `_on_new_call`) just has to register the media gateway and
     start the pipeline — no blocking warmup sits on the user's critical path.
 
-    All errors are swallowed: if ringing-phase warmup fails, `_on_new_call`
-    detects the missing entry and falls back to the normal answer-phase
-    warmup path so the call still works (just with the old ~2 s penalty).
+    Legacy unowned callbacks may use answer-phase warmup after a failure.
+    An owned outbound call must retain its selected session; a missing one
+    is handled by the answer/terminal owner, never replaced with defaults.
     """
     _ringing_adapter = get_adapter()
     if _ringing_adapter is None or getattr(_ringing_adapter, "name", "") != "asterisk":
@@ -2108,6 +2142,13 @@ async def _on_ringing(call_id: str) -> None:
         or _sb.get_voice_session(call_id) is not None
     ):
         return  # idempotent/reserved — never create a second warmup for a call
+    if _outbound_terminal_seen(_ringing_adapter, call_id) or _requires_selected_outbound_session(
+        _sb, _ringing_adapter, call_id
+    ):
+        # Losing a selected session does not authorize a legacy default. The
+        # answer/terminal owner handles that call; this callback must not hide
+        # the loss by publishing a different profile under the same ID.
+        return
 
     # Track B (live call transparency): the callee's phone is now ringing.
     # Emit RINGING so the live-calls panel advances "Dialing" → "Ringing" in
@@ -2136,6 +2177,15 @@ async def _on_ringing(call_id: str) -> None:
             _ring_exc,
         )
 
+    if (
+        _outbound_terminal_seen(_ringing_adapter, call_id)
+        or _requires_selected_outbound_session(_sb, _ringing_adapter, call_id)
+        or _sb.has_ringing_warmup(call_id)
+        or _sb.get_ringing_event(call_id) is not None
+        or _sb.get_voice_session(call_id) is not None
+    ):
+        return
+
     if _sb.voice_session_count() + _sb.ringing_warmup_count() >= _MAX_TELEPHONY_SESSIONS:
         logger.warning(
             "ringing_warmup_skipped_at_capacity call_id=%s",
@@ -2152,10 +2202,25 @@ async def _on_ringing(call_id: str) -> None:
 
     _t0 = asyncio.get_event_loop().time()
     logger.info(f"WARMUP ringing_warmup_start {call_id[:12]}")
+    voice_session = None
     try:
         orchestrator = _get_orchestrator()
         config = _build_telephony_session_config(gateway_type="telephony")
         voice_session = await orchestrator.create_voice_session(config)
+
+        if (
+            _outbound_terminal_seen(_ringing_adapter, call_id)
+            or _requires_selected_outbound_session(_sb, _ringing_adapter, call_id)
+            or _sb.get_ringing_event(call_id) is not evt
+            or _sb.has_ringing_warmup(call_id)
+            or _sb.get_voice_session(call_id) is not None
+        ):
+            # Creation yielded to another owner. Retire only this unused
+            # session; never publish it over a selected or terminal call.
+            if _sb.get_ringing_event(call_id) is evt:
+                _sb.pop_ringing_event(call_id)
+            await orchestrator.end_session(voice_session)
+            return
 
         # STT + TTS: persistent per-call WebSockets.  We await these (via the
         # gathered task below) in `_on_new_call` so caller audio can flow into
@@ -2267,8 +2332,11 @@ async def _on_ringing(call_id: str) -> None:
         )
     except Exception as exc:
         logger.error(f"Ringing warmup failed for {call_id[:12]}: {exc}", exc_info=True)
-        # Clean up partial state so `_on_new_call` takes the slow path.
-        _pop_ringing_warmup(call_id)
+        # A failed stale creation/cleanup must not remove another owner's
+        # selected session which arrived during the awaited factory call.
+        current = _sb.get_ringing_warmup(call_id)
+        if current is not None and current[0] is voice_session:
+            _pop_ringing_warmup(call_id)
     finally:
         # Always signal the event so _on_new_call never waits forever.
         evt.set()
@@ -3509,6 +3577,18 @@ async def _on_new_call(call_id: str, inbound_admission: Any = None) -> None:
         _inbound_admissions_in_flight[call_id] = admission_payload
     is_true_inbound = bool(admission_payload and admission_payload.get("allowed"))
 
+    # Preserve ownership across status/capacity awaits: terminal cleanup can
+    # remove both of these existing markers while this callback is suspended.
+    outbound_adapter = get_adapter()
+
+    prepared_outbound_required = False
+    if not is_true_inbound:
+        if _outbound_terminal_seen(outbound_adapter, call_id) or state_backend.get_voice_session(call_id) is not None:
+            return
+        prepared_outbound_required = _requires_selected_outbound_session(
+            state_backend, outbound_adapter, call_id
+        )
+
     # The callback runs only after Answer. Arm both safety guards before the
     # first DB/provider await so a slow optional status write cannot create an
     # unbounded, non-heartbeating inbound call. Snapshot validation is purely
@@ -3612,6 +3692,11 @@ async def _on_new_call(call_id: str, inbound_admission: Any = None) -> None:
     except Exception as exc:
         logger.debug("call_status.answered_emit_raised call=%s err=%s", call_id[:12], exc)
 
+    if not is_true_inbound and (
+        _outbound_terminal_seen(outbound_adapter, call_id) or state_backend.get_voice_session(call_id) is not None
+    ):
+        return
+
     # Per-pod cap (existing, kept as a backstop so a single pod never
     # exceeds its MAX_TELEPHONY_SESSIONS memory budget). The global cap
     # below is the new cluster-wide check (T1.2).
@@ -3658,6 +3743,23 @@ async def _on_new_call(call_id: str, inbound_admission: Any = None) -> None:
             cap=resolve_global_cap(),
             fail_closed=True,
         )
+        if _outbound_terminal_seen(outbound_adapter, call_id):
+            # The terminal owner may have released its lease before this
+            # in-flight acquisition returned. Undo only that late acquisition;
+            # never replay settlement or declare provider cleanup successful.
+            if lease:
+                from app.domain.services.global_concurrency import release_lease
+
+                try:
+                    await asyncio.wait_for(
+                        _serialized_global_release(release_lease, redis_client, call_id),
+                        timeout=1.0,
+                    )
+                except Exception as exc:
+                    logger.warning("late_answer_lease_release_unconfirmed call=%s err_type=%s", call_id[:12], type(exc).__name__)
+            return
+        if state_backend.get_voice_session(call_id) is not None:
+            return
     if not lease:
         logger.error(
             "telephony_global_admission_refused call_id=%s current=%s reason=%s",
@@ -3924,6 +4026,13 @@ async def _on_new_call(call_id: str, inbound_admission: Any = None) -> None:
                         "falling back to answer-path warmup",
                         call_id[:12],
                     )
+                if not is_true_inbound and (
+                    _outbound_terminal_seen(outbound_adapter, call_id) or _sb.get_voice_session(call_id) is not None
+                ):
+                    # Terminal cleanup owns the lease acquired before this
+                    # wait. Do not consume another callback's selected session
+                    # or request a second hangup after that owner took over.
+                    return
                 pre = _pop_ringing_warmup(call_id)
                 if pre is not None:
                     _wait_ms = (
@@ -3966,8 +4075,12 @@ async def _on_new_call(call_id: str, inbound_admission: Any = None) -> None:
                 bool(admission_payload.get("is_replay")),
             )
         else:
-            # Non-inbound slow path (outbound warmup unavailable). Preserve its
-            # historical process-default configuration.
+            if prepared_outbound_required:
+                # A provider-owned outbound Answer must consume its selected
+                # session. Current tenant defaults cannot reconstruct the
+                # campaign/knowledge snapshot that was approved before dial.
+                raise RuntimeError("prepared_outbound_session_unavailable")
+            # Unowned legacy/development callback compatibility only.
             config = _build_telephony_session_config(gateway_type=gateway_type)
             voice_session = await orchestrator.create_voice_session(config)
 

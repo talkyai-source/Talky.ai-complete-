@@ -3649,6 +3649,14 @@ class AsteriskAdapter(CallControlAdapter):
 
         return self._outbound_answered_at_monotonic.get(channel_id)
 
+    def has_terminal_event(self, channel_id: str) -> bool:
+        """Whether this owner already dispatched the channel's terminal event.
+
+        This fences delayed setup callbacks; it is not proof that asynchronous
+        resource cleanup or durable outcome settlement has completed.
+        """
+        return channel_id in self._end_dispatched
+
     def pop_outbound_answered_at_monotonic(self, channel_id: str) -> Optional[float]:
         """Return and retire the outbound Answer clock at terminal handling."""
 
