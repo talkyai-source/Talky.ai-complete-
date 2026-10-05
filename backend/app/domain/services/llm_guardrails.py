@@ -6,13 +6,12 @@ Day 17: Ensures graceful degradation when LLM fails while maintaining
 human-like conversation flow (no hints that it's an AI).
 """
 import re
-import asyncio
 import logging
 from collections.abc import Mapping
-from typing import Any, Tuple, Optional, List, Union
+from typing import Any, Tuple, Optional, Union
 from pydantic import BaseModel, Field
 
-from app.domain.models.conversation_state import ConversationState, CallOutcomeType
+from app.domain.models.conversation_state import ConversationState
 from app.domain.models.agent_config import ConversationRule
 
 logger = logging.getLogger(__name__)
@@ -110,6 +109,13 @@ _ACTION_NEGATED_COMPLETION_PATTERNS = {
     ),
 }
 
+_EMAIL_MODAL_FAILURE = re.compile(
+    r"\b(?:e-?mail|information|details|quote|estimate)\s+"
+    r"(?:could not|couldn't|cannot|can't|can not)\s+be\s+"
+    r"(?:sent|emailed|delivered)\b",
+    re.IGNORECASE,
+)
+
 _TRANSFER_OFFER = re.compile(
     r"\b(?:(?:i|we)(?:\s+(?:can|could|will)|'ll)|would\s+you\s+like\s+me\s+to|"
     r"shall\s+i|let\s+me)\s+(?:transfer\s+(?:you|this\s+call|the\s+call)|"
@@ -142,6 +148,14 @@ def _completed_action_claims(response: str) -> list[str]:
                 if any(
                     match.start() < end and start < match.end()
                     for start, end in negated_spans
+                ):
+                    continue
+                # New direct modal failures cannot exempt a greedy completion
+                # match spanning a separate positive claim. Keep the existing
+                # coordinated-negation handling above unchanged.
+                if action == "send_email" and any(
+                    failure.start() <= match.start() and match.end() <= failure.end()
+                    for failure in _EMAIL_MODAL_FAILURE.finditer(clause)
                 ):
                     continue
                 claims.append(action)
