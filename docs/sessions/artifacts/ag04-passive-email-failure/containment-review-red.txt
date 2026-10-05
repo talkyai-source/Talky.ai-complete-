@@ -1,0 +1,70 @@
+..........FFF...............                                             [100%]
+================================== FAILURES ===================================
+_ test_existing_coordinated_failures_remain_allowed[The callback was not scheduled or confirmed.] _
+
+text = 'The callback was not scheduled or confirmed.'
+
+    @pytest.mark.parametrize("text", [
+        "The callback was not scheduled or confirmed.",
+        "The form was not submitted or filed.",
+        "The email was not sent or delivered.",
+    ])
+    def test_existing_coordinated_failures_remain_allowed(text):
+>       assert LLMGuardrails().validate_response(text, action_results={}) == (True, None)
+E       AssertionError: assert (False, 'unco...ule_callback') == (True, None)
+E         At index 0 diff: False != True
+E         Use -v to get more diff
+
+tests\unit\test_passive_email_failure_guard.py:32: AssertionError
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.llm_guardrails:llm_guardrails.py:373 Blocked unconfirmed voice action claim: schedule_callback
+_ test_existing_coordinated_failures_remain_allowed[The form was not submitted or filed.] _
+
+text = 'The form was not submitted or filed.'
+
+    @pytest.mark.parametrize("text", [
+        "The callback was not scheduled or confirmed.",
+        "The form was not submitted or filed.",
+        "The email was not sent or delivered.",
+    ])
+    def test_existing_coordinated_failures_remain_allowed(text):
+>       assert LLMGuardrails().validate_response(text, action_results={}) == (True, None)
+E       AssertionError: assert (False, 'unco...:submit_form') == (True, None)
+E         At index 0 diff: False != True
+E         Use -v to get more diff
+
+tests\unit\test_passive_email_failure_guard.py:32: AssertionError
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.llm_guardrails:llm_guardrails.py:373 Blocked unconfirmed voice action claim: submit_form
+_ test_existing_coordinated_failures_remain_allowed[The email was not sent or delivered.] _
+
+text = 'The email was not sent or delivered.'
+
+    @pytest.mark.parametrize("text", [
+        "The callback was not scheduled or confirmed.",
+        "The form was not submitted or filed.",
+        "The email was not sent or delivered.",
+    ])
+    def test_existing_coordinated_failures_remain_allowed(text):
+>       assert LLMGuardrails().validate_response(text, action_results={}) == (True, None)
+E       AssertionError: assert (False, 'unco...n:send_email') == (True, None)
+E         At index 0 diff: False != True
+E         Use -v to get more diff
+
+tests\unit\test_passive_email_failure_guard.py:32: AssertionError
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.llm_guardrails:llm_guardrails.py:373 Blocked unconfirmed voice action claim: send_email
+============================== warnings summary ===============================
+tests/unit/test_passive_email_failure_guard.py::test_actual_native_failed_action_recovers_with_exact_passive_failure[openai]
+tests/unit/test_passive_email_failure_guard.py::test_actual_native_failed_action_recovers_with_exact_passive_failure[openai]
+tests/unit/test_passive_email_failure_guard.py::test_actual_native_failed_action_recovers_with_exact_passive_failure[xai]
+tests/unit/test_passive_email_failure_guard.py::test_actual_native_failed_action_recovers_with_exact_passive_failure[xai]
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\ag04-native-parity-20261005\backend\app\domain\services\transcript_service.py:372: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    timestamp=datetime.utcnow().isoformat(),
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/unit/test_passive_email_failure_guard.py::test_existing_coordinated_failures_remain_allowed[The callback was not scheduled or confirmed.]
+FAILED tests/unit/test_passive_email_failure_guard.py::test_existing_coordinated_failures_remain_allowed[The form was not submitted or filed.]
+FAILED tests/unit/test_passive_email_failure_guard.py::test_existing_coordinated_failures_remain_allowed[The email was not sent or delivered.]
+3 failed, 25 passed, 4 warnings in 1.44s
