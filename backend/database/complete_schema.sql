@@ -2228,36 +2228,147 @@ CREATE INDEX IF NOT EXISTS idx_call_guard_decisions_phone ON call_guard_decision
 CREATE TABLE IF NOT EXISTS dnc_entries (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE, -- NULL = global DNC
-
     phone_number VARCHAR(50) NOT NULL,
-    normalized_number VARCHAR(50) NOT NULL, -- E.164 format
-
-    -- DNC source/reason
-    source TEXT NOT NULL DEFAULT 'manual' CHECK (source IN (
-        'manual',           -- Added by admin
-        'customer_request', -- Customer asked not to be called
-        'internal_list',    -- Company policy
-        'government_list',  -- National DNC registry
-        'litigation',       -- Legal hold
-        'abuse_prevention'  -- Auto-added due to abuse
-    )),
-
-    -- Reason for DNC
+    normalized_number VARCHAR(50) NOT NULL,
+    source TEXT NOT NULL DEFAULT 'manual', -- Existing API accepts free-text sources.
     reason TEXT,
-
-    -- Expiration (optional)
     expires_at TIMESTAMPTZ,
-
-    -- Metadata
     created_at TIMESTAMPTZ DEFAULT NOW(),
-    created_by UUID,
-
-    UNIQUE(tenant_id, normalized_number)
+    created_by UUID, -- Retained legacy attribution; not inferred as added_by.
+    added_by UUID REFERENCES user_profiles(id) ON DELETE SET NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- BEGIN 0061 DNC RUNTIME CONTRACT: same guarded, data-preserving Alembic upgrade.
+
+DO $dnc_contract$
+DECLARE
+    target oid := 'public.dnc_entries'::regclass;
+    source_att smallint;
+    existing record;
+    spec record;
+    named_index oid;
+    expression text;
+    source_values text[];
+BEGIN
+    PERFORM set_config('lock_timeout','5s',true);
+    -- ALTERs need this lock too; take it once before preflight/data checks.
+    LOCK TABLE public.dnc_entries IN ACCESS EXCLUSIVE MODE;
+    SELECT attnum INTO source_att FROM pg_attribute
+      WHERE attrelid=target AND attname='source' AND NOT attisdropped;
+    IF source_att IS NULL OR NOT EXISTS (
+        SELECT 1 FROM pg_attribute WHERE attrelid=target AND attname='source'
+          AND atttypid IN ('text'::regtype,'varchar'::regtype) AND attnotnull
+    ) OR NOT EXISTS (
+        SELECT 1 FROM pg_attribute WHERE attrelid=target AND attname='normalized_number'
+          AND atttypid IN ('text'::regtype,'varchar'::regtype) AND attnotnull
+    ) THEN
+        RAISE EXCEPTION '0061: unsupported DNC source/number shape; inspect before retrying; no evidence removed';
+    END IF;
+    IF EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid=target AND NOT attisdropped AND (
+        (attname='phone_number' AND atttypid NOT IN ('text'::regtype,'varchar'::regtype)) OR
+        (attname='added_by' AND atttypid<>'uuid'::regtype) OR
+        (attname='updated_at' AND atttypid<>'timestamptz'::regtype))) THEN
+        RAISE EXCEPTION '0061: incompatible DNC compatibility column type; inspect before retrying; no evidence rewritten';
+    END IF;
+
+    -- Remove only the exact obsolete six-value source constraint. Other
+    -- source restrictions require an explicit operator decision.
+    FOR existing IN SELECT conname,pg_get_constraintdef(oid) AS definition
+        FROM pg_constraint WHERE conrelid=target AND contype='c'
+          AND source_att=ANY(conkey)
+    LOOP
+        expression := regexp_replace(existing.definition,
+            '::(character varying|text)(\[\])?', '', 'g');
+        expression := regexp_replace(expression, '[[:space:]()]', '', 'g');
+        SELECT array_agg(m[1] ORDER BY m[1]) INTO source_values
+          FROM regexp_matches(expression, '''([a-z_]+)''', 'g') AS m;
+        IF regexp_replace(expression, '''[a-z_]+''', '', 'g') !~ '^CHECKsource=ANYARRAY\[,*\]$'
+           OR source_values IS DISTINCT FROM ARRAY[
+              'abuse_prevention','customer_request','government_list',
+              'internal_list','litigation','manual']::text[] THEN
+            RAISE EXCEPTION '0061: unrecognized DNC source constraint; inspect before retrying; no evidence removed';
+        END IF;
+        EXECUTE format('ALTER TABLE %s DROP CONSTRAINT %I',target::regclass,existing.conname);
+    END LOOP;
+
+    -- Source-specific keys allow a permanent caller opt-out alongside an
+    -- independent manual/regulatory record. NULL tenant means global.
+    FOR spec IN SELECT * FROM (VALUES
+        ('uq_dnc_entries_tenant_number_source', ARRAY['tenant_id','normalized_number','source']::text[], 'tenant_idISNOTNULL'),
+        ('uq_dnc_entries_global_number_source', ARRAY['normalized_number','source']::text[], 'tenant_idISNULL')
+    ) AS definitions(name,keys,predicate)
+    LOOP
+        SELECT c.oid INTO named_index FROM pg_class c
+          WHERE c.relnamespace=(SELECT relnamespace FROM pg_class WHERE oid=target)
+            AND c.relname=spec.name;
+        IF named_index IS NOT NULL THEN
+            SELECT i.*,am.amname,
+                   ARRAY(SELECT pg_get_indexdef(i.indexrelid,n,true)
+                         FROM generate_series(1,i.indnkeyatts) AS n) AS keys,
+                   regexp_replace(pg_get_expr(i.indpred,i.indrelid),'[[:space:]()]','','g') AS predicate
+              INTO existing FROM pg_index i JOIN pg_class c ON c.oid=i.indexrelid
+              JOIN pg_am am ON am.oid=c.relam WHERE i.indexrelid=named_index;
+            IF NOT FOUND OR existing.indrelid<>target OR NOT existing.indisunique
+               OR NOT existing.indisvalid OR NOT existing.indisready OR NOT existing.indislive
+               OR NOT existing.indimmediate OR existing.indnatts<>existing.indnkeyatts
+               OR existing.keys IS DISTINCT FROM spec.keys OR existing.amname<>'btree'
+               OR existing.predicate IS DISTINCT FROM spec.predicate THEN
+                RAISE EXCEPTION '0061: named DNC index is invalid or incompatible; inspect before retrying; no evidence removed';
+            END IF;
+        END IF;
+    END LOOP;
+
+    FOR existing IN
+        SELECT i.*,c.relname,k.conname,k.condeferrable,am.amname,
+               ARRAY(SELECT pg_get_indexdef(i.indexrelid,n,true)
+                     FROM generate_series(1,i.indnkeyatts) AS n) AS keys
+          FROM pg_index i JOIN pg_class c ON c.oid=i.indexrelid
+          JOIN pg_am am ON am.oid=c.relam
+          LEFT JOIN pg_constraint k ON k.conindid=i.indexrelid AND k.contype='u'
+         WHERE i.indrelid=target AND i.indisunique AND NOT i.indisprimary
+           AND c.relname NOT IN ('uq_dnc_entries_tenant_number_source','uq_dnc_entries_global_number_source')
+    LOOP
+        IF existing.conname IS DISTINCT FROM 'dnc_entries_tenant_id_normalized_number_key'
+           OR existing.keys IS DISTINCT FROM ARRAY['tenant_id','normalized_number']::text[]
+           OR existing.indpred IS NOT NULL OR existing.indexprs IS NOT NULL
+           OR existing.indnatts<>2 OR NOT existing.indisvalid OR NOT existing.indisready
+           OR NOT existing.indislive OR NOT existing.indimmediate OR existing.condeferrable
+           OR existing.amname<>'btree' THEN
+            RAISE EXCEPTION '0061: unrecognized DNC unique restriction; inspect before retrying; no evidence removed';
+        END IF;
+        EXECUTE format('ALTER TABLE %s DROP CONSTRAINT %I',target::regclass,existing.conname);
+    END LOOP;
+    IF EXISTS (SELECT 1 FROM public.dnc_entries
+        GROUP BY tenant_id,normalized_number,source HAVING count(*)>1) THEN
+        RAISE EXCEPTION '0061: duplicate DNC source records require evidence review before retrying; no rows merged or deleted';
+    END IF;
+
+    -- Retain original created_by and all existing data/FKs/RLS. The added
+    -- legacy phone column mirrors the authoritative stored normalized value.
+    ALTER TABLE public.dnc_entries ADD COLUMN IF NOT EXISTS phone_number varchar(50);
+    UPDATE public.dnc_entries SET phone_number=normalized_number WHERE phone_number IS NULL;
+    ALTER TABLE public.dnc_entries ALTER COLUMN phone_number SET NOT NULL;
+    IF EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid=target
+        AND attname='source' AND atttypid<>'text'::regtype) THEN
+        ALTER TABLE public.dnc_entries ALTER COLUMN source TYPE text;
+    END IF;
+    ALTER TABLE public.dnc_entries ADD COLUMN IF NOT EXISTS added_by uuid
+        REFERENCES public.user_profiles(id) ON DELETE SET NULL;
+    ALTER TABLE public.dnc_entries ADD COLUMN IF NOT EXISTS updated_at timestamptz NOT NULL DEFAULT now();
+    -- If an existing timestamp column is nullable, retain its NULL evidence.
+    -- New/bootstrap columns are NOT NULL; no historical update time is guessed.
+
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_dnc_entries_tenant_number_source
+        ON public.dnc_entries(tenant_id,normalized_number,source) WHERE tenant_id IS NOT NULL;
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_dnc_entries_global_number_source
+        ON public.dnc_entries(normalized_number,source) WHERE tenant_id IS NULL;
+END $dnc_contract$;
+-- END 0061 DNC RUNTIME CONTRACT
 CREATE INDEX IF NOT EXISTS idx_dnc_entries_tenant ON dnc_entries(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_dnc_entries_number ON dnc_entries(normalized_number);
 CREATE INDEX IF NOT EXISTS idx_dnc_entries_global ON dnc_entries(normalized_number) WHERE tenant_id IS NULL;
+CREATE INDEX IF NOT EXISTS idx_dnc_entries_expires ON dnc_entries(expires_at) WHERE expires_at IS NOT NULL;
 
 -- =============================================================================
 -- SECTION 6.6: AUDIT LOGGING, SECURITY & SUSPENSION (Day 8)
@@ -3349,21 +3460,7 @@ CREATE TABLE IF NOT EXISTS partner_limits (
 CREATE INDEX IF NOT EXISTS idx_partner_limits_partner_active
     ON partner_limits(partner_id, is_active);
 
--- 10.3 DNC ENTRIES
-CREATE TABLE IF NOT EXISTS dnc_entries (
-    id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id         UUID REFERENCES tenants(id) ON DELETE CASCADE,
-    normalized_number VARCHAR(20) NOT NULL,
-    source            VARCHAR(50) NOT NULL DEFAULT 'manual',
-    reason            TEXT,
-    added_by          UUID REFERENCES user_profiles(id) ON DELETE SET NULL,
-    expires_at        TIMESTAMPTZ,
-    created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-CREATE INDEX IF NOT EXISTS idx_dnc_entries_number ON dnc_entries(normalized_number);
-CREATE INDEX IF NOT EXISTS idx_dnc_entries_expires ON dnc_entries(expires_at) WHERE expires_at IS NOT NULL;
+-- 10.3 DNC ENTRIES: canonical definition and 0061 contract appear in the DNC section above.
 
 -- 10.4 CALL GUARD DECISIONS (append-only audit)
 CREATE TABLE IF NOT EXISTS call_guard_decisions (
