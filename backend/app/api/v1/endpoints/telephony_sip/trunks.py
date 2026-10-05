@@ -129,7 +129,8 @@ async def _sync_trunk_pjsip_config(
 
     In production Asterisk mode, activation and edits to an active trunk are
     fail-closed: the enclosing database transaction rolls back unless a live
-    reload is executed or coalesced into an already-pending reload.  A failed
+    reload command is acknowledged by Asterisk. A pending reload is not an
+    acknowledgement, and command acknowledgement is not trunk health. A failed
     edit restores the previous file projection before surfacing HTTP 503.
 
     Deactivation stays logically authoritative even if file cleanup fails:

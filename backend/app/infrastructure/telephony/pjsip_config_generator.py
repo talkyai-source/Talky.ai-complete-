@@ -70,8 +70,8 @@ class PJSIPReloadResult:
 
     @property
     def accepted(self) -> bool:
-        """Whether this file change is covered by a live reload."""
-        return self.status in {"executed", "coalesced"}
+        """Whether Asterisk acknowledged this request's reload command."""
+        return self.status == "executed"
 
 
 class PJSIPReloadError(RuntimeError):
@@ -387,11 +387,11 @@ def remove_trunk_file(trunk_id: str, *, base_dir: Optional[Path] = None) -> bool
         return False
 
 
-# --- reload hook (debounced; executes Asterisk only when configured) --------
+# --- reload hook (serialized; executes Asterisk only when configured) --------
 
 _reload_lock = asyncio.Lock()
-_reload_pending = False
 _RELOAD_DEBOUNCE_S = float(os.getenv("TELEPHONY_PJSIP_RELOAD_DEBOUNCE_S", "2.0"))
+_RELOAD_TIMEOUT_S = 10.0
 
 
 def pjsip_reload_command() -> str:
@@ -410,9 +410,9 @@ async def request_pjsip_reload(*, execute: Optional[bool] = None) -> PJSIPReload
 
     With ``TELEPHONY_PJSIP_AUTO_RELOAD`` disabled, returns a structured
     ``disabled`` result after logging the operator command. When enabled,
-    coalesces rapid changes within a debounce window and returns structured
-    ``executed``, ``coalesced`` or ``failed`` evidence. Production Asterisk
-    lifecycle endpoints require an accepted result before committing.
+    serializes commands and waits for each acknowledgement. A pending request
+    cannot acknowledge another request. Production Asterisk lifecycle endpoints
+    require an accepted result before committing; runtime health stays separate.
     """
     if execute is None:
         execute = _auto_reload_enabled()
@@ -427,27 +427,74 @@ async def request_pjsip_reload(*, execute: Optional[bool] = None) -> PJSIPReload
             "Automatic PJSIP reload is disabled; configuration was not applied live.",
         )
 
-    global _reload_pending
     async with _reload_lock:
-        if _reload_pending:
-            return PJSIPReloadResult(
-                "coalesced",
-                "A pending PJSIP reload will include this atomic file change.",
-            )
-        _reload_pending = True
-    try:
-        await asyncio.sleep(_RELOAD_DEBOUNCE_S)  # debounce: coalesce a burst
-    finally:
-        async with _reload_lock:
-            _reload_pending = False
+        await asyncio.sleep(_RELOAD_DEBOUNCE_S)
+        return await _execute_pjsip_reload()
 
+
+async def _stop_reload_process(proc: Any, communication: asyncio.Task) -> None:
+    """Keep command ownership until the stopped child is drained and reaped."""
+    async def drain() -> None:
+        try:
+            if proc.returncode is None:
+                try:
+                    proc.kill()
+                except ProcessLookupError:
+                    pass
+        finally:
+            # Even a denied kill or broken pipe does not establish child exit.
+            try:
+                await communication
+            finally:
+                await proc.wait()
+
+    cleanup = asyncio.create_task(drain())
+    cancelled = False
+    while not cleanup.done():
+        try:
+            await asyncio.shield(cleanup)
+        except asyncio.CancelledError:
+            # A repeated caller cancellation must not free the serialization
+            # lock while its subprocess still owns a live reload command.
+            cancelled = True
+        except Exception:
+            break  # Cleanup completed with an error; inspect it after fencing cancellation.
+    try:
+        cleanup.result()
+    except Exception:
+        if not cancelled:
+            raise
+    if cancelled:
+        raise asyncio.CancelledError
+
+
+async def _execute_pjsip_reload() -> PJSIPReloadResult:
     try:
         proc = await asyncio.create_subprocess_exec(
             "asterisk", "-rx", "pjsip reload",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        out, err = await proc.communicate()
+        communication = asyncio.create_task(proc.communicate())
+        try:
+            out, err = await asyncio.wait_for(
+                asyncio.shield(communication), timeout=_RELOAD_TIMEOUT_S,
+            )
+        except asyncio.CancelledError as cancelled:
+            try:
+                await _stop_reload_process(proc, communication)
+            except Exception as exc:
+                logger.error("pjsip_reload_cancel_cleanup_error err_type=%s", type(exc).__name__)
+            raise cancelled
+        except asyncio.TimeoutError:
+            await _stop_reload_process(proc, communication)
+            logger.error("pjsip_reload_timeout timeout_s=%s", _RELOAD_TIMEOUT_S)
+            return PJSIPReloadResult(
+                "failed", "Asterisk reload acknowledgement timed out; live state is unconfirmed.",
+            )
+        except Exception:
+            await _stop_reload_process(proc, communication)
+            raise
         if proc.returncode != 0:
             logger.error(
                 "pjsip_reload_failed rc=%s err=%s", proc.returncode,

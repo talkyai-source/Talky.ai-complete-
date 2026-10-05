@@ -340,9 +340,7 @@ async def test_required_live_reload_rejects_disabled_hook(tmp_path, monkeypatch)
         )
 
 
-@pytest.mark.asyncio
-async def test_pending_reload_coalesces_as_confirmed_coverage(monkeypatch):
-    monkeypatch.setattr(pjsip_module, "_reload_pending", True)
-    result = await pjsip_module.request_pjsip_reload(execute=True)
-    assert result.status == "coalesced"
-    assert result.accepted is True
+def test_only_executed_reload_is_confirmed_coverage():
+    for status in ("coalesced", "disabled", "failed"):
+        assert not pjsip_module.PJSIPReloadResult(status, "unconfirmed").accepted
+    assert pjsip_module.PJSIPReloadResult("executed", "acknowledged").accepted
