@@ -838,12 +838,14 @@ class DialerWorker:
                     call_intent=call_intent,
                 )
 
-                if provider_call_id == self._METERING_UNAVAILABLE:
+                if provider_call_id in (self._METERING_UNAVAILABLE, self._TELEPHONY_SELECTION_UNAVAILABLE):
                     # The bridge explicitly rejected before provider admission.
                     # Preserve the committed intent and the same queue attempt.
+                    reason = ("metering_unavailable" if provider_call_id == self._METERING_UNAVAILABLE
+                              else "telephony_selection_unavailable")
                     await release_tenant_dial_slot(self._redis, job.tenant_id)
-                    await self._publish_block(job, "metering_unavailable", rules=rules)
-                    await self._redefer_before_intent_resolution(job, reason="metering_unavailable")
+                    await self._publish_block(job, reason, rules=rules)
+                    await self._redefer_before_intent_resolution(job, reason=reason)
                     return
 
                 if provider_call_id == self._ORIGINATION_UNCERTAIN:
@@ -1064,8 +1066,11 @@ class DialerWorker:
                 use_smart_policy,
             )
 
-            if use_smart_policy():
-                code, msg = parse_bridge_error(self._last_bridge_body)
+            code, msg = parse_bridge_error(self._last_bridge_body)
+            # This explicit configuration rejection cannot recover by dialing
+            # again. Keep its non-retryable meaning even in legacy retry mode;
+            # the absence-proof CAS above remains required before settlement.
+            if use_smart_policy() or code == "cloud_telephony_unavailable":
                 category, reason = classify_telephony_response(
                     http_status=self._last_bridge_http_status,
                     error_code=code,
@@ -1139,6 +1144,7 @@ class DialerWorker:
     # consuming the job's retry budget.
     _PIPELINE_UNAVAILABLE = "__pipeline_unavailable__"
     _METERING_UNAVAILABLE = "__metering_unavailable__"
+    _TELEPHONY_SELECTION_UNAVAILABLE = "__telephony_selection_unavailable__"
 
     # The HTTP result is unknown after a transport timeout/disconnect, or the
     # bridge explicitly reports proof-aware cleanup in progress. Retrying as a
@@ -1311,6 +1317,8 @@ class DialerWorker:
                             error = parsed.get("error", parsed.get("detail", {}))
                             if isinstance(error, dict) and error.get("code") == "metering_unavailable":
                                 return self._METERING_UNAVAILABLE
+                            if isinstance(error, dict) and error.get("code") == "telephony_selection_unavailable":
+                                return self._TELEPHONY_SELECTION_UNAVAILABLE
                         except (ValueError, TypeError, AttributeError):
                             pass
                         logger.warning(
@@ -2084,9 +2092,11 @@ class DialerWorker:
                 outcome="duplicate_terminal_attempt",
             )
             return
-        if provider_call_id == self._METERING_UNAVAILABLE:
-            await self._publish_block(job, "metering_unavailable", rules=rules)
-            await self._redefer_before_intent_resolution(job, reason="metering_unavailable")
+        if provider_call_id in (self._METERING_UNAVAILABLE, self._TELEPHONY_SELECTION_UNAVAILABLE):
+            reason = ("metering_unavailable" if provider_call_id == self._METERING_UNAVAILABLE
+                      else "telephony_selection_unavailable")
+            await self._publish_block(job, reason, rules=rules)
+            await self._redefer_before_intent_resolution(job, reason=reason)
             return
         if provider_call_id == self._PIPELINE_UNAVAILABLE:
             if not await self._mark_call_intent_not_originated(

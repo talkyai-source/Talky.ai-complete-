@@ -12,6 +12,7 @@
  */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api as sharedApi } from "@/lib/api";
+import { z } from "zod";
 
 // ----- Types ----------------------------------------------------------------
 
@@ -25,6 +26,14 @@ export interface TestResult {
     status_code?: number | null;
     account_status?: string | null;
     friendly_name?: string | null;
+    check_scope?: "provider_account" | "sdk_initialization" | null;
+}
+
+export interface ProviderAvailability {
+    activation_allowed: boolean;
+    qualification_only: boolean;
+    reason_code?: string | null;
+    reason: string;
 }
 
 export interface ProviderRow {
@@ -40,6 +49,33 @@ export interface ProviderRow {
 export interface ProvidersListResponse {
     active: ActiveProvider;
     providers: ProviderRow[];
+    availability?: Partial<Record<TelephonyProvider, ProviderAvailability>>;
+}
+
+const providerAvailabilitySchema = z.object({
+    activation_allowed: z.boolean(), qualification_only: z.boolean(),
+    reason_code: z.string().nullable().optional(), reason: z.string(),
+});
+const providerCheckSchema = z.object({
+    ok: z.boolean(), latency_ms: z.number().finite().optional(), error: z.string().nullable().optional(),
+    status_code: z.number().nullable().optional(), account_status: z.string().nullable().optional(),
+    friendly_name: z.string().nullable().optional(),
+    check_scope: z.enum(["provider_account", "sdk_initialization"]).nullable().optional(),
+});
+const providersListSchema = z.object({
+    active: z.enum(["twilio", "vonage", "sip", "none"]),
+    providers: z.array(z.object({
+        provider: z.enum(["twilio", "vonage"]), status: z.enum(["active", "inactive", "failed"]),
+        label: z.string().nullable().optional(), from_number: z.string().nullable().optional(),
+        last_tested_at: z.string().nullable().optional(), last_test_result: providerCheckSchema.nullable().optional(),
+        has_credentials: z.boolean(),
+    })),
+    // Older API responses remain readable, but cannot authorize activation.
+    availability: z.object({ twilio: providerAvailabilitySchema.optional(), vonage: providerAvailabilitySchema.optional() }).optional(),
+});
+
+export function parseProvidersResponse(value: unknown): ProvidersListResponse {
+    return providersListSchema.parse(value);
 }
 
 export interface TwilioCredentials {
@@ -137,7 +173,7 @@ export const telephonyKeys = {
 export function useTelephonyProviders() {
     return useQuery({
         queryKey: telephonyKeys.providers,
-        queryFn: () => api<ProvidersListResponse>("/telephony/providers"),
+        queryFn: async () => parseProvidersResponse(await api<unknown>("/telephony/providers")),
     });
 }
 

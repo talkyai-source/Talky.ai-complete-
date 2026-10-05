@@ -139,6 +139,7 @@ _CODE_TO_CATEGORY: dict[str, FailureCategory] = {
     "invalid_phone_number": FailureCategory.INVALID_INPUT,
     "blocked_region": FailureCategory.INVALID_INPUT,
     "dnc_match": FailureCategory.INVALID_INPUT,
+    "cloud_telephony_unavailable": FailureCategory.INVALID_INPUT,
     # Carrier
     "carrier_rejected": FailureCategory.CARRIER_REJECT,
     "no_answer": FailureCategory.CARRIER_REJECT,

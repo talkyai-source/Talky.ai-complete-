@@ -118,6 +118,8 @@ class _CallConn:
 
     async def fetchrow(self, query, *args):
         normalized = " ".join(query.split()).lower()
+        if "active_telephony_provider" in normalized:
+            return {"active_telephony_provider": "sip"}
         if "update calls" in normalized and "dialer_attempt_number" in normalized:
             self.events.append("claim_intent")
             self.intent_queries.append((normalized, args))

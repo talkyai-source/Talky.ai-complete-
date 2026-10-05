@@ -8,6 +8,7 @@ from app.core.db_utils import acquire_with_tenant
 from app.domain.models.calling_rules import CallingRules
 from app.domain.services.dialer.campaign_schedule import effective_rules
 from app.domain.services.telephony import caller_id_guard, trunk_resolver
+from app.domain.services.telephony.provider_availability import TelephonySelectionError, require_production_outbound_selection
 
 
 def _object(raw) -> dict:
@@ -29,6 +30,13 @@ async def evaluate_outbound_readiness(
         "reason_code": "sip_not_required", "reason": None, "trunk_id": None,
         "caller_id": _rules_caller_id(calling_rules, campaign) if calling_rules is not None else None,
     }
+    try:
+        await require_production_outbound_selection(db_pool, tenant_id=tenant_id, environment=environment)
+    except TelephonySelectionError as exc:
+        if exc.status_code == 503:
+            raise
+        result.update(ready=False, reason_code=exc.code, reason=exc.message)
+        return result
     if not await trunk_resolver.requires_sip_readiness(db_pool, tenant_id=tenant_id, campaign=campaign):
         return result
     environment = environment or os.getenv("ENVIRONMENT", "development")

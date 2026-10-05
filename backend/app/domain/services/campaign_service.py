@@ -231,13 +231,19 @@ class CampaignService:
 
     async def _evaluate_outbound_readiness(self, campaign: dict, campaign_id: str, tenant_id: str) -> dict:
         from app.domain.services.telephony.outbound_readiness import evaluate_outbound_readiness
+        from app.domain.services.telephony.provider_availability import TelephonySelectionError
 
         if campaign.get("direction", "outbound") != "outbound":
             raise CampaignDirectionError()
-        return await evaluate_outbound_readiness(
-            getattr(self.db_client, "pool", None), tenant_id=str(tenant_id),
-            campaign_id=str(campaign_id), campaign=campaign,
-        )
+        try:
+            return await evaluate_outbound_readiness(
+                getattr(self.db_client, "pool", None), tenant_id=str(tenant_id),
+                campaign_id=str(campaign_id), campaign=campaign,
+            )
+        except TelephonySelectionError as exc:
+            # Keep a temporary lookup failure typed across start_campaign's
+            # CampaignError boundary instead of converting it to generic 500.
+            raise CampaignError(exc.message, status_code=exc.status_code) from exc
 
     # =========================================================================
     # Start Campaign

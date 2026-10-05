@@ -1832,6 +1832,19 @@ async def make_call(request: Request, body: MakeCallRequest):
                 }
             )
 
+    # Keep existing receipt replay above authoritative. A new attempt must not
+    # silently use SIP while an unsupported cloud selection is still saved.
+    from app.domain.services.telephony.provider_availability import (
+        TelephonySelectionError,
+        require_production_outbound_selection,
+    )
+    try:
+        await require_production_outbound_selection(
+            getattr(container, "db_pool", None), tenant_id=str(effective_tenant_id), environment=environment,
+        )
+    except TelephonySelectionError as exc:
+        raise HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": exc.message}) from exc
+
     # Resolve the final route and caller ID before ownership, guards, or costly
     # provider warmup. Never validate one DID and originate with another.
     _outbound_route = None
