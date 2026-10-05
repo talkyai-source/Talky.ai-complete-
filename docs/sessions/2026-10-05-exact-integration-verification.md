@@ -357,3 +357,45 @@ metadata stayed unchanged; private objects were removed. This is not a new full
 backend, production RLS or provider run. Original-action-account receipt inspection
 and operator resolution remain open; all package/final/scenario states remain as
 previously recorded.
+
+
+## Inbound inventory and grounded-answer integration (6 October)
+
+Inbound lease-loss source `7e1b31fc`, integrated as `18b9781d`, requires verified
+durable leg inventory and all-leg absence before logical finalization. A database
+outage still permits the known same-provider parent's hangup request, but neither
+parent absence nor its synchronous callback settles the call. The existing
+recovery guard is installed before the first await and retained for retry.
+Generation tokens prevent an old expiry timer, failed finalizer or late completion
+from removing or completing a newer local owner.
+
+The [verification](artifacts/inbound-lease-inventory/verification.md) records
+**304 passing tests, zero failures and zero skips** across sixteen modules,
+including nineteen new controls and preserved before-fix failures. Root and RT
+read the final source; all four integrated source/test paths and sixteen regression
+inputs match the recorded canonical LF fingerprints and source commit. This is
+source verification, not another test run. Only the separately verified inbox
+application files differ from that owner's application tree. Actual PBX host,
+account identity, cross-process fencing and transport-ambiguous commands remain
+outside this local proof.
+
+AG04 test-only source `daf092b4`, integrated as `b7c1c6a0`, adds a useful non-price
+source answer and an unavailable-link negative across the six existing profiles.
+The actual knowledge data block, source identities/versions, submitted answer and
+assistant history are checked. Root and LLM reviewed the six-file change, which
+matches the owner's committed source. The [owner report](2026-10-06-ag04-grounded-answer-controls.md)
+records **153 passing tests** and one common CLI run on that exact source:
+**240 rows, 2,278 passing runtime controls, zero evidence errors and no network
+attempts**. The compressed replay's uncompressed digest was independently checked.
+The CLI still exits 1: the captured Groq semantic failure remains failed, and 239
+other semantic findings remain unreviewed.
+
+Twelve added profile rows represent one additional canonical condition. Aggregate
+offline mapping is now **43/50**, with seven conditions unmapped; this is neither
+per-profile completeness nor model/human/live acceptance. Arbitrary unsupported
+factual embellishment and the existing AG02 retrieval quality failure remain open.
+
+There remain 27 eligible unfinished packages, AG03 separately candidate-verified,
+and three deferred packages. All fifteen final gates and twenty-two scenario
+gates retain their previous not-run states. No deferred work, live call, provider
+request, deployment, push or production approval occurred in these integrations.

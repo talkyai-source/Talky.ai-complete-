@@ -594,10 +594,16 @@
           "path": "docs/sessions/2026-10-05-exact-integration-verification.md",
           "kind": "combined_selection_action_guard_and_audio_storage_regression",
           "candidate": "bbbb9450dfbff9e0436493a3b7b870a64481b77a"
+        },
+        {
+          "path": "docs/sessions/2026-10-06-ag04-grounded-answer-controls.md",
+          "kind": "offline_grounded_answer_controls_not_semantic_acceptance",
+          "candidate": "daf092b43ef84783888ff42d6396f57cbc9596e6",
+          "integrated_candidate": "b7c1c6a0"
         }
       ],
-      "blocker": "Captured Groq semantic failure retained. Proposed matrix 42/50 mapped by offline replay; intended profile roster/rubric/cohort unratified; live/human/audio/effect acceptance not run. AG02 retrieval gate remains failed. Eight canonical conditions remain unmapped.",
-      "next_action": "Qualify remaining actual acoustic, grounded-answer, sensitive/unrelated request and unclear-name boundaries. Preserve failed Groq semantics and perform approved per-profile human/live qualification. The 42/50 union, 228 replay rows and 2,146 passing runtime controls are not semantic or live approval; unresolved-action speech repair does not prove durable duplicate-effect recovery.",
+      "blocker": "Captured Groq semantic failure retained. Proposed matrix 43/50 mapped by offline replay; intended profile roster/rubric/cohort unratified; live/human/audio/effect acceptance not run. AG02 retrieval gate remains failed. Seven canonical conditions remain unmapped.",
+      "next_action": "Qualify remaining actual acoustic, sensitive/unrelated request and unclear-name boundaries. Preserve failed Groq semantics and perform approved per-profile human/live qualification. The 43/50 union, 240 replay rows and 2,278 passing runtime controls are not semantic or live approval; source-answer controls do not prove universal factual entailment or durable duplicate-effect recovery.",
       "target_date": null,
       "execution_note": "1797 tests passed0skip;170offline rows1120controlchecks0failed;1retained semantic failure/169unreviewed. Local source commit only; no provider call/push/deploy."
     },
@@ -1009,10 +1015,16 @@
           "candidate": "bbbb9450dfbff9e0436493a3b7b870a64481b77a"
         },
         "docs/sessions/2026-10-05-cloud-telephony-availability.md",
-        "docs/sessions/artifacts/provider-proof-fence/verification.md"
+        "docs/sessions/artifacts/provider-proof-fence/verification.md",
+        {
+          "path": "docs/sessions/artifacts/inbound-lease-inventory/verification.md",
+          "kind": "synthetic_inventory_callback_and_local_marker_ownership_regression",
+          "candidate": "7e1b31fcf28e9201587008eba00674a9504f0b52",
+          "integrated_candidate": "18b9781d"
+        }
       ],
-      "blocker": "Local pacing, DNC settlement, selected warmup, cloud-selection and saved-provider termination boundaries pass. Unknown-provider/ambiguous-owner resolution, complete inbound linked-leg proof during a context-load outage and actual queue/process/PBX recovery acceptance remain open.",
-      "next_action": "Retain saved concrete parent/linked-leg provider checks before namespace-specific hangup proof. Investigate the separately identified inbound context-load outage, then complete designated recovery acceptance and existing ambiguous-owner resolution without blind redial or session reconstruction. Matching provider family alone is not original PBX host/account proof.",
+      "blocker": "Local pacing, DNC settlement, selected warmup, cloud-selection, saved-provider termination and inbound context-outage callback fences pass. Unknown-provider/ambiguous-owner resolution, original PBX host/account proof and actual queue/process/PBX recovery acceptance remain open.",
+      "next_action": "Retain saved concrete parent/linked-leg provider checks and require durable complete inventory plus all-leg absence before inbound lease-loss finalization. Local marker generations fence stale cleanup/completion. Complete designated recovery acceptance and existing ambiguous-owner resolution without blind redial or session reconstruction; these local checks do not establish original PBX host/account or cross-process ownership.",
       "target_date": null
     },
     {
