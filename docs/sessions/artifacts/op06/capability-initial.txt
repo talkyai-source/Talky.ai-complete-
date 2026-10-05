@@ -1,0 +1,815 @@
+FFFFFFFFFF.FFFFFF.F                                                      [100%]
+================================== FAILURES ===================================
+_ test_production_inbound_is_not_offered_despite_connected_adapter_and_saved_policy _
+
+voice = namespace(row={'call_id': 'synthetic-call', 'provider_call_id': 'synthetic-provider-call', 'lead_id': None, 'provider'...'transfer_call': 'Approved destination only; live telephony policy also applies.'}, _voice_action_context_loaded=True))
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001EDC9EA0680>
+
+    @pytest.mark.asyncio
+    async def test_production_inbound_is_not_offered_despite_connected_adapter_and_saved_policy(voice, monkeypatch):
+        monkeypatch.setenv("ENVIRONMENT", "production")
+        assert inbound_transfer.CONTROLLED_INBOUND_TRANSFER_RUNTIME_AVAILABLE is False
+>       assert_not_offered(voice.session, await action_execution.prepare_voice_action_context(voice.session))
+
+tests\unit\test_op06_transfer_capabilities.py:97: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+session = namespace(tenant_id='11111111-1111-4111-8111-111111111111', campaign_id='22222222-2222-4222-8222-222222222222', call_i...{'transfer_call': 'Approved destination only; live telephony policy also applies.'}, _voice_action_context_loaded=True)
+actions = {'end_call', 'transfer_call'}
+
+    def assert_not_offered(session, actions):
+>       assert "transfer_call" not in actions
+E       AssertionError: assert 'transfer_call' not in {'end_call', 'transfer_call'}
+
+tests\unit\test_op06_transfer_capabilities.py:78: AssertionError
+_______ test_each_unavailable_inbound_gate_removes_offer[tenant_scope] ________
+
+voice = namespace(row={'call_id': 'synthetic-call', 'provider_call_id': 'synthetic-provider-call', 'lead_id': None, 'provider'...'transfer_call': 'Approved destination only; live telephony policy also applies.'}, _voice_action_context_loaded=True))
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001EDC9EA3020>
+missing_gate = 'tenant_scope'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("missing_gate", [
+        "tenant_scope", "config_scope", "snapshot", "malformed_snapshot", "policy_disabled",
+        "destination", "self_target", "platform_disabled", "platform_unavailable",
+        "adapter_disconnected", "not_admitted", "not_active", "not_reserved", "no_reservation",
+    ])
+    async def test_each_unavailable_inbound_gate_removes_offer(voice, monkeypatch, missing_gate):
+        snapshot = voice.row["route_snapshot"]
+        if missing_gate == "tenant_scope":
+            monkeypatch.setenv("INBOUND_TRANSFER_STAGING_PROOF_TENANT_ID", OTHER)
+        elif missing_gate == "config_scope":
+            snapshot["route"]["config_id"] = OTHER
+        elif missing_gate == "snapshot":
+            voice.row["route_snapshot"] = None
+        elif missing_gate == "malformed_snapshot":
+            voice.row["route_snapshot"] = {"route": [], "inbound_config": "invalid-json"}
+        elif missing_gate == "policy_disabled":
+            snapshot["inbound_config"]["transfer_policy"]["enabled"] = False
+        elif missing_gate == "destination":
+            snapshot["inbound_config"]["transfer_policy"]["destinations"] = ["+15555550456"]
+        elif missing_gate == "self_target":
+            snapshot["route"]["called_did"] = DESTINATION
+        elif missing_gate == "platform_disabled":
+            voice.platform_enabled = False
+        elif missing_gate == "platform_unavailable":
+            voice.platform_error = True
+        elif missing_gate == "adapter_disconnected":
+            voice.connected = False
+        elif missing_gate == "not_admitted":
+            voice.row["admission_status"] = "denied"
+        elif missing_gate == "not_active":
+            voice.row["processing_status"] = "completed"
+        elif missing_gate == "not_reserved":
+            voice.row["billing_status"] = "settled"
+        elif missing_gate == "no_reservation":
+            voice.row["reserved_seconds"] = 0
+>       assert_not_offered(voice.session, await action_execution.prepare_voice_action_context(voice.session))
+
+tests\unit\test_op06_transfer_capabilities.py:136: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+session = namespace(tenant_id='11111111-1111-4111-8111-111111111111', campaign_id='22222222-2222-4222-8222-222222222222', call_i...{'transfer_call': 'Approved destination only; live telephony policy also applies.'}, _voice_action_context_loaded=True)
+actions = {'end_call', 'transfer_call'}
+
+    def assert_not_offered(session, actions):
+>       assert "transfer_call" not in actions
+E       AssertionError: assert 'transfer_call' not in {'end_call', 'transfer_call'}
+
+tests\unit\test_op06_transfer_capabilities.py:78: AssertionError
+_______ test_each_unavailable_inbound_gate_removes_offer[config_scope] ________
+
+voice = namespace(row={'call_id': 'synthetic-call', 'provider_call_id': 'synthetic-provider-call', 'lead_id': None, 'provider'...'transfer_call': 'Approved destination only; live telephony policy also applies.'}, _voice_action_context_loaded=True))
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001EDC9EA2F90>
+missing_gate = 'config_scope'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("missing_gate", [
+        "tenant_scope", "config_scope", "snapshot", "malformed_snapshot", "policy_disabled",
+        "destination", "self_target", "platform_disabled", "platform_unavailable",
+        "adapter_disconnected", "not_admitted", "not_active", "not_reserved", "no_reservation",
+    ])
+    async def test_each_unavailable_inbound_gate_removes_offer(voice, monkeypatch, missing_gate):
+        snapshot = voice.row["route_snapshot"]
+        if missing_gate == "tenant_scope":
+            monkeypatch.setenv("INBOUND_TRANSFER_STAGING_PROOF_TENANT_ID", OTHER)
+        elif missing_gate == "config_scope":
+            snapshot["route"]["config_id"] = OTHER
+        elif missing_gate == "snapshot":
+            voice.row["route_snapshot"] = None
+        elif missing_gate == "malformed_snapshot":
+            voice.row["route_snapshot"] = {"route": [], "inbound_config": "invalid-json"}
+        elif missing_gate == "policy_disabled":
+            snapshot["inbound_config"]["transfer_policy"]["enabled"] = False
+        elif missing_gate == "destination":
+            snapshot["inbound_config"]["transfer_policy"]["destinations"] = ["+15555550456"]
+        elif missing_gate == "self_target":
+            snapshot["route"]["called_did"] = DESTINATION
+        elif missing_gate == "platform_disabled":
+            voice.platform_enabled = False
+        elif missing_gate == "platform_unavailable":
+            voice.platform_error = True
+        elif missing_gate == "adapter_disconnected":
+            voice.connected = False
+        elif missing_gate == "not_admitted":
+            voice.row["admission_status"] = "denied"
+        elif missing_gate == "not_active":
+            voice.row["processing_status"] = "completed"
+        elif missing_gate == "not_reserved":
+            voice.row["billing_status"] = "settled"
+        elif missing_gate == "no_reservation":
+            voice.row["reserved_seconds"] = 0
+>       assert_not_offered(voice.session, await action_execution.prepare_voice_action_context(voice.session))
+
+tests\unit\test_op06_transfer_capabilities.py:136: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+session = namespace(tenant_id='11111111-1111-4111-8111-111111111111', campaign_id='22222222-2222-4222-8222-222222222222', call_i...{'transfer_call': 'Approved destination only; live telephony policy also applies.'}, _voice_action_context_loaded=True)
+actions = {'end_call', 'transfer_call'}
+
+    def assert_not_offered(session, actions):
+>       assert "transfer_call" not in actions
+E       AssertionError: assert 'transfer_call' not in {'end_call', 'transfer_call'}
+
+tests\unit\test_op06_transfer_capabilities.py:78: AssertionError
+_________ test_each_unavailable_inbound_gate_removes_offer[snapshot] __________
+
+voice = namespace(row={'call_id': 'synthetic-call', 'provider_call_id': 'synthetic-provider-call', 'lead_id': None, 'provider'...'transfer_call': 'Approved destination only; live telephony policy also applies.'}, _voice_action_context_loaded=True))
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001EDC9EBD070>
+missing_gate = 'snapshot'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("missing_gate", [
+        "tenant_scope", "config_scope", "snapshot", "malformed_snapshot", "policy_disabled",
+        "destination", "self_target", "platform_disabled", "platform_unavailable",
+        "adapter_disconnected", "not_admitted", "not_active", "not_reserved", "no_reservation",
+    ])
+    async def test_each_unavailable_inbound_gate_removes_offer(voice, monkeypatch, missing_gate):
+        snapshot = voice.row["route_snapshot"]
+        if missing_gate == "tenant_scope":
+            monkeypatch.setenv("INBOUND_TRANSFER_STAGING_PROOF_TENANT_ID", OTHER)
+        elif missing_gate == "config_scope":
+            snapshot["route"]["config_id"] = OTHER
+        elif missing_gate == "snapshot":
+            voice.row["route_snapshot"] = None
+        elif missing_gate == "malformed_snapshot":
+            voice.row["route_snapshot"] = {"route": [], "inbound_config": "invalid-json"}
+        elif missing_gate == "policy_disabled":
+            snapshot["inbound_config"]["transfer_policy"]["enabled"] = False
+        elif missing_gate == "destination":
+            snapshot["inbound_config"]["transfer_policy"]["destinations"] = ["+15555550456"]
+        elif missing_gate == "self_target":
+            snapshot["route"]["called_did"] = DESTINATION
+        elif missing_gate == "platform_disabled":
+            voice.platform_enabled = False
+        elif missing_gate == "platform_unavailable":
+            voice.platform_error = True
+        elif missing_gate == "adapter_disconnected":
+            voice.connected = False
+        elif missing_gate == "not_admitted":
+            voice.row["admission_status"] = "denied"
+        elif missing_gate == "not_active":
+            voice.row["processing_status"] = "completed"
+        elif missing_gate == "not_reserved":
+            voice.row["billing_status"] = "settled"
+        elif missing_gate == "no_reservation":
+            voice.row["reserved_seconds"] = 0
+>       assert_not_offered(voice.session, await action_execution.prepare_voice_action_context(voice.session))
+
+tests\unit\test_op06_transfer_capabilities.py:136: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+session = namespace(tenant_id='11111111-1111-4111-8111-111111111111', campaign_id='22222222-2222-4222-8222-222222222222', call_i...{'transfer_call': 'Approved destination only; live telephony policy also applies.'}, _voice_action_context_loaded=True)
+actions = {'end_call', 'transfer_call'}
+
+    def assert_not_offered(session, actions):
+>       assert "transfer_call" not in actions
+E       AssertionError: assert 'transfer_call' not in {'end_call', 'transfer_call'}
+
+tests\unit\test_op06_transfer_capabilities.py:78: AssertionError
+____ test_each_unavailable_inbound_gate_removes_offer[malformed_snapshot] _____
+
+voice = namespace(row={'call_id': 'synthetic-call', 'provider_call_id': 'synthetic-provider-call', 'lead_id': None, 'provider'...'transfer_call': 'Approved destination only; live telephony policy also applies.'}, _voice_action_context_loaded=True))
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001EDC9EBE960>
+missing_gate = 'malformed_snapshot'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("missing_gate", [
+        "tenant_scope", "config_scope", "snapshot", "malformed_snapshot", "policy_disabled",
+        "destination", "self_target", "platform_disabled", "platform_unavailable",
+        "adapter_disconnected", "not_admitted", "not_active", "not_reserved", "no_reservation",
+    ])
+    async def test_each_unavailable_inbound_gate_removes_offer(voice, monkeypatch, missing_gate):
+        snapshot = voice.row["route_snapshot"]
+        if missing_gate == "tenant_scope":
+            monkeypatch.setenv("INBOUND_TRANSFER_STAGING_PROOF_TENANT_ID", OTHER)
+        elif missing_gate == "config_scope":
+            snapshot["route"]["config_id"] = OTHER
+        elif missing_gate == "snapshot":
+            voice.row["route_snapshot"] = None
+        elif missing_gate == "malformed_snapshot":
+            voice.row["route_snapshot"] = {"route": [], "inbound_config": "invalid-json"}
+        elif missing_gate == "policy_disabled":
+            snapshot["inbound_config"]["transfer_policy"]["enabled"] = False
+        elif missing_gate == "destination":
+            snapshot["inbound_config"]["transfer_policy"]["destinations"] = ["+15555550456"]
+        elif missing_gate == "self_target":
+            snapshot["route"]["called_did"] = DESTINATION
+        elif missing_gate == "platform_disabled":
+            voice.platform_enabled = False
+        elif missing_gate == "platform_unavailable":
+            voice.platform_error = True
+        elif missing_gate == "adapter_disconnected":
+            voice.connected = False
+        elif missing_gate == "not_admitted":
+            voice.row["admission_status"] = "denied"
+        elif missing_gate == "not_active":
+            voice.row["processing_status"] = "completed"
+        elif missing_gate == "not_reserved":
+            voice.row["billing_status"] = "settled"
+        elif missing_gate == "no_reservation":
+            voice.row["reserved_seconds"] = 0
+>       assert_not_offered(voice.session, await action_execution.prepare_voice_action_context(voice.session))
+
+tests\unit\test_op06_transfer_capabilities.py:136: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+session = namespace(tenant_id='11111111-1111-4111-8111-111111111111', campaign_id='22222222-2222-4222-8222-222222222222', call_i...{'transfer_call': 'Approved destination only; live telephony policy also applies.'}, _voice_action_context_loaded=True)
+actions = {'end_call', 'transfer_call'}
+
+    def assert_not_offered(session, actions):
+>       assert "transfer_call" not in actions
+E       AssertionError: assert 'transfer_call' not in {'end_call', 'transfer_call'}
+
+tests\unit\test_op06_transfer_capabilities.py:78: AssertionError
+______ test_each_unavailable_inbound_gate_removes_offer[policy_disabled] ______
+
+voice = namespace(row={'call_id': 'synthetic-call', 'provider_call_id': 'synthetic-provider-call', 'lead_id': None, 'provider'...'transfer_call': 'Approved destination only; live telephony policy also applies.'}, _voice_action_context_loaded=True))
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001EDC9EBF140>
+missing_gate = 'policy_disabled'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("missing_gate", [
+        "tenant_scope", "config_scope", "snapshot", "malformed_snapshot", "policy_disabled",
+        "destination", "self_target", "platform_disabled", "platform_unavailable",
+        "adapter_disconnected", "not_admitted", "not_active", "not_reserved", "no_reservation",
+    ])
+    async def test_each_unavailable_inbound_gate_removes_offer(voice, monkeypatch, missing_gate):
+        snapshot = voice.row["route_snapshot"]
+        if missing_gate == "tenant_scope":
+            monkeypatch.setenv("INBOUND_TRANSFER_STAGING_PROOF_TENANT_ID", OTHER)
+        elif missing_gate == "config_scope":
+            snapshot["route"]["config_id"] = OTHER
+        elif missing_gate == "snapshot":
+            voice.row["route_snapshot"] = None
+        elif missing_gate == "malformed_snapshot":
+            voice.row["route_snapshot"] = {"route": [], "inbound_config": "invalid-json"}
+        elif missing_gate == "policy_disabled":
+            snapshot["inbound_config"]["transfer_policy"]["enabled"] = False
+        elif missing_gate == "destination":
+            snapshot["inbound_config"]["transfer_policy"]["destinations"] = ["+15555550456"]
+        elif missing_gate == "self_target":
+            snapshot["route"]["called_did"] = DESTINATION
+        elif missing_gate == "platform_disabled":
+            voice.platform_enabled = False
+        elif missing_gate == "platform_unavailable":
+            voice.platform_error = True
+        elif missing_gate == "adapter_disconnected":
+            voice.connected = False
+        elif missing_gate == "not_admitted":
+            voice.row["admission_status"] = "denied"
+        elif missing_gate == "not_active":
+            voice.row["processing_status"] = "completed"
+        elif missing_gate == "not_reserved":
+            voice.row["billing_status"] = "settled"
+        elif missing_gate == "no_reservation":
+            voice.row["reserved_seconds"] = 0
+>       assert_not_offered(voice.session, await action_execution.prepare_voice_action_context(voice.session))
+
+tests\unit\test_op06_transfer_capabilities.py:136: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+session = namespace(tenant_id='11111111-1111-4111-8111-111111111111', campaign_id='22222222-2222-4222-8222-222222222222', call_i...{'transfer_call': 'Approved destination only; live telephony policy also applies.'}, _voice_action_context_loaded=True)
+actions = {'end_call', 'transfer_call'}
+
+    def assert_not_offered(session, actions):
+>       assert "transfer_call" not in actions
+E       AssertionError: assert 'transfer_call' not in {'end_call', 'transfer_call'}
+
+tests\unit\test_op06_transfer_capabilities.py:78: AssertionError
+________ test_each_unavailable_inbound_gate_removes_offer[destination] ________
+
+voice = namespace(row={'call_id': 'synthetic-call', 'provider_call_id': 'synthetic-provider-call', 'lead_id': None, 'provider'...'transfer_call': 'Approved destination only; live telephony policy also applies.'}, _voice_action_context_loaded=True))
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001EDC9E99040>
+missing_gate = 'destination'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("missing_gate", [
+        "tenant_scope", "config_scope", "snapshot", "malformed_snapshot", "policy_disabled",
+        "destination", "self_target", "platform_disabled", "platform_unavailable",
+        "adapter_disconnected", "not_admitted", "not_active", "not_reserved", "no_reservation",
+    ])
+    async def test_each_unavailable_inbound_gate_removes_offer(voice, monkeypatch, missing_gate):
+        snapshot = voice.row["route_snapshot"]
+        if missing_gate == "tenant_scope":
+            monkeypatch.setenv("INBOUND_TRANSFER_STAGING_PROOF_TENANT_ID", OTHER)
+        elif missing_gate == "config_scope":
+            snapshot["route"]["config_id"] = OTHER
+        elif missing_gate == "snapshot":
+            voice.row["route_snapshot"] = None
+        elif missing_gate == "malformed_snapshot":
+            voice.row["route_snapshot"] = {"route": [], "inbound_config": "invalid-json"}
+        elif missing_gate == "policy_disabled":
+            snapshot["inbound_config"]["transfer_policy"]["enabled"] = False
+        elif missing_gate == "destination":
+            snapshot["inbound_config"]["transfer_policy"]["destinations"] = ["+15555550456"]
+        elif missing_gate == "self_target":
+            snapshot["route"]["called_did"] = DESTINATION
+        elif missing_gate == "platform_disabled":
+            voice.platform_enabled = False
+        elif missing_gate == "platform_unavailable":
+            voice.platform_error = True
+        elif missing_gate == "adapter_disconnected":
+            voice.connected = False
+        elif missing_gate == "not_admitted":
+            voice.row["admission_status"] = "denied"
+        elif missing_gate == "not_active":
+            voice.row["processing_status"] = "completed"
+        elif missing_gate == "not_reserved":
+            voice.row["billing_status"] = "settled"
+        elif missing_gate == "no_reservation":
+            voice.row["reserved_seconds"] = 0
+>       assert_not_offered(voice.session, await action_execution.prepare_voice_action_context(voice.session))
+
+tests\unit\test_op06_transfer_capabilities.py:136: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+session = namespace(tenant_id='11111111-1111-4111-8111-111111111111', campaign_id='22222222-2222-4222-8222-222222222222', call_i...{'transfer_call': 'Approved destination only; live telephony policy also applies.'}, _voice_action_context_loaded=True)
+actions = {'end_call', 'transfer_call'}
+
+    def assert_not_offered(session, actions):
+>       assert "transfer_call" not in actions
+E       AssertionError: assert 'transfer_call' not in {'end_call', 'transfer_call'}
+
+tests\unit\test_op06_transfer_capabilities.py:78: AssertionError
+________ test_each_unavailable_inbound_gate_removes_offer[self_target] ________
+
+voice = namespace(row={'call_id': 'synthetic-call', 'provider_call_id': 'synthetic-provider-call', 'lead_id': None, 'provider'...'transfer_call': 'Approved destination only; live telephony policy also applies.'}, _voice_action_context_loaded=True))
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001EDC9E9A5A0>
+missing_gate = 'self_target'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("missing_gate", [
+        "tenant_scope", "config_scope", "snapshot", "malformed_snapshot", "policy_disabled",
+        "destination", "self_target", "platform_disabled", "platform_unavailable",
+        "adapter_disconnected", "not_admitted", "not_active", "not_reserved", "no_reservation",
+    ])
+    async def test_each_unavailable_inbound_gate_removes_offer(voice, monkeypatch, missing_gate):
+        snapshot = voice.row["route_snapshot"]
+        if missing_gate == "tenant_scope":
+            monkeypatch.setenv("INBOUND_TRANSFER_STAGING_PROOF_TENANT_ID", OTHER)
+        elif missing_gate == "config_scope":
+            snapshot["route"]["config_id"] = OTHER
+        elif missing_gate == "snapshot":
+            voice.row["route_snapshot"] = None
+        elif missing_gate == "malformed_snapshot":
+            voice.row["route_snapshot"] = {"route": [], "inbound_config": "invalid-json"}
+        elif missing_gate == "policy_disabled":
+            snapshot["inbound_config"]["transfer_policy"]["enabled"] = False
+        elif missing_gate == "destination":
+            snapshot["inbound_config"]["transfer_policy"]["destinations"] = ["+15555550456"]
+        elif missing_gate == "self_target":
+            snapshot["route"]["called_did"] = DESTINATION
+        elif missing_gate == "platform_disabled":
+            voice.platform_enabled = False
+        elif missing_gate == "platform_unavailable":
+            voice.platform_error = True
+        elif missing_gate == "adapter_disconnected":
+            voice.connected = False
+        elif missing_gate == "not_admitted":
+            voice.row["admission_status"] = "denied"
+        elif missing_gate == "not_active":
+            voice.row["processing_status"] = "completed"
+        elif missing_gate == "not_reserved":
+            voice.row["billing_status"] = "settled"
+        elif missing_gate == "no_reservation":
+            voice.row["reserved_seconds"] = 0
+>       assert_not_offered(voice.session, await action_execution.prepare_voice_action_context(voice.session))
+
+tests\unit\test_op06_transfer_capabilities.py:136: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+session = namespace(tenant_id='11111111-1111-4111-8111-111111111111', campaign_id='22222222-2222-4222-8222-222222222222', call_i...{'transfer_call': 'Approved destination only; live telephony policy also applies.'}, _voice_action_context_loaded=True)
+actions = {'end_call', 'transfer_call'}
+
+    def assert_not_offered(session, actions):
+>       assert "transfer_call" not in actions
+E       AssertionError: assert 'transfer_call' not in {'end_call', 'transfer_call'}
+
+tests\unit\test_op06_transfer_capabilities.py:78: AssertionError
+_____ test_each_unavailable_inbound_gate_removes_offer[platform_disabled] _____
+
+voice = namespace(row={'call_id': 'synthetic-call', 'provider_call_id': 'synthetic-provider-call', 'lead_id': None, 'provider'...'transfer_call': 'Approved destination only; live telephony policy also applies.'}, _voice_action_context_loaded=True))
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001EDC9E9AC90>
+missing_gate = 'platform_disabled'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("missing_gate", [
+        "tenant_scope", "config_scope", "snapshot", "malformed_snapshot", "policy_disabled",
+        "destination", "self_target", "platform_disabled", "platform_unavailable",
+        "adapter_disconnected", "not_admitted", "not_active", "not_reserved", "no_reservation",
+    ])
+    async def test_each_unavailable_inbound_gate_removes_offer(voice, monkeypatch, missing_gate):
+        snapshot = voice.row["route_snapshot"]
+        if missing_gate == "tenant_scope":
+            monkeypatch.setenv("INBOUND_TRANSFER_STAGING_PROOF_TENANT_ID", OTHER)
+        elif missing_gate == "config_scope":
+            snapshot["route"]["config_id"] = OTHER
+        elif missing_gate == "snapshot":
+            voice.row["route_snapshot"] = None
+        elif missing_gate == "malformed_snapshot":
+            voice.row["route_snapshot"] = {"route": [], "inbound_config": "invalid-json"}
+        elif missing_gate == "policy_disabled":
+            snapshot["inbound_config"]["transfer_policy"]["enabled"] = False
+        elif missing_gate == "destination":
+            snapshot["inbound_config"]["transfer_policy"]["destinations"] = ["+15555550456"]
+        elif missing_gate == "self_target":
+            snapshot["route"]["called_did"] = DESTINATION
+        elif missing_gate == "platform_disabled":
+            voice.platform_enabled = False
+        elif missing_gate == "platform_unavailable":
+            voice.platform_error = True
+        elif missing_gate == "adapter_disconnected":
+            voice.connected = False
+        elif missing_gate == "not_admitted":
+            voice.row["admission_status"] = "denied"
+        elif missing_gate == "not_active":
+            voice.row["processing_status"] = "completed"
+        elif missing_gate == "not_reserved":
+            voice.row["billing_status"] = "settled"
+        elif missing_gate == "no_reservation":
+            voice.row["reserved_seconds"] = 0
+>       assert_not_offered(voice.session, await action_execution.prepare_voice_action_context(voice.session))
+
+tests\unit\test_op06_transfer_capabilities.py:136: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+session = namespace(tenant_id='11111111-1111-4111-8111-111111111111', campaign_id='22222222-2222-4222-8222-222222222222', call_i...{'transfer_call': 'Approved destination only; live telephony policy also applies.'}, _voice_action_context_loaded=True)
+actions = {'end_call', 'transfer_call'}
+
+    def assert_not_offered(session, actions):
+>       assert "transfer_call" not in actions
+E       AssertionError: assert 'transfer_call' not in {'end_call', 'transfer_call'}
+
+tests\unit\test_op06_transfer_capabilities.py:78: AssertionError
+___ test_each_unavailable_inbound_gate_removes_offer[platform_unavailable] ____
+
+voice = namespace(row={'call_id': 'synthetic-call', 'provider_call_id': 'synthetic-provider-call', 'lead_id': None, 'provider'...'transfer_call': 'Approved destination only; live telephony policy also applies.'}, _voice_action_context_loaded=True))
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001EDC9F04B90>
+missing_gate = 'platform_unavailable'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("missing_gate", [
+        "tenant_scope", "config_scope", "snapshot", "malformed_snapshot", "policy_disabled",
+        "destination", "self_target", "platform_disabled", "platform_unavailable",
+        "adapter_disconnected", "not_admitted", "not_active", "not_reserved", "no_reservation",
+    ])
+    async def test_each_unavailable_inbound_gate_removes_offer(voice, monkeypatch, missing_gate):
+        snapshot = voice.row["route_snapshot"]
+        if missing_gate == "tenant_scope":
+            monkeypatch.setenv("INBOUND_TRANSFER_STAGING_PROOF_TENANT_ID", OTHER)
+        elif missing_gate == "config_scope":
+            snapshot["route"]["config_id"] = OTHER
+        elif missing_gate == "snapshot":
+            voice.row["route_snapshot"] = None
+        elif missing_gate == "malformed_snapshot":
+            voice.row["route_snapshot"] = {"route": [], "inbound_config": "invalid-json"}
+        elif missing_gate == "policy_disabled":
+            snapshot["inbound_config"]["transfer_policy"]["enabled"] = False
+        elif missing_gate == "destination":
+            snapshot["inbound_config"]["transfer_policy"]["destinations"] = ["+15555550456"]
+        elif missing_gate == "self_target":
+            snapshot["route"]["called_did"] = DESTINATION
+        elif missing_gate == "platform_disabled":
+            voice.platform_enabled = False
+        elif missing_gate == "platform_unavailable":
+            voice.platform_error = True
+        elif missing_gate == "adapter_disconnected":
+            voice.connected = False
+        elif missing_gate == "not_admitted":
+            voice.row["admission_status"] = "denied"
+        elif missing_gate == "not_active":
+            voice.row["processing_status"] = "completed"
+        elif missing_gate == "not_reserved":
+            voice.row["billing_status"] = "settled"
+        elif missing_gate == "no_reservation":
+            voice.row["reserved_seconds"] = 0
+>       assert_not_offered(voice.session, await action_execution.prepare_voice_action_context(voice.session))
+
+tests\unit\test_op06_transfer_capabilities.py:136: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+session = namespace(tenant_id='11111111-1111-4111-8111-111111111111', campaign_id='22222222-2222-4222-8222-222222222222', call_i...{'transfer_call': 'Approved destination only; live telephony policy also applies.'}, _voice_action_context_loaded=True)
+actions = {'end_call', 'transfer_call'}
+
+    def assert_not_offered(session, actions):
+>       assert "transfer_call" not in actions
+E       AssertionError: assert 'transfer_call' not in {'end_call', 'transfer_call'}
+
+tests\unit\test_op06_transfer_capabilities.py:78: AssertionError
+_______ test_each_unavailable_inbound_gate_removes_offer[not_admitted] ________
+
+voice = namespace(row={'call_id': 'synthetic-call', 'provider_call_id': 'synthetic-provider-call', 'lead_id': None, 'provider'...'transfer_call': 'Approved destination only; live telephony policy also applies.'}, _voice_action_context_loaded=True))
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001EDC9F06360>
+missing_gate = 'not_admitted'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("missing_gate", [
+        "tenant_scope", "config_scope", "snapshot", "malformed_snapshot", "policy_disabled",
+        "destination", "self_target", "platform_disabled", "platform_unavailable",
+        "adapter_disconnected", "not_admitted", "not_active", "not_reserved", "no_reservation",
+    ])
+    async def test_each_unavailable_inbound_gate_removes_offer(voice, monkeypatch, missing_gate):
+        snapshot = voice.row["route_snapshot"]
+        if missing_gate == "tenant_scope":
+            monkeypatch.setenv("INBOUND_TRANSFER_STAGING_PROOF_TENANT_ID", OTHER)
+        elif missing_gate == "config_scope":
+            snapshot["route"]["config_id"] = OTHER
+        elif missing_gate == "snapshot":
+            voice.row["route_snapshot"] = None
+        elif missing_gate == "malformed_snapshot":
+            voice.row["route_snapshot"] = {"route": [], "inbound_config": "invalid-json"}
+        elif missing_gate == "policy_disabled":
+            snapshot["inbound_config"]["transfer_policy"]["enabled"] = False
+        elif missing_gate == "destination":
+            snapshot["inbound_config"]["transfer_policy"]["destinations"] = ["+15555550456"]
+        elif missing_gate == "self_target":
+            snapshot["route"]["called_did"] = DESTINATION
+        elif missing_gate == "platform_disabled":
+            voice.platform_enabled = False
+        elif missing_gate == "platform_unavailable":
+            voice.platform_error = True
+        elif missing_gate == "adapter_disconnected":
+            voice.connected = False
+        elif missing_gate == "not_admitted":
+            voice.row["admission_status"] = "denied"
+        elif missing_gate == "not_active":
+            voice.row["processing_status"] = "completed"
+        elif missing_gate == "not_reserved":
+            voice.row["billing_status"] = "settled"
+        elif missing_gate == "no_reservation":
+            voice.row["reserved_seconds"] = 0
+>       assert_not_offered(voice.session, await action_execution.prepare_voice_action_context(voice.session))
+
+tests\unit\test_op06_transfer_capabilities.py:136: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+session = namespace(tenant_id='11111111-1111-4111-8111-111111111111', campaign_id='22222222-2222-4222-8222-222222222222', call_i...{'transfer_call': 'Approved destination only; live telephony policy also applies.'}, _voice_action_context_loaded=True)
+actions = {'end_call', 'transfer_call'}
+
+    def assert_not_offered(session, actions):
+>       assert "transfer_call" not in actions
+E       AssertionError: assert 'transfer_call' not in {'end_call', 'transfer_call'}
+
+tests\unit\test_op06_transfer_capabilities.py:78: AssertionError
+________ test_each_unavailable_inbound_gate_removes_offer[not_active] _________
+
+voice = namespace(row={'call_id': 'synthetic-call', 'provider_call_id': 'synthetic-provider-call', 'lead_id': None, 'provider'...'transfer_call': 'Approved destination only; live telephony policy also applies.'}, _voice_action_context_loaded=True))
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001EDC9E9BD40>
+missing_gate = 'not_active'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("missing_gate", [
+        "tenant_scope", "config_scope", "snapshot", "malformed_snapshot", "policy_disabled",
+        "destination", "self_target", "platform_disabled", "platform_unavailable",
+        "adapter_disconnected", "not_admitted", "not_active", "not_reserved", "no_reservation",
+    ])
+    async def test_each_unavailable_inbound_gate_removes_offer(voice, monkeypatch, missing_gate):
+        snapshot = voice.row["route_snapshot"]
+        if missing_gate == "tenant_scope":
+            monkeypatch.setenv("INBOUND_TRANSFER_STAGING_PROOF_TENANT_ID", OTHER)
+        elif missing_gate == "config_scope":
+            snapshot["route"]["config_id"] = OTHER
+        elif missing_gate == "snapshot":
+            voice.row["route_snapshot"] = None
+        elif missing_gate == "malformed_snapshot":
+            voice.row["route_snapshot"] = {"route": [], "inbound_config": "invalid-json"}
+        elif missing_gate == "policy_disabled":
+            snapshot["inbound_config"]["transfer_policy"]["enabled"] = False
+        elif missing_gate == "destination":
+            snapshot["inbound_config"]["transfer_policy"]["destinations"] = ["+15555550456"]
+        elif missing_gate == "self_target":
+            snapshot["route"]["called_did"] = DESTINATION
+        elif missing_gate == "platform_disabled":
+            voice.platform_enabled = False
+        elif missing_gate == "platform_unavailable":
+            voice.platform_error = True
+        elif missing_gate == "adapter_disconnected":
+            voice.connected = False
+        elif missing_gate == "not_admitted":
+            voice.row["admission_status"] = "denied"
+        elif missing_gate == "not_active":
+            voice.row["processing_status"] = "completed"
+        elif missing_gate == "not_reserved":
+            voice.row["billing_status"] = "settled"
+        elif missing_gate == "no_reservation":
+            voice.row["reserved_seconds"] = 0
+>       assert_not_offered(voice.session, await action_execution.prepare_voice_action_context(voice.session))
+
+tests\unit\test_op06_transfer_capabilities.py:136: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+session = namespace(tenant_id='11111111-1111-4111-8111-111111111111', campaign_id='22222222-2222-4222-8222-222222222222', call_i...{'transfer_call': 'Approved destination only; live telephony policy also applies.'}, _voice_action_context_loaded=True)
+actions = {'end_call', 'transfer_call'}
+
+    def assert_not_offered(session, actions):
+>       assert "transfer_call" not in actions
+E       AssertionError: assert 'transfer_call' not in {'end_call', 'transfer_call'}
+
+tests\unit\test_op06_transfer_capabilities.py:78: AssertionError
+_______ test_each_unavailable_inbound_gate_removes_offer[not_reserved] ________
+
+voice = namespace(row={'call_id': 'synthetic-call', 'provider_call_id': 'synthetic-provider-call', 'lead_id': None, 'provider'...'transfer_call': 'Approved destination only; live telephony policy also applies.'}, _voice_action_context_loaded=True))
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001EDC9E999A0>
+missing_gate = 'not_reserved'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("missing_gate", [
+        "tenant_scope", "config_scope", "snapshot", "malformed_snapshot", "policy_disabled",
+        "destination", "self_target", "platform_disabled", "platform_unavailable",
+        "adapter_disconnected", "not_admitted", "not_active", "not_reserved", "no_reservation",
+    ])
+    async def test_each_unavailable_inbound_gate_removes_offer(voice, monkeypatch, missing_gate):
+        snapshot = voice.row["route_snapshot"]
+        if missing_gate == "tenant_scope":
+            monkeypatch.setenv("INBOUND_TRANSFER_STAGING_PROOF_TENANT_ID", OTHER)
+        elif missing_gate == "config_scope":
+            snapshot["route"]["config_id"] = OTHER
+        elif missing_gate == "snapshot":
+            voice.row["route_snapshot"] = None
+        elif missing_gate == "malformed_snapshot":
+            voice.row["route_snapshot"] = {"route": [], "inbound_config": "invalid-json"}
+        elif missing_gate == "policy_disabled":
+            snapshot["inbound_config"]["transfer_policy"]["enabled"] = False
+        elif missing_gate == "destination":
+            snapshot["inbound_config"]["transfer_policy"]["destinations"] = ["+15555550456"]
+        elif missing_gate == "self_target":
+            snapshot["route"]["called_did"] = DESTINATION
+        elif missing_gate == "platform_disabled":
+            voice.platform_enabled = False
+        elif missing_gate == "platform_unavailable":
+            voice.platform_error = True
+        elif missing_gate == "adapter_disconnected":
+            voice.connected = False
+        elif missing_gate == "not_admitted":
+            voice.row["admission_status"] = "denied"
+        elif missing_gate == "not_active":
+            voice.row["processing_status"] = "completed"
+        elif missing_gate == "not_reserved":
+            voice.row["billing_status"] = "settled"
+        elif missing_gate == "no_reservation":
+            voice.row["reserved_seconds"] = 0
+>       assert_not_offered(voice.session, await action_execution.prepare_voice_action_context(voice.session))
+
+tests\unit\test_op06_transfer_capabilities.py:136: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+session = namespace(tenant_id='11111111-1111-4111-8111-111111111111', campaign_id='22222222-2222-4222-8222-222222222222', call_i...{'transfer_call': 'Approved destination only; live telephony policy also applies.'}, _voice_action_context_loaded=True)
+actions = {'end_call', 'transfer_call'}
+
+    def assert_not_offered(session, actions):
+>       assert "transfer_call" not in actions
+E       AssertionError: assert 'transfer_call' not in {'end_call', 'transfer_call'}
+
+tests\unit\test_op06_transfer_capabilities.py:78: AssertionError
+______ test_each_unavailable_inbound_gate_removes_offer[no_reservation] _______
+
+voice = namespace(row={'call_id': 'synthetic-call', 'provider_call_id': 'synthetic-provider-call', 'lead_id': None, 'provider'...'transfer_call': 'Approved destination only; live telephony policy also applies.'}, _voice_action_context_loaded=True))
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001EDC9EBC590>
+missing_gate = 'no_reservation'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("missing_gate", [
+        "tenant_scope", "config_scope", "snapshot", "malformed_snapshot", "policy_disabled",
+        "destination", "self_target", "platform_disabled", "platform_unavailable",
+        "adapter_disconnected", "not_admitted", "not_active", "not_reserved", "no_reservation",
+    ])
+    async def test_each_unavailable_inbound_gate_removes_offer(voice, monkeypatch, missing_gate):
+        snapshot = voice.row["route_snapshot"]
+        if missing_gate == "tenant_scope":
+            monkeypatch.setenv("INBOUND_TRANSFER_STAGING_PROOF_TENANT_ID", OTHER)
+        elif missing_gate == "config_scope":
+            snapshot["route"]["config_id"] = OTHER
+        elif missing_gate == "snapshot":
+            voice.row["route_snapshot"] = None
+        elif missing_gate == "malformed_snapshot":
+            voice.row["route_snapshot"] = {"route": [], "inbound_config": "invalid-json"}
+        elif missing_gate == "policy_disabled":
+            snapshot["inbound_config"]["transfer_policy"]["enabled"] = False
+        elif missing_gate == "destination":
+            snapshot["inbound_config"]["transfer_policy"]["destinations"] = ["+15555550456"]
+        elif missing_gate == "self_target":
+            snapshot["route"]["called_did"] = DESTINATION
+        elif missing_gate == "platform_disabled":
+            voice.platform_enabled = False
+        elif missing_gate == "platform_unavailable":
+            voice.platform_error = True
+        elif missing_gate == "adapter_disconnected":
+            voice.connected = False
+        elif missing_gate == "not_admitted":
+            voice.row["admission_status"] = "denied"
+        elif missing_gate == "not_active":
+            voice.row["processing_status"] = "completed"
+        elif missing_gate == "not_reserved":
+            voice.row["billing_status"] = "settled"
+        elif missing_gate == "no_reservation":
+            voice.row["reserved_seconds"] = 0
+>       assert_not_offered(voice.session, await action_execution.prepare_voice_action_context(voice.session))
+
+tests\unit\test_op06_transfer_capabilities.py:136: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+session = namespace(tenant_id='11111111-1111-4111-8111-111111111111', campaign_id='22222222-2222-4222-8222-222222222222', call_i...{'transfer_call': 'Approved destination only; live telephony policy also applies.'}, _voice_action_context_loaded=True)
+actions = {'end_call', 'transfer_call'}
+
+    def assert_not_offered(session, actions):
+>       assert "transfer_call" not in actions
+E       AssertionError: assert 'transfer_call' not in {'end_call', 'transfer_call'}
+
+tests\unit\test_op06_transfer_capabilities.py:78: AssertionError
+_______ test_allowed_staging_scope_can_offer_without_executing_transfer _______
+
+voice = namespace(row={'call_id': 'synthetic-call', 'provider_call_id': 'synthetic-provider-call', 'lead_id': None, 'provider'...'transfer_call': 'Approved destination only; live telephony policy also applies.'}, _voice_action_context_loaded=True))
+
+    @pytest.mark.asyncio
+    async def test_allowed_staging_scope_can_offer_without_executing_transfer(voice):
+        actions = await action_execution.prepare_voice_action_context(voice.session)
+        assert "transfer_call" in actions
+>       assert voice.platform_reads == 1
+E       AssertionError: assert 0 == 1
+E        +  where 0 = namespace(row={'call_id': 'synthetic-call', 'provider_call_id': 'synthetic-provider-call', 'lead_id': None, 'provider'...'transfer_call': 'Approved destination only; live telephony policy also applies.'}, _voice_action_context_loaded=True)).platform_reads
+
+tests\unit\test_op06_transfer_capabilities.py:143: AssertionError
+_______ test_call_direction_cannot_be_overridden_by_campaign_direction ________
+
+voice = namespace(row={'call_id': 'synthetic-call', 'provider_call_id': 'synthetic-provider-call', 'lead_id': None, 'provider'...'transfer_call': 'Approved destination only; live telephony policy also applies.'}, _voice_action_context_loaded=True))
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001EDC9EBCF50>
+
+    @pytest.mark.asyncio
+    async def test_call_direction_cannot_be_overridden_by_campaign_direction(voice, monkeypatch):
+        voice.row["direction"] = "outbound"
+        monkeypatch.setenv("ENVIRONMENT", "production")
+>       assert_not_offered(voice.session, await action_execution.prepare_voice_action_context(voice.session))
+
+tests\unit\test_op06_transfer_capabilities.py:153: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+session = namespace(tenant_id='11111111-1111-4111-8111-111111111111', campaign_id='22222222-2222-4222-8222-222222222222', call_i...{'transfer_call': 'Approved destination only; live telephony policy also applies.'}, _voice_action_context_loaded=True)
+actions = {'end_call', 'transfer_call'}
+
+    def assert_not_offered(session, actions):
+>       assert "transfer_call" not in actions
+E       AssertionError: assert 'transfer_call' not in {'end_call', 'transfer_call'}
+
+tests\unit\test_op06_transfer_capabilities.py:78: AssertionError
+_________ test_refresh_removes_capability_after_platform_gate_closes __________
+
+voice = namespace(row={'call_id': 'synthetic-call', 'provider_call_id': 'synthetic-provider-call', 'lead_id': None, 'provider'...'transfer_call': 'Approved destination only; live telephony policy also applies.'}, _voice_action_context_loaded=True))
+
+    @pytest.mark.asyncio
+    async def test_refresh_removes_capability_after_platform_gate_closes(voice):
+        assert "transfer_call" in await action_execution.prepare_voice_action_context(voice.session)
+        voice.platform_enabled = False
+        actions = await action_execution.prepare_voice_action_context(voice.session, refresh=True)
+>       assert_not_offered(voice.session, actions)
+
+tests\unit\test_op06_transfer_capabilities.py:172: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+session = namespace(tenant_id='11111111-1111-4111-8111-111111111111', campaign_id='22222222-2222-4222-8222-222222222222', call_i...{'transfer_call': 'Approved destination only; live telephony policy also applies.'}, _voice_action_context_loaded=True)
+actions = {'end_call', 'transfer_call'}
+
+    def assert_not_offered(session, actions):
+>       assert "transfer_call" not in actions
+E       AssertionError: assert 'transfer_call' not in {'end_call', 'transfer_call'}
+
+tests\unit\test_op06_transfer_capabilities.py:78: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/unit/test_op06_transfer_capabilities.py::test_production_inbound_is_not_offered_despite_connected_adapter_and_saved_policy
+FAILED tests/unit/test_op06_transfer_capabilities.py::test_each_unavailable_inbound_gate_removes_offer[tenant_scope]
+FAILED tests/unit/test_op06_transfer_capabilities.py::test_each_unavailable_inbound_gate_removes_offer[config_scope]
+FAILED tests/unit/test_op06_transfer_capabilities.py::test_each_unavailable_inbound_gate_removes_offer[snapshot]
+FAILED tests/unit/test_op06_transfer_capabilities.py::test_each_unavailable_inbound_gate_removes_offer[malformed_snapshot]
+FAILED tests/unit/test_op06_transfer_capabilities.py::test_each_unavailable_inbound_gate_removes_offer[policy_disabled]
+FAILED tests/unit/test_op06_transfer_capabilities.py::test_each_unavailable_inbound_gate_removes_offer[destination]
+FAILED tests/unit/test_op06_transfer_capabilities.py::test_each_unavailable_inbound_gate_removes_offer[self_target]
+FAILED tests/unit/test_op06_transfer_capabilities.py::test_each_unavailable_inbound_gate_removes_offer[platform_disabled]
+FAILED tests/unit/test_op06_transfer_capabilities.py::test_each_unavailable_inbound_gate_removes_offer[platform_unavailable]
+FAILED tests/unit/test_op06_transfer_capabilities.py::test_each_unavailable_inbound_gate_removes_offer[not_admitted]
+FAILED tests/unit/test_op06_transfer_capabilities.py::test_each_unavailable_inbound_gate_removes_offer[not_active]
+FAILED tests/unit/test_op06_transfer_capabilities.py::test_each_unavailable_inbound_gate_removes_offer[not_reserved]
+FAILED tests/unit/test_op06_transfer_capabilities.py::test_each_unavailable_inbound_gate_removes_offer[no_reservation]
+FAILED tests/unit/test_op06_transfer_capabilities.py::test_allowed_staging_scope_can_offer_without_executing_transfer
+FAILED tests/unit/test_op06_transfer_capabilities.py::test_call_direction_cannot_be_overridden_by_campaign_direction
+FAILED tests/unit/test_op06_transfer_capabilities.py::test_refresh_removes_capability_after_platform_gate_closes
+17 failed, 2 passed in 1.94s

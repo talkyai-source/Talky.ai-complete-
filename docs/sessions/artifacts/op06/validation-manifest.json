@@ -1,0 +1,162 @@
+{
+  "package": "OP06",
+  "base_commit": "ba0c0eb8d4716392303263fc211d1b36a722f056",
+  "application_commit": "266af72652916267d44cbada49c118c63c05c1ce",
+  "branch": "codex/production-ready-op06-20261005",
+  "status": "contained_not_complete",
+  "source_files": [
+    "backend/app/domain/services/voice_pipeline/action_execution.py",
+    "backend/tests/unit/test_op06_transfer_capabilities.py",
+    "backend/tests/unit/test_inbound_campaign_service.py",
+    "Talk-Leee/src/app/ai-voice-agent/page.tsx",
+    "Talk-Leee/src/app/use-cases/customer-services-support/page.tsx",
+    "Talk-Leee/src/app/use-cases/automated-lead-qualification/page.tsx"
+  ],
+  "runtime": {
+    "python": "3.12.12",
+    "pytest": "7.4.4",
+    "node": "v25.8.1",
+    "next": "16.3.8"
+  },
+  "runs": [
+    {
+      "artifact": "capability-initial.txt",
+      "result": {
+        "failed": 17,
+        "passed": 2
+      },
+      "scope": "Initial 19 controls: 16 forbidden/stale capability failures; one allowed control exposes absent platform read."
+    },
+    {
+      "artifact": "capability-final.txt",
+      "result": {
+        "passed": 19
+      },
+      "scope": "First repaired owned module."
+    },
+    {
+      "artifact": "affected-regression.txt",
+      "cwd": "backend",
+      "argv": [
+        "C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/backend/.venv/Scripts/python.exe",
+        "-m",
+        "pytest",
+        "tests/unit/test_op06_transfer_capabilities.py",
+        "tests/unit/test_voice_action_execution.py",
+        "tests/unit/test_voice_action_contract.py",
+        "tests/unit/test_voice_action_spoken_confirmation.py",
+        "tests/unit/test_live_capability_offers.py",
+        "tests/unit/test_inbound_transfer_controls.py",
+        "tests/unit/test_inbound_transfer_billing.py",
+        "tests/unit/test_inbound_campaign_service.py",
+        "-q"
+      ],
+      "result": {
+        "passed": 252,
+        "failed": 1,
+        "warnings": 38
+      },
+      "scope": "Baseline fake SQL dispatch mismatch; retained red."
+    },
+    {
+      "artifact": "inbound-permission-baseline.txt",
+      "cwd": ".",
+      "argv": [
+        "C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/backend/.venv/Scripts/python.exe",
+        "-m",
+        "pytest",
+        "backend/tests/unit/test_inbound_campaign_service.py::test_inbound_mutation_honors_direct_user_grant",
+        "-q"
+      ],
+      "result": {
+        "failed": 1
+      },
+      "scope": "Isolated unchanged baseline dependency and fixture; no OP06 action code in execution path."
+    },
+    {
+      "artifact": "affected-regression-final.txt",
+      "cwd": "backend",
+      "argv": [
+        "C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/backend/.venv/Scripts/python.exe",
+        "-m",
+        "pytest",
+        "tests/unit/test_op06_transfer_capabilities.py",
+        "tests/unit/test_voice_action_execution.py",
+        "tests/unit/test_voice_action_contract.py",
+        "tests/unit/test_voice_action_spoken_confirmation.py",
+        "tests/unit/test_live_capability_offers.py",
+        "tests/unit/test_inbound_transfer_controls.py",
+        "tests/unit/test_inbound_transfer_billing.py",
+        "tests/unit/test_inbound_campaign_service.py",
+        "-q"
+      ],
+      "module_count": 8,
+      "result": {
+        "passed": 253,
+        "failed": 0,
+        "skipped": 0,
+        "warnings": 38,
+        "seconds": 21.13
+      },
+      "scope": "Application source final; before two additional test-only direct-tool closure controls."
+    },
+    {
+      "artifact": "capability-final-21.txt",
+      "cwd": "backend",
+      "argv": [
+        "C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/backend/.venv/Scripts/python.exe",
+        "-m",
+        "pytest",
+        "tests/unit/test_op06_transfer_capabilities.py",
+        "-q"
+      ],
+      "result": {
+        "passed": 21,
+        "failed": 0,
+        "skipped": 0,
+        "seconds": 9.24
+      },
+      "scope": "Final owned module including two actual direct-tool gate-closure controls; overlaps broader batch."
+    },
+    {
+      "artifact": "public-copy-lint-final.txt",
+      "cwd": "Talk-Leee",
+      "argv": [
+        "node",
+        "node_modules/eslint/bin/eslint.js",
+        "src/app/ai-voice-agent/page.tsx",
+        "src/app/use-cases/customer-services-support/page.tsx",
+        "src/app/use-cases/automated-lead-qualification/page.tsx"
+      ],
+      "exit_code": 0
+    },
+    {
+      "artifact": "ruff-final.txt",
+      "cwd": "backend",
+      "argv": [
+        "C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/backend/.venv/Scripts/python.exe",
+        "-m",
+        "ruff",
+        "check",
+        "--select",
+        "F",
+        "app/domain/services/voice_pipeline/action_execution.py",
+        "tests/unit/test_op06_transfer_capabilities.py",
+        "tests/unit/test_inbound_campaign_service.py"
+      ],
+      "exit_code": 0
+    }
+  ],
+  "fixture_only_correction": "Match outer FROM user_permissions before nested FROM tenant_users in the fake dispatcher. Real active-membership SQL and policy unchanged.",
+  "independent_review": "LLM agent read-only backend/copy review found no material backend defect. Residual automatic handoff wording corrected before final lint.",
+  "limits": [
+    "Synthetic SQL and adapter seams; no real PostgreSQL/RLS test in this package.",
+    "No model, provider, carrier, telephone or acoustic acceptance.",
+    "Production controlled inbound flag remains false; outbound transfer contract preserved.",
+    "Staging positive controls only test existing scoped read-only availability.",
+    "No deployment, push, provider send or database start.",
+    "No new full frontend build/render; only changed-page ESLint.",
+    "Temporary node_modules junction reads existing exact-lock main-tree dependencies; no install into them.",
+    "OP06/F23 remains incomplete pending allowlisted two-leg carrier/restart/settlement proof."
+  ]
+}
