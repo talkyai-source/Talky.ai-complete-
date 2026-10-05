@@ -1,0 +1,200 @@
+FFFFFFFFFFF                                                              [100%]
+================================== FAILURES ===================================
+______ test_report_end_date_includes_the_whole_selected_utc_day[summary] ______
+
+read = 'summary'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("read", ["summary", "type"])
+    async def test_report_end_date_includes_the_whole_selected_utc_day(read):
+        db = DB([call(cost=5)])
+        await (summary(db) if read == "summary" else breakdown(db, read))
+        start = datetime(2026, 10, 1, tzinfo=timezone.utc)
+        end = datetime(2026, 10, 6, tzinfo=timezone.utc)
+>       assert db.bounds == [("gte", ("created_at", start)), ("lt", ("created_at", end))] * 2
+E       AssertionError: assert [('gte', ('cr...2026-10-05'))] == [('gte', ('cr...mezone.utc)))]
+E         At index 0 diff: ('gte', ('created_at', '2026-10-01')) != ('gte', ('created_at', datetime.datetime(2026, 10, 1, 0, 0, tzinfo=datetime.timezone.utc)))
+E         Use -v to get more diff
+
+backend\tests\unit\test_op11_usage_truth.py:201: AssertionError
+_______ test_report_end_date_includes_the_whole_selected_utc_day[type] ________
+
+read = 'type'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("read", ["summary", "type"])
+    async def test_report_end_date_includes_the_whole_selected_utc_day(read):
+        db = DB([call(cost=5)])
+        await (summary(db) if read == "summary" else breakdown(db, read))
+        start = datetime(2026, 10, 1, tzinfo=timezone.utc)
+        end = datetime(2026, 10, 6, tzinfo=timezone.utc)
+>       assert db.bounds == [("gte", ("created_at", start)), ("lt", ("created_at", end))] * 2
+E       AssertionError: assert [('gte', ('cr...2026-10-05'))] == [('gte', ('cr...mezone.utc)))]
+E         At index 0 diff: ('gte', ('created_at', '2026-10-01')) != ('gte', ('created_at', datetime.datetime(2026, 10, 1, 0, 0, tzinfo=datetime.timezone.utc)))
+E         Use -v to get more diff
+
+backend\tests\unit\test_op11_usage_truth.py:201: AssertionError
+_ test_invalid_or_reversed_dates_fail_before_query[invalid-2026-10-05-summary] _
+
+read = 'summary', start = 'invalid', end = '2026-10-05'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("read", ["summary", "breakdown"])
+    @pytest.mark.parametrize("start,end", [("invalid", "2026-10-05"), ("2026-10-06", "2026-10-05"), ("20261001", "2026-10-05"), ("2026-10-01", "2026-02-30")])
+    async def test_invalid_or_reversed_dates_fail_before_query(read, start, end):
+        db = DB()
+        fn = get_admin_usage_summary if read == "summary" else get_admin_usage_breakdown
+>       with pytest.raises(HTTPException) as exc:
+E       Failed: DID NOT RAISE <class 'fastapi.exceptions.HTTPException'>
+
+backend\tests\unit\test_op11_usage_truth.py:212: Failed
+_ test_invalid_or_reversed_dates_fail_before_query[invalid-2026-10-05-breakdown] _
+
+read = 'breakdown', start = 'invalid', end = '2026-10-05'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("read", ["summary", "breakdown"])
+    @pytest.mark.parametrize("start,end", [("invalid", "2026-10-05"), ("2026-10-06", "2026-10-05"), ("20261001", "2026-10-05"), ("2026-10-01", "2026-02-30")])
+    async def test_invalid_or_reversed_dates_fail_before_query(read, start, end):
+        db = DB()
+        fn = get_admin_usage_summary if read == "summary" else get_admin_usage_breakdown
+>       with pytest.raises(HTTPException) as exc:
+E       Failed: DID NOT RAISE <class 'fastapi.exceptions.HTTPException'>
+
+backend\tests\unit\test_op11_usage_truth.py:212: Failed
+_ test_invalid_or_reversed_dates_fail_before_query[2026-10-06-2026-10-05-summary] _
+
+read = 'summary', start = '2026-10-06', end = '2026-10-05'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("read", ["summary", "breakdown"])
+    @pytest.mark.parametrize("start,end", [("invalid", "2026-10-05"), ("2026-10-06", "2026-10-05"), ("20261001", "2026-10-05"), ("2026-10-01", "2026-02-30")])
+    async def test_invalid_or_reversed_dates_fail_before_query(read, start, end):
+        db = DB()
+        fn = get_admin_usage_summary if read == "summary" else get_admin_usage_breakdown
+>       with pytest.raises(HTTPException) as exc:
+E       Failed: DID NOT RAISE <class 'fastapi.exceptions.HTTPException'>
+
+backend\tests\unit\test_op11_usage_truth.py:212: Failed
+_ test_invalid_or_reversed_dates_fail_before_query[2026-10-06-2026-10-05-breakdown] _
+
+read = 'breakdown', start = '2026-10-06', end = '2026-10-05'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("read", ["summary", "breakdown"])
+    @pytest.mark.parametrize("start,end", [("invalid", "2026-10-05"), ("2026-10-06", "2026-10-05"), ("20261001", "2026-10-05"), ("2026-10-01", "2026-02-30")])
+    async def test_invalid_or_reversed_dates_fail_before_query(read, start, end):
+        db = DB()
+        fn = get_admin_usage_summary if read == "summary" else get_admin_usage_breakdown
+>       with pytest.raises(HTTPException) as exc:
+E       Failed: DID NOT RAISE <class 'fastapi.exceptions.HTTPException'>
+
+backend\tests\unit\test_op11_usage_truth.py:212: Failed
+_ test_invalid_or_reversed_dates_fail_before_query[20261001-2026-10-05-summary] _
+
+read = 'summary', start = '20261001', end = '2026-10-05'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("read", ["summary", "breakdown"])
+    @pytest.mark.parametrize("start,end", [("invalid", "2026-10-05"), ("2026-10-06", "2026-10-05"), ("20261001", "2026-10-05"), ("2026-10-01", "2026-02-30")])
+    async def test_invalid_or_reversed_dates_fail_before_query(read, start, end):
+        db = DB()
+        fn = get_admin_usage_summary if read == "summary" else get_admin_usage_breakdown
+>       with pytest.raises(HTTPException) as exc:
+E       Failed: DID NOT RAISE <class 'fastapi.exceptions.HTTPException'>
+
+backend\tests\unit\test_op11_usage_truth.py:212: Failed
+_ test_invalid_or_reversed_dates_fail_before_query[20261001-2026-10-05-breakdown] _
+
+read = 'breakdown', start = '20261001', end = '2026-10-05'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("read", ["summary", "breakdown"])
+    @pytest.mark.parametrize("start,end", [("invalid", "2026-10-05"), ("2026-10-06", "2026-10-05"), ("20261001", "2026-10-05"), ("2026-10-01", "2026-02-30")])
+    async def test_invalid_or_reversed_dates_fail_before_query(read, start, end):
+        db = DB()
+        fn = get_admin_usage_summary if read == "summary" else get_admin_usage_breakdown
+>       with pytest.raises(HTTPException) as exc:
+E       Failed: DID NOT RAISE <class 'fastapi.exceptions.HTTPException'>
+
+backend\tests\unit\test_op11_usage_truth.py:212: Failed
+_ test_invalid_or_reversed_dates_fail_before_query[2026-10-01-2026-02-30-summary] _
+
+read = 'summary', start = '2026-10-01', end = '2026-02-30'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("read", ["summary", "breakdown"])
+    @pytest.mark.parametrize("start,end", [("invalid", "2026-10-05"), ("2026-10-06", "2026-10-05"), ("20261001", "2026-10-05"), ("2026-10-01", "2026-02-30")])
+    async def test_invalid_or_reversed_dates_fail_before_query(read, start, end):
+        db = DB()
+        fn = get_admin_usage_summary if read == "summary" else get_admin_usage_breakdown
+>       with pytest.raises(HTTPException) as exc:
+E       Failed: DID NOT RAISE <class 'fastapi.exceptions.HTTPException'>
+
+backend\tests\unit\test_op11_usage_truth.py:212: Failed
+_ test_invalid_or_reversed_dates_fail_before_query[2026-10-01-2026-02-30-breakdown] _
+
+read = 'breakdown', start = '2026-10-01', end = '2026-02-30'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("read", ["summary", "breakdown"])
+    @pytest.mark.parametrize("start,end", [("invalid", "2026-10-05"), ("2026-10-06", "2026-10-05"), ("20261001", "2026-10-05"), ("2026-10-01", "2026-02-30")])
+    async def test_invalid_or_reversed_dates_fail_before_query(read, start, end):
+        db = DB()
+        fn = get_admin_usage_summary if read == "summary" else get_admin_usage_breakdown
+>       with pytest.raises(HTTPException) as exc:
+E       Failed: DID NOT RAISE <class 'fastapi.exceptions.HTTPException'>
+
+backend\tests\unit\test_op11_usage_truth.py:212: Failed
+_____________ test_default_period_uses_exclusive_tomorrow_in_utc ______________
+
+    @pytest.mark.asyncio
+    async def test_default_period_uses_exclusive_tomorrow_in_utc():
+        db = DB()
+        result = await get_admin_usage_summary(admin_user=SimpleNamespace(), db_client=db,
+                                              tenant_id=None, from_date=None, to_date=None)
+        today = datetime.now(timezone.utc).date()
+        assert result.period_end == today.isoformat()
+>       assert db.bounds[1][0] == "lt"
+E       AssertionError: assert 'lte' == 'lt'
+E         - lt
+E         + lte
+E         ?   +
+
+backend\tests\unit\test_op11_usage_truth.py:226: AssertionError
+============================== warnings summary ===============================
+backend\app\api\v1\endpoints\admin\health\_shared.py:16
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-op11-20261005\backend\app\api\v1\endpoints\admin\health\_shared.py:16: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    _server_start_time = datetime.utcnow()
+
+tests/unit/test_op11_usage_truth.py::test_report_end_date_includes_the_whole_selected_utc_day[summary]
+tests/unit/test_op11_usage_truth.py::test_invalid_or_reversed_dates_fail_before_query[invalid-2026-10-05-summary]
+tests/unit/test_op11_usage_truth.py::test_invalid_or_reversed_dates_fail_before_query[2026-10-06-2026-10-05-summary]
+tests/unit/test_op11_usage_truth.py::test_invalid_or_reversed_dates_fail_before_query[20261001-2026-10-05-summary]
+tests/unit/test_op11_usage_truth.py::test_invalid_or_reversed_dates_fail_before_query[2026-10-01-2026-02-30-summary]
+tests/unit/test_op11_usage_truth.py::test_default_period_uses_exclusive_tomorrow_in_utc
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-op11-20261005\backend\app\api\v1\endpoints\admin\usage.py:143: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    now = datetime.utcnow()
+
+tests/unit/test_op11_usage_truth.py::test_report_end_date_includes_the_whole_selected_utc_day[type]
+tests/unit/test_op11_usage_truth.py::test_invalid_or_reversed_dates_fail_before_query[invalid-2026-10-05-breakdown]
+tests/unit/test_op11_usage_truth.py::test_invalid_or_reversed_dates_fail_before_query[2026-10-06-2026-10-05-breakdown]
+tests/unit/test_op11_usage_truth.py::test_invalid_or_reversed_dates_fail_before_query[20261001-2026-10-05-breakdown]
+tests/unit/test_op11_usage_truth.py::test_invalid_or_reversed_dates_fail_before_query[2026-10-01-2026-02-30-breakdown]
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-op11-20261005\backend\app\api\v1\endpoints\admin\usage.py:209: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    now = datetime.utcnow()
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED backend\tests\unit\test_op11_usage_truth.py::test_report_end_date_includes_the_whole_selected_utc_day[summary]
+FAILED backend\tests\unit\test_op11_usage_truth.py::test_report_end_date_includes_the_whole_selected_utc_day[type]
+FAILED backend\tests\unit\test_op11_usage_truth.py::test_invalid_or_reversed_dates_fail_before_query[invalid-2026-10-05-summary]
+FAILED backend\tests\unit\test_op11_usage_truth.py::test_invalid_or_reversed_dates_fail_before_query[invalid-2026-10-05-breakdown]
+FAILED backend\tests\unit\test_op11_usage_truth.py::test_invalid_or_reversed_dates_fail_before_query[2026-10-06-2026-10-05-summary]
+FAILED backend\tests\unit\test_op11_usage_truth.py::test_invalid_or_reversed_dates_fail_before_query[2026-10-06-2026-10-05-breakdown]
+FAILED backend\tests\unit\test_op11_usage_truth.py::test_invalid_or_reversed_dates_fail_before_query[20261001-2026-10-05-summary]
+FAILED backend\tests\unit\test_op11_usage_truth.py::test_invalid_or_reversed_dates_fail_before_query[20261001-2026-10-05-breakdown]
+FAILED backend\tests\unit\test_op11_usage_truth.py::test_invalid_or_reversed_dates_fail_before_query[2026-10-01-2026-02-30-summary]
+FAILED backend\tests\unit\test_op11_usage_truth.py::test_invalid_or_reversed_dates_fail_before_query[2026-10-01-2026-02-30-breakdown]
+FAILED backend\tests\unit\test_op11_usage_truth.py::test_default_period_uses_exclusive_tomorrow_in_utc
+11 failed, 23 deselected, 12 warnings in 2.56s

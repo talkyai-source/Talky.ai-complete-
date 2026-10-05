@@ -1,0 +1,31 @@
+
+> frontend@0.0.0 test
+> node --test tests/*.test.mjs
+
+✔ formats an authoritative ISO currency without assuming dollars (3.7286ms)
+✔ labels a ledger amount whose currency was not recorded (0.4501ms)
+✔ renders a reversed monetary state as zero in its ledger currency (0.2902ms)
+✔ does not render absent or non-finite costs (0.2651ms)
+✔ formats aggregate USD estimates without a hardcoded dollar symbol (0.4565ms)
+✔ requested is pending even when a status-looking field says ended (7.5141ms)
+✔ confirmed requires the provider-confirmed contract (0.8714ms)
+✔ already-terminal is safe to remove from the live list (0.7194ms)
+✔ failed provider response preserves the useful error for retry (0.7668ms)
+✔ a requested response produces a pending-only live-row patch (3.9113ms)
+✔ poll reconciliation preserves a raced pending marker (1.1572ms)
+✔ poll reconciliation accepts failed and missing terminal rows (0.8216ms)
+✔ a confirmed live-row marker is terminal, never actionable pending (0.5037ms)
+✔ actual endpoint example renders recorded usage, unavailable attribution and explicit estimate coverage (64.3131ms)
+✔ failed usage read renders an error and unavailable counts, never invented zero (3.0337ms)
+✔ loading usage is not a zero observation (2.4134ms)
+✔ an actually recorded zero count is displayed while supplier cost stays unavailable (1.7182ms)
+✔ known legacy zero is distinct from missing and invalid money (0.8366ms)
+✔ unknown legacy cost does not become USD zero in the actual summary view (4.5732ms)
+ℹ tests 19
+ℹ suites 0
+ℹ pass 19
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1066.6607

@@ -1,0 +1,61 @@
+✖ late old-period success cannot replace the current rows (8.7744ms)
+✖ late old-period success cannot replace the current failure (3.0776ms)
+ℹ tests 2
+ℹ suites 0
+ℹ pass 0
+ℹ fail 2
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 315.3222
+
+✖ failing tests:
+
+test at tests\usage-period-order.test.mjs:31:5
+✖ late old-period success cannot replace the current rows (8.7744ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+
+    [
+      {
+  +     tenant_id: 'period-A',
+  +     total_minutes: 9
+  -     tenant_id: 'period-B',
+  -     total_minutes: 2
+      }
+    ]
+
+      at TestContext.<anonymous> (file:///C:/Users/AL%20AZIZ%20TECH/Desktop/Talky.ai-complete-/tmp/production-ready-op11-20261005/Admin/frontend/tests/usage-period-order.test.mjs:63:20)
+      at async Test.run (node:internal/test_runner/test:1208:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [ { tenant_id: 'period-A', total_minutes: 9 } ],
+    expected: [ { tenant_id: 'period-B', total_minutes: 2 } ],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at tests\usage-period-order.test.mjs:31:5
+✖ late old-period success cannot replace the current failure (3.0776ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+
+  + [
+  +   {
+  +     tenant_id: 'period-A',
+  +     total_minutes: 9
+  +   }
+  + ]
+  - []
+
+      at TestContext.<anonymous> (file:///C:/Users/AL%20AZIZ%20TECH/Desktop/Talky.ai-complete-/tmp/production-ready-op11-20261005/Admin/frontend/tests/usage-period-order.test.mjs:63:20)
+      at async Test.run (node:internal/test_runner/test:1208:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:831:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [ { tenant_id: 'period-A', total_minutes: 9 } ],
+    expected: [],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }

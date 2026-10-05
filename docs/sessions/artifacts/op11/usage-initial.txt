@@ -1,0 +1,193 @@
+FFFFFFFFFF.                                                              [100%]
+================================== FAILURES ===================================
+______ test_real_call_and_failed_action_do_not_fabricate_provider_spend _______
+
+    @pytest.mark.asyncio
+    async def test_real_call_and_failed_action_do_not_fabricate_provider_spend():
+        result = await summary(DB([call(cost=5)], [{"id": "action", "type": "send_sms", "status": "failed"}]))
+>       assert result.total_cost is None
+E       AssertionError: assert 5.35 is None
+E        +  where 5.35 = UsageSummaryResponse(total_cost=5.35, total_call_minutes=10, total_api_calls=1, providers=[UsageBreakdownItem(provider...re ledger-only and are not included in these legacy USD estimates. Call counts and durations include both directions.').total_cost
+
+backend\tests\unit\test_op11_usage_truth.py:66: AssertionError
+____ test_empty_unpriced_or_invalid_money_is_unavailable_not_zero[calls0] _____
+
+calls = []
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("calls", [[], [call()], [call(cost=float("nan"))], [call(cost=float("inf"))]])
+    async def test_empty_unpriced_or_invalid_money_is_unavailable_not_zero(calls):
+        result = await summary(DB(calls))
+>       assert result.total_cost is None
+E       AssertionError: assert 0.0 is None
+E        +  where 0.0 = UsageSummaryResponse(total_cost=0.0, total_call_minutes=0, total_api_calls=0, providers=[], period_start='2026-10-01',...re ledger-only and are not included in these legacy USD estimates. Call counts and durations include both directions.').total_cost
+
+backend\tests\unit\test_op11_usage_truth.py:80: AssertionError
+____ test_empty_unpriced_or_invalid_money_is_unavailable_not_zero[calls1] _____
+
+calls = [{'cost': None, 'direction': 'outbound', 'duration_seconds': 600, 'id': 'synthetic-call', ...}]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("calls", [[], [call()], [call(cost=float("nan"))], [call(cost=float("inf"))]])
+    async def test_empty_unpriced_or_invalid_money_is_unavailable_not_zero(calls):
+        result = await summary(DB(calls))
+>       assert result.total_cost is None
+E       AssertionError: assert 0.34 is None
+E        +  where 0.34 = UsageSummaryResponse(total_cost=0.34, total_call_minutes=10, total_api_calls=0, providers=[UsageBreakdownItem(provider...re ledger-only and are not included in these legacy USD estimates. Call counts and durations include both directions.').total_cost
+
+backend\tests\unit\test_op11_usage_truth.py:80: AssertionError
+____ test_empty_unpriced_or_invalid_money_is_unavailable_not_zero[calls2] _____
+
+calls = [{'cost': nan, 'direction': 'outbound', 'duration_seconds': 600, 'id': 'synthetic-call', ...}]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("calls", [[], [call()], [call(cost=float("nan"))], [call(cost=float("inf"))]])
+    async def test_empty_unpriced_or_invalid_money_is_unavailable_not_zero(calls):
+        result = await summary(DB(calls))
+>       assert result.total_cost is None
+E       AssertionError: assert 0.34 is None
+E        +  where 0.34 = UsageSummaryResponse(total_cost=0.34, total_call_minutes=10, total_api_calls=0, providers=[UsageBreakdownItem(provider...re ledger-only and are not included in these legacy USD estimates. Call counts and durations include both directions.').total_cost
+
+backend\tests\unit\test_op11_usage_truth.py:80: AssertionError
+____ test_empty_unpriced_or_invalid_money_is_unavailable_not_zero[calls3] _____
+
+calls = [{'cost': inf, 'direction': 'outbound', 'duration_seconds': 600, 'id': 'synthetic-call', ...}]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("calls", [[], [call()], [call(cost=float("nan"))], [call(cost=float("inf"))]])
+    async def test_empty_unpriced_or_invalid_money_is_unavailable_not_zero(calls):
+        result = await summary(DB(calls))
+>       assert result.total_cost is None
+E       AssertionError: assert inf is None
+E        +  where inf = UsageSummaryResponse(total_cost=inf, total_call_minutes=10, total_api_calls=0, providers=[UsageBreakdownItem(provider=...re ledger-only and are not included in these legacy USD estimates. Call counts and durations include both directions.').total_cost
+
+backend\tests\unit\test_op11_usage_truth.py:80: AssertionError
+___ test_known_zero_is_distinct_from_missing_and_inbound_money_is_excluded ____
+
+    @pytest.mark.asyncio
+    async def test_known_zero_is_distinct_from_missing_and_inbound_money_is_excluded():
+        inbound = call(cost=99)
+        inbound["direction"] = "inbound"
+        result = await summary(DB([call(cost=0), call(), inbound]))
+>       assert result.total_cost is None
+E       AssertionError: assert 1.01 is None
+E        +  where 1.01 = UsageSummaryResponse(total_cost=1.01, total_call_minutes=30, total_api_calls=0, providers=[UsageBreakdownItem(provider...re ledger-only and are not included in these legacy USD estimates. Call counts and durations include both directions.').total_cost
+
+backend\tests\unit\test_op11_usage_truth.py:91: AssertionError
+_______ test_all_breakdowns_preserve_unavailable_supplier_cost[tenant] ________
+
+group = 'tenant'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("group", ["tenant", "type", "provider"])
+    async def test_all_breakdowns_preserve_unavailable_supplier_cost(group):
+        result = await breakdown(DB([call(cost=5), call()], [{"type": "send_sms"}]), group)
+>       assert result["supplier_cost_status"] == "unavailable"
+E       KeyError: 'supplier_cost_status'
+
+backend\tests\unit\test_op11_usage_truth.py:104: KeyError
+________ test_all_breakdowns_preserve_unavailable_supplier_cost[type] _________
+
+group = 'type'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("group", ["tenant", "type", "provider"])
+    async def test_all_breakdowns_preserve_unavailable_supplier_cost(group):
+        result = await breakdown(DB([call(cost=5), call()], [{"type": "send_sms"}]), group)
+>       assert result["supplier_cost_status"] == "unavailable"
+E       KeyError: 'supplier_cost_status'
+
+backend\tests\unit\test_op11_usage_truth.py:104: KeyError
+______ test_all_breakdowns_preserve_unavailable_supplier_cost[provider] _______
+
+group = 'provider'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("group", ["tenant", "type", "provider"])
+    async def test_all_breakdowns_preserve_unavailable_supplier_cost(group):
+        result = await breakdown(DB([call(cost=5), call()], [{"type": "send_sms"}]), group)
+>       assert result["supplier_cost_status"] == "unavailable"
+E       KeyError: 'supplier_cost_status'
+
+backend\tests\unit\test_op11_usage_truth.py:104: KeyError
+______ test_grouped_duration_aggregates_seconds_before_display_rounding _______
+
+    @pytest.mark.asyncio
+    async def test_grouped_duration_aggregates_seconds_before_display_rounding():
+        db = DB([call(59), call(59)])
+        result = await summary(db)
+>       assert result.total_call_seconds == 118
+
+backend\tests\unit\test_op11_usage_truth.py:117:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = UsageSummaryResponse(total_cost=0.05, total_call_minutes=1, total_api_calls=0, providers=[UsageBreakdownItem(provider=...re ledger-only and are not included in these legacy USD estimates. Call counts and durations include both directions.')
+item = 'total_call_seconds'
+
+    def __getattr__(self, item: str) -> Any:
+        private_attributes = object.__getattribute__(self, '__private_attributes__')
+        if item in private_attributes:
+            attribute = private_attributes[item]
+            if hasattr(attribute, '__get__'):
+                return attribute.__get__(self, type(self))  # type: ignore
+
+            try:
+                # Note: self.__pydantic_private__ cannot be None if self.__private_attributes__ has items
+                return self.__pydantic_private__[item]  # type: ignore
+            except KeyError as exc:
+                raise AttributeError(f'{type(self).__name__!r} object has no attribute {item!r}') from exc
+        else:
+            # `__pydantic_extra__` can fail to be set if the model is not yet fully initialized.
+            # See `BaseModel.__repr_args__` for more details
+            try:
+                pydantic_extra = object.__getattribute__(self, '__pydantic_extra__')
+            except AttributeError:
+                pydantic_extra = None
+
+            if pydantic_extra and item in pydantic_extra:
+                return pydantic_extra[item]
+            else:
+                if hasattr(self.__class__, item):
+                    return super().__getattribute__(item)  # Raises AttributeError if appropriate
+                else:
+                    # this is the current error
+>                   raise AttributeError(f'{type(self).__name__!r} object has no attribute {item!r}')
+E                   AttributeError: 'UsageSummaryResponse' object has no attribute 'total_call_seconds'. Did you mean: 'total_call_minutes'?
+
+..\..\backend\.venv\Lib\site-packages\pydantic\main.py:1026: AttributeError
+============================== warnings summary ===============================
+backend\app\api\v1\endpoints\admin\health\_shared.py:16
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-op11-20261005\backend\app\api\v1\endpoints\admin\health\_shared.py:16: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    _server_start_time = datetime.utcnow()
+
+tests/unit/test_op11_usage_truth.py::test_real_call_and_failed_action_do_not_fabricate_provider_spend
+tests/unit/test_op11_usage_truth.py::test_empty_unpriced_or_invalid_money_is_unavailable_not_zero[calls0]
+tests/unit/test_op11_usage_truth.py::test_empty_unpriced_or_invalid_money_is_unavailable_not_zero[calls1]
+tests/unit/test_op11_usage_truth.py::test_empty_unpriced_or_invalid_money_is_unavailable_not_zero[calls2]
+tests/unit/test_op11_usage_truth.py::test_empty_unpriced_or_invalid_money_is_unavailable_not_zero[calls3]
+tests/unit/test_op11_usage_truth.py::test_known_zero_is_distinct_from_missing_and_inbound_money_is_excluded
+tests/unit/test_op11_usage_truth.py::test_grouped_duration_aggregates_seconds_before_display_rounding
+tests/unit/test_op11_usage_truth.py::test_both_reads_keep_explicit_tenant_filter
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-op11-20261005\backend\app\api\v1\endpoints\admin\usage.py:99: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    now = datetime.utcnow()
+
+tests/unit/test_op11_usage_truth.py::test_all_breakdowns_preserve_unavailable_supplier_cost[tenant]
+tests/unit/test_op11_usage_truth.py::test_all_breakdowns_preserve_unavailable_supplier_cost[type]
+tests/unit/test_op11_usage_truth.py::test_all_breakdowns_preserve_unavailable_supplier_cost[provider]
+tests/unit/test_op11_usage_truth.py::test_both_reads_keep_explicit_tenant_filter
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-op11-20261005\backend\app\api\v1\endpoints\admin\usage.py:218: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    now = datetime.utcnow()
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED backend\tests\unit\test_op11_usage_truth.py::test_real_call_and_failed_action_do_not_fabricate_provider_spend
+FAILED backend\tests\unit\test_op11_usage_truth.py::test_empty_unpriced_or_invalid_money_is_unavailable_not_zero[calls0]
+FAILED backend\tests\unit\test_op11_usage_truth.py::test_empty_unpriced_or_invalid_money_is_unavailable_not_zero[calls1]
+FAILED backend\tests\unit\test_op11_usage_truth.py::test_empty_unpriced_or_invalid_money_is_unavailable_not_zero[calls2]
+FAILED backend\tests\unit\test_op11_usage_truth.py::test_empty_unpriced_or_invalid_money_is_unavailable_not_zero[calls3]
+FAILED backend\tests\unit\test_op11_usage_truth.py::test_known_zero_is_distinct_from_missing_and_inbound_money_is_excluded
+FAILED backend\tests\unit\test_op11_usage_truth.py::test_all_breakdowns_preserve_unavailable_supplier_cost[tenant]
+FAILED backend\tests\unit\test_op11_usage_truth.py::test_all_breakdowns_preserve_unavailable_supplier_cost[type]
+FAILED backend\tests\unit\test_op11_usage_truth.py::test_all_breakdowns_preserve_unavailable_supplier_cost[provider]
+FAILED backend\tests\unit\test_op11_usage_truth.py::test_grouped_duration_aggregates_seconds_before_display_rounding
+10 failed, 1 passed, 13 warnings in 5.47s
