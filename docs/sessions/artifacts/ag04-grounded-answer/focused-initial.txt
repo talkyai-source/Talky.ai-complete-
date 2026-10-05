@@ -1,0 +1,61 @@
+........FFFFF.                                                           [100%]
+================================== FAILURES ===================================
+_ test_nonprice_grounding_preserves_source_and_useful_answer_without_semantic_approval[supported-gemini] _
+tests\unit\test_ag04_traditional_qualification.py:23: in test_nonprice_grounding_preserves_source_and_useful_answer_without_semantic_approval
+    assert all(c["pass"] for c in row["findings"]["control"]), row["findings"]["control"]
+E   AssertionError: [{'detail': 'No runner exception; errors=[]', 'id': 'runner_completed', 'pass': True}, {'detail': 'Synthetic gateway h...llenged claim must produce its truthful speech outcome on that turn.', 'id': 'guarded_turn_speech', 'pass': True}, ...]
+E   assert False
+E    +  where False = all(<generator object test_nonprice_grounding_preserves_source_and_useful_answer_without_semantic_approval.<locals>.<genexpr> at 0x000001C3B56CE0C0>)
+_ test_nonprice_grounding_preserves_source_and_useful_answer_without_semantic_approval[absent_link-groq] _
+tests\unit\test_ag04_traditional_qualification.py:23: in test_nonprice_grounding_preserves_source_and_useful_answer_without_semantic_approval
+    assert all(c["pass"] for c in row["findings"]["control"]), row["findings"]["control"]
+E   AssertionError: [{'detail': 'No runner exception; errors=[]', 'id': 'runner_completed', 'pass': True}, {'detail': 'Synthetic gateway h...lenged claim must produce its truthful speech outcome on that turn.', 'id': 'guarded_turn_speech', 'pass': False}, ...]
+E   assert False
+E    +  where False = all(<generator object test_nonprice_grounding_preserves_source_and_useful_answer_without_semantic_approval.<locals>.<genexpr> at 0x000001C3B694E670>)
+_ test_nonprice_grounding_preserves_source_and_useful_answer_without_semantic_approval[absent_link-cerebras] _
+tests\unit\test_ag04_traditional_qualification.py:23: in test_nonprice_grounding_preserves_source_and_useful_answer_without_semantic_approval
+    assert all(c["pass"] for c in row["findings"]["control"]), row["findings"]["control"]
+E   AssertionError: [{'detail': 'No runner exception; errors=[]', 'id': 'runner_completed', 'pass': True}, {'detail': 'Synthetic gateway h...lenged claim must produce its truthful speech outcome on that turn.', 'id': 'guarded_turn_speech', 'pass': False}, ...]
+E   assert False
+E    +  where False = all(<generator object test_nonprice_grounding_preserves_source_and_useful_answer_without_semantic_approval.<locals>.<genexpr> at 0x000001C3B694EA80>)
+_ test_nonprice_grounding_preserves_source_and_useful_answer_without_semantic_approval[absent_link-openai] _
+tests\unit\test_ag04_traditional_qualification.py:23: in test_nonprice_grounding_preserves_source_and_useful_answer_without_semantic_approval
+    assert all(c["pass"] for c in row["findings"]["control"]), row["findings"]["control"]
+E   AssertionError: [{'detail': 'No runner exception; errors=[]', 'id': 'runner_completed', 'pass': True}, {'detail': 'Synthetic gateway h...lenged claim must produce its truthful speech outcome on that turn.', 'id': 'guarded_turn_speech', 'pass': False}, ...]
+E   assert False
+E    +  where False = all(<generator object test_nonprice_grounding_preserves_source_and_useful_answer_without_semantic_approval.<locals>.<genexpr> at 0x000001C3B6A41220>)
+_ test_nonprice_grounding_preserves_source_and_useful_answer_without_semantic_approval[absent_link-gemini] _
+tests\unit\test_ag04_traditional_qualification.py:23: in test_nonprice_grounding_preserves_source_and_useful_answer_without_semantic_approval
+    assert all(c["pass"] for c in row["findings"]["control"]), row["findings"]["control"]
+E   AssertionError: [{'detail': 'No runner exception; errors=[]', 'id': 'runner_completed', 'pass': True}, {'detail': 'Synthetic gateway h...lenged claim must produce its truthful speech outcome on that turn.', 'id': 'guarded_turn_speech', 'pass': False}, ...]
+E   assert False
+E    +  where False = all(<generator object test_nonprice_grounding_preserves_source_and_useful_answer_without_semantic_approval.<locals>.<genexpr> at 0x000001C3B6A43E00>)
+============================== warnings summary ===============================
+tests/unit/test_ag04_native_qualification.py: 10 warnings
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\ag04-grounded-answer-20261006\backend\app\domain\services\transcript_service.py:372: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    timestamp=datetime.utcnow().isoformat(),
+
+tests/unit/test_ag04_traditional_qualification.py: 50 warnings
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\backend\.venv\Lib\site-packages\pydantic\main.py:250: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+
+tests/unit/test_ag04_traditional_qualification.py: 20 warnings
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\ag04-grounded-answer-20261006\backend\app\domain\services\voice_pipeline\transcript_handler.py:150: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "timestamp": datetime.utcnow().isoformat(),
+
+tests/unit/test_ag04_traditional_qualification.py: 50 warnings
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\ag04-grounded-answer-20261006\backend\app\domain\models\session.py:207: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    self.last_activity_at = datetime.utcnow()
+
+tests/unit/test_ag04_traditional_qualification.py: 10 warnings
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\ag04-grounded-answer-20261006\backend\app\domain\services\voice_pipeline\turn_ender.py:594: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "timestamp": datetime.utcnow().isoformat(),
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/unit/test_ag04_traditional_qualification.py::test_nonprice_grounding_preserves_source_and_useful_answer_without_semantic_approval[supported-gemini]
+FAILED tests/unit/test_ag04_traditional_qualification.py::test_nonprice_grounding_preserves_source_and_useful_answer_without_semantic_approval[absent_link-groq]
+FAILED tests/unit/test_ag04_traditional_qualification.py::test_nonprice_grounding_preserves_source_and_useful_answer_without_semantic_approval[absent_link-cerebras]
+FAILED tests/unit/test_ag04_traditional_qualification.py::test_nonprice_grounding_preserves_source_and_useful_answer_without_semantic_approval[absent_link-openai]
+FAILED tests/unit/test_ag04_traditional_qualification.py::test_nonprice_grounding_preserves_source_and_useful_answer_without_semantic_approval[absent_link-gemini]
+5 failed, 9 passed, 110 deselected, 140 warnings in 14.48s

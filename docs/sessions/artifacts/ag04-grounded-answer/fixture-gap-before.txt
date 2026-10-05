@@ -1,0 +1,200 @@
+FFFFFFFFFFFFFF                                                           [100%]
+================================== FAILURES ===================================
+_ test_nonprice_grounding_preserves_source_and_useful_answer_without_semantic_approval[supported-openai] _
+tests\unit\test_ag04_native_qualification.py:21: in test_nonprice_grounding_preserves_source_and_useful_answer_without_semantic_approval
+    case = next(c for c in corpus["scenarios"] if c["id"] == "native.nonprice_" + variant)
+E   StopIteration
+
+The above exception was the direct cause of the following exception:
+..\..\..\backend\.venv\Lib\site-packages\pytest_asyncio\plugin.py:430: in runtest
+    super().runtest()
+..\..\..\backend\.venv\Lib\site-packages\pytest_asyncio\plugin.py:887: in inner
+    _loop.run_until_complete(task)
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\base_events.py:691: in run_until_complete
+    return future.result()
+E   RuntimeError: coroutine raised StopIteration
+_ test_nonprice_grounding_preserves_source_and_useful_answer_without_semantic_approval[supported-xai] _
+tests\unit\test_ag04_native_qualification.py:21: in test_nonprice_grounding_preserves_source_and_useful_answer_without_semantic_approval
+    case = next(c for c in corpus["scenarios"] if c["id"] == "native.nonprice_" + variant)
+E   StopIteration
+
+The above exception was the direct cause of the following exception:
+..\..\..\backend\.venv\Lib\site-packages\pytest_asyncio\plugin.py:430: in runtest
+    super().runtest()
+..\..\..\backend\.venv\Lib\site-packages\pytest_asyncio\plugin.py:887: in inner
+    _loop.run_until_complete(task)
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\base_events.py:691: in run_until_complete
+    return future.result()
+E   RuntimeError: coroutine raised StopIteration
+_ test_nonprice_grounding_preserves_source_and_useful_answer_without_semantic_approval[absent_link-openai] _
+tests\unit\test_ag04_native_qualification.py:21: in test_nonprice_grounding_preserves_source_and_useful_answer_without_semantic_approval
+    case = next(c for c in corpus["scenarios"] if c["id"] == "native.nonprice_" + variant)
+E   StopIteration
+
+The above exception was the direct cause of the following exception:
+..\..\..\backend\.venv\Lib\site-packages\pytest_asyncio\plugin.py:430: in runtest
+    super().runtest()
+..\..\..\backend\.venv\Lib\site-packages\pytest_asyncio\plugin.py:887: in inner
+    _loop.run_until_complete(task)
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\base_events.py:691: in run_until_complete
+    return future.result()
+E   RuntimeError: coroutine raised StopIteration
+_ test_nonprice_grounding_preserves_source_and_useful_answer_without_semantic_approval[absent_link-xai] _
+tests\unit\test_ag04_native_qualification.py:21: in test_nonprice_grounding_preserves_source_and_useful_answer_without_semantic_approval
+    case = next(c for c in corpus["scenarios"] if c["id"] == "native.nonprice_" + variant)
+E   StopIteration
+
+The above exception was the direct cause of the following exception:
+..\..\..\backend\.venv\Lib\site-packages\pytest_asyncio\plugin.py:430: in runtest
+    super().runtest()
+..\..\..\backend\.venv\Lib\site-packages\pytest_asyncio\plugin.py:887: in inner
+    _loop.run_until_complete(task)
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\base_events.py:691: in run_until_complete
+    return future.result()
+E   RuntimeError: coroutine raised StopIteration
+_ test_nonprice_common_controls_fail_when_source_is_missing_or_answer_is_only_abstention _
+tests\unit\test_ag04_native_qualification.py:52: in test_nonprice_common_controls_fail_when_source_is_missing_or_answer_is_only_abstention
+    original = next(c for c in corpus["scenarios"] if c["id"] == "native.nonprice_supported")
+E   StopIteration
+
+The above exception was the direct cause of the following exception:
+..\..\..\backend\.venv\Lib\site-packages\pytest_asyncio\plugin.py:430: in runtest
+    super().runtest()
+..\..\..\backend\.venv\Lib\site-packages\pytest_asyncio\plugin.py:887: in inner
+    _loop.run_until_complete(task)
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\base_events.py:691: in run_until_complete
+    return future.result()
+E   RuntimeError: coroutine raised StopIteration
+_ test_nonprice_grounding_preserves_source_and_useful_answer_without_semantic_approval[supported-groq] _
+tests\unit\test_ag04_traditional_qualification.py:20: in test_nonprice_grounding_preserves_source_and_useful_answer_without_semantic_approval
+    case = next(c for c in data["cases"] if c["id"] == "ag04.nonprice_" + variant)
+E   StopIteration
+
+The above exception was the direct cause of the following exception:
+..\..\..\backend\.venv\Lib\site-packages\pytest_asyncio\plugin.py:430: in runtest
+    super().runtest()
+..\..\..\backend\.venv\Lib\site-packages\pytest_asyncio\plugin.py:887: in inner
+    _loop.run_until_complete(task)
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\base_events.py:691: in run_until_complete
+    return future.result()
+E   RuntimeError: coroutine raised StopIteration
+_ test_nonprice_grounding_preserves_source_and_useful_answer_without_semantic_approval[supported-cerebras] _
+tests\unit\test_ag04_traditional_qualification.py:20: in test_nonprice_grounding_preserves_source_and_useful_answer_without_semantic_approval
+    case = next(c for c in data["cases"] if c["id"] == "ag04.nonprice_" + variant)
+E   StopIteration
+
+The above exception was the direct cause of the following exception:
+..\..\..\backend\.venv\Lib\site-packages\pytest_asyncio\plugin.py:430: in runtest
+    super().runtest()
+..\..\..\backend\.venv\Lib\site-packages\pytest_asyncio\plugin.py:887: in inner
+    _loop.run_until_complete(task)
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\base_events.py:691: in run_until_complete
+    return future.result()
+E   RuntimeError: coroutine raised StopIteration
+_ test_nonprice_grounding_preserves_source_and_useful_answer_without_semantic_approval[supported-openai] _
+tests\unit\test_ag04_traditional_qualification.py:20: in test_nonprice_grounding_preserves_source_and_useful_answer_without_semantic_approval
+    case = next(c for c in data["cases"] if c["id"] == "ag04.nonprice_" + variant)
+E   StopIteration
+
+The above exception was the direct cause of the following exception:
+..\..\..\backend\.venv\Lib\site-packages\pytest_asyncio\plugin.py:430: in runtest
+    super().runtest()
+..\..\..\backend\.venv\Lib\site-packages\pytest_asyncio\plugin.py:887: in inner
+    _loop.run_until_complete(task)
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\base_events.py:691: in run_until_complete
+    return future.result()
+E   RuntimeError: coroutine raised StopIteration
+_ test_nonprice_grounding_preserves_source_and_useful_answer_without_semantic_approval[supported-gemini] _
+tests\unit\test_ag04_traditional_qualification.py:20: in test_nonprice_grounding_preserves_source_and_useful_answer_without_semantic_approval
+    case = next(c for c in data["cases"] if c["id"] == "ag04.nonprice_" + variant)
+E   StopIteration
+
+The above exception was the direct cause of the following exception:
+..\..\..\backend\.venv\Lib\site-packages\pytest_asyncio\plugin.py:430: in runtest
+    super().runtest()
+..\..\..\backend\.venv\Lib\site-packages\pytest_asyncio\plugin.py:887: in inner
+    _loop.run_until_complete(task)
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\base_events.py:691: in run_until_complete
+    return future.result()
+E   RuntimeError: coroutine raised StopIteration
+_ test_nonprice_grounding_preserves_source_and_useful_answer_without_semantic_approval[absent_link-groq] _
+tests\unit\test_ag04_traditional_qualification.py:20: in test_nonprice_grounding_preserves_source_and_useful_answer_without_semantic_approval
+    case = next(c for c in data["cases"] if c["id"] == "ag04.nonprice_" + variant)
+E   StopIteration
+
+The above exception was the direct cause of the following exception:
+..\..\..\backend\.venv\Lib\site-packages\pytest_asyncio\plugin.py:430: in runtest
+    super().runtest()
+..\..\..\backend\.venv\Lib\site-packages\pytest_asyncio\plugin.py:887: in inner
+    _loop.run_until_complete(task)
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\base_events.py:691: in run_until_complete
+    return future.result()
+E   RuntimeError: coroutine raised StopIteration
+_ test_nonprice_grounding_preserves_source_and_useful_answer_without_semantic_approval[absent_link-cerebras] _
+tests\unit\test_ag04_traditional_qualification.py:20: in test_nonprice_grounding_preserves_source_and_useful_answer_without_semantic_approval
+    case = next(c for c in data["cases"] if c["id"] == "ag04.nonprice_" + variant)
+E   StopIteration
+
+The above exception was the direct cause of the following exception:
+..\..\..\backend\.venv\Lib\site-packages\pytest_asyncio\plugin.py:430: in runtest
+    super().runtest()
+..\..\..\backend\.venv\Lib\site-packages\pytest_asyncio\plugin.py:887: in inner
+    _loop.run_until_complete(task)
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\base_events.py:691: in run_until_complete
+    return future.result()
+E   RuntimeError: coroutine raised StopIteration
+_ test_nonprice_grounding_preserves_source_and_useful_answer_without_semantic_approval[absent_link-openai] _
+tests\unit\test_ag04_traditional_qualification.py:20: in test_nonprice_grounding_preserves_source_and_useful_answer_without_semantic_approval
+    case = next(c for c in data["cases"] if c["id"] == "ag04.nonprice_" + variant)
+E   StopIteration
+
+The above exception was the direct cause of the following exception:
+..\..\..\backend\.venv\Lib\site-packages\pytest_asyncio\plugin.py:430: in runtest
+    super().runtest()
+..\..\..\backend\.venv\Lib\site-packages\pytest_asyncio\plugin.py:887: in inner
+    _loop.run_until_complete(task)
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\base_events.py:691: in run_until_complete
+    return future.result()
+E   RuntimeError: coroutine raised StopIteration
+_ test_nonprice_grounding_preserves_source_and_useful_answer_without_semantic_approval[absent_link-gemini] _
+tests\unit\test_ag04_traditional_qualification.py:20: in test_nonprice_grounding_preserves_source_and_useful_answer_without_semantic_approval
+    case = next(c for c in data["cases"] if c["id"] == "ag04.nonprice_" + variant)
+E   StopIteration
+
+The above exception was the direct cause of the following exception:
+..\..\..\backend\.venv\Lib\site-packages\pytest_asyncio\plugin.py:430: in runtest
+    super().runtest()
+..\..\..\backend\.venv\Lib\site-packages\pytest_asyncio\plugin.py:887: in inner
+    _loop.run_until_complete(task)
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\base_events.py:691: in run_until_complete
+    return future.result()
+E   RuntimeError: coroutine raised StopIteration
+_ test_nonprice_common_controls_fail_when_source_missing_or_answer_only_abstains _
+tests\unit\test_ag04_traditional_qualification.py:43: in test_nonprice_common_controls_fail_when_source_missing_or_answer_only_abstains
+    original = next(c for c in data["cases"] if c["id"] == "ag04.nonprice_supported")
+E   StopIteration
+
+The above exception was the direct cause of the following exception:
+..\..\..\backend\.venv\Lib\site-packages\pytest_asyncio\plugin.py:430: in runtest
+    super().runtest()
+..\..\..\backend\.venv\Lib\site-packages\pytest_asyncio\plugin.py:887: in inner
+    _loop.run_until_complete(task)
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\base_events.py:691: in run_until_complete
+    return future.result()
+E   RuntimeError: coroutine raised StopIteration
+=========================== short test summary info ===========================
+FAILED tests/unit/test_ag04_native_qualification.py::test_nonprice_grounding_preserves_source_and_useful_answer_without_semantic_approval[supported-openai]
+FAILED tests/unit/test_ag04_native_qualification.py::test_nonprice_grounding_preserves_source_and_useful_answer_without_semantic_approval[supported-xai]
+FAILED tests/unit/test_ag04_native_qualification.py::test_nonprice_grounding_preserves_source_and_useful_answer_without_semantic_approval[absent_link-openai]
+FAILED tests/unit/test_ag04_native_qualification.py::test_nonprice_grounding_preserves_source_and_useful_answer_without_semantic_approval[absent_link-xai]
+FAILED tests/unit/test_ag04_native_qualification.py::test_nonprice_common_controls_fail_when_source_is_missing_or_answer_is_only_abstention
+FAILED tests/unit/test_ag04_traditional_qualification.py::test_nonprice_grounding_preserves_source_and_useful_answer_without_semantic_approval[supported-groq]
+FAILED tests/unit/test_ag04_traditional_qualification.py::test_nonprice_grounding_preserves_source_and_useful_answer_without_semantic_approval[supported-cerebras]
+FAILED tests/unit/test_ag04_traditional_qualification.py::test_nonprice_grounding_preserves_source_and_useful_answer_without_semantic_approval[supported-openai]
+FAILED tests/unit/test_ag04_traditional_qualification.py::test_nonprice_grounding_preserves_source_and_useful_answer_without_semantic_approval[supported-gemini]
+FAILED tests/unit/test_ag04_traditional_qualification.py::test_nonprice_grounding_preserves_source_and_useful_answer_without_semantic_approval[absent_link-groq]
+FAILED tests/unit/test_ag04_traditional_qualification.py::test_nonprice_grounding_preserves_source_and_useful_answer_without_semantic_approval[absent_link-cerebras]
+FAILED tests/unit/test_ag04_traditional_qualification.py::test_nonprice_grounding_preserves_source_and_useful_answer_without_semantic_approval[absent_link-openai]
+FAILED tests/unit/test_ag04_traditional_qualification.py::test_nonprice_grounding_preserves_source_and_useful_answer_without_semantic_approval[absent_link-gemini]
+FAILED tests/unit/test_ag04_traditional_qualification.py::test_nonprice_common_controls_fail_when_source_missing_or_answer_only_abstains
+14 failed, 110 deselected in 14.77s

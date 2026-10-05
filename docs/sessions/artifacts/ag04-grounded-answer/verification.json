@@ -1,0 +1,166 @@
+{
+  "candidate_revision": "daf092b43ef84783888ff42d6396f57cbc9596e6",
+  "baseline_revision": "7660fe7eeb9a2d66d93fb6b92b10578639aee097",
+  "source_files": [
+    "backend/tests/fixtures/conversation/ag04_native.json",
+    "backend/tests/fixtures/conversation/ag04_traditional.json",
+    "backend/tests/qualification/ag04_native.py",
+    "backend/tests/qualification/ag04_traditional.py",
+    "backend/tests/unit/test_ag04_native_qualification.py",
+    "backend/tests/unit/test_ag04_traditional_qualification.py"
+  ],
+  "source_scope": "Six existing runner/corpus/unit-test files; no application, prompt, matrix, evaluator, threshold or tracker status edits.",
+  "working_directory": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag04-grounded-answer-20261006\\backend",
+  "interpreter": "C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/backend/.venv/Scripts/python.exe",
+  "environment": {
+    "ENVIRONMENT": "test",
+    "PYTHONPATH_order": [
+      "C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/tmp/postgres-matrix-20261005/tmp/exact-requirements-20261005/packages",
+      "C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/tmp/production-ready-ag07-20261005/tmp/op02-testdeps"
+    ]
+  },
+  "dependency_evidence": "dependency-parity.json: 62/62 active direct requirements satisfied, no fresh transitive resolution.",
+  "checks": [
+    {
+      "command": "python -m pytest tests/unit/test_ag04_native_qualification.py tests/unit/test_ag04_traditional_qualification.py -k nonprice -q --tb=short",
+      "exit_code": 1,
+      "failed": 14,
+      "deselected": 110,
+      "output": "fixture-gap-before.txt",
+      "meaning": "Cases absent before extension; coverage gap, not a production runtime defect."
+    },
+    {
+      "command": "python -m pytest tests/unit/test_ag04_native_qualification.py tests/unit/test_ag04_traditional_qualification.py -k nonprice -q --tb=short",
+      "exit_code": 1,
+      "failed": 5,
+      "passed": 9,
+      "output": "focused-initial.txt",
+      "meaning": "Fixture assumptions: Gemini source is in system_instruction, and third sentence was beyond the speech cap. Initial observations preserved separately; no production change."
+    },
+    {
+      "command": "python -m pytest tests/unit/test_ag04_native_qualification.py tests/unit/test_ag04_traditional_qualification.py -k nonprice -q --tb=short",
+      "exit_code": 0,
+      "passed": 14,
+      "deselected": 110,
+      "output": "focused-final.txt"
+    },
+    {
+      "command": "python -m pytest tests/unit/test_ag04_native_qualification.py tests/unit/test_ag04_traditional_qualification.py tests/unit/test_ag04_qualification_gate.py -q --tb=short",
+      "exit_code": 0,
+      "passed": 153,
+      "skipped": 0,
+      "warnings": 1978,
+      "output": "qualification-tests-final.txt"
+    },
+    {
+      "command": "python -m ruff check --select F backend/tests/qualification/ag04_native.py backend/tests/qualification/ag04_traditional.py backend/tests/unit/test_ag04_native_qualification.py backend/tests/unit/test_ag04_traditional_qualification.py",
+      "cwd": "repository root",
+      "exit_code": 0,
+      "output": "lint-final.txt"
+    },
+    {
+      "command": "python -m scripts.evaluate_ag04_conversations --output ../docs/sessions/artifacts/ag04-grounded-answer/replay.json",
+      "exit_code": 1,
+      "expected_reason": "The unchanged captured historical Groq semantic failure remains failed; offline controls never approve production.",
+      "counts": {
+        "declared_profile_scenario_rows": 240,
+        "observed_rows": 240,
+        "distinct_replayed_scenario_ids": 84,
+        "control_checks": 2278,
+        "control_failures": 0,
+        "captured_or_reviewed_semantic_failures": 1,
+        "unreviewed_semantic_findings": 239
+      },
+      "output": "replay.json.gz",
+      "console": "replay-console.txt",
+      "network_attempts": 0,
+      "evidence_errors": 0
+    },
+    {
+      "command": "git diff --check",
+      "cwd": "repository root",
+      "exit_code": 0
+    },
+    {
+      "command": "python C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/tmp/postgres-matrix-20261005/tmp/exact-requirements-20261005/verify_parity.py backend/requirements.txt docs/sessions/artifacts/ag04-grounded-answer/dependency-parity.json --expected-target C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/tmp/postgres-matrix-20261005/tmp/exact-requirements-20261005/packages",
+      "cwd": "repository root",
+      "exit_code": 0,
+      "active_requirements": 62,
+      "failures": 0,
+      "output": "dependency-parity.json",
+      "note": "Paths containing spaces were separately quoted."
+    }
+  ],
+  "new_rows": 12,
+  "new_runtime_controls": 132,
+  "canonical_union": {
+    "replayed_anywhere": 43,
+    "proposed_catalog": 50,
+    "remaining_unmapped": [
+      "ag04.background_speech",
+      "ag04.echo_reentry",
+      "ag04.hold_music",
+      "ag04.sensitive_data_offer",
+      "ag04.silence_without_request",
+      "ag04.unclear_name",
+      "ag04.unrelated_request"
+    ],
+    "note": "43/50 is aggregate mapping, not complete per-profile qualification or human passes; fixtures add one canonical condition."
+  },
+  "preserved_semantic_failures": [
+    {
+      "scenario_id": "ag04.prior_question_rephrase",
+      "engine": "traditional",
+      "profile": {
+        "provider": "groq",
+        "model": "openai/gpt-oss-20b",
+        "voice": "synthetic-no-audio",
+        "settings": {
+          "temperature": 0.2,
+          "visible_token_target": 300
+        },
+        "mode": "offline_replay"
+      },
+      "id": "semantic_rubric",
+      "status": "fail",
+      "detail": "The captured reply changes new setup versus replacement into upgrading an assumed current terminal. Actual request contains the original question."
+    }
+  ],
+  "review": [
+    {
+      "reviewer": "root",
+      "scope": "Six files, including actual inside-fence/history amendments",
+      "result": "No material defect found; approved source commit."
+    },
+    {
+      "reviewer": "llm_audit",
+      "scope": "Independent six-file read-only review; no test/PG/provider execution",
+      "result": "No material defect found."
+    }
+  ],
+  "limits": [
+    "All new scripted semantics unreviewed; no actual model comprehension measured.",
+    "Only supported absent-resource containment is demonstrated; arbitrary factual embellishment is not deterministically checked.",
+    "Native completion is a synthetic transport receipt, not human hearing; traditional TTS is intercepted before audio.",
+    "No provider, network, telephone, database, customer effects, or durable knowledge/storage proof.",
+    "Original models, defaults, price mapping, captured Groq failure, matrix/evaluator/threshold/status files unchanged.",
+    "No package acceptance closed."
+  ],
+  "replay_uncompressed_sha256": "a3016e298971fcefa63031a42ba832b423e73f5877be0a16961a31dee5ead94e",
+  "artifacts_sha256": {
+    "dependency-parity.json": "7bd174d65e5d2593bbf6296961d7af7d45ec178038adfc6f3f074370edefca8d",
+    "fixture-gap-before.txt": "f357cb27ee90e8a9d6cdc877054afab43837dfe331ade7c0034d903715f649c9",
+    "focused-final.txt": "d58143772854b92fc8e331166e887bca470eeaaa67c9b26d475126045364d74f",
+    "focused-initial.txt": "f51d5928c3435b97ff7f745b992a403e072c1168b2631d460c7c40492c880b44",
+    "initial-observations-console.txt": "664208a2cce7cd40c91c6ebc7577e8398b771c37a25c43bfb11ea310a0bf8a99",
+    "lint-final.txt": "a4443afdcfb6d7363adb285762515ccf7cf50473b1a05c20c1a50f6bed4d26b0",
+    "lint.txt": "a4443afdcfb6d7363adb285762515ccf7cf50473b1a05c20c1a50f6bed4d26b0",
+    "new-controls.json.gz": "c76a10904b1a519550d34ca0f17a859d040c31d5249940411f8742fc8aef108b",
+    "qualification-tests-final.txt": "1961c99ecd89062674faae9c71af2889252cc31c5d769cc3fd9744b1d4386b13",
+    "qualification-tests.txt": "17234f7f40c393df22941a63d7210d1ae7982d4a010ab263ab86423cd356e261",
+    "replay-console.txt": "0dd27b95891167722ddd8a99ca44f9f50b8c83f2bfccc888828747284e017088",
+    "replay-exit.txt": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
+    "replay.json.gz": "aea20f778c73771c36c109048dbbacf8564b43ccf213519312a345f1ae940b88",
+    "traditional-initial-observations.json.gz": "c318131d28fe24edc62b8b50842871d7b7a5b03f412dca1ae2a1e3ac2872b121"
+  }
+}
