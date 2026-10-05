@@ -581,10 +581,12 @@
           "candidate": "add699c4f7bf1fbf603f078e862f7229a04406c8"
         },
         "docs/sessions/artifacts/ag04-passive-email-failure/verification.md",
-        "docs/sessions/artifacts/ag04-native-parity/verification.md"
+        "docs/sessions/artifacts/ag04-native-parity/verification.md",
+        "docs/sessions/artifacts/ag04-unresolved-action-speech/verification.md",
+        "docs/sessions/artifacts/ag04-unknown-common/verification.md"
       ],
-      "blocker": "Captured Groq semantic failure retained. Proposed matrix 41/50 mapped by offline replay; intended profile roster/rubric/cohort unratified; live/human/audio/effect acceptance not run. AG02 retrieval gate remains failed. Unknown-outcome failure/retry speech needs the bounded repair under investigation.",
-      "next_action": "Complete status-aware unknown-outcome speech controls and remaining meaningful per-engine/canonical qualification. Preserve failed Groq semantics and perform approved per-profile human/live qualification. The 41/50 union and 216 replay rows are not approval. Nine canonical IDs remain unmapped; acoustic/semantic gaps need their actual boundaries.",
+      "blocker": "Captured Groq semantic failure retained. Proposed matrix 42/50 mapped by offline replay; intended profile roster/rubric/cohort unratified; live/human/audio/effect acceptance not run. AG02 retrieval gate remains failed. Eight canonical conditions remain unmapped.",
+      "next_action": "Qualify remaining actual acoustic, grounded-answer, sensitive/unrelated request and unclear-name boundaries. Preserve failed Groq semantics and perform approved per-profile human/live qualification. The 42/50 union, 228 replay rows and 2,146 passing runtime controls are not semantic or live approval; unresolved-action speech repair does not prove durable duplicate-effect recovery.",
       "target_date": null,
       "execution_note": "1797 tests passed0skip;170offline rows1120controlchecks0failed;1retained semantic failure/169unreviewed. Local source commit only; no provider call/push/deploy."
     },
@@ -675,7 +677,9 @@
           "path": "docs/sessions/2026-10-05-ag06-admin-receipts.md",
           "kind": "saved_receipt_and_selection_truth_verified_locally",
           "candidate": "0cda5660"
-        }
+        },
+        "docs/sessions/artifacts/ag04-unresolved-action-speech/verification.md",
+        "docs/sessions/artifacts/ag04-unknown-common/verification.md"
       ],
       "blocker": null,
       "next_action": "Complete original-account evidence inspection and approved durable operator resolution of held outcomes; saved receipt display and selection ownership are locally verified. Missing IDs, timeouts and empty searches do not authorize resend. Designated provider/browser acceptance remains open.",

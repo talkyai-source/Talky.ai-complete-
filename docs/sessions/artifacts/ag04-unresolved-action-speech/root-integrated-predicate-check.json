@@ -1,0 +1,80 @@
+{
+  "candidate": "b8310ae73d060d18254004b5720d03ac5eb14476",
+  "source": "backend/app/domain/services/llm_guardrails.py",
+  "source_sha256": "4b01e04c0651d2bef0361c5cae7c5f2247790b850fe471b827ac2cd00a489d56",
+  "execution": "Actual integrated validator, synthetic receipts; zero model/provider/database calls",
+  "rows": [
+    {
+      "text": "The callback, as requested, was scheduled.",
+      "receipt_status": null,
+      "valid": false,
+      "reason": "unconfirmed_action:schedule_callback"
+    },
+    {
+      "text": "The email, as requested, was sent.",
+      "receipt_status": null,
+      "valid": false,
+      "reason": "unconfirmed_action:send_email"
+    },
+    {
+      "text": "The form, as requested, was submitted.",
+      "receipt_status": null,
+      "valid": false,
+      "reason": "unconfirmed_action:submit_form"
+    },
+    {
+      "text": "I have sent the price and payment information.",
+      "receipt_status": null,
+      "valid": false,
+      "reason": "unconfirmed_action:send_email"
+    },
+    {
+      "text": "The callback, as requested, was scheduled.",
+      "receipt_status": "unknown",
+      "valid": false,
+      "reason": "action_failed:schedule_callback:unknown"
+    },
+    {
+      "text": "The email, as requested, was sent.",
+      "receipt_status": "unknown",
+      "valid": false,
+      "reason": "action_failed:send_email:unknown"
+    },
+    {
+      "text": "The form, as requested, was submitted.",
+      "receipt_status": "unknown",
+      "valid": false,
+      "reason": "action_failed:submit_form:unknown"
+    },
+    {
+      "text": "I have sent the price and payment information.",
+      "receipt_status": "unknown",
+      "valid": false,
+      "reason": "action_failed:send_email:unknown"
+    },
+    {
+      "text": "The callback, as requested, was scheduled.",
+      "receipt_status": "failed",
+      "valid": false,
+      "reason": "action_failed:schedule_callback:failed"
+    },
+    {
+      "text": "The email, as requested, was sent.",
+      "receipt_status": "failed",
+      "valid": false,
+      "reason": "action_failed:send_email:failed"
+    },
+    {
+      "text": "The form, as requested, was submitted.",
+      "receipt_status": "failed",
+      "valid": false,
+      "reason": "action_failed:submit_form:failed"
+    },
+    {
+      "text": "I have sent the price and payment information.",
+      "receipt_status": "failed",
+      "valid": false,
+      "reason": "action_failed:send_email:failed"
+    }
+  ]
+}

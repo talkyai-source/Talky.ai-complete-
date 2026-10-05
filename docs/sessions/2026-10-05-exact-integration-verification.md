@@ -210,3 +210,37 @@ the committed source; two reviewers examined the bounded change. This is separat
 from the earlier 1,296-check run, not part of that source snapshot or a new full
 backend result. No deployed permissions, persistence or live acceptance is
 inferred. OP07, OP11 and all final/scenario gate statuses remain unchanged.
+
+## Unresolved-action speech and common runtime controls
+
+The [shared speech repair](artifacts/ag04-unresolved-action-speech/verification.md)
+checks existing unknown/in-progress receipts before admitting recognized false
+failure or action-specific resend language. It retains honest uncertainty and
+the existing repair/fallback/executor policies. Initial source `7e6a96bf` requires
+follow-up `39b95480`; both were integrated, ending at source `4c006e6c`. Root found
+four positive-claim regressions in the first draft, and a nearest-match prototype
+was also rejected. Their evidence remains. Final positive matching preserves the
+original predicate spans; this is a bounded language guard, not general NLP proof.
+
+The final four-module guard batch passed **236 checks, zero skipped**. Independent
+review passed nineteen actual-method probes. Root also repeated the four positive
+regressions across absent/unknown/failed receipts on integrated `b8310ae7`:
+[all twelve were blocked correctly](artifacts/ag04-unresolved-action-speech/root-integrated-predicate-check.json).
+These overlapping controls are not additive whole-suite coverage.
+
+Test-only source `3b00bc68` was integrated as `b060521d`; its
+[final common replay](artifacts/ag04-unknown-common/verification.md) is bound to
+the corrected owner source `39b95480`. It passed 180 focused checks with zero
+skips. The CLI completed **228 rows and 2,146 runtime controls**, with zero control
+failures, one retained Groq semantic failure and 227 unreviewed findings. Exit 1
+and `production_approved=false` remain correct. The canonical union is now
+**42/50**, adding only the existing unresolved-action condition. Eight conditions
+remain unmapped: background speech, echo reentry, grounded nonprice answer, hold
+music, sensitive data offer, silence without request, unclear name and unrelated
+request. Per-engine gaps and human ratification also remain.
+
+The six adapters use actual runtime guards with synthetic receipts/executor ports.
+One executor invocation in the authored sequence does not prove real timeout
+reconciliation, durable no-resend behavior, model comprehension or heard speech.
+No provider, telephone or database effect was performed. Package/final/scenario
+statuses and the three deferred packages remain unchanged.
