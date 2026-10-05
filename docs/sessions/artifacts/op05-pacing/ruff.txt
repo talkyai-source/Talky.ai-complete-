@@ -1,0 +1,12 @@
+tests\integration\test_op05_pacing_holds.py:16:73: F811 Redefinition of unused `hold_db` from line 8
+   |
+14 | @pytest.mark.parametrize("reason,delay", CASES)
+15 | @pytest.mark.parametrize("denied", [False, True])
+16 | async def test_pacing_retains_database_owner_and_original_redis_attempt(hold_db, monkeypatch, reason, delay, denied):
+   |                                                                         ^^^^^^^ F811
+17 |     db = hold_db
+18 |     original_job = DialerJob(job_id=str(db.job_id), tenant_id=str(db.tenant),
+   |
+   = help: Remove definition: `hold_db`
+
+Found 1 error.

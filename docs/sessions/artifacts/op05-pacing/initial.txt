@@ -1,0 +1,126 @@
+FFFFFFFFFF                                                               [100%]
+================================== FAILURES ===================================
+_ test_pacing_hold_preserves_attempt_and_exact_durable_due[batch_capacity-5] __
+tests\unit\test_op05_pacing_holds.py:44: in test_pacing_hold_preserves_attempt_and_exact_durable_due
+    assert saved["attempt_number"] == job.attempt_number == 1
+E   assert 2 == 1
+E    +  where 2 = DialerJob(id=job-abc..., phone=+447700900123, priority=5, status=JobStatus.RETRY_SCHEDULED, attempt=2).attempt_number
+____ test_pacing_hold_preserves_attempt_and_exact_durable_due[call_gap-17] ____
+tests\unit\test_op05_pacing_holds.py:44: in test_pacing_hold_preserves_attempt_and_exact_durable_due
+    assert saved["attempt_number"] == job.attempt_number == 1
+E   assert 2 == 1
+E    +  where 2 = DialerJob(id=job-abc..., phone=+447700900123, priority=5, status=JobStatus.RETRY_SCHEDULED, attempt=2).attempt_number
+___ test_pacing_hold_preserves_attempt_and_exact_durable_due[tenant_gap-23] ___
+tests\unit\test_op05_pacing_holds.py:44: in test_pacing_hold_preserves_attempt_and_exact_durable_due
+    assert saved["attempt_number"] == job.attempt_number == 1
+E   assert 2 == 1
+E    +  where 2 = DialerJob(id=job-abc..., phone=+447700900123, priority=5, status=JobStatus.RETRY_SCHEDULED, attempt=2).attempt_number
+_ test_pacing_hold_preserves_attempt_and_exact_durable_due[call_guard_throttled-60] _
+tests\unit\test_op05_pacing_holds.py:44: in test_pacing_hold_preserves_attempt_and_exact_durable_due
+    assert saved["attempt_number"] == job.attempt_number == 1
+E   assert 2 == 1
+E    +  where 2 = DialerJob(id=job-abc..., phone=+447700900123, priority=5, status=JobStatus.RETRY_SCHEDULED, attempt=2).attempt_number
+------------------------------ Captured log call ------------------------------
+WARNING  app.workers.dialer_worker:dialer_worker.py:774 Call guard decision for job job-abc: throttle
+_ test_pacing_hold_preserves_attempt_and_exact_durable_due[call_guard_queued-30] _
+tests\unit\test_op05_pacing_holds.py:44: in test_pacing_hold_preserves_attempt_and_exact_durable_due
+    assert saved["attempt_number"] == job.attempt_number == 1
+E   assert 2 == 1
+E    +  where 2 = DialerJob(id=job-abc..., phone=+447700900123, priority=5, status=JobStatus.RETRY_SCHEDULED, attempt=2).attempt_number
+------------------------------ Captured log call ------------------------------
+WARNING  app.workers.dialer_worker:dialer_worker.py:774 Call guard decision for job job-abc: queue
+_ test_pacing_hold_database_failure_leaves_original_inflight[batch_capacity-5] _
+tests\unit\test_op05_pacing_holds.py:62: in test_pacing_hold_database_failure_leaves_original_inflight
+    await worker.process_job(job)
+app\workers\dialer_worker.py:1159: in process_job
+    await self._update_job_status(
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:2291: in _execute_mock_call
+    raise effect
+app\workers\dialer_worker.py:676: in process_job
+    await self._update_job_status(
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:2291: in _execute_mock_call
+    raise effect
+E   ConnectionError: synthetic durable hold failure
+------------------------------ Captured log call ------------------------------
+ERROR    app.workers.dialer_worker:dialer_worker.py:1119 dial_failed_terminal category=internal reason=no_response attempt=2 (max attempts for category exhausted) job=job-abc lead=lead-abc dest=+447700900123 err=synthetic durable hold failure
+WARNING  app.workers.dialer_worker:dialer_worker.py:2777 could not write failure_category/reason for job=job-abc (missing columns? not yet migrated?): 'NoneType' object has no attribute 'acquire'
+___ test_pacing_hold_database_failure_leaves_original_inflight[call_gap-17] ___
+tests\unit\test_op05_pacing_holds.py:62: in test_pacing_hold_database_failure_leaves_original_inflight
+    await worker.process_job(job)
+app\workers\dialer_worker.py:1159: in process_job
+    await self._update_job_status(
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:2291: in _execute_mock_call
+    raise effect
+app\workers\dialer_worker.py:710: in process_job
+    await self._update_job_status(
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:2291: in _execute_mock_call
+    raise effect
+E   ConnectionError: synthetic durable hold failure
+------------------------------ Captured log call ------------------------------
+ERROR    app.workers.dialer_worker:dialer_worker.py:1119 dial_failed_terminal category=internal reason=no_response attempt=2 (max attempts for category exhausted) job=job-abc lead=lead-abc dest=+447700900123 err=synthetic durable hold failure
+WARNING  app.workers.dialer_worker:dialer_worker.py:2777 could not write failure_category/reason for job=job-abc (missing columns? not yet migrated?): 'NoneType' object has no attribute 'acquire'
+__ test_pacing_hold_database_failure_leaves_original_inflight[tenant_gap-23] __
+tests\unit\test_op05_pacing_holds.py:62: in test_pacing_hold_database_failure_leaves_original_inflight
+    await worker.process_job(job)
+app\workers\dialer_worker.py:1159: in process_job
+    await self._update_job_status(
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:2291: in _execute_mock_call
+    raise effect
+app\workers\dialer_worker.py:743: in process_job
+    await self._update_job_status(
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:2291: in _execute_mock_call
+    raise effect
+E   ConnectionError: synthetic durable hold failure
+------------------------------ Captured log call ------------------------------
+ERROR    app.workers.dialer_worker:dialer_worker.py:1119 dial_failed_terminal category=internal reason=no_response attempt=2 (max attempts for category exhausted) job=job-abc lead=lead-abc dest=+447700900123 err=synthetic durable hold failure
+WARNING  app.workers.dialer_worker:dialer_worker.py:2777 could not write failure_category/reason for job=job-abc (missing columns? not yet migrated?): 'NoneType' object has no attribute 'acquire'
+_ test_pacing_hold_database_failure_leaves_original_inflight[call_guard_throttled-60] _
+tests\unit\test_op05_pacing_holds.py:62: in test_pacing_hold_database_failure_leaves_original_inflight
+    await worker.process_job(job)
+app\workers\dialer_worker.py:1159: in process_job
+    await self._update_job_status(
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:2291: in _execute_mock_call
+    raise effect
+app\workers\dialer_worker.py:809: in process_job
+    await self._update_job_status(
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:2291: in _execute_mock_call
+    raise effect
+E   ConnectionError: synthetic durable hold failure
+------------------------------ Captured log call ------------------------------
+WARNING  app.workers.dialer_worker:dialer_worker.py:774 Call guard decision for job job-abc: throttle
+ERROR    app.workers.dialer_worker:dialer_worker.py:1119 dial_failed_terminal category=internal reason=no_response attempt=2 (max attempts for category exhausted) job=job-abc lead=lead-abc dest=+447700900123 err=synthetic durable hold failure
+WARNING  app.workers.dialer_worker:dialer_worker.py:2777 could not write failure_category/reason for job=job-abc (missing columns? not yet migrated?): 'NoneType' object has no attribute 'acquire'
+_ test_pacing_hold_database_failure_leaves_original_inflight[call_guard_queued-30] _
+tests\unit\test_op05_pacing_holds.py:62: in test_pacing_hold_database_failure_leaves_original_inflight
+    await worker.process_job(job)
+app\workers\dialer_worker.py:1159: in process_job
+    await self._update_job_status(
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:2291: in _execute_mock_call
+    raise effect
+app\workers\dialer_worker.py:828: in process_job
+    await self._update_job_status(
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:2291: in _execute_mock_call
+    raise effect
+E   ConnectionError: synthetic durable hold failure
+------------------------------ Captured log call ------------------------------
+WARNING  app.workers.dialer_worker:dialer_worker.py:774 Call guard decision for job job-abc: queue
+ERROR    app.workers.dialer_worker:dialer_worker.py:1119 dial_failed_terminal category=internal reason=no_response attempt=2 (max attempts for category exhausted) job=job-abc lead=lead-abc dest=+447700900123 err=synthetic durable hold failure
+WARNING  app.workers.dialer_worker:dialer_worker.py:2777 could not write failure_category/reason for job=job-abc (missing columns? not yet migrated?): 'NoneType' object has no attribute 'acquire'
+============================== warnings summary ===============================
+tests/unit/test_op05_pacing_holds.py: 20 warnings
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\backend\.venv\Lib\site-packages\pydantic\main.py:250: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/unit/test_op05_pacing_holds.py::test_pacing_hold_preserves_attempt_and_exact_durable_due[batch_capacity-5]
+FAILED tests/unit/test_op05_pacing_holds.py::test_pacing_hold_preserves_attempt_and_exact_durable_due[call_gap-17]
+FAILED tests/unit/test_op05_pacing_holds.py::test_pacing_hold_preserves_attempt_and_exact_durable_due[tenant_gap-23]
+FAILED tests/unit/test_op05_pacing_holds.py::test_pacing_hold_preserves_attempt_and_exact_durable_due[call_guard_throttled-60]
+FAILED tests/unit/test_op05_pacing_holds.py::test_pacing_hold_preserves_attempt_and_exact_durable_due[call_guard_queued-30]
+FAILED tests/unit/test_op05_pacing_holds.py::test_pacing_hold_database_failure_leaves_original_inflight[batch_capacity-5]
+FAILED tests/unit/test_op05_pacing_holds.py::test_pacing_hold_database_failure_leaves_original_inflight[call_gap-17]
+FAILED tests/unit/test_op05_pacing_holds.py::test_pacing_hold_database_failure_leaves_original_inflight[tenant_gap-23]
+FAILED tests/unit/test_op05_pacing_holds.py::test_pacing_hold_database_failure_leaves_original_inflight[call_guard_throttled-60]
+FAILED tests/unit/test_op05_pacing_holds.py::test_pacing_hold_database_failure_leaves_original_inflight[call_guard_queued-30]
+10 failed, 20 warnings in 5.76s

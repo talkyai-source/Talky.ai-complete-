@@ -1,0 +1,48 @@
+........................................................................ [ 48%]
+................................................FFF..................... [ 96%]
+......                                                                   [100%]
+================================== FAILURES ===================================
+_______________ test_guard_not_evaluated_when_batch_gate_defers _______________
+tests\unit\test_dialer_worker_guard_ordering.py:89: in test_guard_not_evaluated_when_batch_gate_defers
+    worker.queue_service.schedule_retry.assert_awaited_once()
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:2334: in assert_awaited_once
+    raise AssertionError(msg)
+E   AssertionError: Expected schedule_retry to have been awaited once. Awaited 0 times.
+------------------------------ Captured log call ------------------------------
+WARNING  app.workers.dialer_worker:dialer_worker.py:1776 Failed to get lead timezone: 'NoneType' object has no attribute 'acquire'
+________________ test_guard_not_evaluated_when_call_gap_defers ________________
+tests\unit\test_dialer_worker_guard_ordering.py:104: in test_guard_not_evaluated_when_call_gap_defers
+    worker.queue_service.schedule_retry.assert_awaited_once()
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:2334: in assert_awaited_once
+    raise AssertionError(msg)
+E   AssertionError: Expected schedule_retry to have been awaited once. Awaited 0 times.
+------------------------------ Captured log call ------------------------------
+WARNING  app.workers.dialer_worker:dialer_worker.py:1776 Failed to get lead timezone: 'NoneType' object has no attribute 'acquire'
+_______________ test_guard_not_evaluated_when_tenant_gap_defers _______________
+tests\unit\test_dialer_worker_guard_ordering.py:125: in test_guard_not_evaluated_when_tenant_gap_defers
+    worker.queue_service.schedule_retry.assert_awaited_once_with(
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:2362: in assert_awaited_once_with
+    raise AssertionError(msg)
+E   AssertionError: Expected schedule_retry to have been awaited once. Awaited 0 times.
+------------------------------ Captured log call ------------------------------
+WARNING  app.workers.dialer_worker:dialer_worker.py:1776 Failed to get lead timezone: 'NoneType' object has no attribute 'acquire'
+============================== warnings summary ===============================
+tests/unit/test_op05_pacing_holds.py: 20 warnings
+tests/unit/test_op05_pre_attempt_holds.py: 22 warnings
+tests/unit/test_dialer_worker_block_visibility.py: 40 warnings
+tests/unit/test_dialer_origination_durability.py: 48 warnings
+tests/unit/test_dialer_redis_reliability.py: 26 warnings
+tests/unit/test_op01_metering_unavailable.py: 8 warnings
+tests/unit/test_dialer_lead_cooldown_gate.py: 10 warnings
+tests/unit/test_lead_timezone_precedence.py: 22 warnings
+tests/unit/test_dialer_worker_guard_ordering.py: 10 warnings
+tests/unit/test_queue_retry_idempotency.py: 4 warnings
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\backend\.venv\Lib\site-packages\pydantic\main.py:250: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/unit/test_dialer_worker_guard_ordering.py::test_guard_not_evaluated_when_batch_gate_defers
+FAILED tests/unit/test_dialer_worker_guard_ordering.py::test_guard_not_evaluated_when_call_gap_defers
+FAILED tests/unit/test_dialer_worker_guard_ordering.py::test_guard_not_evaluated_when_tenant_gap_defers
+3 failed, 147 passed, 210 warnings in 30.22s
