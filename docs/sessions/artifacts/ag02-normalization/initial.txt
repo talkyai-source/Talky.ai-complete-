@@ -1,0 +1,220 @@
+FFFFFFFFFFFF.......                                                      [100%]
+================================== FAILURES ===================================
+_ test_regular_inflection_preserves_authored_evidence[False-account-accounts] _
+
+singular = 'account', plural = 'accounts', reverse = False
+
+    @pytest.mark.parametrize("singular,plural", PAIRS)
+    @pytest.mark.parametrize("reverse", [False, True])
+    def test_regular_inflection_preserves_authored_evidence(singular, plural, reverse):
+        query, source_word = (singular, plural) if reverse else (plural, singular)
+        source = f"The {source_word} is described in this document."
+        result = evidence(query, source)
+>       assert result["status"] == "matched", result
+E       AssertionError: {'passages': [{'coverage': 0.0, 'node_id': 'synthetic', 'source_id': 'authored-source', 'source_version': 1, ...}], 'status': 'weak_match', 'text': '- Reference: The account is described in this document.'}
+E       assert 'weak_match' == 'matched'
+E         - matched
+E         + weak_match
+
+tests\unit\test_ag02_normalization_boundary.py:26: AssertionError
+_____ test_regular_inflection_preserves_authored_evidence[False-fee-fees] _____
+
+singular = 'fee', plural = 'fees', reverse = False
+
+    @pytest.mark.parametrize("singular,plural", PAIRS)
+    @pytest.mark.parametrize("reverse", [False, True])
+    def test_regular_inflection_preserves_authored_evidence(singular, plural, reverse):
+        query, source_word = (singular, plural) if reverse else (plural, singular)
+        source = f"The {source_word} is described in this document."
+        result = evidence(query, source)
+>       assert result["status"] == "matched", result
+E       AssertionError: {'passages': [{'coverage': 0.0, 'node_id': 'synthetic', 'source_id': 'authored-source', 'source_version': 1, ...}], 'status': 'weak_match', 'text': '- Reference: The fee is described in this document.'}
+E       assert 'weak_match' == 'matched'
+E         - matched
+E         + weak_match
+
+tests\unit\test_ag02_normalization_boundary.py:26: AssertionError
+_ test_regular_inflection_preserves_authored_evidence[False-booking-bookings] _
+
+singular = 'booking', plural = 'bookings', reverse = False
+
+    @pytest.mark.parametrize("singular,plural", PAIRS)
+    @pytest.mark.parametrize("reverse", [False, True])
+    def test_regular_inflection_preserves_authored_evidence(singular, plural, reverse):
+        query, source_word = (singular, plural) if reverse else (plural, singular)
+        source = f"The {source_word} is described in this document."
+        result = evidence(query, source)
+>       assert result["status"] == "matched", result
+E       AssertionError: {'passages': [{'coverage': 0.0, 'node_id': 'synthetic', 'source_id': 'authored-source', 'source_version': 1, ...}], 'status': 'weak_match', 'text': '- Reference: The booking is described in this document.'}
+E       assert 'weak_match' == 'matched'
+E         - matched
+E         + weak_match
+
+tests\unit\test_ag02_normalization_boundary.py:26: AssertionError
+_ test_regular_inflection_preserves_authored_evidence[False-delivery-deliveries] _
+
+singular = 'delivery', plural = 'deliveries', reverse = False
+
+    @pytest.mark.parametrize("singular,plural", PAIRS)
+    @pytest.mark.parametrize("reverse", [False, True])
+    def test_regular_inflection_preserves_authored_evidence(singular, plural, reverse):
+        query, source_word = (singular, plural) if reverse else (plural, singular)
+        source = f"The {source_word} is described in this document."
+        result = evidence(query, source)
+>       assert result["status"] == "matched", result
+E       AssertionError: {'passages': [], 'status': 'no_match', 'text': ''}
+E       assert 'no_match' == 'matched'
+E         - matched
+E         + no_match
+
+tests\unit\test_ag02_normalization_boundary.py:26: AssertionError
+__ test_regular_inflection_preserves_authored_evidence[False-batch-batches] ___
+
+singular = 'batch', plural = 'batches', reverse = False
+
+    @pytest.mark.parametrize("singular,plural", PAIRS)
+    @pytest.mark.parametrize("reverse", [False, True])
+    def test_regular_inflection_preserves_authored_evidence(singular, plural, reverse):
+        query, source_word = (singular, plural) if reverse else (plural, singular)
+        source = f"The {source_word} is described in this document."
+        result = evidence(query, source)
+>       assert result["status"] == "matched", result
+E       AssertionError: {'passages': [{'coverage': 0.0, 'node_id': 'synthetic', 'source_id': 'authored-source', 'source_version': 1, ...}], 'status': 'weak_match', 'text': '- Reference: The batch is described in this document.'}
+E       assert 'weak_match' == 'matched'
+E         - matched
+E         + weak_match
+
+tests\unit\test_ag02_normalization_boundary.py:26: AssertionError
+_ test_regular_inflection_preserves_authored_evidence[False-invoice-invoices] _
+
+singular = 'invoice', plural = 'invoices', reverse = False
+
+    @pytest.mark.parametrize("singular,plural", PAIRS)
+    @pytest.mark.parametrize("reverse", [False, True])
+    def test_regular_inflection_preserves_authored_evidence(singular, plural, reverse):
+        query, source_word = (singular, plural) if reverse else (plural, singular)
+        source = f"The {source_word} is described in this document."
+        result = evidence(query, source)
+>       assert result["status"] == "matched", result
+E       AssertionError: {'passages': [{'coverage': 0.0, 'node_id': 'synthetic', 'source_id': 'authored-source', 'source_version': 1, ...}], 'status': 'weak_match', 'text': '- Reference: The invoice is described in this document.'}
+E       assert 'weak_match' == 'matched'
+E         - matched
+E         + weak_match
+
+tests\unit\test_ag02_normalization_boundary.py:26: AssertionError
+_ test_regular_inflection_preserves_authored_evidence[True-account-accounts] __
+
+singular = 'account', plural = 'accounts', reverse = True
+
+    @pytest.mark.parametrize("singular,plural", PAIRS)
+    @pytest.mark.parametrize("reverse", [False, True])
+    def test_regular_inflection_preserves_authored_evidence(singular, plural, reverse):
+        query, source_word = (singular, plural) if reverse else (plural, singular)
+        source = f"The {source_word} is described in this document."
+        result = evidence(query, source)
+>       assert result["status"] == "matched", result
+E       AssertionError: {'passages': [{'coverage': 0.0, 'node_id': 'synthetic', 'source_id': 'authored-source', 'source_version': 1, ...}], 'status': 'weak_match', 'text': '- Reference: The accounts is described in this document.'}
+E       assert 'weak_match' == 'matched'
+E         - matched
+E         + weak_match
+
+tests\unit\test_ag02_normalization_boundary.py:26: AssertionError
+_____ test_regular_inflection_preserves_authored_evidence[True-fee-fees] ______
+
+singular = 'fee', plural = 'fees', reverse = True
+
+    @pytest.mark.parametrize("singular,plural", PAIRS)
+    @pytest.mark.parametrize("reverse", [False, True])
+    def test_regular_inflection_preserves_authored_evidence(singular, plural, reverse):
+        query, source_word = (singular, plural) if reverse else (plural, singular)
+        source = f"The {source_word} is described in this document."
+        result = evidence(query, source)
+>       assert result["status"] == "matched", result
+E       AssertionError: {'passages': [{'coverage': 0.0, 'node_id': 'synthetic', 'source_id': 'authored-source', 'source_version': 1, ...}], 'status': 'weak_match', 'text': '- Reference: The fees is described in this document.'}
+E       assert 'weak_match' == 'matched'
+E         - matched
+E         + weak_match
+
+tests\unit\test_ag02_normalization_boundary.py:26: AssertionError
+_ test_regular_inflection_preserves_authored_evidence[True-booking-bookings] __
+
+singular = 'booking', plural = 'bookings', reverse = True
+
+    @pytest.mark.parametrize("singular,plural", PAIRS)
+    @pytest.mark.parametrize("reverse", [False, True])
+    def test_regular_inflection_preserves_authored_evidence(singular, plural, reverse):
+        query, source_word = (singular, plural) if reverse else (plural, singular)
+        source = f"The {source_word} is described in this document."
+        result = evidence(query, source)
+>       assert result["status"] == "matched", result
+E       AssertionError: {'passages': [{'coverage': 0.0, 'node_id': 'synthetic', 'source_id': 'authored-source', 'source_version': 1, ...}], 'status': 'weak_match', 'text': '- Reference: The bookings is described in this document.'}
+E       assert 'weak_match' == 'matched'
+E         - matched
+E         + weak_match
+
+tests\unit\test_ag02_normalization_boundary.py:26: AssertionError
+_ test_regular_inflection_preserves_authored_evidence[True-delivery-deliveries] _
+
+singular = 'delivery', plural = 'deliveries', reverse = True
+
+    @pytest.mark.parametrize("singular,plural", PAIRS)
+    @pytest.mark.parametrize("reverse", [False, True])
+    def test_regular_inflection_preserves_authored_evidence(singular, plural, reverse):
+        query, source_word = (singular, plural) if reverse else (plural, singular)
+        source = f"The {source_word} is described in this document."
+        result = evidence(query, source)
+>       assert result["status"] == "matched", result
+E       AssertionError: {'passages': [], 'status': 'no_match', 'text': ''}
+E       assert 'no_match' == 'matched'
+E         - matched
+E         + no_match
+
+tests\unit\test_ag02_normalization_boundary.py:26: AssertionError
+___ test_regular_inflection_preserves_authored_evidence[True-batch-batches] ___
+
+singular = 'batch', plural = 'batches', reverse = True
+
+    @pytest.mark.parametrize("singular,plural", PAIRS)
+    @pytest.mark.parametrize("reverse", [False, True])
+    def test_regular_inflection_preserves_authored_evidence(singular, plural, reverse):
+        query, source_word = (singular, plural) if reverse else (plural, singular)
+        source = f"The {source_word} is described in this document."
+        result = evidence(query, source)
+>       assert result["status"] == "matched", result
+E       AssertionError: {'passages': [{'coverage': 0.0, 'node_id': 'synthetic', 'source_id': 'authored-source', 'source_version': 1, ...}], 'status': 'weak_match', 'text': '- Reference: The batches is described in this document.'}
+E       assert 'weak_match' == 'matched'
+E         - matched
+E         + weak_match
+
+tests\unit\test_ag02_normalization_boundary.py:26: AssertionError
+_ test_regular_inflection_preserves_authored_evidence[True-invoice-invoices] __
+
+singular = 'invoice', plural = 'invoices', reverse = True
+
+    @pytest.mark.parametrize("singular,plural", PAIRS)
+    @pytest.mark.parametrize("reverse", [False, True])
+    def test_regular_inflection_preserves_authored_evidence(singular, plural, reverse):
+        query, source_word = (singular, plural) if reverse else (plural, singular)
+        source = f"The {source_word} is described in this document."
+        result = evidence(query, source)
+>       assert result["status"] == "matched", result
+E       AssertionError: {'passages': [{'coverage': 0.0, 'node_id': 'synthetic', 'source_id': 'authored-source', 'source_version': 1, ...}], 'status': 'weak_match', 'text': '- Reference: The invoices is described in this document.'}
+E       assert 'weak_match' == 'matched'
+E         - matched
+E         + weak_match
+
+tests\unit\test_ag02_normalization_boundary.py:26: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/unit/test_ag02_normalization_boundary.py::test_regular_inflection_preserves_authored_evidence[False-account-accounts]
+FAILED tests/unit/test_ag02_normalization_boundary.py::test_regular_inflection_preserves_authored_evidence[False-fee-fees]
+FAILED tests/unit/test_ag02_normalization_boundary.py::test_regular_inflection_preserves_authored_evidence[False-booking-bookings]
+FAILED tests/unit/test_ag02_normalization_boundary.py::test_regular_inflection_preserves_authored_evidence[False-delivery-deliveries]
+FAILED tests/unit/test_ag02_normalization_boundary.py::test_regular_inflection_preserves_authored_evidence[False-batch-batches]
+FAILED tests/unit/test_ag02_normalization_boundary.py::test_regular_inflection_preserves_authored_evidence[False-invoice-invoices]
+FAILED tests/unit/test_ag02_normalization_boundary.py::test_regular_inflection_preserves_authored_evidence[True-account-accounts]
+FAILED tests/unit/test_ag02_normalization_boundary.py::test_regular_inflection_preserves_authored_evidence[True-fee-fees]
+FAILED tests/unit/test_ag02_normalization_boundary.py::test_regular_inflection_preserves_authored_evidence[True-booking-bookings]
+FAILED tests/unit/test_ag02_normalization_boundary.py::test_regular_inflection_preserves_authored_evidence[True-delivery-deliveries]
+FAILED tests/unit/test_ag02_normalization_boundary.py::test_regular_inflection_preserves_authored_evidence[True-batch-batches]
+FAILED tests/unit/test_ag02_normalization_boundary.py::test_regular_inflection_preserves_authored_evidence[True-invoice-invoices]
+12 failed, 7 passed in 4.37s

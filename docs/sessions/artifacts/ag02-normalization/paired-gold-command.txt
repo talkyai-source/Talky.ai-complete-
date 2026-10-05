@@ -1,0 +1,2 @@
+baseline {'matrix_sha256': '31782fc367ca7bb3f07ba0569b5d1eb0e4cdfbae274b618f3b7c0733db504b52', 'recall_at_3': 0.9333333333333333, 'sufficient_passage_rate': 0.7111111111111111, 'retrieval_targets_met': False}
+prototype {'matrix_sha256': '31782fc367ca7bb3f07ba0569b5d1eb0e4cdfbae274b618f3b7c0733db504b52', 'recall_at_3': 0.9333333333333333, 'sufficient_passage_rate': 0.7555555555555555, 'retrieval_targets_met': False}

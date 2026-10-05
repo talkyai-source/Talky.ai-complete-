@@ -1,0 +1,463 @@
+{
+  "scope": "wheel-only proposal assessment; no application change or model/voice proof",
+  "candidate": "snowballstemmer==2.2.0 direct EnglishStemmer; fresh per helper call",
+  "python": "3.12.12 (main, Dec  9 2025, 19:02:55) [MSC v.1944 64 bit (AMD64)]",
+  "footprint": {
+    "wheel_bytes": 93002,
+    "expanded_bytes": 785954,
+    "archive_members": 37,
+    "requires_dist": [],
+    "license": [
+      "License: BSD-3-Clause"
+    ]
+  },
+  "cold_import_samples": [
+    {
+      "import_and_instance_ms_with_tracemalloc": 1328.8579000072787,
+      "python_traced_current_bytes": 2595924,
+      "python_traced_peak_bytes": 13615435,
+      "class": "EnglishStemmer"
+    },
+    {
+      "import_and_instance_ms_with_tracemalloc": 1405.1600999955554,
+      "python_traced_current_bytes": 2596104,
+      "python_traced_peak_bytes": 13615525,
+      "class": "EnglishStemmer"
+    },
+    {
+      "import_and_instance_ms_with_tracemalloc": 1760.4066000058083,
+      "python_traced_current_bytes": 2595969,
+      "python_traced_peak_bytes": 13615435,
+      "class": "EnglishStemmer"
+    }
+  ],
+  "runtime": {
+    "input_tokens": 1600,
+    "runs_ms": [
+      98.84750000492204,
+      100.73059999558609,
+      98.41219999361783,
+      97.74589999869931,
+      94.51770001032855,
+      94.2332999984501,
+      100.8472000103211
+    ],
+    "median_ms": 98.41219999361783,
+    "long_token_length": 100000,
+    "long_token_ms": 0.05319999763742089,
+    "long_token_retained_exactly": true
+  },
+  "token_comparisons": [
+    {
+      "word": "account",
+      "snowball": "account",
+      "prototype_key": "account"
+    },
+    {
+      "word": "accounts",
+      "snowball": "account",
+      "prototype_key": "account"
+    },
+    {
+      "word": "and",
+      "snowball": "and",
+      "prototype_key": "and"
+    },
+    {
+      "word": "batch",
+      "snowball": "batch",
+      "prototype_key": "batch"
+    },
+    {
+      "word": "batches",
+      "snowball": "batch",
+      "prototype_key": "batch"
+    },
+    {
+      "word": "booking",
+      "snowball": "book",
+      "prototype_key": "book"
+    },
+    {
+      "word": "bookings",
+      "snowball": "book",
+      "prototype_key": "book"
+    },
+    {
+      "word": "bus",
+      "snowball": "bus",
+      "prototype_key": "bus"
+    },
+    {
+      "word": "business",
+      "snowball": "busi",
+      "prototype_key": "busi"
+    },
+    {
+      "word": "deliveries",
+      "snowball": "deliveri",
+      "prototype_key": "deliveri"
+    },
+    {
+      "word": "delivery",
+      "snowball": "deliveri",
+      "prototype_key": "deliveri"
+    },
+    {
+      "word": "fee",
+      "snowball": "fee",
+      "prototype_key": "fee"
+    },
+    {
+      "word": "fees",
+      "snowball": "fee",
+      "prototype_key": "fee"
+    },
+    {
+      "word": "form",
+      "snowball": "form",
+      "prototype_key": "form"
+    },
+    {
+      "word": "free",
+      "snowball": "free",
+      "prototype_key": "free"
+    },
+    {
+      "word": "from",
+      "snowball": "from",
+      "prototype_key": "from"
+    },
+    {
+      "word": "invoice",
+      "snowball": "invoic",
+      "prototype_key": "invoic"
+    },
+    {
+      "word": "invoices",
+      "snowball": "invoic",
+      "prototype_key": "invoic"
+    },
+    {
+      "word": "model500",
+      "snowball": "model500",
+      "prototype_key": "model500"
+    },
+    {
+      "word": "model500s",
+      "snowball": "model500",
+      "prototype_key": "model500s"
+    },
+    {
+      "word": "new",
+      "snowball": "new",
+      "prototype_key": "new"
+    },
+    {
+      "word": "news",
+      "snowball": "news",
+      "prototype_key": "news"
+    },
+    {
+      "word": "no",
+      "snowball": "no",
+      "prototype_key": "no"
+    },
+    {
+      "word": "not",
+      "snowball": "not",
+      "prototype_key": "not"
+    },
+    {
+      "word": "organ",
+      "snowball": "organ",
+      "prototype_key": "organ"
+    },
+    {
+      "word": "organization",
+      "snowball": "organ",
+      "prototype_key": "organ"
+    },
+    {
+      "word": "police",
+      "snowball": "polic",
+      "prototype_key": "polic"
+    },
+    {
+      "word": "policy",
+      "snowball": "polici",
+      "prototype_key": "polici"
+    },
+    {
+      "word": "series",
+      "snowball": "seri",
+      "prototype_key": "seri"
+    },
+    {
+      "word": "species",
+      "snowball": "speci",
+      "prototype_key": "speci"
+    },
+    {
+      "word": "statue",
+      "snowball": "statu",
+      "prototype_key": "statu"
+    },
+    {
+      "word": "status",
+      "snowball": "status",
+      "prototype_key": "status"
+    },
+    {
+      "word": "the",
+      "snowball": "the",
+      "prototype_key": "the"
+    },
+    {
+      "word": "universe",
+      "snowball": "univers",
+      "prototype_key": "univers"
+    },
+    {
+      "word": "university",
+      "snowball": "univers",
+      "prototype_key": "univers"
+    }
+  ],
+  "boundary_collisions": [
+    {
+      "query": "Universe",
+      "source": "University tuition costs 100 units.",
+      "baseline": {
+        "status": "no_match",
+        "passages": [],
+        "text": ""
+      },
+      "prototype": {
+        "status": "no_match",
+        "passages": [],
+        "text": ""
+      }
+    },
+    {
+      "query": "Organ",
+      "source": "Organization membership costs 50 units.",
+      "baseline": {
+        "status": "no_match",
+        "passages": [],
+        "text": ""
+      },
+      "prototype": {
+        "status": "no_match",
+        "passages": [],
+        "text": ""
+      }
+    }
+  ],
+  "postgres": {
+    "server_version": "16.1",
+    "transaction_read_only": true,
+    "rows": [
+      {
+        "word": "account",
+        "lexemes": [
+          "account"
+        ]
+      },
+      {
+        "word": "accounts",
+        "lexemes": [
+          "account"
+        ]
+      },
+      {
+        "word": "and",
+        "lexemes": []
+      },
+      {
+        "word": "batch",
+        "lexemes": [
+          "batch"
+        ]
+      },
+      {
+        "word": "batches",
+        "lexemes": [
+          "batch"
+        ]
+      },
+      {
+        "word": "booking",
+        "lexemes": [
+          "book"
+        ]
+      },
+      {
+        "word": "bookings",
+        "lexemes": [
+          "book"
+        ]
+      },
+      {
+        "word": "bus",
+        "lexemes": [
+          "bus"
+        ]
+      },
+      {
+        "word": "business",
+        "lexemes": [
+          "busi"
+        ]
+      },
+      {
+        "word": "deliveries",
+        "lexemes": [
+          "deliveri"
+        ]
+      },
+      {
+        "word": "delivery",
+        "lexemes": [
+          "deliveri"
+        ]
+      },
+      {
+        "word": "fee",
+        "lexemes": [
+          "fee"
+        ]
+      },
+      {
+        "word": "fees",
+        "lexemes": [
+          "fee"
+        ]
+      },
+      {
+        "word": "form",
+        "lexemes": [
+          "form"
+        ]
+      },
+      {
+        "word": "free",
+        "lexemes": [
+          "free"
+        ]
+      },
+      {
+        "word": "from",
+        "lexemes": []
+      },
+      {
+        "word": "invoice",
+        "lexemes": [
+          "invoic"
+        ]
+      },
+      {
+        "word": "invoices",
+        "lexemes": [
+          "invoic"
+        ]
+      },
+      {
+        "word": "model500",
+        "lexemes": [
+          "model500"
+        ]
+      },
+      {
+        "word": "model500s",
+        "lexemes": [
+          "model500"
+        ]
+      },
+      {
+        "word": "new",
+        "lexemes": [
+          "new"
+        ]
+      },
+      {
+        "word": "news",
+        "lexemes": [
+          "news"
+        ]
+      },
+      {
+        "word": "no",
+        "lexemes": []
+      },
+      {
+        "word": "not",
+        "lexemes": []
+      },
+      {
+        "word": "organ",
+        "lexemes": [
+          "organ"
+        ]
+      },
+      {
+        "word": "organization",
+        "lexemes": [
+          "organ"
+        ]
+      },
+      {
+        "word": "police",
+        "lexemes": [
+          "polic"
+        ]
+      },
+      {
+        "word": "policy",
+        "lexemes": [
+          "polici"
+        ]
+      },
+      {
+        "word": "series",
+        "lexemes": [
+          "seri"
+        ]
+      },
+      {
+        "word": "species",
+        "lexemes": [
+          "speci"
+        ]
+      },
+      {
+        "word": "statue",
+        "lexemes": [
+          "statu"
+        ]
+      },
+      {
+        "word": "status",
+        "lexemes": [
+          "status"
+        ]
+      },
+      {
+        "word": "the",
+        "lexemes": []
+      },
+      {
+        "word": "universe",
+        "lexemes": [
+          "univers"
+        ]
+      },
+      {
+        "word": "university",
+        "lexemes": [
+          "univers"
+        ]
+      }
+    ]
+  }
+}

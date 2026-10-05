@@ -1,0 +1,42 @@
+.........................FF.                                             [100%]
+================================== FAILURES ===================================
+_ test_derivational_collision_does_not_authorize_source[Universe courses-University course fees are 100 units.] _
+
+query = 'Universe courses', source = 'University course fees are 100 units.'
+
+    @pytest.mark.parametrize("query,source", [
+        ("Universes", "Universities are listed here."),
+        ("Universe courses", "University course fees are 100 units."),
+        ("Organ memberships", "Organization membership costs 50 units."),
+    ])
+    def test_derivational_collision_does_not_authorize_source(query, source):
+        """Added after the blanket-stem probe exposed these unsafe admissions."""
+>       assert evidence(query, source)["status"] != "matched"
+E       AssertionError: assert 'matched' != 'matched'
+
+tests\unit\test_ag02_normalization_boundary.py:70: AssertionError
+_ test_derivational_collision_does_not_authorize_source[Organ memberships-Organization membership costs 50 units.] _
+
+query = 'Organ memberships', source = 'Organization membership costs 50 units.'
+
+    @pytest.mark.parametrize("query,source", [
+        ("Universes", "Universities are listed here."),
+        ("Universe courses", "University course fees are 100 units."),
+        ("Organ memberships", "Organization membership costs 50 units."),
+    ])
+    def test_derivational_collision_does_not_authorize_source(query, source):
+        """Added after the blanket-stem probe exposed these unsafe admissions."""
+>       assert evidence(query, source)["status"] != "matched"
+E       AssertionError: assert 'matched' != 'matched'
+
+tests\unit\test_ag02_normalization_boundary.py:70: AssertionError
+============================== warnings summary ===============================
+..\..\..\backend\.venv\Lib\site-packages\_pytest\config\__init__.py:1204
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\backend\.venv\Lib\site-packages\_pytest\config\__init__.py:1204: PytestAssertRewriteWarning: Module already imported so cannot be rewritten: anyio
+    self._mark_plugins_for_rewrite(hook)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/unit/test_ag02_normalization_boundary.py::test_derivational_collision_does_not_authorize_source[Universe courses-University course fees are 100 units.]
+FAILED tests/unit/test_ag02_normalization_boundary.py::test_derivational_collision_does_not_authorize_source[Organ memberships-Organization membership costs 50 units.]
+2 failed, 26 passed, 1 warning in 0.48s
