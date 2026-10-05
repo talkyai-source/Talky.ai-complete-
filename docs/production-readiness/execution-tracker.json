@@ -721,10 +721,30 @@
           "path": "docs/sessions/artifacts/email-bind-actual-pg/verification.md",
           "kind": "fifteen_actual_email_intent_binding_and_status_sql_controls_private_postgresql",
           "candidate": "5d8ddba3"
+        },
+        {
+          "path": "docs/sessions/artifacts/reviewed-selector-pg/verification.md",
+          "kind": "actual_adapter_uuid_reproduction_and_twelve_private_postgresql_selector_controls",
+          "candidate": "45943862"
+        },
+        {
+          "path": "docs/sessions/artifacts/crm-reference-hold/verification.md",
+          "kind": "uncertain_call_creation_reference_adoption_repair",
+          "candidate": "e7add564"
+        },
+        {
+          "path": "docs/sessions/artifacts/crm-receipt-inspection/verification.md",
+          "kind": "admin_only_original_account_crm_reference_observation",
+          "candidate": "5b880433"
+        },
+        {
+          "path": "docs/sessions/artifacts/crm-account-integration/verification.md",
+          "kind": "333_affected_tests_on_combined_account_and_crm_source",
+          "candidate": "35fe11b0"
         }
       ],
-      "blocker": "Canonical Gmail/Google Calendar/Outlook Calendar reviewed authorization, reconnect/refresh selection and owned email/calendar status writes are repaired with scoped synthetic runtime evidence; actual email binding/status SQL has separate isolated PostgreSQL proof. The new reviewed selector SQL, live providers/browser, supported original-action-account receipt inspection and approved durable operator resolution remain unverified or unfinished. Earlier read/refresh identity and atomic authorization-generation health expiry evidence remains valid within its recorded scope.",
-      "next_action": "Complete original-action-account evidence inspection on the existing Admin support surface, then approved durable operator resolution and designated end-to-end acceptance. The local authorization row is an explicit versioned proof, never a fabricated provider account ID. Separately requested message IDs are not receipt-bound inspection; missing IDs, timeouts and empty searches do not authorize resend.",
+      "blocker": "Canonical reviewed authorization and native PostgreSQL UUID admission are repaired; actual email binding and reviewed-selector SQL have separate isolated PostgreSQL evidence. Uncertain CRM call creation no longer adopts title-only matches; Admin can explicitly inspect the original CRM account without writes or refresh. The combined local regression passed 333 tests. Approved durable operator resolution, remaining original email/calendar receipt inspection, full schema/browser and designated live-provider acceptance remain open. CRM read-only resolver SQL is covered by synthetic route/provider tests, not the separate PostgreSQL selector probe.",
+      "next_action": "Complete supported original email/calendar receipt inspection and the approved durable operator-resolution contract, then designated end-to-end acceptance. CRM inspection is observation only: a title/subject match does not prove payload/contact/ownership or completion, and an empty search does not authorize resend. Preserve all original identities and uncertain receipts; do not backfill or bind historical missing proof to the current account.",
       "target_date": null
     },
     {

@@ -468,3 +468,39 @@ Original-account receipt inspection, an approved durable operator-resolution
 workflow and designated provider/browser acceptance remain unfinished. No
 package, scenario, final gate or deferred status was promoted. No live provider,
 customer message/calendar, deployment or push occurred in this repair.
+
+
+## PostgreSQL identity and original-account CRM follow-up (6 October)
+
+Actual database verification subsequently exposed a native UUID mismatch that
+the preceding synthetic reviewed-account run missed. Source `45943862` accepts
+the actual adapter's UUID type while preserving strict row pinning and rejecting
+arbitrary identities. The [database report](artifacts/reviewed-selector-pg/verification.md)
+records the original failure, **168 focused tests and 12 actual SQL controls**.
+Private schema/role objects were removed and public snapshots were unchanged.
+The metadata cache routing and partial-schema limitations remain explicit.
+
+Source `e7add564` also corrects a gap in the earlier statement that unknown CRM
+creation was held. Contact creation was held, but uncertain call creation could
+still adopt a matching title/subject, update that record and report success.
+The [repair](artifacts/crm-reference-hold/verification.md) now holds that path
+before provider resolution or lookup, preserving all original evidence.
+
+Source `5b880433` adds a read-only original-account CRM inspection button to the
+existing platform-admin call drawer. The [owner report](artifacts/crm-receipt-inspection/verification.md)
+records **393 backend and 52 Admin tests**, type checking, lint and build checks.
+Inspection derives its destination from the saved receipt; it does not refresh,
+write, retry, resolve or infer completion from a matching reference.
+
+The [combined integration](artifacts/crm-account-integration/verification.md)
+passed **333 tests, zero failures/skips and one warning** on `35fe11b0` across
+eight affected modules. All sixteen recorded source/test inputs remained
+unchanged and matched Git; no prohibited network attempt occurred. Earlier
+owner totals overlap this run. The shared resolver contains both reviewed changes;
+the prior PostgreSQL probe did not execute the later opt-in CRM read mode.
+
+Original email/calendar receipt inspection, approved durable operator resolution,
+browser/live-provider and release acceptance remain open. Package counts remain
+27 eligible unfinished, AG03 separately candidate verified and three deferred;
+all fifteen final gates and twenty-two scenario gates remain not run. No push,
+deployment, live provider call or freeze exit is included.
