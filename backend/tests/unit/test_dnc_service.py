@@ -75,7 +75,8 @@ class _FakeConn:
         sql_norm = " ".join(sql.split())
 
         if "INSERT INTO dnc_entries" in sql_norm and "DO NOTHING" in sql_norm:
-            tenant_id, number, source, reason, added_by, expires_at = args
+            tenant_id, number, source, reason = args[:4]
+            added_by, expires_at = args[4:] if len(args) == 6 else (None, None)
             key = (tenant_id, number, source)
             if key in self.store["by_tuple"]:
                 return None
@@ -90,11 +91,18 @@ class _FakeConn:
             return row
 
         if sql_norm.startswith("UPDATE dnc_entries"):
-            tenant_id, number, source, reason, expires_at = args
+            tenant_id, number, source, reason = args[:4]
+            expires_at = args[4] if len(args) == 5 else None
             key = (tenant_id, number, source)
             existing = self.store["by_tuple"].get(key)
             if existing is None:
                 return None
+            previous_expiry = existing["expires_at"]
+            if (len(args) == 4 and source != "caller_opt_out" and previous_expiry is not None
+                    and previous_expiry <= datetime.now(previous_expiry.tzinfo)):
+                return None
+            if source == "caller_opt_out":
+                existing["expires_at"] = None
             if reason is not None:
                 existing["reason"] = reason
             if expires_at is not None:

@@ -72,6 +72,8 @@ RETRYABLE_CAPS = [
 class _FakeConn:
     def __init__(self, calls_row: dict, leads_row: dict, dialer_jobs_row: dict) -> None:
         self.calls_row = calls_row
+        self.calls_row.setdefault("tenant_id", "20000000-0000-4000-8000-000000000017")
+        self.calls_row.setdefault("phone_number", "+15555550107")
         self.calls_row.setdefault("outcome", None)
         self.calls_row.setdefault("ended_at", None)
         self.calls_row.setdefault("duration_seconds", None)
@@ -146,6 +148,10 @@ class _FakeConn:
 
     async def fetchval(self, query: str, *args: Any):
         q = " ".join(query.split())
+        if "FROM dnc_entries" in q:
+            return False
+        if "SELECT id FROM leads" in q:
+            return self.leads_row["id"] if self.leads_row["id"] == args[0] else None
         if "SELECT call_attempts FROM leads" in q:
             return self.leads_row.get("call_attempts", 0)
         if q.startswith("UPDATE dialer_jobs") and "RETURNING id" in q:

@@ -29,7 +29,9 @@ from app.domain.services.call_status import (
     CallOutcome as CallStatusOutcome,
 )
 from app.domain.services.dialer.job_states import IN_FLIGHT_STATUSES
+from app.domain.services.dialer.job_lifecycle import NOT_ORIGINATED_JOB_STATUSES
 from app.workers.disposition_policy import DNC_OUTCOMES
+from app.domain.services.dnc_service import normalize_e164_for_storage
 
 logger = logging.getLogger(__name__)
 
@@ -523,7 +525,7 @@ class CallService:
                 # have committed exactly once.
                 row = await conn.fetchrow(
                     """
-                    SELECT id, lead_id, campaign_id, dialer_job_id, status,
+                    SELECT id, tenant_id, phone_number, lead_id, campaign_id, dialer_job_id, status,
                            outcome, ended_at, duration_seconds,
                            terminal_settled_at, terminal_retry_payload,
                            terminal_retry_enqueued_at
@@ -544,7 +546,54 @@ class CallService:
                         )
                     )
 
+                # Serialize lead projection with a concurrent opt-out purge
+                # before reading DNC. Otherwise a cached negative lookup can
+                # overwrite an opt-out which committed while this lock waited.
+                if row["lead_id"]:
+                    owned_lead = await conn.fetchval(
+                        "SELECT id FROM leads WHERE id=$1 AND tenant_id=$2 FOR UPDATE",
+                        row["lead_id"], row["tenant_id"],
+                    )
+                    if owned_lead is None:
+                        raise RuntimeError("call_lead_owner_unverified")
+
+                # The persisted call owns the original destination. A changed
+                # lead phone or a process-local marker cannot authorize suppression.
+                caller_opted_out = await self._active_caller_opt_out_pooled(conn, row)
+
                 if row["terminal_settled_at"] is not None:
+                    if caller_opted_out:
+                        if row["lead_id"]:
+                            await conn.execute(
+                                """UPDATE leads SET status='dnc', last_call_result='caller_opt_out',
+                                       updated_at=NOW() WHERE id=$1 AND tenant_id=$2""",
+                                row["lead_id"], row["tenant_id"],
+                            )
+                        if (row["terminal_retry_payload"] is not None
+                                and row["terminal_retry_enqueued_at"] is None):
+                            # Recovering the outbox must not re-create work which
+                            # a durable opt-out has since cancelled. No counters
+                            # or prior call outcome are replayed/rewritten.
+                            if row["dialer_job_id"]:
+                                await conn.execute(
+                                    """UPDATE dialer_jobs SET status='non_retryable',
+                                           failure_reason='caller_opt_out', completed_at=NOW(), updated_at=NOW()
+                                       WHERE id=$1 AND tenant_id=$2
+                                         AND status=ANY($3::text[])""",
+                                    row["dialer_job_id"], row["tenant_id"],
+                                    # The prior enqueue may already own a newer
+                                    # live attempt. Only its own finalizer may
+                                    # release processing/calling ownership.
+                                    list(NOT_ORIGINATED_JOB_STATUSES),
+                                )
+                            await conn.execute(
+                                """UPDATE calls SET terminal_retry_payload = NULL,
+                                       terminal_retry_enqueued_at = NULL, updated_at=NOW() WHERE id=$1""",
+                                call_uuid,
+                            )
+                            row = dict(row)
+                            row["terminal_retry_payload"] = None
+                            row["terminal_retry_enqueued_at"] = None
                     # Migration 0028 stamps pre-cutover terminal rows to
                     # prevent historical lead/campaign effects from replaying.
                     # A rare legacy row may still be missing outcome/ended_at;
@@ -623,7 +672,7 @@ class CallService:
 
                 if lead_id:
                     await self._update_lead_status_pooled(
-                        conn, lead_id, effective_outcome
+                        conn, lead_id, effective_outcome, caller_opted_out=caller_opted_out
                     )
 
                 # ---- Step 2: dialer job completion + retry decision --------
@@ -639,6 +688,7 @@ class CallService:
                         outcome=effective_outcome,
                         campaign_id=campaign_id or "",
                         lead_id=lead_id or "",
+                        caller_opted_out=caller_opted_out,
                     )
 
                 # ---- Step 3: campaign counters ------------------------------
@@ -851,8 +901,31 @@ class CallService:
             list(TERMINAL_CALL_STATUSES),
         )
 
+    async def _active_caller_opt_out_pooled(self, conn, call_row) -> bool:
+        """Read suppression using the locked call's tenant and original phone.
+
+        Global entries match the existing CallGuard policy. Holding a matching
+        row share lock serializes its deletion/expiry update with settlement;
+        later additions are still checked at final origination by CallGuard.
+        Lookup/normalization failure aborts settlement, never implies permission.
+        """
+        tenant_id = str(call_row["tenant_id"])
+        number = normalize_e164_for_storage(call_row["phone_number"])
+        active = await conn.fetchval(
+            """SELECT EXISTS(SELECT 1 FROM dnc_entries
+                   WHERE (tenant_id=$1::uuid OR tenant_id IS NULL)
+                     AND normalized_number=$2 AND source='caller_opt_out'
+                     AND (expires_at IS NULL OR expires_at > NOW())
+                   FOR SHARE)""",
+            tenant_id, number,
+        )
+        if not isinstance(active, bool):
+            raise RuntimeError("caller_opt_out_lookup_unverified")
+        return active
+
     async def _update_lead_status_pooled(
         self, conn: asyncpg.Connection, lead_id: str, outcome: CallOutcome,
+        *, caller_opted_out: bool = False,
     ) -> None:
         """Pooled equivalent of `_update_lead_status` — same status rules."""
         lead_status = "called"
@@ -866,8 +939,11 @@ class CallService:
         elif outcome in NON_RETRYABLE_OUTCOMES:
             lead_status = "dnc"  # Do not call
 
+        if caller_opted_out:
+            lead_status, last_call_result = "dnc", "caller_opt_out"
+
         current_attempts = await conn.fetchval(
-            "SELECT call_attempts FROM leads WHERE id = $1", lead_id,
+            "SELECT call_attempts FROM leads WHERE id = $1 FOR UPDATE", lead_id,
         )
         current_attempts = current_attempts or 0
 
@@ -914,6 +990,7 @@ class CallService:
         outcome: CallOutcome,
         campaign_id: str,
         lead_id: str,
+        *, caller_opted_out: bool = False,
     ) -> tuple[bool, Optional[tuple]]:
         """Pooled equivalent of `_handle_job_completion`.
 
@@ -947,13 +1024,17 @@ class CallService:
         from app.workers.disposition_policy import decide as decide_disposition
         decision = decide_disposition(outcome, attempt_number)
 
-        if decision.is_success:
+        should_retry = decision.should_retry and not caller_opted_out
+        failure_reason = "caller_opt_out" if caller_opted_out else decision.reason
+        if caller_opted_out:
+            final_status = JobStatus.NON_RETRYABLE
+        elif decision.is_success:
             final_status = (
                 JobStatus.GOAL_ACHIEVED
                 if outcome == CallOutcome.GOAL_ACHIEVED
                 else JobStatus.COMPLETED
             )
-        elif decision.should_retry:
+        elif should_retry:
             final_status = JobStatus.RETRY_SCHEDULED
         elif outcome in NON_RETRYABLE_OUTCOMES:
             final_status = JobStatus.NON_RETRYABLE
@@ -970,7 +1051,7 @@ class CallService:
         # states once. ``calling`` is retained for older workers/schemas while
         # current workers use ``processing``. If a duplicate teardown reaches
         # this far, updated_job_id is None and no second retry is scheduled.
-        if decision.should_retry:
+        if should_retry:
             # ATTEMPT ACCOUNTING (compliance-critical): advance the persisted
             # counter in the SAME guarded UPDATE that books the retry. Nothing
             # else in the codebase ever wrote this column, so it sat at 1
@@ -995,7 +1076,7 @@ class CallService:
                 WHERE id = $1 AND status = ANY($5::text[])
                 RETURNING id
                 """,
-                job_id, final_status_value, outcome_value, decision.reason,
+                job_id, final_status_value, outcome_value, failure_reason,
                 list(IN_FLIGHT_STATUSES),
             )
         else:
@@ -1007,7 +1088,7 @@ class CallService:
                 WHERE id = $1 AND status = ANY($5::text[])
                 RETURNING id
                 """,
-                job_id, final_status_value, outcome_value, decision.reason,
+                job_id, final_status_value, outcome_value, failure_reason,
                 list(IN_FLIGHT_STATUSES),
             )
 
@@ -1025,7 +1106,7 @@ class CallService:
             job_id, final_status_value, decision.log_message,
         )
 
-        if not decision.should_retry:
+        if not should_retry:
             return True, None
 
         logger.info(

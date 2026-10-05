@@ -35,6 +35,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Optional
 
+from asyncpg import InsufficientPrivilegeError
+
 from app.core.db_utils import acquire_with_tenant
 from app.domain.services.phone_number_normalizer import (
     is_strict_e164,
@@ -211,8 +213,13 @@ class DNCService:
         source: str,
         reason: Optional[str] = None,
     ) -> dict:
-        """Insert many at once. Returns a per-row result dict so the
-        caller can show "accepted / skipped / invalid" counts."""
+        """Acknowledge active suppressions, not attempted INSERT statements.
+
+        New rows have no expiry. Existing caller opt-outs become permanent;
+        other sources retain their recorded expiry, so an expired same-source
+        row is skipped rather than silently extended or reported as active.
+        Active duplicates count as accepted, not as newly created rows.
+        """
         if source not in KNOWN_SOURCES:
             logger.info("dnc_bulk_unknown_source source=%s", source)
         accepted: list[str] = []
@@ -229,19 +236,36 @@ class DNCService:
                     invalid.append(raw)
                     continue
                 try:
-                    await conn.execute(
-                        """
-                        INSERT INTO dnc_entries
-                            (tenant_id, phone_number, normalized_number, source, reason)
-                        VALUES ($1, $2, $2, $3, $4)
-                        ON CONFLICT DO NOTHING
-                        """,
-                        tenant_id,
-                        normalized,
-                        source,
-                        reason,
-                    )
-                    accepted.append(normalized)
+                    # A row error rolls back only this row, not the surrounding
+                    # tenant-scoped transaction or subsequent valid entries.
+                    async with conn.transaction():
+                        row = await conn.fetchrow(
+                            """INSERT INTO dnc_entries
+                                   (tenant_id, phone_number, normalized_number, source, reason)
+                               VALUES ($1, $2, $2, $3, $4)
+                               ON CONFLICT DO NOTHING RETURNING id""",
+                            tenant_id, normalized, source, reason,
+                        )
+                        if row is None:
+                            row = await conn.fetchrow(
+                                """UPDATE dnc_entries SET updated_at=NOW(),
+                                       reason=COALESCE($4,reason),
+                                       expires_at=CASE WHEN source='caller_opt_out' THEN NULL ELSE expires_at END
+                                   WHERE (tenant_id=$1 OR (tenant_id IS NULL AND $1 IS NULL))
+                                     AND normalized_number=$2 AND source=$3
+                                     AND (source='caller_opt_out' OR expires_at IS NULL OR expires_at>NOW())
+                                   RETURNING id""",
+                                tenant_id, normalized, source, reason,
+                            )
+                        if row is None or not row["id"]:
+                            skipped.append(normalized)
+                        else:
+                            accepted.append(normalized)
+                except InsufficientPrivilegeError:
+                    # Authorization/RLS failure is a batch failure, not a bad
+                    # input row. The outer transaction rolls back any earlier
+                    # entries and the caller receives no success receipt.
+                    raise
                 except Exception as exc:
                     logger.warning(
                         "dnc_bulk_import_row_failed number=%s err=%s",
