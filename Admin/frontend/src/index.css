@@ -4273,3 +4273,11 @@ body {
 .enquiry-card dt { color: var(--text-muted); font-size: 12px; }
 .enquiry-card dd { margin: 2px 0 0; }
 .enquiry-message { white-space: pre-wrap; overflow-wrap: anywhere; margin: 20px 0; }
+
+.action-status-badge.status-unknown {
+    color: var(--warning, #b45309);
+}
+
+.action-status-badge.status-scheduled {
+    color: var(--info, #2563eb);
+}

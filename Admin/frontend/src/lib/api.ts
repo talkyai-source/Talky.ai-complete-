@@ -457,6 +457,8 @@ export type ActionType =
 export type ActionStatus =
     | 'pending'
     | 'running'
+    | 'scheduled'
+    | 'unknown'
     | 'completed'
     | 'failed'
     | 'cancelled';
@@ -495,6 +497,15 @@ export interface ActionDetail extends ActionItem {
     connector_name: string | null;
     input_data: Record<string, unknown> | null;
     output_data: Record<string, unknown> | null;
+    saved_receipt?: {
+        action_id: string;
+        status: string;
+        success: boolean;
+        confirmation_allowed: boolean;
+        receipt: Partial<Record<'provider' | 'connector_id' | 'external_account_id' | 'message_id'
+            | 'external_event_id' | 'meeting_id' | 'job_id' | 'reminder_id' | 'plan_id'
+            | 'child_action_id' | 'provider_status', string>>;
+    } | null;
     ip_address: string | null;
     user_agent: string | null;
     request_id: string | null;

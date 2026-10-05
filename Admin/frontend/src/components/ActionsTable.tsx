@@ -10,18 +10,14 @@ import {
     Filter,
     ChevronLeft,
     ChevronRight,
-    Loader2,
-    RefreshCw,
-    CheckCircle,
-    XCircle,
-    Ban,
     Building2,
     Clock,
     Zap,
     User
 } from 'lucide-react';
 import { api } from '../lib/api';
-import type { ActionItem, ActionListParams, ActionType, ActionStatus } from '../lib/api';
+import { ActionStatusBadge } from './ActionStatusBadge';
+import type { ActionItem, ActionListParams, ActionType } from '../lib/api';
 
 interface ActionsTableProps {
     onActionSelect: (actionId: string) => void;
@@ -35,26 +31,6 @@ const ACTION_TYPE_CONFIG: Record<ActionType, { icon: typeof Mail; label: string 
     'set_reminder': { icon: Bell, label: 'Reminder' },
     'start_campaign': { icon: Play, label: 'Campaign' }
 };
-
-function ActionStatusBadge({ status }: { status: ActionStatus }) {
-    const config: Record<ActionStatus, { icon: typeof CheckCircle; className: string; label: string }> = {
-        'pending': { icon: Loader2, className: 'status-pending', label: 'Pending' },
-        'running': { icon: RefreshCw, className: 'status-running', label: 'Running' },
-        'completed': { icon: CheckCircle, className: 'status-completed', label: 'Completed' },
-        'failed': { icon: XCircle, className: 'status-failed', label: 'Failed' },
-        'cancelled': { icon: Ban, className: 'status-cancelled', label: 'Cancelled' }
-    };
-
-    const { icon: Icon, className, label } = config[status] || config['pending'];
-    const isSpinning = status === 'running' || status === 'pending';
-
-    return (
-        <span className={`action-status-badge ${className}`}>
-            <Icon size={12} className={isSpinning ? 'spinning' : ''} />
-            {label}
-        </span>
-    );
-}
 
 function ActionTypeBadge({ type }: { type: ActionType }) {
     const config = ACTION_TYPE_CONFIG[type] || { icon: Play, label: type };
@@ -162,6 +138,8 @@ export function ActionsTable({ onActionSelect }: ActionsTableProps) {
                         <option value="">All Statuses</option>
                         <option value="pending">Pending</option>
                         <option value="running">Running</option>
+                        <option value="scheduled">Scheduled</option>
+                        <option value="unknown">Unknown</option>
                         <option value="completed">Completed</option>
                         <option value="failed">Failed</option>
                         <option value="cancelled">Cancelled</option>

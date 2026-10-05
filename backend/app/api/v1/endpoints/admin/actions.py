@@ -12,6 +12,7 @@ from app.core.postgres_adapter import Client
 from app.core.db_utils import acquire_with_tenant
 from app.core.security.rbac import UserRole, normalize_role
 from app.services.voice_callback_service import callback_job_id
+from app.services.action_execution import public_action_receipt
 
 from app.api.v1.dependencies import get_db_client, require_admin, CurrentUser
 from ._serialization import AdminResponseModel
@@ -123,6 +124,7 @@ class ActionDetail(AdminResponseModel):
     # Payload
     input_data: Optional[dict] = None
     output_data: Optional[dict] = None
+    saved_receipt: Optional[dict] = None
     error: Optional[str] = None
     
     # Audit
@@ -300,6 +302,7 @@ async def get_admin_action_detail(
             connector_name=connector.get("name"),
             input_data=action.get("input_data"),
             output_data=action.get("output_data"),
+            saved_receipt=public_action_receipt(action),
             error=action.get("error"),
             ip_address=str(action["ip_address"]) if action.get("ip_address") else None,
             user_agent=action.get("user_agent"),

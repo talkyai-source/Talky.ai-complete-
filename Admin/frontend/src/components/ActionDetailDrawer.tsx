@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
     X,
     Mail,
@@ -13,15 +13,11 @@ import {
     Zap,
     RefreshCw,
     Ban,
-    ChevronDown,
-    ChevronUp,
-    Copy,
-    CheckCircle,
-    XCircle,
-    Loader2,
     AlertTriangle
 } from 'lucide-react';
 import { api } from '../lib/api';
+import { ActionStatusBadge } from './ActionStatusBadge';
+import { ActionReceiptPanel } from './ActionReceiptPanel';
 import type { ActionDetail, ActionType } from '../lib/api';
 
 interface ActionDetailDrawerProps {
@@ -64,50 +60,6 @@ function formatDuration(ms: number | null): string {
     return `${(ms / 1000).toFixed(2)}s`;
 }
 
-function JsonViewer({ data, title }: { data: Record<string, unknown> | null; title: string }) {
-    const [expanded, setExpanded] = useState(false);
-    const [copied, setCopied] = useState(false);
-
-    if (!data || Object.keys(data).length === 0) {
-        return (
-            <div className="json-viewer empty">
-                <h4>{title}</h4>
-                <p className="no-data">No data available</p>
-            </div>
-        );
-    }
-
-    const handleCopy = async () => {
-        try {
-            await navigator.clipboard.writeText(JSON.stringify(data, null, 2));
-            setCopied(true);
-            setTimeout(() => setCopied(false), 2000);
-        } catch {
-            console.error('Failed to copy');
-        }
-    };
-
-    return (
-        <div className="json-viewer">
-            <div className="json-header" onClick={() => setExpanded(!expanded)}>
-                <h4>
-                    {expanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-                    {title}
-                </h4>
-                <button className="btn btn-ghost btn-sm" onClick={(e) => { e.stopPropagation(); handleCopy(); }}>
-                    {copied ? <CheckCircle size={14} /> : <Copy size={14} />}
-                    {copied ? 'Copied!' : 'Copy'}
-                </button>
-            </div>
-            {expanded && (
-                <pre className="json-content">
-                    {JSON.stringify(data, null, 2)}
-                </pre>
-            )}
-        </div>
-    );
-}
-
 export function ActionDetailDrawer({ actionId, onClose, onRetry }: ActionDetailDrawerProps) {
     const [action, setAction] = useState<ActionDetail | null>(null);
     const [loading, setLoading] = useState(false);
@@ -117,68 +69,81 @@ export function ActionDetailDrawer({ actionId, onClose, onRetry }: ActionDetailD
     const [confirmCancel, setConfirmCancel] = useState(false);
     const [confirmRetry, setConfirmRetry] = useState(false);
 
+    const selection = useRef<{ id: string | null; active: boolean } | null>(null);
+
     useEffect(() => {
-        if (!actionId) {
-            setAction(null);
-            return;
-        }
-
-        const fetchAction = async () => {
-            setLoading(true);
-            setError(null);
-            try {
-                const response = await api.getActionDetail(actionId);
-                if (response.data) {
+        const owner = { id: actionId, active: true };
+        selection.current = owner;
+        setAction(null);
+        setError(null);
+        setConfirmCancel(false);
+        setConfirmRetry(false);
+        setCancelling(false);
+        setRetrying(false);
+        setLoading(Boolean(actionId));
+        if (actionId) {
+            const fetchAction = async () => {
+                try {
+                    const response = await api.getActionDetail(actionId);
+                    if (!owner.active) return;
+                    if (!response.data || response.data.id !== actionId) {
+                        throw new Error('The selected action receipt is unavailable.');
+                    }
                     setAction(response.data);
+                } catch (err) {
+                    if (owner.active) setError(err instanceof Error ? err.message : 'Failed to fetch action details');
+                } finally {
+                    if (owner.active) setLoading(false);
                 }
-            } catch (err) {
-                setError(err instanceof Error ? err.message : 'Failed to fetch action details');
-            } finally {
-                setLoading(false);
-            }
-        };
-
-        fetchAction();
+            };
+            void fetchAction();
+        }
+        return () => { owner.active = false; };
     }, [actionId]);
 
     const handleRetry = async () => {
-        if (!actionId || !confirmRetry) {
+        const owner = selection.current;
+        if (!owner?.active || owner.id !== actionId || action?.id !== actionId || retrying) return;
+        if (!confirmRetry) {
             setConfirmRetry(true);
             return;
         }
-
         setRetrying(true);
         try {
-            await api.retryAction(actionId);
+            const response = await api.retryAction(actionId);
+            if (!owner.active) return;
+            if (response.error) throw new Error(response.error.message);
             onRetry?.();
             onClose();
         } catch (err) {
-            setError(err instanceof Error ? err.message : 'Failed to retry action');
+            if (owner.active) setError(err instanceof Error ? err.message : 'Failed to retry action');
         } finally {
-            setRetrying(false);
-            setConfirmRetry(false);
+            if (owner.active) { setRetrying(false); setConfirmRetry(false); }
         }
     };
 
     const handleCancel = async () => {
-        if (!actionId || !confirmCancel) {
+        const owner = selection.current;
+        if (!owner?.active || owner.id !== actionId || action?.id !== actionId || cancelling) return;
+        if (!confirmCancel) {
             setConfirmCancel(true);
             return;
         }
-
         setCancelling(true);
         try {
-            await api.cancelAction(actionId);
-            // Refresh the action data
+            const cancelled = await api.cancelAction(actionId);
+            if (!owner.active) return;
+            if (cancelled.error) throw new Error(cancelled.error.message);
             const response = await api.getActionDetail(actionId);
-            if (response.data) {
-                setAction(response.data);
+            if (!owner.active) return;
+            if (!response.data || response.data.id !== actionId) {
+                throw new Error('The selected action receipt is unavailable.');
             }
+            setAction(response.data);
         } catch (err) {
-            setError(err instanceof Error ? err.message : 'Failed to cancel action');
+            if (owner.active) setError(err instanceof Error ? err.message : 'Failed to cancel action');
         } finally {
-            setCancelling(false);
-            setConfirmCancel(false);
+            if (owner.active) { setCancelling(false); setConfirmCancel(false); }
         }
     };
 
@@ -207,7 +172,7 @@ export function ActionDetailDrawer({ actionId, onClose, onRetry }: ActionDetailD
                         <div className="error-banner">
                             <p>{error}</p>
                         </div>
-                    ) : action ? (
+                    ) : action?.id === actionId ? (
                         <>
                             {/* Action Header */}
                             <div className="action-info-header">
@@ -215,13 +180,7 @@ export function ActionDetailDrawer({ actionId, onClose, onRetry }: ActionDetailD
                                     <ActionIcon size={24} />
                                     <span>{ACTION_LABELS[action.type] || action.type}</span>
                                 </div>
-                                <span className={`action-status-badge status-${action.status}`}>
-                                    {action.status === 'running' && <Loader2 size={12} className="spinning" />}
-                                    {action.status === 'completed' && <CheckCircle size={12} />}
-                                    {action.status === 'failed' && <XCircle size={12} />}
-                                    {action.status === 'cancelled' && <Ban size={12} />}
-                                    {action.status}
-                                </span>
+                                <ActionStatusBadge status={action.status} />
                             </div>
 
                             {/* Quick Stats */}
@@ -283,7 +242,7 @@ export function ActionDetailDrawer({ actionId, onClose, onRetry }: ActionDetailD
                                     )}
                                     {action.connector_name && (
                                         <div className="related-item">
-                                            <span className="label">Connector</span>
+                                            <span className="label">Current connector display name</span>
                                             <span className="value">{action.connector_name}</span>
                                         </div>
                                     )}
@@ -301,9 +260,7 @@ export function ActionDetailDrawer({ actionId, onClose, onRetry }: ActionDetailD
                                 </div>
                             )}
 
-                            {/* Input/Output JSON */}
-                            <JsonViewer data={action.input_data} title="Input Payload" />
-                            <JsonViewer data={action.output_data} title="Output / Result" />
+                            <ActionReceiptPanel action={action} />
 
                             {/* Audit Info */}
                             {(action.ip_address || action.idempotency_key) && (
