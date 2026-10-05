@@ -137,10 +137,11 @@ export default function ReviewsPage() {
 
                     {/* the Safe Improvement Loop's two questions */}
                     <div className="grid gap-4 lg:grid-cols-2">
-                        <Card title="By prompt version" hint="Which revision is doing worse">
+                        <Card title="By prompt version" hint="Which revision is doing worse" className="min-w-0">
                             {(summary.data?.by_prompt_version ?? []).length === 0 ? (
                                 <Empty>No reviews yet.</Empty>
                             ) : (
+                                <div className="overflow-x-auto">
                                 <table className="w-full text-sm">
                                     <thead>
                                         <tr className="border-b border-border text-left text-xs text-muted-foreground">
@@ -162,7 +163,7 @@ export default function ReviewsPage() {
                                                             );
                                                             setPage(1);
                                                         }}
-                                                        className="font-mono text-xs underline-offset-2 hover:underline"
+                                                        className="break-all text-left font-mono text-xs underline-offset-2 hover:underline"
                                                     >
                                                         {r.prompt_version}
                                                     </button>
@@ -176,10 +177,11 @@ export default function ReviewsPage() {
                                         ))}
                                     </tbody>
                                 </table>
+                                </div>
                             )}
                         </Card>
 
-                        <Card title="By failure category" hint="What actually goes wrong">
+                        <Card title="By failure category" hint="What actually goes wrong" className="min-w-0">
                             {(summary.data?.by_tag ?? []).length === 0 ? (
                                 <Empty>No tagged reviews yet.</Empty>
                             ) : (
@@ -291,7 +293,7 @@ export default function ReviewsPage() {
                                                 <p className="mt-1 text-xs text-muted-foreground">
                                                     {new Date(r.created_at).toLocaleString()}
                                                     {r.prompt_version && (
-                                                        <span className="ml-2 font-mono">{r.prompt_version}</span>
+                                                        <span className="ml-2 break-all font-mono">{r.prompt_version}</span>
                                                     )}
                                                 </p>
                                             </div>
@@ -355,9 +357,9 @@ function Stat({
     );
 }
 
-function Card({ title, hint, children }: { title: string; hint?: string; children: React.ReactNode }) {
+function Card({ title, hint, className, children }: { title: string; hint?: string; className?: string; children: React.ReactNode }) {
     return (
-        <div className="content-card">
+        <div className={className ? `content-card ${className}` : "content-card"}>
             <h2 className="flex items-center gap-2 text-sm font-semibold text-foreground">
                 <MessageSquare className="h-4 w-4 text-muted-foreground" aria-hidden />
                 {title}
