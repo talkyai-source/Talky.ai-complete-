@@ -616,10 +616,16 @@
           "kind": "native_caller_activity_and_expiry_classifier_not_acoustic_acceptance",
           "candidate": "12175fbde91cf57ceef7e7405aeb14dae5fb4621",
           "integrated_candidate": "1c3a2ec7"
+        },
+        {
+          "path": "docs/sessions/artifacts/ag04-explicit-secret-boundary/evidence.json",
+          "kind": "bounded_explicit_secret_text_and_prompt_contract_repair_not_privacy_acceptance",
+          "candidate": "38b5a8ab",
+          "owner_candidate": "939567b9137adaa19cd5fc807b9c0a9a080dcc83"
         }
       ],
-      "blocker": "Captured Groq semantic failure retained. Proposed matrix 43/50 mapped by offline replay; intended profile roster/rubric/cohort unratified; live/human/audio/effect acceptance not run. AG02 retrieval gate remains failed. Seven canonical conditions remain unmapped.",
-      "next_action": "Qualify remaining actual acoustic, sensitive/unrelated request and unclear-name boundaries. Preserve failed Groq semantics and perform approved per-profile human/live qualification. The 43/50 union, 240 replay rows and 2,278 passing runtime controls are not semantic or live approval; source-answer controls do not prove universal factual entailment or durable duplicate-effect recovery.",
+      "blocker": "Bounded explicit-secret text persistence and privacy/name prompt contracts are repaired locally with 472 affected tests passing; this is not universal redaction, model behavior or privacy acceptance. Captured Groq semantic failure is retained. Proposed matrix remains 43/50 mapped by offline replay; seven canonical conditions and the intended profile/rubric/cohort remain unqualified. Live/human/audio/effect acceptance is not run, and AG02 retrieval quality still fails.",
+      "next_action": "Qualify actual acoustic behavior, sensitive/unrelated requests and unclear-name model responses on the approved profile/corpus. Preserve the bounded sanitization limits, failed Groq semantics and current matrix count; complete per-profile human/live qualification. Passing source/persistence/prompt checks does not establish spoken refusal, secure capture, semantic accuracy or customer acceptance.",
       "target_date": null,
       "execution_note": "1797 tests passed0skip;170offline rows1120controlchecks0failed;1retained semantic failure/169unreviewed. Local source commit only; no provider call/push/deploy."
     },

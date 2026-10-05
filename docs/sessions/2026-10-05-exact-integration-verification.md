@@ -609,3 +609,43 @@ mismatch. The owner's older budget dependency is the sole intentional changed
 dependency; both changed source/test pairs match their reviewed commits. Every
 gold case result equals the earlier preserved pinned result. This was read-only
 evidence verification, not another test execution.
+
+
+## Explicit secret text and remaining knowledge qualification (6 October)
+
+Source `38b5a8ab`, integrated from `939567b9`, replaces supported complete,
+explicitly labelled secret values before new traditional/native caller text
+reaches application history, contact extraction and transcript persistence.
+Canonical revisions and contact proofs use the same sanitized text. Normal
+contacts and business references remain available. Traditional/native privacy
+instructions and uncertain-name summary wording were aligned within the existing
+prompt budget, with new governed prompt versions and retained old hashes.
+
+The [owner evidence](artifacts/ag04-explicit-secret-boundary/evidence.json) records
+**472 passing tests across seventeen modules**, including 89 new boundary controls,
+and strict scoped Ruff/diff checks. Both source reviews cleared the final patch.
+They caught punctuation, generic account references, bracketed passwords and an
+unbounded length-description exemption; the corresponding failing controls and
+final result are preserved. One original SQL control had an invalid UUID fixture;
+its corrected reproduction against unchanged application code is recorded
+separately and is not hidden in the failure count.
+
+Root verified eleven normalized source/test hashes and eleven identical
+owner/integrated Git blobs. No other application changes intervened between the
+owner base and integration. This was parity review, not another test execution.
+These tests exercise actual application methods with synthetic ports, not actual
+PostgreSQL, model behavior or human/audio acceptance. The helper handles bounded
+English explicit labels; ambiguous state words, unlabelled/cross-turn/oversized
+values, audio/provider retention and historical transcripts are outside its
+contract. AG04 mapping remains 43/50; no privacy scenario or readiness gate closes.
+
+A separate read-only audit found no additional wiring/source-selection defect
+established by the remaining saved knowledge failures. The pinned thirteen
+insufficient cases comprise three missing expected sources and ten found sources
+with all required fragments but weak literal query coverage. The raw fixture has
+no enrichment aliases. Historical SQL results remain separate; they were not
+rerun. Related/wrong-product sources can also pass lexical coverage, so a better
+retrieval score alone cannot establish faithful answers. The rejected
+normalization experiments, failed raw-source gate, content-owner approval and
+actual configured-profile answer review remain explicit. No thresholds, gold
+answers, providers or dependencies changed during that audit.
