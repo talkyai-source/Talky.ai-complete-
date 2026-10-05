@@ -1,0 +1,159 @@
+{
+  "package": "OP03",
+  "observed_at_utc": "2026-10-05T02:39:37.433864+00:00",
+  "base_commit": "76adb005094ec6c8fc9f04f4c8dbebd3bb64b45b",
+  "source_commit": "f81d5a5e3c094f66ac07f99306fb90ce43ff8a39",
+  "branch": "codex/production-ready-op03-20261005",
+  "python": "3.12.12",
+  "scope": "Local offline resource ownership and truthful transport receipts. No provider, handset, production, database or deployment operations.",
+  "package_completion": "not_complete: approved profile/live audio acceptance remains required",
+  "source_files": [
+    {
+      "path": "backend/app/domain/services/resilient_stt.py",
+      "sha256_lf": "cf2e0fe9be88ceb2c905ca412f49fe3a45ac99faac36580122e5bf7ce8c9f384"
+    },
+    {
+      "path": "backend/app/infrastructure/telephony/browser_media_gateway.py",
+      "sha256_lf": "38bf45268d8a70fb3e7c836d40a56d491a344ba1b16198e1a7bea7b62b0e4b07"
+    },
+    {
+      "path": "backend/app/infrastructure/telephony/twilio_media_gateway.py",
+      "sha256_lf": "d090bd7c6510b3ab9ba0204ac4ff7434836b8fd6851a603791e11ede6a19d929"
+    }
+  ],
+  "test_files": [
+    {
+      "path": "backend/tests/unit/test_op03_audio_ownership.py",
+      "sha256_lf": "78f8099e3c339410172b65d84c3c683cb9b09de2ce15448841c916a1866c1803"
+    },
+    {
+      "path": "backend/tests/unit/test_stt_watchdog_decay.py",
+      "sha256_lf": "8060170413484f2a25785fa0cc470c04bb5bea7010d6d284d55baaaa9f718760"
+    }
+  ],
+  "findings_and_repairs": [
+    {
+      "id": "OP03-stream-close",
+      "root_cause": "Nested STT forwarding generators did not explicitly close the child when the consumer stopped at a yielded transcript.",
+      "before": "Primary and fallback provider still open immediately after wrapper aclose returned; retained generator prevents GC from hiding the ownership gap.",
+      "after": "Each forwarding layer closes its child. Provider closes before tee/replay iterator, then outer call-owned input. Cancellation does not promote a fallback.",
+      "evidence": "ownership-initial.txt"
+    },
+    {
+      "id": "OP03-playback-generation",
+      "root_cause": "Browser completion waits and cleanup referenced one mutable session event; old fade/send/flush work mutated the current generation after awaiting.",
+      "before": "B completion certified waiting A; old wait cleanup/fade cleared B tracking; old send/flush consumed B buffer/accounting. Twilio clear did not wake its waiter.",
+      "after": "Each begin owns a new event; clear/end wake without played proof. Receipt and cleanup recheck generation. Old transport work cannot consume or account against B. Twilio retains its existing clear protocol.",
+      "evidence": [
+        "ownership-initial.txt",
+        "transport-ownership-initial.txt"
+      ]
+    },
+    {
+      "id": "OP03-incomplete-submission",
+      "root_cause": "Transport timeout dropped audio but a later correlated queue completion could still certify the full utterance.",
+      "before": "Browser and Twilio zero/partial successful sends followed by matching ack returned completed/transport_played.",
+      "after": "Per-generation failed submission is monotonic until new begin. Matching ack cannot promote it; receipt remains failed/unknown with played_ms zero. Physical submission counters remain separate.",
+      "evidence": "incomplete-submission-initial.txt"
+    },
+    {
+      "id": "OP03-test-isolation",
+      "root_cause": "Existing environment-policy test reloaded resilient_stt in the shared pytest process, replacing class identities used by later collected orchestrator tests.",
+      "before": "253 passed / one isinstance failure despite returned object being the new instance of the same reloaded class.",
+      "after": "Existing configuration contract is checked in an isolated Python startup with synthetic environment overrides, preserving module identity in the parent test process.",
+      "evidence": "audio-regressions-initial.txt"
+    }
+  ],
+  "validation": {
+    "initial_ownership": {
+      "failed": 3,
+      "passed": 0,
+      "log": "ownership-initial.txt"
+    },
+    "initial_transport_ownership": {
+      "failed": 4,
+      "passed": 7,
+      "log": "transport-ownership-initial.txt"
+    },
+    "initial_incomplete_submission": {
+      "failed": 4,
+      "deselected": 11,
+      "log": "incomplete-submission-initial.txt"
+    },
+    "first_compatibility": {
+      "passed": 67,
+      "failed": 0,
+      "log": "ownership-first-green.txt"
+    },
+    "focused_ownership": {
+      "passed": 15,
+      "failed": 0,
+      "warnings": 38,
+      "log": "ownership-final.txt"
+    },
+    "final_regression": {
+      "passed": 270,
+      "failed": 0,
+      "skipped": 0,
+      "warnings": 107,
+      "duration_seconds": 8.9,
+      "log": "audio-regressions-final.txt",
+      "cwd": "backend",
+      "test_modules": [
+        "tests/unit/test_op03_audio_ownership.py",
+        "tests/unit/test_audio_provider_failure_boundaries.py",
+        "tests/unit/test_stt_failover_no_loss_no_duplication.py",
+        "tests/unit/test_realtime_lifecycle_repairs.py",
+        "tests/unit/test_browser_media_gateway_ws_d.py",
+        "tests/unit/test_tts_playback_waits_for_real_playback.py",
+        "tests/unit/test_resilient_providers.py",
+        "tests/unit/test_resilient_stt_silent_stream.py",
+        "tests/unit/test_stt_fault_injection.py",
+        "tests/unit/test_stt_watchdog_echo_guard.py",
+        "tests/unit/test_stt_watchdog_liveness.py",
+        "tests/unit/test_stt_watchdog_decay.py",
+        "tests/unit/test_audio_ingest_terminal_stt_failure.py",
+        "tests/unit/test_orchestrator_failover_wiring.py",
+        "tests/unit/test_tts_empty_stream.py",
+        "tests/unit/test_tts_delivery_error_stops_turn.py",
+        "tests/unit/test_elevenlabs_partial_audio_retry.py",
+        "tests/unit/test_interrupt_playback.py",
+        "tests/unit/test_turn_streamer_tts_delivery_error_transcript_gap.py",
+        "tests/unit/test_asterisk_tts_acceptance.py",
+        "tests/unit/test_audio_profile_contract.py",
+        "tests/unit/test_twilio_bridge.py"
+      ],
+      "command": "python -m pytest tests/unit/test_op03_audio_ownership.py tests/unit/test_audio_provider_failure_boundaries.py tests/unit/test_stt_failover_no_loss_no_duplication.py tests/unit/test_realtime_lifecycle_repairs.py tests/unit/test_browser_media_gateway_ws_d.py tests/unit/test_tts_playback_waits_for_real_playback.py tests/unit/test_resilient_providers.py tests/unit/test_resilient_stt_silent_stream.py tests/unit/test_stt_fault_injection.py tests/unit/test_stt_watchdog_echo_guard.py tests/unit/test_stt_watchdog_liveness.py tests/unit/test_stt_watchdog_decay.py tests/unit/test_audio_ingest_terminal_stt_failure.py tests/unit/test_orchestrator_failover_wiring.py tests/unit/test_tts_empty_stream.py tests/unit/test_tts_delivery_error_stops_turn.py tests/unit/test_elevenlabs_partial_audio_retry.py tests/unit/test_interrupt_playback.py tests/unit/test_turn_streamer_tts_delivery_error_transcript_gap.py tests/unit/test_asterisk_tts_acceptance.py tests/unit/test_audio_profile_contract.py tests/unit/test_twilio_bridge.py -q"
+    },
+    "ci_lint": {
+      "result": "passed",
+      "log": "lint-ci.txt",
+      "command": "python -m ruff check app/domain/services/resilient_stt.py app/infrastructure/telephony/browser_media_gateway.py app/infrastructure/telephony/twilio_media_gateway.py tests/unit/test_op03_audio_ownership.py tests/unit/test_stt_watchdog_decay.py --select F --extend-ignore F401,F841"
+    },
+    "broader_style_lint": {
+      "result": "43 findings; not claimed clean and no unrelated style rewrite",
+      "log": "lint.txt"
+    },
+    "diff_check": "passed",
+    "independent_review": {
+      "reviewer_role": "independent speech/media reviewer",
+      "result": "No remaining material defect found in this bounded delta; independently ran the 15 ownership controls successfully."
+    }
+  },
+  "preserved_contracts": [
+    "No provider/model/voice, codec, sample-rate, endpointing, timeout or fallback default change.",
+    "STT fallback remains bounded one promotion with replay of uncommitted retained audio; overflow invalidates partial text and requires repeat.",
+    "TTS recovery remains before first output only; existing partial-output failure stops without replay/full spoken-history claim.",
+    "Explicit cross-vendor fallback voice mapping remains required. Flux/Nova can share Deepgram credentials and do not provide shared-account-outage protection.",
+    "Asterisk transmission receipts are not promoted to caller-heard audio. Native Realtime disconnect policy is unchanged."
+  ],
+  "remaining_acceptance": [
+    "No deployed campaign or paid account configuration was inspected. Effective per-campaign profiles/mappings must be recorded and qualified for the intended release.",
+    "Synthetic transports and codec fixtures cannot prove real provider pronunciation, latency, acoustic fidelity, PSTN delivery or caller comprehension.",
+    "Controlled authorized OP08 audio/provider/handset trials, mapped fallback credentials/voices and OP12 gateway compatibility are still required; not run here.",
+    "OP02 connection/lease changes require root integration testing with this separate source commit; this branch did not edit Flux/prewarm/lifecycle/global concurrency.",
+    "Already submitted transport frames cannot be recalled by a local generation fence; failed/unknown receipts intentionally do not claim exactly what was heard.",
+    "Broader Ruff style modernization findings and existing datetime/AsyncMock warnings are recorded, not silently presented as passed."
+  ],
+  "rollback": "Code-only; no schema/config migration. Retain truthful failed/unknown receipts and restore only a reviewed revision; reverting this delta reopens the documented ownership faults."
+}

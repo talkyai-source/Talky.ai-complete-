@@ -1,0 +1,303 @@
+.......FFFF                                                              [100%]
+================================== FAILURES ===================================
+__ test_old_transport_completion_preserves_new_buffer_and_accounting[clear] ___
+
+operation = 'clear'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("operation", ["clear", "send", "flush"])
+    async def test_old_transport_completion_preserves_new_buffer_and_accounting(operation):
+        entered = asyncio.Event()
+        release = asyncio.Event()
+
+        class HeldSocket(BrowserSocket):
+            async def send_bytes(self, payload):
+                if not entered.is_set():
+                    entered.set()
+                    await release.wait()
+                await super().send_bytes(payload)
+
+        gateway = BrowserMediaGateway()
+        await gateway.on_call_started("offline-buffer", {"websocket": HeldSocket()})
+        await gateway.begin_playback("offline-buffer", "old")
+        session = gateway._sessions["offline-buffer"]
+        if operation == "send":
+            pending = asyncio.create_task(gateway.send_audio("offline-buffer", bytes(3200)))
+        else:
+            session.output_buffer = bytearray(200)
+            method = gateway.clear_output_buffer if operation == "clear" else gateway.flush_audio_buffer
+            pending = asyncio.create_task(method("offline-buffer"))
+        try:
+            await asyncio.wait_for(entered.wait(), .2)
+            if operation != "clear":
+                await gateway.clear_output_buffer("offline-buffer")
+            await gateway.begin_playback("offline-buffer", "new")
+            session.output_buffer = bytearray(b"\x01\x00" * 200)
+            release.set()
+            await pending
+>           assert session.playback_tracking_active
+E           AssertionError: assert False
+E            +  where False = BrowserSession(call_id='offline-buffer', websocket=<tests.unit.test_op03_audio_ownership.test_old_transport_completion...=0, output_buffer_peak_bytes=0, dropped_output_bytes=0, ws_send_timeouts=0, ws_send_errors=0, last_send_latency_ms=0.0).playback_tracking_active
+
+tests\unit\test_op03_audio_ownership.py:210: AssertionError
+___ test_old_transport_completion_preserves_new_buffer_and_accounting[send] ___
+
+operation = 'send'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("operation", ["clear", "send", "flush"])
+    async def test_old_transport_completion_preserves_new_buffer_and_accounting(operation):
+        entered = asyncio.Event()
+        release = asyncio.Event()
+
+        class HeldSocket(BrowserSocket):
+            async def send_bytes(self, payload):
+                if not entered.is_set():
+                    entered.set()
+                    await release.wait()
+                await super().send_bytes(payload)
+
+        gateway = BrowserMediaGateway()
+        await gateway.on_call_started("offline-buffer", {"websocket": HeldSocket()})
+        await gateway.begin_playback("offline-buffer", "old")
+        session = gateway._sessions["offline-buffer"]
+        if operation == "send":
+            pending = asyncio.create_task(gateway.send_audio("offline-buffer", bytes(3200)))
+        else:
+            session.output_buffer = bytearray(200)
+            method = gateway.clear_output_buffer if operation == "clear" else gateway.flush_audio_buffer
+            pending = asyncio.create_task(method("offline-buffer"))
+        try:
+            await asyncio.wait_for(entered.wait(), .2)
+            if operation != "clear":
+                await gateway.clear_output_buffer("offline-buffer")
+            await gateway.begin_playback("offline-buffer", "new")
+            session.output_buffer = bytearray(b"\x01\x00" * 200)
+            release.set()
+            await pending
+            assert session.playback_tracking_active
+>           assert session.playback_bytes_sent == 0, "old payload counted as new audio"
+E           AssertionError: old payload counted as new audio
+E           assert 1920 == 0
+E            +  where 1920 = BrowserSession(call_id='offline-buffer', websocket=<tests.unit.test_op03_audio_ownership.test_old_transport_completion... output_buffer_peak_bytes=3200, dropped_output_bytes=0, ws_send_timeouts=0, ws_send_errors=0, last_send_latency_ms=0.0).playback_bytes_sent
+
+tests\unit\test_op03_audio_ownership.py:211: AssertionError
+__ test_old_transport_completion_preserves_new_buffer_and_accounting[flush] ___
+
+operation = 'flush'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("operation", ["clear", "send", "flush"])
+    async def test_old_transport_completion_preserves_new_buffer_and_accounting(operation):
+        entered = asyncio.Event()
+        release = asyncio.Event()
+
+        class HeldSocket(BrowserSocket):
+            async def send_bytes(self, payload):
+                if not entered.is_set():
+                    entered.set()
+                    await release.wait()
+                await super().send_bytes(payload)
+
+        gateway = BrowserMediaGateway()
+        await gateway.on_call_started("offline-buffer", {"websocket": HeldSocket()})
+        await gateway.begin_playback("offline-buffer", "old")
+        session = gateway._sessions["offline-buffer"]
+        if operation == "send":
+            pending = asyncio.create_task(gateway.send_audio("offline-buffer", bytes(3200)))
+        else:
+            session.output_buffer = bytearray(200)
+            method = gateway.clear_output_buffer if operation == "clear" else gateway.flush_audio_buffer
+            pending = asyncio.create_task(method("offline-buffer"))
+        try:
+            await asyncio.wait_for(entered.wait(), .2)
+            if operation != "clear":
+                await gateway.clear_output_buffer("offline-buffer")
+            await gateway.begin_playback("offline-buffer", "new")
+            session.output_buffer = bytearray(b"\x01\x00" * 200)
+            release.set()
+            await pending
+            assert session.playback_tracking_active
+>           assert session.playback_bytes_sent == 0, "old payload counted as new audio"
+E           AssertionError: old payload counted as new audio
+E           assert 200 == 0
+E            +  where 200 = BrowserSession(call_id='offline-buffer', websocket=<tests.unit.test_op03_audio_ownership.test_old_transport_completion..., output_buffer_peak_bytes=0, dropped_output_bytes=0, ws_send_timeouts=0, ws_send_errors=0, last_send_latency_ms=0.985).playback_bytes_sent
+
+tests\unit\test_op03_audio_ownership.py:211: AssertionError
+_______ test_twilio_clear_wakes_old_waiter_and_preserves_new_completion _______
+
+fut = <Task cancelled name='Task-22' coro=<BrowserMediaGateway.finish_playback() done, defined at C:\Users\AL AZIZ TECH\Desk...lky.ai-complete-\tmp\production-ready-op03-20261005\backend\app\infrastructure\telephony\browser_media_gateway.py:496>>
+timeout = 0.2
+
+    async def wait_for(fut, timeout):
+        """Wait for the single Future or coroutine to complete, with timeout.
+
+        Coroutine will be wrapped in Task.
+
+        Returns result of the Future or coroutine.  When a timeout occurs,
+        it cancels the task and raises TimeoutError.  To avoid the task
+        cancellation, wrap it in shield().
+
+        If the wait is cancelled, the task is also cancelled.
+
+        If the task suppresses the cancellation and returns a value instead,
+        that value is returned.
+
+        This function is a coroutine.
+        """
+        # The special case for timeout <= 0 is for the following case:
+        #
+        # async def test_waitfor():
+        #     func_started = False
+        #
+        #     async def func():
+        #         nonlocal func_started
+        #         func_started = True
+        #
+        #     try:
+        #         await asyncio.wait_for(func(), 0)
+        #     except asyncio.TimeoutError:
+        #         assert not func_started
+        #     else:
+        #         assert False
+        #
+        # asyncio.run(test_waitfor())
+
+
+        if timeout is not None and timeout <= 0:
+            fut = ensure_future(fut)
+
+            if fut.done():
+                return fut.result()
+
+            await _cancel_and_wait(fut)
+            try:
+                return fut.result()
+            except exceptions.CancelledError as exc:
+                raise TimeoutError from exc
+
+        async with timeouts.timeout(timeout):
+>           return await fut
+
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\tasks.py:520:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+app\infrastructure\telephony\browser_media_gateway.py:503: in finish_playback
+    completed = await self.wait_for_playback_complete(
+app\infrastructure\telephony\browser_media_gateway.py:588: in wait_for_playback_complete
+    await asyncio.wait_for(
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\tasks.py:520: in wait_for
+    return await fut
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <asyncio.locks.Event object at 0x000001AF76919FD0 [unset]>
+
+    async def wait(self):
+        """Block until the internal flag is true.
+
+        If the internal flag is true on entry, return True
+        immediately.  Otherwise, block until another coroutine calls
+        set() to set the flag to true, then return True.
+        """
+        if self._value:
+            return True
+
+        fut = self._get_loop().create_future()
+        self._waiters.append(fut)
+        try:
+>           await fut
+E           asyncio.exceptions.CancelledError
+
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\locks.py:212: CancelledError
+
+The above exception was the direct cause of the following exception:
+
+    @pytest.mark.asyncio
+    async def test_twilio_clear_wakes_old_waiter_and_preserves_new_completion():
+        gateway = TwilioMediaGateway()
+        socket = BrowserSocket()
+        await gateway.on_call_started("offline-twilio", {"websocket": socket})
+        gateway.set_stream_sid("offline-twilio", "synthetic-stream")
+        await gateway.begin_playback("offline-twilio", "old")
+        waiter = asyncio.create_task(gateway.finish_playback("offline-twilio", "old"))
+        try:
+            for _ in range(10):
+                await asyncio.sleep(0)
+            assert not waiter.done()
+            await gateway.clear_output_buffer("offline-twilio")
+>           receipt = await asyncio.wait_for(waiter, .2)
+
+tests\unit\test_op03_audio_ownership.py:233:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\tasks.py:519: in wait_for
+    async with timeouts.timeout(timeout):
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <Timeout [expired]>
+exc_type = <class 'asyncio.exceptions.CancelledError'>
+exc_val = CancelledError(), exc_tb = <traceback object at 0x000001AF76974900>
+
+    async def __aexit__(
+        self,
+        exc_type: Optional[Type[BaseException]],
+        exc_val: Optional[BaseException],
+        exc_tb: Optional[TracebackType],
+    ) -> Optional[bool]:
+        assert self._state in (_State.ENTERED, _State.EXPIRING)
+
+        if self._timeout_handler is not None:
+            self._timeout_handler.cancel()
+            self._timeout_handler = None
+
+        if self._state is _State.EXPIRING:
+            self._state = _State.EXPIRED
+
+            if self._task.uncancel() <= self._cancelling and exc_type is exceptions.CancelledError:
+                # Since there are no new cancel requests, we're
+                # handling this.
+>               raise TimeoutError from exc_val
+E               TimeoutError
+
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\timeouts.py:115: TimeoutError
+============================== warnings summary ===============================
+tests/unit/test_op03_audio_ownership.py::test_new_browser_completion_cannot_complete_superseded_utterance
+tests/unit/test_op03_audio_ownership.py::test_browser_stop_wakes_waiter_without_playout_proof[clear]
+tests/unit/test_op03_audio_ownership.py::test_browser_stop_wakes_waiter_without_playout_proof[hangup]
+tests/unit/test_op03_audio_ownership.py::test_old_ack_does_not_complete_current_browser_utterance
+tests/unit/test_op03_audio_ownership.py::test_cancelled_old_waiter_cannot_clear_new_tracking
+tests/unit/test_op03_audio_ownership.py::test_old_transport_completion_preserves_new_buffer_and_accounting[clear]
+tests/unit/test_op03_audio_ownership.py::test_old_transport_completion_preserves_new_buffer_and_accounting[send]
+tests/unit/test_op03_audio_ownership.py::test_old_transport_completion_preserves_new_buffer_and_accounting[flush]
+tests/unit/test_op03_audio_ownership.py::test_twilio_clear_wakes_old_waiter_and_preserves_new_completion
+  <string>:5: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+
+tests/unit/test_op03_audio_ownership.py::test_new_browser_completion_cannot_complete_superseded_utterance
+tests/unit/test_op03_audio_ownership.py::test_new_browser_completion_cannot_complete_superseded_utterance
+tests/unit/test_op03_audio_ownership.py::test_old_transport_completion_preserves_new_buffer_and_accounting[clear]
+tests/unit/test_op03_audio_ownership.py::test_old_transport_completion_preserves_new_buffer_and_accounting[send]
+tests/unit/test_op03_audio_ownership.py::test_old_transport_completion_preserves_new_buffer_and_accounting[send]
+tests/unit/test_op03_audio_ownership.py::test_old_transport_completion_preserves_new_buffer_and_accounting[flush]
+tests/unit/test_op03_audio_ownership.py::test_old_transport_completion_preserves_new_buffer_and_accounting[flush]
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-op03-20261005\backend\app\infrastructure\telephony\browser_media_gateway.py:777: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    started = datetime.utcnow()
+
+tests/unit/test_op03_audio_ownership.py::test_new_browser_completion_cannot_complete_superseded_utterance
+tests/unit/test_op03_audio_ownership.py::test_new_browser_completion_cannot_complete_superseded_utterance
+tests/unit/test_op03_audio_ownership.py::test_old_transport_completion_preserves_new_buffer_and_accounting[clear]
+tests/unit/test_op03_audio_ownership.py::test_old_transport_completion_preserves_new_buffer_and_accounting[send]
+tests/unit/test_op03_audio_ownership.py::test_old_transport_completion_preserves_new_buffer_and_accounting[send]
+tests/unit/test_op03_audio_ownership.py::test_old_transport_completion_preserves_new_buffer_and_accounting[flush]
+tests/unit/test_op03_audio_ownership.py::test_old_transport_completion_preserves_new_buffer_and_accounting[flush]
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-op03-20261005\backend\app\infrastructure\telephony\browser_media_gateway.py:783: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    elapsed_ms = (datetime.utcnow() - started).total_seconds() * 1000
+
+tests/unit/test_op03_audio_ownership.py::test_browser_stop_wakes_waiter_without_playout_proof[hangup]
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-op03-20261005\backend\app\infrastructure\telephony\browser_media_gateway.py:647: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    duration_seconds = (datetime.utcnow() - session.created_at).total_seconds()
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/unit/test_op03_audio_ownership.py::test_old_transport_completion_preserves_new_buffer_and_accounting[clear]
+FAILED tests/unit/test_op03_audio_ownership.py::test_old_transport_completion_preserves_new_buffer_and_accounting[send]
+FAILED tests/unit/test_op03_audio_ownership.py::test_old_transport_completion_preserves_new_buffer_and_accounting[flush]
+FAILED tests/unit/test_op03_audio_ownership.py::test_twilio_clear_wakes_old_waiter_and_preserves_new_completion
+4 failed, 7 passed, 24 warnings in 1.21s

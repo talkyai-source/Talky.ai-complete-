@@ -1,0 +1,228 @@
+FFFF                                                                     [100%]
+================================== FAILURES ===================================
+_ test_dropped_audio_cannot_be_promoted_by_matching_playback_ack[False-BrowserMediaGateway] _
+
+gateway_type = <class 'app.infrastructure.telephony.browser_media_gateway.BrowserMediaGateway'>
+first_frame_succeeds = False
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("gateway_type", [BrowserMediaGateway, TwilioMediaGateway])
+    @pytest.mark.parametrize("first_frame_succeeds", [False, True])
+    async def test_dropped_audio_cannot_be_promoted_by_matching_playback_ack(
+        gateway_type, first_frame_succeeds
+    ):
+        class LossySocket(BrowserSocket):
+            media_count = 0
+
+            async def send_bytes(self, payload):
+                self.media_count += 1
+                if not first_frame_succeeds or self.media_count > 1:
+                    await asyncio.Event().wait()
+                await super().send_bytes(payload)
+
+            async def send_text(self, payload):
+                if json.loads(payload)["event"] == "media":
+                    await self.send_bytes(payload)
+                else:
+                    await super().send_text(payload)
+
+        gateway = gateway_type()
+        gateway._ws_send_timeout_ms = 1
+        await gateway.on_call_started("offline-loss", {"websocket": LossySocket()})
+        if isinstance(gateway, TwilioMediaGateway):
+            gateway.set_stream_sid("offline-loss", "synthetic-stream")
+        await gateway.begin_playback("offline-loss", "lossy")
+        await gateway.send_audio("offline-loss", bytes(3200))
+        await gateway.flush_audio_buffer("offline-loss")
+        session = gateway._sessions["offline-loss"]
+        assert session.dropped_output_bytes > 0
+        assert session.total_bytes_sent == (1920 if first_frame_succeeds else 0)
+        gateway.mark_playback_complete("offline-loss", "lossy")
+        receipt = await gateway.finish_playback("offline-loss", "lossy")
+>       assert receipt["status"] == "failed"
+E       AssertionError: assert 'completed' == 'failed'
+E         - failed
+E         + completed
+
+tests\unit\test_op03_audio_ownership.py:281: AssertionError
+------------------------------ Captured log call ------------------------------
+WARNING  app.infrastructure.telephony.browser_media_gateway:browser_media_gateway.py:800 WebSocket send timeout for call offline-loss after 1ms; dropped 1920 bytes
+WARNING  app.infrastructure.telephony.browser_media_gateway:browser_media_gateway.py:800 WebSocket send timeout for call offline-loss after 1ms; dropped 1280 bytes
+_ test_dropped_audio_cannot_be_promoted_by_matching_playback_ack[False-TwilioMediaGateway] _
+
+gateway_type = <class 'app.infrastructure.telephony.twilio_media_gateway.TwilioMediaGateway'>
+first_frame_succeeds = False
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("gateway_type", [BrowserMediaGateway, TwilioMediaGateway])
+    @pytest.mark.parametrize("first_frame_succeeds", [False, True])
+    async def test_dropped_audio_cannot_be_promoted_by_matching_playback_ack(
+        gateway_type, first_frame_succeeds
+    ):
+        class LossySocket(BrowserSocket):
+            media_count = 0
+
+            async def send_bytes(self, payload):
+                self.media_count += 1
+                if not first_frame_succeeds or self.media_count > 1:
+                    await asyncio.Event().wait()
+                await super().send_bytes(payload)
+
+            async def send_text(self, payload):
+                if json.loads(payload)["event"] == "media":
+                    await self.send_bytes(payload)
+                else:
+                    await super().send_text(payload)
+
+        gateway = gateway_type()
+        gateway._ws_send_timeout_ms = 1
+        await gateway.on_call_started("offline-loss", {"websocket": LossySocket()})
+        if isinstance(gateway, TwilioMediaGateway):
+            gateway.set_stream_sid("offline-loss", "synthetic-stream")
+        await gateway.begin_playback("offline-loss", "lossy")
+        await gateway.send_audio("offline-loss", bytes(3200))
+        await gateway.flush_audio_buffer("offline-loss")
+        session = gateway._sessions["offline-loss"]
+        assert session.dropped_output_bytes > 0
+        assert session.total_bytes_sent == (1920 if first_frame_succeeds else 0)
+        gateway.mark_playback_complete("offline-loss", "lossy")
+        receipt = await gateway.finish_playback("offline-loss", "lossy")
+>       assert receipt["status"] == "failed"
+E       AssertionError: assert 'completed' == 'failed'
+E         - failed
+E         + completed
+
+tests\unit\test_op03_audio_ownership.py:281: AssertionError
+------------------------------ Captured log call ------------------------------
+WARNING  app.infrastructure.telephony.twilio_media_gateway:twilio_media_gateway.py:110 Twilio WS send timeout call=offline-loss after 1ms; dropped 1920 bytes
+WARNING  app.infrastructure.telephony.twilio_media_gateway:twilio_media_gateway.py:110 Twilio WS send timeout call=offline-loss after 1ms; dropped 1280 bytes
+_ test_dropped_audio_cannot_be_promoted_by_matching_playback_ack[True-BrowserMediaGateway] _
+
+gateway_type = <class 'app.infrastructure.telephony.browser_media_gateway.BrowserMediaGateway'>
+first_frame_succeeds = True
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("gateway_type", [BrowserMediaGateway, TwilioMediaGateway])
+    @pytest.mark.parametrize("first_frame_succeeds", [False, True])
+    async def test_dropped_audio_cannot_be_promoted_by_matching_playback_ack(
+        gateway_type, first_frame_succeeds
+    ):
+        class LossySocket(BrowserSocket):
+            media_count = 0
+
+            async def send_bytes(self, payload):
+                self.media_count += 1
+                if not first_frame_succeeds or self.media_count > 1:
+                    await asyncio.Event().wait()
+                await super().send_bytes(payload)
+
+            async def send_text(self, payload):
+                if json.loads(payload)["event"] == "media":
+                    await self.send_bytes(payload)
+                else:
+                    await super().send_text(payload)
+
+        gateway = gateway_type()
+        gateway._ws_send_timeout_ms = 1
+        await gateway.on_call_started("offline-loss", {"websocket": LossySocket()})
+        if isinstance(gateway, TwilioMediaGateway):
+            gateway.set_stream_sid("offline-loss", "synthetic-stream")
+        await gateway.begin_playback("offline-loss", "lossy")
+        await gateway.send_audio("offline-loss", bytes(3200))
+        await gateway.flush_audio_buffer("offline-loss")
+        session = gateway._sessions["offline-loss"]
+        assert session.dropped_output_bytes > 0
+        assert session.total_bytes_sent == (1920 if first_frame_succeeds else 0)
+        gateway.mark_playback_complete("offline-loss", "lossy")
+        receipt = await gateway.finish_playback("offline-loss", "lossy")
+>       assert receipt["status"] == "failed"
+E       AssertionError: assert 'completed' == 'failed'
+E         - failed
+E         + completed
+
+tests\unit\test_op03_audio_ownership.py:281: AssertionError
+------------------------------ Captured log call ------------------------------
+WARNING  app.infrastructure.telephony.browser_media_gateway:browser_media_gateway.py:800 WebSocket send timeout for call offline-loss after 1ms; dropped 1280 bytes
+_ test_dropped_audio_cannot_be_promoted_by_matching_playback_ack[True-TwilioMediaGateway] _
+
+gateway_type = <class 'app.infrastructure.telephony.twilio_media_gateway.TwilioMediaGateway'>
+first_frame_succeeds = True
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("gateway_type", [BrowserMediaGateway, TwilioMediaGateway])
+    @pytest.mark.parametrize("first_frame_succeeds", [False, True])
+    async def test_dropped_audio_cannot_be_promoted_by_matching_playback_ack(
+        gateway_type, first_frame_succeeds
+    ):
+        class LossySocket(BrowserSocket):
+            media_count = 0
+
+            async def send_bytes(self, payload):
+                self.media_count += 1
+                if not first_frame_succeeds or self.media_count > 1:
+                    await asyncio.Event().wait()
+                await super().send_bytes(payload)
+
+            async def send_text(self, payload):
+                if json.loads(payload)["event"] == "media":
+                    await self.send_bytes(payload)
+                else:
+                    await super().send_text(payload)
+
+        gateway = gateway_type()
+        gateway._ws_send_timeout_ms = 1
+        await gateway.on_call_started("offline-loss", {"websocket": LossySocket()})
+        if isinstance(gateway, TwilioMediaGateway):
+            gateway.set_stream_sid("offline-loss", "synthetic-stream")
+        await gateway.begin_playback("offline-loss", "lossy")
+        await gateway.send_audio("offline-loss", bytes(3200))
+        await gateway.flush_audio_buffer("offline-loss")
+        session = gateway._sessions["offline-loss"]
+        assert session.dropped_output_bytes > 0
+        assert session.total_bytes_sent == (1920 if first_frame_succeeds else 0)
+        gateway.mark_playback_complete("offline-loss", "lossy")
+        receipt = await gateway.finish_playback("offline-loss", "lossy")
+>       assert receipt["status"] == "failed"
+E       AssertionError: assert 'completed' == 'failed'
+E         - failed
+E         + completed
+
+tests\unit\test_op03_audio_ownership.py:281: AssertionError
+------------------------------ Captured log call ------------------------------
+WARNING  app.infrastructure.telephony.twilio_media_gateway:twilio_media_gateway.py:110 Twilio WS send timeout call=offline-loss after 1ms; dropped 1280 bytes
+============================== warnings summary ===============================
+tests/unit/test_op03_audio_ownership.py::test_dropped_audio_cannot_be_promoted_by_matching_playback_ack[False-BrowserMediaGateway]
+tests/unit/test_op03_audio_ownership.py::test_dropped_audio_cannot_be_promoted_by_matching_playback_ack[False-TwilioMediaGateway]
+tests/unit/test_op03_audio_ownership.py::test_dropped_audio_cannot_be_promoted_by_matching_playback_ack[True-BrowserMediaGateway]
+tests/unit/test_op03_audio_ownership.py::test_dropped_audio_cannot_be_promoted_by_matching_playback_ack[True-TwilioMediaGateway]
+  <string>:5: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+
+tests/unit/test_op03_audio_ownership.py::test_dropped_audio_cannot_be_promoted_by_matching_playback_ack[False-BrowserMediaGateway]
+tests/unit/test_op03_audio_ownership.py::test_dropped_audio_cannot_be_promoted_by_matching_playback_ack[False-BrowserMediaGateway]
+tests/unit/test_op03_audio_ownership.py::test_dropped_audio_cannot_be_promoted_by_matching_playback_ack[True-BrowserMediaGateway]
+tests/unit/test_op03_audio_ownership.py::test_dropped_audio_cannot_be_promoted_by_matching_playback_ack[True-BrowserMediaGateway]
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-op03-20261005\backend\app\infrastructure\telephony\browser_media_gateway.py:783: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    started = datetime.utcnow()
+
+tests/unit/test_op03_audio_ownership.py::test_dropped_audio_cannot_be_promoted_by_matching_playback_ack[False-TwilioMediaGateway]
+tests/unit/test_op03_audio_ownership.py::test_dropped_audio_cannot_be_promoted_by_matching_playback_ack[False-TwilioMediaGateway]
+tests/unit/test_op03_audio_ownership.py::test_dropped_audio_cannot_be_promoted_by_matching_playback_ack[True-TwilioMediaGateway]
+tests/unit/test_op03_audio_ownership.py::test_dropped_audio_cannot_be_promoted_by_matching_playback_ack[True-TwilioMediaGateway]
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-op03-20261005\backend\app\infrastructure\telephony\twilio_media_gateway.py:94: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    started = datetime.utcnow()
+
+tests/unit/test_op03_audio_ownership.py::test_dropped_audio_cannot_be_promoted_by_matching_playback_ack[True-BrowserMediaGateway]
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-op03-20261005\backend\app\infrastructure\telephony\browser_media_gateway.py:790: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    elapsed_ms = (datetime.utcnow() - started).total_seconds() * 1000
+
+tests/unit/test_op03_audio_ownership.py::test_dropped_audio_cannot_be_promoted_by_matching_playback_ack[True-TwilioMediaGateway]
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-op03-20261005\backend\app\infrastructure\telephony\twilio_media_gateway.py:101: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    session.last_send_latency_ms = (datetime.utcnow() - started).total_seconds() * 1000
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/unit/test_op03_audio_ownership.py::test_dropped_audio_cannot_be_promoted_by_matching_playback_ack[False-BrowserMediaGateway]
+FAILED tests/unit/test_op03_audio_ownership.py::test_dropped_audio_cannot_be_promoted_by_matching_playback_ack[False-TwilioMediaGateway]
+FAILED tests/unit/test_op03_audio_ownership.py::test_dropped_audio_cannot_be_promoted_by_matching_playback_ack[True-BrowserMediaGateway]
+FAILED tests/unit/test_op03_audio_ownership.py::test_dropped_audio_cannot_be_promoted_by_matching_playback_ack[True-TwilioMediaGateway]
+4 failed, 11 deselected, 14 warnings in 1.01s

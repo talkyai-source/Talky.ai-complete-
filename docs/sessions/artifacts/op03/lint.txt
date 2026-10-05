@@ -1,0 +1,506 @@
+app\domain\services\resilient_stt.py:7:1: I001 [*] Import block is un-sorted or un-formatted
+   |
+ 5 |   terminal error if recovery is unavailable. Caller cancellation never retries.
+ 6 |   """
+ 7 | / from __future__ import annotations
+ 8 | |
+ 9 | | import asyncio
+10 | | import collections
+11 | | from contextlib import aclosing, nullcontext
+12 | | import logging
+13 | | import os
+14 | | from dataclasses import dataclass, field
+15 | | from typing import AsyncIterator, Callable, Optional
+16 | |
+17 | | from app.domain.interfaces.stt_provider import STTProvider
+18 | | from app.domain.models.conversation import AudioChunk, TranscriptChunk
+19 | | from app.utils.resilience import CircuitBreaker, CircuitOpenError
+20 | |
+21 | | logger = logging.getLogger(__name__)
+   | |_^ I001
+   |
+   = help: Organize imports
+
+app\domain\services\resilient_stt.py:15:1: UP035 [*] Import from `collections.abc` instead: `AsyncIterator`, `Callable`
+   |
+13 | import os
+14 | from dataclasses import dataclass, field
+15 | from typing import AsyncIterator, Callable, Optional
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ UP035
+16 |
+17 | from app.domain.interfaces.stt_provider import STTProvider
+   |
+   = help: Import from `collections.abc`
+
+app\domain\services\resilient_stt.py:377:20: UP007 [*] Use `X | Y` for type annotations
+    |
+375 |         self,
+376 |         primary: STTProvider,
+377 |         secondary: Optional[STTProvider] = None,
+    |                    ^^^^^^^^^^^^^^^^^^^^^ UP007
+378 |         policy: Optional[ReconnectPolicy] = None,
+379 |     ):
+    |
+    = help: Convert to `X | Y`
+
+app\domain\services\resilient_stt.py:378:17: UP007 [*] Use `X | Y` for type annotations
+    |
+376 |         primary: STTProvider,
+377 |         secondary: Optional[STTProvider] = None,
+378 |         policy: Optional[ReconnectPolicy] = None,
+    |                 ^^^^^^^^^^^^^^^^^^^^^^^^^ UP007
+379 |     ):
+380 |         self._primary = primary
+    |
+    = help: Convert to `X | Y`
+
+app\domain\services\resilient_stt.py:393:37: UP007 [*] Use `X | Y` for type annotations
+    |
+391 |         # assumed benign — an uninstalled probe is exactly how the previous
+392 |         # version of this guard came to be dead code for four days.
+393 |         self._agent_speaking_probe: Optional[Callable[[], bool]] = None
+    |                                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ UP007
+394 |         self._probe_errors = 0
+    |
+    = help: Convert to `X | Y`
+
+app\domain\services\resilient_stt.py:397:22: UP007 [*] Use `X | Y` for type annotations
+    |
+396 |     def set_agent_speaking_probe(
+397 |         self, probe: Optional[Callable[[], bool]]
+    |                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ UP007
+398 |     ) -> None:
+399 |         """Tell the watchdog how to ask "is the agent talking right now?".
+    |
+    = help: Convert to `X | Y`
+
+app\domain\services\resilient_stt.py:492:18: UP007 [*] Use `X | Y` for type annotations
+    |
+490 |         audio_stream: AsyncIterator[AudioChunk],
+491 |         language: str = "en",
+492 |         context: Optional[str] = None,
+    |                  ^^^^^^^^^^^^^ UP007
+493 |         call_id: Optional[str] = None,
+494 |         on_eager_end_of_turn: Optional[Callable[[str], None]] = None,
+    |
+    = help: Convert to `X | Y`
+
+app\domain\services\resilient_stt.py:493:18: UP007 [*] Use `X | Y` for type annotations
+    |
+491 |         language: str = "en",
+492 |         context: Optional[str] = None,
+493 |         call_id: Optional[str] = None,
+    |                  ^^^^^^^^^^^^^ UP007
+494 |         on_eager_end_of_turn: Optional[Callable[[str], None]] = None,
+495 |         on_barge_in: Optional[Callable[[], None]] = None,
+    |
+    = help: Convert to `X | Y`
+
+app\domain\services\resilient_stt.py:494:31: UP007 [*] Use `X | Y` for type annotations
+    |
+492 |         context: Optional[str] = None,
+493 |         call_id: Optional[str] = None,
+494 |         on_eager_end_of_turn: Optional[Callable[[str], None]] = None,
+    |                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ UP007
+495 |         on_barge_in: Optional[Callable[[], None]] = None,
+496 |     ) -> AsyncIterator[TranscriptChunk]:
+    |
+    = help: Convert to `X | Y`
+
+app\domain\services\resilient_stt.py:495:22: UP007 [*] Use `X | Y` for type annotations
+    |
+493 |         call_id: Optional[str] = None,
+494 |         on_eager_end_of_turn: Optional[Callable[[str], None]] = None,
+495 |         on_barge_in: Optional[Callable[[], None]] = None,
+    |                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ UP007
+496 |     ) -> AsyncIterator[TranscriptChunk]:
+497 |         """Promote the secondary once; both failed is a terminal error."""
+    |
+    = help: Convert to `X | Y`
+
+app\domain\services\resilient_stt.py:574:61: UP007 [*] Use `X | Y` for type annotations
+    |
+572 |             )
+573 |
+574 |         def _provider_message_age(provider: STTProvider) -> Optional[float]:
+    |                                                             ^^^^^^^^^^^^^^^ UP007
+575 |             """Seconds since the provider last sent ANY message, or None when
+576 |             it cannot say (then the watchdog behaves exactly as before)."""
+    |
+    = help: Convert to `X | Y`
+
+app\domain\services\resilient_stt.py:584:34: UP038 Use `X | Y` in `isinstance` call instead of `(X, Y)`
+    |
+582 |             except Exception:
+583 |                 return None
+584 |             return float(age) if isinstance(age, (int, float)) else None
+    |                                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ UP038
+585 |
+586 |         alive_overrides = 0
+    |
+    = help: Convert to `X | Y`
+
+app\domain\services\resilient_stt.py:795:18: UP007 [*] Use `X | Y` for type annotations
+    |
+793 |         audio_iter: AsyncIterator[AudioChunk],
+794 |         language: str,
+795 |         context: Optional[str],
+    |                  ^^^^^^^^^^^^^ UP007
+796 |         call_id: Optional[str],
+797 |         on_eager_end_of_turn: Optional[Callable[[str], None]],
+    |
+    = help: Convert to `X | Y`
+
+app\domain\services\resilient_stt.py:796:18: UP007 [*] Use `X | Y` for type annotations
+    |
+794 |         language: str,
+795 |         context: Optional[str],
+796 |         call_id: Optional[str],
+    |                  ^^^^^^^^^^^^^ UP007
+797 |         on_eager_end_of_turn: Optional[Callable[[str], None]],
+798 |         on_barge_in: Optional[Callable[[], None]],
+    |
+    = help: Convert to `X | Y`
+
+app\domain\services\resilient_stt.py:797:31: UP007 [*] Use `X | Y` for type annotations
+    |
+795 |         context: Optional[str],
+796 |         call_id: Optional[str],
+797 |         on_eager_end_of_turn: Optional[Callable[[str], None]],
+    |                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ UP007
+798 |         on_barge_in: Optional[Callable[[], None]],
+799 |     ) -> AsyncIterator[TranscriptChunk]:
+    |
+    = help: Convert to `X | Y`
+
+app\domain\services\resilient_stt.py:798:22: UP007 [*] Use `X | Y` for type annotations
+    |
+796 |         call_id: Optional[str],
+797 |         on_eager_end_of_turn: Optional[Callable[[str], None]],
+798 |         on_barge_in: Optional[Callable[[], None]],
+    |                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ UP007
+799 |     ) -> AsyncIterator[TranscriptChunk]:
+800 |         """Drive one provider through the circuit breaker."""
+    |
+    = help: Convert to `X | Y`
+
+app\infrastructure\telephony\browser_media_gateway.py:11:1: I001 [*] Import block is un-sorted or un-formatted
+   |
+ 9 |   """
+10 |
+11 | / import asyncio
+12 | | import logging
+13 | | from collections import deque
+14 | | from typing import Dict, Any, Optional
+15 | | from dataclasses import dataclass, field
+16 | | from datetime import datetime
+17 | | from fastapi import WebSocket
+18 | |
+19 | | from app.domain.interfaces.media_gateway import MediaGateway
+20 | | from app.utils.audio_utils import validate_pcm_format
+21 | |
+22 | | logger = logging.getLogger(__name__)
+   | |_^ I001
+23 |
+24 |   # Input audio buffering: accumulate micro-chunks from browser AudioWorklet
+   |
+   = help: Organize imports
+
+app\infrastructure\telephony\browser_media_gateway.py:14:1: UP035 `typing.Dict` is deprecated, use `dict` instead
+   |
+12 | import logging
+13 | from collections import deque
+14 | from typing import Dict, Any, Optional
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ UP035
+15 | from dataclasses import dataclass, field
+16 | from datetime import datetime
+   |
+
+app\infrastructure\telephony\browser_media_gateway.py:60:28: UP007 [*] Use `X | Y` for type annotations
+   |
+58 |     playback_tracking_active: bool = False
+59 |     playback_bytes_sent: int = 0
+60 |     playback_utterance_id: Optional[str] = None
+   |                            ^^^^^^^^^^^^^ UP007
+61 |     playback_outcome: str = "unknown"
+62 |     last_playback_receipt: Optional[Dict[str, Any]] = None
+   |
+   = help: Convert to `X | Y`
+
+app\infrastructure\telephony\browser_media_gateway.py:62:28: UP007 [*] Use `X | Y` for type annotations
+   |
+60 |     playback_utterance_id: Optional[str] = None
+61 |     playback_outcome: str = "unknown"
+62 |     last_playback_receipt: Optional[Dict[str, Any]] = None
+   |                            ^^^^^^^^^^^^^^^^^^^^^^^^ UP007
+63 |     is_active: bool = True
+   |
+   = help: Convert to `X | Y`
+
+app\infrastructure\telephony\browser_media_gateway.py:62:37: UP006 [*] Use `dict` instead of `Dict` for type annotation
+   |
+60 |     playback_utterance_id: Optional[str] = None
+61 |     playback_outcome: str = "unknown"
+62 |     last_playback_receipt: Optional[Dict[str, Any]] = None
+   |                                     ^^^^ UP006
+63 |     is_active: bool = True
+   |
+   = help: Replace with `dict`
+
+app\infrastructure\telephony\browser_media_gateway.py:104:25: UP006 [*] Use `dict` instead of `Dict` for type annotation
+    |
+103 |     def __init__(self):
+104 |         self._sessions: Dict[str, BrowserSession] = {}
+    |                         ^^^^ UP006
+105 |         self._sample_rate: int = 16000
+106 |         self._input_sample_rate: int = 16000
+    |
+    = help: Replace with `dict`
+
+app\infrastructure\telephony\browser_media_gateway.py:121:40: UP006 [*] Use `dict` instead of `Dict` for type annotation
+    |
+119 |         self._tts_source_format: str = "s16le"
+120 |
+121 |     async def initialize(self, config: Dict[str, Any]) -> None:
+    |                                        ^^^^ UP006
+122 |         """Initialize the browser media gateway.
+    |
+    = help: Replace with `dict`
+
+app\infrastructure\telephony\browser_media_gateway.py:177:61: UP006 [*] Use `dict` instead of `Dict` for type annotation
+    |
+175 |         )
+176 |
+177 |     async def on_call_started(self, call_id: str, metadata: Dict[str, Any]) -> None:
+    |                                                             ^^^^ UP006
+178 |         """
+179 |         Handle browser test session start.
+    |
+    = help: Replace with `dict`
+
+app\infrastructure\telephony\browser_media_gateway.py:486:13: SIM105 Use `contextlib.suppress(Exception)` instead of `try`-`except`-`pass`
+    |
+484 |               ramp = np.linspace(1.0, 0.0, len(tail), dtype=np.float32)
+485 |               faded = (tail * ramp).astype(np.int16)
+486 |               try:
+    |  _____________^
+487 | |                 await self._send_payload(session, faded.tobytes())
+488 | |             except Exception:
+489 | |                 pass
+    | |____________________^ SIM105
+490 |
+491 |       async def send_control_event(self, call_id: str, payload: Dict[str, Any]) -> None:
+    |
+    = help: Replace with `contextlib.suppress(Exception)`
+
+app\infrastructure\telephony\browser_media_gateway.py:491:63: UP006 [*] Use `dict` instead of `Dict` for type annotation
+    |
+489 |                 pass
+490 |
+491 |     async def send_control_event(self, call_id: str, payload: Dict[str, Any]) -> None:
+    |                                                               ^^^^ UP006
+492 |         """Deliver transport playback controls alongside the binary audio stream."""
+493 |         session = self._sessions.get(call_id)
+    |
+    = help: Replace with `dict`
+
+app\infrastructure\telephony\browser_media_gateway.py:502:73: UP006 [*] Use `dict` instead of `Dict` for type annotation
+    |
+500 |         await self.send_control_event(call_id, {"type": "playback_start", "utterance_id": utterance_id})
+501 |
+502 |     async def finish_playback(self, call_id: str, utterance_id: str) -> Dict[str, Any]:
+    |                                                                         ^^^^ UP006
+503 |         session = self._sessions.get(call_id)
+504 |         if not session or session.playback_utterance_id != utterance_id:
+    |
+    = help: Replace with `dict`
+
+app\infrastructure\telephony\browser_media_gateway.py:527:68: UP007 [*] Use `X | Y` for type annotations
+    |
+525 |         return receipt
+526 |
+527 |     def playback_receipt(self, call_id: str, utterance_id: str) -> Optional[Dict[str, Any]]:
+    |                                                                    ^^^^^^^^^^^^^^^^^^^^^^^^ UP007
+528 |         session = self._sessions.get(call_id)
+529 |         receipt = session.last_playback_receipt if session else None
+    |
+    = help: Convert to `X | Y`
+
+app\infrastructure\telephony\browser_media_gateway.py:527:77: UP006 [*] Use `dict` instead of `Dict` for type annotation
+    |
+525 |         return receipt
+526 |
+527 |     def playback_receipt(self, call_id: str, utterance_id: str) -> Optional[Dict[str, Any]]:
+    |                                                                             ^^^^ UP006
+528 |         session = self._sessions.get(call_id)
+529 |         receipt = session.last_playback_receipt if session else None
+    |
+    = help: Replace with `dict`
+
+app\infrastructure\telephony\browser_media_gateway.py:540:70: UP007 [*] Use `X | Y` for type annotations
+    |
+538 |         return True
+539 |
+540 |     def start_playback_tracking(self, call_id: str, *, utterance_id: Optional[str] = None) -> None:
+    |                                                                      ^^^^^^^^^^^^^ UP007
+541 |         """Begin tracking one browser-played utterance."""
+542 |         session = self._sessions.get(call_id)
+    |
+    = help: Convert to `X | Y`
+
+app\infrastructure\telephony\browser_media_gateway.py:555:66: UP007 [*] Use `X | Y` for type annotations
+    |
+553 |         session.playback_outcome = "unknown"
+554 |
+555 |     def mark_playback_complete(self, call_id: str, utterance_id: Optional[str] = None) -> None:
+    |                                                                  ^^^^^^^^^^^^^ UP007
+556 |         """Mark the current browser utterance as fully played."""
+557 |         session = self._sessions.get(call_id)
+    |
+    = help: Convert to `X | Y`
+
+app\infrastructure\telephony\browser_media_gateway.py:572:23: UP007 [*] Use `X | Y` for type annotations
+    |
+570 |         minimum_timeout_ms: int = 1000,
+571 |         maximum_timeout_ms: int = 15000,
+572 |         utterance_id: Optional[str] = None,
+    |                       ^^^^^^^^^^^^^ UP007
+573 |     ) -> bool:
+574 |         """
+    |
+    = help: Convert to `X | Y`
+
+app\infrastructure\telephony\browser_media_gateway.py:609:16: UP041 [*] Replace aliased errors with `TimeoutError`
+    |
+607 |                 and session.playback_outcome == "completed"
+608 |             )
+609 |         except asyncio.TimeoutError:
+    |                ^^^^^^^^^^^^^^^^^^^^ UP041
+610 |             logger.warning(
+611 |                 "Timed out waiting for browser playback completion for %s after %sms "
+    |
+    = help: Replace `asyncio.TimeoutError` with builtin `TimeoutError`
+
+app\infrastructure\telephony\browser_media_gateway.py:625:48: UP007 [*] Use `X | Y` for type annotations
+    |
+623 |                 playback_event.clear()
+624 |
+625 |     def get_audio_queue(self, call_id: str) -> Optional[asyncio.Queue]:
+    |                                                ^^^^^^^^^^^^^^^^^^^^^^^ UP007
+626 |         """
+627 |         Get audio input queue for STT pipeline.
+    |
+    = help: Convert to `X | Y`
+
+app\infrastructure\telephony\browser_media_gateway.py:704:44: UP007 [*] Use `X | Y` for type annotations
+    |
+702 |     # =========================================================================
+703 |
+704 |     def get_session(self, call_id: str) -> Optional[BrowserSession]:
+    |                                            ^^^^^^^^^^^^^^^^^^^^^^^^ UP007
+705 |         """Get session by call_id."""
+706 |         return self._sessions.get(call_id)
+    |
+    = help: Convert to `X | Y`
+
+app\infrastructure\telephony\browser_media_gateway.py:713:52: UP007 [*] Use `X | Y` for type annotations
+    |
+711 |         return session.is_active if session else False
+712 |
+713 |     def get_session_metrics(self, call_id: str) -> Optional[Dict[str, Any]]:
+    |                                                    ^^^^^^^^^^^^^^^^^^^^^^^^ UP007
+714 |         """Get session metrics for display."""
+715 |         session = self._sessions.get(call_id)
+    |
+    = help: Convert to `X | Y`
+
+app\infrastructure\telephony\browser_media_gateway.py:713:61: UP006 [*] Use `dict` instead of `Dict` for type annotation
+    |
+711 |         return session.is_active if session else False
+712 |
+713 |     def get_session_metrics(self, call_id: str) -> Optional[Dict[str, Any]]:
+    |                                                             ^^^^ UP006
+714 |         """Get session metrics for display."""
+715 |         session = self._sessions.get(call_id)
+    |
+    = help: Replace with `dict`
+
+app\infrastructure\telephony\browser_media_gateway.py:812:16: UP041 [*] Replace aliased errors with `TimeoutError`
+    |
+810 |                     and session.playback_complete_event is playback_event):
+811 |                 session.playback_bytes_sent += len(payload)
+812 |         except asyncio.TimeoutError:
+    |                ^^^^^^^^^^^^^^^^^^^^ UP041
+813 |             self._mark_playback_submission_failed(session, playback_event)
+814 |             session.ws_send_timeouts += 1
+    |
+    = help: Replace `asyncio.TimeoutError` with builtin `TimeoutError`
+
+app\infrastructure\telephony\twilio_media_gateway.py:26:1: UP035 `typing.Dict` is deprecated, use `dict` instead
+   |
+24 | import logging
+25 | from datetime import datetime
+26 | from typing import Dict
+   | ^^^^^^^^^^^^^^^^^^^^^^^ UP035
+27 |
+28 | from app.infrastructure.telephony.browser_media_gateway import (
+   |
+
+app\infrastructure\telephony\twilio_media_gateway.py:45:28: UP006 [*] Use `dict` instead of `Dict` for type annotation
+   |
+43 |         # It arrives in the WS "start" event — after the gateway session is
+44 |         # created — so it's stored at gateway level keyed by call_id.
+45 |         self._stream_sids: Dict[str, str] = {}
+   |                            ^^^^ UP006
+46 |
+47 |     @property
+   |
+   = help: Replace with `dict`
+
+app\infrastructure\telephony\twilio_media_gateway.py:109:16: UP041 [*] Replace aliased errors with `TimeoutError`
+    |
+107 |                     and session.playback_complete_event is playback_event):
+108 |                 session.playback_bytes_sent += len(payload)
+109 |         except asyncio.TimeoutError:
+    |                ^^^^^^^^^^^^^^^^^^^^ UP041
+110 |             self._mark_playback_submission_failed(session, playback_event)
+111 |             session.ws_send_timeouts += 1
+    |
+    = help: Replace `asyncio.TimeoutError` with builtin `TimeoutError`
+
+tests\unit\test_stt_watchdog_decay.py:16:1: I001 [*] Import block is un-sorted or un-formatted
+   |
+14 |   whole window so a real failover loses nothing.
+15 |   """
+16 | / from __future__ import annotations
+17 | |
+18 | | import struct
+19 | |
+20 | | import pytest
+21 | |
+22 | | from app.domain.services.resilient_stt import (
+23 | |     ReconnectPolicy,
+24 | |     _SPEECH_RMS_THRESHOLD,
+25 | |     _WATCHDOG_DECAY_RATIO,
+26 | | )
+27 | | import app.domain.services.resilient_stt as rstt
+28 | |
+29 | |
+30 | | class _Chunk:
+   | |_^ I001
+31 |       """Minimal stand-in for AudioChunk: the watchdog reads .data and
+32 |       .sample_rate and nothing else."""
+   |
+   = help: Organize imports
+
+tests\unit\test_stt_watchdog_decay.py:39:58: UP037 [*] Remove quotes from type annotation
+   |
+39 | def _chunk(rms: int, ms: int = 20, rate: int = 16000) -> "_Chunk":
+   |                                                          ^^^^^^^^ UP037
+40 |     """PCM16 mono at roughly the requested RMS, for `ms` milliseconds."""
+41 |     samples = int(rate * ms / 1000)
+   |
+   = help: Remove quotes
+
+Found 43 errors.
+[*] 39 fixable with the `--fix` option (2 hidden fixes can be enabled with the `--unsafe-fixes` option).
