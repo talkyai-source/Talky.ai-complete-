@@ -36,6 +36,17 @@ def _fmt_dt(value: Any) -> Optional[str]:
 
 def _email_provider_error(exc: Exception, *, opening_message: bool = False) -> Dict[str, Any]:
     """Return an honest user-facing error without leaking provider details."""
+    from app.services.connector_resolver import ReviewedConnectorChanged
+
+    if isinstance(exc, ReviewedConnectorChanged):
+        return {
+            "success": False,
+            "error": (
+                "The original email account could not be verified. Check the "
+                "intended account in Connectors before reading again."
+            ),
+            "error_code": "email_account_changed",
+        }
     if isinstance(exc, ConnectorProviderError):
         logger.error(
             "Gmail provider failure operation=%s category=%s status=%s",
@@ -103,7 +114,20 @@ async def _call_with_one_auth_refresh(
     db_client: Client,
     operation: Callable[[BaseConnector], Awaitable[_T]],
 ) -> _T:
-    """Retry exactly once with a freshly-issued access token after a 401."""
+    """Retry once after a 401, retaining the initial connector and account."""
+    from app.services.connector_resolver import (
+        ConnectorNotConnectedError,
+        ReviewedConnectorChanged,
+        connector_identity,
+        resolve_active_connector,
+        verify_reviewed_connector,
+    )
+
+    # Freeze before the first provider await: the connector row can be reused
+    # by a reconnect, and even the original instance can be changed in flight.
+    reviewed = connector_identity(
+        connector, connector_id, getattr(connector, "provider_name", None)
+    )
 
     async def invoke(current: BaseConnector) -> _T:
         return await asyncio.wait_for(
@@ -119,19 +143,22 @@ async def _call_with_one_auth_refresh(
             "Gmail rejected access token; attempting one forced refresh tenant=%s",
             str(tenant_id)[:8],
         )
-        from app.services.connector_resolver import (
-            ConnectorNotConnectedError,
-            resolve_active_connector,
-        )
-
         try:
             refreshed, refreshed_id, _provider = await resolve_active_connector(
                 db_client,
                 tenant_id,
                 "email",
                 force_refresh=True,
+                connector_id=reviewed["connector_id"],
+                provider=reviewed["provider"],
             )
         except ConnectorNotConnectedError as refresh_exc:
+            if refresh_exc.connector_id != reviewed["connector_id"]:
+                # This failure cannot establish the original account's health
+                # and must not expire another connector in the outer handlers.
+                raise ReviewedConnectorChanged(
+                    "The original email connection is unavailable"
+                ) from refresh_exc
             same_terminal_connector = (
                 refresh_exc.connector_id == connector_id
                 and refresh_exc.reason == "refresh_unavailable"
@@ -141,6 +168,7 @@ async def _call_with_one_auth_refresh(
                     db_client, tenant_id, refresh_exc.connector_id or connector_id
                 )
             raise
+        verify_reviewed_connector(refreshed, refreshed_id, _provider, reviewed)
         try:
             return await invoke(refreshed)
         except ConnectorProviderError as retry_exc:

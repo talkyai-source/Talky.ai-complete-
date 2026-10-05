@@ -286,8 +286,9 @@ async def test_read_emails_retries_one_401_after_forced_refresh(monkeypatch):
         message="invalid credentials",
         status_code=401,
     )
-    old = SimpleNamespace(list_emails=AsyncMock(side_effect=rejected))
+    old = SimpleNamespace(provider_name="gmail", external_account_id="account-1", list_emails=AsyncMock(side_effect=rejected))
     refreshed = SimpleNamespace(
+        provider_name="gmail", external_account_id="account-1",
         list_emails=AsyncMock(
             return_value=[EmailMessage(id="m-1", subject="Hello", body="Preview")]
         )
@@ -318,7 +319,7 @@ async def test_unrecoverable_401_downgrades_connector_status(monkeypatch):
         message="invalid credentials",
         status_code=401,
     )
-    old = SimpleNamespace(list_emails=AsyncMock(side_effect=rejected))
+    old = SimpleNamespace(provider_name="gmail", external_account_id="account-1", list_emails=AsyncMock(side_effect=rejected))
     resolver = AsyncMock(
         side_effect=[
             (old, "connector-1", "gmail"),
@@ -376,7 +377,7 @@ async def test_401_then_same_connector_missing_refresh_marks_expired(monkeypatch
         message="invalid access token",
         status_code=401,
     )
-    old = SimpleNamespace(list_emails=AsyncMock(side_effect=rejected))
+    old = SimpleNamespace(provider_name="gmail", external_account_id="account-1", list_emails=AsyncMock(side_effect=rejected))
     resolver = AsyncMock(
         side_effect=[
             (old, "connector-1", "gmail"),
