@@ -56,3 +56,9 @@ try:
 except ImportError:
     pass  # its base (the Cerebras provider) is unavailable
 
+try:
+    from app.infrastructure.llm.deepseek import DeepSeekLLMProvider
+    LLMFactory.register("deepseek", DeepSeekLLMProvider)
+except ImportError:
+    pass  # its base (the Cerebras provider) is unavailable
+

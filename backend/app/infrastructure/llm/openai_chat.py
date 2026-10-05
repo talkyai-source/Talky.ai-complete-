@@ -46,20 +46,29 @@ def _ns(value: Any) -> Any:
 
 
 class _ChatCompletions:
-    def __init__(self, http: httpx.AsyncClient, api_key: str) -> None:
+    def __init__(
+        self,
+        http: httpx.AsyncClient,
+        api_key: str,
+        url: str = _CHAT_URL,
+        label: str = "OpenAI chat",
+    ) -> None:
         self._http = http
         self._api_key = api_key
+        # Any OpenAI-compatible chat-completions endpoint (DeepSeek reuses it).
+        self._url = url
+        self._label = label
 
     async def create(self, **request: Any):
         """Open the stream first so an HTTP error raises here (and is retried
         by the caller before any token is spoken), then yield chunks."""
         headers = {"Authorization": f"Bearer {self._api_key}"}
-        cm = self._http.stream("POST", _CHAT_URL, headers=headers, json=request)
+        cm = self._http.stream("POST", self._url, headers=headers, json=request)
         response = await cm.__aenter__()
         if response.status_code != 200:
             body = (await response.aread()).decode(errors="replace")[:500]
             await cm.__aexit__(None, None, None)
-            raise RuntimeError(f"OpenAI chat HTTP {response.status_code}: {body}")
+            raise RuntimeError(f"{self._label} HTTP {response.status_code}: {body}")
 
         async def chunks():
             try:
@@ -77,9 +86,17 @@ class _ChatCompletions:
 
 
 class _OpenAIChatClient:
-    def __init__(self, api_key: str, timeout: float) -> None:
+    def __init__(
+        self,
+        api_key: str,
+        timeout: float,
+        url: str = _CHAT_URL,
+        label: str = "OpenAI chat",
+    ) -> None:
         self._http = httpx.AsyncClient(timeout=timeout)
-        self.chat = SimpleNamespace(completions=_ChatCompletions(self._http, api_key))
+        self.chat = SimpleNamespace(
+            completions=_ChatCompletions(self._http, api_key, url=url, label=label)
+        )
 
     async def close(self) -> None:
         await self._http.aclose()

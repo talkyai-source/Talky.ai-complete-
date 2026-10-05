@@ -16,6 +16,7 @@ class LLMProvider(str, Enum):
     GEMINI = "gemini"
     CEREBRAS = "cerebras"
     OPENAI = "openai"
+    DEEPSEEK = "deepseek"
 
 
 class STTProvider(str, Enum):
@@ -599,6 +600,26 @@ OPENAI_MODELS = [
         context_window=1_050_000,
         is_preview=False,
         provider="openai",
+    ),
+]
+
+# DeepSeek V4.1 Flash, on DEEPSEEK_API_KEY (owner request 2026-10-06).
+# Verified on the production key (GET /models) and measured from the prod
+# host: see app/infrastructure/llm/deepseek.py.
+DEEPSEEK_MODELS = [
+    ModelInfo(
+        id="deepseek-flash",
+        name="DeepSeek V4.1 Flash",
+        description=(
+            "DeepSeek's fast V4.1 Flash model, run with thinking off. Measured "
+            "from the prod host on 2026-10-06: first text in 446-613 ms on a "
+            "short prompt and 526-771 ms on a prompt the size of a live call."
+        ),
+        speed="~0.45-0.77 s to first text (measured)",
+        price="from $0.15 in / $0.60 out per 1M tokens",
+        context_window=1_000_000,
+        is_preview=False,
+        provider="deepseek",
     ),
 ]
 
