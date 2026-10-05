@@ -1,0 +1,181 @@
+{
+  "scope": "Actual resolver/prewarm/session builders; fake lookup, provider factory/warmup and DID route ports, no DB or provider calls",
+  "results": [
+    {
+      "boundary": "actual_prepare_prewarmed_session",
+      "lookup": "none",
+      "ready": true,
+      "failure": null,
+      "factory_config": [
+        {
+          "pipeline_mode": "realtime",
+          "llm_provider": "groq",
+          "llm_model": "openai/gpt-oss-20b",
+          "realtime_voice": "ash",
+          "stt_eot_timeout_ms": 5000,
+          "tenant_id": "c4442497-fbc8-4675-8424-995456831b39"
+        }
+      ]
+    },
+    {
+      "boundary": "actual_prepare_prewarmed_session",
+      "lookup": "none_cascaded",
+      "ready": true,
+      "failure": null,
+      "factory_config": [
+        {
+          "pipeline_mode": "cascaded",
+          "llm_provider": "cerebras",
+          "llm_model": "gpt-oss-120b",
+          "realtime_voice": "ash",
+          "stt_eot_timeout_ms": 1800,
+          "tenant_id": "c4442497-fbc8-4675-8424-995456831b39"
+        }
+      ]
+    },
+    {
+      "boundary": "actual_prepare_prewarmed_session",
+      "lookup": "ai",
+      "ready": true,
+      "failure": null,
+      "factory_config": [
+        {
+          "pipeline_mode": "cascaded",
+          "llm_provider": "cerebras",
+          "llm_model": "gpt-oss-120b",
+          "realtime_voice": "marin",
+          "stt_eot_timeout_ms": 1800,
+          "tenant_id": "c4442497-fbc8-4675-8424-995456831b39"
+        }
+      ]
+    },
+    {
+      "boundary": "actual_prepare_prewarmed_session",
+      "lookup": "tuning",
+      "ready": true,
+      "failure": null,
+      "factory_config": [
+        {
+          "pipeline_mode": "cascaded",
+          "llm_provider": "cerebras",
+          "llm_model": "gpt-oss-120b",
+          "realtime_voice": "ash",
+          "stt_eot_timeout_ms": 500,
+          "tenant_id": "c4442497-fbc8-4675-8424-995456831b39"
+        }
+      ]
+    },
+    {
+      "boundary": "actual_prepare_prewarmed_session",
+      "lookup": "unwired_ai",
+      "ready": true,
+      "failure": null,
+      "factory_config": [
+        {
+          "pipeline_mode": "cascaded",
+          "llm_provider": "cerebras",
+          "llm_model": "gpt-oss-120b",
+          "realtime_voice": "marin",
+          "stt_eot_timeout_ms": 1800,
+          "tenant_id": "c4442497-fbc8-4675-8424-995456831b39"
+        }
+      ]
+    },
+    {
+      "boundary": "actual_prepare_prewarmed_session",
+      "lookup": "unwired_tuning",
+      "ready": true,
+      "failure": null,
+      "factory_config": [
+        {
+          "pipeline_mode": "cascaded",
+          "llm_provider": "cerebras",
+          "llm_model": "gpt-oss-120b",
+          "realtime_voice": "ash",
+          "stt_eot_timeout_ms": 500,
+          "tenant_id": "c4442497-fbc8-4675-8424-995456831b39"
+        }
+      ]
+    },
+    {
+      "boundary": "actual_prepare_prewarmed_session",
+      "lookup": "no_row",
+      "ready": true,
+      "failure": null,
+      "factory_config": [
+        {
+          "pipeline_mode": "cascaded",
+          "llm_provider": "cerebras",
+          "llm_model": "gpt-oss-120b",
+          "realtime_voice": "marin",
+          "stt_eot_timeout_ms": 500,
+          "tenant_id": "c4442497-fbc8-4675-8424-995456831b39"
+        }
+      ]
+    },
+    {
+      "boundary": "actual_twilio_session_builder",
+      "lookup": "none",
+      "config_returned": true,
+      "config": {
+        "pipeline_mode": "realtime",
+        "llm_provider": "cerebras",
+        "llm_model": "gpt-oss-120b",
+        "realtime_voice": "ash",
+        "stt_eot_timeout_ms": 1800,
+        "tenant_id": "c4442497-fbc8-4675-8424-995456831b39"
+      }
+    },
+    {
+      "boundary": "actual_twilio_session_builder",
+      "lookup": "ai",
+      "config_returned": true,
+      "config": {
+        "pipeline_mode": "cascaded",
+        "llm_provider": "cerebras",
+        "llm_model": "gpt-oss-120b",
+        "realtime_voice": "marin",
+        "stt_eot_timeout_ms": 1800,
+        "tenant_id": "c4442497-fbc8-4675-8424-995456831b39"
+      }
+    },
+    {
+      "boundary": "actual_twilio_session_builder",
+      "lookup": "tuning",
+      "config_returned": false,
+      "exception_type": "TenantAIConfigUnavailable"
+    },
+    {
+      "boundary": "actual_vonage_session_builder",
+      "lookup": "none",
+      "config_returned": true,
+      "config": {
+        "pipeline_mode": "realtime",
+        "llm_provider": "cerebras",
+        "llm_model": "gpt-oss-120b",
+        "realtime_voice": "ash",
+        "stt_eot_timeout_ms": 1800,
+        "tenant_id": "c4442497-fbc8-4675-8424-995456831b39"
+      }
+    },
+    {
+      "boundary": "actual_vonage_session_builder",
+      "lookup": "ai",
+      "config_returned": true,
+      "config": {
+        "pipeline_mode": "cascaded",
+        "llm_provider": "cerebras",
+        "llm_model": "gpt-oss-120b",
+        "realtime_voice": "marin",
+        "stt_eot_timeout_ms": 1800,
+        "tenant_id": "c4442497-fbc8-4675-8424-995456831b39"
+      }
+    },
+    {
+      "boundary": "actual_vonage_session_builder",
+      "lookup": "tuning",
+      "config_returned": false,
+      "exception_type": "TenantAIConfigUnavailable"
+    }
+  ]
+}

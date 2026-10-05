@@ -1,0 +1,4 @@
+pre_originate_warmup_failed: Tenant AI configuration lookup failed � refusing to ring with cold pipeline
+pre_originate_warmup_failed: Voice tuning lookup failed � refusing to ring with cold pipeline
+pre_originate_warmup_failed: Tenant AI configuration lookup is unavailable � refusing to ring with cold pipeline
+pre_originate_warmup_failed: Voice tuning lookup is unavailable � refusing to ring with cold pipeline

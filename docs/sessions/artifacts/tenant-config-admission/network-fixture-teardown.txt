@@ -1,0 +1,300 @@
+Exception ignored in: <function BaseEventLoop.__del__ at 0x0000015852222F20>
+Traceback (most recent call last):
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\base_events.py", line 732, in __del__
+    self.close()
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\proactor_events.py", line 697, in close
+    self._close_self_pipe()
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\proactor_events.py", line 779, in _close_self_pipe
+    self._ssock.close()
+    ^^^^^^^^^^^
+AttributeError: 'ProactorEventLoop' object has no attribute '_ssock'
+Exception ignored in: <function BaseEventLoop.__del__ at 0x0000015852222F20>
+Traceback (most recent call last):
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\base_events.py", line 732, in __del__
+    self.close()
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\proactor_events.py", line 697, in close
+    self._close_self_pipe()
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\proactor_events.py", line 779, in _close_self_pipe
+    self._ssock.close()
+    ^^^^^^^^^^^
+AttributeError: 'ProactorEventLoop' object has no attribute '_ssock'
+Exception ignored in: <function BaseEventLoop.__del__ at 0x0000015852222F20>
+Traceback (most recent call last):
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\base_events.py", line 732, in __del__
+    self.close()
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\proactor_events.py", line 697, in close
+    self._close_self_pipe()
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\proactor_events.py", line 779, in _close_self_pipe
+    self._ssock.close()
+    ^^^^^^^^^^^
+AttributeError: 'ProactorEventLoop' object has no attribute '_ssock'
+Exception ignored in: <function BaseEventLoop.__del__ at 0x0000015852222F20>
+Traceback (most recent call last):
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\base_events.py", line 732, in __del__
+    self.close()
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\proactor_events.py", line 697, in close
+    self._close_self_pipe()
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\proactor_events.py", line 779, in _close_self_pipe
+    self._ssock.close()
+    ^^^^^^^^^^^
+AttributeError: 'ProactorEventLoop' object has no attribute '_ssock'
+Exception ignored in: <function BaseEventLoop.__del__ at 0x0000015852222F20>
+Traceback (most recent call last):
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\base_events.py", line 732, in __del__
+    self.close()
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\proactor_events.py", line 697, in close
+    self._close_self_pipe()
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\proactor_events.py", line 779, in _close_self_pipe
+    self._ssock.close()
+    ^^^^^^^^^^^
+AttributeError: 'ProactorEventLoop' object has no attribute '_ssock'
+Exception ignored in: <function BaseEventLoop.__del__ at 0x0000015852222F20>
+Traceback (most recent call last):
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\base_events.py", line 732, in __del__
+    self.close()
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\proactor_events.py", line 697, in close
+    self._close_self_pipe()
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\proactor_events.py", line 779, in _close_self_pipe
+    self._ssock.close()
+    ^^^^^^^^^^^
+AttributeError: 'ProactorEventLoop' object has no attribute '_ssock'
+Exception ignored in: <function BaseEventLoop.__del__ at 0x0000015852222F20>
+Traceback (most recent call last):
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\base_events.py", line 732, in __del__
+    self.close()
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\proactor_events.py", line 697, in close
+    self._close_self_pipe()
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\proactor_events.py", line 779, in _close_self_pipe
+    self._ssock.close()
+    ^^^^^^^^^^^
+AttributeError: 'ProactorEventLoop' object has no attribute '_ssock'
+Exception ignored in: <function BaseEventLoop.__del__ at 0x0000015852222F20>
+Traceback (most recent call last):
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\base_events.py", line 732, in __del__
+    self.close()
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\proactor_events.py", line 697, in close
+    self._close_self_pipe()
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\proactor_events.py", line 779, in _close_self_pipe
+    self._ssock.close()
+    ^^^^^^^^^^^
+AttributeError: 'ProactorEventLoop' object has no attribute '_ssock'
+Exception ignored in: <function BaseEventLoop.__del__ at 0x0000015852222F20>
+Traceback (most recent call last):
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\base_events.py", line 732, in __del__
+    self.close()
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\proactor_events.py", line 697, in close
+    self._close_self_pipe()
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\proactor_events.py", line 779, in _close_self_pipe
+    self._ssock.close()
+    ^^^^^^^^^^^
+AttributeError: 'ProactorEventLoop' object has no attribute '_ssock'
+.E.E.E.E.E.E.E.E.E.E.E.E.E.E.E.E.E.E.E.E.E.E.E.E.E.E                     [100%]
+=================================== ERRORS ====================================
+_ ERROR at teardown of test_known_tenant_prewarm_rejects_unavailable_profile_before_any_provider_creation[exception-ai] _
+tests\unit\test_tenant_profile_admission.py:23: in blocked
+    raise AssertionError("Profile admission regression attempted network access")
+E   AssertionError: Profile admission regression attempted network access
+------------------------------ Captured log call ------------------------------
+ERROR    app.domain.services.telephony.prewarm:prewarm.py:605 pre_originate_warmup_failed: Tenant AI configuration lookup failed � refusing to ring with cold pipeline
+_ ERROR at teardown of test_known_tenant_prewarm_rejects_unavailable_profile_before_any_provider_creation[exception-tuning] _
+tests\unit\test_tenant_profile_admission.py:23: in blocked
+    raise AssertionError("Profile admission regression attempted network access")
+E   AssertionError: Profile admission regression attempted network access
+------------------------------ Captured log call ------------------------------
+ERROR    app.domain.services.telephony.prewarm:prewarm.py:605 pre_originate_warmup_failed: Voice tuning lookup failed � refusing to ring with cold pipeline
+_ ERROR at teardown of test_known_tenant_prewarm_rejects_unavailable_profile_before_any_provider_creation[unwired-ai] _
+tests\unit\test_tenant_profile_admission.py:23: in blocked
+    raise AssertionError("Profile admission regression attempted network access")
+E   AssertionError: Profile admission regression attempted network access
+------------------------------ Captured log call ------------------------------
+ERROR    app.domain.services.telephony.prewarm:prewarm.py:605 pre_originate_warmup_failed: Tenant AI configuration lookup is unavailable � refusing to ring with cold pipeline
+_ ERROR at teardown of test_known_tenant_prewarm_rejects_unavailable_profile_before_any_provider_creation[unwired-tuning] _
+tests\unit\test_tenant_profile_admission.py:23: in blocked
+    raise AssertionError("Profile admission regression attempted network access")
+E   AssertionError: Profile admission regression attempted network access
+------------------------------ Captured log call ------------------------------
+ERROR    app.domain.services.telephony.prewarm:prewarm.py:605 pre_originate_warmup_failed: Voice tuning lookup is unavailable � refusing to ring with cold pipeline
+_ ERROR at teardown of test_prewarm_preserves_successfully_resolved_saved_selection[realtime] _
+tests\unit\test_tenant_profile_admission.py:23: in blocked
+    raise AssertionError("Profile admission regression attempted network access")
+E   AssertionError: Profile admission regression attempted network access
+_ ERROR at teardown of test_prewarm_preserves_successfully_resolved_saved_selection[cascaded] _
+tests\unit\test_tenant_profile_admission.py:23: in blocked
+    raise AssertionError("Profile admission regression attempted network access")
+E   AssertionError: Profile admission regression attempted network access
+_ ERROR at teardown of test_prewarm_successful_absent_rows_remain_explicit_default_compatible _
+tests\unit\test_tenant_profile_admission.py:23: in blocked
+    raise AssertionError("Profile admission regression attempted network access")
+E   AssertionError: Profile admission regression attempted network access
+_ ERROR at teardown of test_genuinely_tenantless_prewarm_does_not_call_tenant_lookups _
+tests\unit\test_tenant_profile_admission.py:23: in blocked
+    raise AssertionError("Profile admission regression attempted network access")
+E   AssertionError: Profile admission regression attempted network access
+_ ERROR at teardown of test_resolved_did_rejects_unavailable_profile[exception-ai-_build_twilio_session_config] _
+tests\unit\test_tenant_profile_admission.py:23: in blocked
+    raise AssertionError("Profile admission regression attempted network access")
+E   AssertionError: Profile admission regression attempted network access
+_ ERROR at teardown of test_resolved_did_rejects_unavailable_profile[exception-ai-_build_vonage_session_config] _
+tests\unit\test_tenant_profile_admission.py:23: in blocked
+    raise AssertionError("Profile admission regression attempted network access")
+E   AssertionError: Profile admission regression attempted network access
+_ ERROR at teardown of test_resolved_did_rejects_unavailable_profile[exception-tuning-_build_twilio_session_config] _
+tests\unit\test_tenant_profile_admission.py:23: in blocked
+    raise AssertionError("Profile admission regression attempted network access")
+E   AssertionError: Profile admission regression attempted network access
+_ ERROR at teardown of test_resolved_did_rejects_unavailable_profile[exception-tuning-_build_vonage_session_config] _
+tests\unit\test_tenant_profile_admission.py:23: in blocked
+    raise AssertionError("Profile admission regression attempted network access")
+E   AssertionError: Profile admission regression attempted network access
+_ ERROR at teardown of test_resolved_did_rejects_unavailable_profile[unwired-ai-_build_twilio_session_config] _
+tests\unit\test_tenant_profile_admission.py:23: in blocked
+    raise AssertionError("Profile admission regression attempted network access")
+E   AssertionError: Profile admission regression attempted network access
+_ ERROR at teardown of test_resolved_did_rejects_unavailable_profile[unwired-ai-_build_vonage_session_config] _
+tests\unit\test_tenant_profile_admission.py:23: in blocked
+    raise AssertionError("Profile admission regression attempted network access")
+E   AssertionError: Profile admission regression attempted network access
+_ ERROR at teardown of test_resolved_did_rejects_unavailable_profile[unwired-tuning-_build_twilio_session_config] _
+tests\unit\test_tenant_profile_admission.py:23: in blocked
+    raise AssertionError("Profile admission regression attempted network access")
+E   AssertionError: Profile admission regression attempted network access
+_ ERROR at teardown of test_resolved_did_rejects_unavailable_profile[unwired-tuning-_build_vonage_session_config] _
+tests\unit\test_tenant_profile_admission.py:23: in blocked
+    raise AssertionError("Profile admission regression attempted network access")
+E   AssertionError: Profile admission regression attempted network access
+_ ERROR at teardown of test_resolved_did_keeps_saved_profile_and_tuning[_build_twilio_session_config] _
+tests\unit\test_tenant_profile_admission.py:23: in blocked
+    raise AssertionError("Profile admission regression attempted network access")
+E   AssertionError: Profile admission regression attempted network access
+_ ERROR at teardown of test_resolved_did_keeps_saved_profile_and_tuning[_build_vonage_session_config] _
+tests\unit\test_tenant_profile_admission.py:23: in blocked
+    raise AssertionError("Profile admission regression attempted network access")
+E   AssertionError: Profile admission regression attempted network access
+_ ERROR at teardown of test_resolved_did_successfully_absent_rows_keep_defaults[_build_twilio_session_config] _
+tests\unit\test_tenant_profile_admission.py:23: in blocked
+    raise AssertionError("Profile admission regression attempted network access")
+E   AssertionError: Profile admission regression attempted network access
+_ ERROR at teardown of test_resolved_did_successfully_absent_rows_keep_defaults[_build_vonage_session_config] _
+tests\unit\test_tenant_profile_admission.py:23: in blocked
+    raise AssertionError("Profile admission regression attempted network access")
+E   AssertionError: Profile admission regression attempted network access
+_ ERROR at teardown of test_no_did_remains_genuinely_tenantless_default_path[_build_twilio_session_config] _
+tests\unit\test_tenant_profile_admission.py:23: in blocked
+    raise AssertionError("Profile admission regression attempted network access")
+E   AssertionError: Profile admission regression attempted network access
+_ ERROR at teardown of test_no_did_remains_genuinely_tenantless_default_path[_build_vonage_session_config] _
+tests\unit\test_tenant_profile_admission.py:23: in blocked
+    raise AssertionError("Profile admission regression attempted network access")
+E   AssertionError: Profile admission regression attempted network access
+_ ERROR at teardown of test_actual_origination_boundary_returns_503_without_opening_provider[exception-ai] _
+tests\unit\test_tenant_profile_admission.py:23: in blocked
+    raise AssertionError("Profile admission regression attempted network access")
+E   AssertionError: Profile admission regression attempted network access
+------------------------------ Captured log call ------------------------------
+ERROR    app.domain.services.telephony.prewarm:prewarm.py:605 pre_originate_warmup_failed: Tenant AI configuration lookup failed � refusing to ring with cold pipeline
+_ ERROR at teardown of test_actual_origination_boundary_returns_503_without_opening_provider[exception-tuning] _
+tests\unit\test_tenant_profile_admission.py:23: in blocked
+    raise AssertionError("Profile admission regression attempted network access")
+E   AssertionError: Profile admission regression attempted network access
+------------------------------ Captured log call ------------------------------
+ERROR    app.domain.services.telephony.prewarm:prewarm.py:605 pre_originate_warmup_failed: Voice tuning lookup failed � refusing to ring with cold pipeline
+_ ERROR at teardown of test_actual_origination_boundary_returns_503_without_opening_provider[unwired-ai] _
+tests\unit\test_tenant_profile_admission.py:23: in blocked
+    raise AssertionError("Profile admission regression attempted network access")
+E   AssertionError: Profile admission regression attempted network access
+------------------------------ Captured log call ------------------------------
+ERROR    app.domain.services.telephony.prewarm:prewarm.py:605 pre_originate_warmup_failed: Tenant AI configuration lookup is unavailable � refusing to ring with cold pipeline
+_ ERROR at teardown of test_actual_origination_boundary_returns_503_without_opening_provider[unwired-tuning] _
+tests\unit\test_tenant_profile_admission.py:23: in blocked
+    raise AssertionError("Profile admission regression attempted network access")
+E   AssertionError: Profile admission regression attempted network access
+------------------------------ Captured log call ------------------------------
+ERROR    app.domain.services.telephony.prewarm:prewarm.py:605 pre_originate_warmup_failed: Voice tuning lookup is unavailable � refusing to ring with cold pipeline
+============================== warnings summary ===============================
+tests/unit/test_tenant_profile_admission.py::test_prewarm_preserves_successfully_resolved_saved_selection[cascaded]
+tests/unit/test_tenant_profile_admission.py::test_resolved_did_rejects_unavailable_profile[exception-tuning-_build_vonage_session_config]
+tests/unit/test_tenant_profile_admission.py::test_actual_origination_boundary_returns_503_without_opening_provider[exception-ai]
+tests/unit/test_tenant_profile_admission.py::test_actual_origination_boundary_returns_503_without_opening_provider[exception-tuning]
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\backend\.venv\Lib\site-packages\_pytest\unraisableexception.py:78: PytestUnraisableExceptionWarning: Exception ignored in: <function BaseEventLoop.__del__ at 0x0000015852222F20>
+  
+  Traceback (most recent call last):
+    File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\base_events.py", line 732, in __del__
+      self.close()
+    File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\proactor_events.py", line 697, in close
+      self._close_self_pipe()
+    File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\proactor_events.py", line 779, in _close_self_pipe
+      self._ssock.close()
+      ^^^^^^^^^^^
+  AttributeError: 'ProactorEventLoop' object has no attribute '_ssock'
+  
+    warnings.warn(pytest.PytestUnraisableExceptionWarning(msg))
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+ERROR tests/unit/test_tenant_profile_admission.py::test_known_tenant_prewarm_rejects_unavailable_profile_before_any_provider_creation[exception-ai]
+ERROR tests/unit/test_tenant_profile_admission.py::test_known_tenant_prewarm_rejects_unavailable_profile_before_any_provider_creation[exception-tuning]
+ERROR tests/unit/test_tenant_profile_admission.py::test_known_tenant_prewarm_rejects_unavailable_profile_before_any_provider_creation[unwired-ai]
+ERROR tests/unit/test_tenant_profile_admission.py::test_known_tenant_prewarm_rejects_unavailable_profile_before_any_provider_creation[unwired-tuning]
+ERROR tests/unit/test_tenant_profile_admission.py::test_prewarm_preserves_successfully_resolved_saved_selection[realtime]
+ERROR tests/unit/test_tenant_profile_admission.py::test_prewarm_preserves_successfully_resolved_saved_selection[cascaded]
+ERROR tests/unit/test_tenant_profile_admission.py::test_prewarm_successful_absent_rows_remain_explicit_default_compatible
+ERROR tests/unit/test_tenant_profile_admission.py::test_genuinely_tenantless_prewarm_does_not_call_tenant_lookups
+ERROR tests/unit/test_tenant_profile_admission.py::test_resolved_did_rejects_unavailable_profile[exception-ai-_build_twilio_session_config]
+ERROR tests/unit/test_tenant_profile_admission.py::test_resolved_did_rejects_unavailable_profile[exception-ai-_build_vonage_session_config]
+ERROR tests/unit/test_tenant_profile_admission.py::test_resolved_did_rejects_unavailable_profile[exception-tuning-_build_twilio_session_config]
+ERROR tests/unit/test_tenant_profile_admission.py::test_resolved_did_rejects_unavailable_profile[exception-tuning-_build_vonage_session_config]
+ERROR tests/unit/test_tenant_profile_admission.py::test_resolved_did_rejects_unavailable_profile[unwired-ai-_build_twilio_session_config]
+ERROR tests/unit/test_tenant_profile_admission.py::test_resolved_did_rejects_unavailable_profile[unwired-ai-_build_vonage_session_config]
+ERROR tests/unit/test_tenant_profile_admission.py::test_resolved_did_rejects_unavailable_profile[unwired-tuning-_build_twilio_session_config]
+ERROR tests/unit/test_tenant_profile_admission.py::test_resolved_did_rejects_unavailable_profile[unwired-tuning-_build_vonage_session_config]
+ERROR tests/unit/test_tenant_profile_admission.py::test_resolved_did_keeps_saved_profile_and_tuning[_build_twilio_session_config]
+ERROR tests/unit/test_tenant_profile_admission.py::test_resolved_did_keeps_saved_profile_and_tuning[_build_vonage_session_config]
+ERROR tests/unit/test_tenant_profile_admission.py::test_resolved_did_successfully_absent_rows_keep_defaults[_build_twilio_session_config]
+ERROR tests/unit/test_tenant_profile_admission.py::test_resolved_did_successfully_absent_rows_keep_defaults[_build_vonage_session_config]
+ERROR tests/unit/test_tenant_profile_admission.py::test_no_did_remains_genuinely_tenantless_default_path[_build_twilio_session_config]
+ERROR tests/unit/test_tenant_profile_admission.py::test_no_did_remains_genuinely_tenantless_default_path[_build_vonage_session_config]
+ERROR tests/unit/test_tenant_profile_admission.py::test_actual_origination_boundary_returns_503_without_opening_provider[exception-ai]
+ERROR tests/unit/test_tenant_profile_admission.py::test_actual_origination_boundary_returns_503_without_opening_provider[exception-tuning]
+ERROR tests/unit/test_tenant_profile_admission.py::test_actual_origination_boundary_returns_503_without_opening_provider[unwired-ai]
+ERROR tests/unit/test_tenant_profile_admission.py::test_actual_origination_boundary_returns_503_without_opening_provider[unwired-tuning]
+26 passed, 4 warnings, 26 errors in 5.38s
+Exception ignored in: <function BaseEventLoop.__del__ at 0x0000015852222F20>
+Traceback (most recent call last):
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\base_events.py", line 732, in __del__
+    self.close()
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\proactor_events.py", line 697, in close
+    self._close_self_pipe()
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\proactor_events.py", line 779, in _close_self_pipe
+    self._ssock.close()
+    ^^^^^^^^^^^
+AttributeError: 'ProactorEventLoop' object has no attribute '_ssock'
+Exception ignored in: <function BaseEventLoop.__del__ at 0x0000015852222F20>
+Traceback (most recent call last):
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\base_events.py", line 732, in __del__
+    self.close()
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\proactor_events.py", line 697, in close
+    self._close_self_pipe()
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\proactor_events.py", line 779, in _close_self_pipe
+    self._ssock.close()
+    ^^^^^^^^^^^
+AttributeError: 'ProactorEventLoop' object has no attribute '_ssock'
+Exception ignored in: <function BaseEventLoop.__del__ at 0x0000015852222F20>
+Traceback (most recent call last):
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\base_events.py", line 732, in __del__
+    self.close()
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\proactor_events.py", line 697, in close
+    self._close_self_pipe()
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\proactor_events.py", line 779, in _close_self_pipe
+    self._ssock.close()
+    ^^^^^^^^^^^
+AttributeError: 'ProactorEventLoop' object has no attribute '_ssock'
+Exception ignored in: <function BaseEventLoop.__del__ at 0x0000015852222F20>
+Traceback (most recent call last):
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\base_events.py", line 732, in __del__
+    self.close()
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\proactor_events.py", line 697, in close
+    self._close_self_pipe()
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\proactor_events.py", line 779, in _close_self_pipe
+    self._ssock.close()
+    ^^^^^^^^^^^
+AttributeError: 'ProactorEventLoop' object has no attribute '_ssock'

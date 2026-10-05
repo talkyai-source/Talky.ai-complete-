@@ -1,0 +1,56 @@
+FFFF....FF..FF........                                                   [100%]
+================================== FAILURES ===================================
+_ test_known_tenant_prewarm_rejects_unavailable_profile_before_any_provider_creation[exception-ai] _
+backend\tests\unit\test_tenant_profile_admission.py:77: in test_known_tenant_prewarm_rejects_unavailable_profile_before_any_provider_creation
+    assert result.session is None
+E   AssertionError: assert namespace(call_id='synthetic-config-call', call_session=namespace(call_id='synthetic-config-call', _first_speaker='age...tt_provider=namespace(), tts_provider=namespace(), llm_provider=namespace(), _first_speaker='agent', _agent_name='Ava') is None
+E    +  where namespace(call_id='synthetic-config-call', call_session=namespace(call_id='synthetic-config-call', _first_speaker='age...tt_provider=namespace(), tts_provider=namespace(), llm_provider=namespace(), _first_speaker='agent', _agent_name='Ava') = PrewarmResult(session=namespace(call_id='synthetic-config-call', call_session=namespace(call_id='synthetic-config-call...provider=namespace(), _first_speaker='agent', _agent_name='Ava'), effective_first_speaker='agent', failure_reason=None).session
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.tenant_ai_config_resolver:tenant_ai_config_resolver.py:117 tenant_ai_config_lookup_failed tenant=c4442497-fbc8-4675-8424-995456831b39 err=synthetic lookup unavailable � falling back to process default
+_ test_known_tenant_prewarm_rejects_unavailable_profile_before_any_provider_creation[exception-tuning] _
+backend\tests\unit\test_tenant_profile_admission.py:77: in test_known_tenant_prewarm_rejects_unavailable_profile_before_any_provider_creation
+    assert result.session is None
+E   AssertionError: assert namespace(call_id='synthetic-config-call', call_session=namespace(call_id='synthetic-config-call', _first_speaker='age...tt_provider=namespace(), tts_provider=namespace(), llm_provider=namespace(), _first_speaker='agent', _agent_name='Ava') is None
+E    +  where namespace(call_id='synthetic-config-call', call_session=namespace(call_id='synthetic-config-call', _first_speaker='age...tt_provider=namespace(), tts_provider=namespace(), llm_provider=namespace(), _first_speaker='agent', _agent_name='Ava') = PrewarmResult(session=namespace(call_id='synthetic-config-call', call_session=namespace(call_id='synthetic-config-call...provider=namespace(), _first_speaker='agent', _agent_name='Ava'), effective_first_speaker='agent', failure_reason=None).session
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.voice_tuning:voice_tuning.py:222 voice_tuning_db_lookup_failed tenant=c4442497-fbc8-4675-8424-995456831b39 err=synthetic lookup unavailable � falling back to env+defaults
+_ test_known_tenant_prewarm_rejects_unavailable_profile_before_any_provider_creation[unwired-ai] _
+backend\tests\unit\test_tenant_profile_admission.py:77: in test_known_tenant_prewarm_rejects_unavailable_profile_before_any_provider_creation
+    assert result.session is None
+E   AssertionError: assert namespace(call_id='synthetic-config-call', call_session=namespace(call_id='synthetic-config-call', _first_speaker='age...tt_provider=namespace(), tts_provider=namespace(), llm_provider=namespace(), _first_speaker='agent', _agent_name='Ava') is None
+E    +  where namespace(call_id='synthetic-config-call', call_session=namespace(call_id='synthetic-config-call', _first_speaker='age...tt_provider=namespace(), tts_provider=namespace(), llm_provider=namespace(), _first_speaker='agent', _agent_name='Ava') = PrewarmResult(session=namespace(call_id='synthetic-config-call', call_session=namespace(call_id='synthetic-config-call...provider=namespace(), _first_speaker='agent', _agent_name='Ava'), effective_first_speaker='agent', failure_reason=None).session
+_ test_known_tenant_prewarm_rejects_unavailable_profile_before_any_provider_creation[unwired-tuning] _
+backend\tests\unit\test_tenant_profile_admission.py:77: in test_known_tenant_prewarm_rejects_unavailable_profile_before_any_provider_creation
+    assert result.session is None
+E   AssertionError: assert namespace(call_id='synthetic-config-call', call_session=namespace(call_id='synthetic-config-call', _first_speaker='age...tt_provider=namespace(), tts_provider=namespace(), llm_provider=namespace(), _first_speaker='agent', _agent_name='Ava') is None
+E    +  where namespace(call_id='synthetic-config-call', call_session=namespace(call_id='synthetic-config-call', _first_speaker='age...tt_provider=namespace(), tts_provider=namespace(), llm_provider=namespace(), _first_speaker='agent', _agent_name='Ava') = PrewarmResult(session=namespace(call_id='synthetic-config-call', call_session=namespace(call_id='synthetic-config-call...provider=namespace(), _first_speaker='agent', _agent_name='Ava'), effective_first_speaker='agent', failure_reason=None).session
+_ test_resolved_did_rejects_unavailable_profile[exception-ai-_build_twilio_session_config] _
+backend\tests\unit\test_tenant_profile_admission.py:130: in test_resolved_did_rejects_unavailable_profile
+    with pytest.raises(TenantAIConfigUnavailable):
+E   Failed: DID NOT RAISE <class 'app.domain.services.tenant_ai_config_resolver.TenantAIConfigUnavailable'>
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.tenant_ai_config_resolver:tenant_ai_config_resolver.py:117 tenant_ai_config_lookup_failed tenant=c4442497-fbc8-4675-8424-995456831b39 err=synthetic lookup unavailable � falling back to process default
+_ test_resolved_did_rejects_unavailable_profile[exception-ai-_build_vonage_session_config] _
+backend\tests\unit\test_tenant_profile_admission.py:130: in test_resolved_did_rejects_unavailable_profile
+    with pytest.raises(TenantAIConfigUnavailable):
+E   Failed: DID NOT RAISE <class 'app.domain.services.tenant_ai_config_resolver.TenantAIConfigUnavailable'>
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.tenant_ai_config_resolver:tenant_ai_config_resolver.py:117 tenant_ai_config_lookup_failed tenant=c4442497-fbc8-4675-8424-995456831b39 err=synthetic lookup unavailable � falling back to process default
+_ test_resolved_did_rejects_unavailable_profile[unwired-ai-_build_twilio_session_config] _
+backend\tests\unit\test_tenant_profile_admission.py:130: in test_resolved_did_rejects_unavailable_profile
+    with pytest.raises(TenantAIConfigUnavailable):
+E   Failed: DID NOT RAISE <class 'app.domain.services.tenant_ai_config_resolver.TenantAIConfigUnavailable'>
+_ test_resolved_did_rejects_unavailable_profile[unwired-ai-_build_vonage_session_config] _
+backend\tests\unit\test_tenant_profile_admission.py:130: in test_resolved_did_rejects_unavailable_profile
+    with pytest.raises(TenantAIConfigUnavailable):
+E   Failed: DID NOT RAISE <class 'app.domain.services.tenant_ai_config_resolver.TenantAIConfigUnavailable'>
+=========================== short test summary info ===========================
+FAILED backend\tests\unit\test_tenant_profile_admission.py::test_known_tenant_prewarm_rejects_unavailable_profile_before_any_provider_creation[exception-ai]
+FAILED backend\tests\unit\test_tenant_profile_admission.py::test_known_tenant_prewarm_rejects_unavailable_profile_before_any_provider_creation[exception-tuning]
+FAILED backend\tests\unit\test_tenant_profile_admission.py::test_known_tenant_prewarm_rejects_unavailable_profile_before_any_provider_creation[unwired-ai]
+FAILED backend\tests\unit\test_tenant_profile_admission.py::test_known_tenant_prewarm_rejects_unavailable_profile_before_any_provider_creation[unwired-tuning]
+FAILED backend\tests\unit\test_tenant_profile_admission.py::test_resolved_did_rejects_unavailable_profile[exception-ai-_build_twilio_session_config]
+FAILED backend\tests\unit\test_tenant_profile_admission.py::test_resolved_did_rejects_unavailable_profile[exception-ai-_build_vonage_session_config]
+FAILED backend\tests\unit\test_tenant_profile_admission.py::test_resolved_did_rejects_unavailable_profile[unwired-ai-_build_twilio_session_config]
+FAILED backend\tests\unit\test_tenant_profile_admission.py::test_resolved_did_rejects_unavailable_profile[unwired-ai-_build_vonage_session_config]
+8 failed, 14 passed in 13.30s
