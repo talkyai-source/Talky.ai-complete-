@@ -1,0 +1,59 @@
+{
+  "date": "2026-10-06",
+  "source_commit": "1d122149ab6931b13544d13ead6a8915e707e87e",
+  "baseline_commit": "303268a7a293c5f91a6c8660fa36237d99eef290",
+  "hash_algorithm": "Source LF SHA-256 normalizes CRLF bytes only; artifact raw/LF hashes labelled separately.",
+  "source_hashes": {
+    "backend/app/domain/services/voice_pipeline/action_execution.py": "33779d45ca915814fea12b04dc39fb6c48a5a7a359a1340ef1b67704209b023a",
+    "backend/app/services/action_execution.py": "991c5f746e8b93312a21d046ee4554c1426e42031b10bc0a832868d1d9ad89d8",
+    "backend/tests/unit/test_voice_email_receipt_proof.py": "47c4f5b8de5d3f92e345fc4573718e5735091aa62229141c3e612236633ee967",
+    "backend/tests/unit/test_voice_action_execution.py": "ae5ce0cc74165285b3cf29dcccf4a2c4bee50b0f82ecf31dd1ca6a7c0158a528",
+    "backend/tests/unit/test_voice_action_spoken_confirmation.py": "1d885391c3e7d98cfa69dbf4c42ce5875e10ae499b20dce3da8b47e5bd4eb5d5",
+    "backend/tests/unit/test_voice_action_contract.py": "1ceddf38e0238f5cbf8b780774f914374823c5cb94c7a5779e43109bc75faeac",
+    "backend/tests/unit/test_action_envelope_never_spoken.py": "f3ab7be73b37d3a229acc33a58ffc3162fa800aa6856585c30654034441d932d"
+  },
+  "source_matches_committed_git": true,
+  "baseline_voice_sha256_lf": "48da757626c6d3a05345022601eb529644bfe7adf5b6c29bbc904e14ff23a75e",
+  "source_hash_capture": "Recorded from frozen candidate after final execution and source commit; runtime log contains no embedded source hashes.",
+  "result": {
+    "passed": 138,
+    "failed": 0,
+    "skipped": 0,
+    "warnings": 24,
+    "modules": 5,
+    "new_controls_included": 18
+  },
+  "baseline_result": {
+    "failed": 16,
+    "passed": 2,
+    "interpretation": "One safe-evidence projection defect across parameterized cases; two missing-proof compatibility positives."
+  },
+  "reviews": {
+    "root": "Exact app diff and18 controls clear",
+    "independent": "account_review read-only clear, no tests or edits"
+  },
+  "limits": "Synthetic SQL/EmailService ports; actual voice confirmation and shared durable executor/projection control flow. No actual SQL, providers, browser, process-restart persistence, or historical identity backfill.",
+  "production_gate_promoted": false,
+  "artifacts": {
+    "baseline.txt": {
+      "sha256_raw": "3181d0e86375aca1547ae86bac104ab63fb08295c6f7fd503a27e3667a0841bf",
+      "sha256_lf": "7f9cacec0a545c11681d313c4ef50747c665aec2165e884e2343701737881fff"
+    },
+    "commands.json": {
+      "sha256_raw": "b214e78ef777afc7756130a3bea8ea59e809f778608d8c4ec2b275af89e21817",
+      "sha256_lf": "b214e78ef777afc7756130a3bea8ea59e809f778608d8c4ec2b275af89e21817"
+    },
+    "final.txt": {
+      "sha256_raw": "b7e5b75282c59dc8113daf17e7efb61f680055cb689db51065311706136351d5",
+      "sha256_lf": "8e670add0c4476ccd8006d5b11789b10f1c58423473106b31deee50de99ea5ab"
+    },
+    "lint.txt": {
+      "sha256_raw": "a4443afdcfb6d7363adb285762515ccf7cf50473b1a05c20c1a50f6bed4d26b0",
+      "sha256_lf": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18"
+    },
+    "verification.md": {
+      "sha256_raw": "fd6594796f5bd9dbd35a316180f1d86d610cd417c33643b948da232bd64654a3",
+      "sha256_lf": "fd6594796f5bd9dbd35a316180f1d86d610cd417c33643b948da232bd64654a3"
+    }
+  }
+}

@@ -1,0 +1,112 @@
+FFFFFFFFFFFFFF..FF                                                       [100%]
+================================== FAILURES ===================================
+_ test_actual_voice_and_outer_receipt_preserve_original_proof_without_payload[False-accepted-send_email] _
+tests\unit\test_voice_email_receipt_proof.py:173: in test_actual_voice_and_outer_receipt_preserve_original_proof_without_payload
+    assert_evidence(result, inner)
+tests\unit\test_voice_email_receipt_proof.py:149: in assert_evidence
+    assert actual[key] == inner[key]
+E   KeyError: 'identity_version'
+_ test_actual_voice_and_outer_receipt_preserve_original_proof_without_payload[False-accepted-submit_form] _
+tests\unit\test_voice_email_receipt_proof.py:173: in test_actual_voice_and_outer_receipt_preserve_original_proof_without_payload
+    assert_evidence(result, inner)
+tests\unit\test_voice_email_receipt_proof.py:149: in assert_evidence
+    assert actual[key] == inner[key]
+E   KeyError: 'identity_version'
+_ test_actual_voice_and_outer_receipt_preserve_original_proof_without_payload[False-unknown-send_email] _
+tests\unit\test_voice_email_receipt_proof.py:173: in test_actual_voice_and_outer_receipt_preserve_original_proof_without_payload
+    assert_evidence(result, inner)
+tests\unit\test_voice_email_receipt_proof.py:149: in assert_evidence
+    assert actual[key] == inner[key]
+E   KeyError: 'identity_version'
+_ test_actual_voice_and_outer_receipt_preserve_original_proof_without_payload[False-unknown-submit_form] _
+tests\unit\test_voice_email_receipt_proof.py:173: in test_actual_voice_and_outer_receipt_preserve_original_proof_without_payload
+    assert_evidence(result, inner)
+tests\unit\test_voice_email_receipt_proof.py:149: in assert_evidence
+    assert actual[key] == inner[key]
+E   KeyError: 'identity_version'
+_ test_actual_voice_and_outer_receipt_preserve_original_proof_without_payload[False-failed-send_email] _
+tests\unit\test_voice_email_receipt_proof.py:173: in test_actual_voice_and_outer_receipt_preserve_original_proof_without_payload
+    assert_evidence(result, inner)
+tests\unit\test_voice_email_receipt_proof.py:149: in assert_evidence
+    assert actual[key] == inner[key]
+E   KeyError: 'identity_version'
+_ test_actual_voice_and_outer_receipt_preserve_original_proof_without_payload[False-failed-submit_form] _
+tests\unit\test_voice_email_receipt_proof.py:173: in test_actual_voice_and_outer_receipt_preserve_original_proof_without_payload
+    assert_evidence(result, inner)
+tests\unit\test_voice_email_receipt_proof.py:149: in assert_evidence
+    assert actual[key] == inner[key]
+E   KeyError: 'identity_version'
+_ test_actual_voice_and_outer_receipt_preserve_original_proof_without_payload[True-accepted-send_email] _
+tests\unit\test_voice_email_receipt_proof.py:173: in test_actual_voice_and_outer_receipt_preserve_original_proof_without_payload
+    assert_evidence(result, inner)
+tests\unit\test_voice_email_receipt_proof.py:149: in assert_evidence
+    assert actual[key] == inner[key]
+E   KeyError: 'identity_version'
+_ test_actual_voice_and_outer_receipt_preserve_original_proof_without_payload[True-accepted-submit_form] _
+tests\unit\test_voice_email_receipt_proof.py:173: in test_actual_voice_and_outer_receipt_preserve_original_proof_without_payload
+    assert_evidence(result, inner)
+tests\unit\test_voice_email_receipt_proof.py:149: in assert_evidence
+    assert actual[key] == inner[key]
+E   KeyError: 'identity_version'
+_ test_actual_voice_and_outer_receipt_preserve_original_proof_without_payload[True-unknown-send_email] _
+tests\unit\test_voice_email_receipt_proof.py:173: in test_actual_voice_and_outer_receipt_preserve_original_proof_without_payload
+    assert_evidence(result, inner)
+tests\unit\test_voice_email_receipt_proof.py:149: in assert_evidence
+    assert actual[key] == inner[key]
+E   KeyError: 'identity_version'
+_ test_actual_voice_and_outer_receipt_preserve_original_proof_without_payload[True-unknown-submit_form] _
+tests\unit\test_voice_email_receipt_proof.py:173: in test_actual_voice_and_outer_receipt_preserve_original_proof_without_payload
+    assert_evidence(result, inner)
+tests\unit\test_voice_email_receipt_proof.py:149: in assert_evidence
+    assert actual[key] == inner[key]
+E   KeyError: 'identity_version'
+_ test_actual_voice_and_outer_receipt_preserve_original_proof_without_payload[True-failed-send_email] _
+tests\unit\test_voice_email_receipt_proof.py:173: in test_actual_voice_and_outer_receipt_preserve_original_proof_without_payload
+    assert_evidence(result, inner)
+tests\unit\test_voice_email_receipt_proof.py:149: in assert_evidence
+    assert actual[key] == inner[key]
+E   KeyError: 'identity_version'
+_ test_actual_voice_and_outer_receipt_preserve_original_proof_without_payload[True-failed-submit_form] _
+tests\unit\test_voice_email_receipt_proof.py:173: in test_actual_voice_and_outer_receipt_preserve_original_proof_without_payload
+    assert_evidence(result, inner)
+tests\unit\test_voice_email_receipt_proof.py:149: in assert_evidence
+    assert actual[key] == inner[key]
+E   KeyError: 'identity_version'
+_ test_outer_save_failure_retains_safe_provider_evidence_without_confirmation[send_email] _
+tests\unit\test_voice_email_receipt_proof.py:191: in test_outer_save_failure_retains_safe_provider_evidence_without_confirmation
+    assert_evidence(result["provider_result"], inner)
+tests\unit\test_voice_email_receipt_proof.py:149: in assert_evidence
+    assert actual[key] == inner[key]
+E   KeyError: 'identity_version'
+_ test_outer_save_failure_retains_safe_provider_evidence_without_confirmation[submit_form] _
+tests\unit\test_voice_email_receipt_proof.py:191: in test_outer_save_failure_retains_safe_provider_evidence_without_confirmation
+    assert_evidence(result["provider_result"], inner)
+tests\unit\test_voice_email_receipt_proof.py:149: in assert_evidence
+    assert actual[key] == inner[key]
+E   KeyError: 'identity_version'
+_ test_allowlist_rejects_invalid_evidence_and_missing_message_never_confirms[send_email] _
+tests\unit\test_voice_email_receipt_proof.py:220: in test_allowlist_rejects_invalid_evidence_and_missing_message_never_confirms
+    assert result["tenant_id"] == db.tenant and result["provider"] == "gmail"
+E   KeyError: 'tenant_id'
+_ test_allowlist_rejects_invalid_evidence_and_missing_message_never_confirms[submit_form] _
+tests\unit\test_voice_email_receipt_proof.py:220: in test_allowlist_rejects_invalid_evidence_and_missing_message_never_confirms
+    assert result["tenant_id"] == db.tenant and result["provider"] == "gmail"
+E   KeyError: 'tenant_id'
+=========================== short test summary info ===========================
+FAILED tests/unit/test_voice_email_receipt_proof.py::test_actual_voice_and_outer_receipt_preserve_original_proof_without_payload[False-accepted-send_email]
+FAILED tests/unit/test_voice_email_receipt_proof.py::test_actual_voice_and_outer_receipt_preserve_original_proof_without_payload[False-accepted-submit_form]
+FAILED tests/unit/test_voice_email_receipt_proof.py::test_actual_voice_and_outer_receipt_preserve_original_proof_without_payload[False-unknown-send_email]
+FAILED tests/unit/test_voice_email_receipt_proof.py::test_actual_voice_and_outer_receipt_preserve_original_proof_without_payload[False-unknown-submit_form]
+FAILED tests/unit/test_voice_email_receipt_proof.py::test_actual_voice_and_outer_receipt_preserve_original_proof_without_payload[False-failed-send_email]
+FAILED tests/unit/test_voice_email_receipt_proof.py::test_actual_voice_and_outer_receipt_preserve_original_proof_without_payload[False-failed-submit_form]
+FAILED tests/unit/test_voice_email_receipt_proof.py::test_actual_voice_and_outer_receipt_preserve_original_proof_without_payload[True-accepted-send_email]
+FAILED tests/unit/test_voice_email_receipt_proof.py::test_actual_voice_and_outer_receipt_preserve_original_proof_without_payload[True-accepted-submit_form]
+FAILED tests/unit/test_voice_email_receipt_proof.py::test_actual_voice_and_outer_receipt_preserve_original_proof_without_payload[True-unknown-send_email]
+FAILED tests/unit/test_voice_email_receipt_proof.py::test_actual_voice_and_outer_receipt_preserve_original_proof_without_payload[True-unknown-submit_form]
+FAILED tests/unit/test_voice_email_receipt_proof.py::test_actual_voice_and_outer_receipt_preserve_original_proof_without_payload[True-failed-send_email]
+FAILED tests/unit/test_voice_email_receipt_proof.py::test_actual_voice_and_outer_receipt_preserve_original_proof_without_payload[True-failed-submit_form]
+FAILED tests/unit/test_voice_email_receipt_proof.py::test_outer_save_failure_retains_safe_provider_evidence_without_confirmation[send_email]
+FAILED tests/unit/test_voice_email_receipt_proof.py::test_outer_save_failure_retains_safe_provider_evidence_without_confirmation[submit_form]
+FAILED tests/unit/test_voice_email_receipt_proof.py::test_allowlist_rejects_invalid_evidence_and_missing_message_never_confirms[send_email]
+FAILED tests/unit/test_voice_email_receipt_proof.py::test_allowlist_rejects_invalid_evidence_and_missing_message_never_confirms[submit_form]
+16 failed, 2 passed in 6.35s
