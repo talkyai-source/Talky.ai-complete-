@@ -707,3 +707,50 @@ real Leads/Sales Hub browser evidence, designated connector outcomes, and the
 recorded operational/release prerequisites. Raw retrieval sufficiency remains
 32/45, AG04 offline mapping remains 43/50, and live/customer acceptance remains
 unrun. All package/gate/deferred states and the feature freeze are unchanged.
+
+## Canonical recovery and actual React lifecycle follow-up (6 October)
+
+The earlier hand-built database and synthetic hook-scheduler limitations now
+have separate, stronger local evidence. [Canonical recovery acceptance](2026-10-06-ag06-canonical-recovery-acceptance.md)
+is integrated as test `684fb47f` and evidence `6aae5fae`. Ten controls passed on
+the unmodified consolidated schema followed by the real 0009–0062 migration
+chain. JWT/session checks, current role, adapter metadata, Admin detail/digest,
+concurrent recovery, refetch, executor replay and transactional rollback were
+exercised under a restricted non-owner role. The protected database's 108 table
+snapshots, schema and head 0061 stayed unchanged; both generated databases and
+roles were removed. The first run's record-copy fixture failure is retained.
+No backend application repair was needed. Root verified all 83 recorded source
+and 15 artifact/report hashes after integration without another test run.
+
+Admin source `1bf6eaee` repairs three failures reproduced with real ReactDOM:
+late verification could restore a logged-out user, late rejected verification
+could clear a newer login, and late logout could clear a newer login. A local
+operation counter and the existing API authentication generation now fence
+asynchronous completions; effect cleanup invalidates outstanding work. This
+changes no backend authority or recovery outcome contract.
+
+The [React evidence](2026-10-06-ag06-react-dom-acceptance.md) retains the initial
+nine passing/three failing controls and the final twelve passing controls,
+included in 171 passing Admin tests. TypeScript/Vite build passed. A subsequent
+documented lint exception for the intentional mount-only check changed comments
+only; final scoped lint passed without warnings. The exact pre-comment test/build
+hash and final source hash are recorded separately. JSDOM 25.0.1 is an exact dev
+dependency; no existing locked dependency version changed. Tests ran in a fresh
+clean-install fixture with source parity, real React effects/StrictMode/native
+DOM events and synthetic HTTP responses. This is neither a browser run nor
+designated-account usability acceptance.
+
+React evidence is integrated as `863c3882`. Root verified all 67 final recorded
+Admin source/config/dependency/test hashes and exact equality of the entire
+integrated Admin Git tree with the owner source commit. This is integration
+parity, not another test/build run. Independent review of these documentation
+changes confirmed every package, scenario, gate and freeze status is unchanged.
+
+The remaining blockers are substantive: approved campaign facts and retrieval
+quality, configured model/voice comprehension and acoustic checks, a designated
+call/contact cohort, actual Leads/Sales Hub and connector outcomes, and recorded
+operational/release acceptance. Historical campaigns and synthetic fixtures are
+not current designations. The existing request for the campaign, approved
+document/version, owned test number and connected test accounts is unanswered.
+No package or readiness gate is promoted, no deferred package is resumed, and no
+deployment or push is claimed.

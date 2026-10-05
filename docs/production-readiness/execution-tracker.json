@@ -381,6 +381,12 @@
           "path": "docs/sessions/2026-10-06-ag06-saved-acknowledgement-recovery.md",
           "kind": "admin_authprovider_to_api_token_lifecycle_repair_with_actual_component_controls",
           "candidate": "31fd9b36"
+        },
+        {
+          "path": "docs/sessions/2026-10-06-ag06-react-dom-acceptance.md",
+          "kind": "actual_react_lifecycle_auth_race_repair",
+          "candidate_commit": "1bf6eaee",
+          "status": "local_verified_not_browser_or_customer_acceptance"
         }
       ],
       "blocker": "Designated inbox/device/browser recovery, cross-tab cookie behavior, deployed compatibility, first authorized call and operator reconciliation remain unverified. The advertised staff invitation/acceptance journey is absent; assisted setup does not close F05.",
@@ -798,9 +804,21 @@
           "path": "docs/sessions/artifacts/knowledge-privacy-recovery-integration/verification.md",
           "kind": "539_affected_knowledge_privacy_and_receipt_tests",
           "candidate": "c0cac1f7"
+        },
+        {
+          "path": "docs/sessions/2026-10-06-ag06-canonical-recovery-acceptance.md",
+          "kind": "canonical_schema_authenticated_route_local_acceptance",
+          "candidate_commit": "684fb47f",
+          "status": "local_verified_not_customer_acceptance"
+        },
+        {
+          "path": "docs/sessions/2026-10-06-ag06-react-dom-acceptance.md",
+          "kind": "actual_react_lifecycle_auth_race_repair",
+          "candidate_commit": "1bf6eaee",
+          "status": "local_verified_not_browser_or_customer_acceptance"
         }
       ],
-      "blocker": "Original-account CRM/Gmail/calendar inspection and narrow recovery of a canonical saved successful Gmail acknowledgement are implemented locally. Recovery preserves original unknown evidence in an atomic audit, checks current platform-admin session and never resends. Combined knowledge/privacy/action checks passed 539 tests; separate partial-schema PostgreSQL and Admin checks passed. Broader unresolved outcomes without authoritative evidence stay held. Full schema/grant, browser, designated live-provider, retention/deletion and customer acceptance remain open.",
+      "blocker": "Original-account CRM/Gmail/calendar inspection and narrow recovery of a canonical saved successful Gmail acknowledgement are implemented locally. Recovery preserves original unknown evidence in an atomic audit, checks current platform-admin session and never resends. Combined knowledge/privacy/action checks passed 539 tests. Separate canonical bootstrap/migration/authenticated-route checks passed ten controls; actual ReactDOM checks reproduced and repaired three stale authentication response races, with twelve focused and 171 aggregate Admin tests passing. Broader unresolved outcomes without authoritative evidence stay held. Production grants/deployment, real browser, designated live-provider, retention/deletion and customer acceptance remain open.",
       "next_action": "Apply the reviewed additive 0062 migration through the existing release process before exposing recovery, retaining original receipts and its explicit hard-delete restriction. Complete designated original-account email/calendar/CRM, current-session/browser, operator and customer acceptance. Provider observation alone never proves completion or authorizes resend; memory-only UI pending state is not cross-tab/restart persistence.",
       "target_date": null
     },
