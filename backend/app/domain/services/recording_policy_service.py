@@ -9,21 +9,8 @@ The DB row lives in `tenant_recording_policy`. Recording is enabled only by
 an explicit readable tenant policy. A missing row or a policy-store failure
 defaults recording OFF; legal intent must never be inferred from absence.
 
-2026-07-28 — SPOKEN-DISCLOSURE LEDGER
--------------------------------------
-`announcement_required` used to be advisory and nothing ever acted on
-it: the only consumer was `RecordingService.save_and_link()`, which runs
-AFTER the call has ended and only gates the upload. The disclosure was
-therefore never spoken, while two-party-consent tenants (the SAFE
-DEFAULT for every tenant with no policy row) were still recorded — i.e.
-unlawful recording in the UK/EU and in two-party-consent US states.
-
-The fix has two halves:
-
-* the greeting path speaks the disclosure BEFORE any other audio, and
-* it reports what actually happened into the ledger below, which
-  `save_and_link` consults so audio captured without the promised
-  notice is never retained.
+The disclosure ledger records supported transport delivery evidence for the
+configured notice. It does not certify human hearing or legal consent.
 
 The ledger is deliberately process-local and in-memory: it records a
 fact about a live call that only this process observed, and it must
@@ -195,7 +182,8 @@ class RecordingPolicyService:
 # Spoken-disclosure ledger
 # ──────────────────────────────────────────────────────────────────────
 
-DISCLOSURE_SPOKEN = "spoken"          # notice was played to the callee
+DISCLOSURE_SPOKEN = "spoken"          # correlated transport_played receipt
+DISCLOSURE_TRANSMITTED = "transmitted"  # correlated Asterisk transmission receipt
 DISCLOSURE_NOT_REQUIRED = "not_required"  # policy says none is needed
 DISCLOSURE_FAILED = "failed"          # required but NOT delivered
 
@@ -246,26 +234,23 @@ def clear_disclosure_state(*call_ids: Optional[str]) -> None:
             _DISCLOSURE_LEDGER.pop(str(call_id), None)
 
 
+def disclosure_delivered(*call_ids: Optional[str]) -> bool:
+    """Supported completed transport evidence, never a human-hearing claim."""
+    return get_disclosure_state(*call_ids) in {
+        DISCLOSURE_SPOKEN, DISCLOSURE_TRANSMITTED,
+    }
+
+
 def consent_satisfied(decision: Any, *call_ids: Optional[str]) -> bool:
-    """True when this call's audio may lawfully be retained.
+    """Technical configured-policy/disclosure gate, not legal certification.
 
-    Two ways to satisfy it:
-      1. the policy does not require an announcement at all, or
-      2. the announcement was actually SPOKEN on this call.
-
-    Anything else — required-but-failed, or an unknown call — is False.
-    We deliberately fail CLOSED: audio captured while the callee was
-    never told is unlawful to keep, whereas dropping a recording only
-    costs the tenant a QA artefact.
-
-    `announcement_required` is read via getattr so a duck-typed decision
-    (existing tests hand `save_and_link` a stub carrying only
-    `should_record`) is treated as "no announcement required" and keeps
-    its current behaviour instead of raising.
+    A required announcement needs a completed correlated playback or supported
+    transmission receipt. Unknown, failed and partial delivery do not qualify.
+    The policy owner remains responsible for the configured recording rules.
     """
     if not getattr(decision, "announcement_required", False):
         return True
-    return get_disclosure_state(*call_ids) == DISCLOSURE_SPOKEN
+    return disclosure_delivered(*call_ids)
 
 
 def disclosure_known_failed(*call_ids: Optional[str]) -> bool:

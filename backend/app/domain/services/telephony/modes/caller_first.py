@@ -183,9 +183,8 @@ async def prepare_inbound_recording(voice_session) -> bool:
             _speak_recording_disclosure,
         )
         from app.domain.services.recording_policy_service import (
-            DISCLOSURE_SPOKEN,
             RecordingPolicyService,
-            get_disclosure_state,
+            disclosure_delivered,
         )
         from app.core.container import get_container
 
@@ -241,7 +240,7 @@ async def prepare_inbound_recording(voice_session) -> bool:
         await _speak_recording_disclosure(voice_session)
 
         call_ids = _disclosure_call_ids(voice_session)
-        disclosure_spoken = get_disclosure_state(*call_ids) == DISCLOSURE_SPOKEN
+        disclosure_spoken = disclosure_delivered(*call_ids)
         # Re-check after speech so a switch flipped during the notice still
         # prevents the buffers from ever opening.
         live_enabled = await _live_inbound_recording_enabled(db_pool)

@@ -176,6 +176,10 @@ class TtsPlayback:
         """
         call_id = session.call_id
         session._tts_playout_completed = False
+        session._tts_playback_receipt = None
+        session._tts_playback_utterance_id = None
+        session._tts_delivery_status = "pending"
+        _matched_receipt = None
         # Lazy import — see the module-level comment near the other imports
         # for why this can't be a top-level import (circular with
         # asterisk_adapter.py -> telephony.config -> ... -> tts_playback).
@@ -568,6 +572,12 @@ class TtsPlayback:
                 if _playback_uid and first_chunk_sent:
                     receipt = await self._p.media_gateway.finish_playback(call_id, _playback_uid)
                     if isinstance(receipt, dict):
+                        if receipt.get("utterance_id") == _playback_uid:
+                            _matched_receipt = {
+                                "utterance_id": _playback_uid,
+                                "status": receipt.get("status"),
+                                "evidence": receipt.get("evidence"),
+                            }
                         session._tts_playout_completed = bool(
                             receipt.get("utterance_id") == _playback_uid
                             and receipt.get("status") == "completed"
@@ -697,4 +707,10 @@ class TtsPlayback:
                 elif completed:
                     self._p.latency_tracker.mark_completed(call_id)
             session.tts_active = False
+        # Publish only this invocation's correlated receipt, after cleanup.
+        # A recovery clip, old receipt, or transmission alone is not playback.
+        session._tts_playback_utterance_id = _playback_uid
+        session._tts_playback_receipt = (
+            _matched_receipt if completed and not interrupted else None
+        )
         return interrupted

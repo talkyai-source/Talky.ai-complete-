@@ -90,6 +90,8 @@ async def test_local_save_stores_the_encoded_file_with_its_mime(tmp_path, monkey
     buf = rs.RecordingBuffer(call_id="call-9", sample_rate=16000, channels=2, bit_depth=16)
     buf.add_chunk(b"\x01\x02" * 400)
     svc = rs.RecordingService(db_pool=AsyncMock())
+    # Encoding/offload unit scope; actual admission is exercised in OP07 controls.
+    monkeypatch.setattr(svc, "_retention_allowed", AsyncMock(return_value=True))
     inserted = {}
 
     async def fake_insert(**kwargs):

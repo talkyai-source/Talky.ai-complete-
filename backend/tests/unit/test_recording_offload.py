@@ -280,6 +280,8 @@ async def test_local_save_offloaded_and_byte_identical(tmp_path, monkeypatch):
         return await real_to_thread(func, *args, **kwargs)
 
     svc = RecordingService(db_pool=AsyncMock())
+    # Encoding/offload unit scope; actual admission is exercised in OP07 controls.
+    monkeypatch.setattr(svc, "_retention_allowed", AsyncMock(return_value=True))
     with patch(
         "app.domain.services.recording_service.asyncio.to_thread",
         side_effect=spy_to_thread,

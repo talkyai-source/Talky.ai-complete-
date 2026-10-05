@@ -180,26 +180,17 @@ def _disclosure_tenant_id(voice_session):
 
 
 async def _speak_recording_disclosure(voice_session) -> None:
-    """Speak the recording notice, if the tenant's policy requires one.
+    """Deliver the configured notice before the greeting and record transport proof.
 
-    Must run BEFORE any greeting audio: a disclosure delivered after the
-    callee has already spoken is worthless — their words were captured
-    before they were told. Being the first audio on the call also means
-    the notice itself sits at the head of the stored WAV, so the
-    recording carries its own proof of consent.
-
-    Always records an outcome in the disclosure ledger, and NEVER raises:
-    a failure here must not drop the call, it must drop the RECORDING.
-    The call itself is perfectly lawful without a recording; the
-    recording is not lawful without the notice. Every failure path
-    therefore lands on DISCLOSURE_FAILED, which
-    ``RecordingService.save_and_link`` treats as "do not retain".
+    Failure suppresses recording without terminating the call. This technical
+    receipt gate does not establish human hearing or legal consent.
     """
     from app.domain.models.conversation import Message, MessageRole
     from app.domain.services.recording_policy_service import (
         DISCLOSURE_FAILED,
         DISCLOSURE_NOT_REQUIRED,
         DISCLOSURE_SPOKEN,
+        DISCLOSURE_TRANSMITTED,
         RecordingPolicyService,
         record_disclosure_state,
         spoken_disclosure_text,
@@ -333,20 +324,37 @@ async def _speak_recording_disclosure(voice_session) -> None:
         # turn-0 LatencyMetrics, so when the real reply played later the
         # subtraction went negative ("Turn 0 latency" garbage) -- the same
         # class of bug fixed for the silence-monitor nudge on 2026-09-23.
+        session._tts_playback_receipt = None
+        session._tts_playback_utterance_id = None
+        session._tts_delivery_status = "pending"
         interrupted = await voice_session.pipeline.synthesize_and_send_audio(
             session, text, websocket=None, track_latency=False,
         )
-        if interrupted:
+        receipt = getattr(session, "_tts_playback_receipt", None)
+        delivered = bool(
+            not interrupted
+            and getattr(session, "_tts_delivery_status", None) == "submitted"
+            and isinstance(receipt, dict)
+            and receipt.get("utterance_id")
+            and receipt.get("utterance_id") == getattr(session, "_tts_playback_utterance_id", None)
+            and receipt.get("status") == "completed"
+            and receipt.get("evidence") in {"transport_played", "transmitted"}
+        )
+        if not delivered:
             record_disclosure_state(DISCLOSURE_FAILED, *call_ids)
             logger.warning(
-                "recording_disclosure_interrupted call_id=%s — notice cut "
+                "recording_disclosure_unconfirmed call_id=%s — notice incomplete or unproven "
                 "short; not retried (a restart would talk over the caller "
                 "a second time); recording will be suppressed",
                 call_id[:12],
             )
             return
 
-        record_disclosure_state(DISCLOSURE_SPOKEN, *call_ids)
+        record_disclosure_state(
+            DISCLOSURE_SPOKEN if receipt["evidence"] == "transport_played"
+            else DISCLOSURE_TRANSMITTED,
+            *call_ids,
+        )
         # Put it in history so the LLM knows the notice was already given
         # and does not repeat it (or contradict it) on the first turn.
         try:
@@ -382,7 +390,7 @@ async def _speak_recording_disclosure(voice_session) -> None:
                 "recording_disclosure_transcript_accumulate_failed call_id=%s err=%s",
                 call_id[:12], exc,
             )
-        logger.info("recording_disclosure_spoken call_id=%s", call_id[:12])
+        logger.info("recording_disclosure_delivered call_id=%s evidence=%s", call_id[:12], receipt["evidence"])
     except Exception as exc:
         record_disclosure_state(DISCLOSURE_FAILED, *call_ids)
         logger.error(

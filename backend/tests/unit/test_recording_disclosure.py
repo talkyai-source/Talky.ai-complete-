@@ -121,6 +121,12 @@ class _FakePipeline:
         if self._raises:
             raise RuntimeError("tts down")
         self._log.append(("tts", text))
+        session._tts_delivery_status = "partial" if self._interrupted else "submitted"
+        session._tts_playback_utterance_id = "synthetic-notice"
+        session._tts_playback_receipt = {
+            "utterance_id": "synthetic-notice", "status": "completed",
+            "evidence": "transport_played",
+        }
         return self._interrupted
 
 

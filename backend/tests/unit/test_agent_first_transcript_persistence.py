@@ -87,6 +87,12 @@ class _FakePipeline:
         pass
 
     async def synthesize_and_send_audio(self, session, text, websocket=None, **k):
+        session._tts_delivery_status = "partial" if self._interrupted else "submitted"
+        session._tts_playback_utterance_id = "synthetic-notice"
+        session._tts_playback_receipt = {
+            "utterance_id": "synthetic-notice", "status": "completed",
+            "evidence": "transport_played",
+        }
         return self._interrupted
 
 

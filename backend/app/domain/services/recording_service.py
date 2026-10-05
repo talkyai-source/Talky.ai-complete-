@@ -520,6 +520,56 @@ class RecordingService:
         """Backward-compatible storage path helper used by legacy tests/callers."""
         return self._s3_key(tenant_id, campaign_id, call_id)
 
+    async def _retention_allowed(
+        self,
+        call_id: str,
+        tenant_id: str,
+        destination_country_code: Optional[str] = None,
+    ) -> bool:
+        """Check the current configured policy and tenant-owned call before storage.
+
+        This is a technical retention admission, not proof of legal consent or
+        human hearing. A UUID-shaped call ID alone is not ownership evidence.
+        """
+        try:
+            tenant_uuid = UUID(str(tenant_id))
+            try:
+                call_uuid = UUID(str(call_id))
+            except (ValueError, TypeError, AttributeError):
+                call_uuid = None
+            async with acquire_with_tenant(self._db, str(tenant_uuid)) as conn:
+                row = await conn.fetchrow(
+                    "SELECT id FROM calls WHERE tenant_id = $1 "
+                    "AND (id = $2 OR ($2::uuid IS NULL AND external_call_uuid = $3)) "
+                    "ORDER BY created_at DESC LIMIT 1",
+                    tenant_uuid,
+                    call_uuid,
+                    str(call_id),
+                )
+            if not row:
+                logger.warning("recording_call_binding_unavailable call=%s", call_id)
+                return False
+            from app.domain.services.recording_policy_service import (
+                RecordingPolicyService,
+                consent_satisfied,
+            )
+            decision = await RecordingPolicyService(self._db).decide(
+                tenant_id=str(tenant_uuid),
+                destination_country_code=destination_country_code,
+            )
+            allowed = bool(
+                decision.should_record and consent_satisfied(decision, call_id, str(row["id"]))
+            )
+            if not allowed:
+                logger.info(
+                    "recording_retention_suppressed call=%s policy_reason=%s",
+                    call_id, decision.reason,
+                )
+            return allowed
+        except Exception:
+            logger.warning("recording_retention_admission_unavailable call=%s", call_id)
+            return False
+
     async def save_recording(
         self,
         call_id: str,
@@ -532,6 +582,8 @@ class RecordingService:
             return None
 
         if hasattr(self.supabase, "storage"):
+            if not await self._retention_allowed(call_id, tenant_id):
+                return None
             path = self._generate_storage_path(call_id, tenant_id, campaign_id)
             bucket = self.supabase.storage.from_("recordings")
             bucket.upload(path, buffer.get_wav_bytes())
@@ -560,84 +612,28 @@ class RecordingService:
         Returns recording UUID string on success, None on failure.
         Never raises — storage failures should not break call flow.
 
-        T0.4 — Consults `tenant_recording_policy` and returns None when
-        recording is disabled. If no policy row exists for the tenant,
-        the safe default is two-party consent (announcement required).
-
-        2026-07-28 — the announcement is now ENFORCED, not just computed.
-        The greeting path (telephony/modes/agent_first.py) speaks the
-        notice as the first audio on the call and reports the outcome to
-        the disclosure ledger in `recording_policy_service`; this method
-        refuses to retain audio for a call whose required notice was not
-        delivered. Previously `announcement_required` was advisory, no
-        caller ever played it, and two-party-consent tenants were
-        recorded without the callee ever being told.
+        Every storage path requires current tenant/call ownership and the
+        configured policy/disclosure gate. Dependency failure suppresses storage.
         """
         if not buffer or buffer.total_bytes == 0:
             logger.warning(f"No audio to save for call {call_id}")
             return None
 
-        # Consult the per-tenant recording policy. Disabled → skip.
-        try:
-            from app.domain.services.recording_policy_service import (
-                RecordingPolicyService,
-                consent_satisfied,
-            )
-
-            policy = RecordingPolicyService(self._db)
-            decision = await policy.decide(
-                tenant_id=tenant_id,
-                destination_country_code=destination_country_code,
-            )
-            if not decision.should_record:
-                logger.info(
-                    "recording_skipped_by_policy call=%s tenant=%s reason=%s",
-                    call_id,
-                    tenant_id,
-                    decision.reason,
-                )
-                return None
-
-            # The policy demanded a spoken notice. Retain the audio only
-            # if that notice actually reached the callee on this call.
-            # Fails CLOSED — an unknown call counts as "not disclosed".
-            # Keeping audio captured without the required notice is
-            # unlawful in the UK/EU and in two-party-consent US states;
-            # dropping it costs the tenant a QA artefact. A tenant that
-            # is genuinely in a one-party jurisdiction should set
-            # `default_consent_mode = 'one_party'` on its
-            # `tenant_recording_policy` row — that is the lawful way to
-            # record without announcing, and it makes this gate a no-op.
-            if not consent_satisfied(decision, call_id):
-                logger.error(
-                    "recording_suppressed_no_disclosure call=%s tenant=%s "
-                    "reason=%s — policy requires a spoken recording notice "
-                    "and none was delivered on this call; audio discarded",
-                    call_id,
-                    tenant_id,
-                    decision.reason,
-                )
-                return None
-        except Exception as exc:
-            # Fail SAFE — if we cannot confirm the policy, we do not
-            # create a recording. Better to miss an upload than to ship
-            # non-consensual recordings to S3.
-            logger.error(
-                "recording_policy_lookup_failed call=%s tenant=%s err=%s — skipping upload",
-                call_id,
-                tenant_id,
-                exc,
-            )
+        if not await self._retention_allowed(call_id, tenant_id, destination_country_code):
             return None
 
         if not self._s3.is_available():
             logger.info(f"S3 not configured — saving recording locally for call {call_id}.")
-            return await self._save_local(call_id, buffer, tenant_id, campaign_id)
+            return await self._save_local(
+                call_id, buffer, tenant_id, campaign_id, destination_country_code
+            )
 
         try:
             wav_data, ext, mime_type = await asyncio.to_thread(
                 encode_recording_audio, buffer.get_wav_bytes()
             )
+            if not await self._retention_allowed(call_id, tenant_id, destination_country_code):
+                return None
             key = self._s3_key(tenant_id, campaign_id, call_id, ext)
             upload_started = datetime.utcnow()
 
@@ -689,6 +685,7 @@ class RecordingService:
         buffer: RecordingBuffer,
         tenant_id: str = "unknown",
         campaign_id: str = "unknown",
+        destination_country_code: Optional[str] = None,
     ) -> Optional[str]:
         """
         Save recording to local filesystem when S3 is not configured.
@@ -700,31 +697,10 @@ class RecordingService:
 
         Returns the recording UUID string on success, None on failure.
         """
-        # This method is also called DIRECTLY by the telephony teardown
-        # fallback (telephony/recording.py), which bypasses save_and_link
-        # and therefore bypasses the policy gate. Honour a disclosure
-        # failure we positively know about, so that bypass cannot write a
-        # recording the greeting path already determined must not be kept.
-        # Only a POSITIVE failure blocks here: an unknown call falls
-        # through unchanged, because this method has no policy decision of
-        # its own and must not turn "no information" into a silent
-        # behaviour change for callers that never consulted the policy.
-        try:
-            from app.domain.services.recording_policy_service import (
-                disclosure_known_failed,
-            )
-
-            if disclosure_known_failed(call_id):
-                logger.error(
-                    "recording_suppressed_no_disclosure call=%s tenant=%s "
-                    "— required recording notice was not delivered; "
-                    "local save skipped",
-                    call_id,
-                    tenant_id,
-                )
-                return None
-        except Exception as exc:
-            logger.debug("disclosure ledger check failed for %s: %s", call_id, exc)
+        if not buffer or buffer.total_bytes == 0:
+            return None
+        if not await self._retention_allowed(call_id, tenant_id, destination_country_code):
+            return None
 
         recordings_dir = os.getenv("LOCAL_RECORDINGS_DIR", "./recordings")
         abs_dir = os.path.abspath(recordings_dir)
@@ -758,6 +734,8 @@ class RecordingService:
             # whole makedirs+write sequence to a worker thread; `filepath`/
             # `wav_data` are immutable local values captured at call time,
             # so there is no shared mutable state for the thread to race.
+            if not await self._retention_allowed(call_id, tenant_id, destination_country_code):
+                return None
             await asyncio.to_thread(_write_wav_file, recordings_dir, filepath, wav_data)
             logger.info(
                 f"Recording saved locally: {filepath} ({len(wav_data):,} bytes, "
