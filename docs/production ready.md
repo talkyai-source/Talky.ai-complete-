@@ -1,6 +1,6 @@
 # production ready
 
-Plan date: 4 October 2026. Status: local CP01–CP04, CP07–CP08 and AG01–AG07 repairs are committed; AG03 is candidate verified. AG06 still needs real provider/browser and supported operator-resolution acceptance. AG05 still needs cohort/browser/connector acceptance. AG02 retrieval targets and the preserved AG04 Groq semantic sample still fail; live/profile/release acceptance is unfinished. CP05, CP06 and CP09 are deferred at the user’s request; CP08 still needs designated recovery/first-call acceptance and the absent invitation journey; AG07 retains owning-repair architecture dispositions; OP01 and OP02 are underway. See the [execution tracker](production-readiness/execution-tracker.json), [AG04 evidence](sessions/2026-10-05-ag04-implementation.md) and [AG05 evidence](sessions/2026-10-05-ag05-implementation.md) and [AG06 evidence](sessions/2026-10-05-ag06-implementation.md). Product: Talky.ai. Scope remains the 2 October assessment and its 45 feature groups, including prior repairs awaiting deployment and acceptance.
+Plan date: 4 October 2026. Status: local CP01–CP04, CP07–CP08 and AG01–AG07 repairs are committed; AG03 is candidate verified. AG06 still needs real provider/browser and supported operator-resolution acceptance. AG05 still needs cohort/browser/connector acceptance. AG02 retrieval targets and the preserved AG04 Groq semantic sample still fail; live/profile/release acceptance is unfinished. CP05, CP06 and CP09 are deferred at the user’s request; CP08 still needs designated recovery/first-call acceptance and the absent invitation journey; AG07 retains owning-repair architecture dispositions; OP01–OP03 local repairs are integrated and verified; OP04 local verification passed; OP05–OP07 are underway. [Combined operations evidence](sessions/2026-10-05-op01-op03-integration.md) records 3,704 backend, 179 PostgreSQL and 176 frontend passing checks, explicit skips and remaining acceptance. See the [execution tracker](production-readiness/execution-tracker.json), [AG04 evidence](sessions/2026-10-05-ag04-implementation.md) and [AG05 evidence](sessions/2026-10-05-ag05-implementation.md) and [AG06 evidence](sessions/2026-10-05-ag06-implementation.md). Product: Talky.ai. Scope remains the 2 October assessment and its 45 feature groups, including prior repairs awaiting deployment and acceptance.
 
 This is the execution plan for making the existing product worth paying for. It covers the identified defects, incomplete customer journeys, architecture risks and missing validation. Each item needs an owner, a bounded change or validation task, and evidence of the customer outcome. Writing this plan does not mark any repair, live test or deployment complete.
 
@@ -433,6 +433,8 @@ Inventory the alternate `VoicePipelineService.get_llm_response`/`llm_response.py
 
 ### OP01 Make minute admission and the displayed allowance agree
 
+**Local implementation checkpoint — 5 October 2026:** The bounded repairs are committed and verified in the [OP01–OP03 integration report](sessions/2026-10-05-op01-op03-integration.md). The combined backend, database and frontend checks passed with explicitly documented skips/limits. This package remains in progress; its policy, deployed-profile and live acceptance requirements below are unchanged.
+
 **Covers:** O01, F39; billing-cycle and entitlement dependency on the billing workstream. **Owner:** billing/dialer engineering, with finance/product accountable for allowance semantics. **Priority:** P1 when an allowance or hard limit is sold.
 
 **Bounded tasks**
@@ -457,6 +459,8 @@ Inventory the alternate `VoicePipelineService.get_llm_response`/`llm_response.py
 
 ### OP02 Enforce provider and shared call limits at their actual boundary
 
+**Local implementation checkpoint — 5 October 2026:** The bounded repairs are committed and verified in the [OP01–OP03 integration report](sessions/2026-10-05-op01-op03-integration.md). The combined backend, database and frontend checks passed with explicitly documented skips/limits. This package remains in progress; its policy, deployed-profile and live acceptance requirements below are unchanged.
+
 **Covers:** O02, F40; supports F17/F42. **Owner:** platform capacity and speech engineering. **Priority:** P1 for promised hard limits.
 
 **Bounded tasks**
@@ -480,6 +484,8 @@ Inventory the alternate `VoicePipelineService.get_llm_response`/`llm_response.py
 **Evidence and reuse:** `backend/app/infrastructure/providers/provider_concurrency.py`, `backend/app/infrastructure/stt/deepgram_flux.py`, `backend/app/domain/services/global_concurrency.py`, `telephony/lifecycle.py`; existing provider/global concurrency tests extended at the actual Flux connection boundary and process topology. Record open socket/lease counts and cancellation outcomes.
 
 ### OP03 Validate bounded STT and TTS recovery and honest media completion
+
+**Local implementation checkpoint — 5 October 2026:** The bounded repairs are committed and verified in the [OP01–OP03 integration report](sessions/2026-10-05-op01-op03-integration.md). The combined backend, database and frontend checks passed with explicitly documented skips/limits. This package remains in progress; its policy, deployed-profile and live acceptance requirements below are unchanged.
 
 **Covers:** V06, F17, F18; supports F19/F20. **Owner:** speech/media engineering. **Priority:** P2 implementation, required evidence for the approved paid profile.
 

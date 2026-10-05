@@ -40,7 +40,12 @@
     "cp08_implementation_commit": "2d90bf492654c05cda4de9ca58f72e5c04f35c97",
     "ag07_implementation_commit": "09bcd50fe0f600fce9ca6af9c882f794ed45883f",
     "ag03_denial_followup_commit": "7f9ec58f3657e8a5fd7bcd3a3e3d882fb1f5a341",
-    "op04_local_verification_commit": "56cf4ad61124a3b237759a17a64cf50257337113"
+    "op04_local_verification_commit": "56cf4ad61124a3b237759a17a64cf50257337113",
+    "op01_implementation_commit": "28f27ac878bd6e11c0d87802c252f06a27fa7735",
+    "op02_implementation_commit": "482ea9debc765a0132a94606eddacc50c660edd2",
+    "op02_test_dependency_commit": "2a8fe78eedfcee1a6340360831f050df74eb9b4d",
+    "op03_implementation_commit": "2043c3c368c4aa6af97c13c8628e369c27cf6e5a",
+    "operations_ci_commit": "4151b82f81a8357c32f9c8cb5d06d8e2d39d53ca"
   },
   "status_rules": {
     "execution": [
@@ -634,8 +639,8 @@
       "id": "OP01",
       "title": "Make minute admission and the displayed allowance agree",
       "owner_role": "Billing and dialer engineering lead",
-      "assigned_person": null,
-      "reviewer": null,
+      "assigned_person": "Codex implementation team",
+      "reviewer": "Independent provider/media and metering reviews; root combined regression and migrated PostgreSQL verification",
       "status": "in_progress",
       "start_after_milestone": "RG01 baseline recorded",
       "dependencies_and_tests": "See package text; coordination and final acceptance dependencies are distinct from entry milestones.",
@@ -648,17 +653,28 @@
       ],
       "architecture_ids": [],
       "plan_anchor": "op01-make-minute-admission-and-the-displayed-allowance-agree",
-      "evidence": [],
-      "blocker": null,
-      "next_action": "Policy-independent minute-state failure reproduction and repair started in isolated OP01 checkout. Paid cycle, rounding and active-call exhaustion policy are not inferred.",
+      "evidence": [
+        {
+          "path": "docs/sessions/2026-10-05-op01-op03-integration.md",
+          "kind": "integrated_local_implementation_and_verification",
+          "candidate": "28f27ac878bd6e11c0d87802c252f06a27fa7735"
+        },
+        {
+          "path": "docs/sessions/artifacts/op01-03-integration/verification.json",
+          "kind": "verification_manifest",
+          "candidate": "28f27ac878bd6e11c0d87802c252f06a27fa7735"
+        }
+      ],
+      "blocker": "Confirm paid reset/timezone/rounding and active-call exhaustion semantics; execute the approved entitlement/overrun acceptance. Existing calendar-month and floor policy is preserved.",
+      "next_action": "Confirm paid reset/timezone/rounding and active-call exhaustion semantics; execute the approved entitlement/overrun acceptance. Existing calendar-month and floor policy is preserved.",
       "target_date": null
     },
     {
       "id": "OP02",
       "title": "Enforce provider and shared call limits at their actual boundary",
       "owner_role": "Platform capacity and speech lead",
-      "assigned_person": null,
-      "reviewer": null,
+      "assigned_person": "Codex implementation team",
+      "reviewer": "Independent provider/media and metering reviews; root combined regression and migrated PostgreSQL verification",
       "status": "in_progress",
       "start_after_milestone": "RG01 baseline recorded",
       "dependencies_and_tests": "See package text; coordination and final acceptance dependencies are distinct from entry milestones.",
@@ -672,9 +688,20 @@
       ],
       "architecture_ids": [],
       "plan_anchor": "op02-enforce-provider-and-shared-call-limits-at-their-actual-boundary",
-      "evidence": [],
-      "blocker": null,
-      "next_action": "Read-only boundary inventory and synthetic Flux/global-lease reproduction started in isolated checkout. Operator topology/provider limits remain unconfirmed.",
+      "evidence": [
+        {
+          "path": "docs/sessions/2026-10-05-op01-op03-integration.md",
+          "kind": "integrated_local_implementation_and_verification",
+          "candidate": "482ea9debc765a0132a94606eddacc50c660edd2"
+        },
+        {
+          "path": "docs/sessions/artifacts/op01-03-integration/verification.json",
+          "kind": "verification_manifest",
+          "candidate": "482ea9debc765a0132a94606eddacc50c660edd2"
+        }
+      ],
+      "blocker": "Validate deployed provider/account budgets and topology, standalone Redis and owned-call overload/resource cleanup. Local provider limits do not establish a fleet-wide purchased capacity.",
+      "next_action": "Validate deployed provider/account budgets and topology, standalone Redis and owned-call overload/resource cleanup. Local provider limits do not establish a fleet-wide purchased capacity.",
       "target_date": null
     },
     {
@@ -682,7 +709,7 @@
       "title": "Validate bounded STT/TTS recovery and honest media completion",
       "owner_role": "Speech and media lead",
       "assigned_person": "Codex implementation team",
-      "reviewer": null,
+      "reviewer": "Independent provider/media and metering reviews; root combined regression and migrated PostgreSQL verification",
       "status": "in_progress",
       "start_after_milestone": "RG01 baseline recorded",
       "dependencies_and_tests": "See package text; coordination and final acceptance dependencies are distinct from entry milestones.",
@@ -698,9 +725,20 @@
       ],
       "architecture_ids": [],
       "plan_anchor": "op03-validate-bounded-stt-and-tts-recovery-and-honest-media-completion",
-      "evidence": [],
-      "blocker": null,
-      "next_action": "Isolated STT generator-lifetime and browser playback-receipt repairs are in progress after reproduced failures; integrate only after independent review and local verification.",
+      "evidence": [
+        {
+          "path": "docs/sessions/2026-10-05-op01-op03-integration.md",
+          "kind": "integrated_local_implementation_and_verification",
+          "candidate": "2043c3c368c4aa6af97c13c8628e369c27cf6e5a"
+        },
+        {
+          "path": "docs/sessions/artifacts/op01-03-integration/verification.json",
+          "kind": "verification_manifest",
+          "candidate": "2043c3c368c4aa6af97c13c8628e369c27cf6e5a"
+        }
+      ],
+      "blocker": "Complete approved profile/provider/carrier failure and human-listening acceptance; transmission/playout receipts alone do not establish hearing or audio quality.",
+      "next_action": "Complete approved profile/provider/carrier failure and human-listening acceptance; transmission/playout receipts alone do not establish hearing or audio quality.",
       "target_date": null
     },
     {
@@ -737,16 +775,16 @@
         }
       ],
       "blocker": "Local contracts passed; actual carrier/PBX configuration, timer installation/detection, owned handset caller-ID and deployed rollback acceptance remain unverified.",
-      "next_action": "Complete approved operator configuration and controlled handset acceptance without changing selected-route policy. Preserve received SIP codes, scoped ownership and historical dependencies. Include new PG module in the next integrated CI update.",
+      "next_action": "Complete approved operator configuration and controlled handset acceptance without changing selected-route policy. Preserve received SIP codes, scoped ownership and historical dependencies. New PostgreSQL module is now included in CI; remote CI execution remains unrun.",
       "target_date": null
     },
     {
       "id": "OP05",
       "title": "Prove campaign, inbound and redial lifecycle under failure",
       "owner_role": "Calling application and telephony lifecycle lead",
-      "assigned_person": null,
+      "assigned_person": "Codex implementation team",
       "reviewer": null,
-      "status": "planned",
+      "status": "in_progress",
       "start_after_milestone": "RG01 baseline recorded",
       "dependencies_and_tests": "See package text; coordination and final acceptance dependencies are distinct from entry milestones.",
       "finding_ids": [
@@ -764,16 +802,16 @@
       "plan_anchor": "op05-prove-campaign-inbound-and-redial-lifecycle-under-failure",
       "evidence": [],
       "blocker": null,
-      "next_action": "Assign owner and confirm the baseline reproduction or evidence gap.",
+      "next_action": "Isolated same-job pre-attempt scheduling/capacity deferral repair; actual worker/queue and migrated database acceptance in progress.",
       "target_date": null
     },
     {
       "id": "OP06",
       "title": "Close the existing transfer availability gate honestly",
       "owner_role": "Inbound telephony lead",
-      "assigned_person": null,
+      "assigned_person": "Codex implementation team",
       "reviewer": null,
-      "status": "planned",
+      "status": "in_progress",
       "start_after_milestone": "RG01 baseline recorded",
       "dependencies_and_tests": "See package text; coordination and final acceptance dependencies are distinct from entry milestones.",
       "finding_ids": [
@@ -786,16 +824,16 @@
       "plan_anchor": "op06-close-the-existing-transfer-availability-gate-honestly",
       "evidence": [],
       "blocker": null,
-      "next_action": "Assign owner and confirm the baseline reproduction or evidence gap.",
+      "next_action": "Integrate independently verified existing inbound transfer availability/copy repair and exact action fixture schema follow-up; production switch remains closed.",
       "target_date": null
     },
     {
       "id": "OP07",
       "title": "Prove consent, recording lifecycle and customer data requests",
       "owner_role": "Data lifecycle and privacy operations lead",
-      "assigned_person": null,
+      "assigned_person": "Codex implementation team",
       "reviewer": null,
-      "status": "planned",
+      "status": "in_progress",
       "start_after_milestone": "RG01 baseline recorded",
       "dependencies_and_tests": "See package text; coordination and final acceptance dependencies are distinct from entry milestones.",
       "finding_ids": [
@@ -812,7 +850,7 @@
       "plan_anchor": "op07-prove-consent-recording-lifecycle-and-customer-data-requests",
       "evidence": [],
       "blocker": null,
-      "next_action": "Assign owner and confirm the baseline reproduction or evidence gap.",
+      "next_action": "Isolated fail-closed recording storage and disclosure-receipt corrections after actual-method reproductions; retention/consent policy is not redefined.",
       "target_date": null
     },
     {
