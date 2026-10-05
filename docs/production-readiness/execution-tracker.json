@@ -441,10 +441,16 @@
           "path": "docs/sessions/2026-10-05-known-tenant-profile-admission.md",
           "kind": "strict_known_tenant_profile_admission_and_integrated_regression",
           "candidate": "5c26f311"
-        }
+        },
+        {
+          "path": "docs/sessions/2026-10-05-exact-integration-verification.md",
+          "kind": "combined_lifecycle_reload_and_conversation_regression",
+          "candidate": "be44bf7267ee2aa96ca851c8f0acdbc9e5733502"
+        },
+        "docs/sessions/2026-10-05-selected-outbound-warmup-lifecycle.md"
       ],
       "blocker": null,
-      "next_action": "Known-tenant unavailable profile/tuning admission is repaired and verified. Finish separate lost-warmup/legacy ownership investigation and coordinated designated-profile live acceptance; preserve source-bound full and scoped integration evidence.",
+      "next_action": "Known-tenant unavailable lookup and selected outbound warmup/terminal ownership repairs are locally verified. Resolve the separately enabled legacy cloud ownership disposition without inventing a campaign integration, then complete designated-profile live acceptance.",
       "target_date": null,
       "execution_note": "Local candidate 4f47123f: 818 backend passes/1 skip, 38 focused frontend passes, typecheck/build/CI-rule Ruff/scoped ESLint pass. Broader frontend 673 passes/1 baseline failure/2 skips; full lint has baseline configuration error. No real provider calls, migration, push or deployment."
     },
@@ -556,10 +562,16 @@
           "path": "docs/sessions/2026-10-05-ag04-contact-and-historical-dnc-controls.md",
           "kind": "offline_native_contact_and_historical_dnc_controls",
           "candidate": "1c7dce70"
-        }
+        },
+        {
+          "path": "docs/sessions/2026-10-05-exact-integration-verification.md",
+          "kind": "combined_lifecycle_reload_and_conversation_regression",
+          "candidate": "be44bf7267ee2aa96ca851c8f0acdbc9e5733502"
+        },
+        "docs/sessions/artifacts/ag04-accepted-phone/verification.md"
       ],
-      "blocker": "Captured Groq semantic failure retained. Proposed matrix39/50mapped by offline replay; intended profile roster/rubric/cohort unratified; live/human/audio/effect acceptance not run. AG02 retrieval gate remains failed.",
-      "next_action": "Extend the remaining 11 unmapped canonical conditions through meaningful existing runtime boundaries; preserve failed Groq semantics and perform approved per-profile human/live qualification. 39/50 union and 190 replay rows are not approval.",
+      "blocker": "Captured Groq semantic failure retained. Proposed matrix41/50mapped by offline replay; intended profile roster/rubric/cohort unratified; live/human/audio/effect acceptance not run. AG02 retrieval gate remains failed.",
+      "next_action": "Extend meaningful remaining per-engine and canonical runtime controls; preserve failed Groq semantics and perform approved per-profile human/live qualification. 41/50 union and206 replay rows are not approval. Nine canonical IDs remain unmapped; acoustic/semantic gaps need their actual boundaries.",
       "target_date": null,
       "execution_note": "1797 tests passed0skip;170offline rows1120controlchecks0failed;1retained semantic failure/169unreviewed. Local source commit only; no provider call/push/deploy."
     },
@@ -704,10 +716,16 @@
           "path": "docs/sessions/2026-10-05-known-tenant-profile-admission.md",
           "kind": "strict_known_tenant_profile_admission_and_integrated_regression",
           "candidate": "5c26f311"
-        }
+        },
+        {
+          "path": "docs/sessions/2026-10-05-exact-integration-verification.md",
+          "kind": "combined_lifecycle_reload_and_conversation_regression",
+          "candidate": "be44bf7267ee2aa96ca851c8f0acdbc9e5733502"
+        },
+        "docs/sessions/2026-10-05-selected-outbound-warmup-lifecycle.md"
       ],
       "blocker": "A05 cleanup and documented crash contract are locally verified; remaining architecture dispositions follow lifecycle/provider/configuration owning repairs. No full architecture or live/release claim.",
-      "next_action": "Resolve confirmed saved-profile failure paths with AG01; retain current shared session/provider contracts unless an owning repair requires extraction. Complete lifecycle/deployed-configuration acceptance with OP02/OP05/OP12. A05 bounded local duplication resolved; package remains in progress.",
+      "next_action": "Retain verified selected-session lifecycle and strict saved-profile ownership, documented provider/session boundaries and bounded A05 closure. Remaining unknown-provider reconciliation and deployed acceptance belong to OP02/OP05/OP12; unqualified legacy cloud callbacks remain explicit.",
       "target_date": null
     },
     {
@@ -847,7 +865,13 @@
           "path": "docs/sessions/artifacts/op04/verification.json",
           "kind": "verification_manifest",
           "candidate": "56cf4ad61124a3b237759a17a64cf50257337113"
-        }
+        },
+        {
+          "path": "docs/sessions/2026-10-05-exact-integration-verification.md",
+          "kind": "combined_lifecycle_reload_and_conversation_regression",
+          "candidate": "be44bf7267ee2aa96ca851c8f0acdbc9e5733502"
+        },
+        "docs/sessions/2026-10-05-pjsip-reload-receipts.md"
       ],
       "blocker": "Local contracts passed; actual carrier/PBX configuration, timer installation/detection, owned handset caller-ID and deployed rollback acceptance remain unverified.",
       "next_action": "Complete approved operator configuration and controlled handset acceptance without changing selected-route policy. Preserve received SIP codes, scoped ownership and historical dependencies. New PostgreSQL module is now included in CI; remote CI execution remains unrun.",
@@ -908,10 +932,16 @@
           "path": "docs/sessions/2026-10-05-known-tenant-profile-admission.md",
           "kind": "strict_known_tenant_profile_admission_and_integrated_regression",
           "candidate": "5c26f311"
-        }
+        },
+        {
+          "path": "docs/sessions/2026-10-05-exact-integration-verification.md",
+          "kind": "combined_lifecycle_reload_and_conversation_regression",
+          "candidate": "be44bf7267ee2aa96ca851c8f0acdbc9e5733502"
+        },
+        "docs/sessions/2026-10-05-selected-outbound-warmup-lifecycle.md"
       ],
-      "blocker": "Pre-intent pacing attempts, native DNC persistence/speech, durable DNC settlement and bulk suppression are repaired locally. Selected warmup ownership under long ringing, ambiguous-owner reconciliation and actual queue/process/PBX acceptance remain open.",
-      "next_action": "Repair and verify selected warmup ownership and terminal admission races without changing true call outcomes, retry ownership or selected route; then complete designated failure/recovery acceptance.",
+      "blocker": "Pre-intent pacing, DNC persistence/settlement, and selected warmup/terminal callback ownership are repaired locally. Unknown-provider/ambiguous-owner reconciliation and actual queue/process/PBX recovery acceptance remain open.",
+      "next_action": "Complete designated failure/recovery acceptance and existing ambiguous-owner reconciliation; retain true call outcomes, retry ownership, selected profile and selected route without blind redial or session reconstruction.",
       "target_date": null
     },
     {
@@ -1127,7 +1157,13 @@
         {
           "path": "docs/sessions/2026-10-05-op11-recording-privacy.md",
           "kind": "bounded_local_followup_not_release_acceptance"
-        }
+        },
+        {
+          "path": "docs/sessions/2026-10-05-exact-integration-verification.md",
+          "kind": "combined_lifecycle_reload_and_conversation_regression",
+          "candidate": "be44bf7267ee2aa96ca851c8f0acdbc9e5733502"
+        },
+        "docs/sessions/2026-10-05-pjsip-reload-receipts.md"
       ],
       "blocker": "Supplier-cost ingestion/reconciliation is unavailable; deployed privilege and filesystem/account scopes have not been exercised.",
       "next_action": "Review the existing host privilege boundary and designated supplier statements; keep unavailable costs explicit and promote nullable API/Admin contracts together.",
@@ -1233,6 +1269,11 @@
           "path": "docs/sessions/2026-10-05-known-tenant-profile-admission.md",
           "kind": "strict_known_tenant_profile_admission_and_integrated_regression",
           "candidate": "5c26f311"
+        },
+        {
+          "path": "docs/sessions/2026-10-05-exact-integration-verification.md",
+          "kind": "combined_lifecycle_reload_and_conversation_regression",
+          "candidate": "be44bf7267ee2aa96ca851c8f0acdbc9e5733502"
         }
       ],
       "blocker": null,

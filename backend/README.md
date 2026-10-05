@@ -84,9 +84,16 @@ ownership resolves. Failed or unwired lookups stop these setup paths; a successf
 lookup showing no saved row still permits defaults. This admission correction is
 recorded in the [known-tenant profile report](../docs/sessions/2026-10-05-known-tenant-profile-admission.md).
 
+Selected outbound sessions now survive long ringing while the provider channel
+is live or its presence is unknown. A known outbound call that loses its prepared
+session fails through the existing terminal path instead of rebuilding defaults;
+duplicate and terminal callbacks cannot replace its selected owner. See the
+[warmup lifecycle report](../docs/sessions/2026-10-05-selected-outbound-warmup-lifecycle.md).
+This is process-local ownership, not restartable session recovery.
+
 Separate legacy behavior remains under review: the cloud DID helper can still
-return tenantless defaults when ownership cannot resolve, and the outbound
-lifecycle has a default slow path when warmup is absent. Twilio/Vonage cloud
+return tenantless defaults when ownership cannot resolve, and unowned legacy
+telephony callbacks retain their default preparation path. Twilio/Vonage cloud
 callbacks are separately enabled legacy paths; the current campaign worker calls
 the SIP route, whose production durable origination requires Asterisk and a
 planned call identity. A signed cloud callback's destination alone does not

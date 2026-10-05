@@ -45,3 +45,13 @@ behavior, provider choices, migration state, credentials and customer data are
 unchanged. A05 is resolved for its bounded local duplication finding in the
 reviewed candidate. The other observations retain their owning
 repair/acceptance dependencies; AG07 remains in progress.
+
+## Subsequent owning repairs
+
+After the baseline review above, strict known-tenant lookup admission and
+[selected outbound lifecycle ownership](2026-10-05-selected-outbound-warmup-lifecycle.md)
+were repaired and independently reviewed. The README now describes those
+implemented guarantees while preserving unowned legacy/cloud and process-loss
+limits. The combined `be44bf72` run passed 1,025 checks with one explicit POSIX
+skip. This advances the A02/A03/A08 owning work; their deployed acceptance and
+AG07 remain open. A05's bounded local disposition is unchanged.

@@ -126,3 +126,33 @@ experimental controls remain reproducible in the artifact directory and are
 not part of the normal unit suite. A content-owner-reviewed campaign corpus
 and qualification of existing ingestion/enrichment remain outstanding; neither
 enrichment nor local normalization is claimed to close the quality gap.
+
+## Selected-session and reload integration
+
+At `be44bf72`, **1,025 checks passed, zero failed, one POSIX permission check
+skipped**, with 1,417 warnings in 31.35 seconds across 38 related modules. The
+source snapshot stayed unchanged. [Command/source](artifacts/lifecycle-reload-integration/integrated-command.json)
+and [output](artifacts/lifecycle-reload-integration/integrated-tests.txt) preserve
+the exact inventory. This covers the owner batches, direct lifecycle callers,
+strict profile admission, adjacent contact/replay and Admin receipt regressions.
+It is a later scoped run, not a repeat or relabelling of the 11,775-test full run.
+
+- [Selected outbound warmups](2026-10-05-selected-outbound-warmup-lifecycle.md),
+  source `ccdbabf1` integrated as `1f094117`, retain the selected session during
+  live/unknown long ringing. Lost owned selection and duplicate/terminal/ringing
+  races cannot silently replace it with defaults. Unknown provider recovery and
+  separately enabled legacy cloud ownership remain open.
+- [PJSIP reload receipts](2026-10-05-pjsip-reload-receipts.md), source `28833884`
+  integrated as `4781b0ef`, require each command's acknowledgement and retain
+  child ownership through timeout/cancellation cleanup. Command acknowledgement
+  does not establish runtime trunk health or atomic file/database isolation.
+- [Accepted email and phone corrections](artifacts/ag04-accepted-phone/verification.md),
+  test-only source `4878fe83` integrated as `20f59135`, use actual runtime guards
+  with synthetic receipts. The common replay reports 206 rows and 1,580 passing
+  controls, but preserves one captured Groq semantic failure and 205 unreviewed
+  findings. The canonical union is **41/50**; nine conditions and per-engine
+  gaps remain. No human/audio/provider approval is inferred.
+
+All three changes were independently read-reviewed. No migration, live PBX,
+provider, push or deployment occurred. Package/final/scenario statuses remain
+unchanged; CP05, CP06 and CP09 remain deferred.
