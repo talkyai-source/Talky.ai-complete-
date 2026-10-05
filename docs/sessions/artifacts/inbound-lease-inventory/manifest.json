@@ -1,0 +1,281 @@
+{
+  "source_commit": "7e1b31fcf28e9201587008eba00674a9504f0b52",
+  "source_parent": "5ef4a25a46305613342470089f264b6fb4580a90",
+  "previous_provider_source": "c9d3f87e6dd7c9011008f886419e17888a1a6825",
+  "recorded_date": "2026-10-06",
+  "cwd": "backend",
+  "environment": {
+    "ENVIRONMENT": "test",
+    "DATABASE_URL": "postgresql://test:test@127.0.0.1:1/unavailable_test",
+    "python": "C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/backend/.venv/Scripts/python.exe",
+    "PYTHONPATH": [
+      "C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/tmp/postgres-matrix-20261005/tmp/exact-requirements-20261005/packages",
+      "C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/tmp/production-ready-ag07-20261005/tmp/op02-testdeps"
+    ]
+  },
+  "checks": [
+    {
+      "command": [
+        "C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/backend/.venv/Scripts/python.exe",
+        "-m",
+        "pytest",
+        "tests/unit/test_inbound_lease_inventory_proof.py",
+        "tests/unit/test_inbound_lifecycle_fail_closed.py",
+        "tests/unit/test_provider_family_termination.py",
+        "tests/unit/test_telephony_orphan_recovery_confirmation.py",
+        "tests/unit/test_call_service_pooled_teardown.py",
+        "tests/unit/test_lifecycle_cancel_active_turn_id.py",
+        "tests/unit/test_lifecycle_teardown_reliability.py",
+        "tests/unit/test_main_telephony_shutdown.py",
+        "tests/unit/test_minutes_quota_is_live.py",
+        "tests/unit/test_op02_lifecycle_ownership.py",
+        "tests/unit/test_op07_native_dnc_durability.py",
+        "tests/unit/test_outbound_answered_duration.py",
+        "tests/unit/test_selected_warmup_lifecycle.py",
+        "tests/unit/test_telephony_lifecycle_watchdog_hangup.py",
+        "tests/unit/test_telephony_state_backend.py",
+        "tests/unit/test_voice_pipeline_service.py",
+        "-q",
+        "--tb=short"
+      ],
+      "log": "final-regression.txt",
+      "exit_code": 0,
+      "result": {
+        "passed": 304,
+        "failed": 0,
+        "skipped": 0,
+        "warnings": 279,
+        "seconds": 30.39
+      },
+      "new_controls_included": 19
+    },
+    {
+      "command": [
+        "C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/backend/.venv/Scripts/python.exe",
+        "-m",
+        "ruff",
+        "check",
+        "app/domain/services/telephony/lifecycle.py",
+        "tests/unit/test_inbound_lifecycle_fail_closed.py",
+        "tests/unit/test_provider_family_termination.py",
+        "tests/unit/test_inbound_lease_inventory_proof.py",
+        "--select",
+        "F",
+        "--extend-ignore",
+        "F401,F841"
+      ],
+      "exit_code": 0,
+      "log": "ruff-final.txt"
+    },
+    {
+      "command": [
+        "git",
+        "diff",
+        "--check"
+      ],
+      "cwd": ".",
+      "exit_code": 0,
+      "log": "diff-check.txt"
+    },
+    {
+      "command": [
+        "git",
+        "diff",
+        "--cached",
+        "--check"
+      ],
+      "cwd": ".",
+      "exit_code": 0,
+      "scope": "Four source/test paths before source commit."
+    }
+  ],
+  "red_history": [
+    {
+      "log": "initial.txt",
+      "passed": 1,
+      "failed": 6,
+      "scope": "Initial seven inventory/callback controls against the pre-repair source."
+    },
+    {
+      "log": "logical-marker-initial.txt",
+      "passed": 1,
+      "failed": 2,
+      "deselected": 12,
+      "scope": "Actual finalizer cancellation/error retry against the intermediate inventory repair."
+    },
+    {
+      "log": "generation-initial.txt",
+      "passed": 0,
+      "failed": 2,
+      "deselected": 17,
+      "scope": "None-token and late-finalizer completion controls against the intermediate token draft."
+    },
+    {
+      "log": "marker-timer-before.json",
+      "script": "marker-timer-before.py",
+      "scope": "Extracted baseline expiry function with synthetic marker/task state."
+    }
+  ],
+  "hash_algorithm": "SHA256; canonical_lf_sha256 = SHA256(path.read_bytes().replace(b\"\\r\\n\", b\"\\n\")); raw_sha256 = SHA256(path.read_bytes()). No text decoding.",
+  "owned_source_files": {
+    "backend/app/domain/services/telephony/lifecycle.py": {
+      "canonical_lf_sha256": "4d05920b009ddc83c2e328be2593d36c298d246f0d08e1f4dd1f8c8a2f14994a",
+      "raw_sha256": "b1b0563c70066ecb102c54355ea0bf2d179c86dd5d826e1e31e27cd376000c5a"
+    },
+    "backend/tests/unit/test_inbound_lifecycle_fail_closed.py": {
+      "canonical_lf_sha256": "d0c3814137c67fd39145302ff875e11b752d2fa5cbad3c8d96a2f747b18e8416",
+      "raw_sha256": "90ba3a55f87d2e5213a2bafc6587567ab346e7983e00dd342b5e5a0fd88eda70"
+    },
+    "backend/tests/unit/test_provider_family_termination.py": {
+      "canonical_lf_sha256": "aca790b45e26567e5c7f044677a378d658a8f184765ed8db8513681e33c13227",
+      "raw_sha256": "903411f0eec1893be2f8a76b95ded818c9bf5cf88e577023510e0a0d07ef2b1b"
+    },
+    "backend/tests/unit/test_inbound_lease_inventory_proof.py": {
+      "canonical_lf_sha256": "1a3bd52189b403c312f961a180cd508db5235643e4a6b68cdfac1c526d3a72e2",
+      "raw_sha256": "9652dcc129c186b9ddcf929fafa0326e3c234466c780771eaf4ad891f7e13f29"
+    }
+  },
+  "regression_input_files": {
+    "backend/tests/unit/test_inbound_lease_inventory_proof.py": {
+      "canonical_lf_sha256": "1a3bd52189b403c312f961a180cd508db5235643e4a6b68cdfac1c526d3a72e2",
+      "raw_sha256": "9652dcc129c186b9ddcf929fafa0326e3c234466c780771eaf4ad891f7e13f29"
+    },
+    "backend/tests/unit/test_inbound_lifecycle_fail_closed.py": {
+      "canonical_lf_sha256": "d0c3814137c67fd39145302ff875e11b752d2fa5cbad3c8d96a2f747b18e8416",
+      "raw_sha256": "90ba3a55f87d2e5213a2bafc6587567ab346e7983e00dd342b5e5a0fd88eda70"
+    },
+    "backend/tests/unit/test_provider_family_termination.py": {
+      "canonical_lf_sha256": "aca790b45e26567e5c7f044677a378d658a8f184765ed8db8513681e33c13227",
+      "raw_sha256": "903411f0eec1893be2f8a76b95ded818c9bf5cf88e577023510e0a0d07ef2b1b"
+    },
+    "backend/tests/unit/test_telephony_orphan_recovery_confirmation.py": {
+      "canonical_lf_sha256": "0b5445f6474d89a75528508f04fa8d7b6a94dbe06df383091bd400a8fc69e1ce",
+      "raw_sha256": "09c8b7f6091be07537e5ef381cbfc122cec6e8bd8a94904eedd7f9e378a8275e"
+    },
+    "backend/tests/unit/test_call_service_pooled_teardown.py": {
+      "canonical_lf_sha256": "4a536b92b05b7bae0111a4ebdcfc0f03b6eda3043d1f90e7550cad5541e741d3",
+      "raw_sha256": "4a536b92b05b7bae0111a4ebdcfc0f03b6eda3043d1f90e7550cad5541e741d3"
+    },
+    "backend/tests/unit/test_lifecycle_cancel_active_turn_id.py": {
+      "canonical_lf_sha256": "ca5870dff36cb60dfe63ab265fe85cd9a8fd0386dd79a770edae18443ff92668",
+      "raw_sha256": "ca5870dff36cb60dfe63ab265fe85cd9a8fd0386dd79a770edae18443ff92668"
+    },
+    "backend/tests/unit/test_lifecycle_teardown_reliability.py": {
+      "canonical_lf_sha256": "09fd060db8712b67c37804896d73a8e05ec9621e7f568965667dc2cb51519391",
+      "raw_sha256": "09fd060db8712b67c37804896d73a8e05ec9621e7f568965667dc2cb51519391"
+    },
+    "backend/tests/unit/test_main_telephony_shutdown.py": {
+      "canonical_lf_sha256": "703adfd1c74e8a65b681a964056dc091a67df2ddd242166e84c410fb1fddcf1b",
+      "raw_sha256": "2939ab2fc87658773b35251213128859a48dfd5afc986879829d37f7f1ce476d"
+    },
+    "backend/tests/unit/test_minutes_quota_is_live.py": {
+      "canonical_lf_sha256": "a7f0284a3a2009952f031d0fa74f511dbfc0a4a05792a9b579e065fd7a530dce",
+      "raw_sha256": "a7f0284a3a2009952f031d0fa74f511dbfc0a4a05792a9b579e065fd7a530dce"
+    },
+    "backend/tests/unit/test_op02_lifecycle_ownership.py": {
+      "canonical_lf_sha256": "3d32f0eea116c1cd6ff82e1eca9bedda080b3ba20a4863cceb7e47ff8e271f5d",
+      "raw_sha256": "3d32f0eea116c1cd6ff82e1eca9bedda080b3ba20a4863cceb7e47ff8e271f5d"
+    },
+    "backend/tests/unit/test_op07_native_dnc_durability.py": {
+      "canonical_lf_sha256": "1d1175d8d0295507ccbeda15c13b38aa2fc25e212478e7a9940055a02a52f1a9",
+      "raw_sha256": "1d1175d8d0295507ccbeda15c13b38aa2fc25e212478e7a9940055a02a52f1a9"
+    },
+    "backend/tests/unit/test_outbound_answered_duration.py": {
+      "canonical_lf_sha256": "02fe8951f8e58991f0b05fb35d4f4f4961fc3ba7e04c30366908fdb3c5722d37",
+      "raw_sha256": "02fe8951f8e58991f0b05fb35d4f4f4961fc3ba7e04c30366908fdb3c5722d37"
+    },
+    "backend/tests/unit/test_selected_warmup_lifecycle.py": {
+      "canonical_lf_sha256": "f98cc5e1b8bb245fd1249d354093fe8113657123b994d6e7b00055216e71cda7",
+      "raw_sha256": "f98cc5e1b8bb245fd1249d354093fe8113657123b994d6e7b00055216e71cda7"
+    },
+    "backend/tests/unit/test_telephony_lifecycle_watchdog_hangup.py": {
+      "canonical_lf_sha256": "a098d7ce89d0d99c37fb0f38c2aa6f36776fd99432d97b03f12a0a3d1143af34",
+      "raw_sha256": "a098d7ce89d0d99c37fb0f38c2aa6f36776fd99432d97b03f12a0a3d1143af34"
+    },
+    "backend/tests/unit/test_telephony_state_backend.py": {
+      "canonical_lf_sha256": "f555e059bc2874c2adc814f97c1c990d9c952b37079c9ecae4553c40b5d54a53",
+      "raw_sha256": "f555e059bc2874c2adc814f97c1c990d9c952b37079c9ecae4553c40b5d54a53"
+    },
+    "backend/tests/unit/test_voice_pipeline_service.py": {
+      "canonical_lf_sha256": "814359721b8a9a89dd1c91b17bdf230078dcc4dcdb9c0be2d93b51b2bafb92e4",
+      "raw_sha256": "814359721b8a9a89dd1c91b17bdf230078dcc4dcdb9c0be2d93b51b2bafb92e4"
+    }
+  },
+  "evidence_files": {
+    "before.json": {
+      "canonical_lf_sha256": "0d3762ae3c691a18bc2ad35ae848a8084080bd99376ebf90e3a3c9efe03e432a",
+      "raw_sha256": "1690583b742ced076b2d7eb78f615c5c8b957d6e98d9820eb75a1e08ed401599"
+    },
+    "diff-check.txt": {
+      "canonical_lf_sha256": "c1b7a882d09ffe1c59655d2467ae1d296ddb518435d2de85a98ae307d618b56a",
+      "raw_sha256": "9a5bcc6c3f232b6bcd20d31f1f2ac0e4b5b20665f436e1b01201aaf2596afdd3"
+    },
+    "expanded.txt": {
+      "canonical_lf_sha256": "dbc4ed4fa5fb47b915cb8736c84ce2f530dbec13cfb285247aad2a01074feeae",
+      "raw_sha256": "3431302938950a9c9d29d92d095ae9437a3b4c911cae8892e8ea5339215f16df"
+    },
+    "final-regression.txt": {
+      "canonical_lf_sha256": "6fe6d85aa5ce4a234fe622b22d879a21501568116b00addc197e220aca18fe69",
+      "raw_sha256": "cad1fad1702385fc1cd1b031a9fe0f8701a52a7c9569191aa80b602f68996837"
+    },
+    "first-green.txt": {
+      "canonical_lf_sha256": "7bf1808adf38fe2a3cbe0053be44dd6cad617598738a84c77aa8016de7f6dbcd",
+      "raw_sha256": "30e4d32ebfe3dad76aa29eccf6a5f48051efd42cd425723de9da263d262e2cbe"
+    },
+    "generation-initial.txt": {
+      "canonical_lf_sha256": "cec5ec378cf20c818e42eb7087e28cfd02a54f0c3701e5af5f4c4d7e7b015330",
+      "raw_sha256": "1f9302607419ec39a3acb35d5f45fc080bff1b990a95d997abdd3c6116390363"
+    },
+    "initial.txt": {
+      "canonical_lf_sha256": "f64faffbf72f1d611815148c574549f08c6d9e6776ab2c7ac48d1f8e24f661d0",
+      "raw_sha256": "877f5da25572a0a9a18ad4633b0706bd6125b165a6e9186a95806677c17dc630"
+    },
+    "lifecycle-regression.txt": {
+      "canonical_lf_sha256": "8c59bce66f7cd1ab8d99478e9d5aaf90ecf0e2e2bf9f5a09fbafcb20e0012b46",
+      "raw_sha256": "5dd3020d485d85db3e4078b536fd6d5c24cea5f6af09681a2e5afb6e531e974e"
+    },
+    "logical-marker-initial.txt": {
+      "canonical_lf_sha256": "5f3ce61270aee5bc3e35fd62baac391635d15186af6f7652480c3f03fc266fca",
+      "raw_sha256": "ad13fe978e52b5df2d9b59f4f55b1671b551df1c859dcecc2c37d7b7de816f16"
+    },
+    "marker-timer-before.json": {
+      "canonical_lf_sha256": "997e5b05de9b11f6cc7df0c1072ae5b66e3751c346a336738c15382b4d31c7ed",
+      "raw_sha256": "28ca6b40c5e335ab14de97b72f24bd85f8e6373df3cbcff61e5df191720acde5"
+    },
+    "marker-timer-before.py": {
+      "canonical_lf_sha256": "f7ee0c64336c2d62c620f2fd9676e3178edf4e2b20e501d32d87aeb920d7b8f7",
+      "raw_sha256": "5d9e1aa6965e89f479f9caed0cdccef0e44197e6ad8f0fef2daac1927147e47b"
+    },
+    "ownership-followup.txt": {
+      "canonical_lf_sha256": "e48d2ef5feb443e9eceee4caeeef017c2185e372eb0ea6f1c0f3da4e672f1d5f",
+      "raw_sha256": "2f355cf3f9234f26982400894df99f79a1cb81eb15643f27087e93d6751fd341"
+    },
+    "probe.py": {
+      "canonical_lf_sha256": "c19a95329beb8d219ba5687e14bef20b8a2bbd80c4e361a02d303c41c393cd26",
+      "raw_sha256": "963f89fda156f137f1137ae0605e74c41457c83de26430b2e3b49feb16de6e99"
+    },
+    "ruff-final.txt": {
+      "canonical_lf_sha256": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18",
+      "raw_sha256": "a4443afdcfb6d7363adb285762515ccf7cf50473b1a05c20c1a50f6bed4d26b0"
+    },
+    "ruff.txt": {
+      "canonical_lf_sha256": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18",
+      "raw_sha256": "a4443afdcfb6d7363adb285762515ccf7cf50473b1a05c20c1a50f6bed4d26b0"
+    },
+    "verification.md": {
+      "canonical_lf_sha256": "bc167759dba7912ebd0a590e034fd990e4ab06d1583678926263aa102ce4c626",
+      "raw_sha256": "bc167759dba7912ebd0a590e034fd990e4ab06d1583678926263aa102ce4c626"
+    }
+  },
+  "review": {
+    "realtime_audit": "Final bounded read review clear; no independent execution.",
+    "root": "Final bounded read review clear before source commit; no independent test execution attributed."
+  },
+  "limits": [
+    "Synthetic SQL, ARI, retry-ledger and storage/finalization ports; no actual PostgreSQL, Redis server, provider calls or production verification.",
+    "Most new callback cases stop at actual guard admission; the held-finalizer case executes normal orchestration with synthetic persistence ports. No financial settlement proof.",
+    "Local callback/timer generation fencing only; no cross-process or already-dispatched transport-ambiguous Redis acknowledgement fence.",
+    "Provider family does not establish original PBX host/account identity.",
+    "304 final passes include the 19 new controls; overlapping historical runs must not be added to this count."
+  ]
+}

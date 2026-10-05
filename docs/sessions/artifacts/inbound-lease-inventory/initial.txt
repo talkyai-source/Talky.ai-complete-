@@ -1,0 +1,65 @@
+FFFFFF.                                                                  [100%]
+================================== FAILURES ===================================
+______ test_outage_parent_request_and_synchronous_callback_never_settle _______
+tests\unit\test_inbound_lease_inventory_proof.py:73: in test_outage_parent_request_and_synchronous_callback_never_settle
+    assert await path.invoke() is False
+E   assert True is False
+----------------------------- Captured log setup ------------------------------
+WARNING  app.infrastructure.telephony.asterisk_adapter:asterisk_adapter.py:264 AsteriskAdapter: ARI password is a known default � set ASTERISK_ARI_PASSWORD env var in production
+------------------------------ Captured log call ------------------------------
+CRITICAL app.domain.services.telephony.lifecycle:lifecycle.py:2999 inbound_lease_loss_db_fence_failed call=lease-proof- durable_call=00000000-000 err=synthetic DB unavailable
+________ test_repeated_db_outage_then_durable_all_leg_proof_converges _________
+tests\unit\test_inbound_lease_inventory_proof.py:85: in test_repeated_db_outage_then_durable_all_leg_proof_converges
+    assert await path.invoke() is False
+E   assert True is False
+----------------------------- Captured log setup ------------------------------
+WARNING  app.infrastructure.telephony.asterisk_adapter:asterisk_adapter.py:264 AsteriskAdapter: ARI password is a known default � set ASTERISK_ARI_PASSWORD env var in production
+------------------------------ Captured log call ------------------------------
+CRITICAL app.domain.services.telephony.lifecycle:lifecycle.py:2999 inbound_lease_loss_db_fence_failed call=lease-proof- durable_call=00000000-000 err=synthetic DB unavailable
+________ test_cancellation_retains_callback_fence_and_retry_ownership _________
+tests\unit\test_inbound_lease_inventory_proof.py:105: in test_cancellation_retains_callback_fence_and_retry_ownership
+    assert path.entries == []
+E   AssertionError: assert [('lease-proo...of-parent',))] == []
+E     Left contains one more item: ('lease-proof-parent', ('/channels/lease-proof-parent',))
+E     Use -v to get more diff
+----------------------------- Captured log setup ------------------------------
+WARNING  app.infrastructure.telephony.asterisk_adapter:asterisk_adapter.py:264 AsteriskAdapter: ARI password is a known default � set ASTERISK_ARI_PASSWORD env var in production
+------------------------------ Captured log call ------------------------------
+CRITICAL app.domain.services.telephony.lifecycle:lifecycle.py:2999 inbound_lease_loss_db_fence_failed call=lease-proof- durable_call=00000000-000 err=synthetic DB unavailable
+_______________ test_other_recovery_owner_is_never_overwritten ________________
+tests\unit\test_inbound_lease_inventory_proof.py:121: in test_other_recovery_owner_is_never_overwritten
+    assert path.deletes == []
+E   AssertionError: assert ['/channels/l...proof-parent'] == []
+E     Left contains one more item: '/channels/lease-proof-parent'
+E     Use -v to get more diff
+----------------------------- Captured log setup ------------------------------
+WARNING  app.infrastructure.telephony.asterisk_adapter:asterisk_adapter.py:264 AsteriskAdapter: ARI password is a known default � set ASTERISK_ARI_PASSWORD env var in production
+------------------------------ Captured log call ------------------------------
+CRITICAL app.domain.services.telephony.lifecycle:lifecycle.py:2999 inbound_lease_loss_db_fence_failed call=lease-proof- durable_call=00000000-000 err=synthetic DB unavailable
+WARNING  app.domain.services.telephony.lifecycle:lifecycle.py:4970 orphan_terminal_callback_fenced_until_all_leg_proof call=lease-proof-
+WARNING  app.domain.services.telephony.lifecycle:lifecycle.py:4970 orphan_terminal_callback_fenced_until_all_leg_proof call=lease-proof-
+CRITICAL app.domain.services.telephony.lifecycle:lifecycle.py:3032 inbound_lease_loss_termination_unconfirmed call=lease-proof-
+____________ test_in_flight_recovery_owner_prevents_second_request ____________
+tests\unit\test_inbound_lease_inventory_proof.py:128: in test_in_flight_recovery_owner_prevents_second_request
+    assert await path.invoke() is False
+E   assert True is False
+----------------------------- Captured log setup ------------------------------
+WARNING  app.infrastructure.telephony.asterisk_adapter:asterisk_adapter.py:264 AsteriskAdapter: ARI password is a known default � set ASTERISK_ARI_PASSWORD env var in production
+------------------------------ Captured log call ------------------------------
+CRITICAL app.domain.services.telephony.lifecycle:lifecycle.py:2999 inbound_lease_loss_db_fence_failed call=lease-proof- durable_call=00000000-000 err=synthetic DB unavailable
+________ test_live_inventory_still_fences_callbacks_until_child_proof _________
+tests\unit\test_inbound_lease_inventory_proof.py:137: in test_live_inventory_still_fences_callbacks_until_child_proof
+    assert path.callback_results == [False]
+E   assert [True] == [False]
+E     At index 0 diff: True != False
+E     Use -v to get more diff
+----------------------------- Captured log setup ------------------------------
+WARNING  app.infrastructure.telephony.asterisk_adapter:asterisk_adapter.py:264 AsteriskAdapter: ARI password is a known default � set ASTERISK_ARI_PASSWORD env var in production
+=========================== short test summary info ===========================
+FAILED tests/unit/test_inbound_lease_inventory_proof.py::test_outage_parent_request_and_synchronous_callback_never_settle
+FAILED tests/unit/test_inbound_lease_inventory_proof.py::test_repeated_db_outage_then_durable_all_leg_proof_converges
+FAILED tests/unit/test_inbound_lease_inventory_proof.py::test_cancellation_retains_callback_fence_and_retry_ownership
+FAILED tests/unit/test_inbound_lease_inventory_proof.py::test_other_recovery_owner_is_never_overwritten
+FAILED tests/unit/test_inbound_lease_inventory_proof.py::test_in_flight_recovery_owner_prevents_second_request
+FAILED tests/unit/test_inbound_lease_inventory_proof.py::test_live_inventory_still_fences_callbacks_until_child_proof
+6 failed, 1 passed in 11.95s

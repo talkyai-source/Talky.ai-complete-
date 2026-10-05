@@ -1,0 +1,19 @@
+FF                                                                       [100%]
+================================== FAILURES ===================================
+____________ test_missing_token_cannot_release_preexisting_marker _____________
+tests\unit\test_inbound_lease_inventory_proof.py:399: in test_missing_token_cannot_release_preexisting_marker
+    assert lifecycle._clear_ended_marker(path.parent, None) is False
+E   AssertionError: assert True is False
+E    +  where True = <function _clear_ended_marker at 0x000001C63B4D71A0>('lease-proof-parent', None)
+E    +    where <function _clear_ended_marker at 0x000001C63B4D71A0> = lifecycle._clear_ended_marker
+E    +    and   'lease-proof-parent' = namespace(db_available=False, deletes=[], entries=[], callback_results=[], blocked=None, child_present=False, after_pa...eriskAdapter object at 0x000001C63CBDCE30>, logical_entry=<function path.<locals>.logical_entry at 0x000001C63CBC6340>).parent
+----------------------------- Captured log setup ------------------------------
+WARNING  app.infrastructure.telephony.asterisk_adapter:asterisk_adapter.py:264 AsteriskAdapter: ARI password is a known default � set ASTERISK_ARI_PASSWORD env var in production
+___________ test_late_finalizer_cannot_complete_or_ack_newer_owner ____________
+tests\unit\test_inbound_lease_inventory_proof.py:439: in test_late_finalizer_cannot_complete_or_ack_newer_owner
+    assert await tasks[0] is False
+E   assert True is False
+=========================== short test summary info ===========================
+FAILED tests/unit/test_inbound_lease_inventory_proof.py::test_missing_token_cannot_release_preexisting_marker
+FAILED tests/unit/test_inbound_lease_inventory_proof.py::test_late_finalizer_cannot_complete_or_ack_newer_owner
+2 failed, 17 deselected in 6.30s

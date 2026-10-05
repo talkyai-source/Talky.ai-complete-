@@ -1,0 +1,26 @@
+FF.                                                                      [100%]
+================================== FAILURES ===================================
+__ test_actual_logical_finalizer_failure_does_not_strand_own_marker[cancel] ___
+tests\unit\test_inbound_lease_inventory_proof.py:322: in test_actual_logical_finalizer_failure_does_not_strand_own_marker
+    assert path.parent not in lifecycle._ended_calls_in_flight
+E   AssertionError: assert 'lease-proof-parent' not in {'lease-proof-parent'}
+E    +  where 'lease-proof-parent' = namespace(db_available=True, deletes=['/channels/lease-proof-parent', '/channels/lease-proof-child'], entries=[], call...eriskAdapter object at 0x00000248EDDAC3B0>, logical_entry=<function path.<locals>.logical_entry at 0x00000248EDD97420>).parent
+E    +  and   {'lease-proof-parent'} = lifecycle._ended_calls_in_flight
+----------------------------- Captured log setup ------------------------------
+WARNING  app.infrastructure.telephony.asterisk_adapter:asterisk_adapter.py:264 AsteriskAdapter: ARI password is a known default � set ASTERISK_ARI_PASSWORD env var in production
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.telephony.lifecycle:lifecycle.py:4983 orphan_terminal_callback_fenced_until_all_leg_proof call=lease-proof-
+___ test_actual_logical_finalizer_failure_does_not_strand_own_marker[error] ___
+tests\unit\test_inbound_lease_inventory_proof.py:322: in test_actual_logical_finalizer_failure_does_not_strand_own_marker
+    assert path.parent not in lifecycle._ended_calls_in_flight
+E   AssertionError: assert 'lease-proof-parent' not in {'lease-proof-parent'}
+E    +  where 'lease-proof-parent' = namespace(db_available=True, deletes=['/channels/lease-proof-parent', '/channels/lease-proof-child'], entries=[], call...eriskAdapter object at 0x00000248EDE30770>, logical_entry=<function path.<locals>.logical_entry at 0x00000248EDE3C220>).parent
+E    +  and   {'lease-proof-parent'} = lifecycle._ended_calls_in_flight
+----------------------------- Captured log setup ------------------------------
+WARNING  app.infrastructure.telephony.asterisk_adapter:asterisk_adapter.py:264 AsteriskAdapter: ARI password is a known default � set ASTERISK_ARI_PASSWORD env var in production
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.telephony.lifecycle:lifecycle.py:4983 orphan_terminal_callback_fenced_until_all_leg_proof call=lease-proof-
+=========================== short test summary info ===========================
+FAILED tests/unit/test_inbound_lease_inventory_proof.py::test_actual_logical_finalizer_failure_does_not_strand_own_marker[cancel]
+FAILED tests/unit/test_inbound_lease_inventory_proof.py::test_actual_logical_finalizer_failure_does_not_strand_own_marker[error]
+2 failed, 1 passed, 12 deselected in 2.60s
