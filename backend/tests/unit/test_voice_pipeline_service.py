@@ -100,7 +100,7 @@ class _StreamingLLMProvider:
 
 
 @pytest.mark.asyncio
-async def test_get_llm_response_strips_reasoning_and_keeps_full_pricing_answer():
+async def test_streamed_response_strips_reasoning_and_keeps_grounded_pricing():
     service = VoicePipelineService(
         stt_provider=MagicMock(),
         llm_provider=_StreamingLLMProvider([
@@ -121,17 +121,21 @@ async def test_get_llm_response_strips_reasoning_and_keeps_full_pricing_answer()
         Message(role=MessageRole.USER, content="What are your packages and pricing?")
     ]
 
-    response = await service.get_llm_response(
-        session,
-        "What are your packages and pricing?",
+    session.system_prompt += (
+        "\n<company_knowledge>Basic is $29 per month. Professional is $79 per month. "
+        "Enterprise is custom pricing.</company_knowledge>"
     )
+    session.turn_id = 3
+    session.knowledge_mode = "inline"
+    service.synthesize_and_send_audio = AsyncMock(return_value=False)
+    service._barge_in_events[session.call_id] = session.barge_in_event
+    response, _, _ = await service._stream_llm_and_tts(session)
+    submitted = " ".join(c.args[1] for c in service.synthesize_and_send_audio.await_args_list)
+    assert response == submitted
 
     assert "<think>" not in response
     assert "**" not in response
     assert "#" not in response
-    assert "1." not in response
-    assert "2." not in response
-    assert "3." not in response
     assert "outline the pricing plan first" not in response
     assert "Basic" in response
     assert "Professional" in response

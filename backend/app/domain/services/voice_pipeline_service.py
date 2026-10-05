@@ -40,7 +40,6 @@ from app.domain.services.voice_pipeline import (
     is_repetitive_transcript as _is_repetitive_transcript_impl,
 )
 from app.domain.services.voice_pipeline.llm_response import (
-    generate_llm_response as _generate_llm_response_impl,
     response_max_sentences_for_turn as _response_max_sentences_for_turn_impl,
 )
 from app.domain.services.voice_pipeline.tts_playback import TtsPlayback
@@ -896,19 +895,6 @@ class VoicePipelineService:
         unchanged.
         """
         return await self._turn_runner.run(session, full_transcript, websocket, turn_id)
-
-    # ── LLM helper ────────────────────────────────────────────────
-
-    async def get_llm_response(self, session: CallSession, user_input: str) -> str:
-        """Get LLM response with guardrails applied.
-
-        Implementation extracted to voice_pipeline.llm_response (item 2,
-        slice 2). Kept as a method so call sites — and tests that mock
-        ``service.get_llm_response`` — are unchanged.
-        """
-        return await _generate_llm_response_impl(
-            self.llm_provider, self.latency_tracker, session, user_input
-        )
 
     # ── TTS helper ────────────────────────────────────────────────
 

@@ -1,0 +1,27 @@
+backend/app/domain/services/voice_pipeline/kb_budget.py
+backend/app/domain/services/voice_pipeline/knowledge_tool.py
+backend/app/domain/services/voice_pipeline/llm_response.py
+backend/app/domain/services/voice_pipeline/turn_streamer.py
+backend/app/domain/services/voice_pipeline_service.py
+backend/docs/day_forty_five_voice_pipeline_optimization.md
+backend/docs/day_three.md
+backend/docs/debugging/2026-04-06_voice_pipeline_bugs.md
+backend/docs/superpowers/plans/2026-04-03-voice-pipeline-consistency.md
+backend/tests/integration/test_voice_pipeline_conversation.py
+backend/tests/unit/test_kb_injection_budget.py
+backend/tests/unit/test_live_structured_state.py
+backend/tests/unit/test_two_model_pipeline.py
+backend/tests/unit/test_voice_pipeline_llm_response.py
+backend/tests/unit/test_voice_pipeline_runtime.py
+backend/tests/unit/test_voice_pipeline_service.py
+docs/production ready.md
+docs/production-readiness/baseline-assessment-2026-10-02.md
+docs/production-readiness/execution-tracker.json
+docs/sessions/2026-07-31-overnight-audit.md
+docs/sessions/2026-09-07-two-model-pipeline-and-knowledge.md
+docs/sessions/2026-09-18-service-stability-backend-tests.md
+docs/sessions/REPORT-2026-09-14-to-2026-09-16.md
+docs/sessions/REPORT-2026-09-17.md
+docs/sessions/evidence/2026-09-16-backend-test-cases.xml
+docs/sessions/evidence/2026-09-17-backend-fixes.xml
+docs/sessions/evidence/2026-09-17-deployed-backend-qa.xml

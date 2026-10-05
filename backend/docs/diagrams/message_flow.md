@@ -1,5 +1,39 @@
 # WebSocket Message Flow Diagrams
 
+## Current voice turn ownership (AG07, 2026-10-05)
+
+```mermaid
+flowchart LR
+    I[AudioIngest] --> H[TranscriptHandler]
+    H --> E[TurnEnder]
+    E --> R[TurnRunner]
+    R --> S[TurnStreamer]
+    S --> L[Selected traditional LLM]
+    L --> S
+    S --> T[TtsPlayback]
+    T --> G[Selected media gateway]
+    R --> D[TranscriptService]
+    N[Native RealtimeBridge] --> P[Selected native session protocol]
+    P --> N
+    N --> G
+    N --> D
+```
+
+`VoicePipelineService` delegates to these existing components. There is no separate
+supported `get_llm_response` generation path. Traditional injection, knowledge
+tool lookup and native lookup share `prepare_knowledge_evidence`; native prompts
+and session protocol remain separate. TTS submission alone does not prove playback
+completion or that a caller heard the words.
+
+Live sockets, provider objects, tasks and transient contact state are not a
+restartable call snapshot. On process loss, only successfully committed transcript,
+Lead and action evidence survives; transcript save state can remain partial or
+unknown. Neither this diagram nor retained in-memory retry buffers promises
+seamless call resume. Lifecycle failure/recovery qualification remains in OP05.
+
+The transport diagrams below are earlier illustrative examples, not evidence of
+current provider wire formats or deployed topology.
+
 ## 1. Successful Call Flow
 
 ```mermaid

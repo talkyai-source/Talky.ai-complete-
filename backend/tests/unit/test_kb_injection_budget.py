@@ -1,29 +1,12 @@
 """Unit tests for the per-turn knowledge-injection budget (latency fix).
 
 Injecting full bodies of k=5 nodes ballooned the prompt to ~12k tokens and
-stalled the LLM. These guard the trimming + total budget that keep it small.
+stalled the LLM. This guards complete source passages and the total prepared-context budget.
 """
 import asyncio
 from unittest.mock import patch
 
 import app.domain.services.voice_pipeline.turn_streamer as ts
-
-
-def test_trim_kb_body_caps_on_word_boundary():
-    out = ts._trim_kb_body("one two three four five six seven", 18)
-    assert len(out) <= 19          # cap + ellipsis
-    assert out.endswith("…")
-    assert " fo" not in out[-3:]    # no cut-off mid-word at the tail
-
-
-def test_trim_kb_body_short_text_unchanged():
-    assert ts._trim_kb_body("short answer", 100) == "short answer"
-    assert ts._trim_kb_body("  has\nnewlines ", 100) == "has newlines"
-
-
-def test_trim_kb_body_empty():
-    assert ts._trim_kb_body("", 100) == ""
-    assert ts._trim_kb_body(None, 100) == ""  # type: ignore[arg-type]
 
 
 class _FakeSession:

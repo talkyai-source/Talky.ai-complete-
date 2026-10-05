@@ -23,7 +23,6 @@ from app.domain.services.voice_pipeline.live_structured_state import (
     render_live_state_block,
 )
 from app.realtime.bridge import RealtimeBridge
-from app.domain.services.voice_pipeline.llm_response import generate_llm_response
 from app.domain.services.voice_pipeline.turn_streamer import TurnStreamer
 from app.realtime.openai import (
     OpenAIRealtimeSession,
@@ -298,34 +297,6 @@ async def test_cascaded_turn_injects_current_structured_state(monkeypatch):
     assert "interest_level=high" in prompt
     assert "requested_next_action=callback" in prompt
     assert "email:me@example.com" in prompt
-
-
-@pytest.mark.asyncio
-async def test_nonstreaming_cascaded_entry_point_uses_the_same_state_contract():
-    captured = {}
-
-    class _LLM:
-        _model = "fake-model"
-
-        async def stream_chat_with_timeout(self, _messages, **kwargs):
-            captured["system_prompt"] = kwargs["system_prompt"]
-            yield "Okay."
-
-    session = CallSession(
-        call_id="call-compat",
-        campaign_id="campaign-1",
-        lead_id="lead-1",
-        provider_call_id="provider-1",
-        system_prompt="BASE",
-        voice_id="voice-1",
-        conversation_history=[Message(role=MessageRole.USER, content="I'm the decision maker.")],
-    )
-
-    await generate_llm_response(_LLM(), _Latency(), session, "")
-
-    prompt = captured["system_prompt"]
-    assert prompt.count("LIVE STRUCTURED STATE v1") == 1
-    assert "decision_maker=yes" in prompt
 
 
 def test_realtime_base_instructions_always_include_initial_state():

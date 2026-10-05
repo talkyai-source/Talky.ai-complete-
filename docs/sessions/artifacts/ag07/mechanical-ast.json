@@ -1,0 +1,29 @@
+{
+  "app/domain/services/voice_pipeline/llm_response.py": {
+    "remaining_function_asts_unchanged": true,
+    "removed_functions": [
+      "generate_llm_response"
+    ]
+  },
+  "app/domain/services/voice_pipeline/kb_budget.py": {
+    "remaining_function_asts_unchanged": true,
+    "removed_functions": [
+      "_trim_kb_body",
+      "fit_kb_body"
+    ]
+  },
+  "app/domain/services/voice_pipeline/turn_streamer.py": {
+    "remaining_function_asts_unchanged": true,
+    "removed_functions": []
+  },
+  "app/domain/services/voice_pipeline/knowledge_tool.py": {
+    "remaining_function_asts_unchanged": true,
+    "removed_functions": []
+  },
+  "app/domain/services/voice_pipeline_service.py": {
+    "remaining_function_asts_unchanged": true,
+    "removed_functions": [
+      "get_llm_response"
+    ]
+  }
+}

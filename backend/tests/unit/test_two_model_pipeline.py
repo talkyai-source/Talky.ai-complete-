@@ -3,7 +3,7 @@ gpt-oss-120b and Groq openai/gpt-oss-20b — after the 2026-09-06 audit.
 
 Covers: the Cerebras reasoning reserve (F01), two-way failover between the
 pair (F06), the campaign cache key on every turn path (F10) and the knowledge
-entry fitting that keeps a node's spoken answer when its source is trimmed.
+passage preparation that preserves source facts and their qualifications.
 """
 from __future__ import annotations
 
@@ -14,10 +14,9 @@ import pytest
 from app.domain.models.conversation import Message, MessageRole
 from app.domain.services.voice_orchestrator import VoiceOrchestrator
 from app.domain.services.voice_pipeline import kb_budget
-from app.domain.services.voice_pipeline.kb_budget import fit_kb_body
+from app.domain.services.voice_pipeline.kb_budget import prepare_knowledge_evidence
 from app.infrastructure.llm import cerebras as cerebras_module
 from app.infrastructure.llm.cerebras import CerebrasLLMProvider
-from app.services.scripts.knowledge.retrieval import render_node_answer
 
 
 # ---------------------------------------------------------------------------
@@ -108,40 +107,23 @@ def test_turn_streamer_threads_the_campaign_cache_key_on_both_llm_paths():
 # Knowledge entry fitting
 # ---------------------------------------------------------------------------
 
-_RATES_NODE = {
-    "heading": '"What are your rates?"',
-    "content": (
-        "CRITICAL RULE: NEVER quote a specific rate without knowing monthly volume. "
-        "Rates are not publicly published. This is by design - your rate depends on: "
-        "- Monthly card turnover - Card mix (debit vs credit vs corporate vs international) "
-        "- Business type - Contract type. "
-        "Script: Good question, and I want to be straight with you. Dojo does not publish "
-        "a single rate because it depends on your monthly volume and card mix. "
-        "Typical blended rates land between 1.2% and 1.9% for most restaurants."
-    ),
-    "voice_answer": "We don't publish a single rate as it depends on your monthly volume and card mix. I can get the right number for your setup.",
-}
+def test_prepared_passage_preserves_price_and_qualification_or_withholds_both():
+    source = "Starter costs £19 per month. This price requires a twelve-month contract."
+    node = {"id": "starter", "heading": "Starter", "content": source, "coverage": 1.0}
+    prepared = prepare_knowledge_evidence([node], "Starter price", chunk_chars=150)
+    assert prepared["status"] == "matched"
+    assert source in prepared["text"]
+    assert prepare_knowledge_evidence([node], "Starter price", chunk_chars=30)["status"] == "no_match"
 
 
-def test_fit_keeps_the_spoken_answer_when_the_source_is_trimmed():
-    rendered = render_node_answer(_RATES_NODE)
-    body = fit_kb_body(rendered, _RATES_NODE, 350)
-    assert len(body) <= 350 + 2
-    assert "…" in body                                   # the model is told the source was cut
-    assert "depends on your monthly volume" in body      # the answer itself survived
-    # The old path (trim only) lost it:
-    assert "depends on your monthly volume" not in kb_budget._trim_kb_body(rendered, 350)
-
-
-def test_fit_leaves_short_nodes_untouched():
-    node = {"content": "We are open 9 to 5.", "voice_answer": "Open nine to five."}
-    rendered = render_node_answer(node)
-    assert fit_kb_body(rendered, node, 600) == rendered.replace("\n", " ")
-
-
-def test_fit_without_a_voice_answer_degrades_to_the_plain_trim():
-    node = {"content": "x " * 400}
-    assert fit_kb_body(render_node_answer(node), node, 100) == kb_budget._trim_kb_body("x " * 400, 100)
+def test_prepared_passage_never_substitutes_generated_price():
+    node = {"id": "hours", "heading": "Office hours", "content": "We open at nine.",
+            "voice_answer": "Plans cost £1.", "coverage": 1.0}
+    prepared = prepare_knowledge_evidence([node], "Office hours")
+    assert "We open at nine." in prepared["text"]
+    assert "£1" not in prepared["text"]
+    node["content"] = ""
+    assert prepare_knowledge_evidence([node], "Office hours")["status"] == "no_match"
 
 
 def test_budget_defaults_fit_the_live_rates_node():

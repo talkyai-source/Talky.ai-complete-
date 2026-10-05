@@ -167,16 +167,14 @@ def _truncate_history(history: list, max_pairs: int = _MAX_HISTORY_PAIRS) -> lis
     return history[-(max_pairs * 2):]
 
 
-# Per-turn knowledge sizing (budget + trim) is shared with the on-demand tool
+# Per-turn knowledge sizing and source evidence is shared with the on-demand tool
 # path; it lives in kb_budget so the two modes stay identical. Re-exported here
 # so existing references (and tests) resolve via this module.
 from app.domain.services.voice_pipeline.kb_budget import (  # noqa: E402
-    fit_kb_body,
     _KB_MAX_CHUNKS,
     _KB_CHUNK_CHARS,
     _KB_TOTAL_CHARS,
     _KNOWLEDGE_RETRIEVE_TIMEOUT_S,
-    _trim_kb_body,
     knowledge_match_is_weak,
     prepare_knowledge_evidence,
     needs_previous_turn_context,

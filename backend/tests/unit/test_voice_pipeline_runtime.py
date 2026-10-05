@@ -124,7 +124,7 @@ async def test_normal_turn_does_not_trigger_recovery_line():
 
 
 @pytest.mark.asyncio
-async def test_get_llm_response_marks_first_token_latency():
+async def test_streaming_turn_marks_first_token_latency():
     service = VoicePipelineService(
         stt_provider=AsyncMock(),
         llm_provider=StreamingLLMProvider(["Hello", " there."]),
@@ -134,7 +134,9 @@ async def test_get_llm_response_marks_first_token_latency():
     service.latency_tracker = MagicMock()
 
     session = _make_session()
-    response = await service.get_llm_response(session, "Hi")
+    service.synthesize_and_send_audio = AsyncMock(return_value=False)
+    service._barge_in_events[session.call_id] = session.barge_in_event
+    response, _, _ = await service._stream_llm_and_tts(session)
 
     assert response == "Hello there."
     service.latency_tracker.mark_llm_first_token.assert_called_once_with(session.call_id)
