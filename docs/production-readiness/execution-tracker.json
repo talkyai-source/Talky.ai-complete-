@@ -741,10 +741,25 @@
           "path": "docs/sessions/artifacts/crm-account-integration/verification.md",
           "kind": "333_affected_tests_on_combined_account_and_crm_source",
           "candidate": "35fe11b0"
+        },
+        {
+          "path": "docs/sessions/artifacts/gmail-receipt-inspection/verification.md",
+          "kind": "admin_only_exact_original_authorization_gmail_observation",
+          "candidate": "a195ac72"
+        },
+        {
+          "path": "docs/sessions/artifacts/voice-email-receipt-proof/verification.md",
+          "kind": "voice_email_original_proof_and_child_reference_preservation",
+          "candidate": "651fc90c"
+        },
+        {
+          "path": "docs/sessions/artifacts/mail-voice-integration/verification.md",
+          "kind": "421_affected_tests_with_actual_voice_to_gmail_proof_handoff",
+          "candidate": "e81f525f"
         }
       ],
-      "blocker": "Canonical reviewed authorization and native PostgreSQL UUID admission are repaired; actual email binding and reviewed-selector SQL have separate isolated PostgreSQL evidence. Uncertain CRM call creation no longer adopts title-only matches; Admin can explicitly inspect the original CRM account without writes or refresh. The combined local regression passed 333 tests. Approved durable operator resolution, remaining original email/calendar receipt inspection, full schema/browser and designated live-provider acceptance remain open. CRM read-only resolver SQL is covered by synthetic route/provider tests, not the separate PostgreSQL selector probe.",
-      "next_action": "Complete supported original email/calendar receipt inspection and the approved durable operator-resolution contract, then designated end-to-end acceptance. CRM inspection is observation only: a title/subject match does not prove payload/contact/ownership or completion, and an empty search does not authorize resend. Preserve all original identities and uncertain receipts; do not backfill or bind historical missing proof to the current account.",
+      "blocker": "Canonical reviewed authorization, native PostgreSQL UUID admission, uncertain CRM reference adoption and dropped voice email receipt proof are repaired locally. Admin now has explicit original-account CRM and exact-message Gmail observation; combined voice/Gmail/CRM regression passed 421 tests. Calendar exact-reference observation is being implemented; approved durable operator resolution, full schema/browser and designated live-provider acceptance remain open. Inspection read modes have synthetic route/provider proof, not the separate actual-PG reviewed-selector evidence. Missing IDs or historical proof remain unresolved without backfill or inferred linkage.",
+      "next_action": "Finish the bounded exact calendar reference observation using existing permissions and the existing Admin action panel, then complete the approved durable operator-resolution contract and designated end-to-end acceptance. Observation never proves delivery, payload/contact correctness or action completion, and absence never authorizes resend. Preserve original identities, child references and uncertain outcomes; do not bind missing historical proof to the current account.",
       "target_date": null
     },
     {

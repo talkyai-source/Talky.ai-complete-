@@ -504,3 +504,30 @@ browser/live-provider and release acceptance remain open. Package counts remain
 27 eligible unfinished, AG03 separately candidate verified and three deferred;
 all fifteen final gates and twenty-two scenario gates remain not run. No push,
 deployment, live provider call or freeze exit is included.
+
+
+## Exact Gmail inspection and voice receipt handoff (6 October)
+
+Source `a195ac72` adds an explicit platform-admin inspection of an exact saved
+Gmail message through its original authorization. A complete co-persisted proof
+is required; missing historical fields, bulk/SMTP or no-ID outcomes remain
+unavailable. Reads never refresh credentials, alter receipts or infer delivery.
+Source `651fc90c` fixes voice email/form results dropping original authorization
+and child-action references when constructing the outer durable receipt.
+Both accepted and unconfirmed results now retain safe evidence without changing
+confirmation, privacy or replay semantics.
+
+The [combined verification](artifacts/mail-voice-integration/verification.md)
+passed **421 tests, zero failures/skips and one warning** across eleven modules.
+Four new handoff controls connect actual voice confirmation/durable persistence
+to the Gmail proof parser; they were committed unchanged as `e81f525f` after the
+run. All twenty-two source inputs match that commit and stayed unchanged during
+execution. Owner totals of 513 backend/68 Admin for Gmail and 138 for voice
+overlap this run. Admin type/lint/build results remain bound to unchanged owner
+source rather than a new root execution.
+
+Calendar exact-reference observation is the next bounded local implementation;
+filtered event lists are insufficient. Durable operator resolution, designated
+provider/browser and release acceptance remain open. All package/gate/deferred
+states and the feature freeze remain unchanged. No provider request, customer
+message, database operation, push or deployment occurred in these repairs.
