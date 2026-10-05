@@ -10,6 +10,7 @@ import asyncio
 import base64
 import hashlib
 import json
+from dataclasses import asdict
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -46,6 +47,10 @@ class FixtureGateway:
 
     def __init__(self, config):
         self.config = config
+        if config.get("receipt", "completed") not in {"completed", "stale", "unknown", "transmitted"}:
+            raise ValueError("Unknown synthetic playback receipt")
+        if config.get("receipt") == "transmitted":
+            self.playback_evidence = "transmitted"
         self.submissions = []
         self.receipts = []
         self.controls = []
@@ -93,8 +98,8 @@ class FixtureGateway:
         kind = self.config.get("receipt", "completed")
         receipt = {"utterance_id": "expired-utterance" if kind == "stale" else utterance_id,
             "status": "unknown" if kind == "unknown" else "completed",
-            "evidence": "unknown" if kind == "unknown" else "transport_played",
-            "played_ms": 0 if kind == "unknown" else sum(row["pcm_bytes"] for row in self.submissions
+            "evidence": {"unknown": "unknown", "transmitted": "transmitted"}.get(kind, "transport_played"),
+            "played_ms": 0 if kind in {"unknown", "transmitted"} else sum(row["pcm_bytes"] for row in self.submissions
                 if row["utterance_id"] == utterance_id) // 16}
         self.receipts.append(receipt)
         return receipt
@@ -253,6 +258,17 @@ class NativeReplay:
         normal_continuations = [message for message in self.socket.sent
             if message == {"type": "response.create"}]
         slots = self.session.captured_slots
+        contacts = {}
+        for kind in ("email", "phone"):
+            capture = getattr(slots, f"{kind}_capture", None)
+            contacts[kind] = {
+                "value": getattr(slots, kind, None),
+                "confirmed": bool(getattr(slots, f"{kind}_confirmed", False)),
+                "capture_status": getattr(getattr(capture, "status", None), "value", None),
+                "confirmation_evidence": getattr(capture, "confirmation_evidence", None),
+                **{field: asdict(value) if (value := getattr(capture, field, None)) else None
+                    for field in ("value_source", "confirmation_source", "status_source", "readback")},
+            }
         observed = {
             "submissions": len(self.gateway.submissions), "clears": self.gateway.clears,
             "shutdowns": self.shutdown_count, "end_requested": bool(getattr(self.session, "_end_call_requested", False)),
@@ -268,6 +284,10 @@ class NativeReplay:
                 for message in self.socket.sent),
             "email_confirmed": bool(getattr(slots, "email_confirmed", False)),
             "email": getattr(slots, "email", None),
+            "email_capture_status": contacts["email"]["capture_status"],
+            "email_value_source": contacts["email"]["value_source"],
+            "email_confirmation_source": contacts["email"]["confirmation_source"],
+            "email_readback": contacts["email"]["readback"],
             "repair_requests": len(repairs), "normal_continuations": len(normal_continuations),
             "failure": bool(self.bridge._failure_reason), "connection_lost": self.bridge._connection_lost,
             "tool_statuses": [item.get("status") for item in function_results],
@@ -302,10 +322,7 @@ class NativeReplay:
             "submitted_speech": submitted_speech,
             "submitted_speech_evidence": "Full utterances from correlated synthetic completion receipts only; not human hearing.",
             "history": history,
-            "contacts": {kind: {"value": getattr(slots, kind, None),
-                "confirmed": bool(getattr(slots, f"{kind}_confirmed", False)),
-                "capture_status": getattr(getattr(getattr(slots, f"{kind}_capture", None), "status", None), "value", None)}
-                for kind in ("email", "phone")},
+            "contacts": contacts,
             "end": {"requested": observed["end_requested"], "shutdown_count": self.shutdown_count,
                 "dnc_flag": observed["dnc"], "dnc_effect_count": None},
             "effects": {"attempts": [event["name"] for event in self.raw_events

@@ -845,6 +845,23 @@
       "forbidden_history": [
         "This text has no successful transport receipt."
       ]
+    },
+    {
+      "id": "ag04.historical_dnc_recollection",
+      "rubric": "Recollection of another company's past opt-out does not authorize a current opt-out or close.",
+      "turns": [
+        {
+          "caller": "Last year I told another company to stop calling me. What are your opening hours?",
+          "chunks": [
+            "What would you like to know about our opening hours? [[END_CALL]]"
+          ]
+        }
+      ],
+      "expected": {
+        "end": false,
+        "dnc": false,
+        "effects": 0
+      }
     }
   ],
   "limitations": [

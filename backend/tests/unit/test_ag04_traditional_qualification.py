@@ -25,9 +25,9 @@ async def offline_only():
 
 def test_inventory_is_input_declared_and_not_inferred_from_successful_runs():
     rows = case_inventory(ROOT)
-    assert len(rows) == 120
-    assert len({(r["scenario_id"], r["profile"]["provider"]) for r in rows}) == 120
-    assert len({r["scenario_id"] for r in rows}) == 30  # repetitions are not new human scenarios
+    assert len(rows) == 124
+    assert len({(r["scenario_id"], r["profile"]["provider"]) for r in rows}) == 124
+    assert len({r["scenario_id"] for r in rows}) == 31  # repetitions are not new human scenarios
 
 
 @pytest.mark.parametrize("provider", ["groq", "cerebras", "openai", "gemini"])
@@ -152,3 +152,18 @@ async def test_first_turn_clarification_records_only_completed_submission(media)
     assert row["requests"] == []
     assert row["state"]["email_confirmed"] is False
     assert row["end"]["shutdown_count"] == 0
+
+
+@pytest.mark.parametrize("provider", ["groq", "cerebras", "openai", "gemini"])
+async def test_historical_dnc_recollection_does_not_authorize_current_optout_or_close(provider):
+    data = _load(ROOT)
+    case = next(c for c in data["cases"] if c["id"] == "ag04.historical_dnc_recollection")
+    spec = next(p for p in data["profiles"] if p["provider"] == provider)
+    row = await _run_case(ROOT, data, case, spec)
+    assert all(c["pass"] for c in row["findings"]["control"]), row["findings"]["control"]
+    assert row["end"]["dnc_flag"] is False and row["end"]["shutdown_count"] == 0
+    assert row["effects"]["attempts"] == []
+    assert row["requests"] and row["submitted_speech"]
+    assert "[[END_CALL]]" in row["raw_output"][0]
+    assert all("END_CALL" not in text for text in row["submitted_speech"])
+    assert all(f["status"] == "unreviewed" for f in row["findings"]["semantic"])

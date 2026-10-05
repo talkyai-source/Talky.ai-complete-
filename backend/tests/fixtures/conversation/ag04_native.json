@@ -742,6 +742,266 @@
         "submissions": 0,
         "shutdowns": 0
       }
+    },
+    {
+      "id": "native.contact_confirmation_completed",
+      "semantic_ids": [
+        "ag04.exact_contact_confirmation"
+      ],
+      "gateway": {
+        "receipt": "completed"
+      },
+      "steps": [
+        {
+          "kind": "caller",
+          "item": "contact-source",
+          "text": "My email is alex at example dot com."
+        },
+        {
+          "kind": "response",
+          "text": "Your email is alex@example.com, correct?"
+        },
+        {
+          "kind": "caller",
+          "item": "contact-confirmation",
+          "text": "Yes."
+        }
+      ],
+      "expect": {
+        "email": "alex@example.com",
+        "email_confirmed": true,
+        "email_capture_status": "confirmed",
+        "email_value_source": {
+          "provider_item_id": "contact-source",
+          "caller_turn_order": 1,
+          "revision_sha256": "b92727742b9e9a5c477d5d802770316b82d6a3205cdc5c8d3dc8f8688e03b5e1"
+        },
+        "email_confirmation_source": {
+          "provider_item_id": "contact-confirmation",
+          "caller_turn_order": 2,
+          "revision_sha256": "5f9a2b795615ba6a3d5455fd5624d773fbca5bcd16249c421fd37411dc9837da"
+        },
+        "email_readback": {
+          "utterance_id": "rt-1",
+          "status": "completed",
+          "evidence": "transport_played"
+        },
+        "submissions": 1,
+        "shutdowns": 0,
+        "dnc": false,
+        "dnc_attempts": 0
+      },
+      "coverage_note": "Actual parser/bridge capture state with synthetic ASR and transport receipts; neither human hearing nor durable Lead persistence is evaluated."
+    },
+    {
+      "id": "native.contact_confirmation_stale",
+      "semantic_ids": [
+        "ag04.exact_contact_confirmation"
+      ],
+      "gateway": {
+        "receipt": "stale"
+      },
+      "steps": [
+        {
+          "kind": "caller",
+          "item": "contact-source",
+          "text": "My email is alex at example dot com."
+        },
+        {
+          "kind": "response",
+          "text": "Your email is alex@example.com, correct?"
+        },
+        {
+          "kind": "caller",
+          "item": "contact-confirmation",
+          "text": "Yes."
+        }
+      ],
+      "expect": {
+        "email": "alex@example.com",
+        "email_confirmed": false,
+        "email_capture_status": "awaiting_confirmation",
+        "email_value_source": {
+          "provider_item_id": "contact-source",
+          "caller_turn_order": 1,
+          "revision_sha256": "b92727742b9e9a5c477d5d802770316b82d6a3205cdc5c8d3dc8f8688e03b5e1"
+        },
+        "email_confirmation_source": null,
+        "email_readback": null,
+        "submissions": 1,
+        "shutdowns": 0,
+        "dnc": false,
+        "dnc_attempts": 0
+      },
+      "coverage_note": "Actual parser/bridge capture state with synthetic ASR and transport receipts; neither human hearing nor durable Lead persistence is evaluated."
+    },
+    {
+      "id": "native.contact_confirmation_unknown",
+      "semantic_ids": [
+        "ag04.exact_contact_confirmation"
+      ],
+      "gateway": {
+        "receipt": "unknown"
+      },
+      "steps": [
+        {
+          "kind": "caller",
+          "item": "contact-source",
+          "text": "My email is alex at example dot com."
+        },
+        {
+          "kind": "response",
+          "text": "Your email is alex@example.com, correct?"
+        },
+        {
+          "kind": "caller",
+          "item": "contact-confirmation",
+          "text": "Yes."
+        }
+      ],
+      "expect": {
+        "email": "alex@example.com",
+        "email_confirmed": false,
+        "email_capture_status": "awaiting_confirmation",
+        "email_value_source": {
+          "provider_item_id": "contact-source",
+          "caller_turn_order": 1,
+          "revision_sha256": "b92727742b9e9a5c477d5d802770316b82d6a3205cdc5c8d3dc8f8688e03b5e1"
+        },
+        "email_confirmation_source": null,
+        "email_readback": null,
+        "submissions": 1,
+        "shutdowns": 0,
+        "dnc": false,
+        "dnc_attempts": 0
+      },
+      "coverage_note": "Actual parser/bridge capture state with synthetic ASR and transport receipts; neither human hearing nor durable Lead persistence is evaluated."
+    },
+    {
+      "id": "native.contact_confirmation_transmitted",
+      "semantic_ids": [
+        "ag04.exact_contact_confirmation"
+      ],
+      "gateway": {
+        "receipt": "transmitted"
+      },
+      "steps": [
+        {
+          "kind": "caller",
+          "item": "contact-source",
+          "text": "My email is alex at example dot com."
+        },
+        {
+          "kind": "response",
+          "text": "Your email is alex@example.com, correct?"
+        },
+        {
+          "kind": "caller",
+          "item": "contact-confirmation",
+          "text": "Yes."
+        }
+      ],
+      "expect": {
+        "email": "alex@example.com",
+        "email_confirmed": false,
+        "email_capture_status": "awaiting_confirmation",
+        "email_value_source": {
+          "provider_item_id": "contact-source",
+          "caller_turn_order": 1,
+          "revision_sha256": "b92727742b9e9a5c477d5d802770316b82d6a3205cdc5c8d3dc8f8688e03b5e1"
+        },
+        "email_confirmation_source": null,
+        "email_readback": null,
+        "submissions": 1,
+        "shutdowns": 0,
+        "dnc": false,
+        "dnc_attempts": 0
+      },
+      "coverage_note": "Actual parser/bridge capture state with synthetic ASR and transport receipts; neither human hearing nor durable Lead persistence is evaluated."
+    },
+    {
+      "id": "native.contact_confirmation_interrupted",
+      "semantic_ids": [
+        "ag04.exact_contact_confirmation"
+      ],
+      "gateway": {
+        "block": "send"
+      },
+      "steps": [
+        {
+          "kind": "caller",
+          "item": "contact-source",
+          "text": "My email is alex at example dot com."
+        },
+        {
+          "kind": "response",
+          "text": "Your email is alex@example.com, correct?",
+          "wait": false
+        },
+        {
+          "kind": "wait_gateway"
+        },
+        {
+          "kind": "start",
+          "item": "contact-confirmation"
+        },
+        {
+          "kind": "caller",
+          "item": "contact-confirmation",
+          "text": "Yes."
+        },
+        {
+          "kind": "release"
+        }
+      ],
+      "expect": {
+        "email": "alex@example.com",
+        "email_confirmed": false,
+        "email_capture_status": "awaiting_confirmation",
+        "email_value_source": {
+          "provider_item_id": "contact-source",
+          "caller_turn_order": 1,
+          "revision_sha256": "b92727742b9e9a5c477d5d802770316b82d6a3205cdc5c8d3dc8f8688e03b5e1"
+        },
+        "email_confirmation_source": null,
+        "email_readback": null,
+        "submissions": 1,
+        "shutdowns": 0,
+        "dnc": false,
+        "dnc_attempts": 0
+      },
+      "coverage_note": "Actual parser/bridge capture state with synthetic ASR and transport receipts; neither human hearing nor durable Lead persistence is evaluated."
+    },
+    {
+      "id": "native.historical_dnc_recollection",
+      "semantic_ids": [
+        "ag04.historical_dnc_recollection"
+      ],
+      "steps": [
+        {
+          "kind": "caller",
+          "text": "Last year I told another company to stop calling me. What are your opening hours?"
+        },
+        {
+          "kind": "tool",
+          "name": "end_call",
+          "arguments": {}
+        },
+        {
+          "kind": "response",
+          "text": "What would you like to know about our opening hours?"
+        }
+      ],
+      "expect": {
+        "shutdowns": 0,
+        "end_requested": false,
+        "dnc": false,
+        "dnc_attempts": 0,
+        "tool_statuses": [
+          "caller_intent_unconfirmed"
+        ],
+        "submissions": 1
+      }
     }
   ],
   "profiles": {

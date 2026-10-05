@@ -27,7 +27,7 @@ async def test_declared_corpus_runs_actual_native_boundaries_without_network(mon
     inventory = native.case_inventory(ROOT)
     keys = lambda items: {(r["scenario_id"], r["profile"]["provider"]) for r in items}
     assert keys(rows) == keys(inventory)
-    assert len(rows) == len(inventory) == 54  # 27 controls, two parser implementations.
+    assert len(rows) == len(inventory) == 66  # 33 controls, two parser implementations.
     failed = [(row["scenario_id"], row["profile"]["provider"], finding)
         for row in rows for finding in row["findings"]["control"] if finding["pass"] is not True]
     assert not failed, json.dumps(failed, indent=2)
@@ -161,3 +161,57 @@ def test_correction_prefix_does_not_infer_quoted_third_party_negated_or_unclear_
     updated = update_state_from_user_turn(CallState(email="alex@example.com", email_confirmed=True), text)
     assert updated.email == "alex@example.com"
     assert updated.email_confirmed is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("provider", ["openai", "xai"])
+@pytest.mark.parametrize("receipt", ["completed", "stale", "unknown", "transmitted", "interrupted"])
+async def test_exact_contact_confirmation_owns_source_affirmation_and_playback_receipt(provider, receipt):
+    import hashlib
+
+    corpus = native._corpus(ROOT)
+    case = next(c for c in corpus["scenarios"] if c["id"] == "native.contact_confirmation_" + receipt)
+    row = await native.NativeReplay(case, provider, corpus).run()
+    assert all(c["pass"] for c in row["findings"]["control"]), row["findings"]["control"]
+    contact = row["contacts"]["email"]
+    source_text = case["steps"][0]["text"]
+    assert contact["value_source"] == {"provider_item_id": "contact-source", "caller_turn_order": 1,
+        "revision_sha256": hashlib.sha256(source_text.encode()).hexdigest()}
+    assert contact["value"] == "alex@example.com"
+    assert row["raw_output"][0]["text"] == "Your email is alex@example.com, correct?"
+    if receipt == "completed":
+        assert contact["confirmed"] is True and contact["capture_status"] == "confirmed"
+        assert contact["confirmation_source"] == {"provider_item_id": "contact-confirmation", "caller_turn_order": 2,
+            "revision_sha256": hashlib.sha256(b"Yes.").hexdigest()}
+        assert contact["confirmation_evidence"] == "readback_and_caller_affirmation"
+        receipt_row = row["media"]["receipts"][0]
+        assert contact["readback"] == {k: receipt_row[k] for k in ("utterance_id", "status", "evidence")}
+        assert contact["readback"]["utterance_id"] == row["media"]["submissions"][0]["utterance_id"]
+    else:
+        assert contact["confirmed"] is False and contact["capture_status"] == "awaiting_confirmation"
+        assert contact["confirmation_source"] is None and contact["readback"] is None
+        assert row["submitted_speech"] == []
+        if receipt == "interrupted":
+            assert row["media"]["receipts"] == []
+            assert row["media"]["truncate_events"]
+            assert any((turn.get("metadata", {}).get("delivery") or {}).get("status") == "interrupted"
+                for turn in row["history"] if turn["role"] == "assistant")
+        elif receipt == "transmitted":
+            assert row["media"]["receipts"][0]["evidence"] == "transmitted"
+        elif receipt == "stale":
+            assert row["media"]["receipts"][0]["utterance_id"] != row["media"]["submissions"][0]["utterance_id"]
+    assert row["provenance"]["provider_calls"] == 0
+    assert all(f["status"] == "unreviewed" for f in row["findings"]["semantic"])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("provider", ["openai", "xai"])
+async def test_historical_dnc_recollection_has_no_current_optout_or_close_authority(provider):
+    corpus = native._corpus(ROOT)
+    case = next(c for c in corpus["scenarios"] if c["id"] == "native.historical_dnc_recollection")
+    row = await native.NativeReplay(case, provider, corpus).run()
+    assert all(c["pass"] for c in row["findings"]["control"]), row["findings"]["control"]
+    assert row["effects"]["dnc_persistence_receipts"] == []
+    assert row["end"]["dnc_flag"] is False and row["end"]["shutdown_count"] == 0
+    assert row["effects"]["tool_results"][0]["status"] == "caller_intent_unconfirmed"
+    assert row["submitted_speech"] == ["What would you like to know about our opening hours?"]
