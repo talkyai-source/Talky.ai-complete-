@@ -37,7 +37,9 @@
     "ag04_implementation_commit": "c93a05e3561b5feaf7da467b30c2aa37be0e41bd",
     "ag05_implementation_commit": "71cdeefa59a0f786f236d3a3d25ba592470ddf05",
     "ag06_implementation_commit": "1a0bf93d880d441e9702dae9c161b48048b5c81a",
-    "cp08_implementation_commit": "2d90bf492654c05cda4de9ca58f72e5c04f35c97"
+    "cp08_implementation_commit": "2d90bf492654c05cda4de9ca58f72e5c04f35c97",
+    "ag07_implementation_commit": "09bcd50fe0f600fce9ca6af9c882f794ed45883f",
+    "ag03_denial_followup_commit": "7f9ec58f3657e8a5fd7bcd3a3e3d882fb1f5a341"
   },
   "status_rules": {
     "execution": [
@@ -450,7 +452,12 @@
       "plan_anchor": "ag03-preserve-explicit-realtime-relationship-corrections-beyond-12-messages",
       "evidence": [
         "docs/sessions/2026-10-05-ag03-implementation.md",
-        "docs/sessions/artifacts/ag03/verification.json"
+        "docs/sessions/artifacts/ag03/verification.json",
+        {
+          "path": "docs/sessions/2026-10-05-ag03-customer-claim-followup.md",
+          "kind": "exact_denied_customer_output_regression",
+          "candidate": "7f9ec58f3657e8a5fd7bcd3a3e3d882fb1f5a341"
+        }
       ],
       "blocker": null,
       "next_action": "Retain deterministic candidate evidence; qualify real provider/telephone behavior under AG04 and consume saved ASR revision evidence under AG05. No release or feature closure.",
@@ -582,8 +589,8 @@
       "id": "AG07",
       "title": "Use small structural repairs only where they support paid readiness",
       "owner_role": "Backend technical lead",
-      "assigned_person": null,
-      "reviewer": null,
+      "assigned_person": "Codex implementation team",
+      "reviewer": "Independent live-path/mechanical AST review and root integrated backend verification",
       "status": "in_progress",
       "start_after_milestone": "RG01 baseline recorded",
       "dependencies_and_tests": "See package text; coordination and final acceptance dependencies are distinct from entry milestones.",
@@ -601,9 +608,25 @@
         "A08"
       ],
       "plan_anchor": "ag07-use-small-structural-repairs-only-where-they-support-paid-readiness",
-      "evidence": [],
-      "blocker": null,
-      "next_action": "Verified mechanical cleanup and denied-customer follow-up are committed in the isolated AG07 branch, pending integration after CP08. No restartable-call or blanket architecture claim.",
+      "evidence": [
+        {
+          "path": "docs/sessions/2026-10-05-ag07-integration.md",
+          "kind": "integrated_local_verification",
+          "candidate": "7f9ec58f3657e8a5fd7bcd3a3e3d882fb1f5a341"
+        },
+        {
+          "path": "docs/sessions/2026-10-05-ag07-mechanical-cleanup.md",
+          "kind": "caller_inventory_and_mechanical_proof",
+          "candidate": "09bcd50fe0f600fce9ca6af9c882f794ed45883f"
+        },
+        {
+          "path": "docs/sessions/artifacts/ag07/verification.json",
+          "kind": "source_bound_verification_manifest",
+          "candidate": "7f9ec58f3657e8a5fd7bcd3a3e3d882fb1f5a341"
+        }
+      ],
+      "blocker": "A05 cleanup and documented crash contract are locally verified; remaining architecture dispositions follow lifecycle/provider/configuration owning repairs. No full architecture or live/release claim.",
+      "next_action": "Complete reviewed architecture dispositions alongside OP02/OP05/OP12; preserve separate native protocol and durable evidence, without unrelated cosmetic restructuring.",
       "target_date": null
     },
     {
