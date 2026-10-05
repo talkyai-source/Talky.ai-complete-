@@ -257,9 +257,23 @@ jobs:
             tests/integration/test_billing_read_truth.py \
             tests/integration/test_knowledge_retrieval_boundaries.py \
             tests/integration/test_billing_refund_projection.py \
+            tests/integration/test_action_execution_receipts.py \
+            tests/integration/test_ag05_lead_evidence.py \
+            tests/integration/test_ag06_action_cancellation.py \
+            tests/integration/test_ag06_crm_admission.py \
+            tests/integration/test_ag06_dashboard_receipts.py \
+            tests/integration/test_cp08_credential_transactions.py \
+            tests/integration/test_cp08_current_identity.py \
+            tests/integration/test_crm_deliveries.py \
+            tests/integration/test_reminder_recipients.py \
+            tests/integration/test_op01_metering.py \
+            tests/integration/test_op01_auth_metering.py \
+            tests/integration/test_op04_trunk_lifecycle.py \
             -q
         env:
           TEST_DATABASE_URL: postgresql://talky:testpassword@localhost:5432/talky_alembic_test
+          TALKY_CRM_TEST_DATABASE_URL: postgresql://talky:testpassword@localhost:5432/talky_alembic_test
+          TALKY_ACTION_TEST_DATABASE_URL: postgresql://talky:testpassword@localhost:5432/talky_alembic_test
           JWT_SECRET: ci-test-secret-key-not-for-production-32chars
           ENVIRONMENT: test
 
@@ -267,6 +281,9 @@ jobs:
         run: pytest tests/integration/test_op02_redis_admission.py -q
         env:
           TEST_REDIS_URL: redis://127.0.0.1:6379/0
+
+      - name: Offline conversation path contracts
+        run: pytest tests/integration/test_voice_pipeline_conversation.py -q
 
       - name: Run tests with pytest (with coverage)
         # Integration tests own the migrated database above. This is the full
