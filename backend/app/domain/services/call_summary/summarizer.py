@@ -61,7 +61,8 @@ The object MUST contain exactly these keys (and no others):
 
 Rules:
 - Every key MUST be present. If a dimension has nothing (no objections, no commitments, etc.) use an empty list [] or "none" — NEVER omit the key.
-- Be comprehensive: capture every objection, commitment, action item, number, name, and date mentioned. Skip nothing material.
+- Capture material objections, commitments, action items, business figures and dates. Never include payment credentials, passwords, security codes or removed secret text.
+- Preserve uncertainty about names and spelling. An unclear or inferred name is not a confirmed identity; do not guess it or turn a tentative name into a fact. Use the caller's explicit correction, and otherwise describe the name as unconfirmed or omit it.
 - next_step is the ONE immediate action; follow_up_tips are 2-4 concrete, practical suggestions for how to actually win the follow-up (timing, what to send, which concern to lead with). Make them specific to THIS call, not generic.
 - qualification_status is qualified only when a relevant need/fit and a concrete next step are supported by the transcript; nurture means possible need but later timing, missing information, or another decision-maker; unqualified means a clearly unsuitable fit or no relevant need; otherwise use unknown.
 - Never infer authority, need, timing, or budget from tone, politeness, industry stereotypes, or the agent's pitch. Use unknown when the prospect did not reliably confirm it.

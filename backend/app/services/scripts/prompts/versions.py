@@ -123,9 +123,10 @@ _VERSIONS: Final[Mapping[str, str]] = {
     # @10 / @9: unverified caller product use is a question, not a fact.
     # @11 / @10: caller-paced repair, new prospects, small talk and topic refusals.
     # @12: the sales closing example requires an explicit caller goodbye.
-    "lead_gen": "lead_gen@12",
-    "customer_support": "customer_support@10",
-    "receptionist": "receptionist@10",
+    # @13 / @11: explicit-secret privacy and only available secure routes.
+    "lead_gen": "lead_gen@13",
+    "customer_support": "customer_support@11",
+    "receptionist": "receptionist@11",
 }
 
 #: Fallback for a persona that is not in the registry yet. Deliberately visible

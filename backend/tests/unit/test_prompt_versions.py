@@ -124,6 +124,10 @@ _EXPECTED_HASHES: dict[str, str] = {
     "lead_gen@12": "1d8b1ab80d34acc4",
     "customer_support@10": "2939404a68d68cd6",
     "receptionist@10": "350e0cc2d186686f",
+    # Explicit secrets and secure routes only when actually available.
+    "lead_gen@13": "2d6b540419dab373",
+    "customer_support@11": "968fb986d3653107",
+    "receptionist@11": "4691260c5a7819c5",
 }
 
 

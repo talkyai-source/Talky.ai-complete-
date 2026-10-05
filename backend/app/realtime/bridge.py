@@ -597,7 +597,9 @@ class RealtimeBridge:
                     tool_task.add_done_callback(self._tool_tasks.discard)
 
                 elif kind == "caller_transcript" and (ev.text or getattr(ev, "is_final", False)):
-                    text = ev.text if isinstance(ev.text, str) else ""
+                    from app.domain.services.explicit_secrets import sanitize_explicit_secrets, sanitize_transcript_metadata
+                    text = sanitize_explicit_secrets(ev.text) if isinstance(ev.text, str) else ""
+                    caller_raw = sanitize_transcript_metadata(getattr(ev, "raw", None))
                     # Contact values are high-risk transcript content. Log only
                     # event shape, never the raw caller text.
                     logger.debug(
@@ -609,7 +611,7 @@ class RealtimeBridge:
                         # Provider-final caller opt-out is monotonic, even if
                         # turn metadata has expired and cannot own actions.
                         self._record_caller_opt_out(text)
-                        admission = self._admit_caller_final(text, getattr(ev, "raw", None))
+                        admission = self._admit_caller_final(text, caller_raw)
                         if admission is None:
                             continue
                         caller_order, admission_kind = admission
@@ -654,7 +656,7 @@ class RealtimeBridge:
                             self._action_session._voice_action_user_turn = self._live_user_turn_seq
                             self._revoke_pending_end_call()
                             self._record_caller_revision(caller_order, text)
-                            await self._observe_contact_turn(text, getattr(ev, "raw", None), revision=True)
+                            await self._observe_contact_turn(text, caller_raw, revision=True)
                             await self._invalidate_contradicted_playback()
                             await self._publish_live_state()
                             continue
@@ -682,7 +684,7 @@ class RealtimeBridge:
                         self._current_contact_baseline = getattr(self._contact_session, "captured_slots", None)
                         self._current_contact_history = tuple(self._contact_history)
                         self._current_contact_readback = self._last_contact_readback
-                        await self._observe_contact_turn(text, getattr(ev, "raw", None))
+                        await self._observe_contact_turn(text, caller_raw)
                         observed_slots = getattr(self._contact_session, "captured_slots", None)
                         self._current_contact_result = replace(observed_slots) if is_dataclass(observed_slots) else None
                         self._remember_contact_turn("user", text)

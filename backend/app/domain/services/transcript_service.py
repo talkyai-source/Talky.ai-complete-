@@ -342,6 +342,9 @@ class TranscriptService:
         """
         if not isinstance(content, str):
             return None
+        from app.domain.services.explicit_secrets import sanitize_explicit_secrets, sanitize_transcript_metadata
+        content = sanitize_explicit_secrets(content)
+        metadata = sanitize_transcript_metadata(metadata)
         if not content.strip():
             # Keep an owned empty final as audit evidence so a later revision
             # can amend that exact provider item, without inventing speech.
@@ -438,6 +441,9 @@ class TranscriptService:
                 or isinstance(caller_turn_order, bool) or not isinstance(caller_turn_order, int)
                 or caller_turn_order < 0):
             return False
+        from app.domain.services.explicit_secrets import sanitize_explicit_secrets
+        originally_truncated = len(content) > 4096
+        content = sanitize_explicit_secrets(content)
         for turn in reversed(self._buffers.get(call_id, ())):
             if (turn.role != "user" or turn.turn_index != turn_index
                     or turn.metadata.get("provider_item_id") != provider_item_id
@@ -453,7 +459,7 @@ class TranscriptService:
                 "content": content[:4096],
                 "content_sha256": hashlib.sha256(content.encode("utf-8")).hexdigest(),
                 "characters": len(content),
-                "truncated": len(content) > 4096,
+                "truncated": originally_truncated or len(content) > 4096,
                 "retracted": not content.strip(),
             }
             return True

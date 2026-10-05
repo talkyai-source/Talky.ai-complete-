@@ -81,7 +81,7 @@ def test_real_pinned_builder_separates_direction_and_hashes_final_prompt(mode, a
         # the agent knew nothing about the campaign: 980a2caa, 2026-09-30).
         assert "Preserve fixture-guidance exactly." in text
         assert config.system_prompt == text
-        assert config.prompt_version == "realtime@6"
+        assert config.prompt_version == "realtime@7"
         assert "caller contacted the company" in text
         for phrase in FORBIDDEN:
             assert phrase not in text

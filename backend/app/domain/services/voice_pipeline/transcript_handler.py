@@ -20,6 +20,7 @@ from typing import Optional
 from fastapi import WebSocket
 
 from app.core.log_redact import install_pii_log_redaction
+from app.domain.services.explicit_secrets import sanitize_explicit_secrets, sanitize_transcript_metadata
 from app.domain.models.conversation import BargeInSignal
 from app.domain.models.session import CallSession
 from app.domain.services.voice_pipeline.backchannel import is_backchannel
@@ -74,9 +75,16 @@ class TranscriptHandler:
         if isinstance(transcript, BargeInSignal):
             await self._p.handle_barge_in(
                 session, websocket,
-                transcript_text=getattr(transcript, "text", "") or "",
+                transcript_text=sanitize_explicit_secrets(getattr(transcript, "text", "") or ""),
             )
             return
+
+        # Before websocket, history, contact parsing and transcript persistence.
+        # Copy the recognition event so its producer's object is not mutated.
+        from copy import copy
+        transcript = copy(transcript)
+        transcript.text = sanitize_explicit_secrets(transcript.text)
+        transcript.metadata = sanitize_transcript_metadata(transcript.metadata)
 
         if transcript.metadata and transcript.metadata.get("resumed"):
             # TurnResumed targets Deepgram's in-progress SPECULATIVE response.
