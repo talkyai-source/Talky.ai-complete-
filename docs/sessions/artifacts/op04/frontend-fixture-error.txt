@@ -1,0 +1,32 @@
+✖ real inbound form allows loaded IP trunks despite outbound timeout and rejects missing inbound proof (54.2301ms)
+✔ registration and a successful old probe do not claim calling readiness (740.333ms)
+✔ editing a saved trunk preserves credentials without asking for its password (819.5003ms)
+✔ switching to IP authentication clears credentials and registration together (670.5938ms)
+✔ changing username without a replacement password is blocked (512.1321ms)
+✔ delete explicitly disables first and retains the server conflict in the dialog (270.396ms)
+✔ IP trunk can be ready without registration or credentials (82.2695ms)
+✔ an inbound-only IP trunk uses inbound proof despite an unanswered outbound probe (77.8815ms)
+ℹ tests 8
+ℹ suites 0
+ℹ pass 7
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 17315.2985
+
+✖ failing tests:
+
+test at src\components\inbound\inbound-trunk-readiness.test.tsx:2:1997
+✖ real inbound form allows loaded IP trunks despite outbound timeout and rejects missing inbound proof (54.2301ms)
+  Error: useAuth must be used within an AuthProvider
+      at useAuth (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\lib\auth-context.tsx:667:11)
+      at useAuth (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\hooks\useAuth.ts:13:15)
+      at useAiOptionsScope (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\lib\queries\ai-options-queries.ts:40:39)
+      at useVoicesQuery (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\lib\queries\ai-options-queries.ts:67:19)
+      at InboundCampaignForm (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\components\inbound\inbound-campaign-form.tsx:140:25)
+      at Object.react_stack_bottom_frame (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\node_modules\react-dom\cjs\react-dom-client.development.js:25904:20)
+      at renderWithHooks (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\node_modules\react-dom\cjs\react-dom-client.development.js:7662:22)
+      at updateFunctionComponent (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\node_modules\react-dom\cjs\react-dom-client.development.js:10166:19)
+      at beginWork (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\node_modules\react-dom\cjs\react-dom-client.development.js:11778:18)
+      at runWithFiberInDEV (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\node_modules\react-dom\cjs\react-dom-client.development.js:871:30)

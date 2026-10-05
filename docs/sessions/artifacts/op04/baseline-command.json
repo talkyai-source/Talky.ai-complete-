@@ -1,0 +1,30 @@
+{
+  "candidate_revision": "76adb005094ec6c8fc9f04f4c8dbebd3bb64b45b",
+  "command": [
+    "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\backend\\.venv\\Scripts\\python.exe",
+    "-m",
+    "pytest",
+    "tests/unit/test_add_sip_trunk_script.py",
+    "tests/unit/test_caller_id_verification_normalises.py",
+    "tests/unit/test_caller_id_verification.py",
+    "tests/unit/test_campaign_telephony_readiness.py",
+    "tests/unit/test_day10_sip_harness_contract.py",
+    "tests/unit/test_pjsip_config_reconciliation.py",
+    "tests/unit/test_pjsip_config_generator.py",
+    "tests/unit/test_pjsip_extension_routes.py",
+    "tests/unit/test_sip_trunk_call_readiness.py",
+    "tests/unit/test_sip_trunk_metadata.py",
+    "tests/unit/test_telephony_sip_rbac.py",
+    "tests/unit/test_telephony_sip_api.py",
+    "tests/unit/test_trunk_live_status_updater.py",
+    "tests/unit/test_trunk_runtime_status_migration.py",
+    "tests/unit/test_trunk_resolver.py",
+    "tests/unit/test_trunk_probe_security.py",
+    "-q",
+    "--tb=short"
+  ],
+  "cwd": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\production-ready-20261004\\backend",
+  "module_count": 16,
+  "scope": "Existing offline trunk/caller-ID regression contracts; no carrier, deployed timer or handset proof",
+  "exit_code": 0
+}

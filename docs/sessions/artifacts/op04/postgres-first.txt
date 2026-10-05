@@ -1,0 +1,114 @@
+FE.E.E.E.E.E                                                             [100%]
+=================================== ERRORS ====================================
+_ ERROR at teardown of test_delete_receipt_replays_without_second_configuration_effect _
+tests\integration\test_op04_trunk_lifecycle.py:71: in trunk_db
+    await admin.execute("DELETE FROM tenants WHERE id=ANY($1::uuid[])", tenants)
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:353: in execute
+    _, status, _ = await self._execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1794: in _execute
+    result, _ = await self.__execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1892: in __execute
+    result, stmt = await self._do_execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1945: in _do_execute
+    result = await executor(stmt, None)
+asyncpg\protocol\protocol.pyx:207: in bind_execute
+    ???
+E   asyncpg.exceptions.RaiseError: tenant_policy_audit_log is immutable
+_ ERROR at teardown of test_foreign_delete_cannot_remove_configuration_or_owner_record _
+tests\integration\test_op04_trunk_lifecycle.py:71: in trunk_db
+    await admin.execute("DELETE FROM tenants WHERE id=ANY($1::uuid[])", tenants)
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:353: in execute
+    _, status, _ = await self._execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1794: in _execute
+    result, _ = await self.__execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1892: in __execute
+    result, stmt = await self._do_execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1945: in _do_execute
+    result = await executor(stmt, None)
+asyncpg\protocol\protocol.pyx:207: in bind_execute
+    ???
+E   asyncpg.exceptions.RaiseError: tenant_policy_audit_log is immutable
+_ ERROR at teardown of test_failed_configuration_cleanup_retains_trunk_and_rolls_back_receipt _
+tests\integration\test_op04_trunk_lifecycle.py:71: in trunk_db
+    await admin.execute("DELETE FROM tenants WHERE id=ANY($1::uuid[])", tenants)
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:353: in execute
+    _, status, _ = await self._execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1794: in _execute
+    result, _ = await self.__execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1892: in __execute
+    result, stmt = await self._do_execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1945: in _do_execute
+    result = await executor(stmt, None)
+asyncpg\protocol\protocol.pyx:207: in bind_execute
+    ???
+E   asyncpg.exceptions.RaiseError: tenant_policy_audit_log is immutable
+_ ERROR at teardown of test_current_json_assignment_blocks_disabled_trunk_deletion[campaign] _
+tests\integration\test_op04_trunk_lifecycle.py:71: in trunk_db
+    await admin.execute("DELETE FROM tenants WHERE id=ANY($1::uuid[])", tenants)
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:353: in execute
+    _, status, _ = await self._execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1794: in _execute
+    result, _ = await self.__execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1892: in __execute
+    result, stmt = await self._do_execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1945: in _do_execute
+    result = await executor(stmt, None)
+asyncpg\protocol\protocol.pyx:207: in bind_execute
+    ???
+E   asyncpg.exceptions.RaiseError: tenant_policy_audit_log is immutable
+_ ERROR at teardown of test_current_json_assignment_blocks_disabled_trunk_deletion[pool] _
+tests\integration\test_op04_trunk_lifecycle.py:71: in trunk_db
+    await admin.execute("DELETE FROM tenants WHERE id=ANY($1::uuid[])", tenants)
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:353: in execute
+    _, status, _ = await self._execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1794: in _execute
+    result, _ = await self.__execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1892: in __execute
+    result, stmt = await self._do_execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1945: in _do_execute
+    result = await executor(stmt, None)
+asyncpg\protocol\protocol.pyx:207: in bind_execute
+    ???
+E   asyncpg.exceptions.RaiseError: tenant_policy_audit_log is immutable
+_ ERROR at teardown of test_assignment_share_lock_prevents_delete_from_overtaking_dependency _
+tests\integration\test_op04_trunk_lifecycle.py:71: in trunk_db
+    await admin.execute("DELETE FROM tenants WHERE id=ANY($1::uuid[])", tenants)
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:353: in execute
+    _, status, _ = await self._execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1794: in _execute
+    result, _ = await self.__execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1892: in __execute
+    result, stmt = await self._do_execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1945: in _do_execute
+    result = await executor(stmt, None)
+asyncpg\protocol\protocol.pyx:207: in bind_execute
+    ???
+E   asyncpg.exceptions.RaiseError: tenant_policy_audit_log is immutable
+================================== FAILURES ===================================
+_______ test_delete_receipt_replays_without_second_configuration_effect _______
+tests\integration\test_op04_trunk_lifecycle.py:87: in test_delete_receipt_replays_without_second_configuration_effect
+    assert (await delete(db))["deleted"] is True
+tests\integration\test_op04_trunk_lifecycle.py:82: in delete
+    return await trunks.delete_sip_trunk(db.trunks[index], request(), key, db.actor, db.pool)
+app\api\v1\endpoints\telephony_sip\trunks.py:1653: in delete_sip_trunk
+    await conn.execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:353: in execute
+    _, status, _ = await self._execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1794: in _execute
+    result, _ = await self.__execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1892: in __execute
+    result, stmt = await self._do_execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1945: in _do_execute
+    result = await executor(stmt, None)
+asyncpg\protocol\protocol.pyx:207: in bind_execute
+    ???
+E   asyncpg.exceptions.InsufficientPrivilegeError: permission denied for table tenant_policy_audit_log
+=========================== short test summary info ===========================
+FAILED tests/integration/test_op04_trunk_lifecycle.py::test_delete_receipt_replays_without_second_configuration_effect
+ERROR tests/integration/test_op04_trunk_lifecycle.py::test_delete_receipt_replays_without_second_configuration_effect
+ERROR tests/integration/test_op04_trunk_lifecycle.py::test_foreign_delete_cannot_remove_configuration_or_owner_record
+ERROR tests/integration/test_op04_trunk_lifecycle.py::test_failed_configuration_cleanup_retains_trunk_and_rolls_back_receipt
+ERROR tests/integration/test_op04_trunk_lifecycle.py::test_current_json_assignment_blocks_disabled_trunk_deletion[campaign]
+ERROR tests/integration/test_op04_trunk_lifecycle.py::test_current_json_assignment_blocks_disabled_trunk_deletion[pool]
+ERROR tests/integration/test_op04_trunk_lifecycle.py::test_assignment_share_lock_prevents_delete_from_overtaking_dependency
+1 failed, 5 passed, 6 errors in 5.11s

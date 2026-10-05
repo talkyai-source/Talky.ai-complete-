@@ -1,0 +1,21 @@
+# OP04 selected trunk and deletion: local verification
+
+Date: 5 October 2026. Base: `76adb005094ec6c8fc9f04f4c8dbebd3bb64b45b`. Verification candidate: `56cf4ad61124a3b237759a17a64cf50257337113`. Independent fixture/handler-boundary review found no material defect. This checkpoint adds database acceptance tests and updates an existing frontend fixture. It does not change trunk routing, caller-ID policy, timers, credentials, Asterisk configuration or carrier settings. OP04 remains **in progress**.
+
+The existing selected-route regressions passed **302 tests across16 modules**, with one skip for POSIX file-mode behavior on Windows. They cover route selection/refusal, caller-ID verification, current trunk status, generated PJSIP configuration/reconciliation, probe correlation/security and API ownership. [Command](artifacts/op04/baseline-command.json), [output](artifacts/op04/baseline.txt). These are controlled local boundaries, not live SIP or carrier results.
+
+The real inbound form and settings trunk controls passed **eight frontend tests**, with scoped ESLint and TypeScript checking also passing. The inbound fixture initially omitted the AuthProvider now required by scoped AI queries. It now supplies the real provider with a synthetic current principal; the same assertions remain: a loaded IP-auth trunk can be selected for inbound use despite outbound timeout, while absent inbound readiness disables the option. [Initial fixture failure](artifacts/op04/frontend-fixture-error.txt), [final output](artifacts/op04/frontend-trunks.txt).
+
+Six new cases passed on the actual public schema at `0059_auth_identity_contract`, using a unique non-superuser, NOBYPASSRLS role for each case:
+
+- A successful disabled-trunk deletion saves an idempotent receipt; replay does not repeat configuration removal.
+- A foreign tenant cannot delete the record or reach the configuration-removal boundary.
+- A simulated configuration-cleanup failure retains the disabled record and rolls back the incomplete receipt.
+- Campaign and tenant-pool JSON assignments each block deletion.
+- A real concurrent assignment holds the trunk share lock; PostgreSQL reports the deletion query waiting. After assignment commits, deletion is refused, including after the trunk is disabled. The new dependency cannot be overtaken and orphaned.
+
+[Database output](artifacts/op04/postgres-final.txt). The endpoint handlers, row locks, receipts, triggers and tenant contexts are real. Authentication principals are supplied explicitly, quota admission is a controlled dependency and PJSIP configuration removal is an AsyncMock. This does not prove a real reload or every possible dependency-creation path.
+
+The first database run had five successful assertions, one missing-audit-grant fixture failure and six teardown errors. The actual immutable audit trigger prevents cascading deletion of its tenant references. The final fixture grants the needed audit INSERT permission, supplies a real synthetic actor row and preserves referenced synthetic users/tenants and audit records. It removes only its mutable test rows and grant-only role; no trigger or retention rule is weakened. Six roles left by the first teardown failure were checked for exact test identity, no login/bypass/superuser and no owned objects before removing their grants and roles. [Retention record](artifacts/op04/fixture-retention.json). These were fixture defects, not demonstrated production failures. Test-generated tracked Python bytecode was restored to its original committed bytes.
+
+Remaining release evidence is unchanged: approved endpoint/account/caller-ID bindings, managed and hand-managed configuration review, an installed ten-second timer, measured freshness/detection behavior, actual credential-auth and IP-auth routing, configuration reload/failure recovery, and handset-confirmed caller ID for each sold region. Ten seconds is a scheduling cadence, not a guaranteed failure-detection deadline. Received SIP404 and an unanswered local timeout retain different meanings. Regional carrier responsibilities require the accountable operator's evidence. No live SIP probe, telephone call, deploy, push, production migration or final readiness gate was performed.

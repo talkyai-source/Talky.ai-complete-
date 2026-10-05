@@ -505,6 +505,8 @@ Inventory the alternate `VoicePipelineService.get_llm_response`/`llm_response.py
 
 ### OP04 Release the selected trunk and caller ID contract without drift
 
+**Local verification checkpoint — 5 October 2026:** Candidate `56cf4ad61124a3b237759a17a64cf50257337113` adds real migrated-PostgreSQL deletion/assignment tests and repairs an existing authenticated UI fixture; trunk runtime behavior is unchanged. Results: 302 backend tests passed, one POSIX-only skip; eight frontend tests and six PostgreSQL cases passed, plus scoped lint/type checking. [Evidence and limits](sessions/2026-10-05-op04-local-verification.md). Deployment, timer/freshness measurement, carrier configuration and controlled caller-ID acceptance remain open; OP04 is in progress.
+
 **Covers:** F24, F25; O07 configuration dependency. **Owner:** telephony operations with backend owner. **Priority:** P1.
 
 **Bounded tasks**

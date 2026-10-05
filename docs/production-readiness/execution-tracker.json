@@ -39,7 +39,8 @@
     "ag06_implementation_commit": "1a0bf93d880d441e9702dae9c161b48048b5c81a",
     "cp08_implementation_commit": "2d90bf492654c05cda4de9ca58f72e5c04f35c97",
     "ag07_implementation_commit": "09bcd50fe0f600fce9ca6af9c882f794ed45883f",
-    "ag03_denial_followup_commit": "7f9ec58f3657e8a5fd7bcd3a3e3d882fb1f5a341"
+    "ag03_denial_followup_commit": "7f9ec58f3657e8a5fd7bcd3a3e3d882fb1f5a341",
+    "op04_local_verification_commit": "56cf4ad61124a3b237759a17a64cf50257337113"
   },
   "status_rules": {
     "execution": [
@@ -680,9 +681,9 @@
       "id": "OP03",
       "title": "Validate bounded STT/TTS recovery and honest media completion",
       "owner_role": "Speech and media lead",
-      "assigned_person": null,
+      "assigned_person": "Codex implementation team",
       "reviewer": null,
-      "status": "planned",
+      "status": "in_progress",
       "start_after_milestone": "RG01 baseline recorded",
       "dependencies_and_tests": "See package text; coordination and final acceptance dependencies are distinct from entry milestones.",
       "finding_ids": [
@@ -699,16 +700,16 @@
       "plan_anchor": "op03-validate-bounded-stt-and-tts-recovery-and-honest-media-completion",
       "evidence": [],
       "blocker": null,
-      "next_action": "Assign owner and confirm the baseline reproduction or evidence gap.",
+      "next_action": "Isolated STT generator-lifetime and browser playback-receipt repairs are in progress after reproduced failures; integrate only after independent review and local verification.",
       "target_date": null
     },
     {
       "id": "OP04",
       "title": "Release the selected-trunk and caller-ID contract without drift",
       "owner_role": "Telephony operations lead",
-      "assigned_person": null,
-      "reviewer": null,
-      "status": "planned",
+      "assigned_person": "Codex implementation team",
+      "reviewer": "Independent fixture/handler-boundary review; root local regression and PostgreSQL verification",
+      "status": "in_progress",
       "start_after_milestone": "RG01 baseline recorded",
       "dependencies_and_tests": "See package text; coordination and final acceptance dependencies are distinct from entry milestones.",
       "finding_ids": [
@@ -723,9 +724,20 @@
       ],
       "architecture_ids": [],
       "plan_anchor": "op04-release-the-selected-trunk-and-caller-id-contract-without-drift",
-      "evidence": [],
-      "blocker": null,
-      "next_action": "Assign owner and confirm the baseline reproduction or evidence gap.",
+      "evidence": [
+        {
+          "path": "docs/sessions/2026-10-05-op04-local-verification.md",
+          "kind": "local_validation_no_trunk_runtime_changes",
+          "candidate": "56cf4ad61124a3b237759a17a64cf50257337113"
+        },
+        {
+          "path": "docs/sessions/artifacts/op04/verification.json",
+          "kind": "verification_manifest",
+          "candidate": "56cf4ad61124a3b237759a17a64cf50257337113"
+        }
+      ],
+      "blocker": "Local contracts passed; actual carrier/PBX configuration, timer installation/detection, owned handset caller-ID and deployed rollback acceptance remain unverified.",
+      "next_action": "Complete approved operator configuration and controlled handset acceptance without changing selected-route policy. Preserve received SIP codes, scoped ownership and historical dependencies. Include new PG module in the next integrated CI update.",
       "target_date": null
     },
     {
