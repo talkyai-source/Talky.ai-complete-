@@ -1,0 +1,101 @@
+{
+  "schema_version": 1,
+  "scope": "Gmail saved acknowledgement recovery controls in existing Admin action detail",
+  "source_commit": "1a58d7c5c346c7b75b00b43727736a9fcc5fbe0b",
+  "backend_parent_commit": "9eeeb428c9fe1cfe6f82bef57541d416b3f59012",
+  "checks": [
+    {
+      "command": "node --test tests/action-receipts.test.mjs",
+      "cwd": "Admin/frontend",
+      "artifact": "ui-focused.txt",
+      "exit_code": 0,
+      "passed": 118,
+      "baseline_existing_controls": 58,
+      "new_controls": 60
+    },
+    {
+      "command": "node --test tests/*.test.mjs",
+      "cwd": "Admin/frontend",
+      "artifact": "ui-tests.txt",
+      "exit_code": 0,
+      "passed": 159,
+      "note": "Includes the same 118 focused controls; do not add totals."
+    },
+    {
+      "command": "node node_modules/eslint/bin/eslint.js src/lib/api.ts src/lib/auth.tsx src/components/ActionReceiptPanel.tsx src/components/ActionDetailDrawer.tsx",
+      "cwd": "Admin/frontend",
+      "artifact": "ui-lint.txt",
+      "exit_code": 0,
+      "errors": 0,
+      "warnings": 0
+    },
+    {
+      "command": "npm run build",
+      "cwd": "Admin/frontend",
+      "artifact": "ui-build.txt",
+      "exit_code": 0,
+      "note": "Runs tsc -b then vite build; final source typecheck and production bundle both passed.",
+      "transformed_modules": 1768
+    },
+    {
+      "command": "git diff --check",
+      "cwd": ".",
+      "exit_code": 0
+    },
+    {
+      "command": "node node_modules/typescript/bin/tsc -b --pretty false",
+      "cwd": "Admin/frontend",
+      "artifact": "ui-typescript.txt",
+      "exit_code": 0,
+      "note": "Earlier pre-review standalone check only; final typecheck is the tsc -b phase of ui-build.txt."
+    }
+  ],
+  "baseline_and_corrections": {
+    "initial_availability": {
+      "command": "node --test --test-name-pattern='saved acknowledgement recovery requires' Admin/frontend/tests/action-receipts.test.mjs",
+      "exit_code": 1,
+      "assertion": "assert.ok(button)",
+      "finding": "No recovery control existed before application edits.",
+      "capture": "Tool output; no separately retained raw log."
+    },
+    "harness_only_attempts": [
+      "Initial baseline attempt failed before tests because isolated worktree had no esbuild dependency link; existing main Admin node_modules junction supplied, no dependency installation.",
+      "First full-log redirection used an absent artifact path; no tests ran; corrected to worktree ../../docs path.",
+      "Actual AuthProvider test extension first failed at esbuild React resolution from synthetic hook namespace; explicit external React resolution corrected before tests ran."
+    ],
+    "review_findings": [
+      "Actual AuthProvider wrote localStorage directly without updating ApiClient token/generation; approved four-line lifecycle wiring and four actual AuthProvider controls.",
+      "Stale rendered reload callback could adopt a later auth generation; guards now reject before GET; one actual callback control.",
+      "Another valid recovery of the same source could leave an old request permanently pending; only coherent completed same action/source/provider retires that entry, with four positive/negative controls.",
+      "These review defects were identified by source review; no pre-repair red execution is claimed for the nine follow-up controls."
+    ],
+    "pre_final_results": "59 focused, then 98 focused, then 109 focused/150 all Admin were intermediate passing runs. Final source is qualified by 118 focused/159 all Admin only.",
+    "lint_correction": "Intermediate scoped lint reported no-control-regex and missing effect dependency; replaced control-range regex with equivalent character-code validation and separated cache cleanup effect. Final lint has no errors or warnings."
+  },
+  "behavior": [
+    "Eligibility comes only from backend saved-acknowledgement capability, never provider observation.",
+    "Explicit trimmed bounded reason and second confirmation; one exact UUID/digest/reason body retained after uncertainty.",
+    "Manual same-request replay only; 401/403/404/409/422 require explicit detail reload first; 503/network/malformed response retain original pending body.",
+    "In-memory pending cache is keyed to ApiClient authentication generation, bounded to 32 and refuses admission instead of evicting uncertain entries.",
+    "Whole action detail reload updates status, header and receipt coherently; no local completion patch from POST or provider observation.",
+    "Safe validated saved record displays actual actor, time, reason and status; acceptance is not delivery or payload correctness."
+  ],
+  "limitations": [
+    "Synthetic API promises and existing minimal hook scheduler exercise actual components/AuthProvider/API code; no browser or React concurrency qualification.",
+    "No provider, send, production database, migration, or live recipient actions were performed for these UI checks.",
+    "No cross-tab, browser restart or persistent pending-request guarantee; cache is memory only.",
+    "Credential token changes intentionally invalidate the prior auth generation's pending state; no localStorage recovery payload.",
+    "Root customer acceptance and broader AG06/AG04 matrix status remain unchanged by these UI tests."
+  ],
+  "reviews": {
+    "root": "cleared final four app files plus existing test; authorized source commit conditional on unchanged checks",
+    "independent": "account_finalize cleared final source and raw hashes; no reviewer execution"
+  },
+  "source_sha256": {
+    "Admin/frontend/src/lib/api.ts": "7bc0ca33bef3f86775c95b3f95174a4624e324c8281cb24387bff0f8a04bd188",
+    "Admin/frontend/src/lib/auth.tsx": "db5390db691ac34635a8a458b6e3189f58964575373f1fb4e3c33a0f0e15ca10",
+    "Admin/frontend/src/components/ActionReceiptPanel.tsx": "a3d5e372e410dea90fd3e66253a71e87469ff677e4a609b9239d82e4170b80b2",
+    "Admin/frontend/src/components/ActionDetailDrawer.tsx": "f6afdc3d9cc17575a4a09267dedbc164e11af314eb243d7ebc53f07243f6d743",
+    "Admin/frontend/tests/action-receipts.test.mjs": "94f5237ae9104c4199f4fb077b457f915aa124acb1a3e5e00fe82c41da21e6ce"
+  }
+}
