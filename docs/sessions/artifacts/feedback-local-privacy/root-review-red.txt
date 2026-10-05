@@ -1,0 +1,17 @@
+......F....ssss                                                          [100%]
+================================== FAILURES ===================================
+_____________ test_unavailable_storage_root_fails_without_looping _____________
+tests\unit\test_feedback_local_privacy.py:129: in test_unavailable_storage_root_fails_without_looping
+    ???
+app\domain\services\call_feedback_service.py:129: in _write_local
+    ???
+tests\unit\test_feedback_local_privacy.py:124: in unavailable
+    ???
+E   AssertionError: Writer revisited unavailable root without failing
+E   assert 64 < 64
+E    +  where 64 = len(['C:\\Users\\AL AZIZ TECH\\AppData\\Local\\Temp\\pytest-of-UZAIR\\pytest-806\\test_unavailable_storage_root_0', 'C:\\U...L AZIZ TECH\\AppData\\Local\\Temp', 'C:\\Users\\AL AZIZ TECH\\AppData\\Local', 'C:\\Users\\AL AZIZ TECH\\AppData', ...])
+=========================== short test summary info ===========================
+SKIPPED [3] tests\unit\test_feedback_local_privacy.py:174: POSIX mode bits; Windows ACLs require separate acceptance
+SKIPPED [1] tests\unit\test_feedback_local_privacy.py:197: POSIX mode bits; Windows ACLs require separate acceptance
+FAILED tests/unit/test_feedback_local_privacy.py::test_unavailable_storage_root_fails_without_looping
+1 failed, 10 passed, 4 skipped in 1.68s

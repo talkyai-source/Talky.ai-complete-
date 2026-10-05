@@ -1,0 +1,22 @@
+......F..ssss                                                            [100%]
+================================== FAILURES ===================================
+_____________ test_unavailable_storage_root_fails_without_looping _____________
+tests\unit\test_op11_recording_file_privacy.py:98: in test_unavailable_storage_root_fails_without_looping
+    ???
+app\domain\services\recording_service.py:483: in _write_wav_file
+    ???
+tests\unit\test_op11_recording_file_privacy.py:93: in unavailable
+    ???
+E   AssertionError: Writer revisited unavailable root without failing
+E   assert 64 < 64
+E    +  where 64 = len(['C:\\Users\\AL AZIZ TECH\\AppData\\Local\\Temp\\pytest-of-UZAIR\\pytest-807\\test_unavailable_storage_root_0', 'C:\\U...L AZIZ TECH\\AppData\\Local\\Temp', 'C:\\Users\\AL AZIZ TECH\\AppData\\Local', 'C:\\Users\\AL AZIZ TECH\\AppData', ...])
+============================== warnings summary ===============================
+tests/unit/test_op11_recording_file_privacy.py::test_denied_file_open_does_not_register_success_or_fallback_elsewhere
+  <string>:9: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+SKIPPED [3] tests\unit\test_op11_recording_file_privacy.py:149: Requires POSIX permissions; Windows ACLs are not mode-bit proof
+SKIPPED [1] tests\unit\test_op11_recording_file_privacy.py:181: Requires POSIX permissions; Windows ACLs are not mode-bit proof
+FAILED tests/unit/test_op11_recording_file_privacy.py::test_unavailable_storage_root_fails_without_looping
+1 failed, 8 passed, 4 skipped, 1 warning in 1.00s

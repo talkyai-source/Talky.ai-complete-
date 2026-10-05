@@ -1,0 +1,30 @@
+{
+  "candidate": "0b2a7e130e103da4f1328dbee60ba682d9e67db3",
+  "command": [
+    "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\backend\\.venv\\Scripts\\python.exe",
+    "-m",
+    "pytest",
+    "tests/unit/test_feedback_local_privacy.py",
+    "tests/unit/test_call_feedback_service.py",
+    "tests/unit/test_call_feedback_replace.py",
+    "tests/unit/test_call_feedback_api.py",
+    "tests/unit/test_op11_recording_file_privacy.py",
+    "tests/unit/test_recording_offload.py",
+    "tests/unit/test_recording_encoding.py",
+    "tests/unit/test_recording_storage_permanent_delete.py",
+    "tests/unit/test_recordings_endpoint_contract.py",
+    "tests/unit/test_op07_recording_retention.py",
+    "-q",
+    "--tb=short",
+    "-ra"
+  ],
+  "source_before": {
+    "backend/app/domain/services/call_feedback_service.py": "ce13406adb5222ae0a8d75928af0bfd69972f64fb738cbe212a6ab3bee48e7bf",
+    "backend/tests/unit/test_feedback_local_privacy.py": "91ba376b0517c09a24b8ee00ddf2bff297b124d923ddfa5b79365e81d27d33f9",
+    "backend/app/domain/services/recording_service.py": "9fc0cf816cfb0350a1cc5c649e7cd4822d016a9a10785283ca1fe65dc69927f4",
+    "backend/tests/unit/test_op11_recording_file_privacy.py": "1ff63112fbe61622810af8287e3542c90ca3a5c83981499ed279af7f3eeb58f5"
+  },
+  "scope": "Temporary synthetic audio, real local I/O and injected faults; Windows explicit creation requests are not POSIX modes/deployed ACL acceptance.",
+  "exit_code": 0,
+  "source_unchanged": true
+}

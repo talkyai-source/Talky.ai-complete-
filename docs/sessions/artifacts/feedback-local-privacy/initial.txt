@@ -1,0 +1,18 @@
+FF........ssss                                                           [100%]
+================================== FAILURES ===================================
+______________ test_each_new_directory_requests_owner_only_mode _______________
+tests\unit\test_feedback_local_privacy.py:55: in test_each_new_directory_requests_owner_only_mode
+    assert observed == [(tmp_path / "new", 0o700), (path.parent, 0o700)]
+E   AssertionError: assert [(WindowsPath...ested'), 511)] == [(WindowsPath...ested'), 448)]
+E     At index 0 diff: (WindowsPath('C:/Users/AL AZIZ TECH/AppData/Local/Temp/pytest-of-UZAIR/pytest-804/test_each_new_directory_reques0/new'), 511) != (WindowsPath('C:/Users/AL AZIZ TECH/AppData/Local/Temp/pytest-of-UZAIR/pytest-804/test_each_new_directory_reques0/new'), 448)
+E     Use -v to get more diff
+_____ test_audio_requests_owner_only_file_mode_without_losing_exclusivity _____
+tests\unit\test_feedback_local_privacy.py:82: in test_audio_requests_owner_only_file_mode_without_losing_exclusivity
+    assert mode == 0o600
+E   assert 438 == 384
+=========================== short test summary info ===========================
+SKIPPED [3] tests\unit\test_feedback_local_privacy.py:160: POSIX mode bits; Windows ACLs require separate acceptance
+SKIPPED [1] tests\unit\test_feedback_local_privacy.py:183: POSIX mode bits; Windows ACLs require separate acceptance
+FAILED tests/unit/test_feedback_local_privacy.py::test_each_new_directory_requests_owner_only_mode
+FAILED tests/unit/test_feedback_local_privacy.py::test_audio_requests_owner_only_file_mode_without_losing_exclusivity
+2 failed, 8 passed, 4 skipped in 2.96s
