@@ -1,0 +1,35 @@
+{
+  "source_base": "da9f10e6a77a17b8230c1ee1cf5cb95332c0f240",
+  "normalized_source_sha256": {
+    "backend/app/infrastructure/assistant/tools/inbox.py": "cd93b1fbcf3a4e7bf765baf67804a18904f1a3e99277b26bcb6727ceb038156b",
+    "backend/app/services/connector_resolver.py": "4b9e790fd9a622e6fcb5d48483f83bbcffbe1ae4a393ea5fa6dec2e3b1725727",
+    "backend/tests/unit/test_inbox_original_account.py": "4cdd55e81c490ecb06b7854ad9adcb869d36c3916d1fa830d752b262f8dbdcc5",
+    "backend/tests/unit/test_connector_health.py": "b6de5278a094a388c5868f10d6f943697869a58c558bcd310600e94311af8a81"
+  },
+  "final_test_modules": [
+    "tests/unit/test_inbox_original_account.py",
+    "tests/unit/test_connector_health.py",
+    "tests/unit/test_email_service.py",
+    "tests/unit/test_connector_factory.py",
+    "tests/unit/assistant/test_tool_arg_coercion.py",
+    "tests/unit/assistant/test_streaming.py",
+    "tests/unit/assistant/test_calendar_and_drive_errors.py",
+    "tests/unit/test_calendar_delivery_contract.py",
+    "tests/unit/test_communication_delivery_contract.py",
+    "tests/unit/test_crm_sync_hooks.py",
+    "tests/unit/test_crm_sync_service.py",
+    "tests/unit/test_meeting_service.py"
+  ],
+  "result": {
+    "passed": 220,
+    "failed": 0,
+    "skipped": 0,
+    "warnings": 13
+  },
+  "limits": [
+    "synthetic provider and database ports; no provider/network/PG operation",
+    "per-invocation authorization row is not provider-stable receipt adjudication",
+    "known connector-wide health-expiry generation race not repaired"
+  ],
+  "source_commit": "0f69c0f736ec0080ef68a575ccb13e9a6dbe1384"
+}

@@ -1,0 +1,47 @@
+.........................................F................               [100%]
+================================== FAILURES ===================================
+____________ test_read_emails_retries_one_401_after_forced_refresh ____________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000025EC6E74560>
+
+    @pytest.mark.asyncio
+    async def test_read_emails_retries_one_401_after_forced_refresh(monkeypatch):
+        rejected = ConnectorProviderError(
+            provider="gmail",
+            operation="list_emails",
+            category="authentication",
+            message="invalid credentials",
+            status_code=401,
+        )
+        old = SimpleNamespace(provider_name="gmail", external_account_id="account-1", account_row_id="authorization-1", list_emails=AsyncMock(side_effect=rejected))
+        refreshed = SimpleNamespace(
+            provider_name="gmail", external_account_id="account-1",
+            list_emails=AsyncMock(
+                return_value=[EmailMessage(id="m-1", subject="Hello", body="Preview")]
+            )
+        )
+        resolver = AsyncMock(
+            side_effect=[
+                (old, "connector-1", "gmail"),
+                (refreshed, "connector-1", "gmail"),
+            ]
+        )
+        monkeypatch.setattr(connector_resolver, "resolve_active_connector", resolver)
+
+        result = await read_emails("tenant-1", SimpleNamespace(), max_results=5)
+
+>       assert result["success"] is True
+E       assert False is True
+
+tests\unit\test_connector_health.py:306: AssertionError
+------------------------------ Captured log call ------------------------------
+ERROR    app.infrastructure.assistant.tools.inbox:inbox.py:293 read_emails failed type=ReviewedConnectorChanged
+============================== warnings summary ===============================
+tests/unit/test_connector_health.py::test_gmail_parser_walks_nested_mime_parts
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\inbox-original-account-20261005\backend\app\infrastructure\connectors\email\gmail.py:503: DeprecationWarning: datetime.datetime.utcfromtimestamp() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.fromtimestamp(timestamp, datetime.UTC).
+    sent_at=datetime.utcfromtimestamp(int(data["internalDate"]) / 1000) if data.get("internalDate") else None
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/unit/test_connector_health.py::test_read_emails_retries_one_401_after_forced_refresh
+1 failed, 57 passed, 1 warning in 3.95s

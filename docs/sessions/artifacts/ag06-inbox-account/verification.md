@@ -1,5 +1,7 @@
 # AG06 inbox read identity across authentication refresh
 
+**Historical candidate:** this first implementation was rejected for canonical Gmail compatibility after independent review. Its synthetic external-identity fixtures missed Gmail accounts with a null external ID. The original observations below are preserved; use [the authorization-row follow-up](verification-row-pin.md) for the accepted source and final validation.
+
 Base: `3648fe70`. Source: `bc964a8bccd6eab6826818c922b934b5eb62bfe6` on isolated branch `codex/inbox-original-account-20261005`. No remote push, deployment, provider call, database operation or resend was performed.
 
 The actual `_call_with_one_auth_refresh` helper previously resolved the tenant's newly active connector after an authentication rejection. With original account A and replacement account B, it read the same requested message reference in B and returned success. The synthetic actual-method probe preserves that observation and a matching-A positive control in `probe-before.json`; `probe.py` contains the reproducible program. The provider and database ports are synthetic, not a live Gmail observation.
