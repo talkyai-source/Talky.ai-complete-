@@ -1,0 +1,32 @@
+FFFF..............                                                       [100%]
+================================== FAILURES ===================================
+_ test_known_shapes_preserve_evidence_and_enforce_source_specific_keys[migration-legacy] _
+tests\integration\test_dnc_schema_migration.py:121: in test_known_shapes_preserve_evidence_and_enforce_source_specific_keys
+    assert await db.conn.fetch("SELECT indexrelid FROM pg_index WHERE indrelid='dnc_entries'::regclass ORDER BY indexrelid") == indexes
+E   assert [<Record inde...xrelid=58995>] == [<Record inde...xrelid=58992>]
+E     At index 1 diff: <Record indexrelid=58994> != <Record indexrelid=58991>
+E     Use -v to get more diff
+_ test_known_shapes_preserve_evidence_and_enforce_source_specific_keys[migration-later] _
+tests\integration\test_dnc_schema_migration.py:121: in test_known_shapes_preserve_evidence_and_enforce_source_specific_keys
+    assert await db.conn.fetch("SELECT indexrelid FROM pg_index WHERE indrelid='dnc_entries'::regclass ORDER BY indexrelid") == indexes
+E   assert [<Record inde...xrelid=59035>] == [<Record inde...xrelid=59032>]
+E     At index 1 diff: <Record indexrelid=59034> != <Record indexrelid=59031>
+E     Use -v to get more diff
+_ test_known_shapes_preserve_evidence_and_enforce_source_specific_keys[bootstrap-legacy] _
+tests\integration\test_dnc_schema_migration.py:121: in test_known_shapes_preserve_evidence_and_enforce_source_specific_keys
+    assert await db.conn.fetch("SELECT indexrelid FROM pg_index WHERE indrelid='dnc_entries'::regclass ORDER BY indexrelid") == indexes
+E   assert [<Record inde...xrelid=59078>] == [<Record inde...xrelid=59075>]
+E     At index 1 diff: <Record indexrelid=59077> != <Record indexrelid=59074>
+E     Use -v to get more diff
+_ test_known_shapes_preserve_evidence_and_enforce_source_specific_keys[bootstrap-later] _
+tests\integration\test_dnc_schema_migration.py:121: in test_known_shapes_preserve_evidence_and_enforce_source_specific_keys
+    assert await db.conn.fetch("SELECT indexrelid FROM pg_index WHERE indrelid='dnc_entries'::regclass ORDER BY indexrelid") == indexes
+E   assert [<Record inde...xrelid=59118>] == [<Record inde...xrelid=59115>]
+E     At index 1 diff: <Record indexrelid=59117> != <Record indexrelid=59114>
+E     Use -v to get more diff
+=========================== short test summary info ===========================
+FAILED tests/integration/test_dnc_schema_migration.py::test_known_shapes_preserve_evidence_and_enforce_source_specific_keys[migration-legacy]
+FAILED tests/integration/test_dnc_schema_migration.py::test_known_shapes_preserve_evidence_and_enforce_source_specific_keys[migration-later]
+FAILED tests/integration/test_dnc_schema_migration.py::test_known_shapes_preserve_evidence_and_enforce_source_specific_keys[bootstrap-legacy]
+FAILED tests/integration/test_dnc_schema_migration.py::test_known_shapes_preserve_evidence_and_enforce_source_specific_keys[bootstrap-later]
+4 failed, 14 passed in 10.56s

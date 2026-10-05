@@ -1,0 +1,4 @@
+INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.
+INFO  [alembic.runtime.migration] Will assume transactional DDL.
+INFO  [alembic.runtime.migration] Running upgrade 0060_dialer_active_job_owner -> 0061_dnc_runtime_contract, Align the two historical DNC shapes without discarding opt-out evidence.
+PASS disposable public head=0061_dnc_runtime_contract; original_rows=0; existing values and RLS unchanged; both source keys present
