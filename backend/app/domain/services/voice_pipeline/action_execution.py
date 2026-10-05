@@ -15,7 +15,7 @@ from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 from app.core.db_utils import acquire_with_tenant
-from app.services.action_execution import DurableActionExecutor
+from app.services.action_execution import DurableActionExecutor, public_action_receipt
 
 
 def _object(value):
@@ -321,10 +321,15 @@ async def execute_connected_voice_action(session, action, arguments, user_text):
                 to=[payload["recipient"]], subject=payload["subject"], body=body,
                 lead_ids=[str(context["lead_id"])] if context.get("lead_id") else None,
                 call_id=str(context["call_id"]), triggered_by="voice")
+            # Project only existing safe receipt fields; the outer executor owns
+            # its action ID, while this explicitly records the returned inner ID.
+            evidence = public_action_receipt({"id": None, "output_data": {
+                **receipt, "child_action_id": receipt.get("action_id"),
+            }})["receipt"]
             if not receipt.get("success") or not receipt.get("message_id"):
-                return _result(action, receipt.get("status") or "unknown", "Sending was not confirmed; do not resend automatically.")
+                return _result(action, receipt.get("status") or "unknown", "Sending was not confirmed; do not resend automatically.", **evidence)
             return _result(action, "provider_accepted", "The provider accepted the email for sending. Recipient delivery is unconfirmed.",
-                           success=True, confirmation_allowed=True, provider=receipt.get("provider"), message_id=receipt["message_id"])
+                           success=True, confirmation_allowed=True, **evidence)
         if action == "transfer_call":
             from app.domain.services.telephony.adapter_registry import execute_transfer
             receipt = await execute_transfer(str(context["provider_call_id"]), payload["destination"], "blind",
