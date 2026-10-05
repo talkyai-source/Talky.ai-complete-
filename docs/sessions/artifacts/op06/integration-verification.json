@@ -1,0 +1,36 @@
+{
+  "application_commit": "25ab5ac8815f6d4957d8eaab3382a458ecf11e0c",
+  "fixture_followup_commit": "6d736aba21b7d3435bd098b47900d571367b3bc2",
+  "root_backend": {
+    "passed": 255,
+    "skipped": 0,
+    "modules": 8,
+    "warnings": 38,
+    "command_record": "integrated-command.json"
+  },
+  "postgres": {
+    "passed": 7,
+    "skipped": 0,
+    "location": "isolated owner worktree; source and canonical minimal fixture carried unchanged by cherry-pick",
+    "scope": "Actual PostgreSQL isolated action schema, scripted provider/queue. Not public-head migration or RLS proof.",
+    "log": "action-receipts-postgres.txt"
+  },
+  "review": "Independent capability/copy review; root integrated behavior; independent CI/schema-consumer review.",
+  "source_files_sha256_lf": {
+    "backend/app/domain/services/voice_pipeline/action_execution.py": "48da757626c6d3a05345022601eb529644bfe7adf5b6c29bbc904e14ff23a75e",
+    "backend/tests/unit/test_op06_transfer_capabilities.py": "2e981d3c8f4fa10387414d0a2f564c186ffcc9cddd5c8e3c0cd2d78a850e3d72",
+    "backend/tests/unit/test_inbound_campaign_service.py": "cf1c4b7792254d9f2de07b8e9b18566f78aff1d8d05bcde6a46e3f93df603e9e",
+    "Talk-Leee/src/app/ai-voice-agent/page.tsx": "0d42de3707264f7dbefcd3587112fad48578452c4a9441d8a100fbbecf659d73",
+    "Talk-Leee/src/app/use-cases/customer-services-support/page.tsx": "b6a3cc1b1dc8596c0fa8352d91a4bf801b44afe3f7d83bc0e80285bedad769f2",
+    "Talk-Leee/src/app/use-cases/automated-lead-qualification/page.tsx": "4eb684bc868714b47221a002acdd08a14e6cc0f6dabccd4c56621b53c9ba085f",
+    "backend/tests/integration/test_action_execution_receipts.py": "b93c735cc6364f1857452f117f607833943ef5cd944d1c65a272e1bd4a626725"
+  },
+  "package_status": "in_progress; containment repaired, actual carrier transfer acceptance incomplete",
+  "unchanged": [
+    "Production inbound transfer flag remains false",
+    "Outbound transfer implementation unchanged",
+    "No transfer framework or policy added",
+    "No provider effects or calls"
+  ],
+  "remaining": "Approved two-leg transfer availability, audible handoff and settlement evidence still required; F23 is not complete."
+}

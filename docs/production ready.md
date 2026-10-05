@@ -560,6 +560,8 @@ Inventory the alternate `VoicePipelineService.get_llm_response`/`llm_response.py
 
 ### OP06 Close the existing transfer availability gate honestly
 
+**Local checkpoint — 5 October 2026:** Incoming-call transfer offers now use the existing runtime/pinned-policy gate, and public wording reflects its current availability. Root integration passed 255 related checks; seven actual PostgreSQL action-receipt checks passed in the isolated canonical-column fixture. [Evidence](sessions/2026-10-05-op06-transfer-availability.md) and [integration manifest](sessions/artifacts/op06/integration-verification.json) retain limits. Production availability stays disabled and F23 acceptance remains incomplete.
+
 **Covers:** V05, F23. **Owner:** inbound telephony lead; product owner owns purchased scope. **Priority:** P1 for transfer-dependent use.
 
 **Bounded tasks:** keep `CONTROLLED_INBOUND_TRANSFER_RUNTIME_AVAILABLE` false until the already specified staging/allowlist proof is completed. Do not expose a promise of human handoff merely because a transfer policy field exists. Validate that the UI, API, assistant and after-hours flow consistently disclose unavailability and offer only existing authorized message intake. Complete the current implementation's two-leg acceptance and repair only failures it demonstrates; do not substitute a new carrier or transfer architecture. An explicitly narrowed initial offer may exclude it, but that is recorded containment, not completion of F23 or permission to resume new feature work.
@@ -603,6 +605,8 @@ Inventory the alternate `VoicePipelineService.get_llm_response`/`llm_response.py
 
 ### OP08 Establish real voice quality latency and capacity evidence
 
+**Local checkpoint — 5 October 2026:** Existing offline metrics, alert, backup/restore and release-tool controls passed 113 checks. The [operating baseline](sessions/2026-10-05-operating-acceptance-baseline.md) distinguishes repository evidence from this package's still-required operating acceptance. No remote host, alert receiver, backup restore, live call or deployment was exercised.
+
 **Covers:** V01, O05, F19/F20/F42; acceptance for F17/F18/F21–F27. **Owner:** conversation QA/performance lead with telephony operator. **Priority:** P1 release evidence.
 
 **Bounded tasks**
@@ -631,6 +635,8 @@ Product/operations ratify targets before running the gate. If a target is not me
 
 ### OP09 Make operational alerts reach an accountable person
 
+**Local checkpoint — 5 October 2026:** Existing offline metrics, alert, backup/restore and release-tool controls passed 113 checks. The [operating baseline](sessions/2026-10-05-operating-acceptance-baseline.md) distinguishes repository evidence from this package's still-required operating acceptance. No remote host, alert receiver, backup restore, live call or deployment was exercised.
+
 **Covers:** O04, F41. **Owner:** site reliability/on-call lead. **Priority:** P1 for managed service reliability.
 
 **Bounded tasks:** inventory the actual installed monitoring and any external system; the October 2 absence of on-host Prometheus/Alertmanager does not prove no external monitor. Use the existing metrics, healthwatch and alert rules with one approved real receiver/escalation path. Verify scrape/heartbeat freshness, worker death, provider timeout/failover, queue age, metering/capacity admission degradation, backup age/failure and resource leak signals. Keep tenant/customer data and secrets out of alerts. Assign operator actions for each actionable alert; a dashboard alone does not close this package.
@@ -648,6 +654,8 @@ Product/operations ratify targets before running the gate. If a target is not me
 **Evidence:** actual receiver receipt, incident timeline, acknowledgement, recovery notification, rules/config fingerprint and runbook. Existing logs/metrics plus a successful `/health` response are insufficient.
 
 ### OP10 Demonstrate recoverable backups within declared objectives
+
+**Local checkpoint — 5 October 2026:** Existing offline metrics, alert, backup/restore and release-tool controls passed 113 checks. The [operating baseline](sessions/2026-10-05-operating-acceptance-baseline.md) distinguishes repository evidence from this package's still-required operating acceptance. No remote host, alert receiver, backup restore, live call or deployment was exercised.
 
 **Covers:** O03, F43; operational F34/F45. **Owner:** database/reliability operations. **Priority:** P1.
 
@@ -692,6 +700,8 @@ Product/operations ratify targets before running the gate. If a target is not me
 **Evidence:** permission matrix, unit configuration diff, positive/negative access outcomes, relevant scanner triage and a sanitized cost reconciliation with provider/account identity and coverage. Root services plus passing security CI alone cannot establish procurement approval.
 
 ### OP12 Promote one compatible release and prove an operable recovery path
+
+**Local checkpoint — 5 October 2026:** Existing offline metrics, alert, backup/restore and release-tool controls passed 113 checks. The [operating baseline](sessions/2026-10-05-operating-acceptance-baseline.md) distinguishes repository evidence from this package's still-required operating acceptance. No remote host, alert receiver, backup restore, live call or deployment was exercised.
 
 **Covers:** O07, F44; integration gate for every package. **Owner:** release lead with database, telephony and frontend operators. **Priority:** P1.
 

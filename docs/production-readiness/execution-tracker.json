@@ -45,7 +45,9 @@
     "op02_implementation_commit": "482ea9debc765a0132a94606eddacc50c660edd2",
     "op02_test_dependency_commit": "2a8fe78eedfcee1a6340360831f050df74eb9b4d",
     "op03_implementation_commit": "2043c3c368c4aa6af97c13c8628e369c27cf6e5a",
-    "operations_ci_commit": "4151b82f81a8357c32f9c8cb5d06d8e2d39d53ca"
+    "operations_ci_commit": "4151b82f81a8357c32f9c8cb5d06d8e2d39d53ca",
+    "op06_implementation_commit": "25ab5ac8815f6d4957d8eaab3382a458ecf11e0c",
+    "op06_fixture_followup_commit": "6d736aba21b7d3435bd098b47900d571367b3bc2"
   },
   "status_rules": {
     "execution": [
@@ -810,7 +812,7 @@
       "title": "Close the existing transfer availability gate honestly",
       "owner_role": "Inbound telephony lead",
       "assigned_person": "Codex implementation team",
-      "reviewer": null,
+      "reviewer": "Independent voice capability and CI/schema review; root integrated behavior checks",
       "status": "in_progress",
       "start_after_milestone": "RG01 baseline recorded",
       "dependencies_and_tests": "See package text; coordination and final acceptance dependencies are distinct from entry milestones.",
@@ -822,9 +824,20 @@
       ],
       "architecture_ids": [],
       "plan_anchor": "op06-close-the-existing-transfer-availability-gate-honestly",
-      "evidence": [],
-      "blocker": null,
-      "next_action": "Integrate independently verified existing inbound transfer availability/copy repair and exact action fixture schema follow-up; production switch remains closed.",
+      "evidence": [
+        {
+          "path": "docs/sessions/2026-10-05-op06-transfer-availability.md",
+          "kind": "bounded_local_containment_repair",
+          "candidate": "25ab5ac8815f6d4957d8eaab3382a458ecf11e0c"
+        },
+        {
+          "path": "docs/sessions/artifacts/op06/integration-verification.json",
+          "kind": "integration_verification",
+          "candidate": "25ab5ac8815f6d4957d8eaab3382a458ecf11e0c"
+        }
+      ],
+      "blocker": "Incoming-call runtime remains unavailable in production; approved two-leg handoff and settlement acceptance are not run.",
+      "next_action": "Complete the existing approved scoped carrier proof before enabling runtime; keep offer/tool availability and public wording consistent with that gate.",
       "target_date": null
     },
     {
@@ -857,9 +870,9 @@
       "id": "OP08",
       "title": "Establish real voice quality, latency and capacity evidence",
       "owner_role": "Conversation QA and performance lead",
-      "assigned_person": null,
+      "assigned_person": "Codex implementation team; designated operating acceptance owner pending",
       "reviewer": null,
-      "status": "planned",
+      "status": "in_progress",
       "start_after_milestone": "RG01 baseline recorded",
       "dependencies_and_tests": "See package text; coordination and final acceptance dependencies are distinct from entry milestones.",
       "finding_ids": [
@@ -877,18 +890,24 @@
       ],
       "architecture_ids": [],
       "plan_anchor": "op08-establish-real-voice-quality-latency-and-capacity-evidence",
-      "evidence": [],
+      "evidence": [
+        {
+          "path": "docs/sessions/2026-10-05-operating-acceptance-baseline.md",
+          "kind": "existing_offline_control_validation_and_remaining_acceptance",
+          "candidate": "e5cfff12773b259db516ab76ad53d417c3f5edc0"
+        }
+      ],
       "blocker": null,
-      "next_action": "Assign owner and confirm the baseline reproduction or evidence gap.",
+      "next_action": "Use the existing operating tools for the package acceptance once its designated profile, operator and environment prerequisites are established. Local baseline is not deployed outcome proof.",
       "target_date": null
     },
     {
       "id": "OP09",
       "title": "Make operational alerts reach an accountable person",
       "owner_role": "Reliability and on-call lead",
-      "assigned_person": null,
+      "assigned_person": "Codex implementation team; designated operating acceptance owner pending",
       "reviewer": null,
-      "status": "planned",
+      "status": "in_progress",
       "start_after_milestone": "RG01 baseline recorded",
       "dependencies_and_tests": "See package text; coordination and final acceptance dependencies are distinct from entry milestones.",
       "finding_ids": [
@@ -899,18 +918,24 @@
       ],
       "architecture_ids": [],
       "plan_anchor": "op09-make-operational-alerts-reach-an-accountable-person",
-      "evidence": [],
+      "evidence": [
+        {
+          "path": "docs/sessions/2026-10-05-operating-acceptance-baseline.md",
+          "kind": "existing_offline_control_validation_and_remaining_acceptance",
+          "candidate": "e5cfff12773b259db516ab76ad53d417c3f5edc0"
+        }
+      ],
       "blocker": null,
-      "next_action": "Assign owner and confirm the baseline reproduction or evidence gap.",
+      "next_action": "Use the existing operating tools for the package acceptance once its designated profile, operator and environment prerequisites are established. Local baseline is not deployed outcome proof.",
       "target_date": null
     },
     {
       "id": "OP10",
       "title": "Demonstrate recoverable backups within declared objectives",
       "owner_role": "Database and reliability operations lead",
-      "assigned_person": null,
+      "assigned_person": "Codex implementation team; designated operating acceptance owner pending",
       "reviewer": null,
-      "status": "planned",
+      "status": "in_progress",
       "start_after_milestone": "RG01 baseline recorded",
       "dependencies_and_tests": "See package text; coordination and final acceptance dependencies are distinct from entry milestones.",
       "finding_ids": [
@@ -924,9 +949,15 @@
       ],
       "architecture_ids": [],
       "plan_anchor": "op10-demonstrate-recoverable-backups-within-declared-objectives",
-      "evidence": [],
+      "evidence": [
+        {
+          "path": "docs/sessions/2026-10-05-operating-acceptance-baseline.md",
+          "kind": "existing_offline_control_validation_and_remaining_acceptance",
+          "candidate": "e5cfff12773b259db516ab76ad53d417c3f5edc0"
+        }
+      ],
       "blocker": null,
-      "next_action": "Assign owner and confirm the baseline reproduction or evidence gap.",
+      "next_action": "Use the existing operating tools for the package acceptance once its designated profile, operator and environment prerequisites are established. Local baseline is not deployed outcome proof.",
       "target_date": null
     },
     {
@@ -956,9 +987,9 @@
       "id": "OP12",
       "title": "Promote one compatible release and prove an operable recovery path",
       "owner_role": "Release lead",
-      "assigned_person": null,
+      "assigned_person": "Codex implementation team; designated operating acceptance owner pending",
       "reviewer": null,
-      "status": "planned",
+      "status": "in_progress",
       "start_after_milestone": "RG01 baseline recorded",
       "dependencies_and_tests": "See package text; coordination and final acceptance dependencies are distinct from entry milestones.",
       "finding_ids": [
@@ -971,9 +1002,15 @@
         "A08"
       ],
       "plan_anchor": "op12-promote-one-compatible-release-and-prove-an-operable-recovery-path",
-      "evidence": [],
+      "evidence": [
+        {
+          "path": "docs/sessions/2026-10-05-operating-acceptance-baseline.md",
+          "kind": "existing_offline_control_validation_and_remaining_acceptance",
+          "candidate": "e5cfff12773b259db516ab76ad53d417c3f5edc0"
+        }
+      ],
       "blocker": null,
-      "next_action": "Assign owner and confirm the baseline reproduction or evidence gap.",
+      "next_action": "Use the existing operating tools for the package acceptance once its designated profile, operator and environment prerequisites are established. Local baseline is not deployed outcome proof.",
       "target_date": null
     },
     {
