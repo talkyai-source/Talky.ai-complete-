@@ -129,7 +129,7 @@ export default function AnalyticsPage() {
             <motion.div
                 initial={{ opacity: 0, y: -10 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="flex flex-col gap-3 mb-6 sm:flex-row sm:items-center sm:gap-4"
+                className="flex flex-col gap-3 mb-6 sm:flex-row sm:flex-wrap sm:items-center sm:gap-4"
             >
                 <motion.div
                     whileHover={{ scale: 1.02 }}
@@ -289,7 +289,8 @@ export default function AnalyticsPage() {
                                     ) : null}
 
                                     <div className="overflow-x-auto">
-                                        <div className="min-w-max flex items-end justify-center gap-3 h-40 px-2">
+                                        <div className="min-w-max">
+                                        <div className="flex items-end justify-center gap-3 h-40 px-2">
                                         {data.map((item, index) => (
                                             <motion.div
                                                 key={index}
@@ -356,20 +357,19 @@ export default function AnalyticsPage() {
                                             </motion.div>
                                         ))}
                                         </div>
-                                    </div>
-                                </div>
-
-                                {/* X-axis labels */}
-                                <div className="overflow-x-auto">
-                                    <div className="min-w-max flex items-start justify-center gap-3 px-2">
-                                        {data.map((item, index) => (
-                                            <div
-                                                key={index}
-                                                className={`${barWidthClass} text-center text-xs text-muted-foreground`}
-                                            >
-                                                {formatDate(item.date)}
-                                            </div>
-                                        ))}
+                                        {/* X-axis labels — in the same scroller as the bars so both
+                                            pan together and each date stays under its own bar. */}
+                                        <div className="mt-4 flex items-start justify-center gap-3 px-2">
+                                            {data.map((item, index) => (
+                                                <div
+                                                    key={index}
+                                                    className={`${barWidthClass} text-center text-xs text-muted-foreground`}
+                                                >
+                                                    {formatDate(item.date)}
+                                                </div>
+                                            ))}
+                                        </div>
+                                        </div>
                                     </div>
                                 </div>
 
