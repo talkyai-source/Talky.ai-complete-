@@ -371,3 +371,59 @@ async def test_actual_postgres_gold_matrix_and_excluded_controls(knowledge_db):
     )
     # Quality targets are reported, never silently converted into SQL-test success.
     assert len(results) == len(matrix["cases"])
+
+
+@pytest.mark.parametrize("field", ["keywords", "example_questions"])
+async def test_generated_routing_aliases_do_not_authorize_unrelated_source(knowledge_db, field):
+    from app.domain.services.voice_pipeline.kb_budget import prepare_knowledge_evidence
+
+    db = knowledge_db
+    values = ["orbital", "guidance"] if field == "keywords" else ["What is orbital guidance?"]
+    source, node = await publish(db, text="# Support\nSupport is available during business hours.",
+                                 enrichment=NodeEnrichment(**{field: values}))
+    hits = await retrieve_knowledge(db.pool, db.tenants[0], db.campaigns[0], "orbital guidance",
+                                   k=3, raise_on_error=True)
+    assert [str(hit["id"]) for hit in hits] == [node]  # Metadata still routes.
+    evidence = prepare_knowledge_evidence(hits, "orbital guidance")
+    assert evidence["status"] == "weak_match", evidence
+    assert hits[0]["coverage"] == 0
+    assert evidence["passages"][0]["source_id"] == source
+    assert evidence["passages"][0]["source_version"] == 1
+    assert evidence["passages"][0]["version"]
+
+
+async def test_authored_source_coverage_stays_matched_with_irrelevant_metadata(knowledge_db):
+    from app.domain.services.voice_pipeline.kb_budget import prepare_knowledge_evidence
+
+    db = knowledge_db
+    _, node = await publish(db, text="# Orbital guidance\nA calibrated antenna is required.",
+                            enrichment=NodeEnrichment(keywords=["gardening"],
+                                                      example_questions=["How are flowers grown?"]))
+    hits = await retrieve_knowledge(db.pool, db.tenants[0], db.campaigns[0], "orbital guidance",
+                                   k=3, raise_on_error=True)
+    assert [str(hit["id"]) for hit in hits] == [node]
+    assert hits[0]["coverage"] == 1
+    evidence = prepare_knowledge_evidence(hits, "orbital guidance")
+    assert evidence["status"] == "matched" and "calibrated antenna" in evidence["text"]
+
+
+async def test_other_nodes_generated_alias_frequency_cannot_change_source_confidence(knowledge_db):
+    db = knowledge_db
+    _, support = await publish(db, text="# Support\nSupport is available on weekdays.")
+    _, orbital = await publish(db, text="# Orbital\nOrbital navigation uses an antenna.")
+
+    async def source_coverage():
+        hits = await retrieve_knowledge(db.pool, db.tenants[0], db.campaigns[0], "support orbital",
+                                       k=3, raise_on_error=True)
+        return next(hit["coverage"] for hit in hits if str(hit["id"]) == support)
+
+    before = await source_coverage()
+    # Synthetic private fixture only: aliases change, authored source does not.
+    await db.admin.execute("""UPDATE campaign_knowledge_nodes
+      SET search_text=search_text || ' support',
+          search_tsv=to_tsvector('english', search_text || ' support'), keywords=ARRAY['support']
+      WHERE id=$1""", orbital)
+    after = await source_coverage()
+    # Equal authored document frequencies imply equal weight, independently of aliases.
+    assert before == pytest.approx(0.5)
+    assert after == pytest.approx(before)

@@ -180,7 +180,9 @@ async def retrieve_knowledge(
                 # nodes most likely to win are the ones that survive the cap.
                 """
                 WITH eligible AS (
-                    SELECT n.*, s.version AS source_version
+                    SELECT n.*, s.version AS source_version,
+                           to_tsvector('english', coalesce(n.heading, '') || ' ' ||
+                                                   coalesce(n.content, '')) AS authored_tsv
                     FROM campaign_knowledge_nodes n
                     JOIN campaign_knowledge_sources s ON s.id = n.source_id
                       AND s.tenant_id = n.tenant_id AND s.campaign_id = n.campaign_id
@@ -195,7 +197,7 @@ async def retrieve_knowledge(
                 ),
                 cand AS (
                     SELECT n.id, n.heading, n.summary, n.voice_answer, n.content,
-                           n.search_tsv, n.search_text, n.priority, n.hit_count,
+                           n.search_tsv, n.search_text, n.authored_tsv, n.priority, n.hit_count,
                            n.source_id, n.source_version, n.updated_at
                     FROM eligible n, tq
                     WHERE n.campaign_id = $1
@@ -226,6 +228,19 @@ async def retrieve_knowledge(
                           AND d.search_tsv @@ plainto_tsquery('simple', l.lexeme)
                     GROUP BY l.lexeme, tot.n
                 ),
+                -- Generated aliases may route/rank candidates, but neither
+                -- their matches nor their campaign frequency prove a fact.
+                -- Keep ranking's original w; source confidence has its own idf.
+                authored_w AS (
+                    SELECT w.lexeme,
+                           ln((tot.n + 1.0) / (count(d.id) + 0.5)) AS idf
+                    FROM w
+                    CROSS JOIN (SELECT count(*)::numeric AS n
+                                  FROM eligible) tot
+                    LEFT JOIN eligible d
+                           ON d.authored_tsv @@ plainto_tsquery('simple', w.lexeme)
+                    GROUP BY w.lexeme, tot.n
+                ),
                 -- RANKING (2026-10-01). It used to sort first by "contains
                 -- EVERY query word", so a catch-all node ("Version Control",
                 -- "Known Gaps", "AI Retrieval Examples") that mentions
@@ -239,7 +254,7 @@ async def retrieve_knowledge(
                 -- Estimation knowledge before shipping.
                 top_k AS (
                     SELECT c.id, c.heading, c.summary, c.voice_answer, c.content,
-                           c.search_tsv, c.source_id, c.source_version, c.updated_at,
+                           c.search_tsv, c.authored_tsv, c.source_id, c.source_version, c.updated_at,
                            ts_rank(c.search_tsv, tq.q_and) AS fts,
                            word_similarity($2, c.search_text) AS sim,
                            row_number() OVER (ORDER BY
@@ -266,9 +281,9 @@ async def retrieve_knowledge(
                 )
                 SELECT t.id, t.heading, t.summary, t.voice_answer, t.content,
                        t.source_id, t.source_version, t.updated_at, t.fts, t.sim,
-                       COALESCE((SELECT sum(w.idf) FROM w
-                                  WHERE t.search_tsv @@ plainto_tsquery('simple', w.lexeme)), 0)
-                         / NULLIF((SELECT sum(w.idf) FROM w), 0) AS coverage
+                       COALESCE((SELECT sum(a.idf) FROM authored_w a
+                                  WHERE t.authored_tsv @@ plainto_tsquery('simple', a.lexeme)), 0)
+                         / NULLIF((SELECT sum(a.idf) FROM authored_w a), 0) AS coverage
                 FROM top_k t
                 ORDER BY t.ord
                 """,
@@ -347,7 +362,12 @@ def retrieve_pinned_knowledge(
             if t not in _COVERAGE_STOPWORDS and t not in _NUMBER_WORDS and not t.isdigit()
         }
         if content_tokens:
-            node["coverage"] = len(content_tokens & doc_tokens) / len(content_tokens)
+            # Search metadata remains useful for routing, never factual authority.
+            authored = " ".join(str(node.get(key) or "") for key in ("heading", "content"))
+            authored_tokens = set(_TOKEN_RE.findall(authored.lower()))
+            node["coverage"] = len(content_tokens & authored_tokens) / len(content_tokens)
+        else:
+            node["coverage"] = None  # No measured terms; never reuse a prior query's score.
         ranked.append((score, priority, -index, node))
     ranked.sort(key=lambda item: (item[0], item[1], item[2]), reverse=True)
     return [item[3] for item in ranked[: max(1, int(k or 1))]]
