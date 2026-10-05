@@ -1,0 +1,26 @@
+...........................................F.........                    [100%]
+================================== FAILURES ===================================
+_ test_non_offers_and_explicitly_unsupported_shapes_are_not_inferred[My card number is 1111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111] _
+
+text = 'My card number is 1111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111'
+
+    @pytest.mark.parametrize("text", [
+        "My card number", "4111 1111 1111 1111", "1234", "My password is not working.",
+        "The password is required.", "A password reset is required.", "My password is missing.",
+        "passwordistan", "my cardinal number is 123456", "My email is password@example.com.",
+        "My card number is " + "1" * 100,
+        "My password is " + "x" * 200,
+        "My card number is 4111" + " " * 300 + "1111 1111 1111",
+        'My password is "abc"suffix',
+    ])
+    def test_non_offers_and_explicitly_unsupported_shapes_are_not_inferred(text):
+        from app.domain.services.explicit_secrets import sanitize_explicit_secrets
+>       assert sanitize_explicit_secrets(text) == text
+E       AssertionError: assert 'My card numb...cret removed]' == 'My card numb...1111111111111'
+E         - My card number is 1111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111
+E         + My card number is [secret removed]
+
+tests\unit\test_explicit_secret_boundary.py:188: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/unit/test_explicit_secret_boundary.py::test_non_offers_and_explicitly_unsupported_shapes_are_not_inferred[My card number is 1111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111]
+1 failed, 52 passed, 38 warnings in 1.90s

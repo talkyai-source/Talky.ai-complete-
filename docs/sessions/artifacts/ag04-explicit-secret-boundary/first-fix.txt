@@ -1,0 +1,76 @@
+.....F............FFF...........                                         [100%]
+================================== FAILURES ===================================
+_ test_actual_incremental_and_final_sql_payloads_never_retain_explicit_secret _
+
+    async def test_actual_incremental_and_final_sql_payloads_never_retain_explicit_secret():
+        from tests.unit.test_transcript_flush_pooled import _FakeConn, _FakePool
+        svc = TranscriptService()
+        svc.accumulate_turn("synthetic", "user", MIXED, is_final=True)
+        conn = _FakeConn()
+        pool = _FakePool(conn)
+>       assert await svc.flush_to_database("synthetic", db_pool=pool, tenant_id="tenant")
+E       assert False
+
+tests\unit\test_explicit_secret_boundary.py:86: AssertionError
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.transcript_service:transcript_service.py:623 transcript_flush_failed call=synthetic error_type=ValueError
+___ test_the_registered_version_still_describes_the_actual_prompt[lead_gen] ___
+
+persona = 'lead_gen'
+
+    @pytest.mark.parametrize("persona", known_personas())
+    def test_the_registered_version_still_describes_the_actual_prompt(persona):
+        """THE LOAD-BEARING TEST. See the module docstring before "fixing" this."""
+        version = version_for(persona)
+        actual = hash_prompt(compose(persona))
+        expected = _EXPECTED_HASHES.get(version)
+    
+>       assert expected and expected != "__FILL_ME__", (
+            f"{persona}: version {version} has no pinned hash. Add one: {actual!r}"
+        )
+E       AssertionError: lead_gen: version lead_gen@13 has no pinned hash. Add one: '780bbd7d205e033d'
+E       assert (None)
+
+tests\unit\test_prompt_versions.py:137: AssertionError
+_ test_the_registered_version_still_describes_the_actual_prompt[customer_support] _
+
+persona = 'customer_support'
+
+    @pytest.mark.parametrize("persona", known_personas())
+    def test_the_registered_version_still_describes_the_actual_prompt(persona):
+        """THE LOAD-BEARING TEST. See the module docstring before "fixing" this."""
+        version = version_for(persona)
+        actual = hash_prompt(compose(persona))
+        expected = _EXPECTED_HASHES.get(version)
+    
+>       assert expected and expected != "__FILL_ME__", (
+            f"{persona}: version {version} has no pinned hash. Add one: {actual!r}"
+        )
+E       AssertionError: customer_support: version customer_support@11 has no pinned hash. Add one: '87c8151146eaefe8'
+E       assert (None)
+
+tests\unit\test_prompt_versions.py:137: AssertionError
+_ test_the_registered_version_still_describes_the_actual_prompt[receptionist] _
+
+persona = 'receptionist'
+
+    @pytest.mark.parametrize("persona", known_personas())
+    def test_the_registered_version_still_describes_the_actual_prompt(persona):
+        """THE LOAD-BEARING TEST. See the module docstring before "fixing" this."""
+        version = version_for(persona)
+        actual = hash_prompt(compose(persona))
+        expected = _EXPECTED_HASHES.get(version)
+    
+>       assert expected and expected != "__FILL_ME__", (
+            f"{persona}: version {version} has no pinned hash. Add one: {actual!r}"
+        )
+E       AssertionError: receptionist: version receptionist@11 has no pinned hash. Add one: '2815ae3bffbb04eb'
+E       assert (None)
+
+tests\unit\test_prompt_versions.py:137: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/unit/test_explicit_secret_boundary.py::test_actual_incremental_and_final_sql_payloads_never_retain_explicit_secret
+FAILED tests/unit/test_prompt_versions.py::test_the_registered_version_still_describes_the_actual_prompt[lead_gen]
+FAILED tests/unit/test_prompt_versions.py::test_the_registered_version_still_describes_the_actual_prompt[customer_support]
+FAILED tests/unit/test_prompt_versions.py::test_the_registered_version_still_describes_the_actual_prompt[receptionist]
+4 failed, 28 passed, 32 warnings in 1.93s

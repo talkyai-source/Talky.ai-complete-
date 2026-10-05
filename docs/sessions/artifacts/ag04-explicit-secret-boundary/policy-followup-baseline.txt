@@ -1,0 +1,232 @@
+FFFFFFFFFFF....                                                          [100%]
+================================== FAILURES ===================================
+_ test_explicit_password_state_and_numeric_length_descriptions_remain_readable[My password is correct.] _
+
+text = 'My password is correct.'
+
+    @pytest.mark.parametrize("text", [
+        "My password is correct.", "My password is valid.", "My password is fine.",
+        "My password is okay.", "My password is unchanged.", "My password is empty.",
+        "My password is blank.", "My password is 12 characters long.",
+        "My password is 6 digits long.", "My password is 15 letters long.",
+        "My bank account number is 16 digits long.",
+    ])
+    def test_explicit_password_state_and_numeric_length_descriptions_remain_readable(text):
+        svc = TranscriptService()
+>       assert svc.accumulate_turn("synthetic", "user", text).content == text
+E       AssertionError: assert 'My password ...cret removed]' == 'My password is correct.'
+E         - My password is correct.
+E         + My password is [secret removed]
+
+tests\unit\test_explicit_secret_boundary.py:293: AssertionError
+_ test_explicit_password_state_and_numeric_length_descriptions_remain_readable[My password is valid.] _
+
+text = 'My password is valid.'
+
+    @pytest.mark.parametrize("text", [
+        "My password is correct.", "My password is valid.", "My password is fine.",
+        "My password is okay.", "My password is unchanged.", "My password is empty.",
+        "My password is blank.", "My password is 12 characters long.",
+        "My password is 6 digits long.", "My password is 15 letters long.",
+        "My bank account number is 16 digits long.",
+    ])
+    def test_explicit_password_state_and_numeric_length_descriptions_remain_readable(text):
+        svc = TranscriptService()
+>       assert svc.accumulate_turn("synthetic", "user", text).content == text
+E       AssertionError: assert 'My password ...cret removed]' == 'My password is valid.'
+E         - My password is valid.
+E         + My password is [secret removed]
+
+tests\unit\test_explicit_secret_boundary.py:293: AssertionError
+_ test_explicit_password_state_and_numeric_length_descriptions_remain_readable[My password is fine.] _
+
+text = 'My password is fine.'
+
+    @pytest.mark.parametrize("text", [
+        "My password is correct.", "My password is valid.", "My password is fine.",
+        "My password is okay.", "My password is unchanged.", "My password is empty.",
+        "My password is blank.", "My password is 12 characters long.",
+        "My password is 6 digits long.", "My password is 15 letters long.",
+        "My bank account number is 16 digits long.",
+    ])
+    def test_explicit_password_state_and_numeric_length_descriptions_remain_readable(text):
+        svc = TranscriptService()
+>       assert svc.accumulate_turn("synthetic", "user", text).content == text
+E       AssertionError: assert 'My password ...cret removed]' == 'My password is fine.'
+E         - My password is fine.
+E         + My password is [secret removed]
+
+tests\unit\test_explicit_secret_boundary.py:293: AssertionError
+_ test_explicit_password_state_and_numeric_length_descriptions_remain_readable[My password is okay.] _
+
+text = 'My password is okay.'
+
+    @pytest.mark.parametrize("text", [
+        "My password is correct.", "My password is valid.", "My password is fine.",
+        "My password is okay.", "My password is unchanged.", "My password is empty.",
+        "My password is blank.", "My password is 12 characters long.",
+        "My password is 6 digits long.", "My password is 15 letters long.",
+        "My bank account number is 16 digits long.",
+    ])
+    def test_explicit_password_state_and_numeric_length_descriptions_remain_readable(text):
+        svc = TranscriptService()
+>       assert svc.accumulate_turn("synthetic", "user", text).content == text
+E       AssertionError: assert 'My password ...cret removed]' == 'My password is okay.'
+E         - My password is okay.
+E         + My password is [secret removed]
+
+tests\unit\test_explicit_secret_boundary.py:293: AssertionError
+_ test_explicit_password_state_and_numeric_length_descriptions_remain_readable[My password is unchanged.] _
+
+text = 'My password is unchanged.'
+
+    @pytest.mark.parametrize("text", [
+        "My password is correct.", "My password is valid.", "My password is fine.",
+        "My password is okay.", "My password is unchanged.", "My password is empty.",
+        "My password is blank.", "My password is 12 characters long.",
+        "My password is 6 digits long.", "My password is 15 letters long.",
+        "My bank account number is 16 digits long.",
+    ])
+    def test_explicit_password_state_and_numeric_length_descriptions_remain_readable(text):
+        svc = TranscriptService()
+>       assert svc.accumulate_turn("synthetic", "user", text).content == text
+E       AssertionError: assert 'My password ...cret removed]' == 'My password is unchanged.'
+E         - My password is unchanged.
+E         + My password is [secret removed]
+
+tests\unit\test_explicit_secret_boundary.py:293: AssertionError
+_ test_explicit_password_state_and_numeric_length_descriptions_remain_readable[My password is empty.] _
+
+text = 'My password is empty.'
+
+    @pytest.mark.parametrize("text", [
+        "My password is correct.", "My password is valid.", "My password is fine.",
+        "My password is okay.", "My password is unchanged.", "My password is empty.",
+        "My password is blank.", "My password is 12 characters long.",
+        "My password is 6 digits long.", "My password is 15 letters long.",
+        "My bank account number is 16 digits long.",
+    ])
+    def test_explicit_password_state_and_numeric_length_descriptions_remain_readable(text):
+        svc = TranscriptService()
+>       assert svc.accumulate_turn("synthetic", "user", text).content == text
+E       AssertionError: assert 'My password ...cret removed]' == 'My password is empty.'
+E         - My password is empty.
+E         + My password is [secret removed]
+
+tests\unit\test_explicit_secret_boundary.py:293: AssertionError
+_ test_explicit_password_state_and_numeric_length_descriptions_remain_readable[My password is blank.] _
+
+text = 'My password is blank.'
+
+    @pytest.mark.parametrize("text", [
+        "My password is correct.", "My password is valid.", "My password is fine.",
+        "My password is okay.", "My password is unchanged.", "My password is empty.",
+        "My password is blank.", "My password is 12 characters long.",
+        "My password is 6 digits long.", "My password is 15 letters long.",
+        "My bank account number is 16 digits long.",
+    ])
+    def test_explicit_password_state_and_numeric_length_descriptions_remain_readable(text):
+        svc = TranscriptService()
+>       assert svc.accumulate_turn("synthetic", "user", text).content == text
+E       AssertionError: assert 'My password ...cret removed]' == 'My password is blank.'
+E         - My password is blank.
+E         + My password is [secret removed]
+
+tests\unit\test_explicit_secret_boundary.py:293: AssertionError
+_ test_explicit_password_state_and_numeric_length_descriptions_remain_readable[My password is 12 characters long.] _
+
+text = 'My password is 12 characters long.'
+
+    @pytest.mark.parametrize("text", [
+        "My password is correct.", "My password is valid.", "My password is fine.",
+        "My password is okay.", "My password is unchanged.", "My password is empty.",
+        "My password is blank.", "My password is 12 characters long.",
+        "My password is 6 digits long.", "My password is 15 letters long.",
+        "My bank account number is 16 digits long.",
+    ])
+    def test_explicit_password_state_and_numeric_length_descriptions_remain_readable(text):
+        svc = TranscriptService()
+>       assert svc.accumulate_turn("synthetic", "user", text).content == text
+E       AssertionError: assert 'My password ...racters long.' == 'My password ...racters long.'
+E         - My password is 12 characters long.
+E         ?                ^^
+E         + My password is [secret removed] characters long.
+E         ?                ^^^^^^^^^^^^^^^^
+
+tests\unit\test_explicit_secret_boundary.py:293: AssertionError
+_ test_explicit_password_state_and_numeric_length_descriptions_remain_readable[My password is 6 digits long.] _
+
+text = 'My password is 6 digits long.'
+
+    @pytest.mark.parametrize("text", [
+        "My password is correct.", "My password is valid.", "My password is fine.",
+        "My password is okay.", "My password is unchanged.", "My password is empty.",
+        "My password is blank.", "My password is 12 characters long.",
+        "My password is 6 digits long.", "My password is 15 letters long.",
+        "My bank account number is 16 digits long.",
+    ])
+    def test_explicit_password_state_and_numeric_length_descriptions_remain_readable(text):
+        svc = TranscriptService()
+>       assert svc.accumulate_turn("synthetic", "user", text).content == text
+E       AssertionError: assert 'My password ... digits long.' == 'My password ... digits long.'
+E         - My password is 6 digits long.
+E         ?                ^
+E         + My password is [secret removed] digits long.
+E         ?                ^^^^^^^^^^^^^^^^
+
+tests\unit\test_explicit_secret_boundary.py:293: AssertionError
+_ test_explicit_password_state_and_numeric_length_descriptions_remain_readable[My password is 15 letters long.] _
+
+text = 'My password is 15 letters long.'
+
+    @pytest.mark.parametrize("text", [
+        "My password is correct.", "My password is valid.", "My password is fine.",
+        "My password is okay.", "My password is unchanged.", "My password is empty.",
+        "My password is blank.", "My password is 12 characters long.",
+        "My password is 6 digits long.", "My password is 15 letters long.",
+        "My bank account number is 16 digits long.",
+    ])
+    def test_explicit_password_state_and_numeric_length_descriptions_remain_readable(text):
+        svc = TranscriptService()
+>       assert svc.accumulate_turn("synthetic", "user", text).content == text
+E       AssertionError: assert 'My password ...letters long.' == 'My password ...letters long.'
+E         - My password is 15 letters long.
+E         ?                ^^
+E         + My password is [secret removed] letters long.
+E         ?                ^^^^^^^^^^^^^^^^
+
+tests\unit\test_explicit_secret_boundary.py:293: AssertionError
+_ test_explicit_password_state_and_numeric_length_descriptions_remain_readable[My bank account number is 16 digits long.] _
+
+text = 'My bank account number is 16 digits long.'
+
+    @pytest.mark.parametrize("text", [
+        "My password is correct.", "My password is valid.", "My password is fine.",
+        "My password is okay.", "My password is unchanged.", "My password is empty.",
+        "My password is blank.", "My password is 12 characters long.",
+        "My password is 6 digits long.", "My password is 15 letters long.",
+        "My bank account number is 16 digits long.",
+    ])
+    def test_explicit_password_state_and_numeric_length_descriptions_remain_readable(text):
+        svc = TranscriptService()
+>       assert svc.accumulate_turn("synthetic", "user", text).content == text
+E       AssertionError: assert 'My bank acco... digits long.' == 'My bank acco... digits long.'
+E         - My bank account number is 16 digits long.
+E         ?                           ^^
+E         + My bank account number is [secret removed] digits long.
+E         ?                           ^^^^^^^^^^^^^^^^
+
+tests\unit\test_explicit_secret_boundary.py:293: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/unit/test_explicit_secret_boundary.py::test_explicit_password_state_and_numeric_length_descriptions_remain_readable[My password is correct.]
+FAILED tests/unit/test_explicit_secret_boundary.py::test_explicit_password_state_and_numeric_length_descriptions_remain_readable[My password is valid.]
+FAILED tests/unit/test_explicit_secret_boundary.py::test_explicit_password_state_and_numeric_length_descriptions_remain_readable[My password is fine.]
+FAILED tests/unit/test_explicit_secret_boundary.py::test_explicit_password_state_and_numeric_length_descriptions_remain_readable[My password is okay.]
+FAILED tests/unit/test_explicit_secret_boundary.py::test_explicit_password_state_and_numeric_length_descriptions_remain_readable[My password is unchanged.]
+FAILED tests/unit/test_explicit_secret_boundary.py::test_explicit_password_state_and_numeric_length_descriptions_remain_readable[My password is empty.]
+FAILED tests/unit/test_explicit_secret_boundary.py::test_explicit_password_state_and_numeric_length_descriptions_remain_readable[My password is blank.]
+FAILED tests/unit/test_explicit_secret_boundary.py::test_explicit_password_state_and_numeric_length_descriptions_remain_readable[My password is 12 characters long.]
+FAILED tests/unit/test_explicit_secret_boundary.py::test_explicit_password_state_and_numeric_length_descriptions_remain_readable[My password is 6 digits long.]
+FAILED tests/unit/test_explicit_secret_boundary.py::test_explicit_password_state_and_numeric_length_descriptions_remain_readable[My password is 15 letters long.]
+FAILED tests/unit/test_explicit_secret_boundary.py::test_explicit_password_state_and_numeric_length_descriptions_remain_readable[My bank account number is 16 digits long.]
+11 failed, 4 passed, 62 deselected, 15 warnings in 1.18s

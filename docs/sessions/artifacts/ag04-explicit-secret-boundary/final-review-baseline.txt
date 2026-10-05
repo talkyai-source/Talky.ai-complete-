@@ -1,0 +1,154 @@
+FFFFFF......                                                             [100%]
+================================== FAILURES ===================================
+_ test_scope_exclusions_cannot_retain_large_length_values_or_bracket_passwords[My card number is 4111111111111111 digits long.-4111111111111111] _
+
+offered = 'My card number is 4111111111111111 digits long.'
+secret = '4111111111111111'
+
+    @pytest.mark.parametrize("offered,secret", [
+        ("My card number is 4111111111111111 digits long.", "4111111111111111"),
+        ("My password is 123456 characters long.", "123456"),
+        ("CVV is 123 digits long.", "123"),
+        ("CVV is 042 digits long.", "042"),
+        ("My password is [q7!m9].", "[q7!m9]."),
+        ("My password is [q7?m9]", "[q7?m9]"),
+    ])
+    async def test_scope_exclusions_cannot_retain_large_length_values_or_bracket_passwords(offered, secret):
+        from tests.unit.test_transcript_flush_pooled import _FakeConn, _FakePool
+        svc, conn = TranscriptService(), _FakeConn()
+        turn = svc.accumulate_turn("synthetic", "user", offered + " " + CONTACT, is_final=True)
+>       assert turn.content == offered.replace(secret, MARKER) + " " + CONTACT
+E       AssertionError: assert 'My card numb...+14155552671.' == 'My card numb...+14155552671.'
+E         Skipping 84 identical trailing characters in diff, use -v to show
+E         - My card number is [secret removed] digits l
+E         + My card number is 4111111111111111 digits l
+
+tests\unit\test_explicit_secret_boundary.py:319: AssertionError
+_ test_scope_exclusions_cannot_retain_large_length_values_or_bracket_passwords[My password is 123456 characters long.-123456] _
+
+offered = 'My password is 123456 characters long.', secret = '123456'
+
+    @pytest.mark.parametrize("offered,secret", [
+        ("My card number is 4111111111111111 digits long.", "4111111111111111"),
+        ("My password is 123456 characters long.", "123456"),
+        ("CVV is 123 digits long.", "123"),
+        ("CVV is 042 digits long.", "042"),
+        ("My password is [q7!m9].", "[q7!m9]."),
+        ("My password is [q7?m9]", "[q7?m9]"),
+    ])
+    async def test_scope_exclusions_cannot_retain_large_length_values_or_bracket_passwords(offered, secret):
+        from tests.unit.test_transcript_flush_pooled import _FakeConn, _FakePool
+        svc, conn = TranscriptService(), _FakeConn()
+        turn = svc.accumulate_turn("synthetic", "user", offered + " " + CONTACT, is_final=True)
+>       assert turn.content == offered.replace(secret, MARKER) + " " + CONTACT
+E       AssertionError: assert 'My password ...+14155552671.' == 'My password ...+14155552671.'
+E         - My password is [secret removed] characters long. My name is Alex Morgan. My email is alex@example.com. My phone is +14155552671.
+E         ?                ^^^^^^^^^^^^^^^^
+E         + My password is 123456 characters long. My name is Alex Morgan. My email is alex@example.com. My phone is +14155552671.
+E         ?                ^^^^^^
+
+tests\unit\test_explicit_secret_boundary.py:319: AssertionError
+_ test_scope_exclusions_cannot_retain_large_length_values_or_bracket_passwords[CVV is 123 digits long.-123] _
+
+offered = 'CVV is 123 digits long.', secret = '123'
+
+    @pytest.mark.parametrize("offered,secret", [
+        ("My card number is 4111111111111111 digits long.", "4111111111111111"),
+        ("My password is 123456 characters long.", "123456"),
+        ("CVV is 123 digits long.", "123"),
+        ("CVV is 042 digits long.", "042"),
+        ("My password is [q7!m9].", "[q7!m9]."),
+        ("My password is [q7?m9]", "[q7?m9]"),
+    ])
+    async def test_scope_exclusions_cannot_retain_large_length_values_or_bracket_passwords(offered, secret):
+        from tests.unit.test_transcript_flush_pooled import _FakeConn, _FakePool
+        svc, conn = TranscriptService(), _FakeConn()
+        turn = svc.accumulate_turn("synthetic", "user", offered + " " + CONTACT, is_final=True)
+>       assert turn.content == offered.replace(secret, MARKER) + " " + CONTACT
+E       AssertionError: assert 'CVV is 123 d...+14155552671.' == 'CVV is [secr...+14155552671.'
+E         - CVV is [secret removed] digits long. My name is Alex Morgan. My email is alex@example.com. My phone is +14155552671.
+E         ?        ^^^^^^^^^^^^^^^^
+E         + CVV is 123 digits long. My name is Alex Morgan. My email is alex@example.com. My phone is +14155552671.
+E         ?        ^^^
+
+tests\unit\test_explicit_secret_boundary.py:319: AssertionError
+_ test_scope_exclusions_cannot_retain_large_length_values_or_bracket_passwords[CVV is 042 digits long.-042] _
+
+offered = 'CVV is 042 digits long.', secret = '042'
+
+    @pytest.mark.parametrize("offered,secret", [
+        ("My card number is 4111111111111111 digits long.", "4111111111111111"),
+        ("My password is 123456 characters long.", "123456"),
+        ("CVV is 123 digits long.", "123"),
+        ("CVV is 042 digits long.", "042"),
+        ("My password is [q7!m9].", "[q7!m9]."),
+        ("My password is [q7?m9]", "[q7?m9]"),
+    ])
+    async def test_scope_exclusions_cannot_retain_large_length_values_or_bracket_passwords(offered, secret):
+        from tests.unit.test_transcript_flush_pooled import _FakeConn, _FakePool
+        svc, conn = TranscriptService(), _FakeConn()
+        turn = svc.accumulate_turn("synthetic", "user", offered + " " + CONTACT, is_final=True)
+>       assert turn.content == offered.replace(secret, MARKER) + " " + CONTACT
+E       AssertionError: assert 'CVV is 042 d...+14155552671.' == 'CVV is [secr...+14155552671.'
+E         - CVV is [secret removed] digits long. My name is Alex Morgan. My email is alex@example.com. My phone is +14155552671.
+E         ?        ^^^^^^^^^^^^^^^^
+E         + CVV is 042 digits long. My name is Alex Morgan. My email is alex@example.com. My phone is +14155552671.
+E         ?        ^^^
+
+tests\unit\test_explicit_secret_boundary.py:319: AssertionError
+_ test_scope_exclusions_cannot_retain_large_length_values_or_bracket_passwords[My password is [q7!m9].-[q7!m9].] _
+
+offered = 'My password is [q7!m9].', secret = '[q7!m9].'
+
+    @pytest.mark.parametrize("offered,secret", [
+        ("My card number is 4111111111111111 digits long.", "4111111111111111"),
+        ("My password is 123456 characters long.", "123456"),
+        ("CVV is 123 digits long.", "123"),
+        ("CVV is 042 digits long.", "042"),
+        ("My password is [q7!m9].", "[q7!m9]."),
+        ("My password is [q7?m9]", "[q7?m9]"),
+    ])
+    async def test_scope_exclusions_cannot_retain_large_length_values_or_bracket_passwords(offered, secret):
+        from tests.unit.test_transcript_flush_pooled import _FakeConn, _FakePool
+        svc, conn = TranscriptService(), _FakeConn()
+        turn = svc.accumulate_turn("synthetic", "user", offered + " " + CONTACT, is_final=True)
+>       assert turn.content == offered.replace(secret, MARKER) + " " + CONTACT
+E       AssertionError: assert 'My password ...+14155552671.' == 'My password ...+14155552671.'
+E         - My password is [secret removed] My name is Alex Morgan. My email is alex@example.com. My phone is +14155552671.
+E         ?                 ^^^^^^^^^ ^^^^
+E         + My password is [q7!m9]. My name is Alex Morgan. My email is alex@example.com. My phone is +14155552671.
+E         ?                 ^^^ ^ +
+
+tests\unit\test_explicit_secret_boundary.py:319: AssertionError
+_ test_scope_exclusions_cannot_retain_large_length_values_or_bracket_passwords[My password is [q7?m9]-[q7?m9]] _
+
+offered = 'My password is [q7?m9]', secret = '[q7?m9]'
+
+    @pytest.mark.parametrize("offered,secret", [
+        ("My card number is 4111111111111111 digits long.", "4111111111111111"),
+        ("My password is 123456 characters long.", "123456"),
+        ("CVV is 123 digits long.", "123"),
+        ("CVV is 042 digits long.", "042"),
+        ("My password is [q7!m9].", "[q7!m9]."),
+        ("My password is [q7?m9]", "[q7?m9]"),
+    ])
+    async def test_scope_exclusions_cannot_retain_large_length_values_or_bracket_passwords(offered, secret):
+        from tests.unit.test_transcript_flush_pooled import _FakeConn, _FakePool
+        svc, conn = TranscriptService(), _FakeConn()
+        turn = svc.accumulate_turn("synthetic", "user", offered + " " + CONTACT, is_final=True)
+>       assert turn.content == offered.replace(secret, MARKER) + " " + CONTACT
+E       AssertionError: assert 'My password ...+14155552671.' == 'My password ...+14155552671.'
+E         - My password is [secret removed] My name is Alex Morgan. My email is alex@example.com. My phone is +14155552671.
+E         ?                 ^^^^^^^^^ ^^^^
+E         + My password is [q7?m9] My name is Alex Morgan. My email is alex@example.com. My phone is +14155552671.
+E         ?                 ^^^ ^
+
+tests\unit\test_explicit_secret_boundary.py:319: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/unit/test_explicit_secret_boundary.py::test_scope_exclusions_cannot_retain_large_length_values_or_bracket_passwords[My card number is 4111111111111111 digits long.-4111111111111111]
+FAILED tests/unit/test_explicit_secret_boundary.py::test_scope_exclusions_cannot_retain_large_length_values_or_bracket_passwords[My password is 123456 characters long.-123456]
+FAILED tests/unit/test_explicit_secret_boundary.py::test_scope_exclusions_cannot_retain_large_length_values_or_bracket_passwords[CVV is 123 digits long.-123]
+FAILED tests/unit/test_explicit_secret_boundary.py::test_scope_exclusions_cannot_retain_large_length_values_or_bracket_passwords[CVV is 042 digits long.-042]
+FAILED tests/unit/test_explicit_secret_boundary.py::test_scope_exclusions_cannot_retain_large_length_values_or_bracket_passwords[My password is [q7!m9].-[q7!m9].]
+FAILED tests/unit/test_explicit_secret_boundary.py::test_scope_exclusions_cannot_retain_large_length_values_or_bracket_passwords[My password is [q7?m9]-[q7?m9]]
+6 failed, 6 passed, 77 deselected, 6 warnings in 0.84s

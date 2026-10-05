@@ -1,0 +1,38 @@
+F                                                                        [100%]
+================================== FAILURES ===================================
+_ test_actual_incremental_and_final_sql_payloads_never_retain_explicit_secret _
+
+    async def test_actual_incremental_and_final_sql_payloads_never_retain_explicit_secret():
+        from tests.unit.test_transcript_flush_pooled import _FakeConn, _FakePool
+        svc = TranscriptService()
+        svc.accumulate_turn("synthetic", "user", MIXED, is_final=True)
+        conn = _FakeConn()
+        pool = _FakePool(conn)
+        tenant = "00000000-0000-0000-0000-0000000000b1"
+        assert await svc.flush_to_database("synthetic", db_pool=pool, tenant_id=tenant)
+        assert await svc.save_transcript("synthetic", db_pool=pool, tenant_id=tenant)
+        writes = [(sql, args) for sql, args in conn.executed
+                  if sql.startswith("UPDATE calls SET transcript=") or sql.startswith("UPDATE transcripts")]
+        assert len(writes) == 3
+        for _, args in writes:
+>           assert_safe(args)
+
+tests\unit\test_explicit_secret_boundary.py:94: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+value = ('User: My name is Alex Morgan. My email is alex@example.com. My phone is +14155552671. My card number is 4111 1111 11... "include_in_plaintext": true, "metadata": {}}]', None, 'partial', 'synthetic', '00000000-0000-0000-0000-0000000000b1')
+
+    def assert_safe(value):
+        text = json.dumps(value, default=str)
+>       assert "4111" not in text
+E       assert '4111' not in '["User: My ...00000000b1"]'
+E         '4111' is contained here:
+E         ?           ^^^^^^^^^^^^^^^^
+E           number is 4111 1111 1111 1111. Our budget is 2500 and invoice number is 123456.", "[{\"role\": \"user\", \"content\": \"My name is Alex Morgan. My email is alex@example.com. My phone is +14155552671. My card number is 4111 1111 1111 1111. Our budget is 2500 and invoice number is 123456.\", \"timestamp\": \"2026-10-05T22:14:02.768797\", \"confidence\": null, \"talklee_call_id\": null, \"turn_index\": null, \"event_type\": \"utterance\", \"is_final\": true, \"audio_window_start\": null, \"audio_window_end\": null, \"include_in_plaintext\":...
+E         
+E         ...Full output truncated (2 lines hidden), use '-vv' to show
+
+tests\unit\test_explicit_secret_boundary.py:39: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/unit/test_explicit_secret_boundary.py::test_actual_incremental_and_final_sql_payloads_never_retain_explicit_secret
+1 failed, 1 warning in 0.85s
