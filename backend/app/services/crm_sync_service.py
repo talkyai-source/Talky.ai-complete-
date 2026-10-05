@@ -325,6 +325,11 @@ class CRMSyncService:
                 connector=fresh, reviewed_settings=settings, provider=provider)
         if receipt["phase"] == "legacy_unverified":
             raise RuntimeError("Legacy shared CRM ID requires provider ownership review")
+        if receipt.get("reconcile") and receipt["phase"] == "creating_call":
+            # A matching title/subject proves neither this uncertain write nor
+            # its original contact association. Keep the saved evidence for
+            # inspection; never adopt or patch an activity based on that match.
+            raise CRMDestinationMismatch("Call creation outcome requires original-account review")
         connector = await self._connector(tenant_id, provider,
             connector_id=str(receipt['destination_connector_id']) if receipt.get('destination_connector_id') else None)
         if not await self.deliveries.bind_destination(receipt, str(connector.connector_id), str(connector.external_account_id)):
@@ -351,12 +356,6 @@ class CRMSyncService:
                     raise CRMDestinationMismatch("The original CRM contact intent changed before creation; review required")
         elif (receipt.get("remote_contact_id") or receipt.get("remote_call_id")) and lead.get("_crm_explicit_contacts"):
             raise CRMDestinationMismatch("Historical CRM recipient ownership is unverified; review required")
-        if receipt.get("reconcile") and receipt["phase"] == "creating_call":
-            remote = await self._with_auth_retry(tenant_id, provider, connector,
-                lambda c: c.find_call_by_reference(str(call["id"])))
-            if not remote:
-                raise RuntimeError("Create outcome remains unknown; no automatic resend")
-            await self.deliveries.save(receipt, call_id=str(remote))
         remote_call = receipt.get("remote_call_id")
         if remote_call:
             await self.deliveries.save(receipt, phase="updating_call")

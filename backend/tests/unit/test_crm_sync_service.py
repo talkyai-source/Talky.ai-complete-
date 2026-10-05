@@ -526,7 +526,8 @@ def test_one_failed_provider_retries_independently_without_recreating_success(ha
     assert len([c for c in hs.calls if c[0] == 'log']) == 1
 
 
-def test_lost_remote_success_reconciles_without_repeating_create(harness):
+@pytest.mark.parametrize('provider', ['salesforce', 'hubspot'])
+def test_lost_remote_success_remains_held_despite_matching_reference(harness, provider):
     class LostResponse(FakeConnector):
         async def log_call(self, *args, **kwargs):
             await super().log_call(*args, **kwargs)
@@ -534,15 +535,48 @@ def test_lost_remote_success_reconciles_without_repeating_create(harness):
         async def find_call_by_reference(self, reference):
             self.calls.append(('reconcile', reference))
             return 'recovered-call'
-    connector = LostResponse(found={'id': 'contact'})
-    harness['connectors']['salesforce'] = connector
+    connector = LostResponse(provider, found={'id': 'contact'})
+    harness['providers'] = [provider]
+    harness['connectors'][provider] = connector
     assert not _run(harness['service'].sync_call(TENANT, CALL)).success
-    row = harness['deliveries'].rows[(TENANT, CALL, 'salesforce')]
+    row = harness['deliveries'].rows[(TENANT, CALL, provider)]
     assert row['status'] == 'unknown' and row['phase'] == 'creating_call'
+    original = copy.deepcopy(row)
+    resolution_count = len(harness['resolved'])
     second = _run(harness['service'].sync_call(TENANT, CALL))
-    assert second.success and second.crm_call_id == 'recovered-call'
+    assert not second.success and second.crm_call_id is None
+    assert row['status'] == 'unknown' and row['phase'] == 'creating_call'
+    for key in ('destination_connector_id', 'destination_account_id',
+                'remote_contact_id', 'remote_call_id', 'contact_effect', 'completed_key'):
+        assert row.get(key) == original.get(key)
+    assert harness['marked'] == []
+    assert len(harness['resolved']) == resolution_count
     assert len([c for c in connector.calls if c[0] == 'log']) == 1
-    assert ('reconcile', CALL) in connector.calls
+    assert not any(c[0] in {'reconcile', 'update'} for c in connector.calls)
+
+
+@pytest.mark.parametrize('provider', ['salesforce', 'hubspot'])
+def test_expired_creating_call_recovery_never_adopts_or_updates_an_activity(harness, provider):
+    """A reclaimed worker lease has the same uncertain effect as a lost response."""
+    from app.services.crm_sync_service import CRMDestinationMismatch
+
+    connector = FakeConnector(provider, found={'id': 'original-contact'},
+                              fail_first_with=TimeoutError('unknown remote create'))
+    connector.find_call_by_reference = AsyncMock(return_value='unproven-activity')
+    harness['providers'] = [provider]
+    harness['connectors'][provider] = connector
+    assert not _run(harness['service'].sync_call(TENANT, CALL)).success
+    receipt = copy.deepcopy(harness['deliveries'].rows[(TENANT, CALL, provider)])
+    receipt.update(status='processing', reconcile=True)
+    original = copy.deepcopy(receipt)
+    resolution_count = len(harness['resolved'])
+    prior_calls = list(connector.calls)
+    with pytest.raises(CRMDestinationMismatch, match='original-account review'):
+        _run(harness['service']._deliver(receipt, harness['call'], harness['lead'], 'body', None))
+    assert receipt == original
+    assert len(harness['resolved']) == resolution_count
+    assert connector.calls == prior_calls
+    connector.find_call_by_reference.assert_not_awaited()
 
 
 def test_unknown_create_without_reconciliation_evidence_is_never_resent(harness):
