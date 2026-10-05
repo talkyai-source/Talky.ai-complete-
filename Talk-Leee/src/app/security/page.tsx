@@ -560,20 +560,16 @@ export default function SecurityPage() {
                 <Section
                     icon={Clock}
                     title="Data retention and recordings"
-                    description="How long call recordings and transcripts are kept."
-                    tip="Retention is set by your plan, not per user. Recordings are removed after the recording window; transcripts are kept longer because they are far smaller."
+                    description="Review stored audio and confirm your account's retention policy."
+                    tip="Recording deletion applies to audio. Transcripts and other retained data are managed separately."
                 >
                     <p className="text-sm text-muted-foreground">
-                        Retention is determined by your plan and applied automatically. See{" "}
-                        <Link href="/billing" className="font-medium text-foreground underline underline-offset-2">
-                            Billing
-                        </Link>{" "}
-                        for your current plan, and{" "}
+                        Confirm your account&apos;s recording and transcript retention policy
+                        with your administrator. Open{" "}
                         <Link href="/recordings" className="font-medium text-foreground underline underline-offset-2">
                             Recordings
                         </Link>{" "}
-                        for what is currently stored — each recording shows its own remaining
-                        retention.
+                        to review stored audio.
                     </p>
                 </Section>
 
