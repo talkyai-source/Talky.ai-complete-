@@ -290,6 +290,50 @@ def test_static_inventory_depends_on_the_runtime_migration(monkeypatch):
     assert tenant_scoped_tables - rls_tables == EXPECTED_POLICY_TABLES
 
 
+def test_unrelated_python_alter_cannot_borrow_another_tables_rls(tmp_path):
+    migrations = tmp_path / "Alembic" / "versions"
+    migrations.mkdir(parents=True)
+    (migrations / "0001_receipts.py").write_text(
+        dedent('''
+            def upgrade():
+                op.execute("""CREATE TABLE invoices (
+                    id UUID PRIMARY KEY,
+                    tenant_id UUID NOT NULL
+                );""")
+                op.execute("""CREATE TABLE invoice_snapshots (
+                    id UUID PRIMARY KEY,
+                    tenant_id UUID NOT NULL
+                );""")
+                op.execute("ALTER TABLE public.invoices ADD COLUMN observed_at TIMESTAMPTZ")
+                op.execute("ALTER TABLE public.invoice_snapshots ENABLE ROW LEVEL SECURITY")
+        '''),
+        encoding="utf-8",
+    )
+
+    rls_tables, tenant_scoped_tables = inventory.discover_rls_tables(tmp_path)
+
+    assert tenant_scoped_tables == {"invoices", "invoice_snapshots"}
+    assert rls_tables == {"invoice_snapshots"}
+    assert tenant_scoped_tables - rls_tables == {"invoices"}
+
+
+@pytest.mark.parametrize("target", [
+    "invoices", '"invoices"', "public.invoices", 'public."invoices"',
+    "ONLY invoices", 'IF EXISTS ONLY public."invoices"',
+])
+def test_inventory_recognizes_supported_enable_rls_identifiers(tmp_path, target):
+    database = tmp_path / "database"
+    database.mkdir()
+    (database / "schema.sql").write_text(
+        f"ALTER TABLE {target}\n ENABLE ROW LEVEL SECURITY;",
+        encoding="utf-8",
+    )
+
+    rls_tables, _ = inventory.discover_rls_tables(tmp_path)
+
+    assert rls_tables == {"invoices"}
+
+
 def test_schema_discovery_ignores_non_runtime_evidence(tmp_path):
     (tmp_path / "database" / "tests").mkdir(parents=True)
     (tmp_path / "database" / "docs").mkdir()

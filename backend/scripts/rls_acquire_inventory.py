@@ -151,9 +151,11 @@ _TENANT_NAME_RE = re.compile(r"^_?tenant(_id|_uuid)?$|_tenant_id$|^tenant_uuid$"
 # --------------------------------------------------------------------------
 # RLS table discovery (from the schema in this repo, not from a live DB)
 # --------------------------------------------------------------------------
+# Match this ALTER action directly. A free-text gap can cross separate Python
+# SQL literals and attribute another table's ENABLE statement to this table.
 _ENABLE_RLS_RE = re.compile(
     r"alter\s+table\s+(?:if\s+exists\s+)?(?:only\s+)?(?:public\.)?\"?"
-    r"([a-z_][a-z0-9_]*)\"?[^;]*?enable\s+row\s+level\s+security",
+    r"([a-z_][a-z0-9_]*)\"?\s+enable\s+row\s+level\s+security",
     re.IGNORECASE | re.DOTALL,
 )
 _CREATE_POLICY_RE = re.compile(

@@ -30,7 +30,8 @@ def _mock_global_config():
     cfg.llm_temperature = 0.5
     cfg.llm_max_tokens = 200
     cfg.llm_provider = "groq"
-    cfg.stt_engine = "flux"
+    cfg.stt_engine = "deepgram_flux"
+    cfg.stt_language = "en"
     cfg.pipeline_mode = "cascaded"
     cfg.realtime_model = ""
     cfg.realtime_voice = ""
