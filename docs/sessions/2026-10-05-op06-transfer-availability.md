@@ -38,7 +38,7 @@ The wording does not declare every legacy outbound transfer unavailable, and doe
 
 ## Local evidence
 
-All new controls use the real context, capability, traditional tool selector, shared action instructions and response guard with synthetic SQL/adapter seams. They are not actual PostgreSQL/RLS, model-semantic, carrier or acoustic acceptance.
+The new capability controls use the real context, capability, traditional tool selector, shared action instructions and response guard with synthetic SQL/adapter seams. They are not actual PostgreSQL/RLS, model-semantic, carrier or acoustic acceptance. The separately attributed database-fixture follow-up below exercises actual PostgreSQL receipt paths only.
 
 - Initial new module: **17 failed, 2 passed**. Sixteen failures exposed forbidden/stale transfer capabilities; one positive control exposed the absent platform lookup. The two passing controls were disconnected adapter and preserved outbound capability. See `artifacts/op06/capability-initial.txt`.
 - First repaired module: **19 passed**; see `capability-final.txt`.
@@ -50,6 +50,12 @@ All new controls use the real context, capability, traditional tool selector, sh
 - Independent review by the LLM agent found no material backend gate defect. Its remaining same-page handoff implication was corrected before the final lint.
 
 Exact commands, versions, files and result attribution are recorded in `artifacts/op06/validation-manifest.json`. Earlier runs are preserved rather than relabeled as final passes.
+
+## Database-fixture compatibility follow-up
+
+Commit `3f3de0958fdc8b02dcd1bf062d8f9c22d1aa77f6` changes only the existing action-receipt integration fixture. Its deliberately minimal `calls` table needed the six admission/direction fields now read by the shared action context. The added column types and defaults match the canonical migration; no application, permission or production schema changed. Other minimal CRM/lead fixture schemas do not call this context and were left unchanged.
+
+The seven-case action-receipt module passed on the retained loopback PostgreSQL test database: **7 passed, 0 skipped**, three existing datetime warnings, **4.16 seconds**. Cases cover durable duplicate/conflict handling, uncertain/cancelled effects, callback outbox replay, changed policy, actual voice email confirmation and replay, dashboard call preview/queue, and workflow child previews. Provider and queue effects remain synthetic. Each run owns an isolated minimal schema; this is not a full-migration or RLS claim. The public schema remained at `0059` and the exclusive test slot was released after fixture cleanup. See `artifacts/op06/action-receipts-postgres.txt` and the manifest for the exact command.
 
 ## Acceptance still required
 

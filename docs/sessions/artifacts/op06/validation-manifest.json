@@ -10,7 +10,8 @@
     "backend/tests/unit/test_inbound_campaign_service.py",
     "Talk-Leee/src/app/ai-voice-agent/page.tsx",
     "Talk-Leee/src/app/use-cases/customer-services-support/page.tsx",
-    "Talk-Leee/src/app/use-cases/automated-lead-qualification/page.tsx"
+    "Talk-Leee/src/app/use-cases/automated-lead-qualification/page.tsx",
+    "backend/tests/integration/test_action_execution_receipts.py"
   ],
   "runtime": {
     "python": "3.12.12",
@@ -145,12 +146,34 @@
         "tests/unit/test_inbound_campaign_service.py"
       ],
       "exit_code": 0
+    },
+    {
+      "artifact": "action-receipts-postgres.txt",
+      "cwd": "backend",
+      "argv": [
+        "C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/backend/.venv/Scripts/python.exe",
+        "-m",
+        "pytest",
+        "tests/integration/test_action_execution_receipts.py",
+        "-q"
+      ],
+      "environment": {
+        "TALKY_ACTION_TEST_DATABASE_URL": "postgresql://talky@127.0.0.1:55434/cp04_acceptance_test"
+      },
+      "result": {
+        "passed": 7,
+        "failed": 0,
+        "skipped": 0,
+        "warnings": 3,
+        "seconds": 4.16
+      },
+      "scope": "Actual PostgreSQL, unique minimal fixture schema with canonical calls column types/defaults, fake provider and queue. Does not establish full migration or RLS acceptance. Retained public database head0059 was not modified."
     }
   ],
   "fixture_only_correction": "Match outer FROM user_permissions before nested FROM tenant_users in the fake dispatcher. Real active-membership SQL and policy unchanged.",
   "independent_review": "LLM agent read-only backend/copy review found no material backend defect. Residual automatic handoff wording corrected before final lint.",
   "limits": [
-    "Synthetic SQL and adapter seams; no real PostgreSQL/RLS test in this package.",
+    "Initial capability controls use synthetic SQL/adapter seams. Separate seven-case receipt follow-up uses actual PostgreSQL with a unique minimal schema; it is not full-migration or RLS proof.",
     "No model, provider, carrier, telephone or acoustic acceptance.",
     "Production controlled inbound flag remains false; outbound transfer contract preserved.",
     "Staging positive controls only test existing scoped read-only availability.",
@@ -158,5 +181,6 @@
     "No new full frontend build/render; only changed-page ESLint.",
     "Temporary node_modules junction reads existing exact-lock main-tree dependencies; no install into them.",
     "OP06/F23 remains incomplete pending allowlisted two-leg carrier/restart/settlement proof."
-  ]
+  ],
+  "fixture_followup_commit": "3f3de0958fdc8b02dcd1bf062d8f9c22d1aa77f6"
 }
