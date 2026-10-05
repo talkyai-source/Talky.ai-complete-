@@ -1,0 +1,59 @@
+{
+  "package": "OP11",
+  "scope": "Local recording creation privacy and resolved storage containment",
+  "base_commit": "d26f0ff026c76c1ca53ad710fcee249a7116787a",
+  "source_commit": "cf4779d8d82e0dae7fd7c10efd7f85ac2c772af4",
+  "platform": "Windows; effective POSIX mode checks explicitly skipped",
+  "python": "3.12.12",
+  "interpreter": "C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/backend/.venv/Scripts/python.exe",
+  "working_directory": "C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/tmp/production-ready-op11-recording-20261005",
+  "source_files": [
+    "backend/app/domain/services/recording_service.py",
+    "backend/tests/unit/test_op11_recording_file_privacy.py"
+  ],
+  "checks": [
+    {
+      "command": "python -m pytest backend/tests/unit/test_op11_recording_file_privacy.py -q",
+      "source": "Unmodified d26f0ff0 plus initial new test module",
+      "artifact": "initial.txt",
+      "exit_code": 1,
+      "passed": 3,
+      "failed": 3,
+      "skipped": 4,
+      "scope": "Actual Windows temporary-file/symlink operations; POSIX permissions not run"
+    },
+    {
+      "command": "python -m pytest backend/tests/unit/test_op11_recording_file_privacy.py backend/tests/unit/test_recording_offload.py backend/tests/unit/test_recordings_endpoint_contract.py backend/tests/unit/test_recording_storage_permanent_delete.py backend/tests/unit/test_op07_recording_retention.py -q",
+      "source": "cf4779d8d82e0dae7fd7c10efd7f85ac2c772af4",
+      "artifact": "focused-final.txt",
+      "exit_code": 0,
+      "passed": 79,
+      "failed": 0,
+      "skipped": 4,
+      "warnings": 63,
+      "seconds": 10.87,
+      "scope": "Actual local writer and service methods; synthetic DB/storage seams, not production or actual RLS proof"
+    },
+    {
+      "command": "python -m ruff check backend/app/domain/services/recording_service.py backend/tests/unit/test_op11_recording_file_privacy.py --select F --extend-ignore F401,F841",
+      "artifact": "ruff-ci.txt",
+      "exit_code": 0
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "output": "No output; completed before source commit"
+    }
+  ],
+  "earlier_non_additive_artifact": "focused-first.txt: 77 passed,4 skipped before two additional controls",
+  "strict_lint_limit": "A stricter --select F probe found unchanged baseline F401 struct and BotoCoreError; existing CI exceptions preserved, no new suppression",
+  "independent_review": "Root and llm_audit read review clear; no independent test-run count",
+  "not_run": [
+    "Four POSIX mode tests; no local WSL distribution or Docker runtime",
+    "Separate service-account/group/ACL read and deletion",
+    "Production service identity, storage permissions or deployment",
+    "Legacy file/directory permission remediation",
+    "Hostile parent-directory replacement race protection"
+  ],
+  "log_normalization": "Trailing line whitespace removed and UTF-8/LF stored; observed results unchanged"
+}

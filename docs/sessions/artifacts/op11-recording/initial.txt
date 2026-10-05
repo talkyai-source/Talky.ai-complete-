@@ -1,0 +1,70 @@
+..FFF.ssss                                                               [100%]
+================================== FAILURES ===================================
+_____ test_writer_rejects_outside_root_before_creating_or_changing_files ______
+
+tmp_path = WindowsPath('C:/Users/AL AZIZ TECH/AppData/Local/Temp/pytest-of-UZAIR/pytest-776/test_writer_rejects_outside_ro0')
+
+    def test_writer_rejects_outside_root_before_creating_or_changing_files(tmp_path):
+        root = tmp_path / "recordings"
+        outside = tmp_path / "outside.wav"
+        outside.write_bytes(b"preserve")
+
+>       with pytest.raises(ValueError, match="outside"):
+E       Failed: DID NOT RAISE <class 'ValueError'>
+
+backend\tests\unit\test_op11_recording_file_privacy.py:48: Failed
+______ test_writer_rejects_symlink_escape_without_touching_target[True] _______
+
+tmp_path = WindowsPath('C:/Users/AL AZIZ TECH/AppData/Local/Temp/pytest-of-UZAIR/pytest-776/test_writer_rejects_symlink_es0')
+link_is_directory = True
+
+    @pytest.mark.parametrize("link_is_directory", [True, False])
+    def test_writer_rejects_symlink_escape_without_touching_target(tmp_path, link_is_directory):
+        root = tmp_path / "recordings"
+        root.mkdir()
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        target = outside / "call.wav"
+        target.write_bytes(b"preserve")
+        link = root / ("tenant" if link_is_directory else "call.wav")
+        try:
+            link.symlink_to(outside if link_is_directory else target,
+                            target_is_directory=link_is_directory)
+        except OSError as exc:
+            pytest.skip(f"OS cannot create a symlink: {exc}")
+        path = link / "call.wav" if link_is_directory else link
+
+>       with pytest.raises(ValueError, match="outside"):
+E       Failed: DID NOT RAISE <class 'ValueError'>
+
+backend\tests\unit\test_op11_recording_file_privacy.py:71: Failed
+______ test_writer_rejects_symlink_escape_without_touching_target[False] ______
+
+tmp_path = WindowsPath('C:/Users/AL AZIZ TECH/AppData/Local/Temp/pytest-of-UZAIR/pytest-776/test_writer_rejects_symlink_es1')
+link_is_directory = False
+
+    @pytest.mark.parametrize("link_is_directory", [True, False])
+    def test_writer_rejects_symlink_escape_without_touching_target(tmp_path, link_is_directory):
+        root = tmp_path / "recordings"
+        root.mkdir()
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        target = outside / "call.wav"
+        target.write_bytes(b"preserve")
+        link = root / ("tenant" if link_is_directory else "call.wav")
+        try:
+            link.symlink_to(outside if link_is_directory else target,
+                            target_is_directory=link_is_directory)
+        except OSError as exc:
+            pytest.skip(f"OS cannot create a symlink: {exc}")
+        path = link / "call.wav" if link_is_directory else link
+
+>       with pytest.raises(ValueError, match="outside"):
+E       Failed: DID NOT RAISE <class 'ValueError'>
+
+backend\tests\unit\test_op11_recording_file_privacy.py:71: Failed
+=========================== short test summary info ===========================
+FAILED backend\tests\unit\test_op11_recording_file_privacy.py::test_writer_rejects_outside_root_before_creating_or_changing_files
+FAILED backend\tests\unit\test_op11_recording_file_privacy.py::test_writer_rejects_symlink_escape_without_touching_target[True]
+FAILED backend\tests\unit\test_op11_recording_file_privacy.py::test_writer_rejects_symlink_escape_without_touching_target[False]
+3 failed, 3 passed, 4 skipped in 5.11s
