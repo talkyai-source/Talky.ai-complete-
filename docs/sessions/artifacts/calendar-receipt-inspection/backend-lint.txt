@@ -1,0 +1,24 @@
+app\infrastructure\connectors\calendar\google_calendar.py:10:32: F401 [*] `typing.Any` imported but unused
+   |
+ 8 | import logging
+ 9 | import re
+10 | from typing import List, Dict, Any, Optional
+   |                                ^^^ F401
+11 | from datetime import datetime, timedelta
+12 | from urllib.parse import quote, urlencode
+   |
+   = help: Remove unused import: `typing.Any`
+
+app\infrastructure\connectors\calendar\outlook_calendar.py:10:32: F401 [*] `typing.Any` imported but unused
+   |
+ 8 | import logging
+ 9 | import re
+10 | from typing import List, Dict, Any, Optional
+   |                                ^^^ F401
+11 | from datetime import datetime, timedelta
+12 | from urllib.parse import quote, urlencode
+   |
+   = help: Remove unused import: `typing.Any`
+
+Found 2 errors.
+[*] 2 fixable with the `--fix` option.

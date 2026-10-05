@@ -1,0 +1,43 @@
+{
+  "base_commit": "e81f525f6c476e74e22b6a41901e1d50c5c184dc",
+  "source_commit": "2010a1bf10b1305280ba6047099e0af44f3b7147",
+  "hash_scheme": "SHA-256 of bytes after CRLF-to-LF normalization only",
+  "source_files": {
+    "backend/app/api/v1/endpoints/admin/actions.py": "dd30dde55159273f2129f993a5122c356c141d477720267785445104daa66823",
+    "backend/app/infrastructure/connectors/calendar/google_calendar.py": "62ed1e955a2311b6ec176eb90d3aad08ffcb990f9609838d357c7ba4688253c2",
+    "backend/app/infrastructure/connectors/calendar/outlook_calendar.py": "243acb58d03154e2d248d5e9d08a21e738eb15d325a28fc8654c57e01c484810",
+    "Admin/frontend/src/components/ActionReceiptPanel.tsx": "8934151d9deb5a4970f38659b9921bdd62345b508948186ad55be3545984d704",
+    "Admin/frontend/src/lib/api.ts": "912e081c6f2c1e66948e1c9f68d1005d3155d223990701961a35fbfd706f3fd7",
+    "backend/tests/unit/test_admin_calendar_inspection.py": "3776f820c712ea074253e7044cf949719dfc3a5f8be7de5fdc2dc6e6fbf12518",
+    "Admin/frontend/tests/action-receipts.test.mjs": "b6cd90d2d13563fa52e628fa85ee26a2e1f52d89e25fd97d6c400a5099588529"
+  },
+  "unchanged_dependencies": {
+    "backend/app/services/connector_resolver.py": "054e6f5a0e7824ce55dadc8c29c9665b65d7bb6aad113d6c96abf9704a2143e0",
+    "backend/app/services/meeting_service.py": "26775c66e5dd9e5e1dafeca6a00af599d513594202111d56f517328b6473774d",
+    "backend/app/services/action_execution.py": "991c5f746e8b93312a21d046ee4554c1426e42031b10bc0a832868d1d9ad89d8",
+    "backend/tests/unit/test_admin_gmail_inspection.py": "ba8b55aa0d031345ef59fce95db9e867bcbeba729459578c238165bcdd14fc18",
+    "backend/app/infrastructure/connectors/calendar/base.py": "7ec279ca8bae554594755ef61b9fe4ff2d5b8b7013a1889ab2f8ead591ba0961"
+  },
+  "artifacts": {
+    "admin-before-reference-guard.txt": "c05c8077026efd00691893bca2b6c0ab816f29b26cbd41f0f085beff2b0173b4",
+    "admin-build.txt": "1b5c2340da41f29d46136d34407fe242f94aaf28a4e11c2ac8ab162dad374545",
+    "admin-final.txt": "1812cc1441c49b6938cb6cf258c20e5cb4b66ba9f84eab56c973cf8f91332c5e",
+    "admin-focused.txt": "8dfc794efcd7e76eb3520d67bde9c6776bfcb7eee5b6c64f2af72a6e64289e7f",
+    "admin-lint.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "admin-typecheck.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "backend-ci-lint.txt": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18",
+    "backend-final.txt": "80a30e6b639bb5667b2a004b95308521512a38ecdf4af2b07b440793e1071462",
+    "backend-focused.txt": "2802d2367c7f91a075aa8d46d3cd1cfc4f31cfb1475176d01a58170b4dc9f673",
+    "backend-lint.txt": "b286b67367591bbb54cf450b5ee93d0bb80a494360628d1c42dff7e4df9b5b07",
+    "baseline-google-lint.txt": "99d6bcfe4dc23b5f512d7902e5b4eebbe906dc6f667b63cca1455612716c78bd",
+    "baseline-initial-harness.txt": "a4112036fdce7d763654427e371994b58996eb6bc197dddf676d4f6279af326a",
+    "baseline-outlook-lint.txt": "74470fdf1a6975021d22a63b6c04a13736896e6f54bbbd2215d74d3d40f9c719",
+    "baseline.txt": "7302312bfca4e9a5fdc4fc3017bb5f001498b7881aba2ef5340517774c9d7d12",
+    "commands.json": "21fa1907bde640c233a0237e10611f0e4b4a48fda6c1a07c7f82c40eceec6fc7",
+    "record_evidence.py": "e0dda94736da3ceb1dad7c7a7fd79782e52b003df0e1d6f3f8f03da6fcf8b505",
+    "source-hashes.json": "816b27c2beca2fb6cc5c8b00faf58b80be256f098f8457722845002e908b2f0a",
+    "verification.md": "4b351bc1d43433e2fe459d81c0330dc3e84f9885bec5ad5503e0fdd2edf927ce"
+  },
+  "source_git_parity": "12/12 frozen worktree and committed source hashes match",
+  "execution_scope": "Synthetic IO only; no provider, actual SQL, browser, deployment or paid-readiness acceptance"
+}

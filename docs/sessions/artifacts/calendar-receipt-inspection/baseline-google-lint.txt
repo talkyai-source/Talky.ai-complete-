@@ -1,0 +1,13 @@
+google_calendar.py:9:32: F401 [*] `typing.Any` imported but unused
+   |
+ 7 | import os
+ 8 | import logging
+ 9 | from typing import List, Dict, Any, Optional
+   |                                ^^^ F401
+10 | from datetime import datetime, timedelta
+11 | from urllib.parse import urlencode
+   |
+   = help: Remove unused import: `typing.Any`
+
+Found 1 error.
+[*] 1 fixable with the `--fix` option.

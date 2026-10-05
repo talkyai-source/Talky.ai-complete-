@@ -1,0 +1,14 @@
+{
+  "backend/app/api/v1/endpoints/admin/actions.py": "dd30dde55159273f2129f993a5122c356c141d477720267785445104daa66823",
+  "backend/app/infrastructure/connectors/calendar/google_calendar.py": "62ed1e955a2311b6ec176eb90d3aad08ffcb990f9609838d357c7ba4688253c2",
+  "backend/app/infrastructure/connectors/calendar/outlook_calendar.py": "243acb58d03154e2d248d5e9d08a21e738eb15d325a28fc8654c57e01c484810",
+  "Admin/frontend/src/components/ActionReceiptPanel.tsx": "8934151d9deb5a4970f38659b9921bdd62345b508948186ad55be3545984d704",
+  "Admin/frontend/src/lib/api.ts": "912e081c6f2c1e66948e1c9f68d1005d3155d223990701961a35fbfd706f3fd7",
+  "backend/tests/unit/test_admin_calendar_inspection.py": "3776f820c712ea074253e7044cf949719dfc3a5f8be7de5fdc2dc6e6fbf12518",
+  "Admin/frontend/tests/action-receipts.test.mjs": "b6cd90d2d13563fa52e628fa85ee26a2e1f52d89e25fd97d6c400a5099588529",
+  "backend/app/services/connector_resolver.py": "054e6f5a0e7824ce55dadc8c29c9665b65d7bb6aad113d6c96abf9704a2143e0",
+  "backend/app/services/meeting_service.py": "26775c66e5dd9e5e1dafeca6a00af599d513594202111d56f517328b6473774d",
+  "backend/app/services/action_execution.py": "991c5f746e8b93312a21d046ee4554c1426e42031b10bc0a832868d1d9ad89d8",
+  "backend/tests/unit/test_admin_gmail_inspection.py": "ba8b55aa0d031345ef59fce95db9e867bcbeba729459578c238165bcdd14fc18",
+  "backend/app/infrastructure/connectors/calendar/base.py": "7ec279ca8bae554594755ef61b9fe4ff2d5b8b7013a1889ab2f8ead591ba0961"
+}
