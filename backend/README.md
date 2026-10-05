@@ -91,14 +91,15 @@ duplicate and terminal callbacks cannot replace its selected owner. See the
 [warmup lifecycle report](../docs/sessions/2026-10-05-selected-outbound-warmup-lifecycle.md).
 This is process-local ownership, not restartable session recovery.
 
-Separate legacy behavior remains under review: the cloud DID helper can still
-return tenantless defaults when ownership cannot resolve, and unowned legacy
-telephony callbacks retain their default preparation path. Twilio/Vonage cloud
-callbacks are separately enabled legacy paths; the current campaign worker calls
-the SIP route, whose production durable origination requires Asterisk and a
-planned call identity. A signed cloud callback's destination alone does not
-establish the owning outbound tenant. These paths are not qualified as additional
-campaign integrations by the profile correction.
+Legacy Twilio/Vonage callbacks and media paths are blocked in production even
+when their legacy flags are enabled. Explicit nonproduction qualification remains
+available. The cloud DID helper can still return tenantless defaults without
+resolved ownership; a signed callback's destination alone does not establish the
+outbound tenant. The current campaign worker uses SIP/Asterisk with a planned
+call identity. This containment does not implement cloud campaign routing. The
+dashboard cloud activation promise and saved-selection admission mismatch remain
+under repair. Existing enabled cloud sessions must drain before rollout; see the
+[production boundary report](../docs/sessions/2026-10-05-legacy-cloud-production-boundary.md).
 
 Select an existing supported profile through AI Options, save and reload it, then
 assign the intended engine/voice/prompt to the campaign. Confirm the effective

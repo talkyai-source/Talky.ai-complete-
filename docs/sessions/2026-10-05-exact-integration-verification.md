@@ -156,3 +156,43 @@ It is a later scoped run, not a repeat or relabelling of the 11,775-test full ru
 All three changes were independently read-reviewed. No migration, live PBX,
 provider, push or deployment occurred. Package/final/scenario statuses remain
 unchanged; CP05, CP06 and CP09 remain deferred.
+
+## Guard, cloud and parity integration
+
+At `add699c4`, **1,296 checks passed, zero failed, one POSIX permission check
+skipped**, with 1,535 warnings in 33.99 seconds across 47 related modules. The
+source snapshot stayed unchanged. [Command/source](artifacts/guard-cloud-integration/integrated-command.json)
+and [output](artifacts/guard-cloud-integration/integrated-tests.txt) preserve the
+inventory. This later scoped run includes the prior lifecycle/profile/PJSIP
+controls plus cloud containment, passive email failure and native parity checks.
+It overlaps prior results and is not a new whole-backend or live acceptance run.
+
+- [Passive email failure speech](artifacts/ag04-passive-email-failure/verification.md),
+  source `5a6fa48e` integrated as `b45a4c05`, permits the truthful passive failure
+  response after a definitive failed action while retaining unsupported-success
+  protection. Its 224 owner checks passed. Separate unknown/in-progress receipt
+  speech still needs repair: a timeout is not proof of failure or permission to
+  resend. That subsequent investigation is not included in this result.
+- [Native parity controls](artifacts/ag04-native-parity/verification.md), test-only
+  source `9516c2fe` integrated as `a55cc100`, add action failure, contact ownership
+  and incomplete-phone cases through actual runtime guards. The exact-source
+  common replay has **216 rows, 1,942 passing controls, one preserved Groq semantic
+  failure and 215 unreviewed findings**. Its expected exit code remains 1 and
+  production approval remains false. The canonical union stays **41/50**.
+- [Legacy cloud containment](2026-10-05-legacy-cloud-production-boundary.md), source
+  `1bf06a28` integrated as `6702df74`, blocks the unqualified Twilio/Vonage callback
+  and media paths in production even when their legacy flags are enabled.
+  Explicit nonproduction qualification remains available. Its 241 owner checks
+  passed. Existing enabled sessions must drain before rollout; this is not a
+  hot-toggle cleanup guarantee or a completed cloud campaign integration.
+  The surfaced cloud activation/routing promise and saved-selection admission
+  mismatch are a separate follow-up under investigation.
+- [OP11 permission boundaries](2026-10-05-op11-permission-boundaries.md), integrated
+  as `134f0529`, inventory the existing systemd, container, recording and Asterisk
+  CLI boundaries. Documentation and a module comment changed; executable code
+  did not. No host permissions were exercised or changed. Approved runtime
+  identity/topology and positive/negative deployed checks remain outstanding.
+
+All four batches received independent review. No package, final gate or scenario
+gate was closed. The 27 eligible unfinished packages, separate AG03 candidate and
+three deferred packages remain. No provider call, push or deployment occurred.
