@@ -1,0 +1,62 @@
+..FF.F.F......F..                                                        [100%]
+================================== FAILURES ===================================
+_ TestFallbackIsNotARealBrand.test_campaign_without_company_name_does_not_speak_the_real_brand _
+tests\unit\test_company_name_fallback.py:76: in test_campaign_without_company_name_does_not_speak_the_real_brand
+    cfg = _build({
+tests\unit\test_company_name_fallback.py:49: in _build
+    return build_telephony_session_config(
+app\domain\services\telephony_session_config.py:1682: in build_telephony_session_config
+    stt_selection = resolve_stt_selection(source_config, campaign_id=str(_campaign_id(campaign)) if campaign else "telephony")
+app\domain\services\telephony_session_config.py:1184: in resolve_stt_selection
+    raise ValueError("Unsupported STT engine; select deepgram_flux or deepgram_nova")
+E   ValueError: Unsupported STT engine; select deepgram_flux or deepgram_nova
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.telephony_session_config:telephony_session_config.py:83 company_name_fallback tenant=tenant-A campaign=camp-1 source=script_config.company_name � no company name is configured, so the agent will say 'our office' on this call instead of a real brand; set the campaign's company_name
+_ TestFallbackIsNotARealBrand.test_campaign_less_call_does_not_speak_the_real_brand _
+tests\unit\test_company_name_fallback.py:90: in test_campaign_less_call_does_not_speak_the_real_brand
+    cfg = _build(None)
+tests\unit\test_company_name_fallback.py:49: in _build
+    return build_telephony_session_config(
+app\domain\services\telephony_session_config.py:1682: in build_telephony_session_config
+    stt_selection = resolve_stt_selection(source_config, campaign_id=str(_campaign_id(campaign)) if campaign else "telephony")
+app\domain\services\telephony_session_config.py:1184: in resolve_stt_selection
+    raise ValueError("Unsupported STT engine; select deepgram_flux or deepgram_nova")
+E   ValueError: Unsupported STT engine; select deepgram_flux or deepgram_nova
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.telephony_session_config:telephony_session_config.py:83 company_name_fallback tenant=- campaign=- source=script_config.company_name � no company name is configured, so the agent will say 'our office' on this call instead of a real brand; set the campaign's company_name
+_ TestConfiguredCompanyNameUnaffected.test_prompt_path_uses_the_tenants_own_name _
+tests\unit\test_company_name_fallback.py:116: in test_prompt_path_uses_the_tenants_own_name
+    cfg = _build({
+tests\unit\test_company_name_fallback.py:49: in _build
+    return build_telephony_session_config(
+app\domain\services\telephony_session_config.py:1682: in build_telephony_session_config
+    stt_selection = resolve_stt_selection(source_config, campaign_id=str(_campaign_id(campaign)) if campaign else "telephony")
+app\domain\services\telephony_session_config.py:1184: in resolve_stt_selection
+    raise ValueError("Unsupported STT engine; select deepgram_flux or deepgram_nova")
+E   ValueError: Unsupported STT engine; select deepgram_flux or deepgram_nova
+_ TestFallbackIsLoggedOncePerCall.test_prompt_path_warns_once_with_tenant_and_campaign _
+tests\unit\test_company_name_fallback.py:152: in test_prompt_path_warns_once_with_tenant_and_campaign
+    _build({
+tests\unit\test_company_name_fallback.py:49: in _build
+    return build_telephony_session_config(
+app\domain\services\telephony_session_config.py:1682: in build_telephony_session_config
+    stt_selection = resolve_stt_selection(source_config, campaign_id=str(_campaign_id(campaign)) if campaign else "telephony")
+app\domain\services\telephony_session_config.py:1184: in resolve_stt_selection
+    raise ValueError("Unsupported STT engine; select deepgram_flux or deepgram_nova")
+E   ValueError: Unsupported STT engine; select deepgram_flux or deepgram_nova
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.telephony_session_config:telephony_session_config.py:83 company_name_fallback tenant=tenant-C campaign=camp-3 source=script_config.company_name � no company name is configured, so the agent will say 'our office' on this call instead of a real brand; set the campaign's company_name
+___________ test_static_inventory_depends_on_the_runtime_migration ____________
+tests\unit\test_rls_policy_backfill_migration.py:290: in test_static_inventory_depends_on_the_runtime_migration
+    assert tenant_scoped_tables - rls_tables == EXPECTED_POLICY_TABLES
+E   AssertionError: assert {'abuse_detec...sations', ...} == {'abuse_detec...sations', ...}
+E     Extra items in the right set:
+E     'invoices'
+E     Use -v to get more diff
+=========================== short test summary info ===========================
+FAILED tests/unit/test_company_name_fallback.py::TestFallbackIsNotARealBrand::test_campaign_without_company_name_does_not_speak_the_real_brand
+FAILED tests/unit/test_company_name_fallback.py::TestFallbackIsNotARealBrand::test_campaign_less_call_does_not_speak_the_real_brand
+FAILED tests/unit/test_company_name_fallback.py::TestConfiguredCompanyNameUnaffected::test_prompt_path_uses_the_tenants_own_name
+FAILED tests/unit/test_company_name_fallback.py::TestFallbackIsLoggedOncePerCall::test_prompt_path_warns_once_with_tenant_and_campaign
+FAILED tests/unit/test_rls_policy_backfill_migration.py::test_static_inventory_depends_on_the_runtime_migration
+5 failed, 12 passed in 11.45s
