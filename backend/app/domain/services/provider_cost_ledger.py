@@ -1,28 +1,14 @@
-"""Provider cost ledger (Phase 4.2).
+"""Optional lossy provider-usage telemetry, not a supplier statement.
 
-Records every chargeable provider event into
-``tenant_provider_cost_events``. The recorder is **fire-and-forget**
-on the hot path: callers call ``record(...)`` which returns
-immediately, and a single background flusher batches inserts to keep
-the call's critical path latency-clean.
+This module exposes an in-process recorder and a background PostgreSQL flusher.
+The current provider adapters do not call the recorder: starting the flusher
+alone does not establish observed provider coverage. Missing events or nullable
+prices/costs must never be reported as zero spend or complete attribution.
 
-Two modes:
-
-  - **Online** — backed by Postgres + asyncpg. Used in production. The
-    flusher runs every ``FLUSH_INTERVAL_S`` seconds and writes any
-    buffered events in a single ``COPY`` (asyncpg's
-    ``copy_records_to_table``) for throughput. On DB failure events
-    stay buffered up to ``MAX_BUFFER_SIZE``; older ones get dropped
-    and a warning logged.
-
-  - **Disabled** — when ``COST_LEDGER_ENABLED=false`` or no DB pool
-    is reachable. ``record()`` becomes a no-op. The voice pipeline
-    never observes the difference.
-
-Per-provider extraction lives in tiny ``parse_*`` helpers — each
-takes the response object/headers a provider client already has, and
-returns a list of ``CostEvent``. This keeps the per-call hot-path
-edits to a single one-line ``ledger.record(...)`` per provider.
+When used, buffered events can be lost on process exit, capacity overflow or
+failed flush/requeue. Unit-price and cost fields may remain unknown; this module
+has no active pricing/reconciliation job. Retained call usage and supplier
+statements are separate evidence for any financial reconciliation.
 """
 from __future__ import annotations
 

@@ -556,18 +556,30 @@ export interface ConnectorListParams {
     page_size?: number;
 }
 
+export interface LegacyOutboundEstimate {
+    recorded_total: number | null;
+    covered_call_count: number;
+    missing_call_count: number;
+    currency: 'USD';
+    coverage: 'unavailable' | 'partial' | 'recorded_rows_only';
+}
+
 export interface UsageBreakdownItem {
     provider: string;
     usage_type: string;
     total_units: number;
-    estimated_cost: number;
+    estimated_cost: number | null;
     tenant_count: number;
 }
 
 export interface UsageSummaryResponse {
-    total_cost: number;
+    total_cost: number | null;
+    supplier_cost_status: 'unavailable';
+    total_call_seconds: number;
     total_call_minutes: number;
-    total_api_calls: number;
+    total_action_records: number;
+    total_api_calls: number; // Compatibility alias for action records.
+    legacy_outbound_estimate: LegacyOutboundEstimate;
     providers: UsageBreakdownItem[];
     period_start: string;
     period_end: string;
@@ -580,6 +592,7 @@ export interface UsageSummaryResponse {
 
 export interface UsageBreakdownResponse {
     breakdown: Record<string, unknown>[];
+    supplier_cost_status: 'unavailable';
     group_by: string;
     period_start: string;
     period_end: string;

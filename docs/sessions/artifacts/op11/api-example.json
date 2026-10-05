@@ -1,0 +1,54 @@
+{
+  "scope": "Actual endpoint methods with synthetic database rows; no real database/provider or supplier statement.",
+  "summary": {
+    "total_cost": null,
+    "total_call_seconds": 659,
+    "total_call_minutes": 10,
+    "total_action_records": 1,
+    "total_api_calls": 1,
+    "legacy_outbound_estimate": {
+      "recorded_total": 5.0,
+      "covered_call_count": 1,
+      "missing_call_count": 1,
+      "currency": "USD",
+      "coverage": "partial"
+    },
+    "supplier_cost_status": "unavailable",
+    "providers": [],
+    "period_start": "2026-10-01",
+    "period_end": "2026-10-05",
+    "cost_currency": "USD",
+    "legacy_calls_cost_scope": "outbound_only",
+    "authoritative_inbound_monetary_totals_included": false,
+    "authoritative_inbound_monetary_source": "inbound_usage_transactions",
+    "monetary_note": "Supplier cost and provider attribution are unavailable. Legacy outbound USD estimates cover only recorded calls.cost values, not complete supplier spend. Authoritative inbound monetary totals are ledger-only and excluded. Counts and recorded duration include both directions; action records are not API requests."
+  },
+  "tenant_breakdown": {
+    "breakdown": [
+      {
+        "tenant_id": "synthetic-tenant",
+        "tenant_name": "Synthetic",
+        "call_count": 2,
+        "total_seconds": 659,
+        "total_minutes": 10,
+        "total_cost": null,
+        "legacy_outbound_estimate": {
+          "recorded_total": 5.0,
+          "covered_call_count": 1,
+          "missing_call_count": 1,
+          "currency": "USD",
+          "coverage": "partial"
+        }
+      }
+    ],
+    "group_by": "tenant",
+    "period_start": "2026-10-01",
+    "period_end": "2026-10-05",
+    "cost_currency": "USD",
+    "legacy_calls_cost_scope": "outbound_only",
+    "authoritative_inbound_monetary_totals_included": false,
+    "authoritative_inbound_monetary_source": "inbound_usage_transactions",
+    "monetary_note": "Supplier cost and provider attribution are unavailable. Legacy outbound USD estimates cover only recorded calls.cost values, not complete supplier spend. Authoritative inbound monetary totals are ledger-only and excluded. Counts and recorded duration include both directions; action records are not API requests.",
+    "supplier_cost_status": "unavailable"
+  }
+}

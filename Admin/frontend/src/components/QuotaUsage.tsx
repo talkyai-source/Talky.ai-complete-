@@ -1,21 +1,11 @@
 import { useEffect, useState } from 'react';
 import { api, type UsageSummaryResponse } from '../lib/api';
-import { formatCurrencyAmount } from '../lib/call-cost';
-
-// Cluster-wide usage panel. Previously rendered hardcoded percentages
-// (Calls 85%, Tokens 45%, Storage 30%) — those are gone. We now pull
-// real totals from /admin/usage/summary and surface the raw values; a
-// percentage view requires an explicit cluster quota cap, which is a
-// per-tenant configuration rather than a single global number.
-
-function formatNumber(n: number): string {
-    if (!Number.isFinite(n)) return '—';
-    return Math.round(n).toLocaleString();
-}
+import { formatRecordedCount } from '../lib/usage-evidence';
 
 export function QuotaUsage() {
     const [summary, setSummary] = useState<UsageSummaryResponse | null>(null);
     const [loading, setLoading] = useState(true);
+    const [error, setError] = useState(false);
 
     useEffect(() => {
         let cancelled = false;
@@ -23,9 +13,10 @@ export function QuotaUsage() {
             try {
                 const res = await api.getUsageSummary();
                 if (cancelled) return;
-                setSummary(res.data ?? null);
+                setSummary(res.error ? null : res.data ?? null);
+                setError(Boolean(res.error || !res.data));
             } catch {
-                if (!cancelled) setSummary(null);
+                if (!cancelled) { setSummary(null); setError(true); }
             } finally {
                 if (!cancelled) setLoading(false);
             }
@@ -38,37 +29,40 @@ export function QuotaUsage() {
         };
     }, []);
 
+    return <QuotaUsageView summary={summary} loading={loading} error={error} />;
+}
+
+export function QuotaUsageView({ summary, loading = false, error = false }: {
+    summary: UsageSummaryResponse | null; loading?: boolean; error?: boolean;
+}) {
     const items = [
         {
-            label: 'Call minutes',
+            label: 'Recorded call minutes',
             color: 'blue' as const,
-            value: formatNumber(summary?.total_call_minutes ?? 0),
+            value: formatRecordedCount(summary?.total_call_minutes),
         },
         {
-            label: 'API calls',
+            label: 'Action records',
             color: 'orange' as const,
-            value: formatNumber(summary?.total_api_calls ?? 0),
+            value: formatRecordedCount(summary?.total_action_records),
         },
         {
-            label: 'Estimated / legacy cost (inbound ledger excluded)',
+            label: 'Supplier cost',
             color: 'green' as const,
-            value: formatCurrencyAmount(
-                summary?.total_cost ?? 0,
-                summary?.cost_currency,
-                2,
-            ),
+            value: 'Unavailable',
         },
     ];
 
     return (
         <div className="card">
             <div className="card-header">
-                <h3 className="card-title">Quota Usage</h3>
+                <h3 className="card-title">Recorded Usage</h3>
             </div>
             <div className="card-body">
                 {loading && !summary && (
                     <div style={{ color: 'var(--muted-foreground, #6B7280)' }}>Loading…</div>
                 )}
+                {error && <p role="alert">Usage data is unavailable. Please retry.</p>}
                 <div className="quota-chart">
                     <div className="quota-legend">
                         {items.map((item) => (

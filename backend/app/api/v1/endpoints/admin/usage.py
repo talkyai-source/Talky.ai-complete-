@@ -6,7 +6,8 @@ Usage analytics: summary and breakdown by provider/tenant/type
 from fastapi import APIRouter, HTTPException, Depends, Query
 from pydantic import BaseModel
 from typing import List, Literal, Optional
-from datetime import datetime
+from datetime import date, datetime, time, timedelta, timezone
+from math import isfinite
 from app.core.postgres_adapter import Client
 
 from app.api.v1.dependencies import get_db_client, require_platform_admin, CurrentUser
@@ -16,23 +17,76 @@ router = APIRouter()
 _COST_CURRENCY = "USD"
 _INBOUND_MONETARY_SOURCE = "inbound_usage_transactions"
 _INBOUND_MONETARY_NOTE = (
-    "Authoritative inbound monetary totals are ledger-only and are not included "
-    "in these legacy USD estimates. Call counts and durations include both directions."
+    "Supplier cost and provider attribution are unavailable. Legacy outbound USD "
+    "estimates cover only recorded calls.cost values, not complete supplier spend. "
+    "Authoritative inbound monetary totals are ledger-only and excluded. "
+    "Counts and recorded duration include both directions; action records are not API requests."
 )
 
 
-def _legacy_outbound_call_cost(calls: list[dict]) -> float:
-    """Return only the legacy outbound ``calls.cost`` projection.
+class LegacyOutboundEstimate(BaseModel):
+    """Known legacy values only; never complete supplier-cost coverage."""
 
-    Inbound money can carry a per-settlement ISO currency and is authoritative
-    only in ``inbound_usage_transactions``. Mixing it into this USD estimate
-    would silently convert unlike currencies at a 1:1 rate.
-    """
-    return sum(
-        float(call.get("cost") or 0)
-        for call in calls
-        if str(call.get("direction") or "outbound").strip().lower() != "inbound"
+    recorded_total: Optional[float]
+    covered_call_count: int
+    missing_call_count: int
+    currency: Literal["USD"] = "USD"
+    coverage: Literal["unavailable", "partial", "recorded_rows_only"]
+
+
+def _legacy_outbound_estimate(calls: list[dict]) -> LegacyOutboundEstimate:
+    costs = []
+    missing = 0
+    for call in calls:
+        if str(call.get("direction") or "outbound").strip().lower() == "inbound":
+            continue
+        value = call.get("cost")
+        try:
+            amount = float(value) if value is not None and not isinstance(value, bool) else None
+        except (TypeError, ValueError, OverflowError):
+            amount = None
+        if amount is None or not isfinite(amount):
+            missing += 1
+        else:
+            costs.append(amount)
+    total = sum(costs) if costs else None
+    return LegacyOutboundEstimate(
+        recorded_total=total if total is not None and isfinite(total) else None,
+        covered_call_count=len(costs),
+        missing_call_count=missing,
+        coverage="unavailable" if not costs else "partial" if missing else "recorded_rows_only",
     )
+
+
+def _legacy_outbound_call_cost(calls: list[dict]) -> Optional[float]:
+    """Compatibility projection of known legacy outbound values, not supplier spend."""
+    return _legacy_outbound_estimate(calls).recorded_total
+
+
+def _rows(response) -> list[dict]:
+    # The adapter may return an error envelope instead of raising. Never turn
+    # a dependency failure into an apparently empty usage period.
+    if getattr(response, "error", None):
+        raise RuntimeError("usage query unavailable")
+    if not isinstance(response.data, list):
+        raise RuntimeError("usage rows unavailable")
+    return response.data
+
+
+def _period(from_date: Optional[str], to_date: Optional[str]):
+    today = datetime.now(timezone.utc).date()
+    start_text = from_date if from_date is not None else today.replace(day=1).isoformat()
+    end_text = to_date if to_date is not None else today.isoformat()
+    try:
+        start, end = date.fromisoformat(start_text), date.fromisoformat(end_text)
+        if start.isoformat() != start_text or end.isoformat() != end_text or start > end:
+            raise ValueError("invalid report period")
+        return (start_text, end_text,
+                datetime.combine(start, time.min, timezone.utc),
+                datetime.combine(end + timedelta(days=1), time.min, timezone.utc))
+    except (ValueError, TypeError, OverflowError) as exc:
+        raise HTTPException(status_code=400,
+                            detail="Use YYYY-MM-DD dates with from_date on or before to_date.") from exc
 
 
 def _monetary_scope() -> dict:
@@ -42,6 +96,7 @@ def _monetary_scope() -> dict:
         "authoritative_inbound_monetary_totals_included": False,
         "authoritative_inbound_monetary_source": _INBOUND_MONETARY_SOURCE,
         "monetary_note": _INBOUND_MONETARY_NOTE,
+        "supplier_cost_status": "unavailable",
     }
 
 
@@ -56,16 +111,20 @@ class UsageBreakdownItem(BaseModel):
     provider: str  # deepgram, groq, openai, twilio
     usage_type: str  # stt, tts, llm, sms, calls
     total_units: int  # seconds, tokens, count
-    estimated_cost: float
+    estimated_cost: Optional[float]
     tenant_count: int
 
 
 class UsageSummaryResponse(BaseModel):
     """Aggregated usage summary"""
 
-    total_cost: float
+    total_cost: Optional[float]
+    total_call_seconds: int
     total_call_minutes: int
-    total_api_calls: int
+    total_action_records: int
+    total_api_calls: int  # Deprecated compatibility alias: action records, not API requests.
+    legacy_outbound_estimate: LegacyOutboundEstimate
+    supplier_cost_status: Literal["unavailable"] = "unavailable"
     providers: List[UsageBreakdownItem]
     period_start: str
     period_end: str
@@ -92,15 +151,11 @@ async def get_admin_usage_summary(
     """
     Get aggregated usage summary across providers.
 
-    Returns total costs, call minutes, and breakdown by provider.
+    Returns recorded duration/action counts and explicitly incomplete legacy estimates.
+    Supplier cost and provider attribution are unavailable from these source rows.
     """
     try:
-        # Default date range: current month
-        now = datetime.utcnow()
-        if not from_date:
-            from_date = now.replace(day=1).strftime("%Y-%m-%d")
-        if not to_date:
-            to_date = now.strftime("%Y-%m-%d")
+        from_date, to_date, start_at, end_at = _period(from_date, to_date)
 
         # Get call statistics
         calls_query = db_client.table("calls").select(
@@ -108,96 +163,45 @@ async def get_admin_usage_summary(
         )
         if tenant_id:
             calls_query = calls_query.eq("tenant_id", tenant_id)
-        calls_query = calls_query.gte("created_at", from_date).lte("created_at", to_date)
+        calls_query = calls_query.gte("created_at", start_at).lt("created_at", end_at)
         calls_response = calls_query.execute()
 
-        calls = calls_response.data or []
-        total_call_minutes = sum((c.get("duration_seconds") or 0) for c in calls) // 60
-        call_costs = _legacy_outbound_call_cost(calls)
-        call_tenants = len(set(c.get("tenant_id") for c in calls))
+        calls = _rows(calls_response)
+        total_call_seconds = sum((c.get("duration_seconds") or 0) for c in calls)
+        total_call_minutes = total_call_seconds // 60
 
         # Get actions for API usage
         actions_query = db_client.table("assistant_actions").select("id, type, tenant_id")
         if tenant_id:
             actions_query = actions_query.eq("tenant_id", tenant_id)
-        actions_query = actions_query.gte("created_at", from_date).lte("created_at", to_date)
+        actions_query = actions_query.gte("created_at", start_at).lt("created_at", end_at)
         actions_response = actions_query.execute()
 
-        actions = actions_response.data or []
-        total_api_calls = len(actions)
+        actions = _rows(actions_response)
+        total_action_records = len(actions)
 
-        # Build provider breakdown (estimated based on typical usage)
-        providers = []
-
-        # Deepgram (STT/TTS) - estimate based on call minutes
-        if total_call_minutes > 0:
-            # Estimate: ~$0.0125/min for STT + ~$0.02/min for TTS
-            deepgram_cost = total_call_minutes * 0.0325
-            providers.append(
-                UsageBreakdownItem(
-                    provider="deepgram",
-                    usage_type="stt_tts",
-                    total_units=total_call_minutes * 60,  # seconds
-                    estimated_cost=round(deepgram_cost, 2),
-                    tenant_count=call_tenants,
-                )
-            )
-
-        # Groq/OpenAI (LLM) - estimate based on calls
-        llm_calls = len(calls)
-        if llm_calls > 0:
-            # Estimate: ~$0.01/call for LLM
-            llm_cost = llm_calls * 0.01
-            providers.append(
-                UsageBreakdownItem(
-                    provider="groq",
-                    usage_type="llm",
-                    total_units=llm_calls,
-                    estimated_cost=round(llm_cost, 2),
-                    tenant_count=call_tenants,
-                )
-            )
-
-        # Twilio/Vonage (Calls) - from actual costs
-        if call_costs > 0:
-            providers.append(
-                UsageBreakdownItem(
-                    provider="twilio",
-                    usage_type="voice",
-                    total_units=total_call_minutes,
-                    estimated_cost=round(call_costs, 2),
-                    tenant_count=call_tenants,
-                )
-            )
-
-        # SMS actions
-        sms_actions = [a for a in actions if a.get("type") == "send_sms"]
-        if sms_actions:
-            sms_cost = len(sms_actions) * 0.01  # Estimate $0.01/SMS
-            providers.append(
-                UsageBreakdownItem(
-                    provider="twilio",
-                    usage_type="sms",
-                    total_units=len(sms_actions),
-                    estimated_cost=round(sms_cost, 2),
-                    tenant_count=len(set(a.get("tenant_id") for a in sms_actions)),
-                )
-            )
-
-        total_cost = sum(p.estimated_cost for p in providers)
-
+        # Calls and action rows cannot establish supplier/model usage or spend.
+        # The optional cost-event buffer is lossy and has no wired provider
+        # producers in this source snapshot; absence cannot establish zero.
         return UsageSummaryResponse(
-            total_cost=round(total_cost, 2),
+            total_cost=None,
+            total_call_seconds=total_call_seconds,
             total_call_minutes=total_call_minutes,
-            total_api_calls=total_api_calls,
-            providers=providers,
+            total_action_records=total_action_records,
+            total_api_calls=total_action_records,
+            legacy_outbound_estimate=_legacy_outbound_estimate(calls),
+            providers=[],
             period_start=from_date,
             period_end=to_date,
             **_monetary_scope(),
         )
 
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get usage summary: {str(e)}")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503, detail="Usage data is unavailable. Please retry."
+        ) from exc
 
 
 @router.get("/usage/breakdown")
@@ -215,11 +219,7 @@ async def get_admin_usage_breakdown(
     Can group by provider, tenant, or usage type.
     """
     try:
-        now = datetime.utcnow()
-        if not from_date:
-            from_date = now.replace(day=1).strftime("%Y-%m-%d")
-        if not to_date:
-            to_date = now.strftime("%Y-%m-%d")
+        from_date, to_date, start_at, end_at = _period(from_date, to_date)
 
         # Get call data with tenant info
         calls_query = db_client.table("calls").select(
@@ -228,96 +228,65 @@ async def get_admin_usage_breakdown(
         )
         if tenant_id:
             calls_query = calls_query.eq("tenant_id", tenant_id)
-        calls_query = calls_query.gte("created_at", from_date).lte("created_at", to_date)
+        calls_query = calls_query.gte("created_at", start_at).lt("created_at", end_at)
         calls_response = calls_query.execute()
 
-        calls = calls_response.data or []
+        calls = _rows(calls_response)
 
         breakdown = []
 
         if group_by == "tenant":
-            # Group by tenant
-            tenant_stats = {}
+            tenant_calls = {}
             for call in calls:
-                tid = call.get("tenant_id")
-                if tid not in tenant_stats:
-                    tenant = call.get("tenants") or {}
-                    tenant_stats[tid] = {
+                tenant_calls.setdefault(call.get("tenant_id"), []).append(call)
+            for tid, rows in tenant_calls.items():
+                seconds = sum((row.get("duration_seconds") or 0) for row in rows)
+                breakdown.append(
+                    {
                         "tenant_id": tid,
-                        "tenant_name": tenant.get("business_name", "Unknown"),
-                        "call_count": 0,
-                        "total_minutes": 0,
-                        "total_cost": 0,
+                        "tenant_name": (rows[0].get("tenants") or {}).get(
+                            "business_name", "Unknown"
+                        ),
+                        "call_count": len(rows),
+                        "total_seconds": seconds,
+                        "total_minutes": seconds // 60,
+                        "total_cost": None,
+                        "legacy_outbound_estimate": _legacy_outbound_estimate(rows).model_dump(),
                     }
-                tenant_stats[tid]["call_count"] += 1
-                tenant_stats[tid]["total_minutes"] += (call.get("duration_seconds") or 0) // 60
-                if str(call.get("direction") or "outbound").strip().lower() != "inbound":
-                    tenant_stats[tid]["total_cost"] += float(call.get("cost") or 0)
-
-            breakdown = list(tenant_stats.values())
+                )
 
         elif group_by == "type":
-            # Group by usage type
+            seconds = sum((c.get("duration_seconds") or 0) for c in calls)
             breakdown = [
                 {
                     "type": "voice_calls",
-                    "total_units": sum((c.get("duration_seconds") or 0) // 60 for c in calls),
-                    "total_cost": _legacy_outbound_call_cost(calls),
+                    "total_units": seconds // 60,
+                    "total_seconds": seconds,
+                    "total_cost": None,
                     "count": len(calls),
+                    "legacy_outbound_estimate": _legacy_outbound_estimate(calls).model_dump(),
                 }
             ]
-
-            # Add actions breakdown
             actions_query = db_client.table("assistant_actions").select("type")
             if tenant_id:
                 actions_query = actions_query.eq("tenant_id", tenant_id)
-            actions_query = actions_query.gte("created_at", from_date).lte("created_at", to_date)
-            actions = (actions_query.execute()).data or []
-
+            actions_query = actions_query.gte("created_at", start_at).lt("created_at", end_at)
             action_types = {}
-            for action in actions:
+            for action in _rows(actions_query.execute()):
                 atype = action.get("type", "unknown")
                 action_types[atype] = action_types.get(atype, 0) + 1
-
             for atype, count in action_types.items():
                 breakdown.append(
                     {
                         "type": atype,
                         "total_units": count,
-                        "total_cost": 0,  # Actions don't have direct cost
+                        "total_cost": None,
                         "count": count,
+                        "unit": "action_records",
                     }
                 )
-
-        else:  # Default: group by provider
-            call_minutes = sum((c.get("duration_seconds") or 0) // 60 for c in calls)
-            call_cost = _legacy_outbound_call_cost(calls)
-
-            if call_minutes > 0:
-                breakdown.append(
-                    {
-                        "provider": "deepgram",
-                        "usage_type": "stt_tts",
-                        "total_units": call_minutes * 60,
-                        "estimated_cost": round(call_minutes * 0.0325, 2),
-                    }
-                )
-                breakdown.append(
-                    {
-                        "provider": "groq",
-                        "usage_type": "llm",
-                        "total_units": len(calls),
-                        "estimated_cost": round(len(calls) * 0.01, 2),
-                    }
-                )
-                breakdown.append(
-                    {
-                        "provider": "twilio",
-                        "usage_type": "voice",
-                        "total_units": call_minutes,
-                        "estimated_cost": round(call_cost, 2),
-                    }
-                )
+        # Provider attribution remains empty, rather than naming providers that
+        # these rows do not establish. This does not mean no usage occurred.
 
         return {
             "breakdown": breakdown,
@@ -327,5 +296,9 @@ async def get_admin_usage_breakdown(
             **_monetary_scope(),
         }
 
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get usage breakdown: {str(e)}")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503, detail="Usage data is unavailable. Please retry."
+        ) from exc

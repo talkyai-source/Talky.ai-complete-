@@ -48,7 +48,7 @@ class _Builder:
     def gte(self, *_args, **_kwargs):
         return self
 
-    def lte(self, *_args, **_kwargs):
+    def lt(self, *_args, **_kwargs):
         return self
 
     def execute(self):
@@ -80,10 +80,11 @@ async def test_summary_keeps_all_usage_but_excludes_inbound_calls_cost() -> None
     )
 
     assert summary.total_call_minutes == 3
-    voice = next(item for item in summary.providers if item.usage_type == "voice")
-    assert voice.total_units == 3
-    assert voice.estimated_cost == 2.5
-    assert summary.total_cost == 2.62
+    assert summary.providers == []
+    assert summary.total_cost is None
+    assert summary.legacy_outbound_estimate.recorded_total == 2.5
+    assert summary.legacy_outbound_estimate.covered_call_count == 1
+    assert summary.legacy_outbound_estimate.missing_call_count == 0
     assert summary.cost_currency == "USD"
     assert summary.legacy_calls_cost_scope == "outbound_only"
     assert summary.authoritative_inbound_monetary_totals_included is False
@@ -113,13 +114,14 @@ async def test_every_breakdown_keeps_counts_and_excludes_inbound_calls_cost(
         row = response["breakdown"][0]
         assert row["call_count"] == 2
         assert row["total_minutes"] == 3
-        assert row["total_cost"] == 2.5
+        assert row["total_cost"] is None
+        assert row["legacy_outbound_estimate"]["recorded_total"] == 2.5
     elif group_by == "type":
         row = response["breakdown"][0]
         assert row["count"] == 2
         assert row["total_units"] == 3
-        assert row["total_cost"] == 2.5
+        assert row["total_cost"] is None
+        assert row["legacy_outbound_estimate"]["recorded_total"] == 2.5
     else:
-        voice = next(row for row in response["breakdown"] if row["usage_type"] == "voice")
-        assert voice["total_units"] == 3
-        assert voice["estimated_cost"] == 2.5
+        assert response["breakdown"] == []
+        assert response["supplier_cost_status"] == "unavailable"
