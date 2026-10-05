@@ -2142,7 +2142,13 @@ async def make_call(request: Request, body: MakeCallRequest):
                         provider_identity[:12],
                     )
                 if cleanup_ledger_registered:
-                    proof = await request_confirmed_hangup(_adapter, provider_identity)
+                    # This identity was just originated by this adapter, even
+                    # when its durable provider binding failed to commit.
+                    proof = await request_confirmed_hangup(
+                        _adapter,
+                        provider_identity,
+                        expected_provider=getattr(_adapter, "name", None),
+                    )
                 else:
                     proof = HangupProof(
                         False,
@@ -2701,6 +2707,8 @@ async def hangup_call(call_id: str, request: Request):
     proof = await request_confirmed_hangup(
         _adapter,
         str(termination_context.provider_call_id or call_id),
+        expected_provider=termination_context.provider,
+        provider_legs=termination_context.provider_legs,
         provider_leg_ids=termination_context.provider_leg_ids,
     )
     if not proof.confirmed:
@@ -2847,6 +2855,7 @@ async def hangup_calls_for_campaign(campaign_id: str) -> dict[str, object]:
                     await conn.fetch(
                         """
                         SELECT c.id::text AS durable_call_id,
+                               c.provider,
                                COALESCE(c.provider_call_id, c.external_call_uuid)
                                    AS provider_call_id
                         FROM calls c
@@ -2865,7 +2874,7 @@ async def hangup_calls_for_campaign(campaign_id: str) -> dict[str, object]:
                         await conn.fetch(
                             """
                             SELECT call_id::text AS durable_call_id,
-                                   provider_leg_id
+                                   provider_leg_id, provider
                             FROM call_legs
                             WHERE call_id::text=ANY($1::text[])
                               AND status=ANY($2::text[])
@@ -2882,15 +2891,23 @@ async def hangup_calls_for_campaign(campaign_id: str) -> dict[str, object]:
                     else []
                 )
                 legs_by_call: dict[str, list[str]] = {durable_id: [] for durable_id in durable_ids}
+                providers_by_call: dict[str, list[tuple[str, str | None]]] = {
+                    durable_id: [] for durable_id in durable_ids
+                }
                 for leg_row in leg_rows:
                     legs_by_call[str(leg_row["durable_call_id"])].append(
                         str(leg_row["provider_leg_id"])
+                    )
+                    providers_by_call[str(leg_row["durable_call_id"])].append(
+                        (str(leg_row["provider_leg_id"]), leg_row["provider"])
                     )
                 rows = [
                     {
                         "durable_call_id": str(row["durable_call_id"]),
                         "provider_call_id": row["provider_call_id"],
+                        "provider": row["provider"],
                         "provider_leg_ids": legs_by_call[str(row["durable_call_id"])],
+                        "provider_legs": providers_by_call[str(row["durable_call_id"])],
                     }
                     for row in call_rows
                 ]
@@ -2928,7 +2945,9 @@ async def hangup_calls_for_campaign(campaign_id: str) -> dict[str, object]:
                 return await request_confirmed_hangup(
                     _adapter,
                     provider_call_id,
+                    expected_provider=row["provider"],
                     provider_leg_ids=provider_leg_ids,
+                    provider_legs=row["provider_legs"],
                 )
             if provider_leg_ids:
                 # Clean up what we can, but without a parent identity complete
@@ -2936,7 +2955,9 @@ async def hangup_calls_for_campaign(campaign_id: str) -> dict[str, object]:
                 child_proof = await request_confirmed_hangup(
                     _adapter,
                     provider_leg_ids[0],
+                    expected_provider=row["provider"],
                     provider_leg_ids=provider_leg_ids[1:],
+                    provider_legs=row["provider_legs"],
                 )
                 return HangupProof(
                     requested=child_proof.requested,
@@ -3129,6 +3150,8 @@ async def _apply_inbound_transfer_failure_action(attempt, result: dict) -> dict:
             # provider leg attached to the same parent, and proving only the
             # parent/current target would manufacture a terminal state while
             # that linked channel can still bill.
+            expected_provider=termination_context.provider,
+            provider_legs=termination_context.provider_legs,
             provider_leg_ids=termination_context.provider_leg_ids,
         )
         result["fallback_action"] = requested_action

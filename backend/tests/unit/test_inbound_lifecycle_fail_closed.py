@@ -329,10 +329,13 @@ async def test_lease_loss_fence_persists_recovery_and_requires_all_leg_proof(
         provider_call_id="pbx-lease-lost",
         previous_status="in_progress",
         provider_leg_ids=("linked-transfer-leg",),
+        provider="asterisk",
+        provider_legs=(("linked-transfer-leg", "asterisk"),),
     )
     mark_pending = AsyncMock(return_value=context)
 
     force_end = AsyncMock(return_value=False)
+    monkeypatch.setattr(lifecycle, "get_adapter", lambda: SimpleNamespace(name="asterisk"))
     monkeypatch.setattr(lifecycle, "_state", lambda: state)
     monkeypatch.setattr(lifecycle, "_force_end_and_hangup", force_end)
     monkeypatch.setattr(

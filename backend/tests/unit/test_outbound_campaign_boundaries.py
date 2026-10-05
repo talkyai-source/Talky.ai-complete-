@@ -1214,7 +1214,8 @@ async def test_repeated_cancellation_cannot_interrupt_provider_cleanup(monkeypat
         bind_started.set()
         await asyncio.Event().wait()
 
-    async def blocked_confirmed_hangup(_adapter, _provider_call_id):
+    async def blocked_confirmed_hangup(_adapter, _provider_call_id, *, expected_provider):
+        assert expected_provider == _adapter.name
         cleanup_started.set()
         await release_cleanup.wait()
         path.events.append("hangup_confirmed")

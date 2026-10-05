@@ -106,6 +106,8 @@ async def test_shutdown_includes_adapter_owned_pre_lifecycle_channels(monkeypatc
     requested: list[str] = []
 
     class Adapter:
+
+        name = "asterisk"
         def owned_call_ids(self):
             return {"ringing-outbound", "preanswer-inbound"}
 

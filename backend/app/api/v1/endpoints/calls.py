@@ -649,6 +649,8 @@ async def hangup_live_call(
         proof = await request_confirmed_hangup(
             tb._adapter,
             str(termination_context.provider_call_id or ext or ""),
+            expected_provider=termination_context.provider,
+            provider_legs=termination_context.provider_legs,
             provider_leg_ids=termination_context.provider_leg_ids,
         )
         if not proof.confirmed:

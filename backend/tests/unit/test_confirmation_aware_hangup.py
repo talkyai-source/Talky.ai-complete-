@@ -222,10 +222,12 @@ async def test_legacy_adapter_request_is_never_promoted_to_confirmation():
     calls: list[str] = []
 
     class LegacyAdapter:
+
+        name = "asterisk"
         async def hangup(self, call_id: str) -> None:
             calls.append(call_id)
 
-    proof = await request_confirmed_hangup(LegacyAdapter(), "legacy-call")
+    proof = await request_confirmed_hangup(LegacyAdapter(), "legacy-call", expected_provider="asterisk")
 
     assert calls == ["legacy-call"]
     assert proof.requested is True
@@ -238,6 +240,8 @@ async def test_persisted_linked_legs_use_one_multi_leg_confirmation_call():
     calls: list[tuple[str, ...]] = []
 
     class Adapter:
+
+        name = "asterisk"
         async def hangup_many_confirmed(self, call_ids):
             calls.append(tuple(call_ids))
             return True
@@ -248,6 +252,8 @@ async def test_persisted_linked_legs_use_one_multi_leg_confirmation_call():
     proof = await request_confirmed_hangup(
         Adapter(),
         "parent",
+        expected_provider="asterisk",
+        provider_legs=(("parent", "asterisk"), ("target-1", "asterisk"), ("target-2", "asterisk"), ("target", "asterisk")),
         provider_leg_ids=("parent", "target-1", "target-1", "target-2"),
     )
 
@@ -260,6 +266,8 @@ async def test_linked_legs_fail_closed_without_multi_leg_capability():
     calls: list[str] = []
 
     class ParentOnlyAdapter:
+
+        name = "asterisk"
         async def hangup_confirmed(self, call_id: str):
             calls.append(call_id)
             return True
@@ -267,6 +275,8 @@ async def test_linked_legs_fail_closed_without_multi_leg_capability():
     proof = await request_confirmed_hangup(
         ParentOnlyAdapter(),
         "parent",
+        expected_provider="asterisk",
+        provider_legs=(("parent", "asterisk"), ("target-1", "asterisk"), ("target-2", "asterisk"), ("target", "asterisk")),
         provider_leg_ids=("target",),
     )
 
@@ -285,10 +295,10 @@ async def test_load_active_provider_leg_ids_uses_durable_parent_lookup(monkeypat
             captured["query"] = query
             captured["call_reference"] = call_reference
             return [
-                {"provider_leg_id": "parent"},
-                {"provider_leg_id": "talky-xfer-a"},
-                {"provider_leg_id": "talky-xfer-a"},
-                {"provider_leg_id": "  talky-xfer-b  "},
+                {"provider_leg_id": "parent", "provider": "asterisk"},
+                {"provider_leg_id": "talky-xfer-a", "provider": "asterisk"},
+                {"provider_leg_id": "talky-xfer-a", "provider": "asterisk"},
+                {"provider_leg_id": "  talky-xfer-b  ", "provider": "asterisk"},
             ]
 
     @asynccontextmanager
@@ -303,6 +313,7 @@ async def test_load_active_provider_leg_ids_uses_durable_parent_lookup(monkeypat
     result = await load_active_provider_leg_ids(
         pool,
         call_reference="durable-call-id",
+        expected_provider="asterisk",
         tenant_id="00000000-0000-0000-0000-000000000001",
     )
 
@@ -344,9 +355,9 @@ async def test_termination_context_fences_before_snapshotting_linked_legs(monkey
             assert "FROM call_legs" in query
             events.append("legs")
             return [
-                {"provider_leg_id": "talky-xfer-one"},
-                {"provider_leg_id": "talky-xfer-one"},
-                {"provider_leg_id": "talky-xfer-two"},
+                {"provider_leg_id": "talky-xfer-one", "provider": "asterisk"},
+                {"provider_leg_id": "talky-xfer-one", "provider": "asterisk"},
+                {"provider_leg_id": "talky-xfer-two", "provider": "asterisk"},
             ]
 
     @asynccontextmanager

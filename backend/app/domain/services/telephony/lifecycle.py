@@ -1267,6 +1267,7 @@ async def _hydrate_orphan_recovery_context(
             await fetch_active_provider_leg_ids(
                 conn,
                 call_reference=str(row["id"]),
+                expected_provider=row.get("provider"),
             )
         )
 
@@ -2958,6 +2959,8 @@ async def _fence_inbound_call_after_lease_loss(
     campaign_id = str(admission.get("campaign_id") or "").strip() or None
     provider_call_id = str(admission.get("provider_call_id") or pbx_call_id)
     provider_leg_ids: tuple[str, ...] = ()
+    expected_provider = admission.get("provider")
+    provider_legs: tuple[tuple[str, str | None], ...] = ()
 
     try:
         await _state().register_cleanup_obligation(
@@ -2987,6 +2990,8 @@ async def _fence_inbound_call_after_lease_loss(
         )
         provider_call_id = context.provider_call_id or provider_call_id
         provider_leg_ids = context.provider_leg_ids
+        expected_provider = context.provider
+        provider_legs = context.provider_legs
     except Exception as exc:
         # A database outage is exactly when the provider-side fence is most
         # important. Keep retrying it and let the durable admission/Redis state
@@ -2997,6 +3002,22 @@ async def _fence_inbound_call_after_lease_loss(
             durable_call_id[:12],
             exc,
         )
+
+    from app.domain.services.telephony.termination import provider_family_error
+
+    identity_error = provider_family_error(
+        get_adapter(),
+        expected_provider,
+        provider_leg_ids=provider_leg_ids,
+        provider_legs=provider_legs,
+    )
+    if identity_error:
+        logger.critical(
+            "inbound_lease_loss_provider_unconfirmed call=%s reason=%s",
+            pbx_call_id[:12],
+            identity_error,
+        )
+        return False
 
     # Confirmation alone is insufficient: ARI may prove a channel was already
     # absent without delivering a terminal callback. Run the normal idempotent

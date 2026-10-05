@@ -450,8 +450,8 @@ async def test_hydration_uses_durable_inbound_truth_and_all_active_transfer_ids(
             assert actual_durable_id == durable_id
             self.transfer_query = query
             return [
-                {"provider_leg_id": "talky-xfer-00000000000000000001"},
-                {"provider_leg_id": "talky-xfer-00000000000000000002"},
+                {"provider_leg_id": "talky-xfer-00000000000000000001", "provider": "asterisk"},
+                {"provider_leg_id": "talky-xfer-00000000000000000002", "provider": "asterisk"},
             ]
 
     conn = Conn()

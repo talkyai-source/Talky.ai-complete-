@@ -161,6 +161,8 @@ class _Audit:
 
 
 class _Adapter:
+    name = "asterisk"
+
     def __init__(self):
         self.hung_up = []
 
@@ -185,6 +187,7 @@ def _stub_admin_termination_context(monkeypatch, conn: _TerminateConn) -> None:
             ),
             previous_status=previous_status,
             provider_leg_ids=(),
+            provider=row.get("provider"),
         )
 
     monkeypatch.setattr(calls, "mark_termination_pending_and_load_context", mark)
@@ -262,6 +265,8 @@ async def test_admin_terminate_keeps_call_live_without_provider_confirmation(mon
         yield conn
 
     class UnconfirmedAdapter:
+
+        name = "asterisk"
         async def hangup_confirmed(self, _external_id):
             return False
 
@@ -312,6 +317,8 @@ async def test_admin_terminal_replay_still_requires_provider_absence_proof(monke
         yield conn
 
     class UnconfirmedAdapter:
+
+        name = "asterisk"
         async def hangup_confirmed(self, _external_id):
             return False
 

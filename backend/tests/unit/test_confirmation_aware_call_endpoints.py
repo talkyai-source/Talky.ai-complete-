@@ -63,6 +63,8 @@ def _stub_termination_context(monkeypatch, module, row, *, events=None):
             provider_call_id=(row.get("provider_call_id") or row.get("external_call_uuid")),
             previous_status=previous_status,
             provider_leg_ids=(),
+            provider=row.get("provider"),
+            direction=row.get("direction", "outbound"),
         )
 
     monkeypatch.setattr(module, "mark_termination_pending_and_load_context", mark)
@@ -130,6 +132,8 @@ async def test_tenant_unconfirmed_hangup_performs_no_terminal_write(monkeypatch)
     conn = _CallConn(row)
 
     class Adapter:
+
+        name = "asterisk"
         async def hangup_confirmed(self, _call_id):
             return False
 
@@ -170,6 +174,8 @@ async def test_tenant_confirmed_hangup_orders_proof_before_settlement_and_projec
     conn = _CallConn(row, events)
 
     class Adapter:
+
+        name = "asterisk"
         async def hangup_confirmed(self, _call_id):
             events.append("proof")
             return True
@@ -222,6 +228,8 @@ async def test_tenant_terminal_replay_is_idempotent_after_provider_absence_proof
     requested: list[str] = []
 
     class Adapter:
+
+        name = "asterisk"
         async def hangup_confirmed(self, provider_call_id):
             requested.append(provider_call_id)
             return True
@@ -260,6 +268,8 @@ async def test_tenant_terminal_replay_does_not_treat_database_state_as_pbx_proof
     conn = _CallConn(row)
 
     class Adapter:
+
+        name = "asterisk"
         async def hangup_confirmed(self, _call_id):
             return False
 
@@ -288,6 +298,8 @@ async def test_raw_hangup_reports_only_confirmed_provider_absence(monkeypatch):
         return None
 
     class Adapter:
+
+        name = "asterisk"
         async def hangup_confirmed(self, call_id):
             assert call_id == "pbx-raw"
             return True
@@ -305,6 +317,7 @@ async def test_raw_hangup_reports_only_confirmed_provider_absence(monkeypatch):
         telephony_bridge,
         {
             "status": "in_call",
+            "provider": "asterisk",
             "provider_call_id": "pbx-raw",
             "external_call_uuid": "pbx-raw",
         },
@@ -327,6 +340,8 @@ async def test_raw_hangup_returns_gateway_error_when_proof_is_missing(monkeypatc
         return None
 
     class Adapter:
+
+        name = "asterisk"
         async def hangup_confirmed(self, _call_id):
             return False
 
@@ -343,6 +358,7 @@ async def test_raw_hangup_returns_gateway_error_when_proof_is_missing(monkeypatc
         telephony_bridge,
         {
             "status": "in_call",
+            "provider": "asterisk",
             "provider_call_id": "pbx-raw",
             "external_call_uuid": "pbx-raw",
         },
@@ -382,10 +398,11 @@ class _CampaignConn:
             assert "COALESCE(c.provider_call_id, c.external_call_uuid)" in query
             assert "FOR UPDATE OF c" in query
             return [
-                {"durable_call_id": "call-good", "provider_call_id": "pbx-good"},
+                {"durable_call_id": "call-good", "provider_call_id": "pbx-good", "provider": "asterisk"},
                 {
                     "durable_call_id": "call-still-live",
                     "provider_call_id": "pbx-still-live",
+                    "provider": "asterisk",
                 },
             ]
         assert "FROM call_legs" in query
@@ -393,6 +410,7 @@ class _CampaignConn:
             {
                 "durable_call_id": "call-good",
                 "provider_leg_id": "talky-xfer-good",
+                "provider": "asterisk",
             }
         ]
 
@@ -400,6 +418,7 @@ class _CampaignConn:
 @pytest.mark.asyncio
 async def test_campaign_bulk_hangup_separates_attempts_from_confirmations(monkeypatch):
     class Adapter:
+        name = "asterisk"
         async def hangup_confirmed(self, call_id):
             return call_id != "pbx-still-live"
 

@@ -786,6 +786,8 @@ async def terminate_call(
         proof = await request_confirmed_hangup(
             telephony_bridge._adapter,
             str(termination_context.provider_call_id or external_call_id or ""),
+            expected_provider=termination_context.provider,
+            provider_legs=termination_context.provider_legs,
             provider_leg_ids=termination_context.provider_leg_ids,
         )
         if not proof.confirmed:

@@ -48,6 +48,62 @@ class TerminationContext:
     direction: str = "outbound"
     campaign_id: str | None = None
     answered_at: Any = None
+    # Preserve every row, including duplicate IDs with conflicting providers.
+    provider_legs: tuple[tuple[str, str | None], ...] = ()
+
+
+_CONCRETE_PROVIDERS = frozenset({"asterisk", "freeswitch", "twilio", "vonage"})
+
+
+def provider_family_error(
+    adapter: Any,
+    expected_provider: str | None,
+    *,
+    provider_leg_ids: Iterable[str] = (),
+    provider_legs: Iterable[tuple[str, str | None]] = (),
+) -> str | None:
+    """Fence namespace-specific absence proof; this does not prove host/account.
+
+    Only concrete, saved families are accepted. In particular, legacy ``sip``
+    is not an alias for either PBX. Callers without durable rows must supply
+    identity from their existing, positively adapter-owned cleanup operation.
+    """
+
+    expected = (
+        expected_provider.strip().lower()
+        if isinstance(expected_provider, str)
+        else ""
+    )
+    if expected not in _CONCRETE_PROVIDERS:
+        return "provider_identity_unconfirmed"
+    actual = getattr(adapter, "name", None)
+    actual = actual.strip().lower() if isinstance(actual, str) else ""
+    if actual not in _CONCRETE_PROVIDERS:
+        return "adapter_identity_unconfirmed"
+    if actual != expected:
+        return "provider_identity_mismatch"
+    return _provider_legs_error(expected, provider_leg_ids, provider_legs)
+
+
+def _provider_legs_error(
+    expected: str,
+    provider_leg_ids: Iterable[str],
+    provider_legs: Iterable[tuple[str, str | None]],
+) -> str | None:
+    if expected not in _CONCRETE_PROVIDERS:
+        return "provider_identity_unconfirmed"
+    covered = set()
+    for leg_id, provider in provider_legs:
+        normalized_id = str(leg_id or "").strip()
+        leg_provider = provider.strip().lower() if isinstance(provider, str) else ""
+        if not normalized_id or leg_provider not in _CONCRETE_PROVIDERS:
+            return "linked_leg_provider_unconfirmed"
+        if leg_provider != expected:
+            return "linked_leg_provider_mismatch"
+        covered.add(normalized_id)
+    if any(str(leg_id or "").strip() not in covered for leg_id in provider_leg_ids):
+        return "linked_leg_provider_unconfirmed"
+    return None
 
 
 def _safe_error(exc: BaseException) -> str:
@@ -59,7 +115,9 @@ async def request_confirmed_hangup(
     adapter: Any,
     call_id: str,
     *,
+    expected_provider: str | None,
     provider_leg_ids: Iterable[str] = (),
+    provider_legs: Iterable[tuple[str, str | None]] = (),
     timeout_s: float = 5.0,
 ) -> HangupProof:
     """Request a hangup and return proof only when the adapter can provide it.
@@ -75,6 +133,16 @@ async def request_confirmed_hangup(
         return HangupProof(False, False, "missing_provider_call_id")
     if adapter is None:
         return HangupProof(False, False, "adapter_unavailable")
+
+    provider_leg_ids = tuple(provider_leg_ids)
+    identity_error = provider_family_error(
+        adapter,
+        expected_provider,
+        provider_leg_ids=provider_leg_ids,
+        provider_legs=provider_legs,
+    )
+    if identity_error:
+        return HangupProof(False, False, identity_error)
 
     timeout_s = max(0.1, min(5.0, float(timeout_s)))
     linked_ids = tuple(
@@ -145,6 +213,7 @@ async def load_active_provider_leg_ids(
     pool: Any,
     *,
     call_reference: str,
+    expected_provider: str | None,
     tenant_id: str | None = None,
     timeout_s: float = 5.0,
 ) -> tuple[str, ...]:
@@ -156,10 +225,12 @@ async def load_active_provider_leg_ids(
     process whose transfer indexes are empty. Query/dependency failures escape
     so callers fail closed instead of proving only the parent.
 
-    The returned tuple excludes the old synthetic ``transfer-*`` placeholders,
-    which were never real provider channel IDs. Callers should pass it to
-    :func:`request_confirmed_hangup`; that primitive de-duplicates the parent
-    and requires the adapter's one-deadline multi-leg proof capability.
+    The returned tuple excludes old synthetic ``transfer-*`` placeholders,
+    which were never real provider channel IDs. Every selected row must match
+    the concrete saved parent provider before IDs are deduplicated. Recovery
+    additionally checks that provider against its active adapter before proof.
+    Direct request callers use the context's raw pairs so the shared request
+    can validate the same metadata at its boundary.
     """
 
     normalized_reference = str(call_reference or "").strip()
@@ -174,6 +245,7 @@ async def load_active_provider_leg_ids(
         return await fetch_active_provider_leg_ids(
             conn,
             call_reference=normalized_reference,
+            expected_provider=expected_provider,
         )
 
 
@@ -181,6 +253,7 @@ async def fetch_active_provider_leg_ids(
     conn: Any,
     *,
     call_reference: str,
+    expected_provider: str | None,
 ) -> tuple[str, ...]:
     """Connection-level form used when a caller already holds an RLS scope."""
 
@@ -190,7 +263,7 @@ async def fetch_active_provider_leg_ids(
     rows = list(
         await conn.fetch(
             """
-            SELECT l.provider_leg_id
+            SELECT l.provider_leg_id, l.provider
             FROM call_legs l
             JOIN calls c ON c.id=l.call_id
             WHERE (
@@ -211,6 +284,18 @@ async def fetch_active_provider_leg_ids(
             normalized_reference,
         )
     )
+    expected = (
+        expected_provider.strip().lower()
+        if isinstance(expected_provider, str)
+        else ""
+    )
+    error = _provider_legs_error(
+        expected,
+        (),
+        ((str(row["provider_leg_id"]).strip(), row["provider"]) for row in rows),
+    )
+    if error:
+        raise ValueError(error)
     return tuple(
         dict.fromkeys(
             normalized
@@ -292,7 +377,7 @@ async def mark_termination_pending_and_load_context(
         leg_rows = list(
             await conn.fetch(
                 """
-                SELECT provider_leg_id
+                SELECT provider_leg_id, provider
                 FROM call_legs
                 WHERE call_id=$1::uuid
                   AND status = ANY($2::text[])
@@ -328,6 +413,10 @@ async def mark_termination_pending_and_load_context(
         direction=str(row["direction"] or "outbound"),
         campaign_id=(str(row["campaign_id"]) if row["campaign_id"] else None),
         answered_at=row["answered_at"],
+        provider_legs=tuple(
+            (str(leg["provider_leg_id"]).strip(), leg["provider"])
+            for leg in leg_rows
+        ),
     )
 
 

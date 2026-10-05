@@ -146,7 +146,9 @@ async def _terminate_active_telephony_sessions_for_shutdown(
                         require_confirmation=True,
                     )
                 )
-            proof = await request_confirmed_hangup(adapter, call_id)
+            proof = await request_confirmed_hangup(
+                adapter, call_id, expected_provider=getattr(adapter, "name", None)
+            )
             return bool(proof.confirmed)
         except asyncio.CancelledError:
             raise
