@@ -696,10 +696,11 @@
           "kind": "combined_selection_action_guard_and_audio_storage_regression",
           "candidate": "bbbb9450dfbff9e0436493a3b7b870a64481b77a"
         },
-        "docs/sessions/2026-10-05-inbox-health-lock-design.md"
+        "docs/sessions/2026-10-05-inbox-health-lock-design.md",
+        "docs/sessions/artifacts/ag06-inbox-account/verification-row-pin.md"
       ],
-      "blocker": "Original-account inbox retry compatibility and atomic stale-auth health writes remain under repair. The account-health locking proposal passed isolated PostgreSQL design checks, not repaired-application tests. Supported original-receipt inspection/operator resolution and designated provider/browser acceptance remain open.",
-      "next_action": "Complete original-account evidence inspection and approved durable operator resolution of held outcomes; saved receipt display and selection ownership are locally verified. Missing IDs, timeouts and empty searches do not authorize resend. Designated provider/browser acceptance remains open.",
+      "blocker": "Per-invocation inbox authorization-row refresh and canonical Gmail compatibility are locally verified. Atomic stale-auth health writes remain under repair; the locking proposal passed isolated PostgreSQL design checks, not repaired-application tests. Supported original-receipt inspection/operator resolution and designated provider/browser acceptance remain open.",
+      "next_action": "Complete account/generation-safe atomic health updates, original-action-account evidence inspection and approved durable operator resolution. Inbox reads now keep the original active authorization through their one refresh, but separately requested message IDs are not receipt-bound inspection. Missing IDs, timeouts and empty searches do not authorize resend.",
       "target_date": null
     },
     {
@@ -1367,7 +1368,8 @@
           "kind": "combined_selection_action_guard_and_audio_storage_regression",
           "candidate": "bbbb9450dfbff9e0436493a3b7b870a64481b77a"
         },
-        "docs/sessions/artifacts/provider-proof-fence/verification.md"
+        "docs/sessions/artifacts/provider-proof-fence/verification.md",
+        "docs/sessions/artifacts/ag06-inbox-account/verification-row-pin.md"
       ],
       "blocker": null,
       "next_action": "Retain exact-dependency full backend and migrated database results; reconcile subsequent bounded changes and current main/deployment before controlled acceptance. Preserve original user work; no deployed proof is inferred.",

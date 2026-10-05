@@ -313,3 +313,30 @@ compatibility correction is being verified against the actual OAuth/resolver pat
 
 Changes and evidence remain locally committed. No package, final gate, scenario,
 deferred item, provider acceptance or deployment status was promoted.
+
+## Inbox authorization-row compatibility
+
+The final [inbox follow-up](artifacts/ag06-inbox-account/verification-row-pin.md),
+source `0f69c0f7` integrated as `e8dee2c2`, uses the existing authorization row to
+keep a read's one refresh with its original account. The actual Gmail OAuth path
+continues to work with its null external subject ID. Missing/replaced/inactive
+authorization cannot fall through to another mailbox. Revocation during refresh
+is refused by the active-status token-write acknowledgement before a second read.
+Existing reviewed-effect external identity rules are unchanged.
+
+The owner ran **220 tests with zero failures or skips** across twelve related
+modules, with 13 existing warnings. Ruff F and whitespace checks passed. Root and
+RT reviewed the final source. All four integrated source/test hashes match the
+owner's corrected UTF-8/LF Git fingerprints; this is source verification, not
+another test run. The original manifest used Windows CP1252 decoding before
+UTF-8 hashing for two non-ASCII application files. The separately preserved
+[correction](artifacts/ag06-inbox-account/row-pin-hash-correction.md) reproduces
+that encoding error from the exact committed source; the source itself matches.
+The earlier external-ID-required draft and its 102-case result remain historical
+and must not be treated as the accepted standalone change.
+
+The separate atomic health-write correction is still being implemented. This
+read pin neither resolves held external actions nor binds a later independent
+message lookup to an original delivery receipt. No provider, customer mailbox,
+PostgreSQL application operation, deployment or push occurred in this patch.
+Package and release-gate states remain unchanged.
