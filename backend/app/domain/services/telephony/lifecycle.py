@@ -5262,16 +5262,20 @@ async def _on_call_ended(
 
                 _c3 = _gc3()
                 if _c3.is_initialized:
-                    from app.domain.services.dialer.opt_out import purge_lead_on_opt_out
+                    from app.domain.services.dialer.opt_out import purge_lead_on_opt_out, record_purge_result
 
-                    await purge_lead_on_opt_out(
+                    purge_result = await asyncio.wait_for(purge_lead_on_opt_out(
                         db_pool=_c3.db_pool,
                         db_client=_c3.db_client,
                         tenant_id=getattr(voice_session, "_dialer_tenant_id", None),
                         lead_id=getattr(voice_session, "_dialer_lead_id", None),
                         phone_number=getattr(voice_session, "_dialer_phone", None),
                         call_id=getattr(voice_session, "_dialer_call_id", None),
-                    )
+                    ), timeout=2.5)
+                    record_purge_result(voice_session, purge_result)
+                    if not purge_result.get("purge_complete"):
+                        logger.warning("opt_out_teardown_incomplete call_id=%s dnc_written=%s",
+                                       call_id[:12], bool(purge_result.get("dnc_added")))
         except Exception as oo_err:
             logger.warning(
                 "opt_out_purge_failed call_id=%s err=%s",

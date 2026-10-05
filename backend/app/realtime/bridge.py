@@ -151,6 +151,7 @@ class RealtimeBridge:
         self._last_contact_readback = None
         self._transcript_flush_task = None
         self._transcript_flush_pending = False
+        self._opt_out_task: Optional[asyncio.Task] = None
         self._pre_current_relationship_state = self._live_state
         self._call_direction = str(call_direction or "outbound").strip().lower()
         # Shared CallSession for deterministic voice-action results. Optional so
@@ -372,6 +373,8 @@ class RealtimeBridge:
         pending_writes = set(self._contact_tasks)
         if self._transcript_flush_task is not None:
             pending_writes.add(self._transcript_flush_task)
+        if self._opt_out_task is not None:
+            pending_writes.add(self._opt_out_task)
         if pending_writes:
             _done, pending = await asyncio.wait(
                 pending_writes, timeout=2.0
@@ -382,6 +385,7 @@ class RealtimeBridge:
                 await asyncio.gather(*pending, return_exceptions=True)
         self._contact_tasks.clear()
         self._transcript_flush_task = None
+        self._opt_out_task = None
         try:
             await self._rt.close()
         except Exception:  # noqa: BLE001 — cleanup must never raise
@@ -1450,15 +1454,30 @@ class RealtimeBridge:
         opted_out = contains_dnc(text)
         if opted_out:
             self._action_session._caller_opted_out = True
+            # DNC removes future calling permission independently of whether
+            # the caller wants this conversation to continue. Coalesce writes;
+            # never block the sole model/audio event pump on database I/O.
+            if self._opt_out_task is None or self._opt_out_task.done():
+                self._opt_out_task = asyncio.create_task(self._persist_caller_opt_out(),
+                    name=f"rt-opt-out-{self._call_id}")
         return opted_out
+
+    async def _persist_caller_opt_out(self):
+        from app.domain.services.dialer.opt_out import purge_opt_out_before_farewell
+        # The bridge's call identity is also valid when no CallSession was
+        # supplied (older construction sites); it grants no tenant authority.
+        from types import SimpleNamespace
+        session = (self._action_session if getattr(self._action_session, "call_id", None)
+                   else SimpleNamespace(call_id=self._call_id))
+        return await purge_opt_out_before_farewell(session)
 
     def _arm_caller_end_call(self, *, require_explicit=False):
         from app.domain.services.end_session_action import caller_signaled_end
         from app.domain.services.voice_pipeline.identity_disposition import contains_explicit_goodbye
         if self._caller_transcript_pending or self._hangup_started:
             return False
-        # DNC survives a canceled immediate hangup. Shared telephony teardown
-        # reads this CallSession flag and runs the existing durable opt-out.
+        # DNC survives a canceled immediate hangup. Persistence starts in-call;
+        # shared telephony teardown retries any unacknowledged cleanup.
         opted_out = self._record_caller_opt_out(self._latest_caller_text)
         if not caller_signaled_end(self._latest_caller_text, previous_assistant_text=self._previous_assistant_text):
             return False
@@ -1481,6 +1500,10 @@ class RealtimeBridge:
             await asyncio.wait_for(self._goodbye_completed.wait(), timeout=15.0)
         except asyncio.TimeoutError:
             logger.warning("realtime_goodbye_timeout call=%s", self._call_id)
+        if self._opt_out_task is not None:
+            # Its helper has a bounded DB timeout. Shield it from a caller's
+            # interruption cancelling this close; DNC remains monotonic.
+            await asyncio.shield(self._opt_out_task)
         from app.domain.services.end_session_action import caller_signaled_end
         if (self._caller_transcript_pending
                 or caller_revision != self._pending_end_call_revision

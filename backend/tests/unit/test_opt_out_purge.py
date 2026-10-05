@@ -54,6 +54,8 @@ class _FakeDNCConn:
 
     async def execute(self, sql, *args):
         self.executed.append((sql, args))
+        if "UPDATE dialer_jobs" in sql:
+            return "UPDATE 2"
         return "SET"
 
     async def fetchrow(self, *a, **k):
@@ -120,15 +122,13 @@ async def test_purge_runs_all_three_steps():
     assert res["dnc_added"] is True
     assert res["jobs_cancelled"] == 2
     assert res["lead_marked"] is True
-    # dialer_jobs cancel + leads update both happened.
-    assert "dialer_jobs" in client.cap["tables"]
-    assert "leads" in client.cap["tables"]
-    # the cancel used the opt-out reason.
-    assert any(u.get("failure_reason") == OPT_OUT_REASON for u in client.cap["updates"])
-    assert any(u.get("status") == "dnc" for u in client.cap["updates"])
-    assert pool.conn.executed == [
-        (f"SET LOCAL app.current_tenant_id = '{_TENANT_ID}'", ()),
-    ]
+    assert res["purge_complete"] and res["jobs_cleanup_complete"]
+    # Synchronous adapter is no longer used by the in-call async operation.
+    assert not client.cap
+    jobs = next((sql, args) for sql, args in pool.conn.executed if "UPDATE dialer_jobs" in sql)
+    assert OPT_OUT_REASON in jobs[1]
+    assert set(jobs[1][-1]) == {"pending", "queued", "retry_scheduled"}
+    assert sum(sql.startswith("SET LOCAL") for sql, _ in pool.conn.executed) == 3
 
 
 @pytest.mark.asyncio
@@ -136,11 +136,11 @@ async def test_purge_is_resilient_to_missing_phone():
     # No phone → DNC step skipped, but jobs + lead still handled.
     client = _FakeClient(rows=[{"id": "j1"}])
     res = await purge_lead_on_opt_out(
-        db_pool=None, db_client=client,
-        tenant_id="t", lead_id="lead-1", phone_number=None,
+        db_pool=_FakeDNCPool(), db_client=client,
+        tenant_id=_TENANT_ID, lead_id="lead-1", phone_number=None,
     )
     assert res["dnc_added"] is False
-    assert res["jobs_cancelled"] == 1
+    assert res["jobs_cancelled"] == 2
     assert res["lead_marked"] is True
 
 
@@ -150,4 +150,5 @@ async def test_purge_noop_with_no_identifiers():
         db_pool=None, db_client=None,
         tenant_id=None, lead_id=None, phone_number=None,
     )
-    assert res == {"dnc_added": False, "jobs_cancelled": 0, "lead_marked": False}
+    assert res == {"dnc_added": False, "jobs_cancelled": 0, "lead_marked": False,
+                   "jobs_cleanup_complete": True, "purge_complete": False}

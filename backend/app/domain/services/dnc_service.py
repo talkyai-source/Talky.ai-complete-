@@ -129,9 +129,14 @@ class DNCService:
         expires_at: Optional[datetime] = None,
         added_by: Optional[str] = None,
     ) -> DNCEntry:
-        """Add or replace a DNC entry. Idempotent — same number + same
-        tenant just refreshes the row (updated_at changes)."""
+        """Add or refresh the same tenant/number/source suppression.
+
+        Different sources remain independent. Caller opt-out is permanent,
+        including a refresh of an older expiring caller-opt-out entry.
+        """
         normalized = normalize_e164_for_storage(e164)
+        if source == SOURCE_CALLER_OPT_OUT:
+            expires_at = None
         if source not in KNOWN_SOURCES:
             logger.info("dnc_unknown_source source=%s — accepted but not taxonomised", source)
 
@@ -141,8 +146,8 @@ class DNCService:
             row = await conn.fetchrow(
                 """
                 INSERT INTO dnc_entries
-                    (tenant_id, normalized_number, source, reason, added_by, expires_at)
-                VALUES ($1, $2, $3, $4, $5, $6)
+                    (tenant_id, phone_number, normalized_number, source, reason, added_by, expires_at)
+                VALUES ($1, $2, $2, $3, $4, $5, $6)
                 ON CONFLICT DO NOTHING
                 RETURNING id, tenant_id, normalized_number, source, reason,
                           expires_at, created_at
@@ -161,7 +166,8 @@ class DNCService:
                     UPDATE dnc_entries
                     SET updated_at = NOW(),
                         reason = COALESCE($4, reason),
-                        expires_at = COALESCE($5, expires_at)
+                        expires_at = CASE WHEN source = 'caller_opt_out' THEN NULL
+                                          ELSE COALESCE($5, expires_at) END
                     WHERE (tenant_id = $1 OR (tenant_id IS NULL AND $1 IS NULL))
                       AND normalized_number = $2
                       AND source = $3
@@ -226,8 +232,8 @@ class DNCService:
                     await conn.execute(
                         """
                         INSERT INTO dnc_entries
-                            (tenant_id, normalized_number, source, reason)
-                        VALUES ($1, $2, $3, $4)
+                            (tenant_id, phone_number, normalized_number, source, reason)
+                        VALUES ($1, $2, $2, $3, $4)
                         ON CONFLICT DO NOTHING
                         """,
                         tenant_id,
