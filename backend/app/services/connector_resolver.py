@@ -152,7 +152,7 @@ async def _refresh_and_store(
             "last_refreshed_at": datetime.now(timezone.utc).isoformat(),
         }).eq("id", account_id).eq("connector_id", connector_id).eq(
             "tenant_id", tenant_id
-        ).execute()
+        ).eq("status", "active").execute()
     except Exception as exc:
         logger.error("connector_resolver: token write-back raised for %s: %s", connector_id, exc)
         raise _ConnectorTokenStoreError(str(exc)) from exc
@@ -211,6 +211,7 @@ async def resolve_active_connector(
     force_refresh: bool = False,
     provider: Optional[str] = None,
     connector_id: Optional[str] = None,
+    account_id: Optional[str] = None,
 ) -> Tuple[BaseConnector, str, str]:
     """Return ``(connector, connector_id, provider)`` for the tenant's active
     connector of ``connector_type`` ("email" | "drive" | "calendar" | ...),
@@ -219,6 +220,9 @@ async def resolve_active_connector(
     ``provider`` narrows the lookup to one provider (the CRM type can hold a
     HubSpot AND a Salesforce connector at once). Any persisted
     ``connectors.config`` is handed to the connector via ``apply_config``.
+    ``account_id`` pins an existing active authorization row; a missing pinned row never
+    falls back to another account. Returned ``account_row_id`` identifies that
+    local authorization, not a provider-stable external account identity.
 
     Raises ``ConnectorNotConnectedError`` when nothing is connected/usable.
     """
@@ -248,7 +252,10 @@ async def resolve_active_connector(
         str(tenant_id)[:8], connector_type, len(rows),
     )
     if not rows:
-        raise ConnectorNotConnectedError(connector_type, connector_id=connector_id)
+        raise ConnectorNotConnectedError(
+            connector_type, connector_id=connector_id,
+            reason="account_unavailable" if account_id is not None else None,
+        )
 
     # Repeat "Connect" clicks can leave several active connector rows. The
     # newest connector is authoritative: falling back across connector IDs can
@@ -266,12 +273,17 @@ async def resolve_active_connector(
     first_failure_reason = "access_unusable"
     for row in rows[:1]:
         cid = str(row["id"])
-        acc = (
+        account_query = (
             db_client.table("connector_accounts")
             .select("id, access_token_encrypted, refresh_token_encrypted, token_expires_at, last_refreshed_at, external_account_id")
             .eq("connector_id", cid)
+            .eq("tenant_id", tenant_id)
             .eq("status", "active")
-            .order("last_refreshed_at", desc=True)
+        )
+        if account_id is not None:
+            account_query = account_query.eq("id", account_id)
+        acc = (
+            account_query.order("last_refreshed_at", desc=True)
             .limit(1)
             .execute()
         )
@@ -283,6 +295,8 @@ async def resolve_active_connector(
             raise ConnectorLookupError(connector_type, str(acc.error))
         adata = acc.data
         account_rows = adata if isinstance(adata, list) else ([adata] if isinstance(adata, dict) else [])
+        if account_id is not None and not account_rows:
+            first_failure_reason = "account_unavailable"
         for arow in account_rows:
             try:
                 candidate_access = enc.decrypt(arow["access_token_encrypted"])
@@ -343,6 +357,7 @@ async def resolve_active_connector(
 
     connector = ConnectorFactory.create(provider=provider, tenant_id=tenant_id, connector_id=connector_id)
     connector.external_account_id = str(acc_data.get("external_account_id") or "") or None
+    connector.account_row_id = str(acc_data["id"])
     row_config = _coerce_config(rows[0].get("config") if isinstance(rows[0], dict) else None)
     if row_config is not None:
         connector.apply_config(row_config)

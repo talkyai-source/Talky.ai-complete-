@@ -123,11 +123,24 @@ async def _call_with_one_auth_refresh(
         verify_reviewed_connector,
     )
 
-    # Freeze before the first provider await: the connector row can be reused
-    # by a reconnect, and even the original instance can be changed in flight.
-    reviewed = connector_identity(
-        connector, connector_id, getattr(connector, "provider_name", None)
+    # Freeze before the first provider await. OAuth reconnect inserts a new
+    # authorization row; ordinary token refresh retains it. Gmail may have no
+    # external subject ID, so that separate reviewed-effect proof is optional
+    # here. Legacy objects without row proof can read, but cannot refresh/retry.
+    initial = {
+        "connector_id": connector_id,
+        "provider": getattr(connector, "provider_name", None),
+        "account_id": getattr(connector, "account_row_id", None),
+    }
+    retry_identity = (
+        {key: value.strip() for key, value in initial.items()}
+        if all(isinstance(value, str) and value.strip() for value in initial.values())
+        else None
     )
+    try:
+        reviewed = connector_identity(connector, connector_id, initial["provider"])
+    except ReviewedConnectorChanged:
+        reviewed = None
 
     async def invoke(current: BaseConnector) -> _T:
         return await asyncio.wait_for(
@@ -139,6 +152,10 @@ async def _call_with_one_auth_refresh(
     except ConnectorProviderError as exc:
         if exc.category != "authentication":
             raise
+        if retry_identity is None:
+            raise ReviewedConnectorChanged(
+                "The original email authorization cannot be verified for retry"
+            ) from exc
         logger.info(
             "Gmail rejected access token; attempting one forced refresh tenant=%s",
             str(tenant_id)[:8],
@@ -149,11 +166,15 @@ async def _call_with_one_auth_refresh(
                 tenant_id,
                 "email",
                 force_refresh=True,
-                connector_id=reviewed["connector_id"],
-                provider=reviewed["provider"],
+                connector_id=retry_identity["connector_id"],
+                provider=retry_identity["provider"],
+                account_id=retry_identity["account_id"],
             )
         except ConnectorNotConnectedError as refresh_exc:
-            if refresh_exc.connector_id != reviewed["connector_id"]:
+            if (
+                refresh_exc.connector_id != retry_identity["connector_id"]
+                or refresh_exc.reason == "account_unavailable"
+            ):
                 # This failure cannot establish the original account's health
                 # and must not expire another connector in the outer handlers.
                 raise ReviewedConnectorChanged(
@@ -168,7 +189,15 @@ async def _call_with_one_auth_refresh(
                     db_client, tenant_id, refresh_exc.connector_id or connector_id
                 )
             raise
-        verify_reviewed_connector(refreshed, refreshed_id, _provider, reviewed)
+        current = {
+            "connector_id": refreshed_id,
+            "provider": _provider,
+            "account_id": getattr(refreshed, "account_row_id", None),
+        }
+        if current != retry_identity:
+            raise ReviewedConnectorChanged("The original email authorization changed")
+        if reviewed is not None:
+            verify_reviewed_connector(refreshed, refreshed_id, _provider, reviewed)
         try:
             return await invoke(refreshed)
         except ConnectorProviderError as retry_exc:
