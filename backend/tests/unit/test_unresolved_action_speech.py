@@ -150,3 +150,79 @@ def test_uncertainty_or_negation_cannot_license_a_separate_claim_or_repeat(text)
         False,
         "action_failed:send_email:unknown",
     )
+
+
+@pytest.mark.parametrize("status", [None, "unknown", "failed"])
+@pytest.mark.parametrize(
+    "action,text",
+    [
+        ("schedule_callback", "The callback, as requested, was scheduled."),
+        ("send_email", "The email, as requested, was sent."),
+        ("submit_form", "The form, as requested, was submitted."),
+        ("send_email", "I have sent the price and payment information."),
+    ],
+)
+def test_complete_positive_predicates_survive_embedded_clause_punctuation(status, action, text):
+    results = {} if status is None else {action: receipt(action, status)}
+    valid, reason = LLMGuardrails().validate_response(text, action_results=results)
+    assert valid is False
+    assert reason == (
+        f"unconfirmed_action:{action}" if status is None else f"action_failed:{action}:{status}"
+    )
+
+
+@pytest.mark.parametrize("status", [None, "unknown", "failed"])
+@pytest.mark.parametrize(
+    "text",
+    [
+        "I cannot confirm whether the email, as requested, was sent.",
+        "I cannot confirm whether the callback, as requested, was scheduled.",
+        "I cannot confirm whether the form, as requested, was submitted.",
+        "The caller said 'the email, as requested, was not sent'.",
+    ],
+)
+def test_whole_predicate_uncertainty_and_quoted_failure_remain_truthful(status, text):
+    results = (
+        {}
+        if status is None
+        else {
+            action: receipt(action, status)
+            for action in (
+                "send_email",
+                "schedule_callback",
+                "submit_form",
+            )
+        }
+    )
+    assert LLMGuardrails().validate_response(text, action_results=results) == (True, None)
+
+
+@pytest.mark.parametrize(
+    "action,text",
+    [
+        ("schedule_callback", "The callback, as requested, was not scheduled."),
+        ("send_email", "The email, as requested, was not sent."),
+        ("submit_form", "The form, as requested, was not submitted."),
+        ("send_email", "I have not sent the price and payment information."),
+    ],
+)
+def test_whole_negative_predicate_still_requires_a_definite_outcome(action, text):
+    guard = LLMGuardrails()
+    assert guard.validate_response(text, action_results={action: receipt(action)}) == (
+        False,
+        f"action_failed:{action}:unknown",
+    )
+    assert guard.validate_response(text, action_results={action: receipt(action, "failed")}) == (
+        True,
+        None,
+    )
+
+
+@pytest.mark.parametrize("results", [{}, {"send_email": receipt(status="failed")}])
+def test_modal_failure_cannot_swallow_a_later_delivery_claim(results):
+    valid, reason = LLMGuardrails().validate_response(
+        "The email could not be sent but delivered.",
+        action_results=results,
+    )
+    assert valid is False
+    assert reason.startswith(("unconfirmed_action:send_email", "action_failed:send_email"))

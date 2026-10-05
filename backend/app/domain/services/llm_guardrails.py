@@ -126,8 +126,9 @@ _ACTION_CLAUSE_BOUNDARY = re.compile(r",|\b(?:but|however|instead|so|and)\b", re
 
 
 def _action_clause_text(response: str) -> str:
-    # Preserve offsets and entire quoted spans for assertion_matches. A report
-    # or uncertainty in one clause cannot qualify a later independent claim.
+    # Scope qualifiers for assertion_matches while keeping quote spans/offsets.
+    # Never split positive predicates with this view: punctuation and "and"
+    # can also be part of one predicate ("sent the price and payment details").
     return _ACTION_CLAUSE_BOUNDARY.sub(
         lambda match: ";" + " " * (len(match[0]) - 1), response.replace("’", "'"),
     )
@@ -197,7 +198,7 @@ _TRANSFER_OFFER = re.compile(
 
 def _completed_action_claims(response: str) -> list[str]:
     """Return action names claimed as completed, excluding explicit failures."""
-    response = _action_clause_text(response)
+    response = response.replace("’", "'")
     clauses = re.split(r"(?<=[.!?;])\s+", response)
     claims: list[str] = []
     for action, pattern in _ACTION_COMPLETION_PATTERNS.items():
@@ -207,9 +208,15 @@ def _completed_action_claims(response: str) -> list[str]:
                 for negated in _ACTION_NEGATED_COMPLETION_PATTERNS[action].finditer(clause)
             ]
             for match in pattern.finditer(clause):
-                # Limit each search to one sentence. A greedy match must not
-                # swallow a later positive claim into an earlier limitation.
-                if _UNCERTAIN_COMPLETION_PREFIX.search(clause[:match.start()]):
+                # Keep the original predicate whole (including punctuation and
+                # coordinated objects). A qualifier cannot cover a second full
+                # predicate after an independent boundary inside a greedy match.
+                if _UNCERTAIN_COMPLETION_PREFIX.search(clause[:match.start()]) and not any(
+                    pattern.search(clause, boundary.end(), match.end())
+                    for boundary in _ACTION_CLAUSE_BOUNDARY.finditer(
+                        clause, match.start(), match.end(),
+                    )
+                ):
                     continue
                 # Only the negation of this predicate can exempt it.
                 if any(
