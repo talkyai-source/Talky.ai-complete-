@@ -1,0 +1,52 @@
+{
+  "evidence_date": "2026-10-06",
+  "source_head_at_execution": "39407989342b98fdcb0c586a15aab4fbd259f986",
+  "source_status": "Explicitly frozen uncommitted candidate; source_before/source_after canonical LF hashes are the tested identity.",
+  "source_hash_algorithm": "sha256(read_bytes().replace(b'\\r\\n',b'\\n'))",
+  "source_hashes": {
+    "backend/app/services/email_service.py": "bf72801178da5386f07e4bcaaafd7e3e6d5d2eaa68a5eb1f81378590980b545d",
+    "backend/app/services/connector_resolver.py": "83e811c7469d8409d4700a0ac0752a6aa3fc4cd73d6fa5dea4a6946c0a7f1552",
+    "backend/app/core/db_utils.py": "e58351113da50a0821e8327b06a14271c97778075b74786838f25d4ba5a4fb3a",
+    "backend/app/core/postgres_adapter.py": "012685e51c160e0f1ee13ea0f5c391e7ee1c0e6e27f9e3ec5dda0a2dbc93e074"
+  },
+  "cases_passed": 15,
+  "public_unchanged": true,
+  "source_unchanged": true,
+  "private_schema_removed": true,
+  "private_role_removed": true,
+  "external_network_attempts": 0,
+  "artifacts": {
+    "command.json": {
+      "sha256_raw": "d234cb837e7a0b2c5858dd76f37ca8b36678dc43f895d64ad182e1ac87bc9273",
+      "sha256_lf": "231bed7bc2e4a54bef9b9b19533065ee6693c62b51d42fdee7ace83d8f1a5619"
+    },
+    "final-result.json": {
+      "sha256_raw": "2544779a331bb823bf6bba5863dabeb20173c4c2d47bfa4791694f92056e627c",
+      "sha256_lf": "8cbfefa3e849198175d96cf2342afd5feabbd3ad4f0eb0d35634bd5da11eab3b"
+    },
+    "final.txt": {
+      "sha256_raw": "799c41352a39009c8fbde4243768244f035cc9d362112139373250ef776c2bdb",
+      "sha256_lf": "a7dceceff348353891b5575f4499e5e40ca415d37def70728b598ba58c606c6a"
+    },
+    "initial-probe.py": {
+      "sha256_raw": "b3b7748b9ffc3d8ed49e7e5662b06b7a4797f7999f864ea53cf77c141a14186c",
+      "sha256_lf": "b3b7748b9ffc3d8ed49e7e5662b06b7a4797f7999f864ea53cf77c141a14186c"
+    },
+    "initial.txt": {
+      "sha256_raw": "0ad41ce4b2a3eceb3aaacd05f60d3ec31882aa44dde42bbb70e5d4dfa3d24ece",
+      "sha256_lf": "d4b0d58b87c2b010f70370bf727ea4d448578c892e25794379622c72dc2ab3ff"
+    },
+    "lint.txt": {
+      "sha256_raw": "a4443afdcfb6d7363adb285762515ccf7cf50473b1a05c20c1a50f6bed4d26b0",
+      "sha256_lf": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18"
+    },
+    "probe.py": {
+      "sha256_raw": "c38770694673e62b87f6706c8d8cb53c408766ad9875fd5f62a49ed004aae3ba",
+      "sha256_lf": "c38770694673e62b87f6706c8d8cb53c408766ad9875fd5f62a49ed004aae3ba"
+    },
+    "verification.md": {
+      "sha256_raw": "218ae32bbb72fbc630fa0553fcc5bfb0522aa3882220a95d7142e81163bc0595",
+      "sha256_lf": "218ae32bbb72fbc630fa0553fcc5bfb0522aa3882220a95d7142e81163bc0595"
+    }
+  }
+}

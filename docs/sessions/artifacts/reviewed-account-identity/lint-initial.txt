@@ -1,0 +1,734 @@
+app\services\email_service.py:12:22: F401 [*] `datetime.datetime` imported but unused
+   |
+10 | import json
+11 | from typing import Optional, List, Dict, Any
+12 | from datetime import datetime
+   |                      ^^^^^^^^ F401
+13 | import asyncpg  # migrated from db_client
+   |
+   = help: Remove unused import: `datetime.datetime`
+
+app\services\email_service.py:26:5: F401 [*] `app.domain.services.email_template_manager.EmailContentValidationError` imported but unused
+   |
+24 |     get_email_template_manager,
+25 |     EmailTemplateManager,
+26 |     EmailContentValidationError,
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^ F401
+27 | )
+   |
+   = help: Remove unused import: `app.domain.services.email_template_manager.EmailContentValidationError`
+
+app\services\email_service.py:295:67: W291 Trailing whitespace
+    |
+293 |                     """
+294 |                     INSERT INTO assistant_actions (
+295 |                         id, tenant_id, type, status, triggered_by, 
+    |                                                                   ^ W291
+296 |                         conversation_id, call_id, lead_id,
+297 |                         input_data, started_at, created_at
+    |
+    = help: Remove trailing whitespace
+
+app\services\meeting_service.py:14:48: F401 [*] `app.infrastructure.connectors.base.ConnectorFactory` imported but unused
+   |
+12 | from app.core.postgres_adapter import Client
+13 | 
+14 | from app.infrastructure.connectors.base import ConnectorFactory
+   |                                                ^^^^^^^^^^^^^^^^ F401
+15 | from app.infrastructure.connectors.encryption import get_encryption_service
+16 | from app.domain.models.meeting import Meeting, MeetingStatus, Attendee
+   |
+   = help: Remove unused import: `app.infrastructure.connectors.base.ConnectorFactory`
+
+app\services\meeting_service.py:16:39: F401 [*] `app.domain.models.meeting.Meeting` imported but unused
+   |
+14 | from app.infrastructure.connectors.base import ConnectorFactory
+15 | from app.infrastructure.connectors.encryption import get_encryption_service
+16 | from app.domain.models.meeting import Meeting, MeetingStatus, Attendee
+   |                                       ^^^^^^^ F401
+17 | from app.services.connector_resolver import (
+18 |     reviewed_authorization_identity, verify_reviewed_authorization,
+   |
+   = help: Remove unused import
+
+app\services\meeting_service.py:16:48: F401 [*] `app.domain.models.meeting.MeetingStatus` imported but unused
+   |
+14 | from app.infrastructure.connectors.base import ConnectorFactory
+15 | from app.infrastructure.connectors.encryption import get_encryption_service
+16 | from app.domain.models.meeting import Meeting, MeetingStatus, Attendee
+   |                                                ^^^^^^^^^^^^^ F401
+17 | from app.services.connector_resolver import (
+18 |     reviewed_authorization_identity, verify_reviewed_authorization,
+   |
+   = help: Remove unused import
+
+app\services\meeting_service.py:16:63: F401 [*] `app.domain.models.meeting.Attendee` imported but unused
+   |
+14 | from app.infrastructure.connectors.base import ConnectorFactory
+15 | from app.infrastructure.connectors.encryption import get_encryption_service
+16 | from app.domain.models.meeting import Meeting, MeetingStatus, Attendee
+   |                                                               ^^^^^^^^ F401
+17 | from app.services.connector_resolver import (
+18 |     reviewed_authorization_identity, verify_reviewed_authorization,
+   |
+   = help: Remove unused import
+
+app\services\meeting_service.py:35:1: W293 Blank line contains whitespace
+   |
+33 |     """
+34 |     Meeting creation service that bridges calendar connectors with database.
+35 |     
+   | ^^^^ W293
+36 |     Responsibilities:
+37 |     - Fetch availability from connected calendar
+   |
+   = help: Remove whitespace from blank line
+
+app\services\meeting_service.py:43:1: W293 Blank line contains whitespace
+   |
+41 |     - Send calendar invites
+42 |     - Handle update/cancel operations
+43 |     
+   | ^^^^ W293
+44 |     Integration Points:
+45 |     - Triggerable from: Voice agent outcome, Assistant agent, Dashboard API
+   |
+   = help: Remove whitespace from blank line
+
+app\services\meeting_service.py:47:1: W293 [*] Blank line contains whitespace
+   |
+45 |     - Triggerable from: Voice agent outcome, Assistant agent, Dashboard API
+46 |     """
+47 |     
+   | ^^^^ W293
+48 |     def __init__(self, db_client: Client):
+49 |         self.db_client = db_client
+   |
+   = help: Remove whitespace from blank line
+
+app\services\meeting_service.py:52:1: W293 [*] Blank line contains whitespace
+   |
+50 |         self.supabase = db_client
+51 |         self._encryption = get_encryption_service()
+52 |     
+   | ^^^^ W293
+53 |     async def _get_active_calendar_connector(
+54 |         self,
+   |
+   = help: Remove whitespace from blank line
+
+app\services\meeting_service.py:62:1: W293 Blank line contains whitespace
+   |
+60 |         """
+61 |         Get active calendar connector for tenant.
+62 |         
+   | ^^^^^^^^ W293
+63 |         Returns:
+64 |             Tuple of (connector_instance, connector_id, provider)
+   |
+   = help: Remove whitespace from blank line
+
+app\services\meeting_service.py:65:1: W293 Blank line contains whitespace
+   |
+63 |         Returns:
+64 |             Tuple of (connector_instance, connector_id, provider)
+65 |             
+   | ^^^^^^^^^^^^ W293
+66 |         Raises:
+67 |             CalendarNotConnectedError: If no active calendar connector
+   |
+   = help: Remove whitespace from blank line
+
+app\services\meeting_service.py:91:1: W293 Blank line contains whitespace
+   |
+89 |         """
+90 |         Get available time slots from connected calendar.
+91 |         
+   | ^^^^^^^^ W293
+92 |         Args:
+93 |             tenant_id: Tenant ID
+   |
+   = help: Remove whitespace from blank line
+
+app\services\meeting_service.py:97:1: W293 Blank line contains whitespace
+   |
+95 |             end_time: End of availability window
+96 |             duration_minutes: Required slot duration in minutes
+97 |             
+   | ^^^^^^^^^^^^ W293
+98 |         Returns:
+99 |             List of available slots: [{"start": datetime, "end": datetime}, ...]
+   |
+   = help: Remove whitespace from blank line
+
+app\services\meeting_service.py:100:1: W293 Blank line contains whitespace
+    |
+ 98 |         Returns:
+ 99 |             List of available slots: [{"start": datetime, "end": datetime}, ...]
+100 |             
+    | ^^^^^^^^^^^^ W293
+101 |         Raises:
+102 |             CalendarNotConnectedError: If no calendar is connected
+    |
+    = help: Remove whitespace from blank line
+
+app\services\meeting_service.py:105:1: W293 [*] Blank line contains whitespace
+    |
+103 |         """
+104 |         connector, _, provider = await self._get_active_calendar_connector(tenant_id)
+105 |         
+    | ^^^^^^^^ W293
+106 |         logger.info(f"Getting availability for tenant {tenant_id[:8]}... via {provider}")
+    |
+    = help: Remove whitespace from blank line
+
+app\services\meeting_service.py:107:1: W293 [*] Blank line contains whitespace
+    |
+106 |         logger.info(f"Getting availability for tenant {tenant_id[:8]}... via {provider}")
+107 |         
+    | ^^^^^^^^ W293
+108 |         # Get available slots from calendar
+109 |         available_slots = await connector.get_availability(
+    |
+    = help: Remove whitespace from blank line
+
+app\services\meeting_service.py:114:1: W293 [*] Blank line contains whitespace
+    |
+112 |             duration_minutes=duration_minutes
+113 |         )
+114 |         
+    | ^^^^^^^^ W293
+115 |         # Format response
+116 |         return [
+    |
+    = help: Remove whitespace from blank line
+
+app\services\meeting_service.py:175:1: W293 [*] Blank line contains whitespace
+    |
+173 |         check_reviewed_authorization_current(self.db_client, tenant_id, connector, connector_id, provider, identity)
+174 |         return connector, connector_id, provider, identity
+175 |     
+    | ^^^^ W293
+176 |     @staticmethod
+177 |     def _required_row(response, operation):
+    |
+    = help: Remove whitespace from blank line
+
+app\services\meeting_service.py:394:1: W293 [*] Blank line contains whitespace
+    |
+392 |             "*"
+393 |         ).eq("id", meeting_id).eq("tenant_id", tenant_id).single().execute()
+394 |         
+    | ^^^^^^^^ W293
+395 |         return response.data
+    |
+    = help: Remove whitespace from blank line
+
+app\services\meeting_service.py:396:1: W293 [*] Blank line contains whitespace
+    |
+395 |         return response.data
+396 |     
+    | ^^^^ W293
+397 |     async def list_meetings(
+398 |         self,
+    |
+    = help: Remove whitespace from blank line
+
+app\services\meeting_service.py:409:1: W293 [*] Blank line contains whitespace
+    |
+407 |             "*"
+408 |         ).eq("tenant_id", tenant_id)
+409 |         
+    | ^^^^^^^^ W293
+410 |         if status:
+411 |             query = query.eq("status", status)
+    |
+    = help: Remove whitespace from blank line
+
+app\services\meeting_service.py:416:1: W293 [*] Blank line contains whitespace
+    |
+414 |         if to_date:
+415 |             query = query.lte("start_time", to_date.isoformat())
+416 |         
+    | ^^^^^^^^ W293
+417 |         response = query.order("start_time", desc=False).limit(limit).execute()
+    |
+    = help: Remove whitespace from blank line
+
+app\services\meeting_service.py:418:1: W293 [*] Blank line contains whitespace
+    |
+417 |         response = query.order("start_time", desc=False).limit(limit).execute()
+418 |         
+    | ^^^^^^^^ W293
+419 |         return response.data or []
+    |
+    = help: Remove whitespace from blank line
+
+app\services\meeting_service.py:420:1: W293 [*] Blank line contains whitespace
+    |
+419 |         return response.data or []
+420 |     
+    | ^^^^ W293
+421 | # Singleton instance helper
+422 | _meeting_service: Optional[MeetingService] = None
+    |
+    = help: Remove whitespace from blank line
+
+tests\unit\test_communication_delivery_contract.py:2:8: F401 [*] `json` imported but unused
+  |
+1 | import asyncio
+2 | import json
+  |        ^^^^ F401
+3 | import threading
+4 | from types import SimpleNamespace as NS
+  |
+  = help: Remove unused import: `json`
+
+tests\unit\test_email_service.py:7:22: F401 [*] `datetime.datetime` imported but unused
+  |
+5 | import pytest
+6 | import os
+7 | from datetime import datetime, timedelta
+  |                      ^^^^^^^^ F401
+8 | from unittest.mock import AsyncMock, MagicMock, patch
+9 | from cryptography.fernet import Fernet
+  |
+  = help: Remove unused import
+
+tests\unit\test_email_service.py:7:32: F401 [*] `datetime.timedelta` imported but unused
+  |
+5 | import pytest
+6 | import os
+7 | from datetime import datetime, timedelta
+  |                                ^^^^^^^^^ F401
+8 | from unittest.mock import AsyncMock, MagicMock, patch
+9 | from cryptography.fernet import Fernet
+  |
+  = help: Remove unused import
+
+tests\unit\test_email_service.py:8:49: F401 [*] `unittest.mock.patch` imported but unused
+  |
+6 | import os
+7 | from datetime import datetime, timedelta
+8 | from unittest.mock import AsyncMock, MagicMock, patch
+  |                                                 ^^^^^ F401
+9 | from cryptography.fernet import Fernet
+  |
+  = help: Remove unused import: `unittest.mock.patch`
+
+tests\unit\test_email_service.py:45:1: W293 [*] Blank line contains whitespace
+   |
+43 | class TestEmailServiceImports:
+44 |     """Test that all email service components import correctly"""
+45 |     
+   | ^^^^ W293
+46 |     def test_email_service_import(self):
+47 |         """EmailService can be imported"""
+   |
+   = help: Remove whitespace from blank line
+
+tests\unit\test_email_service.py:50:1: W293 [*] Blank line contains whitespace
+   |
+48 |         from app.services.email_service import EmailService
+49 |         assert EmailService is not None
+50 |     
+   | ^^^^ W293
+51 |     def test_email_not_connected_error_import(self):
+52 |         """EmailNotConnectedError can be imported"""
+   |
+   = help: Remove whitespace from blank line
+
+tests\unit\test_email_service.py:55:1: W293 [*] Blank line contains whitespace
+   |
+53 |         from app.services.email_service import EmailNotConnectedError
+54 |         assert EmailNotConnectedError is not None
+55 |     
+   | ^^^^ W293
+56 |     def test_get_email_service_import(self):
+57 |         """get_email_service helper can be imported"""
+   |
+   = help: Remove whitespace from blank line
+
+tests\unit\test_email_service.py:64:1: W293 [*] Blank line contains whitespace
+   |
+62 | class TestEmailNotConnectedError:
+63 |     """Tests for EmailNotConnectedError exception"""
+64 |     
+   | ^^^^ W293
+65 |     def test_default_message(self):
+66 |         """Exception has user-friendly default message"""
+   |
+   = help: Remove whitespace from blank line
+
+tests\unit\test_email_service.py:69:1: W293 [*] Blank line contains whitespace
+   |
+67 |         from app.services.email_service import EmailNotConnectedError
+68 |         error = EmailNotConnectedError()
+69 |         
+   | ^^^^^^^^ W293
+70 |         assert "No email provider connected" in error.message
+71 |         assert "Gmail" in error.message
+   |
+   = help: Remove whitespace from blank line
+
+tests\unit\test_email_service.py:72:1: W293 [*] Blank line contains whitespace
+   |
+70 |         assert "No email provider connected" in error.message
+71 |         assert "Gmail" in error.message
+72 |     
+   | ^^^^ W293
+73 |     def test_custom_message(self):
+74 |         """Exception accepts custom message"""
+   |
+   = help: Remove whitespace from blank line
+
+tests\unit\test_email_service.py:77:1: W293 [*] Blank line contains whitespace
+   |
+75 |         from app.services.email_service import EmailNotConnectedError
+76 |         error = EmailNotConnectedError("Custom error message")
+77 |         
+   | ^^^^^^^^ W293
+78 |         assert error.message == "Custom error message"
+   |
+   = help: Remove whitespace from blank line
+
+tests\unit\test_email_service.py:83:1: W293 [*] Blank line contains whitespace
+   |
+81 | class TestEmailServiceInit:
+82 |     """Tests for EmailService initialization"""
+83 |     
+   | ^^^^ W293
+84 |     def test_init_with_supabase(self):
+85 |         """EmailService initializes with supabase client"""
+   |
+   = help: Remove whitespace from blank line
+
+tests\unit\test_email_service.py:87:1: W293 [*] Blank line contains whitespace
+   |
+85 |         """EmailService initializes with supabase client"""
+86 |         from app.services.email_service import EmailService
+87 |         
+   | ^^^^^^^^ W293
+88 |         mock_supabase = MagicMock()
+89 |         service = EmailService(mock_supabase)
+   |
+   = help: Remove whitespace from blank line
+
+tests\unit\test_email_service.py:90:1: W293 [*] Blank line contains whitespace
+   |
+88 |         mock_supabase = MagicMock()
+89 |         service = EmailService(mock_supabase)
+90 |         
+   | ^^^^^^^^ W293
+91 |         assert service.supabase == mock_supabase
+92 |         assert service.template_manager is not None
+   |
+   = help: Remove whitespace from blank line
+
+tests\unit\test_email_service.py:93:1: W293 [*] Blank line contains whitespace
+   |
+91 |         assert service.supabase == mock_supabase
+92 |         assert service.template_manager is not None
+93 |     
+   | ^^^^ W293
+94 |     def test_encryption_service_initialized(self):
+95 |         """Encryption service is initialized"""
+   |
+   = help: Remove whitespace from blank line
+
+tests\unit\test_email_service.py:97:1: W293 [*] Blank line contains whitespace
+   |
+95 |         """Encryption service is initialized"""
+96 |         from app.services.email_service import EmailService
+97 |         
+   | ^^^^^^^^ W293
+98 |         mock_supabase = MagicMock()
+99 |         service = EmailService(mock_supabase)
+   |
+   = help: Remove whitespace from blank line
+
+tests\unit\test_email_service.py:100:1: W293 [*] Blank line contains whitespace
+    |
+ 98 |         mock_supabase = MagicMock()
+ 99 |         service = EmailService(mock_supabase)
+100 |         
+    | ^^^^^^^^ W293
+101 |         assert service.encryption is not None
+    |
+    = help: Remove whitespace from blank line
+
+tests\unit\test_email_service.py:106:1: W293 [*] Blank line contains whitespace
+    |
+104 | class TestGetActiveEmailConnector:
+105 |     """Tests for _get_active_email_connector"""
+106 |     
+    | ^^^^ W293
+107 |     @pytest.mark.asyncio
+108 |     async def test_no_email_connected_raises(self):
+    |
+    = help: Remove whitespace from blank line
+
+tests\unit\test_email_service.py:111:1: W293 [*] Blank line contains whitespace
+    |
+109 |         """Raises EmailNotConnectedError when no email connector exists"""
+110 |         from app.services.email_service import EmailService, EmailNotConnectedError
+111 |         
+    | ^^^^^^^^ W293
+112 |         # Mock supabase to return no connectors
+113 |         mock_supabase = MagicMock()
+    |
+    = help: Remove whitespace from blank line
+
+tests\unit\test_email_service.py:117:1: W293 [*] Blank line contains whitespace
+    |
+115 |         mock_response.data = []
+116 |         mock_response.error = None
+117 |         
+    | ^^^^^^^^ W293
+118 |         mock_table = MagicMock()
+119 |         mock_table.select.return_value = mock_table
+    |
+    = help: Remove whitespace from blank line
+
+tests\unit\test_email_service.py:124:1: W293 [*] Blank line contains whitespace
+    |
+122 |         mock_table.execute.return_value = mock_response
+123 |         mock_supabase.table.return_value = mock_table
+124 |         
+    | ^^^^^^^^ W293
+125 |         service = EmailService(mock_supabase)
+    |
+    = help: Remove whitespace from blank line
+
+tests\unit\test_email_service.py:126:1: W293 [*] Blank line contains whitespace
+    |
+125 |         service = EmailService(mock_supabase)
+126 |         
+    | ^^^^^^^^ W293
+127 |         with pytest.raises(EmailNotConnectedError):
+128 |             await service._get_active_email_connector("test-tenant-id")
+    |
+    = help: Remove whitespace from blank line
+
+tests\unit\test_email_service.py:133:1: W293 [*] Blank line contains whitespace
+    |
+131 | class TestSendEmail:
+132 |     """Tests for send_email method"""
+133 |     
+    | ^^^^ W293
+134 |     @pytest.mark.asyncio
+135 |     async def test_send_email_no_connector_raises(self):
+    |
+    = help: Remove whitespace from blank line
+
+tests\unit\test_email_service.py:138:1: W293 [*] Blank line contains whitespace
+    |
+136 |         """Raises error when no email connector is connected"""
+137 |         from app.services.email_service import EmailService, EmailNotConnectedError
+138 |         
+    | ^^^^^^^^ W293
+139 |         service = EmailService(MagicMock())
+140 |         service._create_action_record = AsyncMock(return_value="recorded-action")
+    |
+    = help: Remove whitespace from blank line
+
+tests\unit\test_email_service.py:151:1: W293 [*] Blank line contains whitespace
+    |
+149 |                 body="Test body"
+150 |             )
+151 |     
+    | ^^^^ W293
+152 | 
+153 |     @pytest.mark.asyncio
+    |
+    = help: Remove whitespace from blank line
+
+tests\unit\test_email_service.py:158:1: W293 [*] Blank line contains whitespace
+    |
+156 |         from app.services.email_service import EmailService
+157 |         from app.domain.services.email_template_manager import EmailTemplateManager
+158 |         
+    | ^^^^^^^^ W293
+159 |         mock_supabase = MagicMock()
+160 |         template_manager = EmailTemplateManager()
+    |
+    = help: Remove whitespace from blank line
+
+tests\unit\test_email_service.py:161:9: F841 Local variable `service` is assigned to but never used
+    |
+159 |         mock_supabase = MagicMock()
+160 |         template_manager = EmailTemplateManager()
+161 |         service = EmailService(mock_supabase, template_manager)
+    |         ^^^^^^^ F841
+162 |         
+163 |         # Verify template rendering works
+    |
+    = help: Remove assignment to unused variable `service`
+
+tests\unit\test_email_service.py:162:1: W293 [*] Blank line contains whitespace
+    |
+160 |         template_manager = EmailTemplateManager()
+161 |         service = EmailService(mock_supabase, template_manager)
+162 |         
+    | ^^^^^^^^ W293
+163 |         # Verify template rendering works
+164 |         rendered = template_manager.render_email(
+    |
+    = help: Remove whitespace from blank line
+
+tests\unit\test_email_service.py:171:1: W293 [*] Blank line contains whitespace
+    |
+169 |             attendee_name="Jane"
+170 |         )
+171 |         
+    | ^^^^^^^^ W293
+172 |         assert "Test Meeting" in rendered.subject
+173 |         assert "Jane" in rendered.body
+    |
+    = help: Remove whitespace from blank line
+
+tests\unit\test_email_service.py:178:1: W293 [*] Blank line contains whitespace
+    |
+176 | class TestListTemplates:
+177 |     """Tests for list_templates method"""
+178 |     
+    | ^^^^ W293
+179 |     def test_list_templates_returns_info(self):
+180 |         """list_templates returns template information"""
+    |
+    = help: Remove whitespace from blank line
+
+tests\unit\test_email_service.py:182:1: W293 [*] Blank line contains whitespace
+    |
+180 |         """list_templates returns template information"""
+181 |         from app.services.email_service import EmailService
+182 |         
+    | ^^^^^^^^ W293
+183 |         mock_supabase = MagicMock()
+184 |         service = EmailService(mock_supabase)
+    |
+    = help: Remove whitespace from blank line
+
+tests\unit\test_email_service.py:185:1: W293 [*] Blank line contains whitespace
+    |
+183 |         mock_supabase = MagicMock()
+184 |         service = EmailService(mock_supabase)
+185 |         
+    | ^^^^^^^^ W293
+186 |         templates = service.list_templates()
+    |
+    = help: Remove whitespace from blank line
+
+tests\unit\test_email_service.py:187:1: W293 [*] Blank line contains whitespace
+    |
+186 |         templates = service.list_templates()
+187 |         
+    | ^^^^^^^^ W293
+188 |         assert isinstance(templates, list)
+189 |         assert len(templates) >= 3
+    |
+    = help: Remove whitespace from blank line
+
+tests\unit\test_email_service.py:196:1: W293 [*] Blank line contains whitespace
+    |
+194 | class TestContentValidation:
+195 |     """Tests for email content validation in service"""
+196 |     
+    | ^^^^ W293
+197 |     @pytest.mark.asyncio
+198 |     async def test_validation_rejects_empty_subject(self):
+    |
+    = help: Remove whitespace from blank line
+
+tests\unit\test_email_service.py:202:1: W293 [*] Blank line contains whitespace
+    |
+200 |         from app.services.email_service import EmailService
+201 |         from app.domain.services.email_template_manager import EmailContentValidationError
+202 |         
+    | ^^^^^^^^ W293
+203 |         mock_supabase = MagicMock()
+    |
+    = help: Remove whitespace from blank line
+
+tests\unit\test_email_service.py:204:1: W293 [*] Blank line contains whitespace
+    |
+203 |         mock_supabase = MagicMock()
+204 |         
+    | ^^^^^^^^ W293
+205 |         # Mock for action record creation
+206 |         mock_table = MagicMock()
+    |
+    = help: Remove whitespace from blank line
+
+tests\unit\test_email_service.py:213:1: W293 [*] Blank line contains whitespace
+    |
+211 |         mock_table.update.return_value = mock_table
+212 |         mock_supabase.table.return_value = mock_table
+213 |         
+    | ^^^^^^^^ W293
+214 |         service = EmailService(mock_supabase)
+    |
+    = help: Remove whitespace from blank line
+
+tests\unit\test_email_service.py:215:1: W293 [*] Blank line contains whitespace
+    |
+214 |         service = EmailService(mock_supabase)
+215 |         
+    | ^^^^^^^^ W293
+216 |         with pytest.raises(EmailContentValidationError):
+217 |             await service.send_email(
+    |
+    = help: Remove whitespace from blank line
+
+tests\unit\test_email_service.py:227:1: W293 [*] Blank line contains whitespace
+    |
+225 | class TestSingletonHelper:
+226 |     """Tests for singleton helper"""
+227 |     
+    | ^^^^ W293
+228 |     def test_get_email_service_returns_service(self):
+229 |         """get_email_service returns EmailService instance"""
+    |
+    = help: Remove whitespace from blank line
+
+tests\unit\test_email_service.py:231:1: W293 [*] Blank line contains whitespace
+    |
+229 |         """get_email_service returns EmailService instance"""
+230 |         from app.services.email_service import get_email_service, EmailService
+231 |         
+    | ^^^^^^^^ W293
+232 |         mock_supabase = MagicMock()
+    |
+    = help: Remove whitespace from blank line
+
+tests\unit\test_email_service.py:233:1: W293 [*] Blank line contains whitespace
+    |
+232 |         mock_supabase = MagicMock()
+233 |         
+    | ^^^^^^^^ W293
+234 |         # Reset singleton for testing
+235 |         import app.services.email_service as email_module
+    |
+    = help: Remove whitespace from blank line
+
+tests\unit\test_email_service.py:237:1: W293 [*] Blank line contains whitespace
+    |
+235 |         import app.services.email_service as email_module
+236 |         email_module._email_service = None
+237 |         
+    | ^^^^^^^^ W293
+238 |         service = get_email_service(mock_supabase)
+    |
+    = help: Remove whitespace from blank line
+
+tests\unit\test_email_service.py:239:1: W293 [*] Blank line contains whitespace
+    |
+238 |         service = get_email_service(mock_supabase)
+239 |         
+    | ^^^^^^^^ W293
+240 |         assert isinstance(service, EmailService)
+    |
+    = help: Remove whitespace from blank line
+
+Found 69 errors.
+[*] 60 fixable with the `--fix` option (9 hidden fixes can be enabled with the `--unsafe-fixes` option).

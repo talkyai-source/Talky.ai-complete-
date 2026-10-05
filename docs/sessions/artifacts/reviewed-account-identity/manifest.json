@@ -1,0 +1,111 @@
+{
+  "evidence_date": "2026-10-06",
+  "baseline_commit": "39407989342b98fdcb0c586a15aab4fbd259f986",
+  "source_commit": "ac104e2f5497a103429b0a1a6e91855b738ec3a3",
+  "source_status": "Final owner-tested frozen candidate, committed unchanged after root clearance. No runtime tests repeated after restart.",
+  "hash_algorithm": "sha256(read_bytes().replace(b'\\r\\n',b'\\n')) for source_hashes; artifact raw and LF hashes labelled separately",
+  "source_hashes": {
+    "backend/app/infrastructure/assistant/tools/comms.py": "d35d183e23fa67e1d8eb18fa384ab70c2c97898916f0af089531d54ebe360136",
+    "backend/app/infrastructure/assistant/tools/meetings.py": "7e4146d4147dd37896740782b8ebc7c03fb7d46d4b02b5ebae8114d306d62c78",
+    "backend/app/services/action_execution.py": "991c5f746e8b93312a21d046ee4554c1426e42031b10bc0a832868d1d9ad89d8",
+    "backend/app/services/connector_resolver.py": "83e811c7469d8409d4700a0ac0752a6aa3fc4cd73d6fa5dea4a6946c0a7f1552",
+    "backend/app/services/email_service.py": "bf72801178da5386f07e4bcaaafd7e3e6d5d2eaa68a5eb1f81378590980b545d",
+    "backend/app/services/meeting_service.py": "26775c66e5dd9e5e1dafeca6a00af599d513594202111d56f517328b6473774d",
+    "backend/tests/unit/test_ag06_dashboard_actions.py": "85a53d53e71c310f901862e437b81137eb735b0bd94ba05dee770a753574ea47",
+    "backend/tests/unit/test_calendar_delivery_contract.py": "00a0a5ffa669096093f986ab13e682f2df63b7111afb90b317c7b6d7e29051d2",
+    "backend/tests/unit/test_communication_delivery_contract.py": "b93288da5d7271cb208fd9d776df18ef9f90707980fd9a911e1d0f4894d51840",
+    "backend/tests/unit/test_email_service.py": "f477f4b591538b259d65fda1c6c9be1e29e986eeb3de89c9d4fd441d8ddcff29",
+    "backend/tests/unit/test_reviewed_account_identity.py": "8b00221c871ad882e1e878e8fe53bc6568e72209ccba952b54974893b966d933"
+  },
+  "source_matches_committed_git_bytes": true,
+  "final_affected_result": {
+    "passed": 396,
+    "failed": 0,
+    "skipped": 0,
+    "warnings": 28,
+    "seconds": 23.03,
+    "owner_reported_modules": 14
+  },
+  "canonical_controls": {
+    "passed": 97,
+    "included_in_affected_result": true
+  },
+  "historical_invocation_provenance": "Exact historical pytest/lint argv not saved in recovered files. Counts are preserved owner-run logs; commands.json labels recommended reproduction separately.",
+  "post_restart_source_review": "Root final calendar CAS/12 controls reread clear; additional independent six-app/five-test reread clear, no execution.",
+  "post_restart_check": "git diff --check passed before source staging; all eleven working-tree LF files equal committed Git bytes after commit.",
+  "actual_postgresql": {
+    "manifest": "../email-bind-actual-pg/manifest.json",
+    "manifest_sha256_lf": "408f5302ee93e014d3995314eb998fa63106689cb603f5919b7b9ef0890ec7cb",
+    "controls_passed": 15,
+    "separate_scope": true,
+    "email_and_resolver_hashes_match": true
+  },
+  "production_gate_promoted": false,
+  "artifacts": {
+    "affected-final.txt": {
+      "sha256_raw": "fb876a2b034104f0c23f611665f47a200b00da28e49df3ccdffd7a32b13eec63",
+      "sha256_lf": "9e769bc8819d63469b39a39e03e8d589e9351df4e5e024dd7cb7cddea528e200"
+    },
+    "affected-initial.txt": {
+      "sha256_raw": "6d2858006e6fbbb2462eb040fb79a19b0fbf4c2374a54b090fe317ef95bbbea4",
+      "sha256_lf": "5e174d6df8f4a7d975775816898dab5e8618d09be0e672561170495815fa97c2"
+    },
+    "bind-phase-red.txt": {
+      "sha256_raw": "8a3d28dc23d6b0167498f2aae9460b4f11f23b883c7d5ab82048601ea3d835e0",
+      "sha256_lf": "9cd2fcff662babadb742fb5860381aab95910cdca39dffca54f149a8b04179d7"
+    },
+    "calendar-phase-red.txt": {
+      "sha256_raw": "903bd8f80144f0a23189d4353b6706761cb182c346a7d12c2fa7689d6d413ad4",
+      "sha256_lf": "4b85cf6fbe6a61a182c6b700efa9cadf55242d6d348b2cb2e09cd99edd446167"
+    },
+    "canonical-final.txt": {
+      "sha256_raw": "4e770afe962da46ad5fa844078d48a649eea857ef8e9aa20524a1d230a831ae6",
+      "sha256_lf": "86a6119973e44513d15bcb1e054ac2b6e5941b292ac23b22143747bd7cca4c37"
+    },
+    "commands.json": {
+      "sha256_raw": "87ae8bca14b9694036a88c36003671c8d437b27cbf439c70be1f85e0f5c89174",
+      "sha256_lf": "87ae8bca14b9694036a88c36003671c8d437b27cbf439c70be1f85e0f5c89174"
+    },
+    "initial-probe.py": {
+      "sha256_raw": "6d91daddf8d1b193432f999fa37931883fcff1d71bf017a080e23bed38685090",
+      "sha256_lf": "6d91daddf8d1b193432f999fa37931883fcff1d71bf017a080e23bed38685090"
+    },
+    "initial.json": {
+      "sha256_raw": "d9f3c0c661988ad42e2df2892ac719889ab6c2eae51dfea75dee02f7ad5199c3",
+      "sha256_lf": "b033ff368bc9bcb4ecf33bfc585028520706eceb76409cbda873ac3b4ca2def3"
+    },
+    "legacy-fixtures-final.txt": {
+      "sha256_raw": "1f2a4b082a38974afc92f17e225b8cb6a5831a1758305fcf379145038b03a9ca",
+      "sha256_lf": "80914f4e9fb56b054fb331aaa57e98dd32bbff3dc24aba9f8bd41ddd92764d45"
+    },
+    "legacy-fixtures-lint.txt": {
+      "sha256_raw": "a4443afdcfb6d7363adb285762515ccf7cf50473b1a05c20c1a50f6bed4d26b0",
+      "sha256_lf": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18"
+    },
+    "lint-final.txt": {
+      "sha256_raw": "a4443afdcfb6d7363adb285762515ccf7cf50473b1a05c20c1a50f6bed4d26b0",
+      "sha256_lf": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18"
+    },
+    "lint-initial.txt": {
+      "sha256_raw": "940564981205bda4817b75ed4b36308aed4e6614758258d354d008353e9ce49f",
+      "sha256_lf": "18cabd32147ca7dbaf843a04d1c43d57fcd306c7eb6a79896963681848f54003"
+    },
+    "phase-final.txt": {
+      "sha256_raw": "6922ed882f3946dc99f87800b5f87a97d8fe6ab55fb77007b91e2964145c4ac1",
+      "sha256_lf": "93d787a5aab47d39c10cbb4d3d9dd88dedb6fa21247351daf18e024ee716af10"
+    },
+    "refresh-promotion-probe.py": {
+      "sha256_raw": "d17b55f06984852be97ea3765c8f24ed9b1af7868dc90296215f0b97c69cbc76",
+      "sha256_lf": "d17b55f06984852be97ea3765c8f24ed9b1af7868dc90296215f0b97c69cbc76"
+    },
+    "refresh-promotion.json": {
+      "sha256_raw": "649025d1a62bff3c805cb58c5419b7e0819e154cc8d913a26287d65bbfc3bbf1",
+      "sha256_lf": "5a55f222c629f62be9d6a1b833ef2bab28eee526165902d6fa4cafb3e4fad25f"
+    },
+    "verification.md": {
+      "sha256_raw": "bc56d8d711d72d86d3e66f9381e1ef8c6bba590c5c12a55f01a936dae0dfdb58",
+      "sha256_lf": "bc56d8d711d72d86d3e66f9381e1ef8c6bba590c5c12a55f01a936dae0dfdb58"
+    }
+  },
+  "preserved_evidence_whitespace_exception": "lint-initial.txt quotes the original trailing-whitespace findings; raw log retained unchanged. All other staged evidence passed git diff --cached --check."
+}

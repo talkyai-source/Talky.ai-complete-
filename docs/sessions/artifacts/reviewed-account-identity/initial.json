@@ -1,0 +1,115 @@
+{
+  "base": "39407989",
+  "scope": "Actual OAuth callback, resolver, preview tools and services; synthetic database/provider ports, blocked network.",
+  "results": [
+    {
+      "provider": "gmail",
+      "explicit_external_identity_control": false,
+      "canonical_callback": "active_success",
+      "canonical_external_account_id": null,
+      "canonical_verified_email_present": true,
+      "resolver_original_row_bound": true,
+      "reviewed_preview_success": false,
+      "reviewed_preview_error": "The connected account identity is unavailable. Reconnect and review a new proposal.",
+      "direct_effect_success": false,
+      "direct_effect_error": "The connected account identity is unavailable. Reconnect and review a new proposal.",
+      "provider_effect_attempts": 0,
+      "saved_action_statuses": [
+        "failed"
+      ],
+      "newer_active_row_becomes_current_selection": true,
+      "exact_pin_can_still_resolve_older_active_row": true
+    },
+    {
+      "provider": "gmail",
+      "explicit_external_identity_control": true,
+      "canonical_callback": "active_success",
+      "canonical_external_account_id": null,
+      "canonical_verified_email_present": true,
+      "resolver_original_row_bound": true,
+      "reviewed_preview_success": true,
+      "reviewed_preview_error": null,
+      "direct_effect_success": true,
+      "direct_effect_error": null,
+      "provider_effect_attempts": 1,
+      "saved_action_statuses": [
+        "completed"
+      ],
+      "newer_active_row_becomes_current_selection": true,
+      "exact_pin_can_still_resolve_older_active_row": true
+    },
+    {
+      "provider": "google_calendar",
+      "explicit_external_identity_control": false,
+      "canonical_callback": "active_success",
+      "canonical_external_account_id": null,
+      "canonical_verified_email_present": false,
+      "resolver_original_row_bound": true,
+      "reviewed_preview_success": false,
+      "reviewed_preview_error": "The connected account identity is unavailable. Reconnect and review a new proposal.",
+      "direct_effect_success": false,
+      "direct_effect_error": "The connected account identity is unavailable. Reconnect and review a new proposal.",
+      "provider_effect_attempts": 0,
+      "saved_action_statuses": [],
+      "newer_active_row_becomes_current_selection": true,
+      "exact_pin_can_still_resolve_older_active_row": true
+    },
+    {
+      "provider": "google_calendar",
+      "explicit_external_identity_control": true,
+      "canonical_callback": "active_success",
+      "canonical_external_account_id": null,
+      "canonical_verified_email_present": false,
+      "resolver_original_row_bound": true,
+      "reviewed_preview_success": true,
+      "reviewed_preview_error": null,
+      "direct_effect_success": true,
+      "direct_effect_error": null,
+      "provider_effect_attempts": 1,
+      "saved_action_statuses": [
+        "completed"
+      ],
+      "newer_active_row_becomes_current_selection": true,
+      "exact_pin_can_still_resolve_older_active_row": true
+    },
+    {
+      "provider": "outlook_calendar",
+      "explicit_external_identity_control": false,
+      "canonical_callback": "active_success",
+      "canonical_external_account_id": null,
+      "canonical_verified_email_present": false,
+      "resolver_original_row_bound": true,
+      "reviewed_preview_success": false,
+      "reviewed_preview_error": "The connected account identity is unavailable. Reconnect and review a new proposal.",
+      "direct_effect_success": false,
+      "direct_effect_error": "The connected account identity is unavailable. Reconnect and review a new proposal.",
+      "provider_effect_attempts": 0,
+      "saved_action_statuses": [],
+      "newer_active_row_becomes_current_selection": true,
+      "exact_pin_can_still_resolve_older_active_row": true
+    },
+    {
+      "provider": "outlook_calendar",
+      "explicit_external_identity_control": true,
+      "canonical_callback": "active_success",
+      "canonical_external_account_id": null,
+      "canonical_verified_email_present": false,
+      "resolver_original_row_bound": true,
+      "reviewed_preview_success": true,
+      "reviewed_preview_error": null,
+      "direct_effect_success": true,
+      "direct_effect_error": null,
+      "provider_effect_attempts": 1,
+      "saved_action_statuses": [
+        "completed"
+      ],
+      "newer_active_row_becomes_current_selection": true,
+      "exact_pin_can_still_resolve_older_active_row": true
+    }
+  ],
+  "canonical_failures": 3,
+  "limitations": [
+    "No real OAuth, provider operation, PostgreSQL/RLS or browser acceptance.",
+    "Positive controls inject an explicit synthetic external identity after the canonical callback."
+  ]
+}

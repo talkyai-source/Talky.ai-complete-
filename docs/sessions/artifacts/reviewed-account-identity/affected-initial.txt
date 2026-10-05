@@ -1,0 +1,229 @@
+........................................................................ [ 21%]
+......FFF.FFF..................F.F.........................FFFFFFFFF.F.. [ 43%]
+.....F.F.F.FF........................................................... [ 64%]
+...........F............................................................ [ 86%]
+.............................................                            [100%]
+================================== FAILURES ===================================
+___________ test_email_reconnected_account_cannot_use_old_approval ____________
+tests\unit\test_ag06_dashboard_actions.py:30: in test_email_reconnected_account_cannot_use_old_approval
+    result = await service.send_email(
+app\services\email_service.py:137: in send_email
+    client = self.supabase if hasattr(self.supabase, "table") else PostgresClient(self.db_pool)
+E   AttributeError: 'EmailService' object has no attribute 'supabase'
+___________ test_email_preview_freezes_visible_account_and_content ____________
+tests\unit\test_ag06_dashboard_actions.py:45: in test_email_preview_freezes_visible_account_and_content
+    assert result["_apply_args"]["_reviewed_connector"] == PIN
+E   KeyError: '_apply_args'
+------------------------------ Captured log call ------------------------------
+ERROR    app.infrastructure.assistant.tools.comms:comms.py:311 Error sending email: The original authorization is unavailable. Review a new proposal.
+_______________ test_calendar_preview_freezes_account_and_time ________________
+tests\unit\test_ag06_dashboard_actions.py:64: in test_calendar_preview_freezes_account_and_time
+    assert result["_apply_args"]["_reviewed_connector"]["external_account_id"] == "account-a"
+E   KeyError: '_apply_args'
+------------------------------ Captured log call ------------------------------
+ERROR    app.infrastructure.assistant.tools.meetings:meetings.py:183 Error booking meeting: The original authorization is unavailable. Review a new proposal.
+____________ test_review_then_reconnect_never_sends_on_new_account ____________
+tests\unit\test_ag06_dashboard_actions.py:97: in test_review_then_reconnect_never_sends_on_new_account
+    result = await comms.send_email("tenant", object(), confirm=True, **preview["_apply_args"])
+E   KeyError: '_apply_args'
+------------------------------ Captured log call ------------------------------
+ERROR    app.infrastructure.assistant.tools.comms:comms.py:311 Error sending email: The original authorization is unavailable. Review a new proposal.
+___________ test_reviewed_email_auth_refresh_cannot_switch_accounts ___________
+tests\unit\test_ag06_dashboard_actions.py:119: in test_reviewed_email_auth_refresh_cannot_switch_accounts
+    result = await service.send_email(
+app\services\email_service.py:137: in send_email
+    client = self.supabase if hasattr(self.supabase, "table") else PostgresClient(self.db_pool)
+E   AttributeError: 'EmailService' object has no attribute 'supabase'
+____ test_same_reviewed_account_receipt_is_provider_accepted_not_delivered ____
+tests\unit\test_ag06_dashboard_actions.py:130: in test_same_reviewed_account_receipt_is_provider_accepted_not_delivered
+    result = await service.send_email(
+app\services\email_service.py:137: in send_email
+    client = self.supabase if hasattr(self.supabase, "table") else PostgresClient(self.db_pool)
+E   AttributeError: 'EmailService' object has no attribute 'supabase'
+___________ test_support_report_reconnect_cannot_fall_back_to_smtp ____________
+tests\unit\test_ag06_dashboard_actions.py:531: in test_support_report_reconnect_cannot_fall_back_to_smtp
+    result = await comms.report_issue("tenant", object(), confirm=True, **preview["_apply_args"])
+E   KeyError: '_apply_args'
+__________ test_direct_email_401_refresh_also_cannot_cross_accounts ___________
+tests\unit\test_ag06_dashboard_actions.py:582: in test_direct_email_401_refresh_also_cannot_cross_accounts
+    result = await service.send_email(
+app\services\email_service.py:137: in send_email
+    client = self.supabase if hasattr(self.supabase, "table") else PostgresClient(self.db_pool)
+E   AttributeError: 'EmailService' object has no attribute 'supabase'
+_ test_calendar_rechecks_reviewed_meeting_after_connector_resolution[None-update] _
+tests\unit\test_ag06_dashboard_actions.py:863: in test_calendar_rechecks_reviewed_meeting_after_connector_resolution
+    result = await method("tenant", "meeting", **arguments)
+app\services\meeting_service.py:314: in update_meeting
+    connector, _, provider, identity = await self._meeting_connector(
+app\services\meeting_service.py:159: in _meeting_connector
+    identity = verify_reviewed_authorization(connector, connector_id, provider, persisted)
+app\services\connector_resolver.py:75: in verify_reviewed_authorization
+    current = reviewed_authorization_identity(connector, connector_id, provider)
+app\services\connector_resolver.py:66: in reviewed_authorization_identity
+    raise ReviewedConnectorChanged("The original authorization is unavailable. Review a new proposal.")
+E   app.services.connector_resolver.ReviewedConnectorChanged: The original authorization is unavailable. Review a new proposal.
+_ test_calendar_rechecks_reviewed_meeting_after_connector_resolution[None-cancel] _
+tests\unit\test_ag06_dashboard_actions.py:863: in test_calendar_rechecks_reviewed_meeting_after_connector_resolution
+    result = await method("tenant", "meeting", **arguments)
+app\services\meeting_service.py:350: in cancel_meeting
+    connector, _, provider, identity = await self._meeting_connector(
+app\services\meeting_service.py:159: in _meeting_connector
+    identity = verify_reviewed_authorization(connector, connector_id, provider, persisted)
+app\services\connector_resolver.py:75: in verify_reviewed_authorization
+    current = reviewed_authorization_identity(connector, connector_id, provider)
+app\services\connector_resolver.py:66: in reviewed_authorization_identity
+    raise ReviewedConnectorChanged("The original authorization is unavailable. Review a new proposal.")
+E   app.services.connector_resolver.ReviewedConnectorChanged: The original authorization is unavailable. Review a new proposal.
+____ test_calendar_requires_durable_intent_before_creating_external_event _____
+tests\unit\test_calendar_delivery_contract.py:78: in test_calendar_requires_durable_intent_before_creating_external_event
+    await create(subject)
+tests\unit\test_calendar_delivery_contract.py:72: in create
+    return await subject.create_meeting(TENANT, 'Synthetic meeting', START, 30, ['test@example.invalid'])
+app\services\meeting_service.py:239: in create_meeting
+    if reviewed_connector is not None else reviewed_authorization_identity(connector, connector_id, provider))
+app\services\connector_resolver.py:66: in reviewed_authorization_identity
+    raise ReviewedConnectorChanged("The original authorization is unavailable. Review a new proposal.")
+E   app.services.connector_resolver.ReviewedConnectorChanged: The original authorization is unavailable. Review a new proposal.
+__ test_ack_with_missing_local_receipt_returns_unknown_not_success[failure0] __
+tests\unit\test_calendar_delivery_contract.py:85: in test_ack_with_missing_local_receipt_returns_unknown_not_success
+    result = await create(subject)
+tests\unit\test_calendar_delivery_contract.py:72: in create
+    return await subject.create_meeting(TENANT, 'Synthetic meeting', START, 30, ['test@example.invalid'])
+app\services\meeting_service.py:239: in create_meeting
+    if reviewed_connector is not None else reviewed_authorization_identity(connector, connector_id, provider))
+app\services\connector_resolver.py:66: in reviewed_authorization_identity
+    raise ReviewedConnectorChanged("The original authorization is unavailable. Review a new proposal.")
+E   app.services.connector_resolver.ReviewedConnectorChanged: The original authorization is unavailable. Review a new proposal.
+__ test_ack_with_missing_local_receipt_returns_unknown_not_success[failure1] __
+tests\unit\test_calendar_delivery_contract.py:85: in test_ack_with_missing_local_receipt_returns_unknown_not_success
+    result = await create(subject)
+tests\unit\test_calendar_delivery_contract.py:72: in create
+    return await subject.create_meeting(TENANT, 'Synthetic meeting', START, 30, ['test@example.invalid'])
+app\services\meeting_service.py:239: in create_meeting
+    if reviewed_connector is not None else reviewed_authorization_identity(connector, connector_id, provider))
+app\services\connector_resolver.py:66: in reviewed_authorization_identity
+    raise ReviewedConnectorChanged("The original authorization is unavailable. Review a new proposal.")
+E   app.services.connector_resolver.ReviewedConnectorChanged: The original authorization is unavailable. Review a new proposal.
+___ test_calendar_creation_with_offset_creates_no_unapproved_sms_reminders ____
+tests\unit\test_calendar_delivery_contract.py:94: in test_calendar_creation_with_offset_creates_no_unapproved_sms_reminders
+    result = await create(subject)
+tests\unit\test_calendar_delivery_contract.py:72: in create
+    return await subject.create_meeting(TENANT, 'Synthetic meeting', START, 30, ['test@example.invalid'])
+app\services\meeting_service.py:239: in create_meeting
+    if reviewed_connector is not None else reviewed_authorization_identity(connector, connector_id, provider))
+app\services\connector_resolver.py:66: in reviewed_authorization_identity
+    raise ReviewedConnectorChanged("The original authorization is unavailable. Review a new proposal.")
+E   app.services.connector_resolver.ReviewedConnectorChanged: The original authorization is unavailable. Review a new proposal.
+______________ test_calendar_missing_provider_receipt_is_unknown ______________
+tests\unit\test_calendar_delivery_contract.py:104: in test_calendar_missing_provider_receipt_is_unknown
+    result = await create(subject)
+tests\unit\test_calendar_delivery_contract.py:72: in create
+    return await subject.create_meeting(TENANT, 'Synthetic meeting', START, 30, ['test@example.invalid'])
+app\services\meeting_service.py:239: in create_meeting
+    if reviewed_connector is not None else reviewed_authorization_identity(connector, connector_id, provider))
+app\services\connector_resolver.py:66: in reviewed_authorization_identity
+    raise ReviewedConnectorChanged("The original authorization is unavailable. Review a new proposal.")
+E   app.services.connector_resolver.ReviewedConnectorChanged: The original authorization is unavailable. Review a new proposal.
+____ test_calendar_mutations_pin_original_account_and_require_ack[update] _____
+tests\unit\test_calendar_delivery_contract.py:117: in test_calendar_mutations_pin_original_account_and_require_ack
+    result = await subject.update_meeting(TENANT, 'meeting', new_title='Reviewed title')
+app\services\meeting_service.py:314: in update_meeting
+    connector, _, provider, identity = await self._meeting_connector(
+app\services\meeting_service.py:159: in _meeting_connector
+    identity = verify_reviewed_authorization(connector, connector_id, provider, persisted)
+app\services\connector_resolver.py:75: in verify_reviewed_authorization
+    current = reviewed_authorization_identity(connector, connector_id, provider)
+app\services\connector_resolver.py:66: in reviewed_authorization_identity
+    raise ReviewedConnectorChanged("The original authorization is unavailable. Review a new proposal.")
+E   app.services.connector_resolver.ReviewedConnectorChanged: The original authorization is unavailable. Review a new proposal.
+____ test_calendar_mutations_pin_original_account_and_require_ack[cancel] _____
+tests\unit\test_calendar_delivery_contract.py:114: in test_calendar_mutations_pin_original_account_and_require_ack
+    result = await subject.cancel_meeting(TENANT, 'meeting')
+app\services\meeting_service.py:350: in cancel_meeting
+    connector, _, provider, identity = await self._meeting_connector(
+app\services\meeting_service.py:159: in _meeting_connector
+    identity = verify_reviewed_authorization(connector, connector_id, provider, persisted)
+app\services\connector_resolver.py:75: in verify_reviewed_authorization
+    current = reviewed_authorization_identity(connector, connector_id, provider)
+app\services\connector_resolver.py:66: in reviewed_authorization_identity
+    raise ReviewedConnectorChanged("The original authorization is unavailable. Review a new proposal.")
+E   app.services.connector_resolver.ReviewedConnectorChanged: The original authorization is unavailable. Review a new proposal.
+___ test_successful_cancellation_stops_pending_reminders_and_saves_receipt ____
+tests\unit\test_calendar_delivery_contract.py:136: in test_successful_cancellation_stops_pending_reminders_and_saves_receipt
+    result = await subject.cancel_meeting(TENANT, 'meeting')
+app\services\meeting_service.py:350: in cancel_meeting
+    connector, _, provider, identity = await self._meeting_connector(
+app\services\meeting_service.py:159: in _meeting_connector
+    identity = verify_reviewed_authorization(connector, connector_id, provider, persisted)
+app\services\connector_resolver.py:75: in verify_reviewed_authorization
+    current = reviewed_authorization_identity(connector, connector_id, provider)
+app\services\connector_resolver.py:66: in reviewed_authorization_identity
+    raise ReviewedConnectorChanged("The original authorization is unavailable. Review a new proposal.")
+E   app.services.connector_resolver.ReviewedConnectorChanged: The original authorization is unavailable. Review a new proposal.
+__ test_external_ack_is_not_confirmed_when_receipt_persistence_fails[email] ___
+tests\unit\test_communication_delivery_contract.py:86: in test_external_ack_is_not_confirmed_when_receipt_persistence_fails
+    assert result['success'] is False and result['status'] == 'unknown'
+E   AssertionError: assert (False is False and 'failed' == 'unknown'
+E     - unknown
+E     + failed)
+------------------------------ Captured log call ------------------------------
+ERROR    app.services.email_service:email_service.py:364 Failed to update email action status: RuntimeError
+ERROR    app.services.email_service:email_service.py:191 email receipt persistence failed action=6efed56d-0f7f-43e8-8e56-ea0b1acd91b4
+_____ test_transport_error_after_dispatch_is_unknown_never_retried[email] _____
+tests\unit\test_communication_delivery_contract.py:97: in test_transport_error_after_dispatch_is_unknown_never_retried
+    assert not result['success'] and result['status'] == 'unknown'
+E   AssertionError: assert (not False and 'failed' == 'unknown'
+E     - unknown
+E     + failed)
+_______________ test_cancellation_keeps_unknown_receipt[email] ________________
+tests\unit\test_communication_delivery_contract.py:107: in test_cancellation_keeps_unknown_receipt
+    with pytest.raises(asyncio.CancelledError):
+E   Failed: DID NOT RAISE <class 'asyncio.exceptions.CancelledError'>
+_______ test_email_uses_canonical_resolver_for_pool_and_forced_refresh ________
+tests\unit\test_communication_delivery_contract.py:121: in test_email_uses_canonical_resolver_for_pool_and_forced_refresh
+    assert resolve.await_args.kwargs == {'force_refresh': True}
+E   AssertionError: assert {'force_refre...zation': True} == {'force_refresh': True}
+E     Omitting 1 identical items, use -vv to show
+E     Left contains 1 more item:
+E     {'reviewed_authorization': True}
+E     Use -v to get more diff
+___________ test_email_authentication_retry_only_after_definite_401 ___________
+tests\unit\test_communication_delivery_contract.py:131: in test_email_authentication_retry_only_after_definite_401
+    assert result['success'] and result['status'] == 'accepted'
+E   assert (False)
+_______________ test_calendar_mutations_use_refreshing_resolver _______________
+tests\unit\test_meeting_service.py:309: in test_calendar_mutations_use_refreshing_resolver
+    resolve.assert_awaited_once_with(db, "tenant-1", "calendar")
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:2363: in assert_awaited_once_with
+    return self.assert_awaited_with(*args, **kwargs)
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:2352: in assert_awaited_with
+    raise AssertionError(_error_message()) from cause
+E   AssertionError: expected await not found.
+E   Expected: mock(<MagicMock id='3055637515344'>, 'tenant-1', 'calendar')
+E     Actual: mock(<MagicMock id='3055637515344'>, 'tenant-1', 'calendar', reviewed_authorization=True)
+=========================== short test summary info ===========================
+FAILED tests/unit/test_ag06_dashboard_actions.py::test_email_reconnected_account_cannot_use_old_approval
+FAILED tests/unit/test_ag06_dashboard_actions.py::test_email_preview_freezes_visible_account_and_content
+FAILED tests/unit/test_ag06_dashboard_actions.py::test_calendar_preview_freezes_account_and_time
+FAILED tests/unit/test_ag06_dashboard_actions.py::test_review_then_reconnect_never_sends_on_new_account
+FAILED tests/unit/test_ag06_dashboard_actions.py::test_reviewed_email_auth_refresh_cannot_switch_accounts
+FAILED tests/unit/test_ag06_dashboard_actions.py::test_same_reviewed_account_receipt_is_provider_accepted_not_delivered
+FAILED tests/unit/test_ag06_dashboard_actions.py::test_support_report_reconnect_cannot_fall_back_to_smtp
+FAILED tests/unit/test_ag06_dashboard_actions.py::test_direct_email_401_refresh_also_cannot_cross_accounts
+FAILED tests/unit/test_ag06_dashboard_actions.py::test_calendar_rechecks_reviewed_meeting_after_connector_resolution[None-update]
+FAILED tests/unit/test_ag06_dashboard_actions.py::test_calendar_rechecks_reviewed_meeting_after_connector_resolution[None-cancel]
+FAILED tests/unit/test_calendar_delivery_contract.py::test_calendar_requires_durable_intent_before_creating_external_event
+FAILED tests/unit/test_calendar_delivery_contract.py::test_ack_with_missing_local_receipt_returns_unknown_not_success[failure0]
+FAILED tests/unit/test_calendar_delivery_contract.py::test_ack_with_missing_local_receipt_returns_unknown_not_success[failure1]
+FAILED tests/unit/test_calendar_delivery_contract.py::test_calendar_creation_with_offset_creates_no_unapproved_sms_reminders
+FAILED tests/unit/test_calendar_delivery_contract.py::test_calendar_missing_provider_receipt_is_unknown
+FAILED tests/unit/test_calendar_delivery_contract.py::test_calendar_mutations_pin_original_account_and_require_ack[update]
+FAILED tests/unit/test_calendar_delivery_contract.py::test_calendar_mutations_pin_original_account_and_require_ack[cancel]
+FAILED tests/unit/test_calendar_delivery_contract.py::test_successful_cancellation_stops_pending_reminders_and_saves_receipt
+FAILED tests/unit/test_communication_delivery_contract.py::test_external_ack_is_not_confirmed_when_receipt_persistence_fails[email]
+FAILED tests/unit/test_communication_delivery_contract.py::test_transport_error_after_dispatch_is_unknown_never_retried[email]
+FAILED tests/unit/test_communication_delivery_contract.py::test_cancellation_keeps_unknown_receipt[email]
+FAILED tests/unit/test_communication_delivery_contract.py::test_email_uses_canonical_resolver_for_pool_and_forced_refresh
+FAILED tests/unit/test_communication_delivery_contract.py::test_email_authentication_retry_only_after_definite_401
+FAILED tests/unit/test_meeting_service.py::test_calendar_mutations_use_refreshing_resolver
+24 failed, 309 passed, 27 warnings in 24.32s
