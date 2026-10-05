@@ -2026,8 +2026,7 @@ async def recover_orphaned_calls() -> int:
                 # a completed terminal event; release the local marker now so
                 # the next watchdog tick can retry while the durable ledger is
                 # still present.
-                _ended_calls_in_flight.discard(call_id)
-                _ended_calls_logically_completed.discard(call_id)
+                _clear_ended_marker(call_id, recovery_context.get("_logical_marker_token"))
             _orphan_recovery_in_flight.discard(call_id)
     return recovered
 
@@ -2955,85 +2954,112 @@ async def _fence_inbound_call_after_lease_loss(
     proving termination if this process exits between attempts.
     """
 
+    # Register the existing callback fence synchronously: a natural terminal
+    # event may arrive while either Redis or the durable inventory is awaited.
+    if pbx_call_id in _orphan_recovery_in_flight:
+        return False
+    fence = _orphan_recovery_contexts_by_call.get(pbx_call_id)
+    if fence is not None and fence.get("_lease_loss_inventory_fence") is not True:
+        return False  # An already-hydrated recovery coordinator owns this call.
+    if fence is None:
+        fence = {"_lease_loss_inventory_fence": True}
+    fence["_awaiting_all_leg_absence_proof"] = True
+    fence.pop("_pbx_all_leg_absence_confirmed", None)
+    _orphan_recovery_contexts_by_call[pbx_call_id] = fence
+    _orphan_recovery_in_flight.add(pbx_call_id)
+
     tenant_id = str(admission.get("tenant_id") or "").strip() or None
     campaign_id = str(admission.get("campaign_id") or "").strip() or None
     provider_call_id = str(admission.get("provider_call_id") or pbx_call_id)
     provider_leg_ids: tuple[str, ...] = ()
     expected_provider = admission.get("provider")
     provider_legs: tuple[tuple[str, str | None], ...] = ()
-
+    inventory_verified = False
     try:
-        await _state().register_cleanup_obligation(
-            pbx_call_id,
-            tenant_id=tenant_id,
-            campaign_id=campaign_id,
-            state="termination_pending",
-        )
-    except Exception as exc:
-        # Losing Redis must not suppress the immediate PBX termination request;
-        # the database fence below remains the second durable recovery owner.
-        logger.critical(
-            "inbound_lease_loss_retry_ledger_failed call=%s err=%s",
-            pbx_call_id[:12],
-            exc,
-        )
+        try:
+            await _state().register_cleanup_obligation(
+                pbx_call_id,
+                tenant_id=tenant_id,
+                campaign_id=campaign_id,
+                state="termination_pending",
+            )
+        except Exception as exc:
+            # Redis failure must not prevent the same-owner hangup request.
+            logger.critical(
+                "inbound_lease_loss_retry_ledger_failed call=%s err=%s",
+                pbx_call_id[:12], exc,
+            )
 
-    try:
         from app.domain.services.telephony.termination import (
             mark_termination_pending_and_load_context,
+            request_confirmed_hangup,
         )
 
-        context = await mark_termination_pending_and_load_context(
-            container.db_pool,
-            call_reference=durable_call_id,
-            tenant_id=tenant_id,
-        )
-        provider_call_id = context.provider_call_id or provider_call_id
-        provider_leg_ids = context.provider_leg_ids
-        expected_provider = context.provider
-        provider_legs = context.provider_legs
-    except Exception as exc:
-        # A database outage is exactly when the provider-side fence is most
-        # important. Keep retrying it and let the durable admission/Redis state
-        # drive reconciliation when storage recovers.
-        logger.critical(
-            "inbound_lease_loss_db_fence_failed call=%s durable_call=%s err=%s",
-            pbx_call_id[:12],
-            durable_call_id[:12],
-            exc,
-        )
+        try:
+            context = await mark_termination_pending_and_load_context(
+                container.db_pool,
+                call_reference=durable_call_id,
+                tenant_id=tenant_id,
+            )
+            provider_call_id = context.provider_call_id or provider_call_id
+            provider_leg_ids = context.provider_leg_ids
+            expected_provider = context.provider
+            provider_legs = context.provider_legs
+            inventory_verified = True
+        except Exception as exc:
+            # Still request the known parent's hangup, but parent-only absence
+            # cannot certify that unavailable durable children have ended.
+            logger.critical(
+                "inbound_lease_loss_db_fence_failed call=%s durable_call=%s err=%s",
+                pbx_call_id[:12], durable_call_id[:12], exc,
+            )
 
-    from app.domain.services.telephony.termination import provider_family_error
-
-    identity_error = provider_family_error(
-        get_adapter(),
-        expected_provider,
-        provider_leg_ids=provider_leg_ids,
-        provider_legs=provider_legs,
-    )
-    if identity_error:
-        logger.critical(
-            "inbound_lease_loss_provider_unconfirmed call=%s reason=%s",
-            pbx_call_id[:12],
-            identity_error,
+        if (
+            provider_call_id != pbx_call_id
+            or _orphan_recovery_contexts_by_call.get(pbx_call_id) is not fence
+        ):
+            # The callback fence is bound to this exact provider channel. A
+            # changed durable identity or coordinator requires reconciliation.
+            return False
+        proof = await request_confirmed_hangup(
+            get_adapter(),
+            provider_call_id,
+            expected_provider=expected_provider,
+            provider_leg_ids=provider_leg_ids,
+            provider_legs=provider_legs,
         )
-        return False
+        if not inventory_verified or not proof.confirmed:
+            logger.critical(
+                "inbound_lease_loss_termination_unconfirmed call=%s inventory=%s reason=%s",
+                pbx_call_id[:12], inventory_verified, proof.code,
+            )
+            return False
+        if _orphan_recovery_contexts_by_call.get(pbx_call_id) is not fence:
+            return False
 
-    # Confirmation alone is insufficient: ARI may prove a channel was already
-    # absent without delivering a terminal callback. Run the normal idempotent
-    # logical finalizer after all-leg proof so local media, billing, tenant and
-    # global concurrency state converge in this same ownership path.
-    completed = await _force_end_and_hangup(
-        provider_call_id,
-        require_confirmation=True,
-        provider_leg_ids=list(provider_leg_ids),
-    )
-    if not completed:
-        logger.critical(
-            "inbound_lease_loss_termination_unconfirmed call=%s",
-            pbx_call_id[:12],
-        )
-    return completed
+        # Every durable leg is proved absent. Remove only our guard, then use
+        # the normal live finalizer so cached admission/terminal clocks retain
+        # their existing meaning. The guard is not fabricated recovery data.
+        _orphan_recovery_contexts_by_call.pop(pbx_call_id)
+        marker_token = object()
+        completed = False
+        try:
+            completed = await _on_call_ended(
+                provider_call_id, _marker_token=marker_token
+            ) is not False
+            return completed
+        finally:
+            if not completed and pbx_call_id not in _ended_calls_logically_completed:
+                _clear_ended_marker(pbx_call_id, marker_token)
+                if (
+                    pbx_call_id not in _ended_calls_in_flight
+                    and pbx_call_id not in _orphan_recovery_contexts_by_call
+                ):
+                    _orphan_recovery_contexts_by_call[pbx_call_id] = fence
+    finally:
+        # Unverified inventory, failed proof and cancellation retain the guard
+        # and durable retry ledger. Recovery may later hydrate and replace it.
+        _orphan_recovery_in_flight.discard(pbx_call_id)
 
 
 async def _heartbeat_active_inbound_admission(
@@ -4826,21 +4852,32 @@ _ended_calls_in_flight: set[str] = set()
 # transfer lease finalization completes. Recovery may skip directly to Redis
 # acknowledgement only when BOTH this marker and durable terminal state agree.
 _ended_calls_logically_completed: set[str] = set()
+_ended_call_marker_tokens: dict[str, object] = {}
+
+
+def _clear_ended_marker(call_id: str, token: object | None) -> bool:
+    """Release only the captured generation, including its completion flag."""
+    if token is None or _ended_call_marker_tokens.get(call_id) is not token:
+        return False
+    _ended_call_marker_tokens.pop(call_id, None)
+    _ended_calls_in_flight.discard(call_id)
+    _ended_calls_logically_completed.discard(call_id)
+    return True
 
 
 def _release_ended_marker_later(call_id: str, delay_s: float = 600.0) -> None:
+    token = _ended_call_marker_tokens.get(call_id)
+
     async def _drop() -> None:
         try:
             await asyncio.sleep(delay_s)
         finally:
-            _ended_calls_in_flight.discard(call_id)
-            _ended_calls_logically_completed.discard(call_id)
+            _clear_ended_marker(call_id, token)
 
     try:
         _track_task(_drop())
     except Exception:
-        _ended_calls_in_flight.discard(call_id)
-        _ended_calls_logically_completed.discard(call_id)
+        _clear_ended_marker(call_id, token)
 
 
 def _resolve_inbound_terminal_outcome(
@@ -4942,6 +4979,7 @@ async def _on_call_ended(
     terminal_at_monotonic: Any = None,
     recovery_context: Optional[Dict[str, Any]] = None,
     acknowledge_ledger: bool = True,
+    _marker_token: object | None = None,
 ) -> bool:
     """Clean up voice session when the call hangs up.
 
@@ -4983,9 +5021,12 @@ async def _on_call_ended(
             and call_id in _ended_calls_logically_completed
         )
     _ended_calls_in_flight.add(call_id)
+    owned_marker_token = _marker_token if _marker_token is not None else object()
+    _ended_call_marker_tokens[call_id] = owned_marker_token
     if recovery_context is not None:
         recovery_context["_logical_marker_acquired"] = True
         recovery_context["_logical_marker_owner_task"] = asyncio.current_task()
+        recovery_context["_logical_marker_token"] = owned_marker_token
     _release_ended_marker_later(call_id)
 
     logger.info(f"Telephony bridge: call ended {call_id[:12]}")
@@ -5671,8 +5712,7 @@ async def _on_call_ended(
                 call_id[:12],
                 exc,
             )
-        _ended_calls_in_flight.discard(call_id)
-        _ended_calls_logically_completed.discard(call_id)
+        _clear_ended_marker(call_id, owned_marker_token)
         logger.error(
             "terminal_logical_completion_deferred call=%s outbound_verified=%s "
             "inbound_transfer_verified=%s; ledger retained",
@@ -5700,6 +5740,12 @@ async def _on_call_ended(
             timeout=1.0,
         )
 
+    if _ended_call_marker_tokens.get(call_id) is not owned_marker_token:
+        # An expired marker may have been acquired by a newer callback while
+        # settlement awaited storage. Do not publish completion or acknowledge
+        # its retry ledger on behalf of that newer local owner.
+        logger.warning("terminal_marker_ownership_changed call=%s", call_id[:12])
+        return False
     _ended_calls_logically_completed.add(call_id)
 
     if acknowledge_ledger:

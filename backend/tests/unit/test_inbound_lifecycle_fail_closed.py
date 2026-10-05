@@ -334,10 +334,12 @@ async def test_lease_loss_fence_persists_recovery_and_requires_all_leg_proof(
     )
     mark_pending = AsyncMock(return_value=context)
 
-    force_end = AsyncMock(return_value=False)
-    monkeypatch.setattr(lifecycle, "get_adapter", lambda: SimpleNamespace(name="asterisk"))
+    confirm_all = AsyncMock(return_value=False)
+    adapter = SimpleNamespace(name="asterisk", hangup_many_confirmed=confirm_all)
+    monkeypatch.setattr(lifecycle, "get_adapter", lambda: adapter)
     monkeypatch.setattr(lifecycle, "_state", lambda: state)
-    monkeypatch.setattr(lifecycle, "_force_end_and_hangup", force_end)
+    monkeypatch.setattr(lifecycle, "_orphan_recovery_in_flight", set())
+    monkeypatch.setattr(lifecycle, "_orphan_recovery_contexts_by_call", {})
     monkeypatch.setattr(
         termination,
         "mark_termination_pending_and_load_context",
@@ -359,11 +361,7 @@ async def test_lease_loss_fence_persists_recovery_and_requires_all_leg_proof(
         state="termination_pending",
     )
     mark_pending.assert_awaited_once()
-    force_end.assert_awaited_once_with(
-        "pbx-lease-lost",
-        require_confirmation=True,
-        provider_leg_ids=["linked-transfer-leg"],
-    )
+    confirm_all.assert_awaited_once_with(("pbx-lease-lost", "linked-transfer-leg"))
 
 
 @pytest.mark.asyncio

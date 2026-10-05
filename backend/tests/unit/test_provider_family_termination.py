@@ -146,6 +146,8 @@ async def test_actual_context_retains_all_leg_authority_before_any_io(monkeypatc
 @pytest.mark.asyncio
 @pytest.mark.parametrize("provider", ["asterisk", "twilio", None, "sip"])
 async def test_inbound_lease_loss_does_not_settle_with_unrelated_adapter(monkeypatch, provider):
+    monkeypatch.setattr(lifecycle, "_orphan_recovery_in_flight", set())
+    monkeypatch.setattr(lifecycle, "_orphan_recovery_contexts_by_call", {})
     conn = Conn(provider)
     conn.row["direction"] = "inbound"
 
