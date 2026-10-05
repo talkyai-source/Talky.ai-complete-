@@ -1,0 +1,29 @@
+# Operations integration checkpoint — 5 October 2026
+
+The local candidate includes the campaign hold/ownership, recording boundary and truthful Admin usage repairs. No push, deployment, live provider effect or customer call occurred. These repairs do not complete their production-readiness packages.
+
+## What changed
+
+- **OP05:** Pre-attempt holds preserve the original job and attempt. The follow-up commits the guarded database due time before scheduling Redis work, keeps stale-cooldown cleanup on the same attempt, and flags ambiguous old owners for reconciliation without releasing them on age alone. Migration 0060 installs the existing one-active-job rule through the canonical migration/bootstrap path; duplicate data causes an explicit failure without cancellation. See [owner evidence](2026-10-05-op05-hold-verification.md).
+- **OP07:** Recording retention requires verified ownership, current allowed policy and a correlated technical disclosure receipt. Unknown, failed, partial or stale delivery is not upgraded to completed playback. Native realtime DNC persistence remains a separate active repair. The [owner manifest](artifacts/op07/verification.json), [checkpoint.json](artifacts/op05-op07-integration/checkpoint.json) and execution tracker retain the source revisions and limits.
+- **OP11:** Reports keep supplier cost unavailable when there is no authoritative evidence. Existing outbound estimates retain their provenance and coverage; action records are not assumed to be supplier API calls. UTC date ranges include the whole selected final day. Delayed period responses cannot overwrite the current period's rows or failure. API and Admin contracts require coordinated promotion. See [owner evidence](2026-10-05-op11-usage-truth.md).
+
+## Verification and limits
+
+Root integration at `842517a1` passed **589 media/recording/action checks**, with one optional ffmpeg skip, and **34 actual PostgreSQL checks**, with no skips. PostgreSQL used disposable public head 0060 plus seven legacy action-receipt cases in an isolated canonical-column schema. The latter is not additional public-schema/RLS proof. Commands and unchanged-source hashes are in [media-command.json](artifacts/op05-op07-integration/media-command.json) and [postgres-command.json](artifacts/op05-op07-integration/postgres-command.json).
+
+The subsequent OP05 follow-up passed **148 unit checks and 20 actual PostgreSQL checks** on its isolated owner branch before an unchanged cherry-pick into `d26f0ff0`. Its 20 cases overlap earlier migration/hold checks; they are not 20 additional distinct acceptance scenarios. Root and independent review found no additional material defect. Ambiguous retained owners still need reconciliation; this does not claim automatic orphan recovery.
+
+OP11's final owner validation passed **48 backend checks and 23 Admin checks**, plus app type checking, the Vite production build, scoped lint and Ruff. Tests use synthetic database rows and actual endpoint/component code, with server rendering or a bounded callback scheduler. There is no browser, supplier invoice, actual provider cost ingestion or deployed privilege proof.
+
+The full dashboard suite at `842517a1` produced **773 passes, one failure and two legacy database skips**. The failure selected an obsolete Row actions menu. The correction exercises the current selection and details controls and verifies that neither resumes an unavailable route. All **six focused readiness tests passed**; those six overlap the original run. The first corrected probe also ran before the table's initial hydration/reset frames had settled; its output is retained, and the final test waits for those actual scheduled frames before interacting. No application behavior changed and no second whole-suite green result is claimed.
+
+The exact dashboard lint command now completes with **zero errors and three warnings**. The prior crash came from an untracked, gitignored CommonJS validation probe under `tmp`, for which the installed Next lint configuration did not provide the React plugin. A global ignore now matches that scratch directory. No tracked app files, rules or dependency checks were removed. Focused lint and TypeScript checking passed. CI now includes both OP05 database modules in the existing migrated-database step; remote CI has not run.
+
+The full and focused frontend logs, including failures, are retained under [operations-baseline](artifacts/operations-baseline). [checkpoint.json](artifacts/op05-op07-integration/checkpoint.json) records exact commands, revisions and limitations. Counts from overlapping suites must not be summed into a new coverage or readiness claim.
+
+## Work still required
+
+Native opt-out durability and its cleanup acknowledgement are under repair. Subsequent actual PostgreSQL tests found that the current DNC service and canonical database schema disagree on columns, required phone storage, allowed source values and uniqueness. The bootstrap contains two conflicting definitions. A data-preserving schema/service alignment is now required before DNC durability can be verified; synthetic bridge tests do not close this database failure. Approved recording retention/data-request rules and designated per-store acceptance are still needed. Cost reporting is honest but does not provide complete supplier reconciliation. Actual host privileges, real queue/process/PBX recovery, caller audio quality, on-call delivery, backup restore, compatible release and the purchased journey remain subject to their existing plan gates.
+
+The tracker has **27 eligible unfinished packages**, plus AG03's bounded candidate verification and the three deferred packages CP05, CP06 and CP09. All 15 final gates and 22 scenario gates remain unrun. No deferred work, product capability or acceptance target was added or removed.

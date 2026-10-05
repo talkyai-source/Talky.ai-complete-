@@ -47,7 +47,13 @@
     "op03_implementation_commit": "2043c3c368c4aa6af97c13c8628e369c27cf6e5a",
     "operations_ci_commit": "4151b82f81a8357c32f9c8cb5d06d8e2d39d53ca",
     "op06_implementation_commit": "25ab5ac8815f6d4957d8eaab3382a458ecf11e0c",
-    "op06_fixture_followup_commit": "6d736aba21b7d3435bd098b47900d571367b3bc2"
+    "op06_fixture_followup_commit": "6d736aba21b7d3435bd098b47900d571367b3bc2",
+    "op05_implementation_commit": "1d8a261718d6d886a91e4ace206b80aad0ac618d",
+    "op05_migration_commit": "c75380bd5afccc8d2bf9e32d609e42f6f12de218",
+    "op05_hold_followup_commit": "d26f0ff026c76c1ca53ad710fcee249a7116787a",
+    "op07_recording_commit": "84ab5bfbc6f58595487b09ba44fd574f18012ebd",
+    "op11_reporting_commit": "3f43d397e4e0e0c976416a6d12c2b160502b9954",
+    "operations_validation_commit": "fec31d4b94d9ad97fc5b26b643aedeaedfd03d64"
   },
   "status_rules": {
     "execution": [
@@ -784,8 +790,8 @@
       "id": "OP05",
       "title": "Prove campaign, inbound and redial lifecycle under failure",
       "owner_role": "Calling application and telephony lifecycle lead",
-      "assigned_person": "Codex implementation team",
-      "reviewer": null,
+      "assigned_person": "Codex implementation team; designated operating acceptance owner pending",
+      "reviewer": "Independent code review plus bounded owner/root verification",
       "status": "in_progress",
       "start_after_milestone": "RG01 baseline recorded",
       "dependencies_and_tests": "See package text; coordination and final acceptance dependencies are distinct from entry milestones.",
@@ -802,9 +808,20 @@
         "A02"
       ],
       "plan_anchor": "op05-prove-campaign-inbound-and-redial-lifecycle-under-failure",
-      "evidence": [],
-      "blocker": null,
-      "next_action": "Isolated same-job pre-attempt scheduling/capacity deferral repair; actual worker/queue and migrated database acceptance in progress.",
+      "evidence": [
+        {
+          "path": "docs/sessions/2026-10-05-op05-hold-verification.md",
+          "kind": "bounded_local_repair_and_open_acceptance",
+          "candidate": "d26f0ff026c76c1ca53ad710fcee249a7116787a"
+        },
+        {
+          "path": "docs/sessions/2026-10-05-operations-integration-checkpoint.md",
+          "kind": "integrated_verification_with_limits",
+          "candidate": "d26f0ff026c76c1ca53ad710fcee249a7116787a"
+        }
+      ],
+      "blocker": "Same-attempt holds and durable due ownership are repaired locally. Ambiguous owners require reconciliation; real Redis/process/PBX lifecycle and native DNC acceptance remain unfinished.",
+      "next_action": "Complete in-scope DNC persistence and approved failure/recovery acceptance without age-only ownership release or blind origination replay.",
       "target_date": null
     },
     {
@@ -844,8 +861,8 @@
       "id": "OP07",
       "title": "Prove consent, recording lifecycle and customer data requests",
       "owner_role": "Data lifecycle and privacy operations lead",
-      "assigned_person": "Codex implementation team",
-      "reviewer": null,
+      "assigned_person": "Codex implementation team; designated operating acceptance owner pending",
+      "reviewer": "Independent code review plus bounded owner/root verification",
       "status": "in_progress",
       "start_after_milestone": "RG01 baseline recorded",
       "dependencies_and_tests": "See package text; coordination and final acceptance dependencies are distinct from entry milestones.",
@@ -861,9 +878,20 @@
       ],
       "architecture_ids": [],
       "plan_anchor": "op07-prove-consent-recording-lifecycle-and-customer-data-requests",
-      "evidence": [],
-      "blocker": null,
-      "next_action": "Isolated fail-closed recording storage and disclosure-receipt corrections after actual-method reproductions; retention/consent policy is not redefined.",
+      "evidence": [
+        {
+          "path": "docs/sessions/artifacts/op07/verification.json",
+          "kind": "bounded_local_repair_and_open_acceptance",
+          "candidate": "84ab5bfbc6f58595487b09ba44fd574f18012ebd"
+        },
+        {
+          "path": "docs/sessions/2026-10-05-operations-integration-checkpoint.md",
+          "kind": "integrated_verification_with_limits",
+          "candidate": "d26f0ff026c76c1ca53ad710fcee249a7116787a"
+        }
+      ],
+      "blocker": "Recording ownership/policy/delivery receipts repaired locally. Native DNC, approved retention/export/delete rules and per-store operating acceptance remain unfinished.",
+      "next_action": "Finish the bounded native DNC repair, then validate existing authorized recording/data lifecycle against approved rules and designated stores.",
       "target_date": null
     },
     {
@@ -964,9 +992,9 @@
       "id": "OP11",
       "title": "Reduce privilege and make cost evidence financially honest",
       "owner_role": "Platform security and finance engineering lead",
-      "assigned_person": null,
-      "reviewer": null,
-      "status": "planned",
+      "assigned_person": "Codex implementation team; designated operating acceptance owner pending",
+      "reviewer": "Independent code review plus bounded owner/root verification",
+      "status": "in_progress",
       "start_after_milestone": "RG01 baseline recorded",
       "dependencies_and_tests": "See package text; coordination and final acceptance dependencies are distinct from entry milestones.",
       "finding_ids": [
@@ -978,9 +1006,20 @@
       ],
       "architecture_ids": [],
       "plan_anchor": "op11-reduce-privilege-and-make-cost-evidence-financially-honest",
-      "evidence": [],
-      "blocker": null,
-      "next_action": "Assign owner and confirm the baseline reproduction or evidence gap.",
+      "evidence": [
+        {
+          "path": "docs/sessions/2026-10-05-op11-usage-truth.md",
+          "kind": "bounded_local_repair_and_open_acceptance",
+          "candidate": "3f43d397e4e0e0c976416a6d12c2b160502b9954"
+        },
+        {
+          "path": "docs/sessions/2026-10-05-operations-integration-checkpoint.md",
+          "kind": "integrated_verification_with_limits",
+          "candidate": "d26f0ff026c76c1ca53ad710fcee249a7116787a"
+        }
+      ],
+      "blocker": "Supplier-cost ingestion/reconciliation is unavailable; deployed privilege and filesystem/account scopes have not been exercised.",
+      "next_action": "Review the existing host privilege boundary and designated supplier statements; keep unavailable costs explicit and promote nullable API/Admin contracts together.",
       "target_date": null
     },
     {

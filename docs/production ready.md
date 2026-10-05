@@ -536,6 +536,8 @@ Inventory the alternate `VoicePipelineService.get_llm_response`/`llm_response.py
 
 ### OP05 Prove campaign inbound and redial lifecycle under failure
 
+**Local checkpoint — 5 October 2026:** Same-attempt scheduling now commits its guarded due time before future Redis work, and age-only cleanup retains ambiguous owners with a reconciliation diagnostic. The existing active-job uniqueness rule is installed by canonical migration 0060 without cancelling data. Bounded follow-up evidence: 148 unit and 20 actual PostgreSQL controls passed; operating recovery remains incomplete. See the [integration checkpoint](sessions/2026-10-05-operations-integration-checkpoint.md). No final acceptance gate is closed.
+
 **Covers:** F21, F22, F27, O06; supports F26. **Owner:** calling application/telephony lifecycle engineering. **Priority:** P1 for lifecycle release; redial P2.
 
 **Bounded tasks**
@@ -579,6 +581,8 @@ Inventory the alternate `VoicePipelineService.get_llm_response`/`llm_response.py
 **Evidence:** existing inbound transfer controls/billing tests, staging runtime proof and two-leg carrier artifact; explicitly record either `validated for stated scope` or `contained: excluded and enforced, implementation/acceptance still incomplete`. No new transfer feature is authorized by this plan.
 
 ### OP07 Prove consent recording lifecycle and customer data requests
+
+**Local checkpoint — 5 October 2026:** Storage requires verified tenant/call ownership, allowed current recording policy and correlated technical disclosure delivery. Root combined media verification passed 589 checks with one optional ffmpeg skip. Native realtime opt-out durability is being repaired separately; recording lifecycle, data requests and approved policy acceptance remain open. See the [integration checkpoint](sessions/2026-10-05-operations-integration-checkpoint.md). No final acceptance gate is closed.
 
 **Covers:** F26, F34, operational G02/F45. **Owner:** data lifecycle/privacy operations with telephony engineering. **Priority:** P1 for the sold data/consent promise.
 
@@ -678,6 +682,8 @@ Product/operations ratify targets before running the gate. If a target is not me
 **Evidence:** archive timestamp/checksum/size without contents, off-host location classification, restore start/end, recovered schema/count assertions, RLS/application checks, object/key verification, deletion/queue reconciliation and RPO/RTO comparison. Record failure cases and the successful recovery path.
 
 ### OP11 Reduce privilege and make cost evidence financially honest
+
+**Local checkpoint — 5 October 2026:** Usage reports no longer infer supplier/provider charges from duration or unverified action records. Nullable supplier costs and coverage-labelled legacy estimates are shown consistently; UTC end-date coverage and stale period-response handling are repaired. 48 backend and 23 Admin controls passed locally; supplier statement reconciliation and exercised least privilege remain open. See the [integration checkpoint](sessions/2026-10-05-operations-integration-checkpoint.md). No final acceptance gate is closed.
 
 **Covers:** O08, operational F39/F45. **Owner:** platform/security operations and finance engineering. **Priority:** P2; a stricter customer security/financial promise may make it P1.
 
