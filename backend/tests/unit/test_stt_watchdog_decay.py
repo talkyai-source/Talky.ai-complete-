@@ -125,19 +125,24 @@ def test_the_replay_buffer_covers_the_whole_watchdog_window():
 
 
 def test_the_watchdog_window_is_tunable_without_a_deploy(monkeypatch):
-    import importlib
+    import json
+    import subprocess
+    import sys
 
     monkeypatch.setenv("STT_SILENT_VOICED_SECONDS", "4.0")
     monkeypatch.setenv("STT_REPLAY_BUFFER_MS", "9000")
-    reloaded = importlib.reload(rstt)
-    try:
-        policy = reloaded.ReconnectPolicy()
-        assert policy.silent_stream_voiced_seconds == 4.0
-        assert policy.audio_buffer_ms == 9000
-    finally:
-        monkeypatch.delenv("STT_SILENT_VOICED_SECONDS", raising=False)
-        monkeypatch.delenv("STT_REPLAY_BUFFER_MS", raising=False)
-        importlib.reload(rstt)
+    # Configuration is read at import, as on worker startup. Reloading in this
+    # pytest process replaces class identities retained by other collected
+    # modules, making later real orchestrator isinstance checks fail.
+    result = subprocess.run(
+        [sys.executable, "-c", (
+            "import json; from app.domain.services.resilient_stt import ReconnectPolicy; "
+            "p = ReconnectPolicy(); "
+            "print(json.dumps([p.silent_stream_voiced_seconds, p.audio_buffer_ms]))"
+        )],
+        check=True, capture_output=True, text=True,
+    )
+    assert json.loads(result.stdout) == [4.0, 9000]
 
 
 def test_the_secondary_watchdog_is_told_when_the_agent_is_speaking():

@@ -401,6 +401,7 @@ class BrowserMediaGateway(MediaGateway):
                 len(session.output_buffer),
             )
 
+        playback_event = session.playback_complete_event
         while len(session.output_buffer) >= buf_threshold:
             # Send fixed-size frames so longer TTS replies do not get
             # time-compressed by trimming buffered audio.
@@ -412,6 +413,8 @@ class BrowserMediaGateway(MediaGateway):
                 if not payload:
                     break
                 await self._send_payload(session, payload)
+                if session.playback_complete_event is not playback_event:
+                    return
                 del session.output_buffer[: len(payload)]
             except Exception as e:
                 logger.error(f"Failed to send audio: {e}")
@@ -422,6 +425,7 @@ class BrowserMediaGateway(MediaGateway):
         """Flush remaining audio buffer at end of TTS."""
         session = self._sessions.get(call_id)
         if session and session.is_active:
+            playback_event = session.playback_complete_event
             try:
                 payload = bytes(session.output_buffer)
                 payload_remainder = len(payload) % self._frame_bytes
@@ -435,6 +439,8 @@ class BrowserMediaGateway(MediaGateway):
                     payload = payload[:-payload_remainder]
                 if payload:
                     await self._send_payload(session, payload)
+                if session.playback_complete_event is not playback_event:
+                    return
                 session.output_buffer = bytearray()
                 if session.pending_byte:
                     logger.debug(
@@ -451,24 +457,9 @@ class BrowserMediaGateway(MediaGateway):
         if not session or not session.is_active:
             return
 
-        # Apply a 5ms linear ramp-to-zero on the tail of the output buffer and
-        # send it before discarding the rest.  At 16kHz 16-bit mono:
-        #   5ms = 80 samples = 160 bytes.
-        # Cutting a waveform at non-zero amplitude creates a step discontinuity
-        # perceived as a click or pop.  The fade brings the signal to zero
-        # smoothly so the abrupt silence that follows is inaudible.
-        import numpy as np
-        FADE_BYTES = 160  # 5ms at 16kHz 16-bit mono
+        # Detach the interrupted generation before the fade send can yield.
+        # A concurrently started utterance owns its own buffer and event.
         buf = session.output_buffer
-        if len(buf) >= FADE_BYTES:
-            tail = np.frombuffer(bytes(buf[-FADE_BYTES:]), dtype=np.int16).copy()
-            ramp = np.linspace(1.0, 0.0, len(tail), dtype=np.float32)
-            faded = (tail * ramp).astype(np.int16)
-            try:
-                await self._send_payload(session, faded.tobytes())
-            except Exception:
-                pass
-
         if session.playback_utterance_id:
             session.last_playback_receipt = {"utterance_id": session.playback_utterance_id,
                 "status": "interrupted", "evidence": "unknown", "played_ms": 0}
@@ -477,7 +468,25 @@ class BrowserMediaGateway(MediaGateway):
         session.pending_byte = b""
         session.playback_tracking_active = False
         session.playback_bytes_sent = 0
-        session.playback_complete_event.clear()
+        session.playback_complete_event.set()
+        session.playback_complete_event = asyncio.Event()
+
+        # Apply a 5ms linear ramp-to-zero on the tail of the output buffer and
+        # send it before discarding the rest.  At 16kHz 16-bit mono:
+        #   5ms = 80 samples = 160 bytes.
+        # Cutting a waveform at non-zero amplitude creates a step discontinuity
+        # perceived as a click or pop.  The fade brings the signal to zero
+        # smoothly so the abrupt silence that follows is inaudible.
+        import numpy as np
+        FADE_BYTES = 160  # 5ms at 16kHz 16-bit mono
+        if len(buf) >= FADE_BYTES:
+            tail = np.frombuffer(bytes(buf[-FADE_BYTES:]), dtype=np.int16).copy()
+            ramp = np.linspace(1.0, 0.0, len(tail), dtype=np.float32)
+            faded = (tail * ramp).astype(np.int16)
+            try:
+                await self._send_payload(session, faded.tobytes())
+            except Exception:
+                pass
 
     async def send_control_event(self, call_id: str, payload: Dict[str, Any]) -> None:
         """Deliver transport playback controls alongside the binary audio stream."""
@@ -494,9 +503,20 @@ class BrowserMediaGateway(MediaGateway):
         session = self._sessions.get(call_id)
         if not session or session.playback_utterance_id != utterance_id:
             return {"utterance_id": utterance_id, "status": "unknown", "evidence": "unknown", "played_ms": 0}
+        if session.playback_outcome == "failed":
+            receipt = {"utterance_id": utterance_id, "status": "failed", "evidence": "unknown", "played_ms": 0}
+            session.last_playback_receipt = receipt
+            return receipt
+        playback_event = session.playback_complete_event
         duration_ms = int(session.playback_bytes_sent * 1000 / max(1, self._sample_rate * self._frame_bytes))
         await self.send_control_event(call_id, {"type": "tts_audio_complete", "utterance_id": utterance_id})
-        completed = await self.wait_for_playback_complete(call_id, maximum_timeout_ms=35000)
+        completed = await self.wait_for_playback_complete(
+            call_id, maximum_timeout_ms=35000, utterance_id=utterance_id,
+        )
+        if (self._sessions.get(call_id) is not session or not session.is_active
+                or session.playback_complete_event is not playback_event
+                or session.playback_utterance_id != utterance_id):
+            return {"utterance_id": utterance_id, "status": "interrupted", "evidence": "unknown", "played_ms": 0}
         receipt = {"utterance_id": utterance_id,
             "status": "completed" if completed and session.playback_outcome == "completed" else session.playback_outcome,
             "evidence": "transport_played" if completed and session.playback_outcome == "completed" else "unknown",
@@ -522,7 +542,11 @@ class BrowserMediaGateway(MediaGateway):
         session = self._sessions.get(call_id)
         if not session or not session.is_active:
             return
-        session.playback_complete_event.clear()
+        # A new generation has its own event, including legacy anonymous
+        # playback. Superseding wakes the previous waiter without granting it
+        # the new generation's eventual receipt.
+        session.playback_complete_event.set()
+        session.playback_complete_event = asyncio.Event()
         session.playback_tracking_active = True
         session.playback_bytes_sent = 0
         session.playback_utterance_id = utterance_id
@@ -533,7 +557,8 @@ class BrowserMediaGateway(MediaGateway):
         session = self._sessions.get(call_id)
         if not session or not session.is_active:
             return
-        if session.playback_tracking_active and session.playback_utterance_id == utterance_id:
+        if (session.playback_tracking_active and session.playback_utterance_id == utterance_id
+                and session.playback_outcome != "failed"):
             session.playback_outcome = "completed"
             session.playback_complete_event.set()
 
@@ -544,6 +569,7 @@ class BrowserMediaGateway(MediaGateway):
         extra_grace_ms: int = 1200,
         minimum_timeout_ms: int = 1000,
         maximum_timeout_ms: int = 15000,
+        utterance_id: Optional[str] = None,
     ) -> bool:
         """
         Wait for the browser to confirm queued audio finished playing.
@@ -552,8 +578,13 @@ class BrowserMediaGateway(MediaGateway):
         current utterance plus a small grace window.
         """
         session = self._sessions.get(call_id)
+        if utterance_id is not None and (
+            not session or session.playback_utterance_id != utterance_id
+        ):
+            return False
         if not session or not session.is_active or not session.playback_tracking_active:
             return True
+        playback_event = session.playback_complete_event
 
         bytes_per_second = max(1, self._sample_rate * self._frame_bytes)
         expected_playback_ms = int(
@@ -566,10 +597,15 @@ class BrowserMediaGateway(MediaGateway):
 
         try:
             await asyncio.wait_for(
-                session.playback_complete_event.wait(),
+                playback_event.wait(),
                 timeout=timeout_ms / 1000.0,
             )
-            return True
+            return bool(
+                self._sessions.get(call_id) is session
+                and session.is_active
+                and session.playback_complete_event is playback_event
+                and session.playback_outcome == "completed"
+            )
         except asyncio.TimeoutError:
             logger.warning(
                 "Timed out waiting for browser playback completion for %s after %sms "
@@ -581,9 +617,10 @@ class BrowserMediaGateway(MediaGateway):
             )
             return False
         finally:
-            session.playback_tracking_active = False
-            session.playback_bytes_sent = 0
-            session.playback_complete_event.clear()
+            if session.playback_complete_event is playback_event:
+                session.playback_tracking_active = False
+                session.playback_bytes_sent = 0
+                playback_event.clear()
 
     def get_audio_queue(self, call_id: str) -> Optional[asyncio.Queue]:
         """
@@ -611,6 +648,8 @@ class BrowserMediaGateway(MediaGateway):
             return
 
         session.is_active = False
+        session.playback_outcome = "interrupted"
+        session.playback_complete_event.set()
 
         # Flush any remaining buffered input audio
         self._flush_input_buffer(session)
@@ -741,12 +780,23 @@ class BrowserMediaGateway(MediaGateway):
             session.dropped_input_chunks += 1
             logger.debug("Dropped flushed audio: input queue full")
 
+    @staticmethod
+    def _mark_playback_submission_failed(
+        session: BrowserSession, playback_event: asyncio.Event,
+    ) -> None:
+        # A transport completion mark acknowledges only the surviving queue.
+        # It cannot prove a whole utterance once any of its frames were lost.
+        if session.playback_complete_event is playback_event:
+            session.playback_outcome = "failed"
+            playback_event.set()
+
     async def _send_payload(self, session: BrowserSession, payload: bytes) -> None:
         """
         Send audio payload with timeout so slow websocket clients don't stall
         the full pipeline.
         """
         started = datetime.utcnow()
+        playback_event = session.playback_complete_event
         try:
             await asyncio.wait_for(
                 session.websocket.send_bytes(payload),
@@ -756,9 +806,11 @@ class BrowserMediaGateway(MediaGateway):
             session.last_send_latency_ms = elapsed_ms
             session.chunks_sent += 1
             session.total_bytes_sent += len(payload)
-            if session.playback_tracking_active:
+            if (session.playback_tracking_active
+                    and session.playback_complete_event is playback_event):
                 session.playback_bytes_sent += len(payload)
         except asyncio.TimeoutError:
+            self._mark_playback_submission_failed(session, playback_event)
             session.ws_send_timeouts += 1
             session.dropped_output_bytes += len(payload)
             logger.warning(
@@ -768,6 +820,7 @@ class BrowserMediaGateway(MediaGateway):
                 len(payload),
             )
         except Exception:
+            self._mark_playback_submission_failed(session, playback_event)
             session.ws_send_errors += 1
             raise
 

@@ -77,13 +77,16 @@ class TwilioMediaGateway(BrowserMediaGateway):
     async def _send_payload(self, session: BrowserSession, payload: bytes) -> None:
         """Override: encode linear16 8 kHz -> mu-law, wrap in a Twilio media JSON
         frame, and send as WS text. ``payload`` is frame-aligned int16 PCM."""
+        playback_event = session.playback_complete_event
         stream_sid = self._stream_sids.get(session.call_id)
         if not stream_sid:
-            # streamSid not known yet (pre-"start"); drop — TTS hasn't begun.
+            # No transport owns these bytes; never certify them as played.
+            self._mark_playback_submission_failed(session, playback_event)
             return
         try:
             ulaw = pcm_to_ulaw(payload)
         except Exception as exc:  # never let encoding break the call
+            self._mark_playback_submission_failed(session, playback_event)
             logger.debug("twilio mu-law encode failed call=%s: %s", session.call_id, exc)
             return
         frame = json.dumps({
@@ -100,9 +103,11 @@ class TwilioMediaGateway(BrowserMediaGateway):
             session.last_send_latency_ms = (datetime.utcnow() - started).total_seconds() * 1000
             session.chunks_sent += 1
             session.total_bytes_sent += len(payload)
-            if session.playback_tracking_active:
+            if (session.playback_tracking_active
+                    and session.playback_complete_event is playback_event):
                 session.playback_bytes_sent += len(payload)
         except asyncio.TimeoutError:
+            self._mark_playback_submission_failed(session, playback_event)
             session.ws_send_timeouts += 1
             session.dropped_output_bytes += len(payload)
             logger.warning(
@@ -110,6 +115,7 @@ class TwilioMediaGateway(BrowserMediaGateway):
                 session.call_id, self._ws_send_timeout_ms, len(payload),
             )
         except Exception:
+            self._mark_playback_submission_failed(session, playback_event)
             session.ws_send_errors += 1
             raise
 
@@ -128,7 +134,8 @@ class TwilioMediaGateway(BrowserMediaGateway):
         session.pending_byte = b""
         session.playback_tracking_active = False
         session.playback_bytes_sent = 0
-        session.playback_complete_event.clear()
+        session.playback_complete_event.set()
+        session.playback_complete_event = asyncio.Event()
         stream_sid = self._stream_sids.get(call_id)
         if stream_sid:
             try:

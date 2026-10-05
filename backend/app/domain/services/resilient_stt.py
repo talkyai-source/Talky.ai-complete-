@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import collections
-from contextlib import aclosing
+from contextlib import aclosing, nullcontext
 import logging
 import os
 from dataclasses import dataclass, field
@@ -653,7 +653,7 @@ class ResilientSTTProvider(STTProvider):
                 yield chunk
 
         try:
-            async for out in self._stream_with_provider(
+            async with aclosing(self._stream_with_provider(
                 provider=chosen,
                 audio_iter=_tee_audio(),
                 language=language,
@@ -661,12 +661,13 @@ class ResilientSTTProvider(STTProvider):
                 call_id=call_id,
                 on_eager_end_of_turn=on_eager_end_of_turn,
                 on_barge_in=on_barge_in,
-            ):
-                watchdog.observe_transcript()
-                if getattr(out, "is_final", False):
-                    # Completed caller speech must never be replayed as a new turn.
-                    buffer.drain()
-                yield out
+            )) as stream:
+                async for out in stream:
+                    watchdog.observe_transcript()
+                    if getattr(out, "is_final", False):
+                        # Completed caller speech must never be replayed as a new turn.
+                        buffer.drain()
+                    yield out
             # A provider that swallowed the watchdog's exception ends its
             # stream cleanly instead of raising. Without this re-check that
             # would look like a normal end-of-call and return silently — the
@@ -763,7 +764,7 @@ class ResilientSTTProvider(STTProvider):
                     raise STTStreamSilentError("Secondary STT accepted speech without responding")
                 yield chunk
 
-        async for out in self._stream_with_provider(
+        async with aclosing(self._stream_with_provider(
             provider=self._secondary,
             audio_iter=_replay_then_live(),
             language=language,
@@ -771,14 +772,15 @@ class ResilientSTTProvider(STTProvider):
             call_id=call_id,
             on_eager_end_of_turn=_recovery_eager,
             on_barge_in=on_barge_in,
-        ):
-            secondary_watchdog.observe_transcript()
-            if repeat_required:
-                if getattr(out, "is_final", False):
-                    repeat_required = False
-                    yield TranscriptChunk(text="", is_final=False, metadata={"stt_recovery": "repeat_required"})
-                continue
-            yield out
+        )) as stream:
+            async for out in stream:
+                secondary_watchdog.observe_transcript()
+                if repeat_required:
+                    if getattr(out, "is_final", False):
+                        repeat_required = False
+                        yield TranscriptChunk(text="", is_final=False, metadata={"stt_recovery": "repeat_required"})
+                    continue
+                yield out
         if secondary_watchdog.tripped or not audio_stream.exhausted:
             raise RuntimeError("Secondary STT ended before caller input exhausted")
 
@@ -798,22 +800,21 @@ class ResilientSTTProvider(STTProvider):
         """Drive one provider through the circuit breaker."""
         breaker = self._breaker if provider is self._primary else None
 
-        async def _run() -> AsyncIterator[TranscriptChunk]:
-            async for chunk in provider.stream_transcribe(
+        # Each forwarding generator owns its immediate child. In particular,
+        # closing while suspended at `yield` must close the provider connection
+        # before returning, without waiting for async-generator finalization.
+        # Closing this tee/replay iterator does not close the call-owned input.
+        async with (
+            breaker if breaker is not None else nullcontext(),
+            aclosing(audio_iter),
+            aclosing(provider.stream_transcribe(
                 audio_iter,
                 language=language,
                 context=context,
                 call_id=call_id,
                 on_eager_end_of_turn=on_eager_end_of_turn,
                 on_barge_in=on_barge_in,
-            ):
-                yield chunk
-
-        if breaker is None:
-            async for chunk in _run():
-                yield chunk
-            return
-
-        async with breaker:
-            async for chunk in _run():
+            )) as stream,
+        ):
+            async for chunk in stream:
                 yield chunk
