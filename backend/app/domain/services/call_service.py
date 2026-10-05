@@ -525,7 +525,8 @@ class CallService:
                 # have committed exactly once.
                 row = await conn.fetchrow(
                     """
-                    SELECT id, tenant_id, phone_number, lead_id, campaign_id, dialer_job_id, status,
+                    SELECT id, tenant_id, phone_number, direction, is_test,
+                           lead_id, campaign_id, dialer_job_id, status,
                            outcome, ended_at, duration_seconds,
                            terminal_settled_at, terminal_retry_payload,
                            terminal_retry_enqueued_at
@@ -907,10 +908,23 @@ class CallService:
         Global entries match the existing CallGuard policy. Holding a matching
         row share lock serializes its deletion/expiry update with settlement;
         later additions are still checked at final origination by CallGuard.
-        Lookup/normalization failure aborts settlement, never implies permission.
+        Lookup or invalid outbound-destination failure aborts settlement. Labels
+        on non-dialable inbound/test rows without retry ownership are inapplicable.
         """
         tenant_id = str(call_row["tenant_id"])
-        number = normalize_e164_for_storage(call_row["phone_number"])
+        try:
+            number = normalize_e164_for_storage(call_row["phone_number"])
+        except ValueError:
+            if (
+                (call_row.get("direction") == "inbound" or call_row.get("is_test") is True)
+                and call_row["dialer_job_id"] is None
+                and call_row["terminal_retry_payload"] is None
+            ):
+                # Anonymous inbound ANI and browser-test are legitimate stored
+                # labels, not dialable destinations. No DNC claim/lookup is
+                # applicable, and these rows own no outbound retry work.
+                return False
+            raise
         active = await conn.fetchval(
             """SELECT EXISTS(SELECT 1 FROM dnc_entries
                    WHERE (tenant_id=$1::uuid OR tenant_id IS NULL)

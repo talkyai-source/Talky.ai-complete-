@@ -301,3 +301,26 @@ async def test_old_unacknowledged_outbox_keeps_newer_live_attempt_owned(settleme
         assert await db.admin.fetchval("SELECT status FROM calls WHERE id=$1", newer_call) == "in_progress"
     finally:
         await db.admin.execute("DELETE FROM calls WHERE id=$1", newer_call)
+
+
+@pytest.mark.parametrize("direction,is_test,phone", [("inbound", False, "anonymous"),
+                                                    ("outbound", True, "browser-test")])
+async def test_non_dialable_stored_records_settle_without_suppression_lookup(settlement, direction, is_test, phone):
+    f, db = settlement, settlement.db
+    await db.admin.execute("""UPDATE calls SET direction=$2,is_test=$3,phone_number=$4,
+                             lead_id=NULL,dialer_job_id=NULL WHERE id=$1""", f.call_id, direction, is_test, phone)
+    await db.admin.execute(f'REVOKE SELECT ON dnc_entries FROM "{db.role}"')
+    execution = await settle(f, CallOutcome.ANSWERED)
+    assert execution.result.durable and execution.retry_args is None
+    row = await db.admin.fetchrow("SELECT outcome,duration_seconds,terminal_retry_payload FROM calls WHERE id=$1", f.call_id)
+    assert tuple(row.values()) == ("answered", 42, None)
+
+
+@pytest.mark.parametrize("is_test", [False, True])
+async def test_malformed_outbound_owned_record_cannot_gain_retry_permission(settlement, is_test):
+    f, db = settlement, settlement.db
+    await db.admin.execute("UPDATE calls SET is_test=$2,phone_number='anonymous' WHERE id=$1", f.call_id, is_test)
+    with pytest.raises(ValueError, match="valid E.164"):
+        await settle(f)
+    assert await db.admin.fetchval("SELECT status FROM calls WHERE id=$1", f.call_id) == "in_progress"
+    assert await db.admin.fetchval("SELECT terminal_retry_payload FROM calls WHERE id=$1", f.call_id) is None

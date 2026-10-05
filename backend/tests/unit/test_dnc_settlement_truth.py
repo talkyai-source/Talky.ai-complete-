@@ -124,3 +124,38 @@ async def test_unavailable_suppression_proof_cannot_book_retry(conn):
     assert result.durable is False
     service._queue_service.schedule_retry.assert_not_awaited()
     assert conn.calls_row["terminal_retry_payload"] is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("direction,is_test,phone", [("inbound", False, "anonymous"),
+                                                    ("outbound", True, "browser-test")])
+async def test_non_dialable_inbound_and_browser_records_can_settle_without_dnc_claim(direction, is_test, phone):
+    conn = SuppressionConn(suppression=AssertionError("DNC lookup is inapplicable"), phone=phone)
+    conn.calls_row.update(direction=direction, is_test=is_test, lead_id=None, dialer_job_id=None)
+    execution = await _service(conn)._handle_call_status_pooled("call-1", CallOutcome.ANSWERED, "answered", 42)
+    assert execution.result.durable
+    assert execution.retry_args is None
+    assert conn.calls_row["outcome"] == "answered"
+    assert conn.calls_row["duration_seconds"] == 42
+    assert not any("FROM dnc_entries" in query for query, _ in conn.executed)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("direction,is_test", [("inbound", False), ("outbound", True), ("outbound", False)])
+async def test_non_dialable_record_with_dialer_owner_still_fails_closed(direction, is_test):
+    conn = SuppressionConn(phone="anonymous")
+    conn.calls_row.update(direction=direction, is_test=is_test)
+    result = await _service(conn).handle_call_status("call-1", CallOutcome.FAILED, 42)
+    assert not result.durable
+    assert conn.calls_row["terminal_retry_payload"] is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("is_test,payload", [(False, None), (True, {"pending": "retry"})])
+async def test_absent_job_alone_does_not_authorize_invalid_phone(is_test, payload):
+    conn = SuppressionConn(phone="anonymous")
+    conn.calls_row.update(direction="outbound", is_test=is_test, lead_id=None,
+                         dialer_job_id=None, terminal_retry_payload=payload)
+    result = await _service(conn).handle_call_status("call-1", CallOutcome.FAILED, 42)
+    assert not result.durable
+    assert conn.calls_row["terminal_retry_payload"] == payload
