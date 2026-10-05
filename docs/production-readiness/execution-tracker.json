@@ -756,10 +756,20 @@
           "path": "docs/sessions/artifacts/mail-voice-integration/verification.md",
           "kind": "421_affected_tests_with_actual_voice_to_gmail_proof_handoff",
           "candidate": "e81f525f"
+        },
+        {
+          "path": "docs/sessions/artifacts/calendar-receipt-inspection/verification.md",
+          "kind": "admin_only_exact_original_authorization_calendar_observation",
+          "candidate": "3de75cd3"
+        },
+        {
+          "path": "docs/sessions/artifacts/calendar-mail-voice-integration/verification.md",
+          "kind": "508_affected_tests_on_combined_calendar_gmail_voice_and_crm_source",
+          "candidate": "3de75cd3"
         }
       ],
-      "blocker": "Canonical reviewed authorization, native PostgreSQL UUID admission, uncertain CRM reference adoption and dropped voice email receipt proof are repaired locally. Admin now has explicit original-account CRM and exact-message Gmail observation; combined voice/Gmail/CRM regression passed 421 tests. Calendar exact-reference observation is being implemented; approved durable operator resolution, full schema/browser and designated live-provider acceptance remain open. Inspection read modes have synthetic route/provider proof, not the separate actual-PG reviewed-selector evidence. Missing IDs or historical proof remain unresolved without backfill or inferred linkage.",
-      "next_action": "Finish the bounded exact calendar reference observation using existing permissions and the existing Admin action panel, then complete the approved durable operator-resolution contract and designated end-to-end acceptance. Observation never proves delivery, payload/contact correctness or action completion, and absence never authorizes resend. Preserve original identities, child references and uncertain outcomes; do not bind missing historical proof to the current account.",
+      "blocker": "Canonical reviewed authorization, native PostgreSQL UUID admission, uncertain CRM reference adoption and dropped voice email receipt proof are repaired locally. Admin now has explicit original-account CRM, exact-message Gmail and exact-event Google/Outlook calendar observation; combined calendar/Gmail/voice/CRM regression passed 508 tests. Approved durable operator resolution, full schema/browser and designated live-provider acceptance remain open. Inspection read modes have synthetic route/provider proof, not the separate actual-PG reviewed-selector evidence. Missing IDs or historical proof remain unresolved without backfill or inferred linkage.",
+      "next_action": "Establish the supported operator authority and authoritative evidence/audit contract, then complete durable resolution and designated end-to-end acceptance. Exact-reference observation is implemented locally but never proves delivery, payload/contact correctness, active booking or action completion, and absence never authorizes resend. Preserve original identities, child references and uncertain outcomes; do not bind missing historical proof to the current account.",
       "target_date": null
     },
     {

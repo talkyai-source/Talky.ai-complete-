@@ -531,3 +531,50 @@ filtered event lists are insufficient. Durable operator resolution, designated
 provider/browser and release acceptance remain open. All package/gate/deferred
 states and the feature freeze remain unchanged. No provider request, customer
 message, database operation, push or deployment occurred in these repairs.
+
+
+## Calendar observation and combined receipt verification (6 October)
+
+Source `3de75cd3`, integrated from owner `2010a1bf`, completes bounded exact-event
+observation for the existing Google and Outlook calendar connectors and Admin
+action panel. It requires the saved original authorization and event reference,
+uses one encoded exact-ID read, and changes no provider or local action state.
+Found references can be cancelled/deleted; neither presence nor absence proves
+the outcome of creation, update or cancellation. No refresh, replacement-account
+fallback, window search, automatic resolution or retry is included.
+
+The [owner evidence](artifacts/calendar-receipt-inspection/verification.md) records
+296 backend tests across seven modules and 99 Admin tests, with TypeScript,
+scoped lint and build checks. Root and independent source reviews cleared the
+five application and two test files. The [combined candidate run](artifacts/calendar-mail-voice-integration/verification.md)
+passed **508 tests, zero failures/skips and one warning** across twelve modules
+on committed `3de75cd3`. Twenty-five recorded inputs stayed unchanged and matched
+the committed source; all seven owner files match the integration. Totals overlap
+earlier checks. Admin checks bind unchanged owner source; no root browser or
+actual PostgreSQL/provider execution is claimed.
+
+Independent evidence review verified all twenty-five root source hashes, seven
+owner/integrated Git blobs, twelve owner source/dependency hashes, eighteen owner
+artifact hashes and five root artifact hashes, with no mismatch or test rerun.
+An initial packaging-only comparison mixed normalized working bytes and an
+existing mixed-newline Git blob; comparing raw Git blobs and normalized hashes
+corrected that check without changing source or repeating tests.
+
+The remaining-work audit is an inventory review, not fresh correctness proof.
+It identified no additional demonstrated bounded repair to start independently
+after this assigned inspection work. Substantive gaps remain: CP07's external
+alert delivery contract, CP08's invitation disposition, AG06's audited operator
+resolution, and OP05's ambiguous owner/original-PBX identity resolution. AG02's
+retrieval quality target still fails, AG04 retains its semantic failure and seven
+unmapped conditions, and AG05 contact/qualification quality still needs its
+approved cohort. These are not merely deployment tasks.
+
+Completion also needs the recorded commercial/reset/refund policy decisions,
+designated accounts and owned numbers, approved voice/profile/cohort and carrier
+configuration, retention and restore requirements, on-call and operational
+owners, supplier-cost evidence, deployment/rollback rehearsal, purchased-journey
+acceptance and pilot outcomes. Existing unanswered input requests remain pending;
+no default approval is inferred. CP05, CP06 and CP09 remain deferred. Counts stay
+27 eligible unfinished plus AG03 candidate verified and three deferred; all
+fifteen final and twenty-two scenario gates remain not run. Local commits do not
+lift the freeze or establish a paid-production release.
