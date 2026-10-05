@@ -291,6 +291,7 @@
     },
     {
       "id": "native.dnc_close",
+      "dnc_acknowledgement": true,
       "semantic_ids": [
         "ag04.explicit_dnc_close"
       ],
@@ -307,11 +308,14 @@
       "expect": {
         "shutdowns": 1,
         "dnc": true,
+        "dnc_attempts": 1,
+        "dnc_acknowledged": true,
         "submissions": 1
       }
     },
     {
       "id": "native.dnc_question",
+      "dnc_acknowledgement": true,
       "semantic_ids": [
         "ag04.dnc_with_question"
       ],
@@ -329,8 +333,49 @@
         "shutdowns": 0,
         "end_requested": false,
         "dnc": true,
+        "dnc_attempts": 1,
+        "dnc_acknowledged": true,
         "submissions": 1
       }
+    },
+    {
+      "id": "native.dnc_failed_receipt",
+      "semantic_ids": ["ag04.explicit_dnc_close"],
+      "dnc_acknowledgement": false,
+      "steps": [
+        {"kind": "caller", "text": "Please stop calling me."},
+        {"kind": "response", "text": "Your do-not-call request was saved. Goodbye."}
+      ],
+      "expect": {
+        "dnc": true,
+        "dnc_attempts": 1,
+        "dnc_acknowledged": false,
+        "submissions": 0,
+        "llm_controls": [],
+        "shutdowns": 0,
+        "repair_requests": 1
+      },
+      "coverage_note": "A failed synthetic persistence receipt withholds the original claim and requests a bounded repair; no repair response, database success or human hearing is simulated."
+    },
+    {
+      "id": "native.dnc_unknown_receipt",
+      "semantic_ids": ["ag04.dnc_with_question"],
+      "dnc_acknowledgement": null,
+      "steps": [
+        {"kind": "caller", "text": "Do not call me again, but first I need help with my account."},
+        {"kind": "response", "text": "You have been removed from our calling list. How can I help?"}
+      ],
+      "expect": {
+        "dnc": true,
+        "dnc_attempts": 1,
+        "dnc_acknowledged": false,
+        "submissions": 0,
+        "llm_controls": [],
+        "end_requested": false,
+        "shutdowns": 0,
+        "repair_requests": 1
+      },
+      "coverage_note": "An unknown synthetic persistence receipt is not success. The continued-question caller stays live; no completed repair or durable write is claimed."
     },
     {
       "id": "native.quoted_dnc",
@@ -356,6 +401,7 @@
       "expect": {
         "shutdowns": 0,
         "dnc": false,
+        "dnc_attempts": 0,
         "tool_statuses": [
           "caller_intent_unconfirmed"
         ]

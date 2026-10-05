@@ -27,7 +27,7 @@ async def test_declared_corpus_runs_actual_native_boundaries_without_network(mon
     inventory = native.case_inventory(ROOT)
     keys = lambda items: {(r["scenario_id"], r["profile"]["provider"]) for r in items}
     assert keys(rows) == keys(inventory)
-    assert len(rows) == len(inventory) == 50  # 25 controls, two parser implementations.
+    assert len(rows) == len(inventory) == 54  # 27 controls, two parser implementations.
     failed = [(row["scenario_id"], row["profile"]["provider"], finding)
         for row in rows for finding in row["findings"]["control"] if finding["pass"] is not True]
     assert not failed, json.dumps(failed, indent=2)
@@ -41,6 +41,46 @@ async def test_declared_corpus_runs_actual_native_boundaries_without_network(mon
     assert partial["media"]["truncate_events"]
     assert any((row.get("metadata", {}).get("delivery") or {}).get("status") == "interrupted" for row in partial["history"])
     assert partial["media"]["receipt_origin"] == "synthetic gateway fixture"
+    for provider in ("openai", "xai"):
+        provider_rows = {row["scenario_id"]: row for row in rows if row["profile"]["provider"] == provider}
+        for case_id in ("native.dnc_close", "native.dnc_question"):
+            success = provider_rows[case_id]
+            assert success["effects"]["dnc_persistence_receipts"] == [{
+                "acknowledged": True, "origin": "synthetic persistence port", "database_writes": 0}]
+            assert success["submitted_speech"]
+        for case_id, acknowledgement in (("native.dnc_failed_receipt", False), ("native.dnc_unknown_receipt", None)):
+            withheld = provider_rows[case_id]
+            assert withheld["raw_output"]  # Keep the unsafe scripted candidate visible for review.
+            assert withheld["submitted_speech"] == [] and withheld["media"]["submissions"] == []
+            assert not any(turn["role"] == "assistant" for turn in withheld["history"])
+            assert withheld["effects"]["dnc_persistence_receipts"] == [{
+                "acknowledged": acknowledgement, "origin": "synthetic persistence port", "database_writes": 0}]
+            assert withheld["end"]["shutdown_count"] == 0
+            repairs = withheld["requests"][0]["repair_requests"]
+            assert len(repairs) == 1
+            repair = repairs[0]["response"]
+            assert "do-not-call write is not acknowledged" in repair["instructions"]
+            if provider == "openai":
+                assert repair["metadata"]["talky_dnc_repair_id"]
+            else:
+                assert "metadata" not in repair
+        assert provider_rows["native.quoted_dnc"]["effects"]["dnc_persistence_receipts"] == []
+    assert all(row["end"]["dnc_effect_count"] is None and row["effects"]["dnc_database_writes"] == 0 for row in rows)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("provider", ["openai", "xai"])
+async def test_missing_dnc_fixture_acknowledgement_does_not_become_success(provider):
+    corpus = native._corpus(ROOT)
+    case = dict(next(case for case in corpus["scenarios"] if case["id"] == "native.dnc_close"))
+    case.pop("dnc_acknowledgement")
+    row = await native.NativeReplay(case, provider, corpus).run()
+    assert any(finding["pass"] is False for finding in row["findings"]["control"])
+    assert row["observed"]["dnc_acknowledged"] is False
+    assert row["submitted_speech"] == [] and row["media"]["submissions"] == []
+    assert row["end"]["shutdown_count"] == 0
+    assert row["effects"]["dnc_persistence_receipts"][0]["acknowledged"] is None
+    assert all(finding["status"] == "unreviewed" for finding in row["findings"]["semantic"])
 
 
 @pytest.mark.asyncio

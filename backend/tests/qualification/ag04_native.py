@@ -12,6 +12,7 @@ import hashlib
 import json
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 from uuid import uuid4
 
 from app.domain.services.transcript_service import TranscriptService
@@ -140,6 +141,7 @@ class NativeReplay:
         self.shutdown_count = 0
         self.raw = []
         self.raw_events = []
+        self.dnc_receipts = []
         self.response_counter = 0
         self.item_counter = 0
         self.observed_exception = None
@@ -152,6 +154,16 @@ class NativeReplay:
 
     async def on_end(self):
         self.shutdown_count += 1
+
+    async def persist_dnc(self, session):
+        """Replay the existing persistence port, never perform a database write."""
+        assert session is self.session
+        acknowledged = self.scenario.get("dnc_acknowledgement")
+        if acknowledged is not None and type(acknowledged) is not bool:
+            raise ValueError("Synthetic DNC acknowledgement must be true, false or null")
+        self.dnc_receipts.append({"acknowledged": acknowledged,
+            "origin": "synthetic persistence port", "database_writes": 0})
+        return acknowledged
 
     async def wire(self, event):
         self.raw_events.append(event)
@@ -245,6 +257,10 @@ class NativeReplay:
             "submissions": len(self.gateway.submissions), "clears": self.gateway.clears,
             "shutdowns": self.shutdown_count, "end_requested": bool(getattr(self.session, "_end_call_requested", False)),
             "dnc": bool(getattr(self.session, "_caller_opted_out", False)),
+            "dnc_attempts": len(self.dnc_receipts),
+            "dnc_acknowledged": self.bridge._opt_out_acknowledged,
+            "llm_controls": [item["text"] for item in self.gateway.controls
+                if item.get("type") == "llm_response"],
             "relationship": self.bridge._live_state.customer_relationship.value,
             "identity_introduced": self.bridge._live_state.identity_introduced,
             "opening_interrupted": self.bridge._opening_interrupted,
@@ -279,6 +295,8 @@ class NativeReplay:
                 "session_update_origin": "actual serializer; no handshake sent or acknowledged",
                 "instruction_updates": [message["session"] for message in self.socket.sent
                     if message.get("type") == "session.update"],
+                "repair_requests": repairs,
+                "repair_request_origin": "actual adapter serializer; synthetic socket only",
                 "provider_event_sha256": _digest(self.raw_events)}],
             "raw_output": self.raw, "candidate_text": [value["text"] for value in self.raw],
             "submitted_speech": submitted_speech,
@@ -293,7 +311,9 @@ class NativeReplay:
             "effects": {"attempts": [event["name"] for event in self.raw_events
                 if event.get("type") == "response.function_call_arguments.done"], "accepted": 0,
                 "external_execution": "not_run; no business action capability or database configured",
-                "tool_results": function_results},
+                "tool_results": function_results,
+                "dnc_persistence_receipts": self.dnc_receipts,
+                "dnc_database_writes": 0},
             "media": {"generated_codec": "pcmu/8000", "submitted_codec": "pcm_s16le/8000",
                 "generated_bytes": sum(len(base64.b64decode(event["delta"])) for event in self.raw_events
                     if event.get("type") == "response.output_audio.delta"),
@@ -313,14 +333,18 @@ class NativeReplay:
         }
 
     async def run(self):
-        try:
-            for step in self.scenario["steps"]:
-                await self.step(step)
-            return self.result()
-        finally:
-            self.gateway.release.set()
-            await self.bridge.stop()
-            self.transcripts.clear_buffer(self.call_id)
+        # Keep the real bridge's task, acknowledgement and speech gates. Only
+        # replace the external persistence port, including its bounded stop
+        # drain. A scripted acknowledgement is not durable DNC evidence.
+        with patch("app.domain.services.dialer.opt_out.purge_opt_out_before_farewell", self.persist_dnc):
+            try:
+                for step in self.scenario["steps"]:
+                    await self.step(step)
+                return self.result()
+            finally:
+                self.gateway.release.set()
+                await self.bridge.stop()
+                self.transcripts.clear_buffer(self.call_id)
 
 
 def _profile(corpus, provider_name):
