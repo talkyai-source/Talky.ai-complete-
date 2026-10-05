@@ -2,13 +2,12 @@
 Tests for New API Endpoints
 Tests the frontend-aligned endpoints: auth, plans, dashboard, analytics, calls, recordings, contacts, clients, admin
 
-Note: These tests require proper Supabase environment to be configured.
-If Supabase is not available, tests will be skipped.
+HTTP smoke controls with a synthetic canonical plan-catalog pool. Authentication
+rejections do not require a running database; no live provider is called.
 """
 import pytest
-from unittest.mock import MagicMock, patch, AsyncMock
+from unittest.mock import MagicMock, AsyncMock
 import os
-import sys
 
 
 # Set test environment variables before importing app
@@ -43,11 +42,11 @@ class TestPlansEndpoint:
     @pytest.mark.skipif(not IMPORT_SUCCESS, reason="App not available")
     def test_list_plans_returns_list(self):
         """Test that plans endpoint returns a list"""
-        from app.api.v1.dependencies import get_db_client
+        from app.api.v1.dependencies import get_db_pool
 
-        # Mock Supabase response
-        mock_client = MagicMock()
-        mock_client.table.return_value.select.return_value.order.return_value.execute.return_value.data = [
+        # Exercise the real canonical catalog, including its two async queries.
+        # No paid price options are supplied, so no provider request is possible.
+        plans = [
             {
                 "id": "basic",
                 "name": "Basic",
@@ -61,8 +60,13 @@ class TestPlansEndpoint:
                 "popular": False
             }
         ]
+        connection = MagicMock()
+        connection.fetch = AsyncMock(side_effect=[plans, []])
+        connection.execute = AsyncMock()
+        pool = MagicMock()
+        pool.acquire.return_value.__aenter__.return_value = connection
         # Use FastAPI's dependency_overrides (not @patch) for Depends() injected deps
-        app.dependency_overrides[get_db_client] = lambda: mock_client
+        app.dependency_overrides[get_db_pool] = lambda: pool
         try:
             response = client.get("/api/v1/plans/")
             assert response.status_code == 200
@@ -72,8 +76,23 @@ class TestPlansEndpoint:
             assert data[0]["id"] == "basic"
             assert data[0]["name"] == "Basic"
             assert data[0]["price"] == 29
+            assert data[0]["price_options"] == []
+            assert connection.fetch.await_count == 2
         finally:
-            app.dependency_overrides.pop(get_db_client, None)
+            app.dependency_overrides.pop(get_db_pool, None)
+
+    def test_unavailable_plan_storage_is_not_an_empty_catalog(self):
+        from app.api.v1.dependencies import get_db_pool
+
+        pool = MagicMock()
+        pool.acquire.return_value.__aenter__.side_effect = ConnectionError("synthetic catalog outage")
+        app.dependency_overrides[get_db_pool] = lambda: pool
+        try:
+            response = client.get("/api/v1/plans/")
+            assert response.status_code == 503
+            assert "synthetic catalog outage" not in response.text
+        finally:
+            app.dependency_overrides.pop(get_db_pool, None)
 
 
 class TestAuthEndpoints:

@@ -203,7 +203,6 @@ async def get_current_user(
         PrincipalUnavailable, assert_expected_identity, load_current_principal,
     )
 
-    client = get_db_client()
     payload = None
     session = None
     if authorization or access_cookie:
@@ -226,27 +225,34 @@ async def get_current_user(
         session_id = payload.get("sid")
         if not user_id or not isinstance(session_id, str) or not session_id.strip():
             raise HTTPException(status_code=401, detail="Session-bound token required. Please sign in again.")
-        async with acquire_with_tenant(client.pool, None) as conn:
-            session = await get_session_by_id(conn, session_id, user_id=user_id)
-        if not session:
-            raise HTTPException(status_code=401, detail="Your login session has ended. Please sign in again.")
-        if session_cookie:
-            cookie_session = await _resolve_cookie_session(request, session_cookie, client)
-            if (not cookie_session or str(cookie_session.get("id")) != str(session["id"])
-                    or str(cookie_session.get("user_id")) != str(user_id)):
-                raise HTTPException(status_code=401, detail="Session mismatch. Please sign in again.")
-    elif session_cookie:
-        session = await _resolve_cookie_session(request, session_cookie, client)
-        if not session:
-            raise HTTPException(status_code=401, detail="Session has expired or is invalid")
-        user_id = str(session["user_id"])
-    else:
+    elif not session_cookie:
         raise HTTPException(status_code=401, detail="Authorization required")
 
+    # Reject absent/malformed credentials without needing a database. Once a
+    # credential requires live verification, any unavailable storage is a 503,
+    # never an authenticated fallback or an unhandled container exception.
     try:
+        client = get_db_client()
+        if payload is not None:
+            async with acquire_with_tenant(client.pool, None) as conn:
+                session = await get_session_by_id(conn, session_id, user_id=user_id)
+            if not session:
+                raise HTTPException(status_code=401, detail="Your login session has ended. Please sign in again.")
+            if session_cookie:
+                cookie_session = await _resolve_cookie_session(request, session_cookie, client)
+                if (not cookie_session or str(cookie_session.get("id")) != str(session["id"])
+                        or str(cookie_session.get("user_id")) != str(user_id)):
+                    raise HTTPException(status_code=401, detail="Session mismatch. Please sign in again.")
+        else:
+            session = await _resolve_cookie_session(request, session_cookie, client)
+            if not session:
+                raise HTTPException(status_code=401, detail="Session has expired or is invalid")
+            user_id = str(session["user_id"])
         async with acquire_with_tenant(client.pool, None) as conn:
             row = await load_current_principal(conn, user_id,
                 tenant_id=payload.get("tenant_id") if payload else None)
+    except HTTPException:
+        raise
     except PrincipalUnavailable as exc:
         detail = ("Your tenant membership is no longer active. Contact your account administrator."
                   if exc.code in {"membership_required", "membership_role_unavailable"}
