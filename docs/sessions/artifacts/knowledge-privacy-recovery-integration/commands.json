@@ -1,0 +1,18 @@
+{
+  "executable": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\backend\\.venv\\Scripts\\python.exe",
+  "python_version": "3.12.12 (main, Dec  9 2025, 19:02:55) [MSC v.1944 64 bit (AMD64)]",
+  "cwd": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\production-ready-20261004\\backend",
+  "argv": [
+    "../tmp/runtime-acceptance-integration.py"
+  ],
+  "stdout_stderr": "../docs/sessions/artifacts/knowledge-privacy-recovery-integration/combined.txt",
+  "environment_assigned": {
+    "PYTHONUTF8": "1",
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "ENVIRONMENT": "test",
+    "DATABASE_URL": "postgresql://test:test@127.0.0.1:1/unavailable_test",
+    "PYTHONPATH": "C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/tmp/postgres-matrix-20261005/tmp/exact-requirements-20261005/packages;C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/tmp/production-ready-ag07-20261005/tmp/op02-testdeps"
+  },
+  "environment_limit": "Explicit task assignments only; inherited environment not serialized.",
+  "archive_note": "runner.py was executed at repository tmp/runtime-acceptance-integration.py; its root resolution assumes that location."
+}
