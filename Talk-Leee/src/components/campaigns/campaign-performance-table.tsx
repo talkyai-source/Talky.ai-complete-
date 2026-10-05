@@ -322,6 +322,7 @@ export function CampaignPerformanceTable({
     const [statusOpen, setStatusOpen] = useState(false);
     const [statusPanelStyle, setStatusPanelStyle] = useState<CSSProperties | null>(null);
     const [suggestOpen, setSuggestOpen] = useState(false);
+    const [suggestPlacement, setSuggestPlacement] = useState<{ openUp: boolean; maxHeight: number } | null>(null);
     const [selected, setSelected] = useState<Set<string>>(new Set());
     const [expanded, setExpanded] = useState<Set<string>>(new Set());
     const [detailsId, setDetailsId] = useState<string | null>(null);
@@ -362,16 +363,28 @@ export function CampaignPerformanceTable({
             left = Math.max(margin, Math.min(left, window.innerWidth - width - margin));
 
             let top = rect.bottom + margin;
+            let maxHeight: number | undefined;
 
             const panel = statusPanelRef.current;
             if (panel) {
                 const h = panel.offsetHeight;
-                if (top + h > window.innerHeight - margin) {
-                    top = Math.max(margin, window.innerHeight - h - margin);
+                const spaceBelow = window.innerHeight - rect.bottom - margin * 2;
+                const spaceAbove = rect.top - margin * 2;
+                if (h > spaceBelow) {
+                    // Flip above the trigger instead of sliding down over it;
+                    // whichever side is used, cap the height so the panel
+                    // never leaves the screen or covers its own button.
+                    if (spaceAbove > spaceBelow) {
+                        const capped = Math.min(h, Math.max(margin, spaceAbove));
+                        top = rect.top - margin - capped;
+                        if (capped < h) maxHeight = capped;
+                    } else {
+                        maxHeight = Math.max(margin, spaceBelow);
+                    }
                 }
             }
 
-            setStatusPanelStyle({ left, top, width });
+            setStatusPanelStyle({ left, top, width, maxHeight });
         };
 
         update();
@@ -657,6 +670,35 @@ export function CampaignPerformanceTable({
         </div>
     );
 
+    // Suggestion list placement: open upward when the space under the filter
+    // is too short, and never let the panel run past a screen edge.
+    useLayoutEffect(() => {
+        if (!suggestOpen || nameSuggestions.length === 0) {
+            // eslint-disable-next-line react-hooks/set-state-in-effect -- clearing stale DOM-measured placement on close, not derivable during render
+            setSuggestPlacement(null);
+            return;
+        }
+        const update = () => {
+            const el = suggestRef.current;
+            if (!el) return;
+            const rect = el.getBoundingClientRect();
+            const margin = 8;
+            const gap = 8; // the panel's mt-2 / mb-2
+            const below = window.innerHeight - rect.bottom - gap - margin;
+            const above = rect.top - gap - margin;
+            const openUp = below < 108 && above > below;
+            const maxHeight = Math.max(36, Math.min(256, openUp ? above : below));
+            setSuggestPlacement({ openUp, maxHeight });
+        };
+        update();
+        window.addEventListener("resize", update);
+        window.addEventListener("scroll", update, true);
+        return () => {
+            window.removeEventListener("resize", update);
+            window.removeEventListener("scroll", update, true);
+        };
+    }, [suggestOpen, nameSuggestions.length]);
+
     return (
         <div className="space-y-4">
             <div className="content-card relative">
@@ -682,7 +724,11 @@ export function CampaignPerformanceTable({
                                 {suggestOpen && nameSuggestions.length > 0 ? (
                                     <div
                                         role="listbox"
-                                        className="absolute left-0 top-full z-50 mt-2 w-full max-h-64 origin-top overflow-auto rounded-xl border border-border bg-popover shadow-xl animate-in fade-in-0 zoom-in-95"
+                                        className={cn(
+                                            "absolute left-0 z-50 w-full overflow-auto rounded-xl border border-border bg-popover shadow-xl animate-in fade-in-0 zoom-in-95",
+                                            suggestPlacement?.openUp ? "bottom-full mb-2 origin-bottom" : "top-full mt-2 origin-top"
+                                        )}
+                                        style={{ maxHeight: suggestPlacement?.maxHeight ?? 256 }}
                                     >
                                         {nameSuggestions.map((n) => (
                                             <button
@@ -743,7 +789,7 @@ export function CampaignPerformanceTable({
                                               <div
                                                   ref={statusPanelRef}
                                                   role="listbox"
-                                                  className="absolute overflow-hidden rounded-xl border border-border bg-popover p-2 shadow-xl animate-in fade-in-0 zoom-in-95"
+                                                  className="absolute overflow-y-auto rounded-xl border border-border bg-popover p-2 shadow-xl animate-in fade-in-0 zoom-in-95"
                                                   style={statusPanelStyle ?? undefined}
                                               >
                                                   <div className="max-h-[108px] overflow-y-auto overscroll-contain pr-1 scrollbar-gutter-stable">

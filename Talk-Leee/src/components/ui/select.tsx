@@ -29,19 +29,32 @@ export function Select({
     const enhanceLight = Boolean(lightThemeGreen && theme === "light");
 
     const options = useMemo(() => {
-        const items = React.Children.toArray(children)
-            .map((child) => (React.isValidElement(child) && child.type === "option" ? child : null))
-            .filter(Boolean) as Array<React.ReactElement<{ value?: string; disabled?: boolean; children?: React.ReactNode }>>;
-
-        return items.map((opt) => {
+        // Reads direct <option> children AND options nested in <optgroup>, in
+        // markup order, so grouped options are never silently dropped.
+        type OptionEl = React.ReactElement<{ value?: string; disabled?: boolean; children?: React.ReactNode }>;
+        const out: Array<{ value: string; label: string; disabled: boolean; group?: string }> = [];
+        const pushOption = (opt: OptionEl, group?: string) => {
             const rawLabel = opt.props.children;
-            const label = typeof rawLabel === "string" ? rawLabel : String(rawLabel ?? "");
-            return {
+            out.push({
                 value: String(opt.props.value ?? ""),
-                label,
+                label: typeof rawLabel === "string" ? rawLabel : String(rawLabel ?? ""),
                 disabled: Boolean(opt.props.disabled),
-            };
-        });
+                group,
+            });
+        };
+        for (const child of React.Children.toArray(children)) {
+            if (!React.isValidElement(child)) continue;
+            if (child.type === "option") {
+                pushOption(child as OptionEl);
+            } else if (child.type === "optgroup") {
+                const grp = child as React.ReactElement<{ label?: string; children?: React.ReactNode }>;
+                const groupLabel = typeof grp.props.label === "string" ? grp.props.label : "";
+                for (const sub of React.Children.toArray(grp.props.children)) {
+                    if (React.isValidElement(sub) && sub.type === "option") pushOption(sub as OptionEl, groupLabel);
+                }
+            }
+        }
+        return out;
     }, [children]);
 
     const selectedIndex = Math.max(
@@ -56,7 +69,9 @@ export function Select({
     const buttonRef = useRef<HTMLButtonElement>(null);
     const panelRef = useRef<HTMLDivElement>(null);
     const [mounted, setMounted] = useState(false);
-    const [panelStyle, setPanelStyle] = useState<{ left: number; top: number; width: number } | null>(null);
+    // top is set when the panel opens below the trigger, bottom when it flips
+    // above it; maxHeight is whatever actually fits on the chosen side.
+    const [panelStyle, setPanelStyle] = useState<{ left: number; width: number; maxHeight: number; top?: number; bottom?: number } | null>(null);
 
     useEffect(() => {
         // Portal (createPortal to document.body) hydration gate — document
@@ -78,7 +93,23 @@ export function Select({
             const btn = buttonRef.current;
             if (!btn) return;
             const rect = btn.getBoundingClientRect();
-            setPanelStyle({ left: rect.left, top: rect.bottom + 4, width: rect.width });
+            const vw = window.innerWidth;
+            const vh = window.innerHeight;
+            const MARGIN = 8;   // panel never sits closer than this to a screen edge
+            const GAP = 4;      // gap between trigger and panel
+            const ROW = 36;     // measured option-row height; flip once <3 rows fit below
+
+            const left = Math.max(MARGIN, Math.min(rect.left, vw - rect.width - MARGIN));
+            const spaceBelow = vh - rect.bottom - GAP - MARGIN;
+            const spaceAbove = rect.top - GAP - MARGIN;
+            const flip = spaceBelow < ROW * 3 && spaceAbove > spaceBelow;
+            const maxHeight = Math.max(ROW, Math.min(320, flip ? spaceAbove : spaceBelow));
+
+            setPanelStyle(
+                flip
+                    ? { left, width: rect.width, maxHeight, bottom: vh - rect.top + GAP }
+                    : { left, width: rect.width, maxHeight, top: rect.bottom + GAP }
+            );
         };
 
         updatePanelStyle();
@@ -113,6 +144,14 @@ export function Select({
         // eslint-disable-next-line react-hooks/set-state-in-effect -- resets active option to selection on close, not derivable during render
         if (!open) setActiveIndex(selectedIndex);
     }, [open, selectedIndex]);
+
+    useEffect(() => {
+        // The panel scrolls now, so keep the keyboard-highlighted option in
+        // view while arrowing; otherwise Enter would select something unseen.
+        if (!open) return;
+        const el = panelRef.current?.querySelector(`[data-option-index="${activeIndex}"]`);
+        if (el instanceof HTMLElement) el.scrollIntoView({ block: "nearest" });
+    }, [open, activeIndex]);
 
     const commitValue = (idx: number) => {
         const opt = options[idx];
@@ -165,19 +204,37 @@ export function Select({
                     role="listbox"
                     aria-label={ariaLabel}
                     className={cn(
-                        "fixed z-[1000] overflow-hidden rounded-md border border-border bg-background shadow-md dark:border-zinc-800 dark:bg-zinc-900",
+                        "fixed z-[1000] overflow-y-auto rounded-md border border-border bg-background shadow-md dark:border-zinc-800 dark:bg-zinc-900",
                         enhanceLight ? "ring-1 ring-emerald-500/20 drop-shadow-[0_10px_18px_rgba(16,185,129,0.22)]" : undefined
                     )}
-                    style={{ left: panelStyle.left, top: panelStyle.top, width: panelStyle.width }}
+                    style={{
+                        left: panelStyle.left,
+                        top: panelStyle.top,
+                        bottom: panelStyle.bottom,
+                        width: panelStyle.width,
+                        maxHeight: panelStyle.maxHeight,
+                    }}
                 >
                     {options.map((opt, idx) => {
                         const isSelected = opt.value === value;
                         const isActive = idx === activeIndex;
+                        // Non-interactive group heading before the first option
+                        // of each <optgroup>; keyboard indexes skip headings.
+                        const showGroup = Boolean(opt.group) && (idx === 0 || options[idx - 1].group !== opt.group);
                         return (
+                            <React.Fragment key={`${opt.value}-${idx}`}>
+                            {showGroup ? (
+                                <div
+                                    role="presentation"
+                                    className="px-3 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground"
+                                >
+                                    {opt.group}
+                                </div>
+                            ) : null}
                             <button
-                                key={`${opt.value}-${idx}`}
                                 type="button"
                                 role="option"
+                                data-option-index={idx}
                                 aria-selected={isSelected}
                                 disabled={opt.disabled}
                                 onMouseEnter={() => setActiveIndex(idx)}
@@ -201,6 +258,7 @@ export function Select({
                             >
                                 <span className="min-w-0 truncate">{opt.label}</span>
                             </button>
+                            </React.Fragment>
                         );
                     })}
                 </div>,
