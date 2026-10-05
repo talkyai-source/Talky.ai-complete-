@@ -376,6 +376,11 @@
           "path": "docs/sessions/2026-10-05-exact-integration-verification.md",
           "kind": "integrated_local_regression_not_release_acceptance",
           "candidate": "44dcc2367446cbe85c9c2757838b8695cf15bf1f"
+        },
+        {
+          "path": "docs/sessions/2026-10-06-ag06-saved-acknowledgement-recovery.md",
+          "kind": "admin_authprovider_to_api_token_lifecycle_repair_with_actual_component_controls",
+          "candidate": "31fd9b36"
         }
       ],
       "blocker": "Designated inbox/device/browser recovery, cross-tab cookie behavior, deployed compatibility, first authorized call and operator reconciliation remain unverified. The advertised staff invitation/acceptance journey is absent; assisted setup does not close F05.",
@@ -782,10 +787,21 @@
           "path": "docs/sessions/artifacts/calendar-mail-voice-integration/verification.md",
           "kind": "508_affected_tests_on_combined_calendar_gmail_voice_and_crm_source",
           "candidate": "3de75cd3"
+        },
+        {
+          "path": "docs/sessions/2026-10-06-ag06-saved-acknowledgement-recovery.md",
+          "kind": "atomic_saved_gmail_acknowledgement_recovery_and_admin_session_wiring",
+          "backend_candidate": "c0cac1f7",
+          "admin_candidate": "31fd9b36"
+        },
+        {
+          "path": "docs/sessions/artifacts/knowledge-privacy-recovery-integration/verification.md",
+          "kind": "539_affected_knowledge_privacy_and_receipt_tests",
+          "candidate": "c0cac1f7"
         }
       ],
-      "blocker": "Canonical reviewed authorization, native PostgreSQL UUID admission, uncertain CRM reference adoption and dropped voice email receipt proof are repaired locally. Admin now has explicit original-account CRM, exact-message Gmail and exact-event Google/Outlook calendar observation; combined calendar/Gmail/voice/CRM regression passed 508 tests. Approved durable operator resolution, full schema/browser and designated live-provider acceptance remain open. Inspection read modes have synthetic route/provider proof, not the separate actual-PG reviewed-selector evidence. Missing IDs or historical proof remain unresolved without backfill or inferred linkage.",
-      "next_action": "Establish the supported operator authority and authoritative evidence/audit contract, then complete durable resolution and designated end-to-end acceptance. Exact-reference observation is implemented locally but never proves delivery, payload/contact correctness, active booking or action completion, and absence never authorizes resend. Preserve original identities, child references and uncertain outcomes; do not bind missing historical proof to the current account.",
+      "blocker": "Original-account CRM/Gmail/calendar inspection and narrow recovery of a canonical saved successful Gmail acknowledgement are implemented locally. Recovery preserves original unknown evidence in an atomic audit, checks current platform-admin session and never resends. Combined knowledge/privacy/action checks passed 539 tests; separate partial-schema PostgreSQL and Admin checks passed. Broader unresolved outcomes without authoritative evidence stay held. Full schema/grant, browser, designated live-provider, retention/deletion and customer acceptance remain open.",
+      "next_action": "Apply the reviewed additive 0062 migration through the existing release process before exposing recovery, retaining original receipts and its explicit hard-delete restriction. Complete designated original-account email/calendar/CRM, current-session/browser, operator and customer acceptance. Provider observation alone never proves completion or authorizes resend; memory-only UI pending state is not cross-tab/restart persistence.",
       "target_date": null
     },
     {

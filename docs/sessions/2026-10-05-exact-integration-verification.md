@@ -649,3 +649,61 @@ retrieval score alone cannot establish faithful answers. The rejected
 normalization experiments, failed raw-source gate, content-owner approval and
 actual configured-profile answer review remain explicit. No thresholds, gold
 answers, providers or dependencies changed during that audit.
+
+
+## Saved acknowledgement recovery and Admin session wiring (6 October)
+
+Backend `c0cac1f7` and Admin `31fd9b36` add explicit recovery of the narrow
+canonical Gmail failure envelope that already contains a successful original
+provider acknowledgement. The [package report](2026-10-06-ag06-saved-acknowledgement-recovery.md)
+records proof/intent validation, current platform-admin session checks after the
+action lock, atomic append-only audit/status writes and unchanged request replay.
+It restores saved acceptance without sending another email. Missing evidence,
+unknown remote outcomes and unsupported action types remain held.
+
+The Admin panel requires a reason and confirmation, retains the same uncertain
+request, and refreshes the whole drawer before displaying the current saved
+result. Review found and repaired the actual AuthProvider updating browser
+storage without updating the API client's token. Login/logout/initial verification
+now use the existing token setter. Stale reload callbacks cannot adopt a later
+session, and a coherent recovery by another administrator retires an obsolete
+local pending request while displaying the actual recorded actor/reason.
+
+Owner checks passed **441 backend tests across twelve modules**, **eight actual
+PostgreSQL controls**, and **159 Admin tests**, including 118 focused receipt
+controls. Admin TypeScript/build, scoped lint and backend scoped Ruff passed.
+These are separately scoped, overlapping checks; they are not an additive total.
+The database fixture applied namespace-rewritten migration 0062 to private
+relevant-shape tables under a restricted role. All 108 public table data hashes,
+schema metadata and public head 0061 remained unchanged; temporary objects were
+removed. It is not full production schema/grant or live-provider acceptance.
+The first probe's socket-only Proactor guard limitation is preserved, alongside
+the final exact-database async-transport guard and measured admissions.
+
+The [combined root regression](artifacts/knowledge-privacy-recovery-integration/verification.md)
+passed **539 tests, zero failures/skips and 208 warnings** across sixteen modules
+on committed `c0cac1f7`. All thirty-four recorded inputs stayed unchanged and
+matched Git; both socket and async-transport prohibited-attempt counters were
+zero. Independent read-only review verified the thirty-four source hashes, five
+artifact hashes and eleven privacy source/Git pairs. This is local synthetic-port
+integration proof; the owner Admin checks are source-bound separately, not a
+root browser run or a new whole-backend checkpoint.
+
+Final integration parity checked all thirty-one owner input hashes, twenty-one
+artifact/report hashes and ten owner/integrated source Git blobs with no mismatch.
+The entire Admin tree equals the tested owner tree. No tests were repeated for
+this parity check; the source-bound owner build and UI limits remain explicit.
+
+Migration 0062 must precede release of the recovery control. Its retained audit
+restricts hard deletion of a recovered action or a cascading tenant purge, and
+destructive downgrade is refused. Retention/deletion approval remains open.
+The pending UI cache is bounded and memory-only; no cross-tab/browser-restart
+guarantee or actual React/browser usability acceptance is claimed.
+
+The remaining path from knowledge to customer acceptance still requires approved
+versioned campaign content and factual answers, a ratified existing voice/model
+profile and owned-call cohort, human comprehension/interruption/contact review,
+real Leads/Sales Hub browser evidence, designated connector outcomes, and the
+recorded operational/release prerequisites. Raw retrieval sufficiency remains
+32/45, AG04 offline mapping remains 43/50, and live/customer acceptance remains
+unrun. All package/gate/deferred states and the feature freeze are unchanged.
