@@ -380,22 +380,122 @@
           "id": {
             "type": "string"
           },
-          "name": {
+          "type": {
             "type": "string"
           },
-          "description": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "running",
+              "in_progress",
+              "scheduled",
+              "completed",
+              "failed",
+              "unknown",
+              "cancelled",
+              "success"
+            ]
+          },
+          "triggered_by": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "lead_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "created_at": {
             "type": "string"
           },
-          "parameters": {
-            "type": "object",
-            "additionalProperties": {}
+          "started_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "completed_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "confirmation_allowed": {
+            "type": "boolean"
+          },
+          "receipt": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "provider": {
+                    "type": "string",
+                    "maxLength": 256
+                  },
+                  "connector_id": {
+                    "type": "string",
+                    "maxLength": 256
+                  },
+                  "external_account_id": {
+                    "type": "string",
+                    "maxLength": 512
+                  },
+                  "message_id": {
+                    "type": "string",
+                    "maxLength": 512
+                  },
+                  "external_event_id": {
+                    "type": "string",
+                    "maxLength": 512
+                  },
+                  "meeting_id": {
+                    "type": "string",
+                    "maxLength": 256
+                  },
+                  "reminder_id": {
+                    "type": "string",
+                    "maxLength": 256
+                  },
+                  "plan_id": {
+                    "type": "string",
+                    "maxLength": 256
+                  },
+                  "job_id": {
+                    "type": "string",
+                    "maxLength": 256
+                  },
+                  "child_action_id": {
+                    "type": "string",
+                    "maxLength": 512
+                  },
+                  "provider_status": {
+                    "type": "string",
+                    "maxLength": 64
+                  }
+                },
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "required": [
           "id",
-          "name",
-          "description",
-          "parameters"
+          "type",
+          "status",
+          "created_at"
         ],
         "additionalProperties": false
       },
@@ -788,7 +888,7 @@
       "AssistantActionListResponse": {
         "type": "object",
         "properties": {
-          "items": {
+          "actions": {
             "type": "array",
             "items": {
               "type": "object",
@@ -796,29 +896,144 @@
                 "id": {
                   "type": "string"
                 },
-                "name": {
+                "type": {
                   "type": "string"
                 },
-                "description": {
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "pending",
+                    "running",
+                    "in_progress",
+                    "scheduled",
+                    "completed",
+                    "failed",
+                    "unknown",
+                    "cancelled",
+                    "success"
+                  ]
+                },
+                "triggered_by": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "lead_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "created_at": {
                   "type": "string"
                 },
-                "parameters": {
-                  "type": "object",
-                  "additionalProperties": {}
+                "started_at": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "completed_at": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "confirmation_allowed": {
+                  "type": "boolean"
+                },
+                "receipt": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "provider": {
+                          "type": "string",
+                          "maxLength": 256
+                        },
+                        "connector_id": {
+                          "type": "string",
+                          "maxLength": 256
+                        },
+                        "external_account_id": {
+                          "type": "string",
+                          "maxLength": 512
+                        },
+                        "message_id": {
+                          "type": "string",
+                          "maxLength": 512
+                        },
+                        "external_event_id": {
+                          "type": "string",
+                          "maxLength": 512
+                        },
+                        "meeting_id": {
+                          "type": "string",
+                          "maxLength": 256
+                        },
+                        "reminder_id": {
+                          "type": "string",
+                          "maxLength": 256
+                        },
+                        "plan_id": {
+                          "type": "string",
+                          "maxLength": 256
+                        },
+                        "job_id": {
+                          "type": "string",
+                          "maxLength": 256
+                        },
+                        "child_action_id": {
+                          "type": "string",
+                          "maxLength": 512
+                        },
+                        "provider_status": {
+                          "type": "string",
+                          "maxLength": 64
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "error": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
                 }
               },
               "required": [
                 "id",
-                "name",
-                "description",
-                "parameters"
+                "type",
+                "status",
+                "created_at"
               ],
               "additionalProperties": false
             }
+          },
+          "total": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "page": {
+            "type": "integer",
+            "exclusiveMinimum": 0
+          },
+          "page_size": {
+            "type": "integer",
+            "exclusiveMinimum": 0
           }
         },
         "required": [
-          "items"
+          "actions",
+          "total",
+          "page",
+          "page_size"
         ],
         "additionalProperties": false
       },

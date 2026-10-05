@@ -6,7 +6,7 @@ import { dashboardApi, type Call, type CallListFilters } from "@/lib/dashboard-a
 import { isActiveCallStatus } from "@/lib/call-history-workflow";
 import { outboundCampaignsOnly } from "@/lib/campaign-direction";
 import { extendedApi } from "@/lib/extended-api";
-import type { AssistantRun, CalendarEvent, Connector, PartnerSummary, Reminder, TenantSummary } from "@/lib/models";
+import type { AssistantRun, AssistantRunStatus, CalendarEvent, Connector, PartnerSummary, Reminder, TenantSummary } from "@/lib/models";
 import { emailAuditStore } from "@/lib/email-audit";
 import { notificationsStore } from "@/lib/notifications";
 import { useNotificationMutation } from "@/lib/notification-mutations";
@@ -27,7 +27,6 @@ export const queryKeys = {
     calendarEvents: () => ["calendarEvents"] as const,
     reminders: () => ["reminders"] as const,
     emailTemplates: () => ["emailTemplates"] as const,
-    assistantActions: () => ["assistantActions"] as const,
     assistantRuns: (key: string) => ["assistantRuns", key] as const,
     auditLogs: (key: string) => ["auditLogs", key] as const,
     securityEvents: (key: string) => ["securityEvents", key] as const,
@@ -433,22 +432,15 @@ export function useCancelReminder() {
     });
 }
 
-export function useAssistantActions() {
-    return useQuery({
-        queryKey: queryKeys.assistantActions(),
-        queryFn: ({ signal }) => backendApi.assistantActions.list(signal),
-    });
-}
-
 export type AssistantRunsQuery = {
     page: number;
     pageSize: number;
-    statuses: Array<"pending" | "in_progress" | "completed" | "failed">;
+    statuses: AssistantRunStatus[];
     actionType?: string;
     leadId?: string;
     from?: string;
     to?: string;
-    sortKey?: "createdAt" | "startedAt" | "completedAt" | "status" | "actionType" | "source" | "leadId";
+    sortKey?: "createdAt" | "startedAt" | "completedAt" | "status" | "actionType";
     sortDir?: "asc" | "desc";
 };
 
@@ -464,89 +456,16 @@ function stableListKey<T extends object>(input: T) {
     return JSON.stringify(input);
 }
 
-export function useAssistantRuns(q: AssistantRunsQuery) {
+export function useAssistantRuns(q: AssistantRunsQuery, options?: { enabled?: boolean }) {
     return useQuery({
         queryKey: queryKeys.assistantRuns(assistantRunsKey(q)),
+        enabled: options?.enabled ?? true,
         queryFn: ({ signal }) => backendApi.assistantRuns.list(q, signal),
         placeholderData: keepPreviousData,
         refetchInterval: (query) => {
             const data = query.state.data as { items: AssistantRun[] } | undefined;
-            const needs = data?.items?.some((r) => r.status === "pending" || r.status === "in_progress");
+            const needs = data?.items?.some((r) => ["pending", "running", "in_progress", "scheduled"].includes(r.status));
             return needs ? 3000 : false;
-        },
-    });
-}
-
-export function useAssistantExecute() {
-    const qc = useQueryClient();
-    return useNotificationMutation({
-        mutationFn: backendApi.assistant.execute,
-        onMutate: async (input) => {
-            const optimistic: AssistantRun = {
-                id: randomId(),
-                actionType: input.actionType,
-                source: input.source ?? "dashboard",
-                leadId: input.leadId,
-                status: "pending",
-                createdAt: new Date().toISOString(),
-                result: undefined,
-                requestPayload: { action_type: input.actionType, source: input.source ?? "dashboard", lead_id: input.leadId, context: input.context ?? {} },
-                responsePayload: undefined,
-                error: undefined,
-            };
-
-            const queries = qc.getQueriesData({ queryKey: ["assistantRuns"] });
-            const touched: Array<{ key: unknown[]; prev: unknown }> = [];
-            for (const [key, prev] of queries) {
-                if (!Array.isArray(key)) continue;
-                touched.push({ key, prev });
-                qc.setQueryData(key, (cur: unknown) => {
-                    if (!cur || typeof cur !== "object") return cur;
-                    const obj = cur as { items?: AssistantRun[]; total?: number };
-                    const items = Array.isArray(obj.items) ? obj.items : [];
-                    const nextItems = [optimistic, ...items].slice(0, 50);
-                    const total = typeof obj.total === "number" ? obj.total + 1 : obj.total;
-                    return { ...obj, items: nextItems, total };
-                });
-            }
-            return { touched };
-        },
-        onError: (_err, _input, ctx) => {
-            for (const t of ctx?.touched ?? []) {
-                qc.setQueryData(t.key, t.prev);
-            }
-            notificationsStore.create({ type: "error", title: "Execution failed", message: "Could not start the action." });
-        },
-        onSuccess: () => {
-            notificationsStore.create({ type: "success", title: "Action started", message: "The action has been queued." });
-        },
-        onSettled: () => {
-            void qc.invalidateQueries({ queryKey: ["assistantRuns"] });
-        },
-    });
-}
-
-export function useAssistantPlan() {
-    return useNotificationMutation({
-        mutationFn: backendApi.assistant.plan,
-        onError: () => {
-            notificationsStore.create({ type: "error", title: "Planning failed", message: "Could not generate a plan." });
-        },
-    });
-}
-
-export function useAssistantRunRetry() {
-    const qc = useQueryClient();
-    return useNotificationMutation({
-        mutationFn: backendApi.assistantRuns.retry,
-        onError: () => {
-            notificationsStore.create({ type: "error", title: "Retry failed", message: "Could not retry. Please try again." });
-        },
-        onSuccess: () => {
-            notificationsStore.create({ type: "success", title: "Retry started", message: "A new run was created." });
-        },
-        onSettled: () => {
-            void qc.invalidateQueries({ queryKey: ["assistantRuns"] });
         },
     });
 }

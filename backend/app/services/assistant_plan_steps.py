@@ -6,6 +6,7 @@ All logic is identical to the original private methods; only self.db_client
 is replaced by an explicit db_client parameter, and self-calls to sibling
 helpers are replaced by direct function calls within this module.
 """
+
 import logging
 from typing import Optional, Dict, Any
 from datetime import datetime, timedelta, timezone
@@ -18,6 +19,7 @@ from app.domain.models.action_plan import (
 )
 
 logger = logging.getLogger(__name__)
+
 
 def evaluate_condition(
     condition: ActionStepCondition,
@@ -114,7 +116,10 @@ async def schedule_reminder(
         else:
             scheduled_at = scheduled_at_str
     else:
-        return {"success": False, "error": "Provide an explicit reminder time, or a meeting and offset."}
+        return {
+            "success": False,
+            "error": "Provide an explicit reminder time, or a meeting and offset.",
+        }
 
     # Don't create reminders in the past
     if scheduled_at.tzinfo is None or scheduled_at.utcoffset() is None:
@@ -146,44 +151,91 @@ async def schedule_reminder(
     if not reminder_data["meeting_id"] and not reminder_data["lead_id"]:
         return {"success": False, "error": "Choose the meeting or contact for this reminder."}
     if reminder_data["meeting_id"]:
-        found = db_client.table("meetings").select("id, lead_id").eq("tenant_id", tenant_id).eq("id", reminder_data["meeting_id"]).limit(1).execute()
+        found = (
+            db_client.table("meetings")
+            .select("id, lead_id")
+            .eq("tenant_id", tenant_id)
+            .eq("id", reminder_data["meeting_id"])
+            .limit(1)
+            .execute()
+        )
         if not found.data:
             return {"success": False, "error": "meeting_id is not available in this account."}
         meeting_lead = found.data[0].get("lead_id")
-        if meeting_lead and reminder_data["lead_id"] and str(meeting_lead) != str(reminder_data["lead_id"]):
-            return {"success": False, "error": "The meeting contact changed; preview the reminder again."}
+        if (
+            meeting_lead
+            and reminder_data["lead_id"]
+            and str(meeting_lead) != str(reminder_data["lead_id"])
+        ):
+            return {
+                "success": False,
+                "error": "The meeting contact changed; preview the reminder again.",
+            }
         reminder_data["lead_id"] = reminder_data["lead_id"] or meeting_lead
     if not reminder_data["lead_id"]:
-        return {"success": False, "error": "This meeting has no linked contact. Choose a contact for the reminder."}
-    found = db_client.table("leads").select("id, email, phone_number").eq("tenant_id", tenant_id).eq("id", reminder_data["lead_id"]).limit(1).execute()
+        return {
+            "success": False,
+            "error": "This meeting has no linked contact. Choose a contact for the reminder.",
+        }
+    found = (
+        db_client.table("leads")
+        .select("id, email, phone_number")
+        .eq("tenant_id", tenant_id)
+        .eq("id", reminder_data["lead_id"])
+        .limit(1)
+        .execute()
+    )
     if not found.data:
         return {"success": False, "error": "lead_id is not available in this account."}
     contact_field = "phone_number" if reminder_data["type"] == "sms" else "email"
     recipient = found.data[0].get(contact_field)
     if not recipient:
-        return {"success": False, "error": f"The selected contact has no {contact_field} for this reminder."}
-    if not preview and params.get('_expected_recipient') and params['_expected_recipient'] != recipient:
-        return {"success": False, "error": "The contact address changed; preview the reminder again."}
-    reminder_data['content']['recipient'] = recipient
+        return {
+            "success": False,
+            "error": f"The selected contact has no {contact_field} for this reminder.",
+        }
+    if (
+        not preview
+        and params.get("_expected_recipient")
+        and params["_expected_recipient"] != recipient
+    ):
+        return {
+            "success": False,
+            "error": "The contact address changed; preview the reminder again.",
+        }
+    reminder_data["content"]["recipient"] = recipient
     if preview:
-        return {"preview": True, "changes": [
-            {"field": "Recipient", "before": None, "after": recipient},
-            {"field": "Time", "before": None, "after": scheduled_at.isoformat()},
-            {"field": "Channel", "before": None, "after": reminder_data["type"]},
-            {"field": "Message", "before": None, "after": reminder_data["content"]["message"]},
-        ], "_apply_args": {
-            "meeting_id": reminder_data["meeting_id"], "lead_id": reminder_data["lead_id"],
-            "scheduled_at": scheduled_at.isoformat(), "message": reminder_data["content"]["message"],
-            "reminder_type": reminder_data["type"],
-            "_expected_recipient": recipient,
-        }, "note": "Reminder not scheduled yet."}
+        return {
+            "preview": True,
+            "changes": [
+                {"field": "Recipient", "before": None, "after": recipient},
+                {"field": "Time", "before": None, "after": scheduled_at.isoformat()},
+                {"field": "Channel", "before": None, "after": reminder_data["type"]},
+                {"field": "Message", "before": None, "after": reminder_data["content"]["message"]},
+            ],
+            "_apply_args": {
+                "meeting_id": reminder_data["meeting_id"],
+                "lead_id": reminder_data["lead_id"],
+                "scheduled_at": scheduled_at.isoformat(),
+                "message": reminder_data["content"]["message"],
+                "reminder_type": reminder_data["type"],
+                "_expected_recipient": recipient,
+            },
+            "note": "Reminder not scheduled yet.",
+        }
 
     try:
         response = db_client.table("reminders").insert(reminder_data).execute()
 
-        if response.data:
+        if (
+            not getattr(response, "error", None)
+            and response.data
+            and isinstance(response.data[0], dict)
+            and response.data[0].get("id")
+        ):
             return {
                 "success": True,
+                "confirmation_allowed": True,
                 "status": "scheduled",
                 "reminder_id": response.data[0]["id"],
                 "scheduled_at": scheduled_at.isoformat(),
@@ -240,6 +292,7 @@ async def execute_action(
                 add_video_conference=merged_params.get("add_video_conference", True),
                 confirm=True,
                 conversation_id=conversation_id,
+                _reviewed_connector=merged_params.get("_reviewed_connector"),
             )
 
         elif action_type == AllowedActionType.SEND_EMAIL.value:
@@ -269,6 +322,7 @@ async def execute_action(
                 # Plan execution is an already-approved action — send immediately,
                 # not the interactive preview-first path.
                 confirm=True,
+                _reviewed_connector=merged_params.get("_reviewed_connector"),
             )
 
         elif action_type == AllowedActionType.SEND_SMS.value:
@@ -327,6 +381,8 @@ async def execute_action(
                 new_title=merged_params.get("new_title"),
                 confirm=True,
                 conversation_id=conversation_id,
+                _reviewed_connector=merged_params.get("_reviewed_connector"),
+                _reviewed_meeting=merged_params.get("_reviewed_meeting"),
             )
 
         elif action_type == AllowedActionType.CANCEL_MEETING.value:
@@ -337,6 +393,8 @@ async def execute_action(
                 reason=merged_params.get("reason"),
                 confirm=True,
                 conversation_id=conversation_id,
+                _reviewed_connector=merged_params.get("_reviewed_connector"),
+                _reviewed_meeting=merged_params.get("_reviewed_meeting"),
             )
 
         else:
@@ -344,5 +402,9 @@ async def execute_action(
 
     except Exception as e:
         logger.error(f"Action execution error ({action_type}): {e}")
-        return {"success": False, "status": "unknown", "confirmation_allowed": False,
-                "error": "The action outcome is uncertain. Review its receipt before continuing."}
+        return {
+            "success": False,
+            "status": "unknown",
+            "confirmation_allowed": False,
+            "error": "The action outcome is uncertain. Review its receipt before continuing.",
+        }

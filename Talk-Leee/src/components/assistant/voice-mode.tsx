@@ -25,8 +25,8 @@ import { getAssistantWsToken } from "@/lib/assistant-model-api";
 import { MarkdownMessage } from "./markdown-message";
 import {
     EditProposalCard,
+    withProposalResult,
     type ProposalData,
-    type ProposalStatus,
     type ProposalCampaign,
 } from "./edit-proposal-card";
 import type { DiffChange } from "./diff-view";
@@ -208,21 +208,28 @@ export function AssistantVoiceMode({
     }, []);
 
     // --- proposal actions --------------------------------------------------
-    const sendProposalAction = useCallback((proposalId: string, action: "apply" | "reject" | "overwrite") => {
+    const sendProposalAction = useCallback((proposalId: string, action: "apply" | "reject" | "overwrite" | "status") => {
         const ws = wsRef.current;
         if (!ws || ws.readyState !== WebSocket.OPEN) return;
         try {
             ws.send(
                 JSON.stringify({
-                    type: action === "reject" ? "reject_proposal" : "apply_proposal",
+                    type: action === "status" ? "proposal_status" : action === "reject" ? "reject_proposal" : "apply_proposal",
                     proposal_id: proposalId,
                     // Overwrite-existing on a duplicate card; the server
                     // resolves the target id from its stored proposal.
                     ...(action === "overwrite" ? { mode: "overwrite" } : {}),
                 }),
             );
+            if (action === "apply" || action === "overwrite") setMessages((previous) => previous.map((message) =>
+                message.id === proposalId && message.proposal
+                    ? { ...message, proposal: { ...message.proposal, status: "submitting" } }
+                    : message));
         } catch {
-            /* socket closing */
+            if (action === "apply" || action === "overwrite") setMessages((previous) => previous.map((message) =>
+                message.id === proposalId && message.proposal
+                    ? { ...message, proposal: { ...message.proposal, status: "unknown", error: "The connection closed before a saved result was received." } }
+                    : message));
         }
     }, []);
 
@@ -464,13 +471,10 @@ export function AssistantVoiceMode({
                     case "proposal_result": {
                         const pid = typeof m.proposal_id === "string" ? m.proposal_id : null;
                         if (!pid) break;
-                        const applied = Boolean(m.applied);
-                        const errText = typeof m.error === "string" ? m.error : undefined;
                         setMessages((p) =>
                             p.map((x) => {
                                 if (x.id !== pid || !x.proposal) return x;
-                                const st: ProposalStatus = applied ? "applied" : errText ? "error" : "rejected";
-                                return { ...x, proposal: { ...x.proposal, status: st, error: errText } };
+                                return { ...x, proposal: withProposalResult(x.proposal, m) };
                             }),
                         );
                         break;
@@ -540,6 +544,7 @@ export function AssistantVoiceMode({
                                 <EditProposalCard
                                     proposal={msg.proposal}
                                     onApply={(id) => sendProposalAction(id, "apply")}
+                                    onCheck={(id) => sendProposalAction(id, "status")}
                                     onReject={(id) => sendProposalAction(id, "reject")}
                                     onOverwrite={(id) => sendProposalAction(id, "overwrite")}
                                 />

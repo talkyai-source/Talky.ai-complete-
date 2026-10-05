@@ -20,6 +20,8 @@ def _install_fake_email_service(monkeypatch, sink: dict):
         pass
 
     class _Svc:
+        async def review_connector(self, tenant_id):
+            return {"connector_id": "email", "provider": "gmail", "external_account_id": "account"}
         async def send_email(self, **kwargs):
             sink.update(kwargs)
             return {"success": True, "message_id": "provider-receipt"}
@@ -70,8 +72,11 @@ async def test_report_issue_sends_to_support_with_tenant(monkeypatch):
         category="calls",
         severity="high",
         contact_email="me@acme.com",
-        confirm=True,
+        confirm=False,
     )
+    assert sink == {}
+    res = await comms.report_issue(tenant_id="tenant-123", db_client=None,
+                                 confirm=True, **res["_apply_args"])
 
     assert res["success"] is True
     assert sink["to"] == ["support@example.com"]

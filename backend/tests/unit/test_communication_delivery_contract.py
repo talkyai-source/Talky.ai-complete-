@@ -50,7 +50,7 @@ def encryption(monkeypatch):
 
 def email_service(pool):
     service = EmailService(pool, NS(validate_content=MagicMock()))
-    connector = NS(send_email=AsyncMock(return_value=NS(id='mail-receipt', thread_id='thread')))
+    connector = NS(external_account_id='account', send_email=AsyncMock(return_value=NS(id='mail-receipt', thread_id='thread')))
     service._get_active_email_connector = AsyncMock(return_value=(connector, 'connector', 'gmail'))
     return service, connector
 
@@ -125,7 +125,7 @@ async def test_email_authentication_retry_only_after_definite_401():
     service, old = email_service(Pool())
     old.send_email.side_effect = ConnectorProviderError(provider='gmail', operation='send_email',
         category='authentication', status_code=401, message='expired')
-    fresh = NS(send_email=AsyncMock(return_value=NS(id='refreshed-receipt', thread_id=None)))
+    fresh = NS(external_account_id='account', send_email=AsyncMock(return_value=NS(id='refreshed-receipt', thread_id=None)))
     service._get_active_email_connector.side_effect = [(old, 'c', 'gmail'), (fresh, 'c', 'gmail')]
     result = await send(service, 'email')
     assert result['success'] and result['status'] == 'accepted'
@@ -151,6 +151,8 @@ async def test_sms_idempotency_reads_message_from_json_receipt_and_lookup_errors
 async def test_email_preview_freezes_resolved_recipient_without_later_lookup(monkeypatch):
     lookup = AsyncMock(return_value=('approved@example.invalid', {'id': 'lead'}))
     monkeypatch.setattr(comms, '_resolve_lead_email', lookup)
+    backend = NS(review_connector=AsyncMock(return_value={'connector_id': 'connector', 'provider': 'gmail', 'external_account_id': 'account'}), send_email=AsyncMock(return_value={'success': True, 'message_id': 'real-receipt'}))
+    monkeypatch.setattr('app.services.email_service.get_email_service', lambda _: backend)
     preview = await comms.send_email(TENANT, object(), lead_id='lead', subject='Subject', body='Reviewed body')
     assert preview['preview']
     frozen = preview['_apply_args']
@@ -187,7 +189,7 @@ async def test_sms_preview_has_no_mutation_and_apply_uses_provider_receipt(monke
 
 async def test_report_preview_freezes_content_and_send_failure_is_not_claimed_success(monkeypatch):
     monkeypatch.setenv('SUPPORT_REPORT_EMAIL', 'support@example.invalid')
-    backend = NS(send_email=AsyncMock(return_value={'success': False, 'status': 'unknown', 'error': 'timeout'}))
+    backend = NS(review_connector=AsyncMock(return_value={'connector_id':'email', 'provider':'gmail', 'external_account_id':'account'}), send_email=AsyncMock(return_value={'success': False, 'status': 'unknown', 'error': 'timeout'}))
     monkeypatch.setattr('app.services.email_service.get_email_service', lambda _: backend)
     preview = await comms.report_issue(TENANT, object(), 'Calls failed', contact_email='reporter@example.invalid')
     backend.send_email.assert_not_awaited()
@@ -236,10 +238,10 @@ async def test_historical_simulated_sms_receipt_never_confirms_a_real_send():
 
 async def test_support_report_requires_receipt_even_if_service_claims_success(monkeypatch):
     monkeypatch.setenv('SUPPORT_REPORT_EMAIL', 'support@example.invalid')
-    backend = NS(send_email=AsyncMock(return_value={'success': True}))
+    backend = NS(review_connector=AsyncMock(return_value={'connector_id':'email', 'provider':'gmail', 'external_account_id':'account'}), send_email=AsyncMock(return_value={'success': True}))
     monkeypatch.setattr('app.services.email_service.get_email_service', lambda _: backend)
-    result = await comms.report_issue(TENANT, object(), 'Calls failed',
-        contact_email='reporter@example.invalid', confirm=True)
+    preview = await comms.report_issue(TENANT, object(), 'Calls failed', contact_email='reporter@example.invalid')
+    result = await comms.report_issue(TENANT, object(), confirm=True, **preview['_apply_args'])
     assert not result['success'] and result['status'] == 'unknown'
 
 

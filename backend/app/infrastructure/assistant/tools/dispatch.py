@@ -245,7 +245,16 @@ async def dispatch_tool(
     call_args.pop("proposal_id", None)
     call_args.pop("idempotency_key", None)
     if not trusted_proposal_apply:
-        call_args.pop("_prepared_report", None)
+        # Plan steps and template/context dictionaries are also model supplied.
+        # Only server previews may create internal reviewed evidence.
+        def without_review_markers(value):
+            if isinstance(value, dict):
+                return {key: without_review_markers(item) for key, item in value.items()
+                        if key not in {"_prepared_report", "_reviewed_connector", "_reviewed_meeting", "_expected_recipient"}}
+            if isinstance(value, list):
+                return [without_review_markers(item) for item in value]
+            return value
+        call_args = without_review_markers(call_args)
     for key, default in _BOOL_ARGS.items():
         if key in call_args:
             call_args[key] = coerce_bool(call_args[key], default)
@@ -277,6 +286,12 @@ async def dispatch_tool(
             return authorization_failure
 
     async def invoke() -> Dict[str, Any]:
+        # The durable claim may have awaited the DB after the first permission
+        # check. Recheck current grants before entering the effect service.
+        if func_name in _DURABLE_TOOLS and call_args.get("confirm") is True:
+            denied = await _authorize_action_tool(func_name, tenant_id, db_client, actor_user_id, call_args)
+            if denied is not None:
+                return {**denied, "success": False, "status": "failed"}
         if func_name in _ACTOR_AWARE:
             return await fn(
                 tenant_id,

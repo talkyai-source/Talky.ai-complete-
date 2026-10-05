@@ -59,6 +59,16 @@ async def crm_db(monkeypatch):
         async with admin.transaction():
             for statement in statements:
                 await admin.execute(statement)
+        spec = importlib.util.spec_from_file_location('crm_effect_migration',
+            Path(__file__).resolve().parents[2] / 'Alembic/versions/0058_crm_contact_effect.py')
+        effect_migration = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(effect_migration)
+        statements = []
+        monkeypatch.setattr(effect_migration, 'op', SimpleNamespace(execute=lambda stmt: statements.append(str(stmt))))
+        effect_migration.upgrade()
+        async with admin.transaction():
+            for statement in statements:
+                await admin.execute(statement)
         await admin.execute(f'GRANT USAGE ON SCHEMA {schema} TO {role}')
         await admin.execute(f'GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA {schema} TO {role}')
         async def init(conn):
@@ -82,6 +92,98 @@ async def seed(admin, providers=('salesforce', 'hubspot'), *, legacy_id=None):
         await admin.execute("INSERT INTO connectors VALUES ($1::uuid,$2,'crm','active')", tenant, provider)
     await admin.execute("INSERT INTO calls (id,tenant_id,status,crm_call_id) VALUES ($1::uuid,$2::uuid,'initiated',$3)", call, tenant, legacy_id)
     return tenant, call
+
+
+async def contact_effect_fixture(admin, pool):
+    tenant, call = await seed(admin, ('salesforce',))
+    store = CRMDeliveryStore(pool)
+    revision = await admin.fetchval('SELECT xmin::text FROM calls WHERE id=$1::uuid', call)
+    await store.enqueue(tenant, call, 'salesforce', 'prepared', source_revision=revision)
+    receipt = await store.claim(tenant, call, 'salesforce', source_revision=revision)
+    connector = str(uuid4())
+    assert await store.bind_destination(receipt, connector, 'synthetic-account')
+    await store.save(receipt, phase='resolving_contact')
+    effect = {'version': 1, 'provider': 'salesforce', 'connector_id': connector,
+              'account_id': 'synthetic-account', 'call_id': call,
+              'source_call_revision': revision, 'arguments_sha256': 'a' * 64,
+              'recipient': {'email': 'original@example.com', 'phone': None},
+              'arguments': {'email': 'original@example.com', 'phone': None}}
+    return store, receipt, effect
+
+
+async def test_contact_effect_is_immutable_and_phase_commits_before_create(crm_db):
+    import json
+    admin, pool = crm_db
+    store, receipt, effect = await contact_effect_fixture(admin, pool)
+    await store.bind_contact_effect(receipt, effect)
+    # Identical preparation is idempotent, but a later input cannot replace it.
+    await store.bind_contact_effect(receipt, effect)
+    changed = dict(effect, recipient={'email': 'different@example.com', 'phone': None})
+    with pytest.raises(RuntimeError):
+        await store.bind_contact_effect(receipt, changed)
+    await store.begin_contact_create(receipt, effect)
+    row = await admin.fetchrow('SELECT contact_effect,phase FROM crm_deliveries')
+    assert json.loads(row['contact_effect']) == effect
+    assert row['phase'] == 'creating_contact'
+    with pytest.raises(RuntimeError):
+        await store.begin_contact_create(receipt, effect)
+
+
+async def test_crashed_create_retains_original_account_input_and_requires_reconciliation(crm_db):
+    import json
+    admin, pool = crm_db
+    store, receipt, effect = await contact_effect_fixture(admin, pool)
+    await store.bind_contact_effect(receipt, effect)
+    await store.begin_contact_create(receipt, effect)
+    await admin.execute("UPDATE crm_deliveries SET lease_expires_at=NOW()-INTERVAL '1 second'")
+    resumed = await store.claim(receipt['tenant_id'], receipt['call_id'], 'salesforce')
+    assert resumed['reconcile'] and resumed['phase'] == 'creating_contact'
+    assert json.loads(resumed['contact_effect']) == effect
+    assert resumed['destination_account_id'] == effect['account_id']
+    with pytest.raises(RuntimeError):
+        await store.bind_contact_effect(resumed, effect)
+
+
+@pytest.mark.parametrize('change_after_bind', [False, True])
+async def test_changed_source_cannot_admit_prepared_contact_create(crm_db, change_after_bind):
+    admin, pool = crm_db
+    store, receipt, effect = await contact_effect_fixture(admin, pool)
+    if change_after_bind:
+        await store.bind_contact_effect(receipt, effect)
+    await admin.execute("UPDATE calls SET transcript='corrected synthetic caller evidence' WHERE id=$1::uuid",
+                        receipt['call_id'])
+    with pytest.raises(RuntimeError):
+        if change_after_bind:
+            await store.begin_contact_create(receipt, effect)
+        else:
+            await store.bind_contact_effect(receipt, effect)
+    assert await admin.fetchval('SELECT phase FROM crm_deliveries') == 'resolving_contact'
+
+
+async def test_contact_effect_account_identity_and_evidence_size_are_enforced(crm_db):
+    admin, pool = crm_db
+    store, receipt, effect = await contact_effect_fixture(admin, pool)
+    with pytest.raises(RuntimeError):
+        await store.bind_contact_effect(receipt, dict(effect, account_id='other-account'))
+    with pytest.raises(ValueError):
+        await store.bind_contact_effect(receipt, dict(effect, arguments={'description': 'x' * 32769}))
+    assert await admin.fetchval('SELECT contact_effect FROM crm_deliveries') is None
+
+
+async def test_revalidated_admission_uses_fresh_revision_without_rewriting_original_effect(crm_db):
+    import json
+    admin, pool = crm_db
+    store, receipt, effect = await contact_effect_fixture(admin, pool)
+    await store.bind_contact_effect(receipt, effect)
+    # The service separately compares exact prepared arguments and current
+    # primary evidence. A harmless metadata write changes xmin, not that intent.
+    await admin.execute("UPDATE calls SET crm_call_id='metadata-only' WHERE id=$1::uuid", receipt['call_id'])
+    current_revision = await admin.fetchval('SELECT xmin::text FROM calls WHERE id=$1::uuid', receipt['call_id'])
+    assert current_revision != effect['source_call_revision']
+    await store.begin_contact_create(receipt, effect, source_revision=current_revision)
+    row = await admin.fetchrow('SELECT contact_effect,phase FROM crm_deliveries')
+    assert row['phase'] == 'creating_contact'
+    assert json.loads(row['contact_effect']) == effect
 
 
 async def test_terminal_and_summary_transactions_queue_each_destination_with_rls(crm_db):
@@ -251,7 +353,11 @@ async def test_lead_crm_projection_uses_requested_call_or_latest_lead_call_and_t
     latest = await service.crm_deliveries(tenant, lead_id=lead)
     assert [(row['provider'], row['status'], row['attempts']) for row in latest] == [
         ('hubspot', 'unknown', 2), ('salesforce', 'failed', 3)]
-    assert all(set(row) == {'provider', 'status', 'attempts', 'updated_at'} and row['updated_at'] for row in latest)
+    public_fields = {'call_id', 'provider', 'status', 'phase', 'attempts', 'updated_at',
+                     'destination_connector_id', 'destination_account_id', 'remote_contact_id',
+                     'remote_call_id', 'last_error', 'contact_effect_available', 'payload_digest'}
+    assert all(set(row) == public_fields and row['updated_at'] for row in latest)
+    assert all(not row['contact_effect_available'] and row['payload_digest'] is None for row in latest)
     old = await service.crm_deliveries(tenant, call_id=older_call, lead_id=lead)
     assert [(row['provider'], row['status']) for row in old] == [('hubspot', 'succeeded')]
     assert await service.crm_deliveries(tenant, call_id=other_call) == []

@@ -47,6 +47,21 @@ test("CRM success and uncertain delivery remain separate for each provider", () 
     assert.equal(screen.queryByText("Salesforce: Synced"), null);
 });
 
+test("uncertain CRM delivery retains the original account and provider references for review", () => {
+    show({ processing_status: "complete", missing_required: [], details: [], crm_deliveries: [{
+        provider: "salesforce", status: "unknown", attempts: 1, updated_at: "2026-10-05",
+        call_id: "call-owned", destination_account_id: "original-account", remote_contact_id: "original-contact",
+        remote_call_id: "original-call-log", contact_effect_available: true,
+        last_error: "The provider outcome needs review.",
+    }] });
+    fireEvent.click(screen.getByText("Salesforce delivery record"));
+    assert.ok(screen.getByText("Original account: original-account"));
+    assert.ok(screen.getByText("Provider contact reference: original-contact"));
+    assert.ok(screen.getByText("Provider call reference: original-call-log"));
+    assert.ok(screen.getByText(/review this record in the original account before sending again/));
+    assert.equal(screen.queryByRole("button", { name: /retry|send again/i }), null);
+});
+
 for (const [status, message] of [
     ["awaiting_confirmation", "Awaiting caller confirmation"],
     ["needs_clarification", "Needs clarification"],

@@ -11,7 +11,7 @@ import uuid
 from typing import Optional
 from datetime import datetime
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends, Query
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends, Query, HTTPException
 from fastapi.encoders import jsonable_encoder
 from app.core.postgres_adapter import Client
 
@@ -28,9 +28,58 @@ from app.infrastructure.assistant.proposals import (
     clear_proposal,
 )
 
+from app.services.action_execution import find_owned_action_receipt, public_action_receipt
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/assistant", tags=["Assistant"])
+
+
+def proposal_receipt_result(proposal_id, receipt=None):
+    """A read-only saved outcome; missing evidence never invites another send."""
+    if receipt is None:
+        return {"type": "proposal_result", "proposal_id": proposal_id, "applied": False,
+                "action_id": None, "status": "unavailable", "confirmation_allowed": False,
+                "receipt": {}, "error": "No durable outcome is available yet. Check this request again or ask support to review it; do not submit a replacement action."}
+    return {"type": "proposal_result", "proposal_id": proposal_id,
+            "applied": receipt.get("success") is True and receipt.get("confirmation_allowed") is True, "action_id": receipt.get("action_id"),
+            "status": receipt.get("status", "unknown"),
+            "confirmation_allowed": receipt.get("confirmation_allowed") is True,
+            "receipt": receipt.get("receipt") or {}, "error": receipt.get("error")}
+
+
+def proposal_apply_result(proposal_id, proposal, result):
+    applied = (isinstance(result, dict) and
+               (result.get("applied") is True or result.get("success") is True) and not result.get("error"))
+    error = (result.get("error") or result.get("message")) if isinstance(result, dict) and not applied else None
+    outcome = {"type": "proposal_result", "proposal_id": proposal_id,
+               "applied": applied, "changes": proposal["changes"], "campaigns": proposal["campaigns"],
+               "action_id": None, "status": "completed" if applied else (result.get("status", "failed") if isinstance(result, dict) else "unknown"),
+               "confirmation_allowed": applied, "receipt": {},
+               "error": None if applied else (error or "Could not apply the changes.")}
+    if isinstance(result, dict) and result.get("action_id"):
+        saved = public_action_receipt({"id": result["action_id"], "type": proposal["tool"],
+            "status": ("scheduled" if result.get("status") == "scheduled" else "completed") if applied
+                else result.get("status", "unknown"), "output_data": result})
+        outcome.update(proposal_receipt_result(proposal_id, saved))
+    return outcome
+
+
+def proposal_outcome_note(outcome):
+    if outcome.get("applied"):
+        if outcome.get("receipt", {}).get("provider_status") in {"accepted", "provider_accepted"}:
+            return "The provider accepted the request. Delivery is not confirmed."
+        return "Applied the proposed changes."
+    return outcome.get("error") or "The outcome is unconfirmed. Check the saved request before repeating it."
+
+
+async def _proposal_status(db_client, tenant_id, user_id, proposal_id):
+    try:
+        receipt = await find_owned_action_receipt(db_client, tenant_id=tenant_id, user_id=user_id,
+                                            proposal_id=proposal_id)
+    except Exception:
+        receipt = None
+    return proposal_receipt_result(proposal_id, receipt)
 
 
 # =============================================================================
@@ -599,6 +648,10 @@ async def assistant_chat(
                         "content": False
                     })
             
+            elif data.get("type") == "proposal_status":
+                await manager.send_json(connection_id, await _proposal_status(
+                    db_client, tenant_id, user_id, data.get("proposal_id")))
+
             elif data.get("type") == "apply_proposal":
                 proposal_id = data.get("proposal_id")
                 # Atomic consume (Case 4): pop, so a concurrent second apply of
@@ -611,12 +664,8 @@ async def assistant_chat(
                     else None
                 )
                 if not proposal:
-                    await manager.send_json(connection_id, {
-                        "type": "proposal_result",
-                        "proposal_id": proposal_id,
-                        "applied": False,
-                        "error": "This proposal is no longer available — please ask again.",
-                    })
+                    await manager.send_json(connection_id, await _proposal_status(
+                        db_client, tenant_id, user_id, proposal_id))
                     continue
                 try:
                     from app.infrastructure.assistant.tools.dispatch import dispatch_tool
@@ -635,28 +684,10 @@ async def assistant_chat(
                         trusted_proposal_apply=True,
                         proposal_id=proposal_id,
                     )
-                    # Edit tools return {applied: True}; send_email returns
-                    # {success: True}. Either counts as a successful apply.
-                    applied = (
-                        isinstance(result, dict)
-                        and (result.get("applied") is True or result.get("success") is True)
-                        and not result.get("error")
-                    )
-                    err = (result.get("error") or result.get("message")) if isinstance(result, dict) and not applied else None
-                    # proposal already consumed by pop_proposal above.
-                    await manager.send_json(connection_id, {
-                        "type": "proposal_result",
-                        "proposal_id": proposal_id,
-                        "applied": applied,
-                        "changes": proposal["changes"],
-                        "campaigns": proposal["campaigns"],
-                        "error": None if applied else (err or "Could not apply the changes."),
-                    })
-                    note = (
-                        "✓ Applied the proposed changes."
-                        if applied
-                        else f"Could not apply the changes: {err or 'unknown error'}"
-                    )
+                    outcome = proposal_apply_result(proposal_id, proposal, result)
+                    await manager.send_json(connection_id, outcome)
+                    applied = outcome["applied"]
+                    note = proposal_outcome_note(outcome)
                     messages_history.append({
                         "role": "assistant",
                         "content": note,
@@ -670,12 +701,8 @@ async def assistant_chat(
                 except Exception as apply_err:
                     logger.error("apply_proposal failed: %s", apply_err, exc_info=True)
                     # proposal already consumed by pop_proposal above.
-                    await manager.send_json(connection_id, {
-                        "type": "proposal_result",
-                        "proposal_id": proposal_id,
-                        "applied": False,
-                        "error": "Something went wrong applying the changes.",
-                    })
+                    await manager.send_json(connection_id, await _proposal_status(
+                        db_client, tenant_id, user_id, proposal_id))
 
             elif data.get("type") == "reject_proposal":
                 proposal_id = data.get("proposal_id")
@@ -789,27 +816,62 @@ async def list_actions(
     current_user: CurrentUser = Depends(get_current_user),
     db_client: Client = Depends(get_db_client),
     type: Optional[str] = Query(None),
+    status: Optional[str] = Query(None),
+    lead_id: Optional[uuid.UUID] = Query(None),
+    from_date: Optional[datetime] = Query(None),
+    to_date: Optional[datetime] = Query(None),
+    sort_by: str = Query("created_at", pattern="^(created_at|started_at|completed_at|type|status)$"),
+    sort_dir: str = Query("desc", pattern="^(asc|desc)$"),
     page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100)
+    page_size: int = Query(20, ge=1, le=100),
 ):
-    """List assistant actions (audit log)."""
-    offset = (page - 1) * page_size
-    
-    query = db_client.table("assistant_actions").select(
-        "id, type, status, triggered_by, input_data, output_data, created_at, completed_at",
-        count="exact"
-    ).eq("tenant_id", current_user.tenant_id)
-
+    """Tenant activity metadata. Provider payloads and recipient/content are private."""
+    from app.core.db_utils import acquire_with_tenant
+    if not current_user.tenant_id:
+        raise HTTPException(status_code=403, detail="Tenant context required")
+    if sort_by not in {"created_at", "started_at", "completed_at", "type", "status"} or sort_dir not in {"asc", "desc"}:
+        raise HTTPException(status_code=422, detail="Unsupported action sort")
+    if any(value is not None and (value.tzinfo is None or value.utcoffset() is None) for value in (from_date, to_date)):
+        raise HTTPException(status_code=422, detail="Action date filters require a UTC offset")
+    if from_date and to_date and from_date > to_date:
+        raise HTTPException(status_code=422, detail="Action date range is reversed")
+    predicates, values = ["tenant_id=$1::uuid"], [str(current_user.tenant_id)]
+    def add(predicate, value):
+        values.append(value)
+        predicates.append(predicate.format(index=len(values)))
     if type:
-        query = query.eq("type", type)
-    
-    response = query.order("created_at", desc=True).range(
-        offset, offset + page_size - 1
-    ).execute()
-    
-    return {
-        "actions": response.data,
-        "total": response.count,
-        "page": page,
-        "page_size": page_size
-    }
+        add("type=${index}", type)
+    if status:
+        statuses = list(dict.fromkeys(status.split(",")))
+        if not set(statuses) <= {"pending", "running", "completed", "failed", "unknown", "scheduled", "cancelled"}:
+            raise HTTPException(status_code=422, detail="Unsupported action status")
+        add("status=ANY(${index}::text[])", statuses)
+    if lead_id:
+        add("lead_id=${index}::uuid", str(lead_id))
+    if from_date:
+        add("created_at>=${index}::timestamptz", from_date)
+    if to_date:
+        add("created_at<=${index}::timestamptz", to_date)
+    where = " AND ".join(predicates)
+    async with acquire_with_tenant(db_client.pool, str(current_user.tenant_id)) as conn:
+        total = await conn.fetchval("SELECT COUNT(*) FROM assistant_actions WHERE " + where, *values)
+        rows = await conn.fetch(
+            "SELECT id,type,status,triggered_by,lead_id,output_data,created_at,started_at,completed_at "
+            f"FROM assistant_actions WHERE {where} ORDER BY {sort_by} {sort_dir} NULLS LAST,id {sort_dir} "
+            f"LIMIT ${len(values)+1} OFFSET ${len(values)+2}", *values, page_size, (page-1)*page_size)
+    return {"actions": [public_action_receipt(dict(row)) for row in rows],
+            "total": total, "page": page, "page_size": page_size}
+
+
+@router.get("/actions/{action_id}")
+async def get_action_receipt(
+    action_id: uuid.UUID,
+    current_user: CurrentUser = Depends(get_current_user),
+    db_client: Client = Depends(get_db_client),
+):
+    """Only the originating authenticated actor may recover their action receipt."""
+    receipt = await find_owned_action_receipt(db_client, tenant_id=current_user.tenant_id,
+                                       user_id=current_user.id, action_id=action_id)
+    if receipt is None:
+        raise HTTPException(status_code=404, detail="Action receipt not found")
+    return receipt

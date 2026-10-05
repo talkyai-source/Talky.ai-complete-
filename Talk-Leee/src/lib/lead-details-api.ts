@@ -76,7 +76,13 @@ export interface LeadDetailsResponse {
     missing_required: string[];
     processing_status?: string;
     transcript_save_state?: "unknown" | "partial" | "complete" | "failed" | "no_calls";
-    crm_deliveries?: { provider: string; status: string; attempts: number; updated_at: string }[];
+    crm_deliveries?: {
+        provider: string; status: string; attempts: number; updated_at: string;
+        call_id?: string; phase?: string | null; destination_connector_id?: string | null;
+        destination_account_id?: string | null; remote_contact_id?: string | null;
+        remote_call_id?: string | null; last_error?: string | null;
+        contact_effect_available?: boolean; payload_digest?: string | null;
+    }[];
 }
 
 export interface CampaignLeadField {

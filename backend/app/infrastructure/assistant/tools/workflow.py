@@ -1,6 +1,7 @@
 """
 Workflow orchestration tools for the assistant agent.
 """
+
 import logging
 from typing import Optional, List, Dict, Any
 from pydantic import BaseModel, Field
@@ -11,25 +12,29 @@ logger = logging.getLogger(__name__)
 
 class ScheduleReminderInput(BaseModel):
     """Input for schedule_reminder tool"""
+
     meeting_id: Optional[str] = Field(None, description="Meeting ID to attach reminder to")
     lead_id: Optional[str] = Field(None, description="Lead ID for reminder")
-    offset: Optional[str] = Field(None, description="Time offset from meeting like '-1h', '-30m', '-10m'")
+    offset: Optional[str] = Field(
+        None, description="Time offset from meeting like '-1h', '-30m', '-10m'"
+    )
     scheduled_at: Optional[str] = Field(None, description="Absolute scheduled time if no offset")
     message: Optional[str] = Field(None, description="Custom reminder message")
-    reminder_type: str = Field(..., description="Explicitly selected reminder type: 'sms' or 'email'")
+    reminder_type: str = Field(
+        ..., description="Explicitly selected reminder type: 'sms' or 'email'"
+    )
     confirm: bool = Field(False, description="Preview first; Apply confirms.")
 
 
 class ExecuteActionPlanInput(BaseModel):
     """Input for execute_action_plan tool"""
+
     intent: str = Field(..., description="Natural language description of the workflow")
     actions: List[Dict[str, Any]] = Field(
-        ...,
-        description="List of action steps: [{type, ...params, use_result_from?, condition?}]"
+        ..., description="List of action steps: [{type, ...params, use_result_from?, condition?}]"
     )
     context: Optional[Dict[str, Any]] = Field(
-        None,
-        description="Context data like lead_id, campaign_id"
+        None, description="Context data like lead_id, campaign_id"
     )
     confirm: bool = Field(False, description="Preview all steps first; Apply confirms.")
 
@@ -68,9 +73,14 @@ async def schedule_reminder(
         chained_result: Dict[str, Any] = {}
         if meeting_id:
             try:
-                meeting_response = db_client.table("meetings").select(
-                    "id, title, start_time, join_link"
-                ).eq("id", meeting_id).eq("tenant_id", tenant_id).single().execute()
+                meeting_response = (
+                    db_client.table("meetings")
+                    .select("id, title, start_time, join_link")
+                    .eq("id", meeting_id)
+                    .eq("tenant_id", tenant_id)
+                    .single()
+                    .execute()
+                )
                 if meeting_response.data:
                     chained_result = {
                         "meeting_id": meeting_response.data["id"],
@@ -123,16 +133,23 @@ async def execute_action_plan(
         from app.infrastructure.assistant.tools.dispatch import _authorize_action_tool
 
         async def authorize(action_type, parameters):
-            return await _authorize_action_tool(action_type, tenant_id, db_client, actor_user_id, parameters)
+            return await _authorize_action_tool(
+                action_type, tenant_id, db_client, actor_user_id, parameters
+            )
 
         failure = await _authorize_action_tool(
-            "execute_action_plan", tenant_id, db_client, actor_user_id, {"actions": actions},
+            "execute_action_plan",
+            tenant_id,
+            db_client,
+            actor_user_id,
+            {"actions": actions},
         )
         if failure:
             return failure
         if not confirm:
-            return await _preview_plan(tenant_id, db_client, intent, actions, context,
-                                       conversation_id, actor_user_id)
+            return await _preview_plan(
+                tenant_id, db_client, intent, actions, context, conversation_id, actor_user_id
+            )
 
         service = get_assistant_agent_service(db_client)
 
@@ -147,16 +164,34 @@ async def execute_action_plan(
 
         result = await service.execute_plan(plan, authorize_action=authorize)
 
-        unknown = any((step.result or {}).get("status") in {"unknown", "in_progress", "outcome_unknown"}
-                      for step in result.step_results)
+        unknown = any(
+            (step.result or {}).get("status") in {"unknown", "in_progress", "outcome_unknown"}
+            for step in result.step_results
+        )
+        executed = [step for step in result.step_results if not step.skipped]
+        proof_complete = (
+            result.status == "completed"
+            and bool(executed)
+            and len(result.step_results) == len(result.actions)
+            and {step.step_index for step in result.step_results} == set(range(len(result.actions)))
+            and all(
+                step.success and (step.result or {}).get("confirmation_allowed") is True
+                for step in executed
+            )
+        )
         return {
             "success": result.status == "completed",
+            "confirmation_allowed": proof_complete,
             "plan_id": result.id,
-            "status": "unknown" if unknown else result.status if isinstance(result.status, str) else result.status.value,
+            "status": (
+                "unknown"
+                if unknown
+                else result.status if isinstance(result.status, str) else result.status.value
+            ),
             "steps_completed": result.successful_steps,
             "total_steps": len(result.actions),
             "results": [r.model_dump() for r in result.step_results],
-            "error": result.error
+            "error": result.error,
         }
 
     except ValueError as e:
@@ -179,43 +214,88 @@ async def _preview_plan(tenant_id, db_client, intent, actions, context, conversa
     frozen, changes = [], []
     for index, step in enumerate(actions):
         name = step["type"]
-        parameters = {**(context or {}), **{k: v for k, v in step.items()
-                      if k not in {"type", "use_result_from", "condition"}}}
+        parameters = {
+            **(context or {}),
+            **{k: v for k, v in step.items() if k not in {"type", "use_result_from", "condition"}},
+        }
         if "time" in parameters and "start_time" not in parameters:
             parameters["start_time"] = parameters.pop("time")
         if "template" in parameters and "template_name" not in parameters:
             parameters["template_name"] = parameters.pop("template")
         reference = step.get("use_result_from")
         if reference is not None:
-            if isinstance(reference, bool) or not isinstance(reference, int) or not 0 <= reference < index:
-                return {"success": False, "error": f"Step {index + 1} refers to an invalid earlier step."}
+            if (
+                isinstance(reference, bool)
+                or not isinstance(reference, int)
+                or not 0 <= reference < index
+            ):
+                return {
+                    "success": False,
+                    "error": f"Step {index + 1} refers to an invalid earlier step.",
+                }
             if name == "send_email" and parameters.get("template_name"):
-                return {"success": False, "error": "Preview the booking first, then create its templated confirmation email. A plan can send an explicit reviewed message."}
+                return {
+                    "success": False,
+                    "error": "Preview the booking first, then create its templated confirmation email. A plan can send an explicit reviewed message.",
+                }
             if name == "schedule_reminder" and parameters.get("offset"):
                 start = frozen[reference].get("start_time")
                 if start:
-                    parameters["scheduled_at"] = apply_offset(datetime.fromisoformat(start.replace("Z", "+00:00")), parameters.pop("offset")).isoformat()
+                    parameters["scheduled_at"] = apply_offset(
+                        datetime.fromisoformat(start.replace("Z", "+00:00")),
+                        parameters.pop("offset"),
+                    ).isoformat()
         schema = ACTION_TOOLS[name]["input_schema"]
         parameters = schema.model_validate(parameters).model_dump(exclude_none=True)
         parameters.pop("confirm", None)
         if name in PROPOSAL_TOOLS:
-            preview = await dispatch_tool(name, tenant_id, db_client, conversation_id,
-                                          {**parameters, "confirm": False}, actor_user_id=actor)
+            preview = await dispatch_tool(
+                name,
+                tenant_id,
+                db_client,
+                conversation_id,
+                {**parameters, "confirm": False},
+                actor_user_id=actor,
+            )
             if preview.get("preview") is not True:
-                return {"success": False, "error": f"Step {index + 1}: " + str(preview.get("error") or preview.get("message") or "Cannot prepare this action.")}
+                return {
+                    "success": False,
+                    "error": f"Step {index + 1}: "
+                    + str(
+                        preview.get("error")
+                        or preview.get("message")
+                        or "Cannot prepare this action."
+                    ),
+                }
             parameters = dict(preview.get("_apply_args") or parameters)
-            changes.extend({**change, "field": f"Step {index + 1} · {change['field']}"}
-                           for change in preview.get("changes", []))
+            changes.extend(
+                {**change, "field": f"Step {index + 1} · {change['field']}"}
+                for change in preview.get("changes", [])
+            )
         else:
             # Read-only availability and campaign-start arguments are explicit.
             # Do not call start_campaign during preview.
-            changes.append({"field": f"Step {index + 1}: {name}", "before": None,
-                            "after": json.dumps(parameters, ensure_ascii=False, default=str)})
+            changes.append(
+                {
+                    "field": f"Step {index + 1}: {name}",
+                    "before": None,
+                    "after": json.dumps(parameters, ensure_ascii=False, default=str),
+                }
+            )
         condition = step.get("condition", "always" if index == 0 else "if_previous_success")
         if condition not in {"always", "if_previous_success", "if_previous_failed"}:
             return {"success": False, "error": f"Step {index + 1} has an invalid condition."}
-        frozen.append({"type": name, **parameters, "condition": condition,
-                       **({"use_result_from": reference} if reference is not None else {})})
-    return {"preview": True, "changes": changes,
-            "_apply_args": {"intent": intent, "actions": frozen, "context": {}},
-            "note": "No steps executed. An uncertain result stops the plan. Permissions are rechecked on Apply."}
+        frozen.append(
+            {
+                "type": name,
+                **parameters,
+                "condition": condition,
+                **({"use_result_from": reference} if reference is not None else {}),
+            }
+        )
+    return {
+        "preview": True,
+        "changes": changes,
+        "_apply_args": {"intent": intent, "actions": frozen, "context": {}},
+        "note": "No steps executed. An uncertain result stops the plan. Permissions are rechecked on Apply.",
+    }

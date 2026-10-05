@@ -1,4 +1,5 @@
 """Small Postgres outbox for CRM work; no network writes inside transactions."""
+import json
 from uuid import uuid4
 
 from app.core.db_utils import acquire_with_tenant
@@ -126,6 +127,56 @@ class CRMDeliveryStore:
             return False
         receipt.update(destination_connector_id=connector_id, destination_account_id=account_id)
         return True
+
+    async def bind_contact_effect(self, receipt, effect):
+        """Commit original resolution/create arguments before using them.
+
+        A renewed lease cannot replace a previous effect's destination or
+        input. Unknown historical effects are held, never backfilled here.
+        """
+        encoded = json.dumps(effect, sort_keys=True, ensure_ascii=False)
+        if not isinstance(effect, dict) or len(encoded.encode("utf-8")) > 32768:
+            raise ValueError("CRM contact effect is invalid or exceeds the evidence limit")
+        async with acquire_with_tenant(self.pool, receipt["tenant_id"]) as conn:
+            result = await conn.execute("""
+                UPDATE crm_deliveries SET contact_effect=COALESCE(contact_effect,$5::jsonb),
+                    updated_at=NOW()
+                 WHERE tenant_id=$1::uuid AND call_id=$2::uuid AND provider=$3
+                   AND lease_token=$4::uuid AND status='processing'
+                   AND phase NOT IN ('creating_contact','creating_call','legacy_unverified')
+                   AND remote_contact_id IS NULL AND remote_call_id IS NULL
+                   AND destination_connector_id::text=$5::jsonb->>'connector_id'
+                   AND destination_account_id=$5::jsonb->>'account_id'
+                   AND EXISTS (SELECT 1 FROM calls c WHERE c.id=crm_deliveries.call_id
+                       AND c.tenant_id=crm_deliveries.tenant_id
+                       AND c.xmin::text=$5::jsonb->>'source_call_revision')
+                   AND (contact_effect IS NULL OR contact_effect=$5::jsonb)
+            """, str(receipt["tenant_id"]), str(receipt["call_id"]), receipt["provider"],
+                receipt["lease_token"], encoded)
+        if result != "UPDATE 1":
+            raise RuntimeError("CRM contact create ownership changed; review required")
+        receipt.update(contact_effect=effect)
+
+    async def begin_contact_create(self, receipt, effect, *, source_revision=None):
+        """The saved original arguments own the irreversible create phase."""
+        encoded = json.dumps(effect, sort_keys=True, ensure_ascii=False)
+        async with acquire_with_tenant(self.pool, receipt["tenant_id"]) as conn:
+            result = await conn.execute("""
+                UPDATE crm_deliveries SET phase='creating_contact', updated_at=NOW()
+                 WHERE tenant_id=$1::uuid AND call_id=$2::uuid AND provider=$3
+                   AND lease_token=$4::uuid AND status='processing'
+                   AND phase='resolving_contact' AND contact_effect=$5::jsonb
+                   AND remote_contact_id IS NULL AND remote_call_id IS NULL
+                   AND destination_connector_id::text=$5::jsonb->>'connector_id'
+                   AND destination_account_id=$5::jsonb->>'account_id'
+                   AND EXISTS (SELECT 1 FROM calls c WHERE c.id=crm_deliveries.call_id
+                       AND c.tenant_id=crm_deliveries.tenant_id
+                       AND c.xmin::text=$6::text)
+            """, str(receipt["tenant_id"]), str(receipt["call_id"]), receipt["provider"],
+                receipt["lease_token"], encoded, source_revision or effect.get("source_call_revision"))
+        if result != "UPDATE 1":
+            raise RuntimeError("CRM original contact create evidence is unavailable")
+        receipt["phase"] = "creating_contact"
 
     async def due(self, limit=20):
         # Worker is the only cross-tenant reader; delivery writes remain scoped.

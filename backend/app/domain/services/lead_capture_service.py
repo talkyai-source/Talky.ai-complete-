@@ -613,7 +613,11 @@ class LeadCaptureService:
         from app.core.db_utils import acquire_with_tenant
         async with acquire_with_tenant(self._pool, str(tenant_id)) as conn:
             rows = await conn.fetch(
-                """SELECT provider, status, attempts, updated_at
+                """SELECT call_id, provider, status, phase, attempts, updated_at,
+                          destination_connector_id, destination_account_id,
+                          remote_contact_id, remote_call_id, last_error,
+                          contact_effect IS NOT NULL AS contact_effect_available,
+                          contact_effect->>'arguments_sha256' AS payload_digest
                      FROM crm_deliveries WHERE tenant_id=$1::uuid
                      AND call_id=(SELECT id FROM calls WHERE tenant_id=$1::uuid
                        AND (($2::uuid IS NOT NULL AND id=$2::uuid)
@@ -622,7 +626,24 @@ class LeadCaptureService:
                      ORDER BY provider""",
                 str(tenant_id), call_id, lead_id,
             )
-        return [dict(row) for row in rows]
+        result = []
+        for row in rows:
+            item = dict(row)
+            # Historical exception text is not a public diagnostic contract.
+            # Keep useful receipt/account references without echoing provider
+            # bodies, credentials or contact values from an old error.
+            if item.get("last_error"):
+                item["last_error"] = {
+                    "unknown": "Original CRM delivery needs review.",
+                    "pending": "CRM delivery retry is pending.",
+                    "failed": "CRM delivery failed.",
+                    "skipped": "CRM delivery was skipped.",
+                }.get(item.get("status"), "CRM delivery has a recorded issue.")
+            digest = item.get("payload_digest")
+            if not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+                item["payload_digest"] = None
+            result.append(item)
+        return result
 
     async def processing_status(self, tenant_id: str, *, call_id=None, lead_id=None) -> str:
         from app.core.db_utils import acquire_with_tenant

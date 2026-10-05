@@ -3,7 +3,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import {
-    AssistantActionSchema,
+    AssistantRunSchema,
+    AssistantActionsResponseSchema,
     ConnectorAccountSchema,
     ConnectorSchema,
     ListResponseSchema,
@@ -35,14 +36,14 @@ const ConnectorListResponse = ListResponseSchema(ConnectorSchema);
 const ConnectorAccountListResponse = ListResponseSchema(ConnectorAccountSchema);
 const MeetingListResponse = ListResponseSchema(MeetingSchema);
 const ReminderListResponse = ListResponseSchema(ReminderSchema);
-const AssistantActionListResponse = ListResponseSchema(AssistantActionSchema);
+const AssistantActionListResponse = AssistantActionsResponseSchema;
 
 const schemas = {
     Connector: schemaFromZod("Connector", ConnectorSchema),
     ConnectorAccount: schemaFromZod("ConnectorAccount", ConnectorAccountSchema),
     Meeting: schemaFromZod("Meeting", MeetingSchema),
     Reminder: schemaFromZod("Reminder", ReminderSchema),
-    AssistantAction: schemaFromZod("AssistantAction", AssistantActionSchema),
+    AssistantAction: schemaFromZod("AssistantAction", AssistantRunSchema),
     ConnectorListResponse: schemaFromZod("ConnectorListResponse", ConnectorListResponse),
     ConnectorAccountListResponse: schemaFromZod("ConnectorAccountListResponse", ConnectorAccountListResponse),
     MeetingListResponse: schemaFromZod("MeetingListResponse", MeetingListResponse),

@@ -58,7 +58,7 @@ from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 from fastapi.encoders import jsonable_encoder
 
 from app.api.v1.dependencies import get_db_client
-from app.api.v1.endpoints.assistant_ws import _is_origin_allowed, _resolve_ws_token
+from app.api.v1.endpoints.assistant_ws import (_is_origin_allowed, _resolve_ws_token, _proposal_status, proposal_apply_result, proposal_outcome_note)
 from app.core.jwt_security import JWTValidationError, decode_and_validate_token
 from app.domain.models.conversation import AudioChunk
 from app.infrastructure.assistant.model_config import get_tenant_assistant_model
@@ -579,8 +579,7 @@ async def _run_voice_session(
             else None
         )
         if not proposal:
-            await send_json({"type": "proposal_result", "proposal_id": proposal_id, "applied": False,
-                             "error": "That proposal is no longer available — please ask again."})
+            await send_json(await _proposal_status(db_client, tenant_id, user_id, proposal_id))
             return
         try:
             from app.infrastructure.assistant.tools.dispatch import dispatch_tool
@@ -599,32 +598,16 @@ async def _run_voice_session(
                 trusted_proposal_apply=True,
                 proposal_id=proposal_id,
             )
-            applied = (
-                isinstance(result, dict)
-                and (result.get("applied") is True or result.get("success") is True)
-                and not result.get("error")
-            )
-            err = (result.get("error") or result.get("message")) if isinstance(result, dict) and not applied else None
-            # proposal already consumed by pop_proposal above.
-            await send_json({
-                "type": "proposal_result",
-                "proposal_id": proposal_id,
-                "applied": applied,
-                "changes": proposal["changes"],
-                "campaigns": proposal["campaigns"],
-                "error": None if applied else (err or "Could not apply."),
-            })
-            spoken_note = (result.get("note") if isinstance(result, dict) else None) or (
-                "Done." if applied else "I couldn't apply that."
-            )
+            outcome = proposal_apply_result(proposal_id, proposal, result)
+            await send_json(outcome)
+            spoken_note = proposal_outcome_note(outcome)
             messages_history.append({"role": "assistant", "content": spoken_note, "timestamp": datetime.utcnow().isoformat()})
             await persist()
             await speak(spoken_note)
         except Exception as exc:
             logger.error("assistant_voice: apply_proposal failed: %s", exc, exc_info=True)
             # proposal already consumed by pop_proposal above.
-            await send_json({"type": "proposal_result", "proposal_id": proposal_id, "applied": False,
-                             "error": "Something went wrong applying that."})
+            await send_json(await _proposal_status(db_client, tenant_id, user_id, proposal_id))
 
     async def receive_loop() -> None:
         nonlocal active
@@ -673,6 +656,8 @@ async def _run_voice_session(
             mtype = data.get("type")
             if mtype == "ping":
                 await send_json({"type": "pong"})
+            elif mtype == "proposal_status":
+                await send_json(await _proposal_status(db_client, tenant_id, user_id, data.get("proposal_id")))
             elif mtype == "apply_proposal":
                 await apply_proposal(data.get("proposal_id"), data.get("mode"))
             elif mtype == "reject_proposal":

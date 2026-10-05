@@ -26,6 +26,7 @@ class DB:
     def __init__(self, fail=None):
         self.fail, self.writes, self.filters = fail, [], []
         self.meeting = {'id': 'meeting', 'connector_id': 'pinned-calendar', 'external_event_id': 'event',
+            'metadata': {'provider': 'google_calendar', 'external_account_id': 'calendar-account'},
             'start_time': START.isoformat(), 'end_time': (START + timedelta(minutes=30)).isoformat()}
     def table(self, table):
         return Query(self, table)
@@ -61,7 +62,7 @@ class Query:
 
 def service(db):
     subject = MeetingService(db)
-    connector = NS(create_event=AsyncMock(return_value=NS(id='event', video_link='https://example.invalid/meet', metadata={})),
+    connector = NS(external_account_id='calendar-account', create_event=AsyncMock(return_value=NS(id='event', video_link='https://example.invalid/meet', metadata={})),
         update_event=AsyncMock(return_value=NS(id='event')), delete_event=AsyncMock(return_value=True))
     subject._get_active_calendar_connector = AsyncMock(return_value=(connector, 'pinned-calendar', 'google_calendar'))
     return subject, connector

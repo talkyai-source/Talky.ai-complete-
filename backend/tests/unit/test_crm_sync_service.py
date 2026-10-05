@@ -8,7 +8,7 @@ the settlement and summary hooks, and the forced-refresh retry on a 401.
 from __future__ import annotations
 
 import asyncio
-import os
+import copy
 from datetime import datetime, timezone
 
 import pytest
@@ -16,6 +16,7 @@ from unittest.mock import AsyncMock
 
 from app.infrastructure.connectors.base import ConnectorProviderError  # noqa: E402
 from app.services import crm_sync_service as svc  # noqa: E402
+from app.domain.services.lead_capture_service import LeadCaptureService
 from app.services.crm_sync_service import (  # noqa: E402
     CRMNotConnectedWarning,
     CRMSyncResult,
@@ -140,6 +141,18 @@ class MemoryDeliveries:
         receipt.update(destination_connector_id=connector_id, destination_account_id=account_id)
         return True
 
+    async def bind_contact_effect(self, receipt, effect):
+        row = self.rows[(receipt['tenant_id'], receipt['call_id'], receipt['provider'])]
+        if row.get('contact_effect') not in (None, effect):
+            raise RuntimeError('Original contact effect cannot change')
+        row.update(contact_effect=effect)
+        receipt.update(contact_effect=effect)
+
+    async def begin_contact_create(self, receipt, effect, *, source_revision=None):
+        row = self.rows[(receipt['tenant_id'], receipt['call_id'], receipt['provider'])]
+        assert row.get('contact_effect') == effect
+        row['phase'] = receipt['phase'] = 'creating_contact'
+
 
 @pytest.fixture
 def harness(monkeypatch):
@@ -147,6 +160,7 @@ def harness(monkeypatch):
     state = {
         "providers": ["salesforce"], "connectors": {}, "call": _call_row(), "lead": _lead_row(),
         "marked": [], "remembered": [], "resolved": [],
+        "call_details": [], "lead_details": [],
     }
     service = CRMSyncService(db_client=object(), db_pool=object())
     service.deliveries = MemoryDeliveries()
@@ -159,7 +173,11 @@ def harness(monkeypatch):
         return state["connectors"][provider]
 
     async def _load_call(tenant_id, call_id):
-        return state["call"]
+        row = dict(state["call"])
+        # Ordinary fixtures represent a summary of the supplied source. Tests
+        # for stale or legacy evidence explicitly supply their different hash.
+        row.setdefault("summary_transcript_hash", svc.transcript_revision(row))
+        return row
 
     async def _load_lead(tenant_id, lead_id):
         return state["lead"] if lead_id else None
@@ -173,12 +191,30 @@ def harness(monkeypatch):
     async def _mark(tenant_id, call_id, crm_call_id):
         state["marked"].append((call_id, crm_call_id))
 
+    async def _stamp(tenant_id, call_id, connector_id, provider):
+        connector = state["connectors"][provider]
+        return copy.deepcopy({
+            "call_revision": state["call"].get("source_revision"),
+            "lead": state["lead"], "call_details": state["call_details"],
+            "lead_details": state["lead_details"],
+            "external_account_id": connector.external_account_id,
+            "connector_config": connector.config,
+            "connector_id": connector.connector_id,
+        })
+
     monkeypatch.setattr(service, "_connector", _connector)
     monkeypatch.setattr(service, "_load_call", _load_call)
     monkeypatch.setattr(service, "_load_lead", _load_lead)
     monkeypatch.setattr(service, "_campaign_name", _campaign_name)
     monkeypatch.setattr(service, "_remember_contact_id", _remember)
     monkeypatch.setattr(service, "_mark_call_synced", _mark)
+    monkeypatch.setattr(service, "_write_admission_stamp", _stamp)
+    async def call_details(_service, *_args):
+        return state["call_details"]
+    async def lead_details(_service, *_args):
+        return state["lead_details"]
+    monkeypatch.setattr(LeadCaptureService, "details_for_call", call_details)
+    monkeypatch.setattr(LeadCaptureService, "details_for_lead", lead_details)
     state["service"] = service
     return state
 
@@ -337,8 +373,9 @@ def test_authentication_failure_forces_one_refresh_and_retries(harness):
     harness["connectors"]["salesforce"] = stale
     out = _run(harness["service"].sync_call(TENANT, CALL))
     assert out.success and out.crm_call_id == "00Ttask"
-    # resolved once normally, then once with force_refresh=True
-    assert harness["resolved"] == [("salesforce", False), ("salesforce", True)]
+    # Resolve initially and revalidate immediately before the write, then one
+    # bounded forced refresh after the provider rejects authentication.
+    assert harness["resolved"] == [("salesforce", False), ("salesforce", False), ("salesforce", True)]
 
 
 @pytest.mark.parametrize('switch', ['connector', 'account'])
@@ -407,7 +444,7 @@ def test_non_auth_provider_error_is_reported_not_retried(harness):
     harness["connectors"]["salesforce"] = conn
     out = _run(harness["service"].sync_call(TENANT, CALL))
     assert out.success is False and "rate_limit" in out.error_message
-    assert harness["resolved"] == [("salesforce", False)]
+    assert harness["resolved"] == [("salesforce", False), ("salesforce", False)]
     assert harness["marked"] == []
 
 
@@ -465,7 +502,7 @@ def test_both_destinations_keep_their_own_ids_across_summary_and_restart(harness
     harness['call']['summary_json'] = {'headline': 'A new summary'}
     # Restart loses all per-instance state except the durable store.
     restarted = CRMSyncService(object(), object())
-    for name in ('_connector', '_load_call', '_load_lead', '_campaign_name', '_remember_contact_id', '_mark_call_synced'):
+    for name in ('_connector', '_load_call', '_load_lead', '_campaign_name', '_remember_contact_id', '_mark_call_synced', '_write_admission_stamp'):
         setattr(restarted, name, getattr(harness['service'], name))
     restarted.deliveries = harness['deliveries']
     assert _run(restarted.sync_call(TENANT, CALL, reason='summary')).success

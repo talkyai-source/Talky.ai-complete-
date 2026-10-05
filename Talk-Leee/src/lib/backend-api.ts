@@ -1,8 +1,6 @@
 import { backendEndpoints } from "@/lib/backend-endpoints";
 import {
-    AssistantActionSchema,
-    AssistantPlanSchema,
-    AssistantRunSchema,
+    AssistantActionsResponseSchema,
     AuditLogEventSchema,
     ConnectorResponseSchema,
     ConnectorAccountSchema,
@@ -22,9 +20,8 @@ import {
     TenantSummarySchema,
     VoiceCallGuardResponseSchema,
     VoiceCallStartResponseSchema,
-    type AssistantAction,
-    type AssistantPlan,
     type AssistantRun,
+    type AssistantRunStatus,
     type AuditLogEvent,
     type CalendarEvent,
     type Connector,
@@ -524,83 +521,40 @@ export const backendApi = {
             return parseOrThrow(VoiceCallStartResponseSchema, data);
         },
     },
-    assistantActions: {
-        list: async (signal?: AbortSignal): Promise<ListResponse<AssistantAction>> => {
-            const data = await httpClient().request({ path: backendEndpoints.assistantActionsList.path, timeoutMs: 12_000, signal });
-            return parseOrThrow(ListResponseSchema(AssistantActionSchema), data);
-        },
-    },
     assistantRuns: {
         list: async (
             input: {
                 page?: number;
                 pageSize?: number;
-                statuses?: Array<"pending" | "in_progress" | "completed" | "failed">;
+                statuses?: AssistantRunStatus[];
                 actionType?: string;
                 leadId?: string;
                 from?: string;
                 to?: string;
-                sortKey?: "createdAt" | "startedAt" | "completedAt" | "status" | "actionType" | "source" | "leadId";
+                sortKey?: "createdAt" | "startedAt" | "completedAt" | "status" | "actionType";
                 sortDir?: "asc" | "desc";
             },
             signal?: AbortSignal
         ): Promise<{ items: AssistantRun[]; total?: number; page?: number; page_size?: number }> => {
             const data = await httpClient().request({
-                path: backendEndpoints.assistantRunsList.path,
-                method: backendEndpoints.assistantRunsList.method,
+                path: backendEndpoints.assistantActionsList.path,
+                method: backendEndpoints.assistantActionsList.method,
                 query: {
                     page: input.page,
                     page_size: input.pageSize,
                     status: input.statuses?.length ? input.statuses.join(",") : undefined,
-                    action_type: input.actionType,
+                    type: input.actionType,
                     lead_id: input.leadId,
-                    from: input.from,
-                    to: input.to,
-                    sort_key: input.sortKey,
+                    from_date: input.from,
+                    to_date: input.to,
+                    sort_by: input.sortKey ? ({ createdAt: "created_at", startedAt: "started_at", completedAt: "completed_at", status: "status", actionType: "type" } as const)[input.sortKey] : undefined,
                     sort_dir: input.sortDir,
                 },
                 timeoutMs: 12_000,
                 signal,
             });
-            return parseOrThrow(PaginatedResponseSchema(AssistantRunSchema), data);
-        },
-        retry: async (id: string): Promise<AssistantRun> => {
-            const data = await httpClient().request({
-                path: backendEndpoints.assistantRunsRetry.path.replace("{id}", encodeURIComponent(id)),
-                method: backendEndpoints.assistantRunsRetry.method,
-                timeoutMs: 12_000,
-            });
-            return parseOrThrow(AssistantRunSchema, data);
-        },
-    },
-    assistant: {
-        plan: async (input: { actionType: string; source?: string; leadId?: string; context?: Record<string, unknown> }): Promise<AssistantPlan> => {
-            const data = await httpClient().request({
-                path: backendEndpoints.assistantPlan.path,
-                method: backendEndpoints.assistantPlan.method,
-                body: {
-                    action_type: input.actionType,
-                    source: input.source ?? "dashboard",
-                    lead_id: input.leadId,
-                    context: input.context ?? {},
-                },
-                timeoutMs: 12_000,
-            });
-            return parseOrThrow(AssistantPlanSchema, data);
-        },
-        execute: async (input: { actionType: string; source?: string; leadId?: string; context?: Record<string, unknown> }): Promise<AssistantRun> => {
-            const data = await httpClient().request({
-                path: backendEndpoints.assistantExecute.path,
-                method: backendEndpoints.assistantExecute.method,
-                body: {
-                    action_type: input.actionType,
-                    source: input.source ?? "dashboard",
-                    lead_id: input.leadId,
-                    context: input.context ?? {},
-                },
-                timeoutMs: 12_000,
-            });
-            return parseOrThrow(AssistantRunSchema, data);
+            const response = parseOrThrow(AssistantActionsResponseSchema, data);
+            return { items: response.actions, total: response.total, page: response.page, page_size: response.page_size };
         },
     },
     admin: {

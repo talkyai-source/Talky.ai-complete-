@@ -439,112 +439,56 @@ export const ReminderSchema = z.union([ReminderNormalizedSchema, ReminderSnakeSc
 
 export type Reminder = z.infer<typeof ReminderSchema>;
 
-export const AssistantActionSchema = z.object({
-    id: z.string(),
-    name: z.string(),
-    description: z.string(),
-    parameters: z.record(z.unknown()),
-});
-
-export type AssistantAction = z.infer<typeof AssistantActionSchema>;
-
-export const AssistantRunStatusSchema = z.enum(["pending", "in_progress", "completed", "failed"]);
+export const AssistantRunStatusSchema = z.enum(["pending", "running", "in_progress", "scheduled", "completed", "failed", "unknown", "cancelled"]);
 
 export type AssistantRunStatus = z.infer<typeof AssistantRunStatusSchema>;
 
 const AssistantRunStatusInputSchema = z
-    .enum(["pending", "in_progress", "completed", "failed", "success"])
+    .enum(["pending", "running", "in_progress", "scheduled", "completed", "failed", "unknown", "cancelled", "success"])
     .transform((v) => (v === "success" ? "completed" : v));
 
-const AssistantRunBaseSchema = z.object({
-    id: z.string(),
-    actionType: z.string(),
-    source: z.string(),
-    leadId: z.string().nullable().optional(),
-    status: AssistantRunStatusInputSchema,
-    createdAt: z.string(),
-    startedAt: z.string().nullable().optional(),
-    completedAt: z.string().nullable().optional(),
-    result: z.string().nullable().optional(),
-    requestPayload: z.unknown().optional(),
-    responsePayload: z.unknown().optional(),
-    error: z.unknown().optional(),
+export const ActionReceiptSchema = z.object({
+    provider: z.string().max(256).optional(),
+    connector_id: z.string().max(256).optional(),
+    external_account_id: z.string().max(512).optional(),
+    message_id: z.string().max(512).optional(),
+    external_event_id: z.string().max(512).optional(),
+    meeting_id: z.string().max(256).optional(),
+    reminder_id: z.string().max(256).optional(),
+    plan_id: z.string().max(256).optional(),
+    job_id: z.string().max(256).optional(),
+    child_action_id: z.string().max(512).optional(),
+    provider_status: z.string().max(64).optional(),
 });
 
-export const AssistantRunSchema = z.union([
-    AssistantRunBaseSchema,
-    z
-        .object({
-            id: z.string(),
-            action_type: z.string(),
-            source: z.string().optional().default("unknown"),
-            lead_id: z.string().nullable().optional(),
-            status: AssistantRunStatusInputSchema,
-            created_at: z.string(),
-            started_at: z.string().nullable().optional(),
-            completed_at: z.string().nullable().optional(),
-            result: z.string().nullable().optional(),
-            request_payload: z.unknown().optional(),
-            response_payload: z.unknown().optional(),
-            error: z.unknown().optional(),
-        })
-        .transform((v) => ({
-            id: v.id,
-            actionType: v.action_type,
-            source: v.source,
-            leadId: v.lead_id ?? undefined,
-            status: v.status,
-            createdAt: v.created_at,
-            startedAt: v.started_at ?? undefined,
-            completedAt: v.completed_at ?? undefined,
-            result: v.result ?? undefined,
-            requestPayload: v.request_payload,
-            responsePayload: v.response_payload,
-            error: v.error,
-        })),
-    z
-        .object({
-            id: z.string(),
-            actionType: z.string(),
-            source: z.string().optional().default("unknown"),
-            leadId: z.string().nullable().optional(),
-            status: AssistantRunStatusInputSchema,
-            createdAt: z.string(),
-            startedAt: z.string().nullable().optional(),
-            completedAt: z.string().nullable().optional(),
-            result: z.string().nullable().optional(),
-            requestPayload: z.unknown().optional(),
-            responsePayload: z.unknown().optional(),
-            error: z.unknown().optional(),
-        })
-        .transform((v) => ({
-            id: v.id,
-            actionType: v.actionType,
-            source: v.source ?? "unknown",
-            leadId: v.leadId ?? undefined,
-            status: v.status,
-            createdAt: v.createdAt,
-            startedAt: v.startedAt ?? undefined,
-            completedAt: v.completedAt ?? undefined,
-            result: v.result ?? undefined,
-            requestPayload: v.requestPayload,
-            responsePayload: v.responsePayload,
-            error: v.error,
-        })),
-]);
+export type ActionReceipt = z.infer<typeof ActionReceiptSchema>;
+
+export const AssistantRunSchema = z.object({
+        id: z.string(),
+        type: z.string(),
+        status: AssistantRunStatusInputSchema,
+        triggered_by: z.string().nullable().optional(),
+        lead_id: z.string().nullable().optional(),
+        created_at: z.string(),
+        started_at: z.string().nullable().optional(),
+        completed_at: z.string().nullable().optional(),
+        confirmation_allowed: z.boolean().optional(),
+        receipt: ActionReceiptSchema.nullable().optional(),
+        error: z.string().nullable().optional(),
+    }).transform((value) => ({
+        id: value.id, actionType: value.type, status: value.status,
+        source: value.triggered_by ?? "unknown", leadId: value.lead_id,
+        createdAt: value.created_at, startedAt: value.started_at, completedAt: value.completed_at,
+        confirmationAllowed: value.confirmation_allowed, receipt: value.receipt ?? undefined,
+        error: value.error,
+    }));
 
 export type AssistantRun = z.infer<typeof AssistantRunSchema>;
 
-export const AssistantPlanSchema = z
-    .object({
-        planId: z.string().optional(),
-        steps: z.array(z.unknown()).optional(),
-        estimatedImpact: z.unknown().optional(),
-        summary: z.string().optional(),
-    })
-    .passthrough();
-
-export type AssistantPlan = z.infer<typeof AssistantPlanSchema>;
+export const AssistantActionsResponseSchema = z.object({
+    actions: z.array(AssistantRunSchema), total: z.number().int().nonnegative(),
+    page: z.number().int().positive(), page_size: z.number().int().positive(),
+});
 
 export const PaginatedResponseSchema = <T extends z.ZodTypeAny>(item: T) =>
     z

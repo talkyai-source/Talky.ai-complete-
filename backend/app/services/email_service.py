@@ -15,7 +15,7 @@ import asyncpg  # migrated from db_client
 from app.core.db_utils import acquire_with_tenant
 from app.infrastructure.connectors.base import ConnectorProviderError
 from app.core.postgres_adapter import PostgresClient
-from app.services.connector_resolver import resolve_active_connector, ConnectorNotConnectedError
+from app.services.connector_resolver import resolve_active_connector, ConnectorNotConnectedError, connector_identity, verify_reviewed_connector
 from app.infrastructure.connectors.encryption import get_encryption_service
 from app.domain.services.email_template_manager import (
     get_email_template_manager,
@@ -94,6 +94,7 @@ class EmailService:
         conversation_id: Optional[str] = None,
         triggered_by: str = "assistant",
         connector_id: Optional[str] = None,
+        reviewed_connector: Optional[Dict[str, str]] = None,
     ) -> Dict[str, Any]:
         """
         Send an email via connected email provider.
@@ -122,14 +123,20 @@ class EmailService:
                 "bcc": bcc,
                 "subject": subject,
                 "template_name": template_name,
+                "reviewed_connector": reviewed_connector,
             },
         )
 
         attempted = False
         receipt = {}
         try:
+            if reviewed_connector is not None:
+                connector_id = reviewed_connector.get("connector_id")
             connector, connector_id, provider = await self._get_active_email_connector(
                 tenant_id, **({"connector_id": connector_id} if connector_id else {}))
+            identity = (verify_reviewed_connector(connector, connector_id, provider, reviewed_connector)
+                        if reviewed_connector is not None else connector_identity(connector, connector_id, provider))
+            receipt = dict(identity)
             send_args = dict(to=to, subject=subject, body=body, body_html=body_html, cc=cc, bcc=bcc, reply_to=reply_to)
             attempted = True
             try:
@@ -141,6 +148,7 @@ class EmailService:
                 attempted = False
                 connector, connector_id, provider = await self._get_active_email_connector(
                     tenant_id, force_refresh=True, connector_id=connector_id)
+                identity = verify_reviewed_connector(connector, connector_id, provider, identity)
                 attempted = True
                 result = await connector.send_email(**send_args)
             message_id = getattr(result, "id", None)
@@ -148,6 +156,8 @@ class EmailService:
                 raise RuntimeError("Provider did not return a message receipt")
             receipt = {"message_id": message_id, "thread_id": getattr(result, "thread_id", None),
                        "provider": provider, "connector_id": connector_id, "recipient_count": len(to)}
+            if identity:
+                receipt["external_account_id"] = identity["external_account_id"]
             await self._update_action_status(tenant_id=tenant_id, action_id=action_id,
                 status="completed", output_data=receipt)
             return {"success": True, "status": "accepted", "confirmation_allowed": True,
@@ -175,6 +185,10 @@ class EmailService:
             return {"success": False, "status": state, "confirmation_allowed": False,
                     "error": "Email outcome is unconfirmed; do not resend automatically" if state == "unknown" else str(exc),
                     "action_id": action_id, **receipt}
+
+    async def review_connector(self, tenant_id, connector_id=None):
+        return connector_identity(*await self._get_active_email_connector(
+            tenant_id, **({"connector_id": connector_id} if connector_id else {})))
 
     async def send_templated_email(
         self,

@@ -328,9 +328,20 @@ export function LeadDetailsPanel({
             {deliveries.length > 0 && (
                 <div className="mb-3 space-y-1 text-xs text-muted-foreground" aria-label="CRM delivery status">
                     {deliveries.map((delivery) => (
-                        <p key={delivery.provider}>
-                            {humanise(delivery.provider)}: {({ succeeded: "Synced", pending: "Waiting to sync", processing: "Syncing", failed: "Sync failed", unknown: "Outcome uncertain — review before retrying", skipped: "Not synced" } as Record<string, string>)[delivery.status] ?? humanise(delivery.status)}
-                        </p>
+                        <div key={delivery.provider}>
+                            <p>{humanise(delivery.provider)}: {({ succeeded: "Synced", pending: "Waiting to sync", processing: "Syncing", failed: "Sync failed", unknown: "Outcome uncertain — review before retrying", skipped: "Not synced" } as Record<string, string>)[delivery.status] ?? humanise(delivery.status)}</p>
+                            {delivery.call_id && <details className="mt-1">
+                                <summary className="cursor-pointer">{humanise(delivery.provider)} delivery record</summary>
+                                <div className="space-y-1 break-all pl-2">
+                                    <p>Call reference: {delivery.call_id}</p>
+                                    {delivery.destination_account_id && <p>Original account: {delivery.destination_account_id}</p>}
+                                    {delivery.remote_contact_id && <p>Provider contact reference: {delivery.remote_contact_id}</p>}
+                                    {delivery.remote_call_id && <p>Provider call reference: {delivery.remote_call_id}</p>}
+                                    {delivery.last_error && <p>{delivery.last_error}</p>}
+                                    {delivery.status === "unknown" && <p>Ask your workspace administrator to review this record in the original account before sending again.</p>}
+                                </div>
+                            </details>}
+                        </div>
                     ))}
                 </div>
             )}

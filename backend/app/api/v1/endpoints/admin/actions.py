@@ -5,8 +5,13 @@ Assistant action log: list, detail, retry, cancel
 from fastapi import APIRouter, HTTPException, Depends, Query
 from pydantic import BaseModel
 from typing import List, Optional
-from datetime import datetime
+import asyncio
+import json
+from uuid import UUID
 from app.core.postgres_adapter import Client
+from app.core.db_utils import acquire_with_tenant
+from app.core.security.rbac import UserRole, normalize_role
+from app.services.voice_callback_service import callback_job_id
 
 from app.api.v1.dependencies import get_db_client, require_admin, CurrentUser
 from ._serialization import AdminResponseModel
@@ -14,8 +19,54 @@ from ._serialization import AdminResponseModel
 router = APIRouter()
 
 
-# Safe actions that can be retried
-RETRYABLE_ACTION_TYPES = {"send_email", "send_sms", "set_reminder"}
+# These historical audit types have no generic replay consumer. A new pending
+# row is not queue admission, and an uncertain effect must never be replayed.
+RETRYABLE_ACTION_TYPES = frozenset()
+
+
+def _object(value):
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except ValueError:
+            return {}
+    return value if isinstance(value, dict) else {}
+
+
+def _admin_tenant(user):
+    """Broad Admin roles do not grant platform-wide receipt access."""
+    if normalize_role(getattr(user, "role", None)) == UserRole.PLATFORM_ADMIN:
+        return None
+    tenant = getattr(user, "tenant_id", None)
+    if not tenant:
+        raise HTTPException(status_code=403, detail="Tenant context required for action receipts")
+    try:
+        return str(UUID(str(tenant)))
+    except ValueError as exc:
+        raise HTTPException(status_code=403, detail="Invalid tenant context") from exc
+
+
+def _is_callback(row):
+    return row.get("type") == "schedule_callback" and row.get("triggered_by") == "voice"
+
+
+def _cancellation_owned(row):
+    """Only an existing claim/outbox can prove that cancellation stops work."""
+    if row.get("status") == "pending":
+        # Legacy email/SMS pending rows are audits, not execution claims: a
+        # provider request may already be in progress while they remain pending.
+        return bool(row.get("idempotency_key") and _object(row.get("input_data")).get("request_hash"))
+    return (row.get("status") == "scheduled" and _is_callback(row)
+            and not _object(row.get("output_data")).get("dialer_job_id"))
+
+
+async def _callback_reserved(conn, row):
+    if not _is_callback(row):
+        return False
+    return bool(await conn.fetchval(
+        "SELECT EXISTS(SELECT 1 FROM dialer_jobs WHERE tenant_id=$1::uuid AND id=$2::uuid)",
+        str(row["tenant_id"]), callback_job_id(row["id"]),
+    ))
 
 
 # =============================================================================
@@ -111,9 +162,12 @@ async def get_admin_actions(
 ):
     """
     List all assistant actions with pagination and filters.
-    Admin-only endpoint that can view all tenants.
+    Platform admins may view all tenants; tenant and partner admins stay scoped.
     """
     try:
+        scope = _admin_tenant(admin_user)
+        if scope and tenant_id and str(tenant_id) != scope:
+            raise HTTPException(status_code=403, detail="Cannot access another tenant's action receipts")
         offset = (page - 1) * page_size
         
         # Build query with joins
@@ -127,8 +181,8 @@ async def get_admin_actions(
             query = query.eq("status", status)
         if type:
             query = query.eq("type", type)
-        if tenant_id:
-            query = query.eq("tenant_id", tenant_id)
+        if scope or tenant_id:
+            query = query.eq("tenant_id", scope or tenant_id)
         if from_date:
             query = query.gte("created_at", f"{from_date}T00:00:00")
         if to_date:
@@ -175,6 +229,8 @@ async def get_admin_actions(
             page_size=page_size
         )
     
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=500,
@@ -192,11 +248,15 @@ async def get_admin_action_detail(
     Get full action detail including input/output payloads.
     """
     try:
+        scope = _admin_tenant(admin_user)
         # Fetch action with all relations
-        response = db_client.table("assistant_actions").select(
+        query = db_client.table("assistant_actions").select(
             "*, tenants!inner(business_name), leads(first_name, last_name, phone_number), "
             "campaigns(name), connectors(name)"
-        ).eq("id", action_id).single().execute()
+        ).eq("id", action_id)
+        if scope:
+            query = query.eq("tenant_id", scope)
+        response = query.single().execute()
         
         if not response.data:
             raise HTTPException(status_code=404, detail="Action not found")
@@ -216,7 +276,10 @@ async def get_admin_action_detail(
             action["status"] == "failed" and 
             action["type"] in RETRYABLE_ACTION_TYPES
         )
-        is_cancellable = action["status"] in ("pending", "scheduled")
+        is_cancellable = _cancellation_owned(action)
+        if is_cancellable and _is_callback(action):
+            async with acquire_with_tenant(db_client.pool, str(action["tenant_id"])) as conn:
+                is_cancellable = not await _callback_reserved(conn, action)
         
         return ActionDetail(
             id=action["id"],
@@ -266,63 +329,29 @@ async def retry_action(
     admin_user: CurrentUser = Depends(require_admin),
     db_client: Client = Depends(get_db_client)
 ):
-    """
-    Retry a failed action. Only allowed for safe/idempotent action types.
-    Creates a new action with the same parameters.
-    """
+    """Retain the receipt; no generic worker supports replaying audit rows."""
     try:
+        scope = _admin_tenant(admin_user)
         # Fetch original action
-        response = db_client.table("assistant_actions").select("*").eq("id", action_id).single().execute()
+        query = db_client.table("assistant_actions").select("*").eq("id", action_id)
+        if scope:
+            query = query.eq("tenant_id", scope)
+        response = query.single().execute()
         
         if not response.data:
             raise HTTPException(status_code=404, detail="Action not found")
         
         original = response.data
         
-        # Validate action can be retried
-        if original["status"] != "failed":
-            raise HTTPException(
-                status_code=400,
-                detail=f"Only failed actions can be retried. Current status: {original['status']}"
-            )
-        
-        if original["type"] not in RETRYABLE_ACTION_TYPES:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Action type '{original['type']}' is not safe to retry. Only {list(RETRYABLE_ACTION_TYPES)} can be retried."
-            )
-        
-        # Create new action with same parameters
-        from uuid import uuid4
-        now = datetime.utcnow().isoformat()
-        
-        new_action = {
-            "id": str(uuid4()),
-            "tenant_id": original["tenant_id"],
-            "conversation_id": original.get("conversation_id"),
-            "user_id": original.get("user_id"),
-            "call_id": original.get("call_id"),
-            "lead_id": original.get("lead_id"),
-            "campaign_id": original.get("campaign_id"),
-            "connector_id": original.get("connector_id"),
-            "type": original["type"],
-            "status": "pending",
-            "input_data": original.get("input_data"),
-            "triggered_by": "admin_retry",
-            "created_at": now
-        }
-        
-        insert_response = db_client.table("assistant_actions").insert(new_action).execute()
-        
-        if not insert_response.data:
-            raise HTTPException(status_code=500, detail="Failed to create retry action")
-        
-        return {
-            "detail": "Action queued for retry",
-            "original_action_id": action_id,
-            "new_action_id": new_action["id"],
-            "status": "pending"
-        }
+        uncertain = original["status"] in {"pending", "scheduled", "running", "unknown"}
+        raise HTTPException(status_code=501, detail={
+            "code": "action_retry_unavailable", "action_id": str(original["id"]),
+            "status": original["status"], "retryable": False,
+            "message": "No action was queued. This receipt has no supported automatic replay route.",
+            "next_step": ("Keep this action held. Review the original account and provider receipt; do not resend an uncertain effect."
+                          if uncertain else
+                          "Review the original receipt first. Only after non-execution is established may an authorized user create a fresh preview and confirm it through the existing assistant."),
+        })
     
     except HTTPException:
         raise
@@ -339,47 +368,45 @@ async def cancel_action(
     admin_user: CurrentUser = Depends(require_admin),
     db_client: Client = Depends(get_db_client)
 ):
-    """
-    Cancel a pending action.
-    """
+    """Cancel only before the owned executor/outbox has reserved dispatch."""
     try:
-        # Fetch action
-        response = db_client.table("assistant_actions").select("status").eq("id", action_id).single().execute()
-        
-        if not response.data:
-            raise HTTPException(status_code=404, detail="Action not found")
-        
-        current_status = response.data["status"]
-        
-        # Validate action can be cancelled
-        if current_status not in ("pending", "scheduled"):
-            raise HTTPException(
-                status_code=400,
-                detail=f"Only pending or scheduled actions can be cancelled. Current status: {current_status}"
-            )
-        
-        # Update status to cancelled
-        now = datetime.utcnow().isoformat()
-        update_response = db_client.table("assistant_actions").update({
-            "status": "cancelled",
-            "outcome_status": "cancelled_by_admin",
-            "completed_at": now
-        }).eq("id", action_id).execute()
-        
-        if not update_response.data:
-            raise HTTPException(status_code=500, detail="Failed to cancel action")
-        
-        return {
-            "detail": "Action cancelled successfully",
-            "action_id": action_id,
-            "previous_status": current_status,
-            "new_status": "cancelled"
-        }
+        scope = _admin_tenant(admin_user)
+        action_id = str(UUID(action_id))
+        # Only platform admins use the existing bypass; all other accepted
+        # Admin roles stay tenant scoped. This lock is shared with claim and
+        # callback preparation; updates also pin the row's authoritative tenant.
+        async with asyncio.timeout(5):
+            async with acquire_with_tenant(db_client.pool, scope) as conn:
+                row = await conn.fetchrow(
+                    "SELECT * FROM assistant_actions WHERE id=$1::uuid "
+                    "AND ($2::uuid IS NULL OR tenant_id=$2::uuid) FOR UPDATE", action_id, scope,
+                )
+                if row is None:
+                    raise HTTPException(status_code=404, detail="Action not found")
+                if not _cancellation_owned(row) or await _callback_reserved(conn, row):
+                    raise HTTPException(status_code=409, detail={
+                        "code": "action_not_cancellable", "action_id": action_id,
+                        "status": row["status"], "retryable": False,
+                        "message": "Cancellation is not confirmed: execution is already reserved or this audit row does not own a cancellable action. Review the saved receipt; do not resend.",
+                    })
+                result = await conn.fetchval(
+                    """UPDATE assistant_actions SET status='cancelled',outcome_status='cancelled_by_admin',
+                        completed_at=NOW(),output_data=COALESCE(output_data,'{}'::jsonb) || $4::jsonb
+                        WHERE id=$1::uuid AND tenant_id=$2::uuid AND status=$3 RETURNING id""",
+                    action_id, str(row["tenant_id"]), row["status"], json.dumps({
+                        "success": False, "status": "cancelled", "confirmation_allowed": False,
+                        "message": "Cancelled before dispatch was reserved.",
+                        "cancelled_by_user_id": str(admin_user.id),
+                    }),
+                )
+                if result is None:
+                    raise RuntimeError("Cancellation was not persisted")
+        return {"detail": "Cancelled before dispatch was reserved", "action_id": action_id,
+                "previous_status": row["status"], "new_status": "cancelled"}
     
     except HTTPException:
         raise
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to cancel action: {str(e)}"
-        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="Invalid action ID") from exc
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Cancellation could not be confirmed. Reload the saved receipt before another action.") from exc

@@ -45,6 +45,11 @@ class CancelMeetingInput(BaseModel):
     confirm: bool = Field(False, description="Preview first; Apply confirms.")
 
 
+def _attendee_display(meeting):
+    return ", ".join(str(item.get("email", "")) if isinstance(item, dict) else str(item)
+                     for item in meeting.get("attendees") or [])
+
+
 def _future_time(value: str) -> datetime:
     result = datetime.fromisoformat(value.replace("Z", "+00:00"))
     if result.tzinfo is None or result.utcoffset() is None:
@@ -55,7 +60,7 @@ def _future_time(value: str) -> datetime:
 
 
 def _meeting(tenant_id, db_client, meeting_id):
-    response = db_client.table("meetings").select("id,title,start_time,status").eq(
+    response = db_client.table("meetings").select("id,title,description,attendees,start_time,end_time,status,connector_id,external_event_id,metadata").eq(
         "tenant_id", tenant_id
     ).eq("id", meeting_id).single().execute()
     if not response.data:
@@ -124,6 +129,8 @@ async def book_meeting(
     add_video_conference: bool = True,
     conversation_id: Optional[str] = None,
     confirm: bool = False,
+    _reviewed_connector: Optional[Dict[str, str]] = None,
+    _reviewed_meeting: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
     """
     Book a meeting via connected calendar.
@@ -138,15 +145,22 @@ async def book_meeting(
         start_dt = _future_time(start_time)
         if not title.strip() or not 1 <= duration_minutes <= 480:
             raise ValueError("Provide a title and a duration between 1 and 480 minutes.")
+        service = get_meeting_service(db_client)
         if not confirm:
+            reviewed = await service.review_connector(tenant_id)
             return {"preview": True, "changes": [
+                {"field": "Calendar account", "before": None, "after": reviewed["external_account_id"]},
                 {"field": "Title", "before": None, "after": title},
                 {"field": "Start", "before": None, "after": start_dt.isoformat()},
                 {"field": "Duration", "before": None, "after": f"{duration_minutes} minutes"},
                 {"field": "Attendees", "before": None, "after": ", ".join(attendees or [])},
-            ], "note": "No calendar event has been created."}
+            ], "note": "No calendar event has been created.", "_apply_args": {
+                "title": title, "start_time": start_dt.isoformat(), "duration_minutes": duration_minutes,
+                "attendees": attendees or [], "lead_id": lead_id, "description": description,
+                "add_video_conference": add_video_conference, "_reviewed_connector": reviewed}}
 
-        service = get_meeting_service(db_client)
+        if not _reviewed_connector:
+            raise ValueError("Review the calendar account in a new proposal before applying.")
 
         result = await service.create_meeting(
             tenant_id=tenant_id,
@@ -157,7 +171,7 @@ async def book_meeting(
             lead_id=lead_id,
             description=description,
             add_video_conference=add_video_conference,
-            triggered_by="assistant"
+            triggered_by="assistant", reviewed_connector=_reviewed_connector
         )
 
         return result
@@ -177,6 +191,8 @@ async def update_meeting_tool(
     new_title: Optional[str] = None,
     conversation_id: Optional[str] = None,
     confirm: bool = False,
+    _reviewed_connector: Optional[Dict[str, str]] = None,
+    _reviewed_meeting: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
     """
     Update/reschedule an existing meeting.
@@ -193,18 +209,24 @@ async def update_meeting_tool(
             raise ValueError("Provide a new time or title.")
         current = _meeting(tenant_id, db_client, meeting_id)
         if not confirm:
-            changes = []
+            reviewed = await service.review_meeting(tenant_id, current)
+            changes = [{"field": "Calendar account", "before": None, "after": reviewed["external_account_id"]},
+                       {"field": "Attendees", "before": None, "after": _attendee_display(current)}]
             if new_time:
                 changes.append({"field": "Start", "before": current.get("start_time"), "after": new_start_time.isoformat()})
             if new_title:
                 changes.append({"field": "Title", "before": current.get("title"), "after": new_title})
-            return {"preview": True, "changes": changes, "note": "Meeting not changed yet."}
+            return {"preview": True, "changes": changes, "note": "Meeting not changed yet.",
+                "_apply_args": {"meeting_id": meeting_id, "new_time": new_time, "new_title": new_title,
+                    "_reviewed_connector": reviewed, "_reviewed_meeting": service.meeting_identity(current)}}
 
+        if not _reviewed_connector or not _reviewed_meeting:
+            raise ValueError("Review this meeting and calendar account before applying.")
         result = await service.update_meeting(
             tenant_id=tenant_id,
             meeting_id=meeting_id,
             new_start_time=new_start_time,
-            new_title=new_title
+            new_title=new_title, reviewed_connector=_reviewed_connector, reviewed_meeting=_reviewed_meeting
         )
 
         return result
@@ -223,6 +245,8 @@ async def cancel_meeting_tool(
     reason: Optional[str] = None,
     conversation_id: Optional[str] = None,
     confirm: bool = False,
+    _reviewed_connector: Optional[Dict[str, str]] = None,
+    _reviewed_meeting: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
     """
     Cancel a scheduled meeting.
@@ -230,16 +254,24 @@ async def cancel_meeting_tool(
     try:
         from app.services.meeting_service import get_meeting_service
 
+        service = get_meeting_service(db_client)
         current = _meeting(tenant_id, db_client, meeting_id)
         if not confirm:
-            return {"preview": True, "changes": [{"field": "Meeting", "before": current.get("title"), "after": "Cancelled"}], "note": "Meeting not cancelled yet."}
+            reviewed = await service.review_meeting(tenant_id, current)
+            return {"preview": True, "changes": [{"field": "Calendar account", "before": None, "after": reviewed["external_account_id"]}, {"field": "Meeting", "before": current.get("title"), "after": "Cancelled"},
+                {"field": "Start", "before": None, "after": current.get("start_time")},
+                {"field": "Attendees", "before": None, "after": _attendee_display(current)}], "note": "Meeting not cancelled yet.",
+                "_apply_args": {"meeting_id": meeting_id, "reason": reason, "_reviewed_connector": reviewed,
+                    "_reviewed_meeting": service.meeting_identity(current)}}
 
         service = get_meeting_service(db_client)
 
+        if not _reviewed_connector or not _reviewed_meeting:
+            raise ValueError("Review this meeting and calendar account before applying.")
         result = await service.cancel_meeting(
             tenant_id=tenant_id,
             meeting_id=meeting_id,
-            reason=reason
+            reason=reason, reviewed_connector=_reviewed_connector, reviewed_meeting=_reviewed_meeting
         )
 
         return result

@@ -47,10 +47,6 @@ export const backendEndpoints = {
     voiceCallsStart: { method: "POST", path: "/voice/calls/start", tags: ["Voice"], summary: "Start a guarded voice call session" },
 
     assistantActionsList: { method: "GET", path: "/assistant/actions", tags: ["Assistant"], summary: "List assistant actions" },
-    assistantRunsList: { method: "GET", path: "/assistant/runs", tags: ["Assistant"], summary: "List assistant runs" },
-    assistantPlan: { method: "POST", path: "/assistant/plan", tags: ["Assistant"], summary: "Plan assistant action" },
-    assistantExecute: { method: "POST", path: "/assistant/execute", tags: ["Assistant"], summary: "Execute assistant action" },
-    assistantRunsRetry: { method: "POST", path: "/assistant/runs/{id}/retry", tags: ["Assistant"], summary: "Retry assistant run" },
 
     auditLogsList: { method: "GET", path: "/admin/audit-logs", tags: ["Admin"], summary: "List audit logs" },
     securityEventsList: { method: "GET", path: "/admin/security-events", tags: ["Admin"], summary: "List security events" },

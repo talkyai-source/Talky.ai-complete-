@@ -30,6 +30,26 @@ logger = logging.getLogger(__name__)
 _TOKEN_REFRESH_SAFETY_SECONDS = 90
 
 
+class ReviewedConnectorChanged(ValueError):
+    """A reviewed account is missing or no longer the current connected account."""
+
+
+def connector_identity(connector, connector_id, provider) -> dict:
+    """Small, credential-free identity; a reconnectable row ID alone is not proof."""
+    values = {"connector_id": connector_id, "provider": provider,
+              "external_account_id": getattr(connector, "external_account_id", None)}
+    if any(not isinstance(value, str) or not value.strip() for value in values.values()):
+        raise ReviewedConnectorChanged("The connected account identity is unavailable. Reconnect and review a new proposal.")
+    return {key: value.strip() for key, value in values.items()}
+
+
+def verify_reviewed_connector(connector, connector_id, provider, reviewed) -> dict:
+    current = connector_identity(connector, connector_id, provider)
+    if not isinstance(reviewed, dict) or any(reviewed.get(key) != value for key, value in current.items()):
+        raise ReviewedConnectorChanged("The connected account changed after review. No action was sent; review a new proposal.")
+    return current
+
+
 class ConnectorNotConnectedError(Exception):
     """No active connector of the requested type for this tenant."""
 

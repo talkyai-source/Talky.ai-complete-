@@ -10,6 +10,11 @@ def _object(value):
     return json.loads(value) if isinstance(value, str) else dict(value or {})
 
 
+def callback_job_id(action_id):
+    """The existing outbox identity, shared with cancellation admission."""
+    return str(uuid5(UUID(str(action_id)), "voice_callback"))
+
+
 async def drain_voice_callbacks(pool, queue, limit=20):
     # This worker-only scan crosses tenants; every mutation below is scoped.
     async with acquire_with_tenant(pool, None) as conn:
@@ -47,7 +52,7 @@ async def drain_voice_callbacks(pool, queue, limit=20):
                     WHERE id=$1::uuid AND tenant_id=$2::uuid
                 """, action_id, tenant)
                 continue
-            job_id = str(uuid5(UUID(action_id), "voice_callback"))
+            job_id = callback_job_id(action_id)
             active = await conn.fetchval("""
                 SELECT EXISTS(SELECT 1 FROM dialer_jobs WHERE tenant_id=$1::uuid AND lead_id=$2::uuid
                   AND id<>$3::uuid AND status IN ('pending','queued','processing','calling','retry_scheduled'))
@@ -59,6 +64,14 @@ async def drain_voice_callbacks(pool, queue, limit=20):
                 VALUES ($1::uuid,$2::uuid,$3::uuid,$4::uuid,$5,'pending',$6)
                 ON CONFLICT (id) DO NOTHING
             """, job_id, tenant, str(row["campaign_id"]), str(row["lead_id"]), payload["phone"], row["scheduled_at"])
+            # This transaction owns the action row lock. Make reservation
+            # visible before releasing it or awaiting Redis: an admin can no
+            # longer truthfully promise cancellation once dispatch may start.
+            await conn.execute("""
+                UPDATE assistant_actions SET output_data=COALESCE(output_data,'{}'::jsonb)
+                    || jsonb_build_object('dialer_job_id',$3::text,'status','dispatching')
+                WHERE id=$1::uuid AND tenant_id=$2::uuid AND status='scheduled'
+            """, action_id, tenant, job_id)
             job = DialerJob(job_id=job_id, tenant_id=tenant, campaign_id=str(row["campaign_id"]),
                            lead_id=str(row["lead_id"]), phone_number=payload["phone"], scheduled_at=row["scheduled_at"])
         # The DB job exists before Redis, and repeated handoff is idempotent.

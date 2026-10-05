@@ -38,8 +38,8 @@ import { ConversationHistory, type StoredMessage } from "./conversation-history"
 import { MarkdownMessage } from "./markdown-message";
 import {
     EditProposalCard,
+    withProposalResult,
     type ProposalData,
-    type ProposalStatus,
     type ProposalCampaign,
 } from "./edit-proposal-card";
 import type { DiffChange } from "./diff-view";
@@ -479,17 +479,10 @@ export function FloatingAssistant() {
                     setTyping(false);
                     const pid = typeof payload.proposal_id === "string" ? payload.proposal_id : null;
                     if (!pid) break;
-                    const applied = Boolean(payload.applied);
-                    const errText = typeof payload.error === "string" ? payload.error : undefined;
                     setMessages((prev) =>
                         prev.map((m) => {
                             if (m.id !== pid || !m.proposal) return m;
-                            const status: ProposalStatus = applied
-                                ? "applied"
-                                : errText
-                                    ? "error"
-                                    : "rejected";
-                            return { ...m, proposal: { ...m.proposal, status, error: errText } };
+                            return { ...m, proposal: withProposalResult(m.proposal, payload) };
                         }),
                     );
                     break;
@@ -620,7 +613,7 @@ export function FloatingAssistant() {
     }, [connect, input]);
 
     const sendProposalAction = useCallback(
-        (proposalId: string, action: "apply" | "reject" | "overwrite") => {
+        (proposalId: string, action: "apply" | "reject" | "overwrite" | "status") => {
             const ws = wsRef.current;
             if (!ws || ws.readyState !== WebSocket.OPEN) {
                 // Socket dropped — the proposal lives server-side (in-process),
@@ -630,26 +623,34 @@ export function FloatingAssistant() {
                     {
                         id: uid(),
                         role: "system",
-                        content: "Not connected — reconnecting. Try Apply again in a moment.",
+                        content: "Not connected — reconnecting. Check the saved action record before submitting again.",
                         ts: Date.now(),
                     },
                 ]);
                 connect();
                 return;
             }
-            if (action !== "reject") setTyping(true);
+            if (action === "apply" || action === "overwrite") setTyping(true);
             try {
                 ws.send(
                     JSON.stringify({
-                        type: action === "reject" ? "reject_proposal" : "apply_proposal",
+                        type: action === "status" ? "proposal_status" : action === "reject" ? "reject_proposal" : "apply_proposal",
                         proposal_id: proposalId,
                         // Overwrite-existing on a duplicate card; the server
                         // resolves the target id from its stored proposal.
                         ...(action === "overwrite" ? { mode: "overwrite" } : {}),
                     }),
                 );
+                if (action === "apply" || action === "overwrite") setMessages((previous) => previous.map((message) =>
+                    message.id === proposalId && message.proposal
+                        ? { ...message, proposal: { ...message.proposal, status: "submitting" } }
+                        : message));
             } catch {
                 setTyping(false);
+                if (action === "apply" || action === "overwrite") setMessages((previous) => previous.map((message) =>
+                    message.id === proposalId && message.proposal
+                        ? { ...message, proposal: { ...message.proposal, status: "unknown", error: "The connection closed before a saved result was received." } }
+                        : message));
             }
         },
         [connect],
@@ -853,7 +854,7 @@ function MessageRow({
     onProposalAction,
 }: {
     msg: ChatMessage;
-    onProposalAction: (id: string, action: "apply" | "reject" | "overwrite") => void;
+    onProposalAction: (id: string, action: "apply" | "reject" | "overwrite" | "status") => void;
 }) {
     if (msg.proposal) {
         return (
@@ -862,6 +863,7 @@ function MessageRow({
                     <EditProposalCard
                         proposal={msg.proposal}
                         onApply={(id) => onProposalAction(id, "apply")}
+                        onCheck={(id) => onProposalAction(id, "status")}
                         onReject={(id) => onProposalAction(id, "reject")}
                         onOverwrite={(id) => onProposalAction(id, "overwrite")}
                     />

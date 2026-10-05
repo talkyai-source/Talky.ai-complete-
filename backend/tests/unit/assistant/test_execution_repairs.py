@@ -30,14 +30,14 @@ async def test_availability_accepts_advertised_date_and_uses_timezone(monkeypatc
 
 @pytest.mark.asyncio
 async def test_booking_preview_and_ambiguous_time_never_create_event(monkeypatch):
-    service = SimpleNamespace(create_meeting=AsyncMock(return_value={"success": True}))
+    service = SimpleNamespace(review_connector=AsyncMock(return_value={"connector_id": "calendar", "provider": "google_calendar", "external_account_id": "account"}), create_meeting=AsyncMock(return_value={"success": True}))
     monkeypatch.setattr("app.services.meeting_service.get_meeting_service", lambda _: service)
     preview = await meetings.book_meeting("tenant", object(), title="Demo", start_time="2030-10-02T09:00:00+05:00")
     invalid = await meetings.book_meeting("tenant", object(), title="Demo", start_time="2030-10-02T09:00:00", confirm=True)
     assert preview["preview"] is True
     assert invalid["success"] is False and "offset" in invalid["error"]
     service.create_meeting.assert_not_called()
-    applied = await meetings.book_meeting("tenant", object(), title="Demo", start_time="2030-10-02T09:00:00+05:00", confirm=True)
+    applied = await meetings.book_meeting("tenant", object(), confirm=True, **preview["_apply_args"])
     assert applied["success"] is True
     service.create_meeting.assert_awaited_once()
 

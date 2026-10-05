@@ -87,26 +87,47 @@ async def report_issue(
         if _prepared_report.get("to") != support_to:
             return {"success": False, "status": "failed", "error": "Support destination changed; preview again."}
         subject, body = _prepared_report["subject"], _prepared_report["body"]
+    from app.services.email_service import get_email_service, EmailNotConnectedError
+    from app.infrastructure.connectors.email.smtp import SMTPConnector
     if not confirm:
+        try:
+            reviewed = await get_email_service(db_client).review_connector(tenant_id)
+            sender = {"kind": "tenant", "connector": reviewed}
+            sender_label = reviewed["external_account_id"]
+        except EmailNotConnectedError:
+            if not SMTPConnector.is_configured():
+                return {"success": False, "status": "failed", "error": "Support email is not configured."}
+            smtp = SMTPConnector()
+            sender = {"kind": "smtp", "host": smtp.host, "port": smtp.port, "from_email": smtp.from_email}
+            sender_label = smtp.from_email
+        except Exception:
+            return {"success": False, "status": "failed", "error": "The support sending account could not be verified."}
         return {"preview": True, "changes": [
+            {"field": "Sending account", "before": None, "after": sender_label},
             {"field": "To", "before": None, "after": support_to},
             {"field": "Subject", "before": None, "after": subject},
             {"field": "Body", "before": None, "after": body}], "note": "Not sent yet.",
             "_apply_args": {"description": description, "category": cat, "severity": sev,
-                "contact_email": reporter, "_prepared_report": {"to": support_to, "subject": subject, "body": body}}}
+                "contact_email": reporter, "_prepared_report": {"to": support_to, "subject": subject, "body": body, "sender": sender}}}
+    if not isinstance(_prepared_report, dict) or not isinstance(_prepared_report.get("sender"), dict):
+        return {"success": False, "status": "failed", "error": "Review the support destination and sending account before applying."}
     try:
-        from app.services.email_service import get_email_service, EmailNotConnectedError
-        from app.infrastructure.connectors.email.smtp import SMTPConnector
-        try:
+        sender = _prepared_report["sender"]
+        if sender.get("kind") == "tenant":
             result = await get_email_service(db_client).send_email(tenant_id=tenant_id, to=[support_to], subject=subject,
-                body=body, triggered_by="assistant_report_issue", conversation_id=conversation_id)
-        except EmailNotConnectedError:
-            if not SMTPConnector.is_configured():
-                return {"success": False, "status": "failed", "error": "Support email is not configured."}
-            sent = await SMTPConnector().send_email(to=[support_to], subject=subject, body=body)
+                body=body, triggered_by="assistant_report_issue", conversation_id=conversation_id,
+                reviewed_connector=sender.get("connector"))
+        elif sender.get("kind") == "smtp":
+            smtp = SMTPConnector()
+            current = {"kind": "smtp", "host": smtp.host, "port": smtp.port, "from_email": smtp.from_email}
+            if not SMTPConnector.is_configured() or current != sender:
+                return {"success": False, "status": "failed", "error": "The support sending account changed. Review a new proposal."}
+            sent = await smtp.send_email(to=[support_to], subject=subject, body=body)
             if not getattr(sent, "id", None):
                 return {"success": False, "status": "unknown", "error": "Support send returned no receipt."}
             result = {"success": True, "status": "accepted", "message_id": sent.id, "provider": "smtp"}
+        else:
+            return {"success": False, "status": "failed", "error": "The reviewed support sending account is unavailable."}
         if not isinstance(result, dict):
             return {"success": False, "status": "unknown", "confirmation_allowed": False}
         if result.get("success") is not True:
@@ -199,7 +220,8 @@ async def send_email(
     phone_number: Optional[str] = None,
     confirm: bool = False,
     connector_id: Optional[str] = None,
-    conversation_id: Optional[str] = None
+    conversation_id: Optional[str] = None,
+    _reviewed_connector: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
     """
     Send email through the tenant connected provider.
@@ -253,26 +275,32 @@ async def send_email(
 
         # PREVIEW — confirm=False returns a proposal-style diff and sends nothing.
         if not confirm:
+            from app.services.email_service import get_email_service
+            reviewed = await get_email_service(db_client).review_connector(tenant_id, connector_id)
             preview_body = eff_body
             return {
                 "preview": True,
                 "changes": [
+                    {"field": "Sending account", "before": None, "after": reviewed["external_account_id"]},
                     {"field": "To", "before": None, "after": ", ".join(recipients)},
                     {"field": "Subject", "before": None, "after": eff_subject},
                     {"field": "Body", "before": None, "after": preview_body},
                 ],
                 "note": "Not sent yet.",
                 "_apply_args": {"to": recipients, "subject": eff_subject, "body": eff_body,
-                    "body_html": eff_html, "lead_ids": lead_ids, "connector_id": connector_id},
+                    "body_html": eff_html, "lead_ids": lead_ids, "connector_id": reviewed["connector_id"],
+                    "_reviewed_connector": reviewed},
             }
 
         from app.services.email_service import get_email_service, EmailNotConnectedError
         try:
+            if not _reviewed_connector:
+                return {"success": False, "status": "failed", "error": "Review the sending account in a new proposal before sending."}
             result = await get_email_service(db_client).send_email(
                 tenant_id=tenant_id, to=recipients, subject=eff_subject, body=eff_body,
                 body_html=eff_html, template_name=None, template_context=None,
                 lead_ids=lead_ids, conversation_id=conversation_id, triggered_by="assistant",
-                connector_id=connector_id)
+                connector_id=connector_id, reviewed_connector=_reviewed_connector)
             return result if isinstance(result, dict) else {"success": False, "status": "unknown"}
         except EmailNotConnectedError:
             return {"success": False, "status": "failed", "email_required": True,
