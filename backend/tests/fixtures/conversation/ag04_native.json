@@ -1617,6 +1617,604 @@
           }
         }
       }
+    },
+    {
+      "id": "native.failed_action",
+      "semantic_ids": [
+        "ag04.failed_action"
+      ],
+      "synthetic_action_results": {
+        "send_email": {
+          "version": 1,
+          "action": "send_email",
+          "success": false,
+          "status": "failed",
+          "confirmation_allowed": false,
+          "provider": "synthetic-email",
+          "request_id": "synthetic-failed-request-1",
+          "message_id": null,
+          "message": "Synthetic provider rejected the send request."
+        }
+      },
+      "steps": [
+        {
+          "kind": "caller",
+          "item": "request",
+          "text": "Please email the details."
+        },
+        {
+          "kind": "tool",
+          "name": "send_email",
+          "arguments": {}
+        },
+        {
+          "kind": "response",
+          "text": "The email was sent to you."
+        },
+        {
+          "kind": "response",
+          "text": "The email could not be sent."
+        }
+      ],
+      "expect": {
+        "submissions": 1,
+        "repair_requests": 1,
+        "effect_attempts": 1,
+        "accepted_actions": 0,
+        "action_results": {
+          "send_email": {
+            "version": 1,
+            "action": "send_email",
+            "success": false,
+            "status": "failed",
+            "confirmation_allowed": false,
+            "provider": "synthetic-email",
+            "request_id": "synthetic-failed-request-1",
+            "message_id": null,
+            "message": "Synthetic provider rejected the send request."
+          }
+        },
+        "llm_controls": [
+          "The email could not be sent."
+        ],
+        "delivered_text": "The email could not be sent.",
+        "tool_statuses": [
+          "failed"
+        ],
+        "last_tool_success": false,
+        "failure": false,
+        "shutdowns": 0,
+        "end_requested": false,
+        "dnc": false
+      }
+    },
+    {
+      "id": "native.third_party_email_literal",
+      "semantic_ids": [
+        "ag04.third_party_email"
+      ],
+      "steps": [
+        {
+          "kind": "caller",
+          "item": "unusable-source",
+          "text": "My colleague's email is other@example.com.",
+          "checkpoint": "unusable"
+        },
+        {
+          "kind": "caller",
+          "item": "bare-confirmation",
+          "text": "Yes.",
+          "checkpoint": "bare-yes"
+        },
+        {
+          "kind": "caller",
+          "item": "own-source",
+          "text": "My email is alex@example.com.",
+          "checkpoint": "own-pending"
+        },
+        {
+          "kind": "response",
+          "text": "Your email is alex@example.com, correct?"
+        },
+        {
+          "kind": "caller",
+          "item": "own-confirmation",
+          "text": "Yes.",
+          "checkpoint": "own-confirmed"
+        }
+      ],
+      "expect": {
+        "email": "alex@example.com",
+        "email_confirmed": true,
+        "submissions": 1,
+        "llm_controls": [
+          "Your email is alex@example.com, correct?"
+        ],
+        "effect_attempts": 0,
+        "accepted_actions": 0,
+        "repair_requests": 0,
+        "shutdowns": 0,
+        "end_requested": false,
+        "dnc": false
+      },
+      "contact_checkpoint_expectations": {
+        "unusable": {
+          "email": {
+            "value": null,
+            "confirmed": false,
+            "confirmation_source": null,
+            "confirmation_evidence": null,
+            "readback": null,
+            "capture_status": null,
+            "value_source": null,
+            "status_source": null
+          }
+        },
+        "bare-yes": {
+          "email": {
+            "value": null,
+            "confirmed": false,
+            "confirmation_source": null,
+            "confirmation_evidence": null,
+            "readback": null,
+            "capture_status": null,
+            "value_source": null,
+            "status_source": null
+          }
+        },
+        "own-pending": {
+          "email": {
+            "value": "alex@example.com",
+            "confirmed": false,
+            "capture_status": "awaiting_confirmation",
+            "value_source": {
+              "provider_item_id": "own-source",
+              "caller_turn_order": 3,
+              "revision_sha256": "7e7314f04d6187468de5e58b9e30c9a8dbef7949ede37d652957c3201395ed27"
+            },
+            "confirmation_source": null,
+            "confirmation_evidence": null,
+            "readback": null,
+            "status_source": {
+              "provider_item_id": "own-source",
+              "caller_turn_order": 3,
+              "revision_sha256": "7e7314f04d6187468de5e58b9e30c9a8dbef7949ede37d652957c3201395ed27"
+            }
+          }
+        },
+        "own-confirmed": {
+          "email": {
+            "value": "alex@example.com",
+            "confirmed": true,
+            "capture_status": "confirmed",
+            "value_source": {
+              "provider_item_id": "own-source",
+              "caller_turn_order": 3,
+              "revision_sha256": "7e7314f04d6187468de5e58b9e30c9a8dbef7949ede37d652957c3201395ed27"
+            },
+            "confirmation_source": {
+              "provider_item_id": "own-confirmation",
+              "caller_turn_order": 4,
+              "revision_sha256": "5f9a2b795615ba6a3d5455fd5624d773fbca5bcd16249c421fd37411dc9837da"
+            },
+            "confirmation_evidence": "readback_and_caller_affirmation",
+            "readback": {
+              "utterance_id": "rt-1",
+              "status": "completed",
+              "evidence": "transport_played"
+            },
+            "status_source": {
+              "provider_item_id": "own-confirmation",
+              "caller_turn_order": 4,
+              "revision_sha256": "5f9a2b795615ba6a3d5455fd5624d773fbca5bcd16249c421fd37411dc9837da"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "native.third_party_email_reported",
+      "semantic_ids": [
+        "ag04.third_party_email"
+      ],
+      "steps": [
+        {
+          "kind": "caller",
+          "item": "unusable-source",
+          "text": "He said \"My email is other@example.com\".",
+          "checkpoint": "unusable"
+        },
+        {
+          "kind": "caller",
+          "item": "bare-confirmation",
+          "text": "Yes.",
+          "checkpoint": "bare-yes"
+        },
+        {
+          "kind": "caller",
+          "item": "own-source",
+          "text": "My email is alex@example.com.",
+          "checkpoint": "own-pending"
+        },
+        {
+          "kind": "response",
+          "text": "Your email is alex@example.com, correct?"
+        },
+        {
+          "kind": "caller",
+          "item": "own-confirmation",
+          "text": "Yes.",
+          "checkpoint": "own-confirmed"
+        }
+      ],
+      "expect": {
+        "email": "alex@example.com",
+        "email_confirmed": true,
+        "submissions": 1,
+        "llm_controls": [
+          "Your email is alex@example.com, correct?"
+        ],
+        "effect_attempts": 0,
+        "accepted_actions": 0,
+        "repair_requests": 0,
+        "shutdowns": 0,
+        "end_requested": false,
+        "dnc": false
+      },
+      "contact_checkpoint_expectations": {
+        "unusable": {
+          "email": {
+            "value": null,
+            "confirmed": false,
+            "confirmation_source": null,
+            "confirmation_evidence": null,
+            "readback": null,
+            "capture_status": null,
+            "value_source": null,
+            "status_source": null
+          }
+        },
+        "bare-yes": {
+          "email": {
+            "value": null,
+            "confirmed": false,
+            "confirmation_source": null,
+            "confirmation_evidence": null,
+            "readback": null,
+            "capture_status": null,
+            "value_source": null,
+            "status_source": null
+          }
+        },
+        "own-pending": {
+          "email": {
+            "value": "alex@example.com",
+            "confirmed": false,
+            "capture_status": "awaiting_confirmation",
+            "value_source": {
+              "provider_item_id": "own-source",
+              "caller_turn_order": 3,
+              "revision_sha256": "7e7314f04d6187468de5e58b9e30c9a8dbef7949ede37d652957c3201395ed27"
+            },
+            "confirmation_source": null,
+            "confirmation_evidence": null,
+            "readback": null,
+            "status_source": {
+              "provider_item_id": "own-source",
+              "caller_turn_order": 3,
+              "revision_sha256": "7e7314f04d6187468de5e58b9e30c9a8dbef7949ede37d652957c3201395ed27"
+            }
+          }
+        },
+        "own-confirmed": {
+          "email": {
+            "value": "alex@example.com",
+            "confirmed": true,
+            "capture_status": "confirmed",
+            "value_source": {
+              "provider_item_id": "own-source",
+              "caller_turn_order": 3,
+              "revision_sha256": "7e7314f04d6187468de5e58b9e30c9a8dbef7949ede37d652957c3201395ed27"
+            },
+            "confirmation_source": {
+              "provider_item_id": "own-confirmation",
+              "caller_turn_order": 4,
+              "revision_sha256": "5f9a2b795615ba6a3d5455fd5624d773fbca5bcd16249c421fd37411dc9837da"
+            },
+            "confirmation_evidence": "readback_and_caller_affirmation",
+            "readback": {
+              "utterance_id": "rt-1",
+              "status": "completed",
+              "evidence": "transport_played"
+            },
+            "status_source": {
+              "provider_item_id": "own-confirmation",
+              "caller_turn_order": 4,
+              "revision_sha256": "5f9a2b795615ba6a3d5455fd5624d773fbca5bcd16249c421fd37411dc9837da"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "native.unclear_phone_invalid",
+      "semantic_ids": [
+        "ag04.unclear_phone"
+      ],
+      "steps": [
+        {
+          "kind": "caller",
+          "item": "unusable-source",
+          "text": "My phone number is +123",
+          "checkpoint": "unusable"
+        },
+        {
+          "kind": "caller",
+          "item": "bare-confirmation",
+          "text": "Yes.",
+          "checkpoint": "bare-yes"
+        },
+        {
+          "kind": "caller",
+          "item": "own-source",
+          "text": "My phone number is +1 415 555 2671.",
+          "checkpoint": "own-pending"
+        },
+        {
+          "kind": "response",
+          "text": "Your phone number is +1 415 555 2671, correct?"
+        },
+        {
+          "kind": "caller",
+          "item": "own-confirmation",
+          "text": "Yes.",
+          "checkpoint": "own-confirmed"
+        }
+      ],
+      "expect": {
+        "phone": "+14155552671",
+        "phone_confirmed": true,
+        "submissions": 1,
+        "llm_controls": [
+          "Your phone number is +1 415 555 2671, correct?"
+        ],
+        "effect_attempts": 0,
+        "accepted_actions": 0,
+        "repair_requests": 0,
+        "shutdowns": 0,
+        "end_requested": false,
+        "dnc": false
+      },
+      "contact_checkpoint_expectations": {
+        "unusable": {
+          "phone": {
+            "value": null,
+            "confirmed": false,
+            "confirmation_source": null,
+            "confirmation_evidence": null,
+            "readback": null,
+            "capture_status": "needs_clarification",
+            "value_source": {
+              "provider_item_id": "unusable-source",
+              "caller_turn_order": 1,
+              "revision_sha256": "74ae480213fb92c9fe34d29ef9ae63a0e347faa093469e2159de629bf835eac4"
+            },
+            "status_source": {
+              "provider_item_id": "unusable-source",
+              "caller_turn_order": 1,
+              "revision_sha256": "74ae480213fb92c9fe34d29ef9ae63a0e347faa093469e2159de629bf835eac4"
+            }
+          }
+        },
+        "bare-yes": {
+          "phone": {
+            "value": null,
+            "confirmed": false,
+            "confirmation_source": null,
+            "confirmation_evidence": null,
+            "readback": null,
+            "capture_status": "needs_clarification",
+            "value_source": {
+              "provider_item_id": "unusable-source",
+              "caller_turn_order": 1,
+              "revision_sha256": "74ae480213fb92c9fe34d29ef9ae63a0e347faa093469e2159de629bf835eac4"
+            },
+            "status_source": {
+              "provider_item_id": "unusable-source",
+              "caller_turn_order": 1,
+              "revision_sha256": "74ae480213fb92c9fe34d29ef9ae63a0e347faa093469e2159de629bf835eac4"
+            }
+          }
+        },
+        "own-pending": {
+          "phone": {
+            "value": "+14155552671",
+            "confirmed": false,
+            "capture_status": "awaiting_confirmation",
+            "value_source": {
+              "provider_item_id": "own-source",
+              "caller_turn_order": 3,
+              "revision_sha256": "052d151da998b4ad50e3111e262049bfb9a2c68b55f1c460f250ec114ff7be45"
+            },
+            "confirmation_source": null,
+            "confirmation_evidence": null,
+            "readback": null,
+            "status_source": {
+              "provider_item_id": "own-source",
+              "caller_turn_order": 3,
+              "revision_sha256": "052d151da998b4ad50e3111e262049bfb9a2c68b55f1c460f250ec114ff7be45"
+            }
+          }
+        },
+        "own-confirmed": {
+          "phone": {
+            "value": "+14155552671",
+            "confirmed": true,
+            "capture_status": "confirmed",
+            "value_source": {
+              "provider_item_id": "own-source",
+              "caller_turn_order": 3,
+              "revision_sha256": "052d151da998b4ad50e3111e262049bfb9a2c68b55f1c460f250ec114ff7be45"
+            },
+            "confirmation_source": {
+              "provider_item_id": "own-confirmation",
+              "caller_turn_order": 4,
+              "revision_sha256": "5f9a2b795615ba6a3d5455fd5624d773fbca5bcd16249c421fd37411dc9837da"
+            },
+            "confirmation_evidence": "readback_and_caller_affirmation",
+            "readback": {
+              "utterance_id": "rt-1",
+              "status": "completed",
+              "evidence": "transport_played"
+            },
+            "status_source": {
+              "provider_item_id": "own-confirmation",
+              "caller_turn_order": 4,
+              "revision_sha256": "5f9a2b795615ba6a3d5455fd5624d773fbca5bcd16249c421fd37411dc9837da"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "native.unclear_phone_incomplete",
+      "semantic_ids": [
+        "ag04.unclear_phone"
+      ],
+      "steps": [
+        {
+          "kind": "caller",
+          "item": "unusable-source",
+          "text": "My number ends in seven three, I cannot remember the rest.",
+          "checkpoint": "unusable"
+        },
+        {
+          "kind": "caller",
+          "item": "bare-confirmation",
+          "text": "Yes.",
+          "checkpoint": "bare-yes"
+        },
+        {
+          "kind": "caller",
+          "item": "own-source",
+          "text": "My phone number is +1 415 555 2671.",
+          "checkpoint": "own-pending"
+        },
+        {
+          "kind": "response",
+          "text": "Your phone number is +1 415 555 2671, correct?"
+        },
+        {
+          "kind": "caller",
+          "item": "own-confirmation",
+          "text": "Yes.",
+          "checkpoint": "own-confirmed"
+        }
+      ],
+      "expect": {
+        "phone": "+14155552671",
+        "phone_confirmed": true,
+        "submissions": 1,
+        "llm_controls": [
+          "Your phone number is +1 415 555 2671, correct?"
+        ],
+        "effect_attempts": 0,
+        "accepted_actions": 0,
+        "repair_requests": 0,
+        "shutdowns": 0,
+        "end_requested": false,
+        "dnc": false
+      },
+      "contact_checkpoint_expectations": {
+        "unusable": {
+          "phone": {
+            "value": null,
+            "confirmed": false,
+            "confirmation_source": null,
+            "confirmation_evidence": null,
+            "readback": null,
+            "capture_status": "needs_clarification",
+            "value_source": {
+              "provider_item_id": "unusable-source",
+              "caller_turn_order": 1,
+              "revision_sha256": "3e5e4220e2b3c78555c811dabe114b66491fae3a0f243be3202fb8d8aae4d35d"
+            },
+            "status_source": {
+              "provider_item_id": "unusable-source",
+              "caller_turn_order": 1,
+              "revision_sha256": "3e5e4220e2b3c78555c811dabe114b66491fae3a0f243be3202fb8d8aae4d35d"
+            }
+          }
+        },
+        "bare-yes": {
+          "phone": {
+            "value": null,
+            "confirmed": false,
+            "confirmation_source": null,
+            "confirmation_evidence": null,
+            "readback": null,
+            "capture_status": "needs_clarification",
+            "value_source": {
+              "provider_item_id": "unusable-source",
+              "caller_turn_order": 1,
+              "revision_sha256": "3e5e4220e2b3c78555c811dabe114b66491fae3a0f243be3202fb8d8aae4d35d"
+            },
+            "status_source": {
+              "provider_item_id": "unusable-source",
+              "caller_turn_order": 1,
+              "revision_sha256": "3e5e4220e2b3c78555c811dabe114b66491fae3a0f243be3202fb8d8aae4d35d"
+            }
+          }
+        },
+        "own-pending": {
+          "phone": {
+            "value": "+14155552671",
+            "confirmed": false,
+            "capture_status": "awaiting_confirmation",
+            "value_source": {
+              "provider_item_id": "own-source",
+              "caller_turn_order": 3,
+              "revision_sha256": "052d151da998b4ad50e3111e262049bfb9a2c68b55f1c460f250ec114ff7be45"
+            },
+            "confirmation_source": null,
+            "confirmation_evidence": null,
+            "readback": null,
+            "status_source": {
+              "provider_item_id": "own-source",
+              "caller_turn_order": 3,
+              "revision_sha256": "052d151da998b4ad50e3111e262049bfb9a2c68b55f1c460f250ec114ff7be45"
+            }
+          }
+        },
+        "own-confirmed": {
+          "phone": {
+            "value": "+14155552671",
+            "confirmed": true,
+            "capture_status": "confirmed",
+            "value_source": {
+              "provider_item_id": "own-source",
+              "caller_turn_order": 3,
+              "revision_sha256": "052d151da998b4ad50e3111e262049bfb9a2c68b55f1c460f250ec114ff7be45"
+            },
+            "confirmation_source": {
+              "provider_item_id": "own-confirmation",
+              "caller_turn_order": 4,
+              "revision_sha256": "5f9a2b795615ba6a3d5455fd5624d773fbca5bcd16249c421fd37411dc9837da"
+            },
+            "confirmation_evidence": "readback_and_caller_affirmation",
+            "readback": {
+              "utterance_id": "rt-1",
+              "status": "completed",
+              "evidence": "transport_played"
+            },
+            "status_source": {
+              "provider_item_id": "own-confirmation",
+              "caller_turn_order": 4,
+              "revision_sha256": "5f9a2b795615ba6a3d5455fd5624d773fbca5bcd16249c421fd37411dc9837da"
+            }
+          }
+        }
+      }
     }
   ],
   "profiles": {

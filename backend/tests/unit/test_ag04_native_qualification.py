@@ -27,7 +27,7 @@ async def test_declared_corpus_runs_actual_native_boundaries_without_network(mon
     inventory = native.case_inventory(ROOT)
     keys = lambda items: {(r["scenario_id"], r["profile"]["provider"]) for r in items}
     assert keys(rows) == keys(inventory)
-    assert len(rows) == len(inventory) == 78  # 39 controls, two parser implementations.
+    assert len(rows) == len(inventory) == 88  # 44 controls, two parser implementations.
     failed = [(row["scenario_id"], row["profile"]["provider"], finding)
         for row in rows for finding in row["findings"]["control"] if finding["pass"] is not True]
     assert not failed, json.dumps(failed, indent=2)
@@ -309,3 +309,65 @@ async def test_missing_phone_checkpoint_fails_common_control_even_when_final_val
     checks = [check for check in row["findings"]["control"]
               if check["id"].startswith("contact:old-final-ignored:")]
     assert checks and all(check["pass"] is False for check in checks)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("provider", ["openai", "xai"])
+async def test_definitive_failure_keeps_original_receipt_and_only_honest_speech(provider):
+    corpus = native._corpus(ROOT)
+    case = next(c for c in corpus["scenarios"] if c["id"] == "native.failed_action")
+    row = await native.NativeReplay(case, provider, corpus).run()
+    assert all(c["pass"] for c in row["findings"]["control"]), row["findings"]["control"]
+    assert row["submitted_speech"] == ["The email could not be sent."]
+    assert all(turn["content"] != "The email was sent to you." for turn in row["history"])
+    assert row["observed"]["repair_requests"] == 1 and row["observed"]["failure"] is False
+    assert len(row["effects"]["executor_attempts"]) == 1
+    receipt = row["effects"]["executor_attempts"][0]["receipt"]
+    assert receipt == case["synthetic_action_results"]["send_email"]
+    assert receipt["success"] is False and receipt["status"] == "failed"
+    assert receipt["request_id"] == "synthetic-failed-request-1" and receipt["message_id"] is None
+    assert row["effects"]["recorded_results"]["send_email"] == receipt
+    assert row["effects"]["tool_results"] == [receipt]
+    assert row["effects"]["accepted"] == 0
+    assert all(f["status"] == "unreviewed" for f in row["findings"]["semantic"])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("provider", ["openai", "xai"])
+@pytest.mark.parametrize("variant,kind", [
+    ("third_party_email_literal", "email"), ("third_party_email_reported", "email"),
+    ("unclear_phone_invalid", "phone"), ("unclear_phone_incomplete", "phone"),
+])
+async def test_unusable_contact_and_bare_yes_cannot_replace_owned_self_confirmation(provider, variant, kind):
+    import hashlib
+
+    corpus = native._corpus(ROOT)
+    case = next(c for c in corpus["scenarios"] if c["id"] == "native." + variant)
+    row = await native.NativeReplay(case, provider, corpus).run()
+    assert all(c["pass"] for c in row["findings"]["control"]), row["findings"]["control"]
+    checkpoints = {c["id"]: c["contacts"][kind] for c in row["contact_checkpoints"]}
+    bad = checkpoints["unusable"]
+    assert checkpoints["bare-yes"] == bad
+    assert bad["value"] is None and bad["confirmed"] is False
+    assert bad["confirmation_source"] is None and bad["readback"] is None
+    if kind == "email":
+        assert bad["value_source"] is None and bad["capture_status"] is None
+    else:
+        assert bad["capture_status"] == "needs_clarification"
+        assert bad["value_source"] == {"provider_item_id": "unusable-source", "caller_turn_order": 1,
+            "revision_sha256": hashlib.sha256(case["steps"][0]["text"].encode()).hexdigest()}
+    pending = checkpoints["own-pending"]
+    assert pending["confirmed"] is False and pending["confirmation_source"] is None
+    assert pending["readback"] is None
+    final = checkpoints["own-confirmed"]
+    assert final == row["contacts"][kind] and final["confirmed"] is True
+    assert final["value"] == ("alex@example.com" if kind == "email" else "+14155552671")
+    assert final["value_source"] == pending["value_source"]
+    assert final["value_source"]["provider_item_id"] == "own-source"
+    assert final["confirmation_source"]["provider_item_id"] == "own-confirmation"
+    assert final["readback"] == {"utterance_id": "rt-1", "status": "completed", "evidence": "transport_played"}
+    other = row["contacts"]["phone" if kind == "email" else "email"]
+    assert other["value"] is None and other["confirmed"] is False
+    assert row["effects"]["executor_attempts"] == [] and row["effects"]["accepted"] == 0
+    assert row["end"]["requested"] is False and row["end"]["dnc_flag"] is False
+    assert all(f["status"] == "unreviewed" for f in row["findings"]["semantic"])

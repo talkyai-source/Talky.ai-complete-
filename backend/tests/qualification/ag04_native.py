@@ -136,7 +136,7 @@ class NativeReplay:
         self.contact_checkpoints = []
         self.fixture_actions = scenario.get("synthetic_action_results", {})
         self.session = SimpleNamespace(_voice_action_capabilities={
-            name: "Synthetic accepted-result port" for name in self.fixture_actions}, _voice_action_context_loaded=True,
+            name: "Synthetic result port" for name in self.fixture_actions}, _voice_action_context_loaded=True,
             _voice_action_pool=object(), call_id=self.call_id, captured_slots=None)
         self.config = SimpleNamespace(direction="inbound", agent_config=SimpleNamespace(
             agent_name="Ava", company_name="Northwind Systems"), realtime_prompt={
@@ -329,6 +329,8 @@ class NativeReplay:
             "phone": contacts["phone"]["value"], "phone_confirmed": contacts["phone"]["confirmed"],
             "effect_attempts": len(self.action_attempts), "accepted_actions": accepted,
             "action_message_ids": {name: result.get("message_id") for name, result
+                in action_results_for_session(self.session).items() if name != "end_call"},
+            "action_results": {name: result for name, result
                 in action_results_for_session(self.session).items() if name != "end_call"},
             "repair_requests": len(repairs), "normal_continuations": len(normal_continuations),
             "failure": bool(self.bridge._failure_reason), "connection_lost": self.bridge._connection_lost,
