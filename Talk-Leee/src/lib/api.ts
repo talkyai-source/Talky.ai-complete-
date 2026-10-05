@@ -284,6 +284,32 @@ export interface KnowledgeHit {
     sim?: number | null;
 }
 
+export const KnowledgeTestResponseSchema = z.object({
+    query: z.string(),
+    // Legacy raw candidates are retained for compatibility, never used as
+    // factual admission or as a fallback for missing evidence.
+    hits: z.array(z.object({
+        id: z.string(), heading: z.string().nullish(),
+        voice_answer: z.string().nullish(), summary: z.string().nullish(),
+        fts: z.number().finite().nullish(), sim: z.number().finite().nullish(),
+    })),
+    evidence: z.object({
+        status: z.enum(["matched", "weak_match", "no_match"]),
+        passages: z.array(z.object({
+            node_id: z.string(), version: z.string().nullable(),
+            source_id: z.string().nullable(), source_version: z.number().int().positive().nullable(),
+            text: z.string().min(1), coverage: z.number().finite().min(0).max(1).nullable(),
+        })),
+        text: z.string(),
+    }).refine((evidence) => (
+        (evidence.status === "no_match" ? evidence.passages.length === 0 : evidence.passages.length > 0)
+        && evidence.text === evidence.passages.map((passage) => passage.text).join("\n")
+        && (evidence.status !== "matched" || evidence.passages.every((passage) => passage.coverage !== null))
+    ), "Inconsistent knowledge evidence"),
+});
+
+export type KnowledgeTestResponse = z.infer<typeof KnowledgeTestResponseSchema>;
+
 class ApiClient {
     private client() {
         return sharedHttpClient();
@@ -749,14 +775,17 @@ class ApiClient {
         campaignId: string,
         query: string,
         k = 3,
-    ): Promise<{ query: string; hits: KnowledgeHit[] }> {
+    ): Promise<KnowledgeTestResponse> {
         const data = await this.client().request({
             path: `/campaigns/${campaignId}/knowledge/test`,
             method: "POST",
             body: { query, k },
             timeoutMs: 12_000,
         });
-        return data as { query: string; hits: KnowledgeHit[] };
+        return this.parseOrThrow(
+            KnowledgeTestResponseSchema.refine((result) => result.query === query.trim()), data,
+            { url: `/campaigns/${campaignId}/knowledge/test`, method: "POST" },
+        );
     }
 
     async deleteKnowledgeSource(

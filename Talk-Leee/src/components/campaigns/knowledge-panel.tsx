@@ -25,7 +25,7 @@ import {
 
 import { Button } from "@/components/ui/button";
 import {
-    api, CampaignKnowledge, KnowledgeHit, KnowledgeNode, KnowledgeSource,
+    api, CampaignKnowledge, KnowledgeTestResponse, KnowledgeNode, KnowledgeSource,
 } from "@/lib/api";
 import { ApiClientError } from "@/lib/http-client";
 
@@ -241,7 +241,14 @@ function KnowledgePanelScope({ campaignId, readOnly = false }: KnowledgePanelPro
     // Test-a-question
     const [testQuery, setTestQuery] = useState("");
     const [testing, setTesting] = useState(false);
-    const [testHits, setTestHits] = useState<KnowledgeHit[] | null>(null);
+    const [testResult, setTestResult] = useState<KnowledgeTestResponse | null>(null);
+    const testGeneration = useRef(0);
+
+    const clearTest = () => {
+        testGeneration.current += 1;
+        setTestResult(null);
+        setTesting(false);
+    };
 
     const refresh = useCallback(async () => {
         const requestedCampaignId = campaignId;
@@ -276,6 +283,7 @@ function KnowledgePanelScope({ campaignId, readOnly = false }: KnowledgePanelPro
         void refresh();
         return () => {
             requestGeneration.current += 1;
+            testGeneration.current += 1;
         };
     }, [campaignId, refresh]);
 
@@ -284,6 +292,7 @@ function KnowledgePanelScope({ campaignId, readOnly = false }: KnowledgePanelPro
 
     const onUpload = async (file: File) => {
         if (readOnly) return;
+        clearTest();
         setUploading(true); setError(null);
         try { await api.uploadCampaignKnowledge(campaignId, file); await refresh(); }
         catch (err) { setError(err instanceof Error ? err.message : "Upload failed"); }
@@ -292,6 +301,7 @@ function KnowledgePanelScope({ campaignId, readOnly = false }: KnowledgePanelPro
 
     const mutateNode = async (node: KnowledgeNode, patch: Partial<KnowledgeNode>) => {
         if (readOnly || !data) return;
+        clearTest();
         const prevTree = data.tree;
         setData({ ...data, tree: patchNode(data.tree, node.id, patch) });
         markBusy(node.id, true);
@@ -314,6 +324,7 @@ function KnowledgePanelScope({ campaignId, readOnly = false }: KnowledgePanelPro
 
     const onDeleteSource = async (source: KnowledgeSource) => {
         if (readOnly) return;
+        clearTest();
         setDeletingSourceId(source.id); setError(null);
         try { await api.deleteKnowledgeSource(campaignId, source.id); await refresh(); }
         catch (err) { setError(err instanceof Error ? err.message : "Delete failed"); }
@@ -322,11 +333,17 @@ function KnowledgePanelScope({ campaignId, readOnly = false }: KnowledgePanelPro
 
     const runTest = async () => {
         const q = testQuery.trim();
-        if (!q) return;
-        setTesting(true); setTestHits(null); setError(null);
-        try { const res = await api.testCampaignKnowledge(campaignId, q, 3); setTestHits(res.hits); }
-        catch (err) { setError(err instanceof Error ? err.message : "Test failed"); }
-        finally { setTesting(false); }
+        if (!q || testing || uploading || busy.size > 0 || deletingSourceId) return;
+        const generation = ++testGeneration.current;
+        setTesting(true); setTestResult(null); setError(null);
+        try {
+            const res = await api.testCampaignKnowledge(campaignId, q, 3);
+            if (generation === testGeneration.current) setTestResult(res);
+        } catch (err) {
+            if (generation === testGeneration.current) setError(err instanceof Error ? err.message : "Test failed");
+        } finally {
+            if (generation === testGeneration.current) setTesting(false);
+        }
     };
 
     const toggleCollapse = (id: string) =>
@@ -376,28 +393,30 @@ function KnowledgePanelScope({ campaignId, readOnly = false }: KnowledgePanelPro
                         <div className="flex items-center gap-2">
                             <input
                                 value={testQuery}
-                                onChange={(e) => setTestQuery(e.target.value)}
+                                onChange={(e) => { clearTest(); setTestQuery(e.target.value); }}
                                 onKeyDown={(e) => { if (e.key === "Enter") void runTest(); }}
                                 placeholder="Test a question — e.g. “how much does it cost?”"
                                 className="flex-1 rounded-md border border-gray-300 dark:border-white/15 bg-white dark:bg-zinc-900 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
                             />
-                            <Button size="sm" onClick={runTest} disabled={testing || !testQuery.trim()} className="h-8 px-3 text-xs">
+                            <Button size="sm" onClick={runTest} disabled={testing || uploading || busy.size > 0 || !!deletingSourceId || !testQuery.trim()} className="h-8 px-3 text-xs">
                                 {testing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />} Test
                             </Button>
                         </div>
-                        {testHits !== null && (
-                            <div className="mt-2 space-y-1.5">
-                                {testHits.length === 0 ? (
-                                    <p className="text-xs text-muted-foreground">No match — the agent would say it&apos;ll follow up. Try rephrasing, or add/enable a section for this.</p>
-                                ) : testHits.map((h, i) => (
-                                    <div key={h.id} className="rounded-md border border-gray-200 dark:border-white/10 bg-white dark:bg-zinc-900 px-2.5 py-1.5">
-                                        <div className="flex items-center gap-2">
-                                            <span className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-emerald-100 text-[10px] font-semibold text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">{i + 1}</span>
-                                            <span className="text-xs font-medium text-gray-900 dark:text-zinc-100">{h.heading}</span>
-                                        </div>
-                                        {(h.voice_answer || h.summary) && <p className="mt-0.5 pl-6 text-xs text-muted-foreground">{h.voice_answer || h.summary}</p>}
+                        {testResult !== null && (
+                            <div className="mt-2 space-y-1.5" role="region" aria-label="Knowledge test result">
+                                <p className="text-xs font-medium">{testResult.evidence.status === "matched" ? "Source passages found" : "No confirmed answer"}</p>
+                                {testResult.evidence.status === "weak_match" && <p className="text-xs text-muted-foreground">These passages may be related, but are insufficient to confirm the answer.</p>}
+                                {testResult.evidence.status === "no_match" && <p className="text-xs text-muted-foreground">No usable source passage was found. The agent should say it cannot confirm this detail.</p>}
+                                {testResult.evidence.passages.map((passage, i) => (
+                                    <div key={`${passage.node_id}:${i}`} className="rounded-md border border-gray-200 dark:border-white/10 bg-white dark:bg-zinc-900 px-2.5 py-1.5">
+                                        <p className="text-xs whitespace-pre-wrap text-gray-900 dark:text-zinc-100">{passage.text}</p>
+                                        <p className="mt-1 text-[11px] text-muted-foreground break-all">
+                                            Source: {passage.source_id ?? "unavailable"} · Revision: {passage.source_version ?? "unavailable"}
+                                            <br />Section: {passage.node_id || "unavailable"} · Version: {passage.version ?? "unavailable"}
+                                        </p>
                                     </div>
                                 ))}
+                                <p className="text-xs text-muted-foreground">Retrieval check only. Review whether the source answers your question; this does not test a generated answer or a call.</p>
                             </div>
                         )}
                     </div>

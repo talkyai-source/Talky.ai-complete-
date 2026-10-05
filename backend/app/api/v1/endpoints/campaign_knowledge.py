@@ -462,11 +462,11 @@ async def test_retrieval(
         scope="function",
     ),
 ):
-    """Run the live retriever for a query and return the matched node(s).
+    """Run retrieval and the shared source-evidence admission for a query.
 
-    The owner's "test a question" tool — shows exactly what the agent would pull
-    from the knowledge tree for a caller's question. Does NOT bump hit_count so
-    trials don't inflate usage stats.
+    Raw candidates remain separate from admitted source passages. This tests
+    retrieval, not generated answers or whether a caller heard them. Does NOT
+    bump hit_count so trials don't inflate usage stats.
     """
     _require_enabled()
     tenant_id = lease.tenant_id
@@ -480,6 +480,7 @@ async def test_retrieval(
         k = 3
 
     from app.services.scripts.knowledge.retrieval import retrieve_knowledge
+    from app.domain.services.voice_pipeline.kb_budget import prepare_knowledge_evidence
 
     hits = await retrieve_knowledge(
         db_client.pool,
@@ -493,6 +494,7 @@ async def test_retrieval(
     )
     return {
         "query": query,
+        "evidence": prepare_knowledge_evidence(hits, query),
         "hits": [
             {
                 "id": str(h["id"]),
