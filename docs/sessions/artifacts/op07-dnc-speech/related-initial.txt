@@ -1,0 +1,81 @@
+........................................................................ [ 23%]
+........................................................................ [ 47%]
+..................................F..................................... [ 71%]
+........................................................................ [ 94%]
+................                                                         [100%]
+================================== FAILURES ===================================
+________ test_dnc_survives_canceled_close_and_later_goodbye_can_rearm _________
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\tasks.py:520: in wait_for
+    return await fut
+app\realtime\bridge.py:1595: in _finish_end_call
+    await asyncio.wait_for(self._goodbye_completed.wait(), timeout=15.0)
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\tasks.py:520: in wait_for
+    return await fut
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\locks.py:212: in wait
+    await fut
+E   asyncio.exceptions.CancelledError
+
+The above exception was the direct cause of the following exception:
+tests\unit\test_realtime_end_call_ownership.py:168: in test_dnc_survives_canceled_close_and_later_goodbye_can_rearm
+    await asyncio.wait_for(bridge._termination_task, 1)
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\tasks.py:519: in wait_for
+    async with timeouts.timeout(timeout):
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\timeouts.py:115: in __aexit__
+    raise TimeoutError from exc_val
+E   TimeoutError
+------------------------------ Captured log call ------------------------------
+WARNING  app.realtime.bridge:bridge.py:831 realtime_opt_out_speech_withheld call=synthetic-close
+ERROR    app.realtime.bridge:bridge.py:972 realtime_playout_failed call=synthetic-close
+Traceback (most recent call last):
+  File "C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-op07-20261005\backend\app\realtime\bridge.py", line 885, in _play_validated_response
+    if not await self._admit_opt_out_playback(event, utterance):
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-op07-20261005\backend\app\realtime\bridge.py", line 835, in _admit_opt_out_playback
+    await self._rt.repair_unspoken_response(response, **kwargs)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'types.SimpleNamespace' object has no attribute 'repair_unspoken_response'
+============================== warnings summary ===============================
+tests/unit/test_dnc_service.py: 10 warnings
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-op07-20261005\backend\tests\unit\test_dnc_service.py:86: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    created_at=datetime.utcnow(),
+
+tests/unit/test_dnc_service.py::test_bulk_import_splits_accepted_and_invalid
+tests/unit/test_dnc_service.py::test_bulk_import_splits_accepted_and_invalid
+tests/unit/test_dnc_service.py::test_bulk_import_counts_non_e164_as_invalid
+tests/unit/test_dnc_service.py::test_bulk_import_counts_non_e164_as_invalid
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-op07-20261005\backend\tests\unit\test_dnc_service.py:141: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    created_at=datetime.utcnow(),
+
+tests/unit/test_caller_authorized_end_call.py: 107 warnings
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\backend\.venv\Lib\site-packages\pydantic\main.py:250: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+
+tests/unit/test_caller_authorized_end_call.py: 22 warnings
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-op07-20261005\backend\app\domain\services\voice_pipeline\turn_ender.py:594: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "timestamp": datetime.utcnow().isoformat(),
+
+tests/unit/test_caller_authorized_end_call.py: 20 warnings
+tests/unit/test_realtime_relationship_ownership.py: 3 warnings
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-op07-20261005\backend\app\domain\services\transcript_service.py:372: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    timestamp=datetime.utcnow().isoformat(),
+
+tests/unit/test_caller_authorized_end_call.py: 84 warnings
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-op07-20261005\backend\app\domain\models\session.py:207: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    self.last_activity_at = datetime.utcnow()
+
+tests/unit/test_realtime_lifecycle_repairs.py::test_actual_browser_receipt_rejects_stale_and_uncorrelated_ack
+tests/unit/test_realtime_lifecycle_repairs.py::test_twilio_mark_protocol_and_clear_cannot_confirm_readback
+  <string>:5: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+
+tests/unit/test_realtime_independent.py::test_setup_exception_releases_connected_provider_and_gateway
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-op07-20261005\backend\app\realtime\runtime.py:187: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    started_at=datetime.utcnow(),
+
+tests/unit/test_realtime_independent.py::test_setup_exception_releases_connected_provider_and_gateway
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-op07-20261005\backend\app\realtime\runtime.py:188: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    last_activity_at=datetime.utcnow(),
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/unit/test_realtime_end_call_ownership.py::test_dnc_survives_canceled_close_and_later_goodbye_can_rearm
+1 failed, 303 passed, 254 warnings in 18.19s

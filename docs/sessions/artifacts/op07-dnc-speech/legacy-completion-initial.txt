@@ -1,0 +1,11 @@
+F                                                                        [100%]
+================================== FAILURES ===================================
+_ test_caller_revision_during_legacy_completion_control_retains_partial_evidence _
+tests\unit\test_op07_native_dnc_speech.py:580: in test_caller_revision_during_legacy_completion_control_retains_partial_evidence
+    s.gateway.clear_output_buffer.assert_awaited_once()
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:2334: in assert_awaited_once
+    raise AssertionError(msg)
+E   AssertionError: Expected mock to have been awaited once. Awaited 0 times.
+=========================== short test summary info ===========================
+FAILED tests/unit/test_op07_native_dnc_speech.py::test_caller_revision_during_legacy_completion_control_retains_partial_evidence
+1 failed, 30 deselected in 10.71s

@@ -1,0 +1,20 @@
+FF                                                                       [100%]
+================================== FAILURES ===================================
+_ test_late_final_dnc_fences_held_transport_and_preserves_partial_evidence[begin] _
+tests\unit\test_op07_native_dnc_speech.py:423: in test_late_final_dnc_fences_held_transport_and_preserves_partial_evidence
+    assert s.gateway.send_audio.await_count == (1 if boundary == "send" else 0)
+E   AssertionError: assert 3 == 0
+E    +  where 3 = <AsyncMock id='1715705008624'>.await_count
+E    +    where <AsyncMock id='1715705008624'> = namespace(send_audio=<AsyncMock id='1715705008624'>, begin_playback=<AsyncMock id='1715705012656'>, clear_output_buffe...id='1715705016592'>, finish_playback=<AsyncMock id='1715704872208'>, send_control_event=<AsyncMock id='1715703582880'>).send_audio
+E    +      where namespace(send_audio=<AsyncMock id='1715705008624'>, begin_playback=<AsyncMock id='1715705012656'>, clear_output_buffe...id='1715705016592'>, finish_playback=<AsyncMock id='1715704872208'>, send_control_event=<AsyncMock id='1715703582880'>) = namespace(bridge=<app.realtime.bridge.RealtimeBridge object at 0x0000018F77FA9D00>, provider=namespace(close=<AsyncMoc...ller_opted_out=True, _end_call_requested=False, _voice_action_user_turn=1), persistence=<AsyncMock id='1715703779440'>).gateway
+_ test_late_final_dnc_fences_held_transport_and_preserves_partial_evidence[send] _
+tests\unit\test_op07_native_dnc_speech.py:423: in test_late_final_dnc_fences_held_transport_and_preserves_partial_evidence
+    assert s.gateway.send_audio.await_count == (1 if boundary == "send" else 0)
+E   AssertionError: assert 3 == 1
+E    +  where 3 = <AsyncMock id='1715813813856'>.await_count
+E    +    where <AsyncMock id='1715813813856'> = namespace(send_audio=<AsyncMock id='1715813813856'>, begin_playback=<AsyncMock id='1715813817936'>, clear_output_buffe...id='1715813821872'>, finish_playback=<AsyncMock id='1715813694256'>, send_control_event=<AsyncMock id='1715812737600'>).send_audio
+E    +      where namespace(send_audio=<AsyncMock id='1715813813856'>, begin_playback=<AsyncMock id='1715813817936'>, clear_output_buffe...id='1715813821872'>, finish_playback=<AsyncMock id='1715813694256'>, send_control_event=<AsyncMock id='1715812737600'>) = namespace(bridge=<app.realtime.bridge.RealtimeBridge object at 0x0000018F7E771B20>, provider=namespace(close=<AsyncMoc...ller_opted_out=True, _end_call_requested=False, _voice_action_user_turn=1), persistence=<AsyncMock id='1715813796656'>).gateway
+=========================== short test summary info ===========================
+FAILED tests/unit/test_op07_native_dnc_speech.py::test_late_final_dnc_fences_held_transport_and_preserves_partial_evidence[begin]
+FAILED tests/unit/test_op07_native_dnc_speech.py::test_late_final_dnc_fences_held_transport_and_preserves_partial_evidence[send]
+2 failed, 24 deselected in 1.31s
