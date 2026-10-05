@@ -1,0 +1,54 @@
+{
+  "candidate_revision": "6617d072f3067e609ac482afd6b4f327c7e44eeb",
+  "baseline_revision": "91e37616",
+  "source_scope": "native qualification runner, JSON corpus and behavioral tests only",
+  "environment": {
+    "ENVIRONMENT": "test",
+    "PYTHONPATH_order": [
+      "C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/tmp/postgres-matrix-20261005/tmp/exact-requirements-20261005/packages",
+      "C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/tmp/production-ready-ag07-20261005/tmp/op02-testdeps"
+    ],
+    "urllib3": "2.8.0",
+    "PyJWT": "2.15.1"
+  },
+  "interpreter": "C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/backend/.venv/Scripts/python.exe",
+  "working_directory": "tmp/ag04-native-receipts-20261005/backend",
+  "baseline": {
+    "root_failure": "root-baseline-failure.txt: original corpus expectation failed at DNC submission/shutdown after the new acknowledgement gate",
+    "isolated_attempts": ["before.txt", "before-repeat.txt"],
+    "isolated_result": "existing two-second tool/playback wait timed out; preserved separately, not claimed as the exact assertion reproduction"
+  },
+  "checks": [
+    {
+      "command": "python -m pytest tests/unit/test_ag04_native_qualification.py tests/unit/test_ag04_traditional_qualification.py tests/unit/test_ag04_qualification_gate.py tests/unit/test_op07_native_dnc_speech.py -q --tb=short",
+      "exit_code": 0,
+      "passed": 112,
+      "skipped": 0,
+      "warnings": 929,
+      "output": "final-tests.txt"
+    },
+    {
+      "command": "python -m scripts.evaluate_ag04_conversations --output ../docs/sessions/artifacts/ag04-native-receipts/replay.json",
+      "exit_code": 1,
+      "expected_reason": "Original captured Groq semantic failure remains failed; offline control success cannot approve profiles",
+      "observed_rows": 174,
+      "control_checks": 1160,
+      "control_failures": 0,
+      "evidence_errors": 0,
+      "network_attempts": 0,
+      "output": "replay.json.gz",
+      "console": "replay-console.txt"
+    },
+    {
+      "command": "python -m ruff check --select F tests/qualification/ag04_native.py tests/unit/test_ag04_native_qualification.py",
+      "exit_code": 0,
+      "output": "lint.txt"
+    },
+    {"command": "git diff --check", "exit_code": 0}
+  ],
+  "limits": [
+    "No provider, telephone, database, or customer action was performed.",
+    "DNC acknowledgement is explicitly synthetic and does not certify persistence or cleanup.",
+    "37 of50 proposed canonical conditions remain mapped; profile/human/acoustic approval is not granted."
+  ]
+}

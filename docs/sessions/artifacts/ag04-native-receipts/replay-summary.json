@@ -1,0 +1,26 @@
+{
+  "status": "failed",
+  "production_approved": false,
+  "counts": {
+    "declared_profile_scenario_rows": 174,
+    "observed_rows": 174,
+    "distinct_replayed_scenario_ids": 57,
+    "control_checks": 1160,
+    "control_failures": 0,
+    "captured_or_reviewed_semantic_failures": 1,
+    "unreviewed_semantic_findings": 173
+  },
+  "runtime_control_status": "passed",
+  "semantic_status": "failed",
+  "live_profile_qualification": "not_run",
+  "human_rubric_approval": "not_run",
+  "evidence_errors": [],
+  "candidate_revision": "6617d072f3067e609ac482afd6b4f327c7e44eeb",
+  "source_clean_at_capture": true,
+  "network_attempts": [],
+  "runner_errors": [],
+  "catalog_replayed": 37,
+  "catalog_total": 50,
+  "replay_sha256": "1c0df2f26b1c3505508c7a4520d46e6e23ba9e87df3722fbe3cda719237b581d",
+  "gzip_sha256": "3b250f5c4c51d7a72678e1d6c323162b47f565b08928ac7f24f4de8a43ebf6e7"
+}

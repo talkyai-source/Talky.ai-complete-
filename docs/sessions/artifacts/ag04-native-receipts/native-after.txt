@@ -1,0 +1,8 @@
+.....................                                                    [100%]
+============================== warnings summary ===============================
+tests/unit/test_ag04_native_qualification.py: 161 warnings
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\ag04-native-receipts-20261005\backend\app\domain\services\transcript_service.py:372: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    timestamp=datetime.utcnow().isoformat(),
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+21 passed, 161 warnings in 1.88s

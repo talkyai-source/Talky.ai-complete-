@@ -1,0 +1,44 @@
+F                                                                        [100%]
+================================== FAILURES ===================================
+_____ test_declared_corpus_runs_actual_native_boundaries_without_network ______
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\tasks.py:520: in wait_for
+    return await fut
+E   asyncio.exceptions.CancelledError
+
+The above exception was the direct cause of the following exception:
+tests\unit\test_ag04_native_qualification.py:26: in test_declared_corpus_runs_actual_native_boundaries_without_network
+    rows = await native.run_cases(ROOT)
+tests\qualification\ag04_native.py:349: in run_cases
+    results.append(await NativeReplay(scenario, provider, corpus).run())
+tests\qualification\ag04_native.py:318: in run
+    await self.step(step)
+tests\qualification\ag04_native.py:232: in step
+    await self.drain(playback=step.get("wait", True))
+tests\qualification\ag04_native.py:164: in drain
+    await asyncio.wait_for(asyncio.gather(self.bridge._playback_task, return_exceptions=True), 2)
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\tasks.py:519: in wait_for
+    async with timeouts.timeout(timeout):
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\timeouts.py:115: in __aexit__
+    raise TimeoutError from exc_val
+E   TimeoutError
+------------------------------ Captured log call ------------------------------
+WARNING  app.realtime.bridge:bridge.py:542 realtime_playout_rejected call=ag04-synthetic-f402cd1b55cc4723af2cecb0e51a74a9 reason=contradicted_customer_relationship
+WARNING  app.realtime.bridge:bridge.py:542 realtime_playout_rejected call=ag04-synthetic-82919baa83504f729df7aabf9b918765 reason=contradicted_customer_relationship
+WARNING  app.realtime.bridge:bridge.py:542 realtime_playout_rejected call=ag04-synthetic-2d9505f601e447ef98469d4bea1afeed reason=contradicted_customer_relationship
+WARNING  app.realtime.bridge:bridge.py:542 realtime_playout_rejected call=ag04-synthetic-989b7c733dd946bf80b22660e35f2f40 reason=contradicted_customer_relationship
+WARNING  app.realtime.bridge:bridge.py:542 realtime_playout_rejected call=ag04-synthetic-094d7328a6fc4e109857ca7524e9d8de reason=contradicted_customer_relationship
+WARNING  app.realtime.bridge:bridge.py:542 realtime_playout_rejected call=ag04-synthetic-0f0c00d79dcf415fa03bccb2103ba8ff reason=contradicted_customer_relationship
+WARNING  app.realtime.bridge:bridge.py:542 realtime_playout_rejected call=ag04-synthetic-8af13653101b41b6903f0f23a239f7f6 reason=contradicted_customer_relationship
+WARNING  app.realtime.bridge:bridge.py:542 realtime_playout_rejected call=ag04-synthetic-341a8ae67a444680a95574e0cc3f70b8 reason=contradicted_customer_relationship
+WARNING  app.realtime.bridge:bridge.py:542 realtime_playout_rejected call=ag04-synthetic-a907a38287c6424ebe81c24f2c149035 reason=contradicted_customer_relationship
+WARNING  app.realtime.bridge:bridge.py:542 realtime_playout_rejected call=ag04-synthetic-ce100f3a33ca40d09354d5daadfc99ef reason=contradicted_customer_relationship
+WARNING  app.realtime.bridge:bridge.py:850 realtime_opt_out_speech_withheld call=ag04-synthetic-11006d5d199c4a1ba82e725fd880fabf
+============================== warnings summary ===============================
+tests/unit/test_ag04_native_qualification.py: 97 warnings
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\ag04-native-receipts-20261005\backend\app\domain\services\transcript_service.py:372: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    timestamp=datetime.utcnow().isoformat(),
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/unit/test_ag04_native_qualification.py::test_declared_corpus_runs_actual_native_boundaries_without_network
+1 failed, 97 warnings in 12.20s

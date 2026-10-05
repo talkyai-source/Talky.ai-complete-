@@ -1,0 +1,200 @@
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=6 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=7 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=8 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=9 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=10 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=11 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=12 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=13 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=14 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=15 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=16 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=17 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=18 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=19 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=20 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=21 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=22 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=23 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=24 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=25 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=26 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=27 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=28 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=29 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=30 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=31 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=32 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=33 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=34 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=6 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=7 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=8 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=9 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=10 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=11 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=12 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=13 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=14 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=15 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=16 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=17 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=18 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=19 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=20 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=21 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=22 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=23 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=24 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=25 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=26 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=27 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=28 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=29 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=30 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=31 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=32 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=33 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=34 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=6 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=7 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=8 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=9 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=10 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=11 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=12 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=13 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=14 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=15 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=16 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=17 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=18 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=19 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=20 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=21 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=22 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=23 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=24 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=25 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=26 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=27 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=28 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=29 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=30 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=31 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=32 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=33 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=34 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=6 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=7 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=8 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=9 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=10 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=11 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=12 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=13 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=14 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=15 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=16 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=17 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=18 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=19 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=20 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=21 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=22 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=23 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=24 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=25 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=26 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=27 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=28 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=29 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=30 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=31 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=32 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=33 chars=25 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.long_relationship_memory turn=34 chars=25 � identical to the previous agent line
+ungrounded_figure_replaced call=synthetic-ag figures=['GBP 999']
+ungrounded_figure_replaced call=synthetic-ag figures=['GBP 999']
+ungrounded_figure_replaced call=synthetic-ag figures=['GBP 999']
+ungrounded_figure_replaced call=synthetic-ag figures=['GBP 999']
+agent_repeated_turn call_id=synthetic-ag04.third_party_email turn=4 chars=30 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.third_party_email turn=4 chars=30 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.third_party_email turn=4 chars=30 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.third_party_email turn=4 chars=30 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.negated_dnc turn=4 chars=30 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.negated_dnc turn=4 chars=30 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.negated_dnc turn=4 chars=30 � identical to the previous agent line
+agent_repeated_turn call_id=synthetic-ag04.negated_dnc turn=4 chars=30 � identical to the previous agent line
+Blocked failed/unconfirmed voice action claim: send_email status=failed
+llm_response_blocked_before_tts call=synthetic-ag reason=action_failed:send_email:failed
+Blocked failed/unconfirmed voice action claim: send_email status=failed
+llm_response_blocked_before_tts call=synthetic-ag reason=action_failed:send_email:failed
+Blocked failed/unconfirmed voice action claim: send_email status=failed
+llm_response_blocked_before_tts call=synthetic-ag reason=action_failed:send_email:failed
+Blocked failed/unconfirmed voice action claim: send_email status=failed
+llm_response_blocked_before_tts call=synthetic-ag reason=action_failed:send_email:failed
+Blocked unconfirmed voice action claim: transfer_call
+llm_response_blocked_before_tts call=synthetic-ag reason=unconfirmed_action:transfer_call
+Blocked unconfirmed voice action claim: transfer_call
+llm_response_blocked_before_tts call=synthetic-ag reason=unconfirmed_action:transfer_call
+Blocked unconfirmed voice action claim: transfer_call
+llm_response_blocked_before_tts call=synthetic-ag reason=unconfirmed_action:transfer_call
+Blocked unconfirmed voice action claim: transfer_call
+llm_response_blocked_before_tts call=synthetic-ag reason=unconfirmed_action:transfer_call
+LLM timeout for call synthetic-ag04.provider_zero_output (no TTS yet), using fallback
+LLM timeout for call synthetic-ag04.provider_zero_output (no TTS yet), using fallback
+LLM timeout for call synthetic-ag04.provider_zero_output (no TTS yet), using fallback
+LLM timeout for call synthetic-ag04.provider_zero_output (no TTS yet), using fallback
+LLM timeout for call synthetic-ag04.provider_partial_eof after 1 sentence(s) TTS'd � dropping remaining buffer, no fallback
+LLM timeout for call synthetic-ag04.provider_partial_eof after 1 sentence(s) TTS'd � dropping remaining buffer, no fallback
+LLM timeout for call synthetic-ag04.provider_partial_eof after 1 sentence(s) TTS'd � dropping remaining buffer, no fallback
+LLM timeout for call synthetic-ag04.provider_partial_eof after 1 sentence(s) TTS'd � dropping remaining buffer, no fallback
+LLM timeout for call synthetic-ag04.provider_partial_length after 1 sentence(s) TTS'd � dropping remaining buffer, no fallback
+LLM timeout for call synthetic-ag04.provider_partial_length after 1 sentence(s) TTS'd � dropping remaining buffer, no fallback
+LLM timeout for call synthetic-ag04.provider_partial_length after 1 sentence(s) TTS'd � dropping remaining buffer, no fallback
+LLM timeout for call synthetic-ag04.provider_partial_length after 1 sentence(s) TTS'd � dropping remaining buffer, no fallback
+Empty LLM response for call synthetic-ag04.transport_disconnect � rolling back user message
+Empty LLM response for call synthetic-ag04.transport_disconnect � rolling back user message
+Empty LLM response for call synthetic-ag04.transport_disconnect � rolling back user message
+Empty LLM response for call synthetic-ag04.transport_disconnect � rolling back user message
+realtime_playout_rejected call=ag04-synthetic-428af48da81248f99bf07dbd7dff4891 reason=contradicted_customer_relationship
+realtime_playout_rejected call=ag04-synthetic-4270a3a64bf947c0b8039210686cab30 reason=contradicted_customer_relationship
+realtime_playout_rejected call=ag04-synthetic-6313696823b94ef091c005e05f374c90 reason=contradicted_customer_relationship
+realtime_playout_rejected call=ag04-synthetic-7def0f92cdf64fccb69bd3594ccc1e43 reason=contradicted_customer_relationship
+realtime_playout_rejected call=ag04-synthetic-4208bb6c45ff47c4a35aec5d248a9632 reason=contradicted_customer_relationship
+realtime_playout_rejected call=ag04-synthetic-8691844c179d45c0b76bd0dc44fdff61 reason=contradicted_customer_relationship
+realtime_playout_rejected call=ag04-synthetic-6a70a94391304dbab123c6c3c785d812 reason=contradicted_customer_relationship
+realtime_playout_rejected call=ag04-synthetic-f0021bdd62ce45cf87e21e2dd78b5878 reason=contradicted_customer_relationship
+realtime_playout_rejected call=ag04-synthetic-821dd8f03776426c91fb9ccdf61b75bb reason=contradicted_customer_relationship
+realtime_playout_rejected call=ag04-synthetic-d6172335bc3b411d9234987db9e80d18 reason=contradicted_customer_relationship
+realtime_opt_out_speech_withheld call=ag04-synthetic-3cd190f0cad54b1e9429b2e0efca6cd6
+realtime_opt_out_speech_withheld call=ag04-synthetic-62b23cb1559440afae90c2209db9bdb4
+realtime_opt_out_speech_withheld call=ag04-synthetic-427fd5fca5294f74b90b852ef496a52c
+realtime_opt_out_speech_withheld call=ag04-synthetic-ab3ced77cbe742ee9cbdf322593c7a2d
+realtime_playout_rejected call=ag04-synthetic-e209c784ad5540f19f6465ca0fb650d1 reason=unsupported_company_figure
+realtime_playout_rejected call=ag04-synthetic-bc13e3cb33644c47afbdec6f191c1506 reason=unsupported_company_figure
+Blocked failed/unconfirmed voice action claim: send_email status=unavailable
+realtime_playout_rejected call=ag04-synthetic-13703137e51b4c3c9f85a1af8c0b87bc reason=action_failed:send_email:unavailable
+Blocked failed/unconfirmed voice action claim: send_email status=unavailable
+realtime_playout_rejected call=ag04-synthetic-3fc6cb8915c74e41bb86da2e50068e2e reason=action_failed:send_email:unavailable
+realtime_bridge connection_lost call=ag04-synthetic-8c7014eb906c4b45b3c2b1a88a746462 � realtime socket died mid-call; ending Realtime session
+realtime_bridge connection_lost call=ag04-synthetic-501e91e9ebcf477db0d129b72810636b � realtime socket died mid-call; ending Realtime session
+{
+  "status": "failed",
+  "production_approved": false,
+  "counts": {
+    "declared_profile_scenario_rows": 174,
+    "observed_rows": 174,
+    "distinct_replayed_scenario_ids": 57,
+    "control_checks": 1160,
+    "control_failures": 0,
+    "captured_or_reviewed_semantic_failures": 1,
+    "unreviewed_semantic_findings": 173
+  },
+  "runtime_control_status": "passed",
+  "semantic_status": "failed",
+  "live_profile_qualification": "not_run",
+  "human_rubric_approval": "not_run",
+  "evidence_errors": []
+}

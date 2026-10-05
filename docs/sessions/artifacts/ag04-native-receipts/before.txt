@@ -1,0 +1,26 @@
+F                                                                        [100%]
+================================== FAILURES ===================================
+_____ test_declared_corpus_runs_actual_native_boundaries_without_network ______
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\tasks.py:520: in wait_for
+    return await fut
+E   asyncio.exceptions.CancelledError
+
+The above exception was the direct cause of the following exception:
+tests\unit\test_ag04_native_qualification.py:26: in test_declared_corpus_runs_actual_native_boundaries_without_network
+    rows = await native.run_cases(ROOT)
+tests\qualification\ag04_native.py:349: in run_cases
+    results.append(await NativeReplay(scenario, provider, corpus).run())
+tests\qualification\ag04_native.py:318: in run
+    await self.step(step)
+tests\qualification\ag04_native.py:232: in step
+    await self.drain(playback=step.get("wait", True))
+tests\qualification\ag04_native.py:166: in drain
+    await asyncio.wait_for(asyncio.gather(*self.bridge._tool_tasks), 2)
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\tasks.py:519: in wait_for
+    async with timeouts.timeout(timeout):
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\timeouts.py:115: in __aexit__
+    raise TimeoutError from exc_val
+E   TimeoutError
+=========================== short test summary info ===========================
+FAILED tests/unit/test_ag04_native_qualification.py::test_declared_corpus_runs_actual_native_boundaries_without_network
+1 failed in 6.14s
