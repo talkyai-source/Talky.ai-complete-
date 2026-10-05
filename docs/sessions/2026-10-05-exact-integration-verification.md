@@ -244,3 +244,39 @@ One executor invocation in the authored sequence does not prove real timeout
 reconciliation, durable no-resend behavior, model comprehension or heard speech.
 No provider, telephone or database effect was performed. Package/final/scenario
 statuses and the three deferred packages remain unchanged.
+
+## Combined selection, action and audio-storage verification
+
+At `bbbb9450`, **1,714 checks passed, zero failed, ten skipped**, with 2,111
+warnings in 37.14 seconds across 66 related backend modules. Source hashes stayed
+unchanged. [Command/source inventory](artifacts/selection-guard-storage-integration/integrated-command.json)
+and [output](artifacts/selection-guard-storage-integration/integrated-tests.txt)
+record the combined selected-profile lifecycle, PJSIP acknowledgement, cloud
+selection/retry, action speech/common replay and local audio-storage boundaries.
+Nine skips require POSIX file modes; one requires unavailable FFmpeg. This is a
+new affected-path run, not a new full-backend, PostgreSQL or deployed acceptance
+run. Previous counts overlap and are not added to this result.
+
+[Cloud availability](2026-10-05-cloud-telephony-availability.md), source `8f5d7731`
+integrated as `bbbb9450`, fixes the actual silent switch from saved cloud selection
+to SIP. Production activation is unavailable; existing pointers/credentials stay
+visible and block new work until explicitly corrected. Terminal/provider-ID
+receipt replay remains authoritative. A temporary selection lookup failure
+preserves the same job/attempt; a known unsupported selection has no automatic
+retry in either existing retry mode, and absence proof is still required before
+settlement. Explicit nonproduction qualification remains separate from cloud
+campaign support.
+
+Settings now distinguishes saved credentials, provider-account/local configuration
+checks and calling availability. Missing availability cannot enable activation;
+legitimate nullable timeout status remains readable. The owner verified **16
+rendered frontend checks**, scoped ESLint and TypeScript, alongside 202+66 backend
+checks. Integrated frontend files match that owner source exactly; this records
+source identity, not another frontend run or a Next build. Backend, frontend/API
+and root reviews found no further material issue in the bounded final change.
+
+All changes remain local. No provider request, real call, migration, push or
+deployment occurred. There are still **27 eligible unfinished packages**, the
+separate AG03 candidate and three deferred packages. All 15 final gates and 22
+scenario gates remain not run. The next inspections concern existing held-action
+and ambiguous-call recovery; live/operator prerequisites are still outstanding.

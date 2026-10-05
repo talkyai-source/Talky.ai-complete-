@@ -96,9 +96,14 @@ when their legacy flags are enabled. Explicit nonproduction qualification remain
 available. The cloud DID helper can still return tenantless defaults without
 resolved ownership; a signed callback's destination alone does not establish the
 outbound tenant. The current campaign worker uses SIP/Asterisk with a planned
-call identity. This containment does not implement cloud campaign routing. The
-dashboard cloud activation promise and saved-selection admission mismatch remain
-under repair. Existing enabled cloud sessions must drain before rollout; see the
+call identity. This containment does not implement cloud campaign routing.
+Settings reports server-authoritative cloud availability and preserves saved
+credentials/selections. Production cloud selections reject new campaign/redial
+and final origination work instead of silently using SIP. Temporary selection
+lookup failures retain the original queued attempt; known unsupported selections
+do not automatically retry. Existing call receipts remain authoritative. See the
+[selection/admission report](../docs/sessions/2026-10-05-cloud-telephony-availability.md).
+Existing enabled cloud sessions must drain before rollout; see the
 [production boundary report](../docs/sessions/2026-10-05-legacy-cloud-production-boundary.md).
 
 Select an existing supported profile through AI Options, save and reload it, then

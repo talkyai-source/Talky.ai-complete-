@@ -453,10 +453,16 @@
           "kind": "combined_guard_cloud_lifecycle_and_replay_regression",
           "candidate": "add699c4f7bf1fbf603f078e862f7229a04406c8"
         },
-        "docs/sessions/2026-10-05-legacy-cloud-production-boundary.md"
+        "docs/sessions/2026-10-05-legacy-cloud-production-boundary.md",
+        {
+          "path": "docs/sessions/2026-10-05-exact-integration-verification.md",
+          "kind": "combined_selection_action_guard_and_audio_storage_regression",
+          "candidate": "bbbb9450dfbff9e0436493a3b7b870a64481b77a"
+        },
+        "docs/sessions/2026-10-05-cloud-telephony-availability.md"
       ],
       "blocker": null,
-      "next_action": "Known-tenant profile lookup and selected warmup ownership are locally verified. Unqualified legacy cloud callbacks are now production-blocked, with nonproduction qualification preserved. Repair the surfaced cloud activation/routing promise and saved-selection admission mismatch, then complete designated-profile live acceptance.",
+      "next_action": "Saved-profile lookup, selected warmup ownership and production cloud-selection containment are locally verified. Existing cloud credentials/pointers remain visible; unsupported selections no longer fall through to SIP. Complete designated supported-profile, SIP route and live acceptance; no cloud origination implementation is implied.",
       "target_date": null,
       "execution_note": "Local candidate 4f47123f: 818 backend passes/1 skip, 38 focused frontend passes, typecheck/build/CI-rule Ruff/scoped ESLint pass. Broader frontend 673 passes/1 baseline failure/2 skips; full lint has baseline configuration error. No real provider calls, migration, push or deployment."
     },
@@ -583,7 +589,12 @@
         "docs/sessions/artifacts/ag04-passive-email-failure/verification.md",
         "docs/sessions/artifacts/ag04-native-parity/verification.md",
         "docs/sessions/artifacts/ag04-unresolved-action-speech/verification.md",
-        "docs/sessions/artifacts/ag04-unknown-common/verification.md"
+        "docs/sessions/artifacts/ag04-unknown-common/verification.md",
+        {
+          "path": "docs/sessions/2026-10-05-exact-integration-verification.md",
+          "kind": "combined_selection_action_guard_and_audio_storage_regression",
+          "candidate": "bbbb9450dfbff9e0436493a3b7b870a64481b77a"
+        }
       ],
       "blocker": "Captured Groq semantic failure retained. Proposed matrix 42/50 mapped by offline replay; intended profile roster/rubric/cohort unratified; live/human/audio/effect acceptance not run. AG02 retrieval gate remains failed. Eight canonical conditions remain unmapped.",
       "next_action": "Qualify remaining actual acoustic, grounded-answer, sensitive/unrelated request and unclear-name boundaries. Preserve failed Groq semantics and perform approved per-profile human/live qualification. The 42/50 union, 228 replay rows and 2,146 passing runtime controls are not semantic or live approval; unresolved-action speech repair does not prove durable duplicate-effect recovery.",
@@ -679,7 +690,12 @@
           "candidate": "0cda5660"
         },
         "docs/sessions/artifacts/ag04-unresolved-action-speech/verification.md",
-        "docs/sessions/artifacts/ag04-unknown-common/verification.md"
+        "docs/sessions/artifacts/ag04-unknown-common/verification.md",
+        {
+          "path": "docs/sessions/2026-10-05-exact-integration-verification.md",
+          "kind": "combined_selection_action_guard_and_audio_storage_regression",
+          "candidate": "bbbb9450dfbff9e0436493a3b7b870a64481b77a"
+        }
       ],
       "blocker": null,
       "next_action": "Complete original-account evidence inspection and approved durable operator resolution of held outcomes; saved receipt display and selection ownership are locally verified. Missing IDs, timeouts and empty searches do not authorize resend. Designated provider/browser acceptance remains open.",
@@ -745,10 +761,16 @@
           "kind": "combined_guard_cloud_lifecycle_and_replay_regression",
           "candidate": "add699c4f7bf1fbf603f078e862f7229a04406c8"
         },
-        "docs/sessions/2026-10-05-legacy-cloud-production-boundary.md"
+        "docs/sessions/2026-10-05-legacy-cloud-production-boundary.md",
+        {
+          "path": "docs/sessions/2026-10-05-exact-integration-verification.md",
+          "kind": "combined_selection_action_guard_and_audio_storage_regression",
+          "candidate": "bbbb9450dfbff9e0436493a3b7b870a64481b77a"
+        },
+        "docs/sessions/2026-10-05-cloud-telephony-availability.md"
       ],
       "blocker": "A05 cleanup and documented crash contract are locally verified; remaining architecture dispositions follow lifecycle/provider/configuration owning repairs. No full architecture or live/release claim.",
-      "next_action": "Retain verified selected-session/profile ownership, provider boundaries and bounded A05 closure. Legacy cloud callbacks are production-contained; surfaced provider activation and saved-selection admission truth remain under repair. Unknown-provider reconciliation and deployed acceptance remain with OP02/OP05/OP12.",
+      "next_action": "Retain selected-session/profile ownership, authoritative availability and bounded A05 closure. Legacy cloud callbacks and unsupported production selections are contained without adding a cloud route. Remaining unknown-provider/operator reconciliation and deployed acceptance follow OP02/OP05/OP12.",
       "target_date": null
     },
     {
@@ -899,6 +921,11 @@
           "path": "docs/sessions/2026-10-05-exact-integration-verification.md",
           "kind": "combined_guard_cloud_lifecycle_and_replay_regression",
           "candidate": "add699c4f7bf1fbf603f078e862f7229a04406c8"
+        },
+        {
+          "path": "docs/sessions/2026-10-05-exact-integration-verification.md",
+          "kind": "combined_selection_action_guard_and_audio_storage_regression",
+          "candidate": "bbbb9450dfbff9e0436493a3b7b870a64481b77a"
         }
       ],
       "blocker": "Local contracts passed; actual carrier/PBX configuration, timer installation/detection, owned handset caller-ID and deployed rollback acceptance remain unverified.",
@@ -971,9 +998,15 @@
           "path": "docs/sessions/2026-10-05-exact-integration-verification.md",
           "kind": "combined_guard_cloud_lifecycle_and_replay_regression",
           "candidate": "add699c4f7bf1fbf603f078e862f7229a04406c8"
-        }
+        },
+        {
+          "path": "docs/sessions/2026-10-05-exact-integration-verification.md",
+          "kind": "combined_selection_action_guard_and_audio_storage_regression",
+          "candidate": "bbbb9450dfbff9e0436493a3b7b870a64481b77a"
+        },
+        "docs/sessions/2026-10-05-cloud-telephony-availability.md"
       ],
-      "blocker": "Pre-intent pacing, DNC persistence/settlement, and selected warmup/terminal callback ownership are repaired locally. Unknown-provider/ambiguous-owner reconciliation and actual queue/process/PBX recovery acceptance remain open.",
+      "blocker": "Local pacing, DNC settlement, selected warmup ownership and unsupported-cloud admission/retry boundaries pass. Unknown-provider/ambiguous-owner reconciliation and actual queue/process/PBX recovery acceptance remain open.",
       "next_action": "Complete designated failure/recovery acceptance and existing ambiguous-owner reconciliation; retain true call outcomes, retry ownership, selected profile and selected route without blind redial or session reconstruction.",
       "target_date": null
     },
@@ -1059,7 +1092,12 @@
           "kind": "integrated_local_regression_not_release_acceptance",
           "candidate": "44dcc2367446cbe85c9c2757838b8695cf15bf1f"
         },
-        "docs/sessions/2026-10-05-feedback-local-storage-privacy.md"
+        "docs/sessions/2026-10-05-feedback-local-storage-privacy.md",
+        {
+          "path": "docs/sessions/2026-10-05-exact-integration-verification.md",
+          "kind": "combined_selection_action_guard_and_audio_storage_regression",
+          "candidate": "bbbb9450dfbff9e0436493a3b7b870a64481b77a"
+        }
       ],
       "blocker": "Native DNC persistence/speech, durable lead/retry settlement, truthful bulk suppression and recording creation are repaired locally. Approved retention/export/delete rules, per-store execution and deployed supplier/storage evidence remain open.",
       "next_action": "Complete the approved recording/data lifecycle, per-store request execution and deployed supplier/retention reconciliation; retain verified DNC settlement and bulk acknowledgement evidence.",
@@ -1199,7 +1237,12 @@
         },
         "docs/sessions/2026-10-05-pjsip-reload-receipts.md",
         "docs/sessions/2026-10-05-op11-permission-boundaries.md",
-        "docs/sessions/2026-10-05-feedback-local-storage-privacy.md"
+        "docs/sessions/2026-10-05-feedback-local-storage-privacy.md",
+        {
+          "path": "docs/sessions/2026-10-05-exact-integration-verification.md",
+          "kind": "combined_selection_action_guard_and_audio_storage_regression",
+          "candidate": "bbbb9450dfbff9e0436493a3b7b870a64481b77a"
+        }
       ],
       "blocker": "Supplier-cost ingestion/reconciliation is unavailable. Source permission inventory is complete, but approved deployment identity/topology, permission matrix and positive/negative host acceptance are outstanding.",
       "next_action": "Obtain the designated deployment identity/permission matrix and supplier statements, then exercise exact host boundaries. Preserve unavailable costs, private persistent recordings and explicit direct Asterisk CLI authorization. Source inventory does not establish deployed privilege safety.",
@@ -1315,6 +1358,11 @@
           "path": "docs/sessions/2026-10-05-exact-integration-verification.md",
           "kind": "combined_guard_cloud_lifecycle_and_replay_regression",
           "candidate": "add699c4f7bf1fbf603f078e862f7229a04406c8"
+        },
+        {
+          "path": "docs/sessions/2026-10-05-exact-integration-verification.md",
+          "kind": "combined_selection_action_guard_and_audio_storage_regression",
+          "candidate": "bbbb9450dfbff9e0436493a3b7b870a64481b77a"
         }
       ],
       "blocker": null,
