@@ -120,7 +120,11 @@ def prepare_knowledge_evidence(hits: list[dict], query: str, *,
 
     passages = []
     used = 0
-    for node in hits[:_KB_MAX_CHUNKS]:
+    # Weak context is discarded when usable strong evidence exists. Do not let
+    # it consume the budget first and crowd that evidence out. Preserve the
+    # original candidate window and retrieval order within each coverage group.
+    candidates = sorted(hits[:_KB_MAX_CHUNKS], key=lambda hit: knowledge_match_is_weak([hit]))
+    for node in candidates:
         if not isinstance(node, dict):
             continue
         # Summary/voice_answer are generated phrasing, not source evidence.
@@ -132,7 +136,7 @@ def prepare_knowledge_evidence(hits: list[dict], query: str, *,
             continue
         available = min(chunk_chars, total_chars - used - len(heading) - 4)
         if available <= 0:
-            break
+            continue  # A later node can have a shorter heading and still fit.
         body = select_passage(raw, query, available)
         if not body:
             continue
