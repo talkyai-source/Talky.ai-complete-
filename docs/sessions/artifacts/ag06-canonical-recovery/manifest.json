@@ -1,0 +1,26 @@
+{
+  "tested_base": "db99f652fa2f921d5c0f24f8d25c002f228f12b2",
+  "source_commit": "5fcacd633c89f06b5bd05e18610ccd2a700c198a",
+  "source_hash_file": "source-hashes.json",
+  "source_count": 83,
+  "artifact_count": 15,
+  "artifact_lf_sha256": {
+    "docs/sessions/artifacts/ag06-canonical-recovery/commands.json": "2ebfa9b2322e89bcacc23e4580a166fbbf75bbb9e58ff9384b4f735e6776ea3d",
+    "docs/sessions/artifacts/ag06-canonical-recovery/final-result-migration.json": "952dc736e1b95b31f7f4cce2426af636b8b7042fdfd590c77a7c9bffa535619e",
+    "docs/sessions/artifacts/ag06-canonical-recovery/final-result-migration.txt": "1f8840722a79a9fa1a1cd6a0dc873b1bdbd6887e31eade580afc97dc45670309",
+    "docs/sessions/artifacts/ag06-canonical-recovery/final-result.json": "c9714a27c8d09e6b15405b3900403a6afdd94b1a66a6a8eddbe8f967b896726d",
+    "docs/sessions/artifacts/ag06-canonical-recovery/final.txt": "77e65c980141d062d14c51de1fc203e7475b2c94a6071fac75866e8acbd8f53f",
+    "docs/sessions/artifacts/ag06-canonical-recovery/first-probe.py": "225141c89e9b5eb8635609e1a96a48b1d8b26ff166a5b4da54120c3949a692d1",
+    "docs/sessions/artifacts/ag06-canonical-recovery/first-result-migration.json": "952dc736e1b95b31f7f4cce2426af636b8b7042fdfd590c77a7c9bffa535619e",
+    "docs/sessions/artifacts/ag06-canonical-recovery/first-result-migration.txt": "1f8840722a79a9fa1a1cd6a0dc873b1bdbd6887e31eade580afc97dc45670309",
+    "docs/sessions/artifacts/ag06-canonical-recovery/first-result.json": "4079966d88ffc93d93098332556148f96c00e5059e36b970029c21866a1ef789",
+    "docs/sessions/artifacts/ag06-canonical-recovery/first-test.py": "f526df8e22b936c3b0575a24d7c92f464da75acb3cbf94f9689ef65392cc1547",
+    "docs/sessions/artifacts/ag06-canonical-recovery/first.txt": "51f9d1665d9849d641cabaffea5e0c80f2324d0409addd5369db76e68ede4eef",
+    "docs/sessions/artifacts/ag06-canonical-recovery/lint.txt": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18",
+    "docs/sessions/artifacts/ag06-canonical-recovery/probe.py": "225141c89e9b5eb8635609e1a96a48b1d8b26ff166a5b4da54120c3949a692d1",
+    "docs/sessions/artifacts/ag06-canonical-recovery/source-hashes.json": "812d7e14e30e9bbdc3489f0c79f58cf781d4b5aa60d905679a03c1aa9a427a86",
+    "docs/sessions/2026-10-06-ag06-canonical-recovery-acceptance.md": "e5abfa4acec79d66fb0c194493be31154434ce5f72c8749e0773a1350034fe88"
+  },
+  "review": "Root and account_finalize pre-execution review; account_finalize final source/result review clear, without rerun or database access. Artifact parity reviewed separately before evidence commit.",
+  "scope": "Canonical consolidated bootstrap and actual0009-through0062 route/auth/adapter acceptance with synthetic provider ports and explicit fixture grants; no full product/provider/browser or exact-requirements claim."
+}
