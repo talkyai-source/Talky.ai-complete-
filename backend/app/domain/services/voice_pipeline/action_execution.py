@@ -39,6 +39,33 @@ async def _pool(session):
     return pool
 
 
+def _inbound_transfer_policy_available(context, tenant):
+    """Read-only capability check; final admission still owns limits and effects."""
+    from app.domain.services.telephony.inbound_transfer import (
+        inbound_transfer_destination_approved,
+        inbound_transfer_scope_available,
+        normalize_did,
+    )
+    try:
+        snapshot = _object(context.get("route_snapshot"))
+        route = _object(snapshot.get("route"))
+        policy = _object(_object(snapshot.get("inbound_config")).get("transfer_policy"))
+        destination = normalize_did(context["brief"].get("transfer_destination"))
+        return bool(
+            inbound_transfer_scope_available(tenant_id=tenant, config_id=route.get("config_id"))
+            and context.get("admission_status") == "allowed"
+            and context.get("processing_status") == "active"
+            and context.get("billing_status") == "reserved"
+            and int(context.get("reserved_seconds") or 0) > 0
+            and policy.get("enabled") is True
+            and destination
+            and destination != normalize_did(route.get("called_did"))
+            and inbound_transfer_destination_approved(policy, destination)
+        )
+    except (TypeError, ValueError, AttributeError):
+        return False
+
+
 async def _context(session, pool):
     tenant = getattr(session, "tenant_id", None)
     campaign = getattr(session, "campaign_id", None)
@@ -50,7 +77,8 @@ async def _context(session, pool):
             SELECT c.id AS call_id, COALESCE(c.provider_call_id,c.external_call_uuid) AS provider_call_id, c.lead_id, c.provider,
                    c.status AS call_status, p.id AS campaign_id, p.status AS campaign_status,
                    p.direction, p.script_config, l.phone_number, l.do_not_call,
-                   l.status AS lead_status
+                   l.status AS lead_status, c.direction AS call_direction, c.route_snapshot,
+                   c.admission_status, c.processing_status, c.billing_status, c.reserved_seconds
             FROM calls c JOIN campaigns p ON p.id=c.campaign_id AND p.tenant_id=c.tenant_id
             LEFT JOIN leads l ON l.id=c.lead_id AND l.tenant_id=c.tenant_id AND l.campaign_id=p.id
             WHERE c.tenant_id=$1::uuid AND p.id=$2::uuid
@@ -66,7 +94,13 @@ async def _context(session, pool):
                 WHERE c.tenant_id=$1::uuid AND a.tenant_id=$1::uuid AND c.type='email'
                   AND c.status='active' AND a.status='active')
         """, str(tenant)))
-    allowed = set(context["brief"].get("approved_next_actions") or [])
+        context["inbound_transfer_available"] = False
+        allowed = set(context["brief"].get("approved_next_actions") or [])
+        if ("transfer" in allowed and context.get("call_direction") == "inbound"
+                and _inbound_transfer_policy_available(context, str(tenant))):
+            context["inbound_transfer_available"] = await conn.fetchval(
+                "SELECT inbound_transfer_enabled FROM platform_runtime_controls WHERE id=1"
+            ) is True
     context["callback_worker_ready"] = False
     if "schedule_callback" in allowed:
         try:
@@ -107,7 +141,9 @@ def _capabilities(context):
             and not context.get("do_not_call") and context.get("lead_status") != "deleted"):
         out["schedule_callback"] = "Schedule the confirmed number and exact time in the existing dialer."
     if ("transfer" in allowed and brief.get("transfer_destination") and context.get("transfer_connected")
-            and context.get("provider") in {"asterisk", "freeswitch"}):
+            and context.get("provider") in {"asterisk", "freeswitch"}
+            and (context.get("call_direction", context.get("direction")) != "inbound"
+                 or context.get("inbound_transfer_available") is True)):
         out["transfer_call"] = "Approved destination only; live telephony policy also applies."
     return out
 

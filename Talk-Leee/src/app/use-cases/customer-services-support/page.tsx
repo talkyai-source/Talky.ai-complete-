@@ -58,8 +58,8 @@ export default function CustomerServicesSupportUseCasePage() {
     },
     {
       label: "04",
-      title: "Intelligent Human Handoff",
-      description: "Sensitive or complex conversations transfer to your team with full context.",
+      title: "Requests for Human Review",
+      description: "Record requests for your team to review. Human handoff for incoming calls is currently unavailable.",
     },
   ];
 
@@ -73,12 +73,12 @@ export default function CustomerServicesSupportUseCasePage() {
       description: "Refunds, plan changes, and status checks are completed, not deferred to a form.",
     },
     {
-      title: "Route complex requests",
-      description: "Anything outside its scope goes straight to the right team, already triaged.",
+      title: "Record complex requests",
+      description: "Capture the caller's request for your team to review in saved call details.",
     },
     {
-      title: "Escalate to human agents",
-      description: "Full conversation history and context travel with every handoff.",
+      title: "Collect requests for review",
+      description: "Your team can review saved caller details and available conversation history.",
     },
   ];
 
@@ -108,8 +108,8 @@ export default function CustomerServicesSupportUseCasePage() {
     },
     {
       label: "Step 4",
-      title: "Escalate when needed",
-      description: "Complex or sensitive conversations transfer to your team with full context.",
+      title: "Record requests for review",
+      description: "The agent can record a request for your team to review; this does not arrange a callback.",
     },
   ];
 
@@ -153,8 +153,8 @@ export default function CustomerServicesSupportUseCasePage() {
       description: "Track conversations, resolutions, issues, and performance in one view.",
     },
     {
-      title: "Human Handoff",
-      description: "Transfers complex or sensitive conversations to your team with context.",
+      title: "Human Review",
+      description: "Review saved caller requests. Live handoff for incoming calls is currently unavailable.",
     },
   ];
 
@@ -214,7 +214,7 @@ export default function CustomerServicesSupportUseCasePage() {
     {
       question: "What are AI customer support services?",
       answer:
-        "AI agents handle customer conversations, answer questions, resolve issues, and escalate complex requests to human agents.",
+        "AI agents can answer questions using approved information and collect customer requests for review through the configured workflow.",
     },
     {
       question: "How does AI customer support work?",
@@ -229,7 +229,7 @@ export default function CustomerServicesSupportUseCasePage() {
     {
       question: "Can AI handle customer support calls?",
       answer:
-        "Yes. AI agents can handle inbound calls, answer questions, resolve common issues, and transfer calls to human agents.",
+        "AI agents can answer incoming calls, use approved information, and collect requests for review. Human handoff for incoming calls is currently unavailable.",
     },
     {
       question: "Can AI customer support integrate with our CRM?",
@@ -238,7 +238,7 @@ export default function CustomerServicesSupportUseCasePage() {
     },
     {
       question: "Can customers speak to a human agent?",
-      answer: "Yes. Complex or sensitive conversations can be transferred to a human agent with the relevant context.",
+      answer: "Human handoff for incoming calls is currently unavailable. The agent can record a request for your team to review; this does not arrange a callback.",
     },
     {
       question: "Is AI customer support available 24/7?",

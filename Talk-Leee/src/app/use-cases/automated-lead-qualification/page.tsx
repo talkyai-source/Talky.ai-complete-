@@ -124,8 +124,8 @@ export default function AutomatedLeadQualificationUseCasePage() {
     },
     {
       number: "06",
-      title: "Human handoff",
-      description: "Perfect leads can be routed to a live rep mid-conversation when it matters most.",
+      title: "Human review",
+      description: "Your team can review captured lead details and caller requests. Recording a request does not arrange a callback.",
     },
   ];
 

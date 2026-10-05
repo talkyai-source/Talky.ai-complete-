@@ -67,7 +67,7 @@ export default function AIVoiceAgentPage() {
     "Handle customer requests",
     "Follow business rules",
     "Trigger workflows",
-    "Transfer calls when needed",
+    "Record requests for team review",
   ];
 
   const agentSteps = [
@@ -88,8 +88,8 @@ export default function AIVoiceAgentPage() {
       description: "Follow your workflow — qualifying, booking, collecting, or routing.",
     },
     {
-      title: "Hands off",
-      description: "Transfers the conversation to your team when human support is needed.",
+      title: "Collects requests",
+      description: "Records requests for your team to review. Human handoff for incoming calls is currently unavailable.",
     },
   ];
 
@@ -173,7 +173,7 @@ export default function AIVoiceAgentPage() {
         { name: "Welcome", detail: "Greets callers and understands why they’re calling." },
         { name: "Answer", detail: "Handles questions using your business knowledge." },
         { name: "Qualify", detail: "Identifies needs, qualifies opportunities, and books appointments." },
-        { name: "Escalate", detail: "Connects callers to your team when human support is needed." },
+        { name: "Record", detail: "Captures a caller's request for your team to review." },
       ],
     },
     {
@@ -247,7 +247,7 @@ export default function AIVoiceAgentPage() {
     "Automated Actions",
     "24/7 Availability",
     "Scalable Call Handling",
-    "Human Handoff",
+    "Requests for Human Review",
     "Flexible Use Cases",
   ];
 
@@ -295,7 +295,7 @@ export default function AIVoiceAgentPage() {
     "Qualification",
     "Follow-Up",
     "Appointment",
-    "Handoff",
+    "Review",
     "Customer Support",
   ];
 
@@ -318,7 +318,7 @@ export default function AIVoiceAgentPage() {
     {
       question: "Can an AI voice agent answer incoming calls?",
       answer:
-        "Yes. It handles inbound calls, answers questions, collects information, qualifies callers, schedules appointments, and transfers calls when needed.",
+        "It can answer incoming calls, use approved information, collect caller details, and use enabled scheduling actions. Human handoff for incoming calls is currently unavailable.",
     },
     {
       question: "Can AI voice agents handle sales conversations?",
@@ -333,7 +333,7 @@ export default function AIVoiceAgentPage() {
     {
       question: "Can the AI transfer calls to a human?",
       answer:
-        "Yes — human handoff can be included for situations that require expertise, judgment, or personal support.",
+        "Human handoff for incoming calls is currently unavailable. The agent can record a request for your team to review; this does not arrange a callback.",
     },
     {
       question: "Can I customize the AI’s voice and behavior?",

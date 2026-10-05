@@ -218,10 +218,12 @@ class _EffectivePermissionConn:
         self.direct_permissions = list(direct_permissions)
 
     async def fetch(self, query, *_args):
-        if "FROM tenant_users" in query:
-            return [{"name": name} for name in self.role_permissions]
+        # Direct grants also contain the required active-membership subquery.
+        # Match the outer relation before the nested tenant_users reference.
         if "FROM user_permissions" in query:
             return [{"name": name} for name in self.direct_permissions]
+        if "FROM tenant_users" in query:
+            return [{"name": name} for name in self.role_permissions]
         raise AssertionError(query)
 
     async def execute(self, *_args):
