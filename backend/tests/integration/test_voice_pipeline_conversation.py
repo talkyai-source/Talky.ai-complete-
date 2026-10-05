@@ -89,7 +89,6 @@ async def test_two_turns_use_prepared_context_and_commit_only_submitted_speech(p
     assert service.transcript_service.accumulate_turn.call_count == 2
 
 
-@pytest.mark.xfail(strict=True, reason="Baseline relationship grammar gap; AG03 follow-up authorized separately from mechanical cleanup.")
 async def test_caller_denial_reaches_state_and_blocks_existing_customer_claim(pipeline):
     service, session, llm, submitted = pipeline
     llm.chunks = ["As our existing customer, your account is ready."]

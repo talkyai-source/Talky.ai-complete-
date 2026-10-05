@@ -74,6 +74,9 @@ _CUSTOMER_AFFIRMATION = re.compile(
 _CUSTOMER_REASSERTION = re.compile(
     r"\b(?:our|the)\s+(?:records|system|list)\s+(?:show|shows|say|says|indicate|indicates)\b|"
     r"\byou(?:'re|\s+are)\s+(?:an?\s+|our\s+)?(?:existing\s+)?(?:customer|client|merchant)\b|"
+    # A sentence-leading "As our customer" also asserts a current relationship.
+    # Keep it anchored: "if you join as our customer" is not a current claim.
+    r"(?:^|[.!?;]\s*)\s*as\s+our\s+(?:existing\s+)?(?:customer|client|merchant)\b|"
     r"\byour\s+(?:account|subscription)\s+with\s+us\b", re.I,
 )
 
@@ -127,7 +130,7 @@ def contradicted_customer_claim(
     denial; ordinary product questions and statements remain untouched.
     """
     plain = _plain(text)
-    assertions = [match for match in _CUSTOMER_REASSERTION.finditer(plain) if not re.search(
+    assertions = [match for match in assertion_matches(plain, _CUSTOMER_REASSERTION) if not re.search(
         r"\b(?:can't|cannot|won't|will not|don't|do not)\s+(?:confirm|assume|say)\s+(?:that\s+)?$|"
         r"\b(?:if|whether)\s*$", plain[:match.start()], re.I,
     )]

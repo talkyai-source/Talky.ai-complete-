@@ -1,0 +1,99 @@
+FFFF.F.........                                                          [100%]
+================================== FAILURES ===================================
+_ test_direct_existing_relationship_presupposition_respects_denial[As our existing customer, your account is ready.] _
+
+text = 'As our existing customer, your account is ready.'
+
+    @pytest.mark.parametrize("text", [
+        "As our existing customer, your account is ready.",
+        "As our client, you can use your account.",
+        "As our existing merchant, your subscription is active.",
+        "Thanks. As our existing customer, your account is ready.",
+    ])
+    def test_direct_existing_relationship_presupposition_respects_denial(text):
+>       assert contradicted_customer_claim(text, relationship=CustomerRelationship.DENIED)
+E       AssertionError: assert None
+E        +  where None = contradicted_customer_claim('As our existing customer, your account is ready.', relationship=<CustomerRelationship.DENIED: 'denied'>)
+E        +    where <CustomerRelationship.DENIED: 'denied'> = CustomerRelationship.DENIED
+
+tests\unit\test_customer_claim_admission.py:17: AssertionError
+_ test_direct_existing_relationship_presupposition_respects_denial[As our client, you can use your account.] _
+
+text = 'As our client, you can use your account.'
+
+    @pytest.mark.parametrize("text", [
+        "As our existing customer, your account is ready.",
+        "As our client, you can use your account.",
+        "As our existing merchant, your subscription is active.",
+        "Thanks. As our existing customer, your account is ready.",
+    ])
+    def test_direct_existing_relationship_presupposition_respects_denial(text):
+>       assert contradicted_customer_claim(text, relationship=CustomerRelationship.DENIED)
+E       AssertionError: assert None
+E        +  where None = contradicted_customer_claim('As our client, you can use your account.', relationship=<CustomerRelationship.DENIED: 'denied'>)
+E        +    where <CustomerRelationship.DENIED: 'denied'> = CustomerRelationship.DENIED
+
+tests\unit\test_customer_claim_admission.py:17: AssertionError
+_ test_direct_existing_relationship_presupposition_respects_denial[As our existing merchant, your subscription is active.] _
+
+text = 'As our existing merchant, your subscription is active.'
+
+    @pytest.mark.parametrize("text", [
+        "As our existing customer, your account is ready.",
+        "As our client, you can use your account.",
+        "As our existing merchant, your subscription is active.",
+        "Thanks. As our existing customer, your account is ready.",
+    ])
+    def test_direct_existing_relationship_presupposition_respects_denial(text):
+>       assert contradicted_customer_claim(text, relationship=CustomerRelationship.DENIED)
+E       AssertionError: assert None
+E        +  where None = contradicted_customer_claim('As our existing merchant, your subscription is active.', relationship=<CustomerRelationship.DENIED: 'denied'>)
+E        +    where <CustomerRelationship.DENIED: 'denied'> = CustomerRelationship.DENIED
+
+tests\unit\test_customer_claim_admission.py:17: AssertionError
+_ test_direct_existing_relationship_presupposition_respects_denial[Thanks. As our existing customer, your account is ready.] _
+
+text = 'Thanks. As our existing customer, your account is ready.'
+
+    @pytest.mark.parametrize("text", [
+        "As our existing customer, your account is ready.",
+        "As our client, you can use your account.",
+        "As our existing merchant, your subscription is active.",
+        "Thanks. As our existing customer, your account is ready.",
+    ])
+    def test_direct_existing_relationship_presupposition_respects_denial(text):
+>       assert contradicted_customer_claim(text, relationship=CustomerRelationship.DENIED)
+E       AssertionError: assert None
+E        +  where None = contradicted_customer_claim('Thanks. As our existing customer, your account is ready.', relationship=<CustomerRelationship.DENIED: 'denied'>)
+E        +    where <CustomerRelationship.DENIED: 'denied'> = CustomerRelationship.DENIED
+
+tests\unit\test_customer_claim_admission.py:17: AssertionError
+_ test_quoted_negated_conditional_and_product_text_do_not_assert_relationship[You said "You are an existing customer." That was incorrect.] _
+
+text = 'You said "You are an existing customer." That was incorrect.'
+
+    @pytest.mark.parametrize("text", [
+        'The script says "As our existing customer, your account is ready."',
+        'You said "You are an existing customer." That was incorrect.',
+        "I won't describe you as our existing customer.",
+        "I cannot confirm you are an existing customer.",
+        "If you are an existing customer, support can help.",
+        "If you join as our customer, we can discuss the next step.",
+        "You are not our existing customer.",
+        "We help existing customers with questions.",
+        "Would you like to learn about our services?",
+    ])
+    def test_quoted_negated_conditional_and_product_text_do_not_assert_relationship(text):
+>       assert contradicted_customer_claim(text, relationship=CustomerRelationship.DENIED) is None
+E       assert "Thanks for correcting me. I won't assume you're a customer." is None
+E        +  where "Thanks for correcting me. I won't assume you're a customer." = contradicted_customer_claim('You said "You are an existing customer." That was incorrect.', relationship=<CustomerRelationship.DENIED: 'denied'>)
+E        +    where <CustomerRelationship.DENIED: 'denied'> = CustomerRelationship.DENIED
+
+tests\unit\test_customer_claim_admission.py:32: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/unit/test_customer_claim_admission.py::test_direct_existing_relationship_presupposition_respects_denial[As our existing customer, your account is ready.]
+FAILED tests/unit/test_customer_claim_admission.py::test_direct_existing_relationship_presupposition_respects_denial[As our client, you can use your account.]
+FAILED tests/unit/test_customer_claim_admission.py::test_direct_existing_relationship_presupposition_respects_denial[As our existing merchant, your subscription is active.]
+FAILED tests/unit/test_customer_claim_admission.py::test_direct_existing_relationship_presupposition_respects_denial[Thanks. As our existing customer, your account is ready.]
+FAILED tests/unit/test_customer_claim_admission.py::test_quoted_negated_conditional_and_product_text_do_not_assert_relationship[You said "You are an existing customer." That was incorrect.]
+5 failed, 10 passed in 0.68s
