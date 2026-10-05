@@ -511,6 +511,15 @@ export interface ActionListResponse {
     page_size: number;
 }
 
+export interface EmailInspection {
+    action_id: string;
+    outcome: 'observed_message' | 'not_observed' | 'unavailable';
+    reason: 'exact_message_observed_only' | 'absence_is_inconclusive' | 'saved_proof_unavailable'
+        | 'original_authorization_unavailable' | 'provider_read_unavailable';
+    observed_at: string;
+    observed_message_id: string | null;
+}
+
 export interface ActionDetail extends ActionItem {
     conversation_id: string | null;
     call_id: string | null;
@@ -521,12 +530,13 @@ export interface ActionDetail extends ActionItem {
     connector_name: string | null;
     input_data: Record<string, unknown> | null;
     output_data: Record<string, unknown> | null;
+    email_inspection_available?: boolean;
     saved_receipt?: {
         action_id: string;
         status: string;
         success: boolean;
         confirmation_allowed: boolean;
-        receipt: Partial<Record<'provider' | 'connector_id' | 'external_account_id' | 'message_id'
+        receipt: Partial<Record<'identity_version' | 'tenant_id' | 'account_row_id' | 'provider' | 'connector_id' | 'external_account_id' | 'message_id'
             | 'external_event_id' | 'meeting_id' | 'job_id' | 'reminder_id' | 'plan_id'
             | 'child_action_id' | 'provider_status', string>>;
     } | null;
@@ -1655,6 +1665,11 @@ class ApiClient {
             `/admin/actions/${actionId}/retry`,
             { method: 'POST' }
         );
+    }
+
+    async inspectAdminEmailAction(actionId: string) {
+        return this.request<EmailInspection>(`/admin/actions/${encodeURIComponent(actionId)}/email-inspection`,
+            { timeoutMs: 25000 });
     }
 
     async cancelAction(actionId: string) {

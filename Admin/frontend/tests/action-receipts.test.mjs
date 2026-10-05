@@ -9,12 +9,13 @@ import { renderToStaticMarkup } from 'react-dom/server';
 // Synthetic API promises only; not a browser or React-concurrency qualification.
 const bundle = await build({
     stdin: { contents: `export { ActionDetailDrawer } from './src/components/ActionDetailDrawer';
-        export { ActionsTable } from './src/components/ActionsTable'; export { api } from './src/lib/api';`,
+        export { ActionsTable } from './src/components/ActionsTable';
+        export { ActionReceiptPanel } from './src/components/ActionReceiptPanel'; export { api } from './src/lib/api';`,
         resolveDir: fileURLToPath(new URL('..', import.meta.url)) },
     bundle: true, write: false, platform: 'node', format: 'cjs', packages: 'external',
     define: { 'import.meta.env': '{}' }, jsx: 'automatic',
     plugins: [{ name: 'actual-action-hooks', setup(build) {
-        build.onResolve({ filter: /^react$/ }, (args) => /(?:ActionDetailDrawer|ActionsTable)\.tsx$/.test(args.importer)
+        build.onResolve({ filter: /^react$/ }, (args) => /(?:ActionDetailDrawer|ActionsTable|ActionReceiptPanel)\.tsx$/.test(args.importer)
             ? { path: 'hooks', namespace: 'synthetic' } : undefined);
         build.onLoad({ filter: /.*/, namespace: 'synthetic' }, () => ({ contents: `
             export const useState = (...a) => globalThis.__actionHooks.useState(...a);
@@ -25,7 +26,7 @@ const bundle = await build({
 });
 const loaded = { exports: {} };
 new Function('require', 'module', 'exports', bundle.outputFiles[0].text)(createRequire(import.meta.url), loaded, loaded.exports);
-const { ActionDetailDrawer, ActionsTable, api } = loaded.exports;
+const { ActionDetailDrawer, ActionsTable, ActionReceiptPanel, api } = loaded.exports;
 const settle = () => new Promise((resolve) => setImmediate(resolve));
 
 function hooks(initial = []) {
@@ -213,4 +214,131 @@ test('a cancellation confirmation belongs only to its selected action', async ()
         h.render(ActionDetailDrawer, props('B')); await settle();
         assert.doesNotMatch(renderToStaticMarkup(h.render(ActionDetailDrawer, props('B'))), /Yes, Cancel/);
     } finally { h.close(); api.getActionDetail = before; }
+});
+
+const inspectable = (id = 'A') => {
+    const item = action(id);
+    item.email_inspection_available = true;
+    item.saved_receipt.receipt.identity_version = 'authorization_row_v1';
+    item.saved_receipt.receipt.account_row_id = `row-${id}`;
+    delete item.saved_receipt.receipt.external_account_id;
+    return item;
+};
+const inspection = (id = 'A', outcome = 'observed_message', reason = 'exact_message_observed_only') => ({
+    action_id: id, outcome, reason, observed_message_id: outcome === 'observed_message' ? `message-${id}` : null,
+    observed_at: '2026-10-06T04:00:00Z',
+});
+const inspectionButton = (tree) => walk(tree, (node) => node.type === 'button' && node.props.children === 'Inspect saved Gmail message');
+
+test('Gmail observation requires an explicit click and retains saved unknown state', async () => {
+    const h = hooks(), original = api.inspectAdminEmailAction, reads = [], item = inspectable();
+    const before = structuredClone(item);
+    api.inspectAdminEmailAction = async (id) => { reads.push(id); return { data: inspection(id) }; };
+    try {
+        const tree = h.render(ActionReceiptPanel, { action: item });
+        assert.deepEqual(reads, []);
+        const saved = renderToStaticMarkup(tree);
+        assert.match(saved, /Original authorization row/); assert.match(saved, /row-A/);
+        assert.match(saved, /authorization_row_v1/);
+        assert.match(saved, /Original account ID<\/span><span class="value mono">Unavailable/);
+        inspectionButton(tree).props.onClick(); await settle();
+        const html = renderToStaticMarkup(h.render(ActionReceiptPanel, { action: item }));
+        assert.match(html, /Exact message observed/);
+        assert.match(html, /does not prove it was sent, delivered, or contained the intended payload/);
+        assert.match(html, /Outcome unverified/);
+        assert.deepEqual(item, before); assert.deepEqual(reads, ['A']);
+        await settle(); h.render(ActionReceiptPanel, { action: item }); assert.equal(reads.length, 1);
+    } finally { h.close(); api.inspectAdminEmailAction = original; }
+});
+
+for (const [outcome, reason, expected] of [
+    ['not_observed', 'absence_is_inconclusive', /does not prove non-execution or make another send safe/],
+    ['unavailable', 'saved_proof_unavailable', /complete, consistent original authorization/],
+    ['unavailable', 'original_authorization_unavailable', /original active authorization/],
+    ['unavailable', 'provider_read_unavailable', /provider observation could not be obtained/],
+]) {
+    test(`Gmail ${reason} never offers retry or completion`, async () => {
+        const h = hooks(), original = api.inspectAdminEmailAction, item = inspectable();
+        api.inspectAdminEmailAction = async () => ({ data: inspection('A', outcome, reason) });
+        try {
+            inspectionButton(h.render(ActionReceiptPanel, { action: item })).props.onClick(); await settle();
+            const html = renderToStaticMarkup(h.render(ActionReceiptPanel, { action: item }));
+            assert.match(html, expected); assert.match(html, /Outcome unverified/);
+            assert.doesNotMatch(html, />Retry<|>Resolve<|>Complete<|Observed message ID/);
+        } finally { h.close(); api.inspectAdminEmailAction = original; }
+    });
+}
+
+test('Gmail double click sends one read and never echoes raw API errors', async () => {
+    const h = hooks(), original = api.inspectAdminEmailAction, item = inspectable();
+    let count = 0, release;
+    api.inspectAdminEmailAction = () => { count++; return new Promise((resolve) => { release = resolve; }); };
+    try {
+        const click = inspectionButton(h.render(ActionReceiptPanel, { action: item })).props.onClick;
+        click(); click(); assert.equal(count, 1);
+        assert.match(renderToStaticMarkup(h.render(ActionReceiptPanel, { action: item })), /disabled.*Inspecting original authorization/);
+        release({ error: { message: 'private provider error' } }); await settle();
+        const html = renderToStaticMarkup(h.render(ActionReceiptPanel, { action: item }));
+        assert.match(html, /Inspection unavailable. Saved receipt unchanged/);
+        assert.doesNotMatch(html, /private provider/); assert.equal(count, 1);
+    } finally { h.close(); api.inspectAdminEmailAction = original; }
+});
+
+test('late Gmail A observation cannot replace B or clear B pending state', async () => {
+    const h = hooks(), original = api.inspectAdminEmailAction, pending = [];
+    api.inspectAdminEmailAction = (id) => new Promise((resolve) => pending.push({ id, resolve }));
+    try {
+        inspectionButton(h.render(ActionReceiptPanel, { action: inspectable('A') })).props.onClick();
+        h.render(ActionReceiptPanel, { action: inspectable('B') });
+        inspectionButton(h.render(ActionReceiptPanel, { action: inspectable('B') })).props.onClick();
+        pending[0].resolve({ data: inspection('A') }); await settle();
+        const waiting = renderToStaticMarkup(h.render(ActionReceiptPanel, { action: inspectable('B') }));
+        assert.match(waiting, /Inspecting original authorization/); assert.doesNotMatch(waiting, /Observed message ID/);
+        pending[1].resolve({ data: inspection('B') }); await settle();
+        const ready = renderToStaticMarkup(h.render(ActionReceiptPanel, { action: inspectable('B') }));
+        assert.match(ready, /Observed message ID: message-B/); assert.doesNotMatch(ready, /message-A/);
+    } finally { h.close(); api.inspectAdminEmailAction = original; }
+});
+
+for (const bad of ['action', 'message', 'outcome', 'reason', 'inherited', 'contradictory', 'throw']) {
+    test(`Gmail ${bad} observation is rejected`, async () => {
+        const h = hooks(), original = api.inspectAdminEmailAction, item = inspectable(), result = inspection();
+        if (bad === 'action') result.action_id = 'B';
+        if (bad === 'message') result.observed_message_id = 'different';
+        if (bad === 'outcome') result.outcome = 'completed';
+        if (bad === 'reason') result.reason = 'sent';
+        if (bad === 'inherited') result.outcome = 'constructor';
+        if (bad === 'contradictory') result.reason = 'absence_is_inconclusive';
+        api.inspectAdminEmailAction = async () => {
+            if (bad === 'throw') throw new Error('private details');
+            return { data: result };
+        };
+        try {
+            inspectionButton(h.render(ActionReceiptPanel, { action: item })).props.onClick(); await settle();
+            const html = renderToStaticMarkup(h.render(ActionReceiptPanel, { action: item }));
+            assert.match(html, /Inspection unavailable. Saved receipt unchanged/);
+            assert.doesNotMatch(html, /Observed message ID|private details/);
+        } finally { h.close(); api.inspectAdminEmailAction = original; }
+    });
+}
+
+test('missing availability or mismatched saved receipt offers no Gmail inspection', () => {
+    for (const variant of ['unavailable', 'mismatched']) {
+        const h = hooks(), item = inspectable();
+        if (variant === 'unavailable') item.email_inspection_available = false;
+        else item.saved_receipt.action_id = 'B';
+        try { assert.equal(inspectionButton(h.render(ActionReceiptPanel, { action: item })), null); }
+        finally { h.close(); }
+    }
+});
+
+test('Gmail API inspection makes one GET with only saved action ID', async () => {
+    const original = globalThis.fetch, requests = [];
+    globalThis.fetch = async (url, options) => { requests.push({ url, options }); return new Response(JSON.stringify(inspection())); };
+    try {
+        await api.inspectAdminEmailAction('A');
+        assert.equal(requests.length, 1);
+        assert.match(requests[0].url, /\/admin\/actions\/A\/email-inspection$/);
+        assert.equal(requests[0].options.method, 'GET'); assert.equal(requests[0].options.body, undefined);
+    } finally { globalThis.fetch = original; }
 });

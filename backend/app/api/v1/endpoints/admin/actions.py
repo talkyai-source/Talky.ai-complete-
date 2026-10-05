@@ -2,19 +2,23 @@
 Admin Actions Endpoints
 Assistant action log: list, detail, retry, cancel
 """
-from fastapi import APIRouter, HTTPException, Depends, Query
+from fastapi import APIRouter, HTTPException, Depends, Query, Response
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import List, Literal, Optional
 import asyncio
 import json
+import re
+from datetime import datetime, timezone
 from uuid import UUID
 from app.core.postgres_adapter import Client
 from app.core.db_utils import acquire_with_tenant
 from app.core.security.rbac import UserRole, normalize_role
 from app.services.voice_callback_service import callback_job_id
 from app.services.action_execution import public_action_receipt
+from app.services.connector_resolver import resolve_active_connector, verify_reviewed_authorization
+from app.infrastructure.connectors.base import ConnectorProviderError
 
-from app.api.v1.dependencies import get_db_client, require_admin, CurrentUser
+from app.api.v1.dependencies import get_db_client, require_admin, require_platform_admin, CurrentUser
 from ._serialization import AdminResponseModel
 
 router = APIRouter()
@@ -45,6 +49,78 @@ def _admin_tenant(user):
         return str(UUID(str(tenant)))
     except ValueError as exc:
         raise HTTPException(status_code=403, detail="Invalid tenant context") from exc
+
+
+_EMAIL_PROOF_FIELDS = ("identity_version", "tenant_id", "connector_id", "provider", "account_row_id", "external_account_id")
+
+
+def _gmail_inspection_bundle(row):
+    """One co-persisted proof/reference, never a flattened or inferred receipt."""
+    if row.get("type") != "send_email":
+        return None
+    output = _object(row.get("output_data"))
+    nested = output.get("provider_result")
+    if "provider_result" in output and not isinstance(nested, dict):
+        return None
+    sources = [output] + ([nested] if isinstance(nested, dict) else [])
+    if any(source.get("action_id") is not None and str(source["action_id"]) != str(row.get("id")) for source in sources):
+        return None
+    evidence = [source for source in sources if any(key in source for key in (*_EMAIL_PROOF_FIELDS, "message_id"))]
+    if not evidence:
+        return None
+    bundles = []
+    for source in evidence:
+        # A partial contradictory wrapper is not silently ignored or stitched
+        # to a nested result. Bulk receipts require their own supported contract.
+        if "receipts" in source or source.get("identity_version") != "authorization_row_v1" or source.get("provider") != "gmail":
+            return None
+        try:
+            proof = {key: source[key] for key in _EMAIL_PROOF_FIELDS if key != "external_account_id"}
+            for key in ("tenant_id", "connector_id", "account_row_id"):
+                if not isinstance(proof[key], str) or str(UUID(proof[key])) != proof[key]:
+                    return None
+            if proof["tenant_id"] != str(row.get("tenant_id")):
+                return None
+        except (KeyError, TypeError, ValueError):
+            return None
+        external = source.get("external_account_id")
+        if external is not None and (not isinstance(external, str) or not external.strip() or len(external) > 512):
+            return None
+        if external is not None:
+            proof["external_account_id"] = external
+        message_id = source.get("message_id")
+        if not isinstance(message_id, str) or re.fullmatch(r"[A-Za-z0-9_-]{1,256}", message_id) is None:
+            return None
+        if row.get("connector_id") is not None and str(row["connector_id"]) != proof["connector_id"]:
+            return None
+        bundles.append((proof, message_id))
+    if any(bundle != bundles[0] for bundle in bundles[1:]):
+        return None
+    proof, message_id = bundles[0]
+    intent = _object(row.get("input_data"))
+    # Canonical inner EmailService records bind this proof before dispatch.
+    # Outer proposal parameters never supply missing provider-result proof.
+    reviewed_proofs = []
+    if "reviewed_connector" in intent:
+        reviewed_proofs.append(intent["reviewed_connector"])
+    parameters = intent.get("parameters")
+    if isinstance(parameters, dict) and "_reviewed_connector" in parameters:
+        reviewed_proofs.append(parameters["_reviewed_connector"])
+    for reviewed in reviewed_proofs:
+        if not isinstance(reviewed, dict) or any(reviewed.get(key) != proof.get(key) for key in _EMAIL_PROOF_FIELDS):
+            return None
+    if any("receipts" in source or "message_ids" in source for source in sources):
+        return None
+    return proof, message_id
+
+
+class EmailInspection(AdminResponseModel):
+    action_id: str
+    outcome: Literal["observed_message", "not_observed", "unavailable"]
+    reason: Literal["exact_message_observed_only", "absence_is_inconclusive", "saved_proof_unavailable",
+                    "original_authorization_unavailable", "provider_read_unavailable"]
+    observed_at: str
+    observed_message_id: Optional[str] = None
 
 
 def _is_callback(row):
@@ -125,6 +201,7 @@ class ActionDetail(AdminResponseModel):
     input_data: Optional[dict] = None
     output_data: Optional[dict] = None
     saved_receipt: Optional[dict] = None
+    email_inspection_available: bool = False
     error: Optional[str] = None
     
     # Audit
@@ -303,6 +380,8 @@ async def get_admin_action_detail(
             input_data=action.get("input_data"),
             output_data=action.get("output_data"),
             saved_receipt=public_action_receipt(action),
+            email_inspection_available=(normalize_role(admin_user.role) == UserRole.PLATFORM_ADMIN
+                                        and _gmail_inspection_bundle(action) is not None),
             error=action.get("error"),
             ip_address=str(action["ip_address"]) if action.get("ip_address") else None,
             user_agent=action.get("user_agent"),
@@ -324,6 +403,64 @@ async def get_admin_action_detail(
             status_code=500,
             detail=f"Failed to fetch action detail: {str(e)}"
         )
+
+
+@router.get("/actions/{action_id}/email-inspection", response_model=EmailInspection)
+async def inspect_admin_email_action(
+    action_id: UUID,
+    response: Response,
+    admin_user: CurrentUser = Depends(require_platform_admin),
+    db_client: Client = Depends(get_db_client),
+):
+    """Observe the saved Gmail message in its original authorization; no effects."""
+    response.headers["Cache-Control"] = "no-store"
+    selected_id = str(action_id)
+
+    def observation(outcome, reason, message_id=None):
+        return EmailInspection(action_id=selected_id, outcome=outcome, reason=reason,
+                               observed_at=datetime.now(timezone.utc).isoformat(), observed_message_id=message_id)
+
+    try:
+        saved = db_client.table("assistant_actions").select(
+            "id,tenant_id,type,connector_id,input_data,output_data").eq("id", selected_id).single().execute()
+        if getattr(saved, "error", None):
+            raise RuntimeError("Saved action lookup unavailable")
+        if not saved.data:
+            raise HTTPException(status_code=404, detail="Action not found")
+        if str(saved.data.get("id")) != selected_id:
+            raise RuntimeError("Saved action identity mismatch")
+        bundle = _gmail_inspection_bundle(saved.data)
+        if bundle is None:
+            return observation("unavailable", "saved_proof_unavailable")
+        proof, message_id = bundle
+    except HTTPException:
+        raise
+    except Exception:
+        return observation("unavailable", "saved_proof_unavailable")
+
+    try:
+        async with asyncio.timeout(10):
+            connector, connector_id, provider = await resolve_active_connector(
+                db_client, proof["tenant_id"], "email", read_only=True,
+                provider=proof["provider"], connector_id=proof["connector_id"], account_id=proof["account_row_id"],
+                external_account_id=proof.get("external_account_id"),
+            )
+            verify_reviewed_authorization(connector, connector_id, provider, proof)
+    except Exception:
+        return observation("unavailable", "original_authorization_unavailable")
+
+    try:
+        async with asyncio.timeout(10):
+            message = await connector.get_email(message_id)
+        if getattr(message, "id", None) != message_id:
+            return observation("unavailable", "provider_read_unavailable")
+        return observation("observed_message", "exact_message_observed_only", message_id)
+    except ConnectorProviderError as exc:
+        if exc.provider == "gmail" and exc.operation == "get_email" and exc.status_code == 404:
+            return observation("not_observed", "absence_is_inconclusive")
+        return observation("unavailable", "provider_read_unavailable")
+    except Exception:
+        return observation("unavailable", "provider_read_unavailable")
 
 
 @router.post("/actions/{action_id}/retry")

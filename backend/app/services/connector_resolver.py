@@ -401,15 +401,15 @@ async def resolve_active_connector(
     Reviewed email/calendar effects opt into unique creation-time selection;
     ordinary reads and CRM retain their existing refresh-time ordering.
     ``read_only`` is an inspection-only opt-in: require the original connector,
-    provider and external account, one active matching authorization, and a
+    provider and either authorization row or external account, one active match, and a
     safely unexpired token. It never refreshes or writes connector state.
 
     Raises ``ConnectorNotConnectedError`` when nothing is connected/usable.
     """
     if read_only and (force_refresh or reviewed_authorization or any(
         not isinstance(value, str) or not value.strip()
-        for value in (connector_id, provider, external_account_id)
-    )):
+        for value in (connector_id, provider)
+    ) or not any(isinstance(value, str) and value.strip() for value in (account_id, external_account_id))):
         raise ConnectorNotConnectedError(connector_type, reason="original_account_unavailable")
     if external_account_id is not None and not read_only:
         raise ValueError("External account pinning requires read-only inspection")
@@ -470,7 +470,7 @@ async def resolve_active_connector(
         )
         if account_id is not None:
             account_query = account_query.eq("id", account_id)
-        if read_only:
+        if read_only and external_account_id is not None:
             account_query = account_query.eq("external_account_id", external_account_id)
         if reviewed_authorization:
             selected = _reviewed_account_row(db_client, tenant_id, cid, row["provider"], account_id)
