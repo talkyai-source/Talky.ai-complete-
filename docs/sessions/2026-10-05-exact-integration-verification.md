@@ -196,3 +196,17 @@ It overlaps prior results and is not a new whole-backend or live acceptance run.
 All four batches received independent review. No package, final gate or scenario
 gate was closed. The 27 eligible unfinished packages, separate AG03 candidate and
 three deferred packages remain. No provider call, push or deployment occurred.
+
+## Local audio creation follow-up
+
+Source `4bb26dab` was integrated as `e3f961e7`, with its
+[verification report](2026-10-05-feedback-local-storage-privacy.md). New local
+feedback directories/files request 0700/0600, preserving exclusive creation and
+existing modes/umask. Both feedback and recording writers now fail instead of
+looping when their missing storage root cannot be ascended. The ten-module owner
+run passed **129 checks, zero failed, nine skipped** (eight POSIX checks and one
+FFmpeg check), with 66 warnings in 15.23 seconds. The final source hashes match
+the committed source; two reviewers examined the bounded change. This is separate
+from the earlier 1,296-check run, not part of that source snapshot or a new full
+backend result. No deployed permissions, persistence or live acceptance is
+inferred. OP07, OP11 and all final/scenario gate statuses remain unchanged.

@@ -1054,7 +1054,8 @@
           "path": "docs/sessions/2026-10-05-exact-integration-verification.md",
           "kind": "integrated_local_regression_not_release_acceptance",
           "candidate": "44dcc2367446cbe85c9c2757838b8695cf15bf1f"
-        }
+        },
+        "docs/sessions/2026-10-05-feedback-local-storage-privacy.md"
       ],
       "blocker": "Native DNC persistence/speech, durable lead/retry settlement, truthful bulk suppression and recording creation are repaired locally. Approved retention/export/delete rules, per-store execution and deployed supplier/storage evidence remain open.",
       "next_action": "Complete the approved recording/data lifecycle, per-store request execution and deployed supplier/retention reconciliation; retain verified DNC settlement and bulk acknowledgement evidence.",
@@ -1193,7 +1194,8 @@
           "candidate": "be44bf7267ee2aa96ca851c8f0acdbc9e5733502"
         },
         "docs/sessions/2026-10-05-pjsip-reload-receipts.md",
-        "docs/sessions/2026-10-05-op11-permission-boundaries.md"
+        "docs/sessions/2026-10-05-op11-permission-boundaries.md",
+        "docs/sessions/2026-10-05-feedback-local-storage-privacy.md"
       ],
       "blocker": "Supplier-cost ingestion/reconciliation is unavailable. Source permission inventory is complete, but approved deployment identity/topology, permission matrix and positive/negative host acceptance are outstanding.",
       "next_action": "Obtain the designated deployment identity/permission matrix and supplier statements, then exercise exact host boundaries. Preserve unavailable costs, private persistent recordings and explicit direct Asterisk CLI authorization. Source inventory does not establish deployed privilege safety.",

@@ -41,3 +41,14 @@ The next change needs an operator-reviewed identity and permissions matrix; this
 These are required follow-up acceptance outcomes, not tests run by this inventory. The previous configuration must remain available for reviewed rollback, without ad hoc privilege widening. Supplier-cost reconciliation and scanner triage remain their existing OP11 work; this permission inventory makes no claims about completing those gates.
 
 Independent factual source review by `/root/llm_audit` found no additional material issue after the report title's encoding was corrected. Static documentation checks verified the local source links, `git diff --check`, and that the PJSIP module's AST after its module docstring is unchanged. These checks are not application tests or host-permission verification.
+
+## Subsequent local creation correction
+
+The inventory above describes its stated source. A later
+[bounded storage repair](2026-10-05-feedback-local-storage-privacy.md) adds explicit
+0700/0600 creation requests for new local feedback directories/files and stops
+both local audio writers from looping at an unavailable filesystem root. It
+preserves existing modes, production opt-in and the process umask. The owner run
+passed 129 checks with nine explicit skips. Existing permission reconciliation,
+Windows ACL/POSIX acceptance, persistent storage and the operator identity matrix
+remain unverified; no host privilege change or OP11 closure is inferred.
