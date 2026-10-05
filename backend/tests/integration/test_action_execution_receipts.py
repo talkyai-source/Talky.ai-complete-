@@ -40,7 +40,13 @@ async def action_db():
             CREATE TABLE leads (id UUID PRIMARY KEY,tenant_id UUID,campaign_id UUID,phone_number TEXT,do_not_call BOOLEAN,status TEXT);
             CREATE TABLE dialer_jobs (id UUID PRIMARY KEY,tenant_id UUID,campaign_id UUID,lead_id UUID,phone_number TEXT,status TEXT,scheduled_at TIMESTAMPTZ);
             CREATE TABLE calls (id UUID PRIMARY KEY,tenant_id UUID,campaign_id UUID,lead_id UUID,provider_call_id TEXT,external_call_uuid TEXT,
-                provider TEXT,status TEXT,talklee_call_id TEXT,created_at TIMESTAMPTZ DEFAULT NOW());
+                provider TEXT,status TEXT,talklee_call_id TEXT,created_at TIMESTAMPTZ DEFAULT NOW(),
+                direction VARCHAR(12) NOT NULL DEFAULT 'outbound',
+                route_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb,
+                admission_status VARCHAR(16) NOT NULL DEFAULT 'pending',
+                processing_status VARCHAR(16) NOT NULL DEFAULT 'pending',
+                billing_status VARCHAR(16) NOT NULL DEFAULT 'none',
+                reserved_seconds INTEGER NOT NULL DEFAULT 0);
             CREATE TABLE connectors (id UUID PRIMARY KEY,tenant_id UUID,type TEXT,status TEXT);
             CREATE TABLE connector_accounts (connector_id UUID,tenant_id UUID,status TEXT);
         """)
