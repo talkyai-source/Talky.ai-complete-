@@ -19,7 +19,8 @@ _REFERS_BACK = re.compile(
 )
 _CONDITION = re.compile(
     r"\b(?:only|except|exclud\w*|includ\w*|unless|subject to|provided|"
-    r"eligible|eligibility|additional|separately|however|does not|not cover)\b", re.I
+    r"eligible|eligibility|additional|separately|however|does not|not cover|"
+    r"requir\w*|minimum|must|mandatory)\b", re.I
 )
 
 
