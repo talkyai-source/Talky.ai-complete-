@@ -439,10 +439,15 @@ async def test_dialer_worker_passes_the_lead_id_to_the_guard(monkeypatch):
         async def evaluate(self, **kwargs):
             captured.update(kwargs)
 
-            class _R:
-                decision = guard_module.GuardDecision.ALLOW
-
-            return _R()
+            return guard_module.GuardResult(
+                decision=guard_module.GuardDecision.ALLOW,
+                tenant_id=kwargs["tenant_id"],
+                phone_number=kwargs["phone_number"],
+                check_results=[guard_module.CheckResult(
+                    check=guard_module.GuardCheck.DNC_CHECK, passed=True,
+                )],
+                failed_checks=[], total_latency_ms=0,
+            )
 
     monkeypatch.setattr(guard_module, "CallGuard", _StubGuard)
 
