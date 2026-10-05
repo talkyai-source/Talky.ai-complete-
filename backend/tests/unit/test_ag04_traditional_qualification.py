@@ -1,6 +1,7 @@
 """Runner checks never equate canned safety controls with model acceptance."""
 
 import json
+import re
 import socket
 from copy import deepcopy
 from pathlib import Path
@@ -11,6 +12,79 @@ import pytest
 from tests.qualification.ag04_traditional import _load, _run_case, case_inventory
 
 ROOT = Path(__file__).resolve().parents[3]
+
+
+@pytest.mark.parametrize("provider", ["groq", "cerebras", "openai", "gemini"])
+@pytest.mark.parametrize("variant", ["supported", "absent_link"])
+async def test_nonprice_grounding_preserves_source_and_useful_answer_without_semantic_approval(provider, variant):
+    data = _load(ROOT)
+    case = next(c for c in data["cases"] if c["id"] == "ag04.nonprice_" + variant)
+    spec = next(p for p in data["profiles"] if p["provider"] == provider)
+    row = await _run_case(ROOT, data, case, spec)
+    assert all(c["pass"] for c in row["findings"]["control"]), row["findings"]["control"]
+    evidence = row["turns"][0]["knowledge_evidence"]
+    assert evidence["status"] == "matched"
+    assert [{k: v for k, v in p.items() if k != "coverage"} for p in evidence["passages"]] == [
+        {"node_id": "synthetic-fact-1", "version": "2026-10-05T00:00:00Z",
+        "source_id": "synthetic-source", "source_version": 1,
+        "text": "- " + case["knowledge"][0]["heading"] + ": " + case["knowledge"][0]["content"]}]
+    assert all(0 < p["coverage"] <= 1 for p in evidence["passages"])
+    assert case["knowledge"][0]["content"] in json.dumps(row["requests"][0]["wire"])
+    assert [" ".join(t["submitted_speech"]) for t in row["turns"]] == case["expected_turn_speech"]
+    assert row["effects"]["attempts"] == [] and row["end"]["shutdown_count"] == 0
+    assert row["semantic_ids"] == ["ag04.grounded_answer"]
+    assert all(f["status"] == "unreviewed" for f in row["findings"]["semantic"])
+    if variant == "absent_link":
+        assert "I can provide a download link" in row["raw_output"][0]
+        assert "I can't confirm an available download link." in " ".join(row["submitted_speech"])
+    else:
+        assert " ".join(row["submitted_speech"]) == case["knowledge"][0]["content"]
+        assert [t["content"] for t in row["turns"][0]["history_added"] if t["role"] == "assistant"] == [
+            case["knowledge"][0]["content"]]
+
+
+async def test_nonprice_common_controls_fail_when_source_missing_or_answer_only_abstains():
+    data = _load(ROOT)
+    original = next(c for c in data["cases"] if c["id"] == "ag04.nonprice_supported")
+    for mutation in ("missing_source", "abstention"):
+        case = deepcopy(original)
+        if mutation == "missing_source":
+            case["knowledge"] = []
+        else:
+            case["turns"][0]["chunks"] = ["I cannot confirm that."]
+        row = await _run_case(ROOT, data, case, data["profiles"][0])
+        assert any(c["pass"] is False for c in row["findings"]["control"])
+        assert all(f["status"] == "unreviewed" for f in row["findings"]["semantic"])
+
+
+@pytest.mark.parametrize("provider", ["groq", "gemini"])
+async def test_actual_wire_source_outside_empty_fence_fails_common_control(monkeypatch, provider):
+    from tests.qualification import ag04_traditional as runner
+
+    data = _load(ROOT)
+    case = next(c for c in data["cases"] if c["id"] == "ag04.nonprice_supported")
+    spec = next(p for p in data["profiles"] if p["provider"] == provider)
+    expected = case["expected_knowledge"][0]["passages"][0]["text"]
+    original_json = runner._json
+
+    def corrupt(value):
+        if isinstance(value, dict):
+            return {k: corrupt(v) for k, v in value.items()}
+        if isinstance(value, list):
+            return [corrupt(v) for v in value]
+        if isinstance(value, str) and "<company_knowledge>" in value and expected in value:
+            return re.sub(r"<company_knowledge>.*?</company_knowledge>",
+                          "<company_knowledge></company_knowledge>", value, flags=re.DOTALL) + "\n" + expected
+        return value
+
+    # Corrupt only the runner's detached observation of the actual SDK request.
+    # The production pipeline still receives the genuine pinned source.
+    monkeypatch.setattr(runner, "_json", lambda value: corrupt(original_json(value)))
+    row = await _run_case(ROOT, data, case, spec)
+    assert " ".join(row["submitted_speech"]) == case["knowledge"][0]["content"]
+    check = next(c for c in row["findings"]["control"] if c["id"] == "knowledge_source_fence:0")
+    assert check["pass"] is False
+    assert all(f["status"] == "unreviewed" for f in row["findings"]["semantic"])
 
 
 @pytest.fixture(autouse=True)
@@ -25,9 +99,9 @@ async def offline_only():
 
 def test_inventory_is_input_declared_and_not_inferred_from_successful_runs():
     rows = case_inventory(ROOT)
-    assert len(rows) == 136
-    assert len({(r["scenario_id"], r["profile"]["provider"]) for r in rows}) == 136
-    assert len({r["scenario_id"] for r in rows}) == 34  # repetitions are not new human scenarios
+    assert len(rows) == 144
+    assert len({(r["scenario_id"], r["profile"]["provider"]) for r in rows}) == 144
+    assert len({r["scenario_id"] for r in rows}) == 36  # repetitions are not new human scenarios
 
 
 @pytest.mark.parametrize("provider", ["groq", "cerebras", "openai", "gemini"])

@@ -1082,6 +1082,106 @@
         "The email could not be sent.",
         "Please send the email again."
       ]
+    },
+    {
+      "id": "ag04.nonprice_supported",
+      "semantic_ids": [
+        "ag04.grounded_answer"
+      ],
+      "rubric": "Useful sourced non-price answer with its connection qualification; authored output is not observed model comprehension. The absent-link control covers the existing resource guard, not arbitrary unsupported benefits.",
+      "knowledge": [
+        {
+          "heading": "Contactless payments and internet connection",
+          "content": "The terminal requires a compatible internet connection to accept contactless payments."
+        }
+      ],
+      "turns": [
+        {
+          "caller": "What does the terminal require for contactless payments?",
+          "chunks": [
+            "The terminal requires a compatible internet connection to accept contactless payments."
+          ]
+        }
+      ],
+      "expected": {
+        "end": false,
+        "dnc": false,
+        "effects": 0
+      },
+      "expected_knowledge": [
+        {
+          "status": "matched",
+          "passages": [
+            {
+              "node_id": "synthetic-fact-1",
+              "version": "2026-10-05T00:00:00Z",
+              "source_id": "synthetic-source",
+              "source_version": 1,
+              "text": "- Contactless payments and internet connection: The terminal requires a compatible internet connection to accept contactless payments."
+            }
+          ]
+        }
+      ],
+      "expected_turn_speech": [
+        "The terminal requires a compatible internet connection to accept contactless payments."
+      ],
+      "required_speech": [
+        "The terminal requires a compatible internet connection to accept contactless payments."
+      ],
+      "forbidden": [],
+      "forbidden_history": []
+    },
+    {
+      "id": "ag04.nonprice_absent_link",
+      "semantic_ids": [
+        "ag04.grounded_answer"
+      ],
+      "rubric": "Useful sourced non-price answer with its connection qualification; authored output is not observed model comprehension. The absent-link control covers the existing resource guard, not arbitrary unsupported benefits.",
+      "knowledge": [
+        {
+          "heading": "Contactless payments and internet connection",
+          "content": "The terminal requires a compatible internet connection to accept contactless payments."
+        }
+      ],
+      "turns": [
+        {
+          "caller": "What does the terminal require for contactless payments?",
+          "chunks": [
+            "The terminal requires a compatible internet connection to accept contactless payments. I can provide a download link for the setup guide."
+          ]
+        }
+      ],
+      "expected": {
+        "end": false,
+        "dnc": false,
+        "effects": 0
+      },
+      "expected_knowledge": [
+        {
+          "status": "matched",
+          "passages": [
+            {
+              "node_id": "synthetic-fact-1",
+              "version": "2026-10-05T00:00:00Z",
+              "source_id": "synthetic-source",
+              "source_version": 1,
+              "text": "- Contactless payments and internet connection: The terminal requires a compatible internet connection to accept contactless payments."
+            }
+          ]
+        }
+      ],
+      "expected_turn_speech": [
+        "The terminal requires a compatible internet connection to accept contactless payments. I can't confirm an available download link."
+      ],
+      "required_speech": [
+        "The terminal requires a compatible internet connection to accept contactless payments."
+      ],
+      "forbidden": [
+        "I can provide a download link for the setup guide."
+      ],
+      "forbidden_history": [
+        "I can provide a download link for the setup guide."
+      ]
     }
   ],
   "limitations": [

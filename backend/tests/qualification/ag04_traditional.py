@@ -12,6 +12,7 @@ import asyncio
 import hashlib
 import importlib
 import json
+import re
 import time
 from contextlib import ExitStack, asynccontextmanager
 from datetime import datetime, timezone
@@ -415,6 +416,7 @@ async def _run_case(root, data, case, spec):
                     "knowledge_status": (getattr(session, "_knowledge_evidence", {}) or {}).get(
                         "status"
                     ),
+                    "knowledge_evidence": _json(getattr(session, "_knowledge_evidence", {}) or {}),
                     "end_requested": bool(getattr(session, "_end_call_requested", False)),
                 }
             )
@@ -467,6 +469,23 @@ async def _run_case(root, data, case, spec):
         check("guarded_turn_speech",
               [" ".join(turn["submitted_speech"]) for turn in turns] == case["expected_turn_speech"],
               "Every challenged claim must produce its truthful speech outcome on that turn.")
+    for index, expected_knowledge in enumerate(case.get("expected_knowledge", [])):
+        evidence = turns[index]["knowledge_evidence"] if index < len(turns) else {}
+        observed_knowledge = {"status": evidence.get("status"), "passages": [
+            {key: passage.get(key) for key in ("node_id", "version", "source_id", "source_version", "text")}
+            for passage in evidence.get("passages", [])]}
+        check(f"knowledge_identity:{index}", observed_knowledge == expected_knowledge,
+              {"expected": expected_knowledge, "observed": observed_knowledge})
+        # Gemini carries the system instruction in config, outside contents.
+        request_text = json.dumps(requests[index]["wire"]) if index < len(requests) else ""
+        blocks = re.findall(r"<company_knowledge>(.*?)</company_knowledge>", request_text, re.DOTALL)
+        check(f"knowledge_source_fence:{index}",
+              all(any(p["text"] in block for block in blocks) for p in expected_knowledge["passages"]),
+              "Actual provider request must contain the supplied source inside its data fence.")
+        assistant_turn = " ".join(m["content"] for m in turns[index]["history_added"]
+                                  if m["role"] == "assistant") if index < len(turns) else ""
+        check(f"useful_assistant_history:{index}", assistant_turn == case["expected_turn_speech"][index],
+              {"expected": case["expected_turn_speech"][index], "observed": assistant_turn})
     spoken = " ".join(submissions)
     assistant_history = " ".join(m["content"] for m in history if m["role"] == "assistant")
     for forbidden in case.get("forbidden", []):

@@ -10,6 +10,7 @@ import asyncio
 import base64
 import hashlib
 import json
+import re
 from dataclasses import asdict
 from pathlib import Path
 from types import SimpleNamespace
@@ -356,6 +357,28 @@ class NativeReplay:
             and (row.get("metadata", {}).get("delivery") or {}).get("utterance_id") in submitted_ids
             and (row.get("metadata", {}).get("delivery") or {}).get("status") == "completed"
             and (row.get("metadata", {}).get("delivery") or {}).get("evidence") == "transport_played"]
+        if "expected_submitted_speech" in self.scenario:
+            expected = self.scenario["expected_submitted_speech"]
+            controls.append({"id": "useful_submitted_speech", "pass": submitted_speech == expected,
+                "detail": {"expected": expected, "observed": submitted_speech,
+                           "scope": "Authored control preservation, not model comprehension or hearing."}})
+            assistant_history = [turn["content"] for turn in history if turn["role"] == "assistant"]
+            controls.append({"id": "useful_assistant_history", "pass": assistant_history == expected,
+                "detail": {"expected": expected, "observed": assistant_history}})
+        for index, expected in enumerate(self.scenario.get("knowledge_expectations", [])):
+            actual = function_results[index] if index < len(function_results) else {}
+            sources = [{key: source.get(key) for key in ("node_id", "version", "source_id", "source_version")}
+                       for source in actual.get("sources", [])]
+            knowledge_observed = {"status": actual.get("status"), "source_policy": actual.get("source_policy"),
+                        "sources": sources}
+            expected_identity = {key: expected[key] for key in knowledge_observed}
+            controls.append({"id": f"knowledge_identity:{index}", "pass": knowledge_observed == expected_identity,
+                "detail": {"expected": expected_identity, "observed": knowledge_observed}})
+            text = actual.get("text", "")
+            blocks = re.findall(r"<company_knowledge>(.*?)</company_knowledge>", text, re.DOTALL)
+            controls.append({"id": f"knowledge_source_fence:{index}",
+                "pass": any(expected["source_text"] in block for block in blocks),
+                "detail": "Actual matched lookup output must contain the supplied source inside its data fence."})
         return {
             "scenario_id": self.scenario["id"], "semantic_ids": self.scenario["semantic_ids"],
             "engine": "native", "profile": self.profile,

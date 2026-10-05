@@ -2407,6 +2407,124 @@
           "text": "I couldn't confirm the outcome of that request. It needs to be checked before trying again."
         }
       ]
+    },
+    {
+      "id": "native.nonprice_supported",
+      "semantic_ids": [
+        "ag04.grounded_answer"
+      ],
+      "steps": [
+        {
+          "kind": "caller",
+          "text": "What does the terminal require for contactless payments?"
+        },
+        {
+          "kind": "tool",
+          "name": "knowledge_lookup",
+          "arguments": {
+            "query": "What does the terminal require for contactless payments?"
+          }
+        },
+        {
+          "kind": "response",
+          "text": "The terminal requires a compatible internet connection to accept contactless payments."
+        }
+      ],
+      "source_facts": [
+        {
+          "id": "fixture-contactless",
+          "version": 7,
+          "source_id": "fixture-terminal-policy",
+          "source_version": 3,
+          "heading": "Contactless payments and internet connection",
+          "content": "The terminal requires a compatible internet connection to accept contactless payments."
+        }
+      ],
+      "expect": {
+        "tool_statuses": [
+          "matched"
+        ],
+        "submissions": 1,
+        "repair_requests": 0,
+        "shutdowns": 0,
+        "effect_attempts": 0
+      },
+      "knowledge_expectations": [
+        {
+          "status": "matched",
+          "source_policy": "admission_snapshot",
+          "sources": [
+            {
+              "version": 7,
+              "source_id": "fixture-terminal-policy",
+              "source_version": 3,
+              "node_id": "fixture-contactless"
+            }
+          ],
+          "source_text": "The terminal requires a compatible internet connection to accept contactless payments."
+        }
+      ],
+      "expected_submitted_speech": [
+        "The terminal requires a compatible internet connection to accept contactless payments."
+      ]
+    },
+    {
+      "id": "native.nonprice_absent_link",
+      "semantic_ids": [
+        "ag04.grounded_answer"
+      ],
+      "steps": [
+        {
+          "kind": "caller",
+          "text": "What does the terminal require for contactless payments?"
+        },
+        {
+          "kind": "tool",
+          "name": "knowledge_lookup",
+          "arguments": {
+            "query": "What does the terminal require for contactless payments?"
+          }
+        },
+        {
+          "kind": "response",
+          "text": "The terminal requires a compatible internet connection to accept contactless payments. I can provide a download link for the setup guide."
+        }
+      ],
+      "source_facts": [
+        {
+          "id": "fixture-contactless",
+          "version": 7,
+          "source_id": "fixture-terminal-policy",
+          "source_version": 3,
+          "heading": "Contactless payments and internet connection",
+          "content": "The terminal requires a compatible internet connection to accept contactless payments."
+        }
+      ],
+      "expect": {
+        "tool_statuses": [
+          "matched"
+        ],
+        "submissions": 0,
+        "repair_requests": 1,
+        "shutdowns": 0,
+        "effect_attempts": 0
+      },
+      "knowledge_expectations": [
+        {
+          "status": "matched",
+          "source_policy": "admission_snapshot",
+          "sources": [
+            {
+              "version": 7,
+              "source_id": "fixture-terminal-policy",
+              "source_version": 3,
+              "node_id": "fixture-contactless"
+            }
+          ],
+          "source_text": "The terminal requires a compatible internet connection to accept contactless payments."
+        }
+      ],
+      "expected_submitted_speech": []
     }
   ],
   "profiles": {
