@@ -613,6 +613,13 @@ class RealtimeBridge:
                         if admission is None:
                             continue
                         caller_order, admission_kind = admission
+                        # Only a newly admitted caller turn is fresh activity.
+                        # ASR revisions/late history and raw audio are not new
+                        # speech; they must not prolong the inactivity clock.
+                        if admission_kind == "current" and text.strip():
+                            update_activity = getattr(self._contact_session, "update_activity", None)
+                            if callable(update_activity):
+                                update_activity()
                         evidence = evidence_from_transcript(
                             role="user", text=text,
                             turn_id=f"realtime:{caller_order}", caller_turn_order=caller_order,
