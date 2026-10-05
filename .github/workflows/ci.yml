@@ -274,6 +274,7 @@ jobs:
             tests/integration/test_op05_pacing_holds.py \
             tests/integration/test_dnc_schema_migration.py \
             tests/integration/test_op07_native_dnc.py \
+            tests/integration/test_dnc_settlement_truth.py \
             -q
         env:
           TEST_DATABASE_URL: postgresql://talky:testpassword@localhost:5432/talky_alembic_test
