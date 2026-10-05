@@ -113,6 +113,37 @@ def _empty(n: int) -> List[NodeEnrichment]:
     return [NodeEnrichment() for _ in range(n)]
 
 
+def _decode_enrichments(content: str, expected_indices: set[int]) -> dict[int, NodeEnrichment]:
+    """Validate a whole response before attaching metadata to requested nodes."""
+    data = json.loads(content or "{}")
+    if not isinstance(data, dict) or not isinstance(data.get("nodes", []), list):
+        raise ValueError("Invalid enrichment response shape")
+    decoded: dict[int, NodeEnrichment] = {}
+    for item in data.get("nodes", []):
+        if not isinstance(item, dict):
+            raise ValueError("Invalid enrichment item")
+        index = item.get("i")
+        if type(index) is not int or index not in expected_indices or index in decoded:
+            raise ValueError("Ambiguous or unrequested enrichment index")
+        fields = {}
+        for key, limit in (("summary", 300), ("voice_answer", 400)):
+            value = item.get(key)
+            if value is None:
+                value = ""
+            if not isinstance(value, str):
+                raise ValueError("Invalid enrichment text")
+            fields[key] = value[:limit]
+        for key, limit, count in (("keywords", 40, 12), ("example_questions", 160, 5)):
+            values = item.get(key)
+            if values is None:
+                values = []
+            if not isinstance(values, list) or any(not isinstance(value, str) for value in values):
+                raise ValueError("Invalid enrichment list")
+            fields[key] = [value[:limit] for value in values[:count]]
+        decoded[index] = NodeEnrichment(**fields)
+    return decoded
+
+
 async def enrich_nodes(nodes: List[ParsedNode]) -> List[NodeEnrichment]:
     """Return one NodeEnrichment per node (same order). Never raises."""
     if not nodes:
@@ -162,17 +193,9 @@ async def enrich_nodes(nodes: List[ParsedNode]) -> List[NodeEnrichment]:
                 temperature=0.2,
                 max_tokens=_max_tokens_for(len(batch)),
             )
-            data = json.loads(resp.choices[0].message.content or "{}")
-            for item in data.get("nodes", []):
-                i = item.get("i")
-                if not isinstance(i, int) or not (0 <= i < len(out)):
-                    continue
-                out[i] = NodeEnrichment(
-                    summary=str(item.get("summary", "") or "")[:300],
-                    voice_answer=str(item.get("voice_answer", "") or "")[:400],
-                    keywords=[str(k)[:40] for k in (item.get("keywords") or [])][:12],
-                    example_questions=[str(q)[:160] for q in (item.get("example_questions") or [])][:5],
-                )
+            decoded = _decode_enrichments(resp.choices[0].message.content, {i for i, _ in chunk})
+            for i, enrichment in decoded.items():
+                out[i] = enrichment
         except Exception as exc:
             logger.warning(
                 "knowledge enrich batch [%d:%d] failed (%s) — retrying one node "
@@ -199,19 +222,9 @@ async def enrich_nodes(nodes: List[ParsedNode]) -> List[NodeEnrichment]:
                         temperature=0.2,
                         max_tokens=_max_tokens_for(1),
                     )
-                    data = json.loads(resp.choices[0].message.content or "{}")
+                    decoded = _decode_enrichments(resp.choices[0].message.content, {node_index})
                 except Exception:
                     continue
-                for item in data.get("nodes", []):
-                    i = item.get("i")
-                    if not isinstance(i, int) or not (0 <= i < len(out)):
-                        continue
-                    out[i] = NodeEnrichment(
-                        summary=str(item.get("summary", "") or "")[:300],
-                        voice_answer=str(item.get("voice_answer", "") or "")[:400],
-                        keywords=[str(k)[:40] for k in (item.get("keywords") or [])][:12],
-                        example_questions=[
-                            str(q)[:160] for q in (item.get("example_questions") or [])
-                        ][:5],
-                    )
+                for i, enrichment in decoded.items():
+                    out[i] = enrichment
     return out
