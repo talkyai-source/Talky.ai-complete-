@@ -12,6 +12,8 @@
 pytest==7.4.4
 pytest-asyncio==0.23.3
 pytest-cov==4.1.0
+# Test-only Redis script execution; no production dependency change.
+fakeredis[lua]==2.37.1
 
 # --- Lint / Format / Type-check ---
 ruff==0.6.9

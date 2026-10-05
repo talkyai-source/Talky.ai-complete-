@@ -50,7 +50,7 @@ jobs:
           # the production venv, which is why those suites error there. CI has
           # no such constraint, so install it and run them properly.
           pip install -r requirements.txt
-          pip install pytest pytest-asyncio fakeredis
+          pip install pytest pytest-asyncio 'fakeredis[lua]'
 
       - name: Import smoke
         run: python -c "import app.main" && echo IMPORT_OK
@@ -95,7 +95,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pytest pytest-asyncio fakeredis
+          pip install pytest pytest-asyncio 'fakeredis[lua]'
 
       - name: Full suite
         run: python -m pytest tests/unit tests/security -q -p no:randomly -rfsE
