@@ -1,0 +1,51 @@
+FF                                                                       [100%]
+================================== FAILURES ===================================
+__ test_missing_refresh_does_not_expire_newer_credentials_after_original_401 __
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000025A1014CA10>
+canonical_gmail = (<tests.unit.test_inbox_original_account._Rows object at 0x0000025A1014CDD0>, {'access_token_encrypted': 'synthetic:ne...tic@example.invalid', 'connector_id': 'connector-a', 'external_account_id': None, ...}, <AsyncMock id='2585840238912'>)
+
+    @pytest.mark.asyncio
+    async def test_missing_refresh_does_not_expire_newer_credentials_after_original_401(
+        monkeypatch, canonical_gmail
+    ):
+        db, account, refresh = canonical_gmail
+        async def first_read(_self, _message_id):
+            account["access_token_encrypted"] = "synthetic:newer-authorization"
+            account["refresh_token_encrypted"] = None
+            account["last_refreshed_at"] = "2099-01-01T00:00:00Z"
+            raise rejected()
+        monkeypatch.setattr(GmailConnector, "get_email", first_read)
+        result = await inbox.read_email("tenant-a", db, "synthetic-message")
+        assert result["success"] is False
+>       assert account["status"] == "active"
+E       AssertionError: assert 'expired' == 'active'
+E         - active
+E         + expired
+
+tests\unit\test_inbox_original_account.py:523: AssertionError
+_______ test_unproven_initial_auth_failure_does_not_expire_any_account ________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000025A1016E9F0>
+canonical_gmail = (<tests.unit.test_inbox_original_account._Rows object at 0x0000025A1016EF90>, {'access_token_encrypted': 'synthetic:sy...tic@example.invalid', 'connector_id': 'connector-a', 'external_account_id': None, ...}, <AsyncMock id='2585841062144'>)
+
+    @pytest.mark.asyncio
+    async def test_unproven_initial_auth_failure_does_not_expire_any_account(monkeypatch, canonical_gmail):
+        db, account, _refresh = canonical_gmail
+        monkeypatch.setattr(connector_resolver, "resolve_active_connector", AsyncMock(
+            side_effect=connector_resolver.ConnectorNotConnectedError(
+                "email", connector_id="connector-a", provider_confirmed=True,
+            )
+        ))
+        result = await inbox.read_email("tenant-a", db, "synthetic-message")
+        assert result["success"] is False
+>       assert account["status"] == "active"
+E       AssertionError: assert 'expired' == 'active'
+E         - active
+E         + expired
+
+tests\unit\test_inbox_original_account.py:538: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/unit/test_inbox_original_account.py::test_missing_refresh_does_not_expire_newer_credentials_after_original_401
+FAILED tests/unit/test_inbox_original_account.py::test_unproven_initial_auth_failure_does_not_expire_any_account
+2 failed, 34 deselected in 9.00s

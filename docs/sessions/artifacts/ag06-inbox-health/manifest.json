@@ -1,0 +1,60 @@
+{
+  "base": "8141266afe40e86b14cd3d56655edd69c6e0b5b9",
+  "normalized_sha256": {
+    "backend/app/infrastructure/assistant/tools/inbox.py": "a4000e50a98f6e2e0a0a30d76ad03bd29dbe8309db482666fd2439fc9c4fe0ad",
+    "backend/app/services/connector_resolver.py": "28bb6c6ab77ff7c828a0b227267ae8b84c4fffa06c8f2aa017a9ce16952c2c6f",
+    "backend/tests/unit/test_inbox_authorization_health.py": "78b1845dfb4e3032688ab1656c063566df9e39c50a9a5732c07f4b88679392cd",
+    "backend/tests/unit/test_inbox_original_account.py": "5ec8cb2518e619054a754ef9d6bfdfcc337022d8cf41585db57d79e620295a1a",
+    "backend/tests/unit/test_connector_health.py": "f250efcd4bfeb5e8baa5fe0e419f702b65f753209741b800175f4419fcc5ed7a"
+  },
+  "modules": [
+    "tests/unit/test_inbox_original_account.py",
+    "tests/unit/test_inbox_authorization_health.py",
+    "tests/unit/test_connector_health.py",
+    "tests/unit/test_email_service.py",
+    "tests/unit/test_connector_factory.py",
+    "tests/unit/assistant/test_tool_arg_coercion.py",
+    "tests/unit/assistant/test_streaming.py",
+    "tests/unit/assistant/test_calendar_and_drive_errors.py",
+    "tests/unit/test_calendar_delivery_contract.py",
+    "tests/unit/test_communication_delivery_contract.py",
+    "tests/unit/test_crm_sync_hooks.py",
+    "tests/unit/test_crm_sync_service.py",
+    "tests/unit/test_meeting_service.py"
+  ],
+  "owned_validation": {
+    "passed": 241,
+    "failed": 0,
+    "skipped": 0,
+    "warnings": 13
+  },
+  "postgresql_validation": {
+    "owner": "root",
+    "artifact": "docs/sessions/artifacts/inbox-health-actual-pg/result.json",
+    "artifact_utf8_lf_sha256": "30496a2a48ca03c9ca64c62e957a102e5bb3e3a826a34a26254048575f25c4d4",
+    "passed": 13,
+    "failed": 0,
+    "source_hashes_match_committed_app": true,
+    "public_unchanged": true,
+    "schema_removed": true,
+    "role_removed": true,
+    "limits": "Actual helper against private LIKE table copies with canonical account FK and restrictive forced tenant policy; no copied full production triggers/tenant FK/grants, no live provider or deployment/full-RLS-parity proof."
+  },
+  "independent_review": {
+    "reviewer": "realtime_audit",
+    "result": "no additional material defect found in bounded source review",
+    "independent_test_run": false
+  },
+  "source_commit": "7babac65eb74989ee49bf395c8284c79b42351e5",
+  "hashing": "SHA256 of exact Git blob decoded explicitly as UTF-8, CRLF normalized to LF, encoded as UTF-8.",
+  "draft_fingerprint_correction": {
+    "historical_draft_hashes": {
+      "backend/app/infrastructure/assistant/tools/inbox.py": "ff99048ab98028ca66b7dd9025b19092cbccd033585e801c6cb1804265a4efd3",
+      "backend/app/services/connector_resolver.py": "be2ff8e58f90c64b49126478e24369e28cb3e8f608356ef8f8b0718dce9c1630",
+      "backend/tests/unit/test_inbox_authorization_health.py": "78b1845dfb4e3032688ab1656c063566df9e39c50a9a5732c07f4b88679392cd",
+      "backend/tests/unit/test_inbox_original_account.py": "5ec8cb2518e619054a754ef9d6bfdfcc337022d8cf41585db57d79e620295a1a",
+      "backend/tests/unit/test_connector_health.py": "f250efcd4bfeb5e8baa5fe0e419f702b65f753209741b800175f4419fcc5ed7a"
+    },
+    "cause": "Uncommitted draft used default CP1252 Path.read_text then UTF8 str.encode. All draft hashes reproduce exactly from final committed source under that algorithm; only non-ASCII app hashes change under explicit UTF8. No behavioral source delta."
+  }
+}

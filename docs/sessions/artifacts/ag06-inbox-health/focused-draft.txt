@@ -1,0 +1,93 @@
+.................................................................F.F.... [ 88%]
+.........                                                                [100%]
+================================== FAILURES ===================================
+_____________ test_unrecoverable_401_downgrades_connector_status ______________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x00000189DC80D5E0>
+
+    @pytest.mark.asyncio
+    async def test_unrecoverable_401_downgrades_connector_status(monkeypatch):
+        rejected = ConnectorProviderError(
+            provider="gmail",
+            operation="list_emails",
+            category="authentication",
+            message="invalid credentials",
+            status_code=401,
+        )
+        old = SimpleNamespace(provider_name="gmail", external_account_id="account-1", account_row_id="authorization-1", list_emails=AsyncMock(side_effect=rejected))
+        resolver = AsyncMock(
+            side_effect=[
+                (old, "connector-1", "gmail"),
+                connector_resolver.ConnectorNotConnectedError(
+                    "email",
+                    "Authorization expired",
+                    connector_id="connector-1",
+                    provider_confirmed=True,
+                ),
+            ]
+        )
+        monkeypatch.setattr(connector_resolver, "resolve_active_connector", resolver)
+        db = _ScriptedDB(
+            connector_accounts=[_response(data=[{"id": "account-1"}])],
+            connectors=[_response(data=[{"id": "connector-1"}])],
+        )
+
+        result = await read_emails("tenant-1", db, max_results=5)
+
+        assert result["success"] is False
+        assert result["email_required"] is True
+        assert result["error_code"] == "email_not_connected"
+>       assert ("connector_accounts", "update") in db.operations
+E       AssertionError: assert ('connector_accounts', 'update') in []
+E        +  where [] = <tests.unit.test_connector_health._ScriptedDB object at 0x00000189DC71C1A0>.operations
+
+tests\unit\test_connector_health.py:345: AssertionError
+_________ test_401_then_same_connector_missing_refresh_marks_expired __________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x00000189DC77AB70>
+
+    @pytest.mark.asyncio
+    async def test_401_then_same_connector_missing_refresh_marks_expired(monkeypatch):
+        rejected = ConnectorProviderError(
+            provider="gmail",
+            operation="list_emails",
+            category="authentication",
+            message="invalid access token",
+            status_code=401,
+        )
+        old = SimpleNamespace(provider_name="gmail", external_account_id="account-1", account_row_id="authorization-1", list_emails=AsyncMock(side_effect=rejected))
+        resolver = AsyncMock(
+            side_effect=[
+                (old, "connector-1", "gmail"),
+                connector_resolver.ConnectorNotConnectedError(
+                    "email",
+                    "No refresh token",
+                    connector_id="connector-1",
+                    reason="refresh_unavailable",
+                ),
+            ]
+        )
+        monkeypatch.setattr(connector_resolver, "resolve_active_connector", resolver)
+        db = _ScriptedDB(
+            connector_accounts=[_response(data=[{"id": "account-1"}])],
+            connectors=[_response(data=[{"id": "connector-1"}])],
+        )
+
+        result = await read_emails("tenant-1", db, max_results=5)
+
+        assert result["error_code"] == "email_not_connected"
+>       assert ("connector_accounts", "update") in db.operations
+E       AssertionError: assert ('connector_accounts', 'update') in []
+E        +  where [] = <tests.unit.test_connector_health._ScriptedDB object at 0x00000189DC778D70>.operations
+
+tests\unit\test_connector_health.py:401: AssertionError
+============================== warnings summary ===============================
+tests/unit/test_connector_health.py::test_gmail_parser_walks_nested_mime_parts
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\inbox-original-account-20261005\backend\app\infrastructure\connectors\email\gmail.py:503: DeprecationWarning: datetime.datetime.utcfromtimestamp() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.fromtimestamp(timestamp, datetime.UTC).
+    sent_at=datetime.utcfromtimestamp(int(data["internalDate"]) / 1000) if data.get("internalDate") else None
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/unit/test_connector_health.py::test_unrecoverable_401_downgrades_connector_status
+FAILED tests/unit/test_connector_health.py::test_401_then_same_connector_missing_refresh_marks_expired
+2 failed, 79 passed, 1 warning in 2.02s
