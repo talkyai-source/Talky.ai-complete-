@@ -28,10 +28,10 @@ logs only the path + byte length. Newlines are rejected in every rendered
 value to prevent config-object injection via a crafted credential.
 
 File permissions: the generated file is written 0640 (owner rw, GROUP read).
-Asterisk runs as user ``asterisk`` while the backend runs as ``admins``, so
-the file must be GROUP-readable by the asterisk process — a 0600 file the
-backend writes is unreadable by asterisk, the ``#include`` silently skips it,
-and the trunk never loads (a reload still reports "success"). Proven live.
+The configured backend runtime identity and Asterisk reader may differ.
+The shared group must let Asterisk read the generated files; command reload
+acknowledgement alone does not prove that Asterisk could read/load them.
+Do not infer the installed service identity or permissions from this module.
 
 One-time base-config / deployment prerequisites (ops):
   (a) ``pjsip.conf`` contains ``#include pjsip.d/*.conf`` and defines the
@@ -39,12 +39,20 @@ One-time base-config / deployment prerequisites (ops):
       the generated endpoints reference.
   (b) ``/etc/asterisk/pjsip.d`` is owned ``asterisk:asterisk`` mode ``2770``
       (setgid) so files created inside inherit group ``asterisk``.
-  (c) the backend service user (``admins``) is a member of the ``asterisk``
-      group — combined with (b) + the 0640 mode, asterisk can read the files
-      the backend creates.
-  (d) if ``TELEPHONY_PJSIP_AUTO_RELOAD=on``, a sudoers rule lets the backend
-      user run ``asterisk -rx 'pjsip reload'`` (otherwise reload stays a
-      logged hook an operator runs by hand).
+  (c) the configured backend runtime identity has reviewed membership in the
+      shared ``asterisk`` group — combined with (b) + the 0640 mode, it can
+      write the managed directory and Asterisk can read the resulting files.
+      Provision and verify these identities/permissions explicitly; this
+      module and the unit installer do not establish group membership.
+  (d) if ``TELEPHONY_PJSIP_AUTO_RELOAD=on``, that runtime identity must be
+      authorized to execute the actual direct command
+      ``asterisk -rx 'pjsip reload'`` and access its Asterisk control socket.
+      This module does not invoke ``sudo``: a sudoers entry alone does not
+      authorize its direct invocation. Operations must review and exercise
+      the supported privilege boundary, without blanket privileged commands.
+      With auto-reload off, reload is disabled; enabling it without the
+      required access produces a failure, not an automatic privilege change.
+      Operators may use the controlled deployment/reconciliation path.
 """
 from __future__ import annotations
 
