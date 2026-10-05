@@ -1,0 +1,103 @@
+FFFFFFFFFFFF.F                                                           [100%]
+================================== FAILURES ===================================
+_ test_following_requirement_stays_with_price_when_both_fit[A twelve-month contract is required.] _
+tests\unit\test_knowledge_required_conditions.py:24: in test_following_requirement_stays_with_price_when_both_fit
+    assert select_passage(long_source(requirement), "Starter price", len(expected)) == expected
+E   AssertionError: assert 'General back...19 per month.' == 'Starter cost... is required.'
+E     - Starter costs £19 per month. A twelve-month contract is required.
+E     + General background information. Starter costs £19 per month.
+_ test_following_requirement_stays_with_price_when_both_fit[Merchants must maintain an active bank account.] _
+tests\unit\test_knowledge_required_conditions.py:24: in test_following_requirement_stays_with_price_when_both_fit
+    assert select_passage(long_source(requirement), "Starter price", len(expected)) == expected
+E   AssertionError: assert 'General back...19 per month.' == 'Starter cost...bank account.'
+E     - Starter costs £19 per month. Merchants must maintain an active bank account.
+E     + General background information. Starter costs £19 per month.
+_ test_following_requirement_stays_with_price_when_both_fit[A minimum order of ten devices applies.] _
+tests\unit\test_knowledge_required_conditions.py:24: in test_following_requirement_stays_with_price_when_both_fit
+    assert select_passage(long_source(requirement), "Starter price", len(expected)) == expected
+E   AssertionError: assert 'General back...19 per month.' == 'Starter cost...ices applies.'
+E     - Starter costs £19 per month. A minimum order of ten devices applies.
+E     + General background information. Starter costs £19 per month.
+_ test_following_requirement_stays_with_price_when_both_fit[Approval is mandatory before activation.] _
+tests\unit\test_knowledge_required_conditions.py:24: in test_following_requirement_stays_with_price_when_both_fit
+    assert select_passage(long_source(requirement), "Starter price", len(expected)) == expected
+E   AssertionError: assert 'General back...19 per month.' == 'Starter cost...e activation.'
+E     - Starter costs £19 per month. Approval is mandatory before activation.
+E     + General background information. Starter costs £19 per month.
+_ test_price_is_withheld_when_its_requirement_does_not_fit[A twelve-month contract is required.] _
+tests\unit\test_knowledge_required_conditions.py:29: in test_price_is_withheld_when_its_requirement_does_not_fit
+    assert select_passage(long_source(requirement), "Starter price", len(FACT)) == ""
+E   AssertionError: assert 'Starter costs £19 per month.' == ''
+E     + Starter costs £19 per month.
+_ test_price_is_withheld_when_its_requirement_does_not_fit[Merchants must maintain an active bank account.] _
+tests\unit\test_knowledge_required_conditions.py:29: in test_price_is_withheld_when_its_requirement_does_not_fit
+    assert select_passage(long_source(requirement), "Starter price", len(FACT)) == ""
+E   AssertionError: assert 'Starter costs £19 per month.' == ''
+E     + Starter costs £19 per month.
+_ test_price_is_withheld_when_its_requirement_does_not_fit[A minimum order of ten devices applies.] _
+tests\unit\test_knowledge_required_conditions.py:29: in test_price_is_withheld_when_its_requirement_does_not_fit
+    assert select_passage(long_source(requirement), "Starter price", len(FACT)) == ""
+E   AssertionError: assert 'Starter costs £19 per month.' == ''
+E     + Starter costs £19 per month.
+_ test_price_is_withheld_when_its_requirement_does_not_fit[Approval is mandatory before activation.] _
+tests\unit\test_knowledge_required_conditions.py:29: in test_price_is_withheld_when_its_requirement_does_not_fit
+    assert select_passage(long_source(requirement), "Starter price", len(FACT)) == ""
+E   AssertionError: assert 'Starter costs £19 per month.' == ''
+E     + Starter costs £19 per month.
+_ test_shared_voice_evidence_does_not_admit_price_without_requirement[A twelve-month contract is required.] _
+tests\unit\test_knowledge_required_conditions.py:38: in test_shared_voice_evidence_does_not_admit_price_without_requirement
+    assert evidence == {"status": "no_match", "passages": [], "text": ""}
+E   AssertionError: assert {'passages': ...9 per month.'} == {'passages': ...', 'text': ''}
+E     Differing items:
+E     {'text': '- Starter: Starter costs £19 per month.'} != {'text': ''}
+E     {'passages': [{'coverage': 1.0, 'node_id': 'starter', 'source_id': 'approved-source', 'source_version': 3, ...}]} != {'passages': []}
+E     {'status': 'matched'} != {'status': 'no_match'}
+E     Use -v to get more diff
+_ test_shared_voice_evidence_does_not_admit_price_without_requirement[Merchants must maintain an active bank account.] _
+tests\unit\test_knowledge_required_conditions.py:38: in test_shared_voice_evidence_does_not_admit_price_without_requirement
+    assert evidence == {"status": "no_match", "passages": [], "text": ""}
+E   AssertionError: assert {'passages': ...9 per month.'} == {'passages': ...', 'text': ''}
+E     Differing items:
+E     {'text': '- Starter: Starter costs £19 per month.'} != {'text': ''}
+E     {'passages': [{'coverage': 1.0, 'node_id': 'starter', 'source_id': 'approved-source', 'source_version': 3, ...}]} != {'passages': []}
+E     {'status': 'matched'} != {'status': 'no_match'}
+E     Use -v to get more diff
+_ test_shared_voice_evidence_does_not_admit_price_without_requirement[A minimum order of ten devices applies.] _
+tests\unit\test_knowledge_required_conditions.py:38: in test_shared_voice_evidence_does_not_admit_price_without_requirement
+    assert evidence == {"status": "no_match", "passages": [], "text": ""}
+E   AssertionError: assert {'passages': ...9 per month.'} == {'passages': ...', 'text': ''}
+E     Differing items:
+E     {'text': '- Starter: Starter costs £19 per month.'} != {'text': ''}
+E     {'passages': [{'coverage': 1.0, 'node_id': 'starter', 'source_id': 'approved-source', 'source_version': 3, ...}]} != {'passages': []}
+E     {'status': 'matched'} != {'status': 'no_match'}
+E     Use -v to get more diff
+_ test_shared_voice_evidence_does_not_admit_price_without_requirement[Approval is mandatory before activation.] _
+tests\unit\test_knowledge_required_conditions.py:38: in test_shared_voice_evidence_does_not_admit_price_without_requirement
+    assert evidence == {"status": "no_match", "passages": [], "text": ""}
+E   AssertionError: assert {'passages': ...9 per month.'} == {'passages': ...', 'text': ''}
+E     Differing items:
+E     {'text': '- Starter: Starter costs £19 per month.'} != {'text': ''}
+E     {'passages': [{'coverage': 1.0, 'node_id': 'starter', 'source_id': 'approved-source', 'source_version': 3, ...}]} != {'passages': []}
+E     {'status': 'matched'} != {'status': 'no_match'}
+E     Use -v to get more diff
+___ test_multiple_adjacent_requirements_are_preserved_or_withheld_together ____
+tests\unit\test_knowledge_required_conditions.py:51: in test_multiple_adjacent_requirements_are_preserved_or_withheld_together
+    assert select_passage(long_source(requirements), "Starter price", len(expected)) == expected
+E   AssertionError: assert 'General back...19 per month.' == 'Starter cost...e activation.'
+E     - Starter costs £19 per month. A twelve-month contract is required. Merchants must maintain an active bank account. A minimum order of ten devices applies. Approval is mandatory before activation.
+E     + General background information. Starter costs £19 per month.
+=========================== short test summary info ===========================
+FAILED tests/unit/test_knowledge_required_conditions.py::test_following_requirement_stays_with_price_when_both_fit[A twelve-month contract is required.]
+FAILED tests/unit/test_knowledge_required_conditions.py::test_following_requirement_stays_with_price_when_both_fit[Merchants must maintain an active bank account.]
+FAILED tests/unit/test_knowledge_required_conditions.py::test_following_requirement_stays_with_price_when_both_fit[A minimum order of ten devices applies.]
+FAILED tests/unit/test_knowledge_required_conditions.py::test_following_requirement_stays_with_price_when_both_fit[Approval is mandatory before activation.]
+FAILED tests/unit/test_knowledge_required_conditions.py::test_price_is_withheld_when_its_requirement_does_not_fit[A twelve-month contract is required.]
+FAILED tests/unit/test_knowledge_required_conditions.py::test_price_is_withheld_when_its_requirement_does_not_fit[Merchants must maintain an active bank account.]
+FAILED tests/unit/test_knowledge_required_conditions.py::test_price_is_withheld_when_its_requirement_does_not_fit[A minimum order of ten devices applies.]
+FAILED tests/unit/test_knowledge_required_conditions.py::test_price_is_withheld_when_its_requirement_does_not_fit[Approval is mandatory before activation.]
+FAILED tests/unit/test_knowledge_required_conditions.py::test_shared_voice_evidence_does_not_admit_price_without_requirement[A twelve-month contract is required.]
+FAILED tests/unit/test_knowledge_required_conditions.py::test_shared_voice_evidence_does_not_admit_price_without_requirement[Merchants must maintain an active bank account.]
+FAILED tests/unit/test_knowledge_required_conditions.py::test_shared_voice_evidence_does_not_admit_price_without_requirement[A minimum order of ten devices applies.]
+FAILED tests/unit/test_knowledge_required_conditions.py::test_shared_voice_evidence_does_not_admit_price_without_requirement[Approval is mandatory before activation.]
+FAILED tests/unit/test_knowledge_required_conditions.py::test_multiple_adjacent_requirements_are_preserved_or_withheld_together
+13 failed, 1 passed in 3.80s

@@ -1,0 +1,34 @@
+{
+  "source_commit": "15c6a7c0c8d42e6f891656dbf08c3e673a171495",
+  "tested_base": "c01175c15679d881f591c7c5d0a5e17d5af4c465",
+  "source_lf_sha256": {
+    "backend/app/services/scripts/knowledge/passages.py": "a6171328ede5df465b61502624137f0b8145f7d76e19000582e7c4251fb54ff7",
+    "backend/app/services/scripts/knowledge/retrieval.py": "093b8af85cfdba64f74cdc2adb08649de53c6e54c1cb0cd1e558eff525afc263",
+    "backend/app/domain/services/voice_pipeline/kb_budget.py": "71c68cc5043661521f94e810fcbacbff71f01f9e580578cdf5f7fc9f54d2458c",
+    "backend/app/domain/services/voice_pipeline/knowledge_tool.py": "bd312b9323d2f2cebf4d677ba9807288412c56e2bbf5d12d1de40cd69abae3b2",
+    "backend/app/domain/services/voice_pipeline/turn_streamer.py": "b001f93cf5a1f0d602c15885d8c1d548126898f79e2a476e872e7bd8d0f603b7",
+    "backend/app/realtime/bridge.py": "7166eff853b0684793f42de474479716b64ae99c251a2a7b208c9b63bcc7f8b8",
+    "backend/tests/unit/test_knowledge_required_conditions.py": "77be4b150957b32810395163668d5bf291e851aece5bfa99c1c5ef9982dc5433",
+    "backend/tests/unit/test_kb_evidence_contract.py": "e1416fcb529f6d10f8b49de9923da98b383c0719bf6ffb6fd798c327d4036b75",
+    "backend/tests/unit/test_knowledge_evidence_budget_order.py": "8d2c9ee85abc50f93392c607e23471ca18e83e8d3027b82f55c8deb75b73d329",
+    "backend/tests/unit/test_agent_knowledge_repairs.py": "3109164c2953144eea9441c626cab7078237d29d21e618564396a3d02c69d7c3",
+    "backend/tests/unit/test_knowledge_budget.py": "93aeea959e465429472a069fe6e602dd6ef96a1d7fd80758934f7ad9210f9204",
+    "backend/tests/unit/test_kb_source_first_all_paths.py": "f3e5f02feb811ef51bd237c2eee205442a54d0bf6fc7131a1eb5baf77db1418f",
+    "backend/tests/unit/test_realtime_knowledge_evidence.py": "e0b25c54df92694eef4ab3deca0103f41ed0bfec888cac191ff8b51ad59a71e7",
+    "backend/tests/unit/test_knowledge_uncertainty_contract.py": "5fd1aaa6e7ecc9b20e8186f103ef7da7bc17c323c4c126d4aae8275ed7bcee56",
+    "backend/tests/unit/test_knowledge_relevance.py": "18882d82e59b6de40d8da1dc4e15ea95cf8ac67439af9e36aa01a610cdee67cd",
+    "backend/tests/unit/test_knowledge_render.py": "cd044853379e8df3b7dfd69df3e202fe76f56512dcccda77c97aabfee42b8a7f"
+  },
+  "artifact_lf_sha256": {
+    "docs/sessions/artifacts/ag02-required-conditions/baseline.json": "92581f6071e8a7130e64babceae4946b2d2304d0d16a0a8c1412d701ee8caaaa",
+    "docs/sessions/artifacts/ag02-required-conditions/baseline.txt": "40bfead9f93dd9dcfee43ed5217766a17b248c2067936083d0018eb956402acf",
+    "docs/sessions/artifacts/ag02-required-conditions/commands.json": "31f107662cd6821200cfa69f901e3776706a20c39873bae0eca1d8b06bbc0e24",
+    "docs/sessions/artifacts/ag02-required-conditions/final.json": "4c01344c09baa7bc0e048195b482d360c77417b2fbb9e3a803c6118b9ea6b358",
+    "docs/sessions/artifacts/ag02-required-conditions/final.txt": "c70cf46f5f46090dbe14364a2592bd99f31e1c2bfc6d40a3f850f7cbd06adfec",
+    "docs/sessions/artifacts/ag02-required-conditions/lint.txt": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18",
+    "docs/sessions/artifacts/ag02-required-conditions/probe.py": "ed4eb984ef4f9e03852c7d91ca3619cfb58f14e49bec3bd2ddaa0add42cc33b7",
+    "docs/sessions/2026-10-06-ag02-required-conditions.md": "a49eb4e6b08f5500d5c357d7689675e846d6f43ba71dfb19e96a9210c89f5a9f"
+  },
+  "review": "account_finalize independently reviewed source, controls, retained baseline/final results and sixteen source hashes; no rerun.",
+  "qualification": "143 offline tests; bounded obligation grouping, not AG02 retrieval-quality or customer acceptance."
+}
