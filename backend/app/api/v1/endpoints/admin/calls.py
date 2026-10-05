@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+import re
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any, List, Literal, Mapping, Optional
+from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, Field
 
 from app.core.postgres_adapter import Client
@@ -24,6 +27,8 @@ from ._serialization import AdminResponseModel
 from app.domain.services.dialer.job_states import LIVE_CALL_STATUSES
 from app.domain.services.call_status import CallOutcome
 from app.domain.services.audit_logger import AuditEvent, AuditLogger
+from app.infrastructure.connectors.crm.base import AmbiguousCRMCallReference, valid_crm_activity_id
+from app.services.connector_resolver import resolve_active_connector, verify_reviewed_connector
 from app.domain.services.telephony.termination import (
     finalize_proven_inbound_termination,
     mark_termination_pending_and_load_context,
@@ -187,6 +192,95 @@ class CallHistoryResponse(BaseModel):
     total: int
 
 
+class AdminCRMReceipt(AdminResponseModel):
+    """Saved evidence only; excludes provider bodies and contact arguments."""
+
+    provider: Literal["hubspot", "salesforce"]
+    status: str
+    phase: str
+    destination_connector_id: Optional[str] = None
+    destination_account_id: Optional[str] = None
+    remote_contact_id: Optional[str] = None
+    remote_call_id: Optional[str] = None
+    updated_at: Optional[str] = None
+    inspection_available: bool = False
+
+
+class AdminCRMInspection(AdminResponseModel):
+    call_id: str
+    provider: Literal["hubspot", "salesforce"]
+    outcome: Literal["observed_reference", "no_match", "ambiguous", "unavailable"]
+    reason: Literal[
+        "reference_observed_only", "absence_is_inconclusive", "multiple_references",
+        "original_receipt_unavailable", "original_authorization_unavailable",
+        "provider_read_unavailable",
+    ]
+    observed_at: str
+    observed_remote_id: Optional[str] = None
+
+
+_CRM_RECEIPT_COLUMNS = (
+    "tenant_id,call_id,provider,status,phase,destination_connector_id,"
+    "destination_account_id,remote_contact_id,remote_call_id,updated_at"
+)
+
+
+def _crm_reference(value: Any) -> str | None:
+    """Bound identifiers without exposing arbitrary stored exception text."""
+    if isinstance(value, UUID):
+        return str(value)
+    if isinstance(value, str) and re.fullmatch(r"[A-Za-z0-9_.:@/-]{1,256}", value):
+        return value
+    return None
+
+
+def _crm_inspectable(row: Mapping[str, Any]) -> bool:
+    try:
+        UUID(str(row.get("destination_connector_id")))
+        UUID(str(row.get("call_id")))
+        UUID(str(row.get("tenant_id")))
+    except (ValueError, TypeError):
+        return False
+    return bool(
+        row.get("provider") in {"hubspot", "salesforce"}
+        and row.get("phase") == "creating_call"
+        and row.get("status") in {"unknown", "processing"}
+        and _crm_reference(row.get("destination_account_id"))
+    )
+
+
+def _admin_crm_receipts(db_client: Client, tenant_id: str, call_id: str) -> list[dict]:
+    response = db_client.table("crm_deliveries").select(_CRM_RECEIPT_COLUMNS).eq(
+        "tenant_id", tenant_id).eq("call_id", call_id).order("provider").execute()
+    if getattr(response, "error", None) or not isinstance(response.data, list):
+        raise RuntimeError("CRM receipts unavailable")
+    # Explicit identity checks also protect the projection against malformed
+    # adapter results. No current connector is substituted for saved evidence.
+    if any(str(row.get("tenant_id")) != tenant_id or str(row.get("call_id")) != call_id
+           for row in response.data):
+        raise RuntimeError("CRM receipt identity mismatch")
+    return response.data
+
+
+def _admin_crm_projection(row: dict) -> AdminCRMReceipt:
+    return AdminCRMReceipt(
+        provider=row["provider"],
+        status=row["status"] if row.get("status") in {
+            "pending", "processing", "succeeded", "failed", "unknown", "skipped"
+        } else "unknown",
+        phase=row["phase"] if row.get("phase") in {
+            "pending", "legacy_unverified", "resolving_contact", "creating_contact",
+            "creating_call", "updating_call", "complete",
+        } else "unknown",
+        destination_connector_id=_crm_reference(row.get("destination_connector_id")),
+        destination_account_id=_crm_reference(row.get("destination_account_id")),
+        remote_contact_id=_crm_reference(row.get("remote_contact_id")),
+        remote_call_id=_crm_reference(row.get("remote_call_id")),
+        updated_at=row.get("updated_at"),
+        inspection_available=_crm_inspectable(row),
+    )
+
+
 class AdminCallDetail(AdminResponseModel):
     """Full call detail for admin view"""
 
@@ -231,6 +325,8 @@ class AdminCallDetail(AdminResponseModel):
     billing_hold_reason: Optional[str] = None
     reserved_seconds: Optional[int] = None
     transfer_legs: List[dict] = Field(default_factory=list)
+    crm_deliveries: List[AdminCRMReceipt] = Field(default_factory=list)
+    crm_receipts_available: bool = False
 
 
 # =============================================================================
@@ -669,6 +765,14 @@ async def get_admin_call_detail(
             leg["metadata"] = metadata if isinstance(metadata, dict) else {}
             transfer_legs.append(leg)
 
+        crm_receipts_available = True
+        try:
+            crm_deliveries = [_admin_crm_projection(row) for row in _admin_crm_receipts(
+                db_client, str(call["tenant_id"]), str(call["id"]))]
+        except Exception:
+            crm_receipts_available = False
+            crm_deliveries = []
+
         return AdminCallDetail(
             id=call["id"],
             tenant_id=call.get("tenant_id", ""),
@@ -713,12 +817,84 @@ async def get_admin_call_detail(
             billing_hold_reason=call.get("billing_hold_reason"),
             reserved_seconds=call.get("reserved_seconds"),
             transfer_legs=transfer_legs,
+            crm_deliveries=crm_deliveries,
+            crm_receipts_available=crm_receipts_available,
         )
 
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch call detail: {str(e)}")
+
+
+@router.get("/calls/{call_id}/crm-deliveries/{provider}/inspection", response_model=AdminCRMInspection)
+async def inspect_admin_crm_delivery(
+    call_id: UUID,
+    provider: Literal["hubspot", "salesforce"],
+    response: Response,
+    admin_user: CurrentUser = Depends(require_platform_admin),
+    db_client: Client = Depends(get_db_client),
+):
+    """Observe a reference in the original account without resolving the receipt.
+
+    A single matching title/subject is not proof of payload, contact or effect
+    ownership. An empty search is inconclusive. No retry, refresh or write.
+    """
+    response.headers["Cache-Control"] = "no-store"
+    saved_call_id = str(call_id)
+
+    def observation(outcome, reason, remote_id=None):
+        return AdminCRMInspection(
+            call_id=saved_call_id, provider=provider, outcome=outcome, reason=reason,
+            observed_at=datetime.now(timezone.utc).isoformat(), observed_remote_id=remote_id,
+        )
+
+    try:
+        saved = db_client.table("calls").select("id,tenant_id").eq("id", saved_call_id).single().execute()
+        if getattr(saved, "error", None):
+            raise RuntimeError("Call lookup unavailable")
+        if not saved.data:
+            raise HTTPException(status_code=404, detail="Call not found")
+        if str(saved.data.get("id")) != saved_call_id:
+            raise RuntimeError("Call identity mismatch")
+        tenant_id = str(UUID(str(saved.data.get("tenant_id"))))
+        receipts = [row for row in _admin_crm_receipts(db_client, tenant_id, saved_call_id)
+                    if row.get("provider") == provider]
+        if len(receipts) != 1 or not _crm_inspectable(receipts[0]):
+            return observation("unavailable", "original_receipt_unavailable")
+        receipt = receipts[0]
+    except HTTPException:
+        raise
+    except Exception:
+        return observation("unavailable", "original_receipt_unavailable")
+
+    try:
+        async with asyncio.timeout(10):
+            connector, connector_id, resolved_provider = await resolve_active_connector(
+                db_client, tenant_id, "crm", provider=receipt["provider"],
+                connector_id=str(receipt["destination_connector_id"]),
+                read_only=True, external_account_id=receipt["destination_account_id"],
+            )
+            verify_reviewed_connector(connector, connector_id, resolved_provider, {
+                "connector_id": str(receipt["destination_connector_id"]),
+                "provider": receipt["provider"],
+                "external_account_id": receipt["destination_account_id"],
+            })
+    except Exception:
+        return observation("unavailable", "original_authorization_unavailable")
+
+    try:
+        async with asyncio.timeout(10):
+            remote_id = await connector.find_call_by_reference(str(receipt["call_id"]))
+        if remote_id is None:
+            return observation("no_match", "absence_is_inconclusive")
+        if not valid_crm_activity_id(remote_id):
+            return observation("unavailable", "provider_read_unavailable")
+        return observation("observed_reference", "reference_observed_only", remote_id)
+    except AmbiguousCRMCallReference:
+        return observation("ambiguous", "multiple_references")
+    except Exception:
+        return observation("unavailable", "provider_read_unavailable")
 
 
 @router.post("/calls/{call_id}/terminate")

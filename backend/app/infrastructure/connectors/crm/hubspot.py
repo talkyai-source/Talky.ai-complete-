@@ -13,7 +13,7 @@ from urllib.parse import urlencode, quote
 import httpx
 
 from app.infrastructure.connectors.base import ConnectorFactory, OAuthTokens, ConnectorProviderError
-from app.infrastructure.connectors.crm.base import CRMProvider, call_reference
+from app.infrastructure.connectors.crm.base import AmbiguousCRMCallReference, CRMProvider, call_reference, valid_crm_activity_id
 
 logger = logging.getLogger(__name__)
 
@@ -311,10 +311,14 @@ class HubSpotConnector(CRMProvider):
                       "properties": ["hs_call_title"], "limit": 2}, headers=self._get_auth_headers(),
             )
             self._check_response(response, "find_call_by_reference")
-            rows = response.json().get("results") or []
+            rows = response.json().get("results")
+            if not isinstance(rows, list) or any(
+                not isinstance(row, dict) or not valid_crm_activity_id(row.get("id")) for row in rows
+            ):
+                raise ValueError("CRM reference search returned invalid activity IDs")
             if len(rows) > 1:
-                raise ValueError("Multiple CRM activities match this delivery; review required")
-            return str(rows[0]["id"]) if rows else None
+                raise AmbiguousCRMCallReference("Multiple CRM activities match this delivery; review required")
+            return rows[0]["id"] if rows else None
 
     async def create_note(
         self,

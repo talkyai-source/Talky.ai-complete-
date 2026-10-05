@@ -385,6 +385,8 @@ async def resolve_active_connector(
     connector_id: Optional[str] = None,
     account_id: Optional[str] = None,
     reviewed_authorization: bool = False,
+    read_only: bool = False,
+    external_account_id: Optional[str] = None,
 ) -> Tuple[BaseConnector, str, str]:
     """Return ``(connector, connector_id, provider)`` for the tenant's active
     connector of ``connector_type`` ("email" | "drive" | "calendar" | ...),
@@ -398,9 +400,19 @@ async def resolve_active_connector(
     local authorization, not a provider-stable external account identity.
     Reviewed email/calendar effects opt into unique creation-time selection;
     ordinary reads and CRM retain their existing refresh-time ordering.
+    ``read_only`` is an inspection-only opt-in: require the original connector,
+    provider and external account, one active matching authorization, and a
+    safely unexpired token. It never refreshes or writes connector state.
 
     Raises ``ConnectorNotConnectedError`` when nothing is connected/usable.
     """
+    if read_only and (force_refresh or reviewed_authorization or any(
+        not isinstance(value, str) or not value.strip()
+        for value in (connector_id, provider, external_account_id)
+    )):
+        raise ConnectorNotConnectedError(connector_type, reason="original_account_unavailable")
+    if external_account_id is not None and not read_only:
+        raise ValueError("External account pinning requires read-only inspection")
     query = (
         db_client.table("connectors")
         .select("id, provider, status, created_at, config")
@@ -458,16 +470,20 @@ async def resolve_active_connector(
         )
         if account_id is not None:
             account_query = account_query.eq("id", account_id)
+        if read_only:
+            account_query = account_query.eq("external_account_id", external_account_id)
         if reviewed_authorization:
             selected = _reviewed_account_row(db_client, tenant_id, cid, row["provider"], account_id)
             account_rows = [selected]
         else:
-            acc = account_query.order("last_refreshed_at", desc=True).limit(1).execute()
+            acc = account_query.order("last_refreshed_at", desc=True).limit(2 if read_only else 1).execute()
             if getattr(acc, "error", None):
                 logger.error("resolve_active_connector: connector_accounts query error cid=%s err=%s", cid, acc.error)
                 raise ConnectorLookupError(connector_type, str(acc.error))
             adata = acc.data
             account_rows = adata if isinstance(adata, list) else ([adata] if isinstance(adata, dict) else [])
+            if read_only and len(account_rows) != 1:
+                raise ConnectorNotConnectedError(connector_type, reason="original_authorization_unavailable")
         if account_id is not None and not account_rows:
             first_failure_reason = "account_unavailable"
         for arow in account_rows:
@@ -487,6 +503,8 @@ async def resolve_active_connector(
             candidate_should_refresh = _token_needs_refresh(
                 arow.get("token_expires_at"), force=force_refresh
             )
+            if read_only and (not arow.get("token_expires_at") or candidate_should_refresh):
+                raise ConnectorNotConnectedError(connector_type, reason="inspection_token_unavailable")
             candidate_refresh = None
             if candidate_should_refresh:
                 encrypted_refresh = arow.get("refresh_token_encrypted")

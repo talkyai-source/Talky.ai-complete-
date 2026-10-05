@@ -217,6 +217,28 @@ export interface AdminTransferLeg {
     metadata?: Record<string, unknown> | null;
 }
 
+export interface AdminCRMReceipt {
+    provider: 'hubspot' | 'salesforce';
+    status: string;
+    phase: string;
+    destination_connector_id: string | null;
+    destination_account_id: string | null;
+    remote_contact_id: string | null;
+    remote_call_id: string | null;
+    updated_at: string | null;
+    inspection_available: boolean;
+}
+
+export interface AdminCRMInspection {
+    call_id: string;
+    provider: AdminCRMReceipt['provider'];
+    outcome: 'observed_reference' | 'no_match' | 'ambiguous' | 'unavailable';
+    reason: 'reference_observed_only' | 'absence_is_inconclusive' | 'multiple_references'
+        | 'original_receipt_unavailable' | 'original_authorization_unavailable' | 'provider_read_unavailable';
+    observed_at: string;
+    observed_remote_id: string | null;
+}
+
 export interface AdminCallDetail {
     id: string;
     tenant_id: string;
@@ -259,6 +281,8 @@ export interface AdminCallDetail {
     billing_hold_reason?: string | null;
     reserved_seconds?: number | null;
     transfer_legs?: AdminTransferLeg[];
+    crm_deliveries?: AdminCRMReceipt[];
+    crm_receipts_available?: boolean;
     termination_status?: CallTerminationStatus | null;
     termination_requested_at?: string | null;
     termination_error?: string | null;
@@ -1421,6 +1445,13 @@ class ApiClient {
 
     async getAdminCallDetail(callId: string) {
         return this.request<AdminCallDetail>(`/admin/calls/${callId}`);
+    }
+
+    async inspectAdminCRMDelivery(callId: string, provider: AdminCRMReceipt['provider']) {
+        return this.request<AdminCRMInspection>(
+            `/admin/calls/${encodeURIComponent(callId)}/crm-deliveries/${encodeURIComponent(provider)}/inspection`,
+            { timeoutMs: 25000 },
+        );
     }
 
     async terminateCall(callId: string) {

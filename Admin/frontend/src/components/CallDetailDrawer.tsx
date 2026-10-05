@@ -1,4 +1,4 @@
-import { useCallback, useState, useEffect } from 'react';
+import { useCallback, useState, useEffect, useRef } from 'react';
 import {
     X,
     Phone,
@@ -24,6 +24,8 @@ import { api } from '../lib/api';
 import { formatCallCost } from '../lib/call-cost';
 import type {
     AdminCallDetail,
+    AdminCRMInspection,
+    AdminCRMReceipt,
     AdminFeedbackItem,
     AdminRecordingItem,
     AdminTransferLeg,
@@ -163,6 +165,98 @@ function TransferLegsSection({ legs }: { legs: AdminTransferLeg[] }) {
 }
 
 type DetailTab = 'timeline' | 'transcript' | 'recordings' | 'feedback';
+const inspectionLabels: Record<AdminCRMInspection['outcome'], string> = {
+    observed_reference: 'Matching reference observed',
+    no_match: 'No matching reference observed — inconclusive',
+    ambiguous: 'Multiple matching references — unresolved',
+    unavailable: 'Inspection unavailable',
+};
+
+const inspectionReasons: Record<AdminCRMInspection['reason'], string> = {
+    reference_observed_only: 'This does not verify the payload, contact, or completion of this delivery.',
+    absence_is_inconclusive: 'An empty search does not prove the action was not executed. Do not resend on this basis.',
+    multiple_references: 'The provider returned more than one matching activity. The receipt remains unresolved.',
+    original_receipt_unavailable: 'The saved receipt does not contain the required original call-creation evidence.',
+    original_authorization_unavailable: 'A unique, active original account with an unexpired token is unavailable.',
+    provider_read_unavailable: 'The provider observation could not be obtained. The receipt is unchanged.',
+};
+
+export function CRMReceiptsSection({ callId, receipts, available }: {
+    callId: string; receipts: AdminCRMReceipt[]; available: boolean;
+}) {
+    const [observations, setObservations] = useState<Partial<Record<AdminCRMReceipt['provider'], AdminCRMInspection>>>({});
+    const [pending, setPending] = useState<Partial<Record<AdminCRMReceipt['provider'], boolean>>>({});
+    const [errors, setErrors] = useState<Partial<Record<AdminCRMReceipt['provider'], string>>>({});
+    const generation = useRef(0);
+    const inFlight = useRef(new Set<AdminCRMReceipt['provider']>());
+
+    useEffect(() => {
+        generation.current += 1;
+        setObservations({}); setPending({}); setErrors({}); inFlight.current.clear();
+        return () => { generation.current += 1; };
+    }, [callId]);
+
+    const inspect = async (provider: AdminCRMReceipt['provider']) => {
+        if (inFlight.current.has(provider)) return;
+        const ownGeneration = generation.current;
+        inFlight.current.add(provider);
+        setPending((before) => ({ ...before, [provider]: true }));
+        setErrors((before) => ({ ...before, [provider]: undefined }));
+        setObservations((before) => ({ ...before, [provider]: undefined }));
+        try {
+            const result = await api.inspectAdminCRMDelivery(callId, provider);
+            if (generation.current !== ownGeneration) return;
+            if (result.error || !result.data || result.data.call_id !== callId || result.data.provider !== provider
+                || !Object.hasOwn(inspectionLabels, result.data.outcome) || !Object.hasOwn(inspectionReasons, result.data.reason)) {
+                setErrors((before) => ({ ...before, [provider]: 'Inspection unavailable. Saved receipt unchanged.' }));
+            } else {
+                setObservations((before) => ({ ...before, [provider]: result.data }));
+            }
+        } catch {
+            if (generation.current === ownGeneration) {
+                setErrors((before) => ({ ...before, [provider]: 'Inspection unavailable. Saved receipt unchanged.' }));
+            }
+        } finally {
+            if (generation.current === ownGeneration) {
+                inFlight.current.delete(provider);
+                setPending((before) => ({ ...before, [provider]: false }));
+            }
+        }
+    };
+
+    return <section className="qualification-panel" aria-label="Saved CRM delivery evidence">
+        <h4>CRM delivery evidence</h4>
+        <p>Read-only evidence. Inspection does not complete, retry, or change the saved delivery.</p>
+        {!available ? <p>Saved CRM receipts are unavailable.</p> : receipts.length === 0 ? <p>No saved CRM delivery receipts.</p> : receipts.map((receipt) => {
+            const observed = observations[receipt.provider];
+            return <article key={receipt.provider}>
+                <strong>{receipt.provider === 'hubspot' ? 'HubSpot' : 'Salesforce'}</strong>
+                <dl>
+                    <div><dt>Saved status / phase</dt><dd>{humanize(receipt.status)} / {humanize(receipt.phase)}</dd></div>
+                    <div><dt>Original connector</dt><dd>{receipt.destination_connector_id || 'Unavailable'}</dd></div>
+                    <div><dt>Original account</dt><dd>{receipt.destination_account_id || 'Unavailable'}</dd></div>
+                    <div><dt>Saved contact ID</dt><dd>{receipt.remote_contact_id || 'Unavailable'}</dd></div>
+                    <div><dt>Saved activity ID</dt><dd>{receipt.remote_call_id || 'Unavailable'}</dd></div>
+                    <div><dt>Receipt updated</dt><dd>{formatDate(receipt.updated_at)}</dd></div>
+                </dl>
+                {receipt.inspection_available ? <button type="button" className="btn btn-secondary btn-sm"
+                    disabled={Boolean(pending[receipt.provider])} onClick={() => void inspect(receipt.provider)}>
+                    {pending[receipt.provider] ? 'Inspecting original account…' : 'Inspect original account'}
+                </button> : <p>Reference inspection is unavailable for this saved phase or missing original identity.</p>}
+                <div aria-live="polite">
+                    {errors[receipt.provider] && <p>{errors[receipt.provider]}</p>}
+                    {observed && <>
+                        <p><strong>{inspectionLabels[observed.outcome]}</strong></p>
+                        <p>{inspectionReasons[observed.reason]}</p>
+                        {observed.observed_remote_id && <p>Observed activity ID: {observed.observed_remote_id}</p>}
+                        <p>Observed at: {formatDate(observed.observed_at)}</p>
+                    </>}
+                </div>
+            </article>;
+        })}
+    </section>;
+}
+
 type MediaDeleteTarget =
     | { kind: 'recording'; item: AdminRecordingItem }
     | { kind: 'feedback'; item: AdminFeedbackItem };
@@ -180,11 +274,12 @@ export function CallDetailDrawer({ callId, onClose }: CallDetailDrawerProps) {
     const [deleteIdempotencyKey, setDeleteIdempotencyKey] = useState('');
     const [deleting, setDeleting] = useState(false);
 
-    const loadMedia = useCallback(async (selectedCallId: string) => {
+    const loadMedia = useCallback(async (selectedCallId: string, isCurrent: () => boolean = () => true) => {
         const [recordingResponse, feedbackResponse] = await Promise.all([
             api.getAdminRecordings({ call_id: selectedCallId, page_size: 20 }),
             api.getAdminFeedback({ call_id: selectedCallId, page_size: 1 }),
         ]);
+        if (!isCurrent()) return;
         if (recordingResponse.error) throw new Error(recordingResponse.error.message);
         if (feedbackResponse.error) throw new Error(feedbackResponse.error.message);
         setRecordings(recordingResponse.data?.items ?? []);
@@ -192,6 +287,8 @@ export function CallDetailDrawer({ callId, onClose }: CallDetailDrawerProps) {
     }, []);
 
     useEffect(() => {
+        let cancelled = false;
+        setCall(null);
         if (!callId) {
             setCall(null);
             setRecordings([]);
@@ -205,18 +302,20 @@ export function CallDetailDrawer({ callId, onClose }: CallDetailDrawerProps) {
             setActiveTab('timeline');
             try {
                 const response = await api.getAdminCallDetail(callId);
+                if (cancelled) return;
                 if (response.error) throw new Error(response.error.message);
-                if (!response.data) throw new Error('Call details were empty');
+                if (!response.data || response.data.id !== callId) throw new Error('Call details were unavailable');
                 setCall(response.data);
-                await loadMedia(callId);
+                await loadMedia(callId, () => !cancelled);
             } catch (err) {
-                setError(err instanceof Error ? err.message : 'Failed to fetch call details');
+                if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to fetch call details');
             } finally {
-                setLoading(false);
+                if (!cancelled) setLoading(false);
             }
         };
 
         void fetchCallDetail();
+        return () => { cancelled = true; };
     }, [callId, loadMedia]);
 
     const retryFeedback = async () => {
@@ -306,7 +405,7 @@ export function CallDetailDrawer({ callId, onClose }: CallDetailDrawerProps) {
                         <div className="error-banner">
                             <p>{error}</p>
                         </div>
-                    ) : call ? (
+                    ) : call && call.id === callId ? (
                         <>
                             {error && (
                                 <div className="error-banner call-action-error">
@@ -395,6 +494,8 @@ export function CallDetailDrawer({ callId, onClose }: CallDetailDrawerProps) {
                             )}
 
                             <TransferLegsSection legs={call.transfer_legs ?? []} />
+                            <CRMReceiptsSection key={call.id} callId={call.id} receipts={call.crm_deliveries ?? []}
+                                available={call.crm_receipts_available === true} />
 
                             {/* Summary */}
                             {call.summary && (

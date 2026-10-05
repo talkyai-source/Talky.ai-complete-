@@ -45,7 +45,7 @@ from app.infrastructure.connectors.base import (
     ConnectorProviderError,
     OAuthTokens,
 )
-from app.infrastructure.connectors.crm.base import CRMProvider, call_reference
+from app.infrastructure.connectors.crm.base import AmbiguousCRMCallReference, CRMProvider, call_reference, valid_crm_activity_id
 
 logger = logging.getLogger(__name__)
 
@@ -596,9 +596,11 @@ class SalesforceConnector(CRMProvider):
         rows = await self.query(
             f"SELECT Id FROM Task WHERE Subject = 'Talky.ai call {safe_reference}' LIMIT 2"
         )
+        if any(not isinstance(row, dict) or not valid_crm_activity_id(row.get("Id")) for row in rows):
+            raise ValueError("CRM reference search returned invalid activity IDs")
         if len(rows) > 1:
-            raise ValueError("Multiple CRM activities match this delivery; review required")
-        return str(rows[0]["Id"]) if rows else None
+            raise AmbiguousCRMCallReference("Multiple CRM activities match this delivery; review required")
+        return rows[0]["Id"] if rows else None
 
     async def create_note(
         self,

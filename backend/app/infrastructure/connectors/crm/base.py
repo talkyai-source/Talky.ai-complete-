@@ -18,6 +18,15 @@ def call_reference(body: str) -> Optional[str]:
     return match.group(1) if match else None
 
 
+class AmbiguousCRMCallReference(ValueError):
+    """More than one provider activity matches the exact call reference."""
+
+
+def valid_crm_activity_id(value: Any) -> bool:
+    """Bound the opaque activity IDs returned by the supported CRM searches."""
+    return isinstance(value, str) and re.fullmatch(r"[A-Za-z0-9_-]{1,256}", value) is not None
+
+
 class CRMProvider(BaseConnector):
     """
     Abstract base class for CRM providers.
