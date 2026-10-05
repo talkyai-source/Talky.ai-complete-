@@ -1,0 +1,18 @@
+F                                                                        [100%]
+================================== FAILURES ===================================
+________ test_numeric_only_query_cannot_inherit_prior_query_confidence ________
+
+    def test_numeric_only_query_cannot_inherit_prior_query_confidence():
+        node = {"id": "legacy", "content": "Support is available on weekdays.",
+                "search_text": "20", "coverage": 1}
+        hits = retrieve_pinned_knowledge([node], "20")
+        assert hits and hits[0]["id"] == "legacy"  # Numeric routing remains available.
+>       assert prepare_knowledge_evidence(hits, "20")["status"] == "weak_match"
+E       AssertionError: assert 'matched' == 'weak_match'
+E         - weak_match
+E         + matched
+
+tests\unit\test_knowledge_authored_coverage.py:108: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/unit/test_knowledge_authored_coverage.py::test_numeric_only_query_cannot_inherit_prior_query_confidence
+1 failed, 12 deselected in 4.38s

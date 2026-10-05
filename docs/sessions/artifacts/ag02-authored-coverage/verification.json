@@ -1,0 +1,146 @@
+{
+  "base_commit": "c01175c15679d881f591c7c5d0a5e17d5af4c465",
+  "source_commit": "97bf8df07e3c4b5e890ade190e5ad25eef202764",
+  "worktree": "C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/tmp/ag02-authored-coverage-20261006",
+  "cwd": "backend",
+  "interpreter": "C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/backend/.venv/Scripts/python.exe",
+  "dependency_claim": "Existing venv; actual PG runtime provenance is in pg-baseline.json and pg-final.json. Not exact-requirements qualification.",
+  "unit_environment": {
+    "PYTHONPATH": "Absolute worktree backend for final runs; . for initial pinned baseline",
+    "PYTHONDONTWRITEBYTECODE": "1 for follow-up/final runs",
+    "DATABASE_URL": "postgresql://test:test@127.0.0.1:1/unavailable_test",
+    "ENVIRONMENT": "test"
+  },
+  "commands": [
+    {
+      "result": "8 failed, 4 passed in 6.93s",
+      "log": "baseline.txt",
+      "stage": "Before any application edit",
+      "exit_code": 1,
+      "command": "python -m pytest tests/unit/test_knowledge_authored_coverage.py -q -o addopts="
+    },
+    {
+      "result": "3 failed, 1 passed, 9 deselected in 12.11s",
+      "log": "pg-baseline.txt",
+      "stage": "Before any application edit",
+      "exit_code": 1,
+      "command": "python -B ../docs/sessions/artifacts/ag02-authored-coverage/pg_runner.py --focused --output ../docs/sessions/artifacts/ag02-authored-coverage/pg-baseline.json"
+    },
+    {
+      "result": "173 passed in 17.19s",
+      "log": "unit-final.txt",
+      "stage": "Initial source repair, before numeric follow-up",
+      "exit_code": 0,
+      "command": "python -B ../docs/sessions/artifacts/ag02-authored-coverage/unit_runner.py"
+    },
+    {
+      "result": "13 passed in 13.94s",
+      "log": "pg-final.txt",
+      "stage": "Initial source repair; SQL bytes unchanged by later numeric pinned-only fix",
+      "exit_code": 0,
+      "command": "python -B ../docs/sessions/artifacts/ag02-authored-coverage/pg_runner.py --output ../docs/sessions/artifacts/ag02-authored-coverage/pg-final.json"
+    },
+    {
+      "result": "1 failed, 12 deselected in 4.38s",
+      "log": "numeric-followup-baseline.txt",
+      "stage": "Newly identified numeric-only inherited confidence reproduction",
+      "exit_code": 1,
+      "command": "python -B -m pytest tests/unit/test_knowledge_authored_coverage.py -k numeric_only -q -o addopts="
+    },
+    {
+      "result": "174 passed in 17.93s",
+      "log": "unit-followup-final.txt",
+      "stage": "Final source, ten modules including13 new unit controls",
+      "exit_code": 0,
+      "command": "python -B ../docs/sessions/artifacts/ag02-authored-coverage/unit_runner.py",
+      "environment": {
+        "AG02_UNIT_OUTPUT": "unit-followup-final.json"
+      }
+    },
+    {
+      "result": "Pinned42/45 recall,32/45 sufficient; failed unchanged target",
+      "log": "gold-pinned-final.txt",
+      "exit_code": 1,
+      "command": "python -B -m scripts.evaluate_ag02_knowledge --output ../docs/sessions/artifacts/ag02-authored-coverage/gold-pinned-final.json"
+    },
+    {
+      "result": "All checks passed",
+      "log": "lint-followup.txt",
+      "exit_code": 0,
+      "command": "python -m ruff check --select F app/services/scripts/knowledge/retrieval.py tests/unit/test_knowledge_authored_coverage.py tests/integration/test_knowledge_retrieval_boundaries.py"
+    },
+    {
+      "result": "No source whitespace errors",
+      "log": "diff-check.txt",
+      "exit_code": 0,
+      "command": "git diff --check"
+    }
+  ],
+  "source_sha256": {
+    "backend/app/services/scripts/knowledge/retrieval.py": "06034c7fbeb5596961401edb803e7c3f4afbf8415c9ceb4394eff5137abf1e1c",
+    "backend/tests/unit/test_knowledge_authored_coverage.py": "f744416c603702a5d09f65c53900e06cc8e7ffb3b5172073dc31e70ae925dea2",
+    "backend/tests/integration/test_knowledge_retrieval_boundaries.py": "fd1a9da8450a69f7607d4219e2e2054941522a1faae59f5981dae2e36d356c1d"
+  },
+  "artifact_sha256": {
+    "baseline.txt": "781c039b424000aff9c057bd26f230fdf7ad5d8c5b16dfa46014b312e4d28d97",
+    "diff-check.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "gold-parity.json": "84e030b0ead0fafc4f20ca09a12f29c3e3428d51c3fab8909684861f336daf92",
+    "gold-pinned-final.json": "441cdc4cf7090711066691365c2b762ad6c5f80f2a78852b57a6efaa1a7f3642",
+    "gold-pinned-final.txt": "848b1fdb06337f95b4b663752c17e397d409cc8db1dfa6f406c039b4e99ddc18",
+    "lint-followup.txt": "a4443afdcfb6d7363adb285762515ccf7cf50473b1a05c20c1a50f6bed4d26b0",
+    "lint.txt": "a4443afdcfb6d7363adb285762515ccf7cf50473b1a05c20c1a50f6bed4d26b0",
+    "numeric-followup-baseline.txt": "90282b7fd03988311712be852f3236afd5e2b14fe56fed8f47cd473a4bdb7753",
+    "pg_runner.py": "619adff69f77545d3465bd0bd21fc6d9ec7d4a799f113137fff77a884bdcf9aa",
+    "pg-baseline.json": "132f8d1035aef581d77c55cec54818139011b0d80cfc8b1fbe9be72e137937d8",
+    "pg-baseline.txt": "725fb5dd87ac4215b270bc86d7c50cf3b772aba0a28d9314d8048a8c0f3bb26a",
+    "pg-final-gold.json": "1c5040893100ec119d63110d338dbe9a64a2cfdac242af1a2a42ea361ed11ae5",
+    "pg-final.json": "0725f4145f04cb9dcbb63be537cb3b2bcf4d1e2763c003d3ac373dd7a10bbf15",
+    "pg-final.txt": "c6c27152fd9a9b22b318a673b576dfbbf0a743fc7ddeec8d1c288f2a5e594949",
+    "sql-final-parity.json": "4c6a76c033e8f201e89fa0ede8f8339ad9048bf980fd080dbfc97547bf8d789c",
+    "sql-tested-function.json": "8f2ee4d0441cf146939d917abce1a66683bfe02f9636c9da0db7f52213debfb4",
+    "unit_runner.py": "80ba75467876e8be9d0da92e6b2f82eb7a067eada2411931c1c1020408af897e",
+    "unit-final.json": "6e44540d97f3d68e47def5c8e2124e1e5e17731265e68cf30b695dca465df25d",
+    "unit-final.txt": "2fe6495efaed81ea60ed4e828d1e6322bfac872be3eb3d8db84f4aad5d51910a",
+    "unit-followup-final.json": "fcb5b57616b1a67b97a1e5fb7ab79e49cb024996698a6343ad1e83050034d946",
+    "unit-followup-final.txt": "8261a33f7c9f640a252cb3453f08a1556a5e429febfd4d6757d4e936720a1762"
+  },
+  "report_path": "docs/sessions/2026-10-06-ag02-authored-coverage.md",
+  "report_sha256": "e79d227c2399e709c978e874936c900c04fc21a728fa29ffc8d498fb1a602d6f",
+  "reviews": {
+    "root": "Approved source and exact private PG runner; required numeric-only reproduction/fix and no unnecessary PG rerun",
+    "independent": "account_finalize read-only final clearance after source/hash, numeric-only and SQL byte-parity checks; no reviewer execution"
+  },
+  "limits": [
+    "Synthetic unit ports and actual private-schema PostgreSQL0010 fixture, not provider/customer/browser/full deployment acceptance.",
+    "Generated metadata may still route/rank; authored coverage is lexical relevance, not semantic entailment or full product-identity validation.",
+    "Pinned and SQL gold fail unchanged targets; no model-answer fidelity or customer approval claimed.",
+    "Preserved173 and final174 results overlap and must not be summed.",
+    "PG final whole-file hash predates2 pinned-only lines; exact SQL function parity proven separately.",
+    "Initial unit_runner.py output filename was later made environment-selectable to preserve old evidence; result files record respective runner hashes.",
+    "No providers, dependencies, matrix edits or thresholds changed; no historical/public data writes."
+  ],
+  "artifact_sha256_lf": {
+    "baseline.txt": "e758fbb6fd63a3b0c10619cb1661206111782fa6844203fb039004c5c09d359a",
+    "diff-check.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "gold-parity.json": "e62a9a61be400572a9ba37bf4bf2d768f499fa54ca2fd810d79730ba0f267d7e",
+    "gold-pinned-final.json": "6bd0091e65725fcaa7367309c7c7d6060271228aaa894b04aebd5293c1eb9de1",
+    "gold-pinned-final.txt": "08cd72c0da19a01d686a6831043d50289c6cb224f63645f5a8315c70ccc0406e",
+    "lint-followup.txt": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18",
+    "lint.txt": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18",
+    "numeric-followup-baseline.txt": "86ade14bd32675936d9a065c1c1c3f426a6252eb6909fbcf118dc3f4b22225a1",
+    "pg_runner.py": "619adff69f77545d3465bd0bd21fc6d9ec7d4a799f113137fff77a884bdcf9aa",
+    "pg-baseline.json": "3961f8d869f8bbb327196954bd336a3b75039b6299cf8f4ec1853340aae1a85c",
+    "pg-baseline.txt": "233fb8aa1839d200d535730e81cd76a67d755878b7ce68f8f2c00dc9788af9b4",
+    "pg-final-gold.json": "b9885ed7f57eaa839b28d70c3c6718807c24826657c556cf981f69943872b36e",
+    "pg-final.json": "5e2b519d77611db8fc4ff968b433cb6cd049de7ef4bc91174d22263c4224c12c",
+    "pg-final.txt": "873bcebb1eba29339ef7772482bf4139b4f46183a9fd4a6ceb821058d342dd06",
+    "sql-final-parity.json": "a126de920be1bc6118c96a550bda56030834195636c7b5bae3a30be07f333fca",
+    "sql-tested-function.json": "3ad15c823671e541a4942a8df7a91f9f91a99292df932e59de06cd203b6600ba",
+    "unit_runner.py": "80ba75467876e8be9d0da92e6b2f82eb7a067eada2411931c1c1020408af897e",
+    "unit-final.json": "707146a47e2a858b5d05f2799397839ede71bd742d0cc191e84f66eb8e6bfc69",
+    "unit-final.txt": "9312b26558dcf03b6ebfccf9ed578f899595333024c30d47ac2fbb7c3fbd32e6",
+    "unit-followup-final.json": "5dd4a0942b0443e95181680559eca18f395b37d54656e1edab2482122f2e62c8",
+    "unit-followup-final.txt": "cf99b2a9e729a532bd8286b978944d167f4ac362ed85d982fc6327eaebb45292"
+  },
+  "artifact_hash_note": "Raw hashes identify captured worktree bytes. LF hashes permit verification after Git line-ending normalization; log content was not rewritten."
+}

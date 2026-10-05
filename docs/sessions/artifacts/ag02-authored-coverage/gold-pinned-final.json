@@ -1,0 +1,1696 @@
+{
+  "path": "production pinned retrieval + shared evidence",
+  "matrix_sha256": "31782fc367ca7bb3f07ba0569b5d1eb0e4cdfbae274b618f3b7c0733db504b52",
+  "corpus_mode": "raw_unenriched_fail_soft",
+  "metric_definitions": {
+    "recall_at_3": "Expected current-version node appears among three retrieved hits, even if its lexical coverage is weak.",
+    "sufficient_passage_rate": "Expected current-version node survives shared evidence qualification as matched and retains all declared source fragments. This is a deterministic availability proxy, not model answer fidelity or universal semantic sufficiency."
+  },
+  "question_count": 60,
+  "answerable_count": 45,
+  "targets_predeclared": {
+    "answerable_top3_expected_source_recall_min": 0.9,
+    "answerable_sufficient_passage_rate_min": 0.85,
+    "cross_tenant_evidence_max": 0,
+    "unsupported_critical_price_policy_claims_max": 0,
+    "notes": "Nonzero retrieval targets prevent universal abstention from passing. Critical claim fidelity requires independent human/provider review; automated tests cannot award that gate. No threshold lowering after results."
+  },
+  "recall_at_3": 0.9333333333333333,
+  "sufficient_passage_rate": 0.7111111111111111,
+  "retrieval_targets_met": false,
+  "provider_calls": 0,
+  "model_answer_fidelity": "not evaluated",
+  "human_approval": null,
+  "limitations": [
+    "Source presence and query coverage are not proof that a model answers faithfully.",
+    "A matched related passage may still require abstention; human answer review remains required.",
+    "Pinned evaluation accepts an already scoped admission snapshot; it does not prove SQL tenant/source selection."
+  ],
+  "cases": [
+    {
+      "id": "Q01",
+      "category": "direct",
+      "query": "What is the Starter monthly price?",
+      "answerable": true,
+      "hit_node_ids": [
+        "starter"
+      ],
+      "expected_source_found": true,
+      "sufficient_passage": true,
+      "missing_source_fragments": [],
+      "evidence_status": "matched",
+      "passages": [
+        {
+          "node_id": "starter",
+          "version": 3,
+          "source_id": "harbour-commercial-handbook",
+          "source_version": 3,
+          "text": "- Starter monthly price: The Starter plan costs £19 per month per location, excluding VAT. This price requires a twelve-month contract. Setup costs £40 once, excluding VAT.",
+          "coverage": 1.0
+        }
+      ],
+      "model_answer_fidelity": null,
+      "human_review": null
+    },
+    {
+      "id": "Q02",
+      "category": "direct",
+      "query": "How much is the Starter plan per location?",
+      "answerable": true,
+      "hit_node_ids": [
+        "starter"
+      ],
+      "expected_source_found": true,
+      "sufficient_passage": true,
+      "missing_source_fragments": [],
+      "evidence_status": "matched",
+      "passages": [
+        {
+          "node_id": "starter",
+          "version": 3,
+          "source_id": "harbour-commercial-handbook",
+          "source_version": 3,
+          "text": "- Starter monthly price: The Starter plan costs £19 per month per location, excluding VAT. This price requires a twelve-month contract. Setup costs £40 once, excluding VAT.",
+          "coverage": 1.0
+        }
+      ],
+      "model_answer_fidelity": null,
+      "human_review": null
+    },
+    {
+      "id": "Q03",
+      "category": "paraphrase",
+      "query": "What does the entry-level package cost?",
+      "answerable": true,
+      "hit_node_ids": [
+        "starter"
+      ],
+      "expected_source_found": true,
+      "sufficient_passage": false,
+      "missing_source_fragments": [],
+      "evidence_status": "weak_match",
+      "passages": [
+        {
+          "node_id": "starter",
+          "version": 3,
+          "source_id": "harbour-commercial-handbook",
+          "source_version": 3,
+          "text": "- Starter monthly price: The Starter plan costs £19 per month per location, excluding VAT. This price requires a twelve-month contract. Setup costs £40 once, excluding VAT.",
+          "coverage": 0.0
+        }
+      ],
+      "model_answer_fidelity": null,
+      "human_review": null
+    },
+    {
+      "id": "Q04",
+      "category": "direct",
+      "query": "What connectivity does the Mobile terminal support?",
+      "answerable": true,
+      "hit_node_ids": [
+        "mobile",
+        "countertop",
+        "contract"
+      ],
+      "expected_source_found": true,
+      "sufficient_passage": true,
+      "missing_source_fragments": [],
+      "evidence_status": "matched",
+      "passages": [
+        {
+          "node_id": "mobile",
+          "version": 3,
+          "source_id": "harbour-commercial-handbook",
+          "source_version": 3,
+          "text": "- Mobile terminal connectivity: The Mobile terminal supports Wi-Fi and a supplied 4G SIM. Mobile terminal battery operation lasts up to eight hours under light use. It does not support offline payments.",
+          "coverage": 1.0
+        }
+      ],
+      "model_answer_fidelity": null,
+      "human_review": null
+    },
+    {
+      "id": "Q05",
+      "category": "direct",
+      "query": "Can the Mobile terminal take offline payments?",
+      "answerable": true,
+      "hit_node_ids": [
+        "mobile",
+        "countertop",
+        "online"
+      ],
+      "expected_source_found": true,
+      "sufficient_passage": true,
+      "missing_source_fragments": [],
+      "evidence_status": "matched",
+      "passages": [
+        {
+          "node_id": "mobile",
+          "version": 3,
+          "source_id": "harbour-commercial-handbook",
+          "source_version": 3,
+          "text": "- Mobile terminal connectivity: The Mobile terminal supports Wi-Fi and a supplied 4G SIM. Mobile terminal battery operation lasts up to eight hours under light use. It does not support offline payments.",
+          "coverage": 0.8
+        }
+      ],
+      "model_answer_fidelity": null,
+      "human_review": null
+    },
+    {
+      "id": "Q06",
+      "category": "paraphrase",
+      "query": "Will the portable reader work without internet?",
+      "answerable": true,
+      "hit_node_ids": [],
+      "expected_source_found": false,
+      "sufficient_passage": false,
+      "missing_source_fragments": [
+        "Wi-Fi",
+        "4G SIM",
+        "does not support offline payments"
+      ],
+      "evidence_status": "no_match",
+      "passages": [],
+      "model_answer_fidelity": null,
+      "human_review": null
+    },
+    {
+      "id": "Q07",
+      "category": "direct",
+      "query": "Does the Countertop terminal have a receipt printer?",
+      "answerable": true,
+      "hit_node_ids": [
+        "countertop",
+        "mobile"
+      ],
+      "expected_source_found": true,
+      "sufficient_passage": true,
+      "missing_source_fragments": [],
+      "evidence_status": "matched",
+      "passages": [
+        {
+          "node_id": "countertop",
+          "version": 3,
+          "source_id": "harbour-commercial-handbook",
+          "source_version": 3,
+          "text": "- Countertop terminal receipt printer: The Countertop terminal has a built-in receipt printer. It requires mains power and an Ethernet or Wi-Fi connection. The Countertop terminal has no battery.",
+          "coverage": 1.0
+        }
+      ],
+      "model_answer_fidelity": null,
+      "human_review": null
+    },
+    {
+      "id": "Q08",
+      "category": "direct",
+      "query": "Does the Countertop terminal need mains power?",
+      "answerable": true,
+      "hit_node_ids": [
+        "countertop",
+        "mobile",
+        "security"
+      ],
+      "expected_source_found": true,
+      "sufficient_passage": true,
+      "missing_source_fragments": [],
+      "evidence_status": "matched",
+      "passages": [
+        {
+          "node_id": "countertop",
+          "version": 3,
+          "source_id": "harbour-commercial-handbook",
+          "source_version": 3,
+          "text": "- Countertop terminal receipt printer: The Countertop terminal has a built-in receipt printer. It requires mains power and an Ethernet or Wi-Fi connection. The Countertop terminal has no battery.",
+          "coverage": 0.8
+        }
+      ],
+      "model_answer_fidelity": null,
+      "human_review": null
+    },
+    {
+      "id": "Q09",
+      "category": "paraphrase",
+      "query": "Can the till device print paper receipts?",
+      "answerable": true,
+      "hit_node_ids": [
+        "countertop"
+      ],
+      "expected_source_found": true,
+      "sufficient_passage": false,
+      "missing_source_fragments": [],
+      "evidence_status": "weak_match",
+      "passages": [
+        {
+          "node_id": "countertop",
+          "version": 3,
+          "source_id": "harbour-commercial-handbook",
+          "source_version": 3,
+          "text": "- Countertop terminal receipt printer: The Countertop terminal has a built-in receipt printer. It requires mains power and an Ethernet or Wi-Fi connection. The Countertop terminal has no battery.",
+          "coverage": 0.0
+        }
+      ],
+      "model_answer_fidelity": null,
+      "human_review": null
+    },
+    {
+      "id": "Q10",
+      "category": "direct",
+      "query": "Does Online checkout support recurring subscriptions?",
+      "answerable": true,
+      "hit_node_ids": [
+        "online",
+        "mobile",
+        "contract"
+      ],
+      "expected_source_found": true,
+      "sufficient_passage": true,
+      "missing_source_fragments": [],
+      "evidence_status": "matched",
+      "passages": [
+        {
+          "node_id": "online",
+          "version": 3,
+          "source_id": "harbour-commercial-handbook",
+          "source_version": 3,
+          "text": "- Online checkout exclusions: The Online checkout service supports hosted payment links. Recurring subscriptions and cryptocurrency payments are excluded. Payment links expire after seven days.",
+          "coverage": 0.8
+        }
+      ],
+      "model_answer_fidelity": null,
+      "human_review": null
+    },
+    {
+      "id": "Q11",
+      "category": "direct",
+      "query": "When do Online payment links expire?",
+      "answerable": true,
+      "hit_node_ids": [
+        "online",
+        "mobile",
+        "support"
+      ],
+      "expected_source_found": true,
+      "sufficient_passage": true,
+      "missing_source_fragments": [],
+      "evidence_status": "matched",
+      "passages": [
+        {
+          "node_id": "online",
+          "version": 3,
+          "source_id": "harbour-commercial-handbook",
+          "source_version": 3,
+          "text": "- Online checkout exclusions: The Online checkout service supports hosted payment links. Recurring subscriptions and cryptocurrency payments are excluded. Payment links expire after seven days.",
+          "coverage": 1.0
+        }
+      ],
+      "model_answer_fidelity": null,
+      "human_review": null
+    },
+    {
+      "id": "Q12",
+      "category": "paraphrase",
+      "query": "Can I sell a monthly subscription through payment links?",
+      "answerable": true,
+      "hit_node_ids": [
+        "online",
+        "starter",
+        "mobile"
+      ],
+      "expected_source_found": true,
+      "sufficient_passage": false,
+      "missing_source_fragments": [],
+      "evidence_status": "weak_match",
+      "passages": [
+        {
+          "node_id": "online",
+          "version": 3,
+          "source_id": "harbour-commercial-handbook",
+          "source_version": 3,
+          "text": "- Online checkout exclusions: The Online checkout service supports hosted payment links. Recurring subscriptions and cryptocurrency payments are excluded. Payment links expire after seven days.",
+          "coverage": 0.3333333333333333
+        },
+        {
+          "node_id": "starter",
+          "version": 3,
+          "source_id": "harbour-commercial-handbook",
+          "source_version": 3,
+          "text": "- Starter monthly price: The Starter plan costs £19 per month per location, excluding VAT. This price requires a twelve-month contract. Setup costs £40 once, excluding VAT.",
+          "coverage": 0.16666666666666666
+        },
+        {
+          "node_id": "mobile",
+          "version": 3,
+          "source_id": "harbour-commercial-handbook",
+          "source_version": 3,
+          "text": "- Mobile terminal connectivity: The Mobile terminal supports Wi-Fi and a supplied 4G SIM. Mobile terminal battery operation lasts up to eight hours under light use. It does not support offline payments.",
+          "coverage": 0.0
+        }
+      ],
+      "model_answer_fidelity": null,
+      "human_review": null
+    },
+    {
+      "id": "Q13",
+      "category": "direct",
+      "query": "What is the payout settlement schedule?",
+      "answerable": true,
+      "hit_node_ids": [
+        "payout"
+      ],
+      "expected_source_found": true,
+      "sufficient_passage": true,
+      "missing_source_fragments": [],
+      "evidence_status": "matched",
+      "passages": [
+        {
+          "node_id": "payout",
+          "version": 3,
+          "source_id": "harbour-commercial-handbook",
+          "source_version": 3,
+          "text": "- Payout settlement schedule: Payout settlement reaches a verified UK bank account on the next working day for transactions captured before 18:00 UK time. This schedule excludes weekends and UK bank holidays. Risk reviews can delay a payout.",
+          "coverage": 1.0
+        }
+      ],
+      "model_answer_fidelity": null,
+      "human_review": null
+    },
+    {
+      "id": "Q14",
+      "category": "direct",
+      "query": "Are weekend payouts available?",
+      "answerable": true,
+      "hit_node_ids": [
+        "coverage",
+        "payout"
+      ],
+      "expected_source_found": true,
+      "sufficient_passage": false,
+      "missing_source_fragments": [],
+      "evidence_status": "weak_match",
+      "passages": [
+        {
+          "node_id": "coverage",
+          "version": 3,
+          "source_id": "harbour-commercial-handbook",
+          "source_version": 3,
+          "text": "- Service availability regions: Service is available to registered businesses in England, Scotland and Wales. Northern Ireland and overseas territories are not supported. Approval requires identity and business checks.",
+          "coverage": 0.3333333333333333
+        },
+        {
+          "node_id": "payout",
+          "version": 3,
+          "source_id": "harbour-commercial-handbook",
+          "source_version": 3,
+          "text": "- Payout settlement schedule: Payout settlement reaches a verified UK bank account on the next working day for transactions captured before 18:00 UK time. This schedule excludes weekends and UK bank holidays. Risk reviews can delay a payout.",
+          "coverage": 0.0
+        }
+      ],
+      "model_answer_fidelity": null,
+      "human_review": null
+    },
+    {
+      "id": "Q15",
+      "category": "paraphrase",
+      "query": "When will the money arrive in my bank?",
+      "answerable": true,
+      "hit_node_ids": [
+        "payout",
+        "support"
+      ],
+      "expected_source_found": true,
+      "sufficient_passage": false,
+      "missing_source_fragments": [],
+      "evidence_status": "weak_match",
+      "passages": [
+        {
+          "node_id": "payout",
+          "version": 3,
+          "source_id": "harbour-commercial-handbook",
+          "source_version": 3,
+          "text": "- Payout settlement schedule: Payout settlement reaches a verified UK bank account on the next working day for transactions captured before 18:00 UK time. This schedule excludes weekends and UK bank holidays. Risk reviews can delay a payout.",
+          "coverage": 0.3333333333333333
+        },
+        {
+          "node_id": "support",
+          "version": 3,
+          "source_id": "harbour-commercial-handbook",
+          "source_version": 3,
+          "text": "- Support contact hours: Support hours are Monday to Friday, 09:00 to 17:00 UK time, excluding bank holidays. Support email is help@harbour-payments.example. The approved support guide is https://harbour-payments.example/support. There is no promised twenty-four-hour telephone support.",
+          "coverage": 0.3333333333333333
+        }
+      ],
+      "model_answer_fidelity": null,
+      "human_review": null
+    },
+    {
+      "id": "Q16",
+      "category": "direct",
+      "query": "How long does customer refund processing take?",
+      "answerable": true,
+      "hit_node_ids": [
+        "refund",
+        "installation"
+      ],
+      "expected_source_found": true,
+      "sufficient_passage": true,
+      "missing_source_fragments": [],
+      "evidence_status": "matched",
+      "passages": [
+        {
+          "node_id": "refund",
+          "version": 3,
+          "source_id": "harbour-commercial-handbook",
+          "source_version": 3,
+          "text": "- Customer refund processing: A merchant can request a customer refund from the dashboard. Refund processing normally takes five to ten working days after approval. The original processing fee is not returned. This policy does not promise a refund for every dispute.",
+          "coverage": 0.6
+        }
+      ],
+      "model_answer_fidelity": null,
+      "human_review": null
+    },
+    {
+      "id": "Q17",
+      "category": "direct",
+      "query": "Is the original processing fee returned on a refund?",
+      "answerable": true,
+      "hit_node_ids": [
+        "refund"
+      ],
+      "expected_source_found": true,
+      "sufficient_passage": true,
+      "missing_source_fragments": [],
+      "evidence_status": "matched",
+      "passages": [
+        {
+          "node_id": "refund",
+          "version": 3,
+          "source_id": "harbour-commercial-handbook",
+          "source_version": 3,
+          "text": "- Customer refund processing: A merchant can request a customer refund from the dashboard. Refund processing normally takes five to ten working days after approval. The original processing fee is not returned. This policy does not promise a refund for every dispute.",
+          "coverage": 1.0
+        }
+      ],
+      "model_answer_fidelity": null,
+      "human_review": null
+    },
+    {
+      "id": "Q18",
+      "category": "paraphrase",
+      "query": "How quickly does a buyer get their money back?",
+      "answerable": true,
+      "hit_node_ids": [],
+      "expected_source_found": false,
+      "sufficient_passage": false,
+      "missing_source_fragments": [
+        "five to ten working days after approval",
+        "original processing fee is not returned"
+      ],
+      "evidence_status": "no_match",
+      "passages": [],
+      "model_answer_fidelity": null,
+      "human_review": null
+    },
+    {
+      "id": "Q19",
+      "category": "direct",
+      "query": "What notice is required for contract cancellation?",
+      "answerable": true,
+      "hit_node_ids": [
+        "contract",
+        "starter",
+        "support"
+      ],
+      "expected_source_found": true,
+      "sufficient_passage": true,
+      "missing_source_fragments": [],
+      "evidence_status": "matched",
+      "passages": [
+        {
+          "node_id": "contract",
+          "version": 3,
+          "source_id": "harbour-commercial-handbook",
+          "source_version": 3,
+          "text": "- Contract cancellation notice: Contract cancellation requires thirty days written notice. A remaining minimum-term charge may apply. No automatic renewal discount is promised. The support team must confirm the effective cancellation date.",
+          "coverage": 0.75
+        }
+      ],
+      "model_answer_fidelity": null,
+      "human_review": null
+    },
+    {
+      "id": "Q20",
+      "category": "direct",
+      "query": "Can a minimum-term charge apply when cancelling?",
+      "answerable": true,
+      "hit_node_ids": [
+        "contract"
+      ],
+      "expected_source_found": true,
+      "sufficient_passage": true,
+      "missing_source_fragments": [],
+      "evidence_status": "matched",
+      "passages": [
+        {
+          "node_id": "contract",
+          "version": 3,
+          "source_id": "harbour-commercial-handbook",
+          "source_version": 3,
+          "text": "- Contract cancellation notice: Contract cancellation requires thirty days written notice. A remaining minimum-term charge may apply. No automatic renewal discount is promised. The support team must confirm the effective cancellation date.",
+          "coverage": 0.8
+        }
+      ],
+      "model_answer_fidelity": null,
+      "human_review": null
+    },
+    {
+      "id": "Q21",
+      "category": "paraphrase",
+      "query": "How do I end the agreement early?",
+      "answerable": true,
+      "hit_node_ids": [
+        "injected"
+      ],
+      "expected_source_found": false,
+      "sufficient_passage": false,
+      "missing_source_fragments": [
+        "thirty days written notice",
+        "remaining minimum-term charge may apply",
+        "confirm the effective cancellation date"
+      ],
+      "evidence_status": "no_match",
+      "passages": [],
+      "model_answer_fidelity": null,
+      "human_review": null
+    },
+    {
+      "id": "Q22",
+      "category": "direct",
+      "query": "Which regions have service availability?",
+      "answerable": true,
+      "hit_node_ids": [
+        "coverage",
+        "online"
+      ],
+      "expected_source_found": true,
+      "sufficient_passage": true,
+      "missing_source_fragments": [],
+      "evidence_status": "matched",
+      "passages": [
+        {
+          "node_id": "coverage",
+          "version": 3,
+          "source_id": "harbour-commercial-handbook",
+          "source_version": 3,
+          "text": "- Service availability regions: Service is available to registered businesses in England, Scotland and Wales. Northern Ireland and overseas territories are not supported. Approval requires identity and business checks.",
+          "coverage": 1.0
+        }
+      ],
+      "model_answer_fidelity": null,
+      "human_review": null
+    },
+    {
+      "id": "Q23",
+      "category": "direct",
+      "query": "Is Northern Ireland supported?",
+      "answerable": true,
+      "hit_node_ids": [
+        "coverage",
+        "mobile",
+        "contract"
+      ],
+      "expected_source_found": true,
+      "sufficient_passage": true,
+      "missing_source_fragments": [],
+      "evidence_status": "matched",
+      "passages": [
+        {
+          "node_id": "coverage",
+          "version": 3,
+          "source_id": "harbour-commercial-handbook",
+          "source_version": 3,
+          "text": "- Service availability regions: Service is available to registered businesses in England, Scotland and Wales. Northern Ireland and overseas territories are not supported. Approval requires identity and business checks.",
+          "coverage": 1.0
+        }
+      ],
+      "model_answer_fidelity": null,
+      "human_review": null
+    },
+    {
+      "id": "Q24",
+      "category": "paraphrase",
+      "query": "Can a business outside Great Britain apply?",
+      "answerable": true,
+      "hit_node_ids": [
+        "contract",
+        "coverage",
+        "injected"
+      ],
+      "expected_source_found": true,
+      "sufficient_passage": false,
+      "missing_source_fragments": [],
+      "evidence_status": "weak_match",
+      "passages": [
+        {
+          "node_id": "contract",
+          "version": 3,
+          "source_id": "harbour-commercial-handbook",
+          "source_version": 3,
+          "text": "- Contract cancellation notice: Contract cancellation requires thirty days written notice. A remaining minimum-term charge may apply. No automatic renewal discount is promised. The support team must confirm the effective cancellation date.",
+          "coverage": 0.2
+        },
+        {
+          "node_id": "coverage",
+          "version": 3,
+          "source_id": "harbour-commercial-handbook",
+          "source_version": 3,
+          "text": "- Service availability regions: Service is available to registered businesses in England, Scotland and Wales. Northern Ireland and overseas territories are not supported. Approval requires identity and business checks.",
+          "coverage": 0.2
+        }
+      ],
+      "model_answer_fidelity": null,
+      "human_review": null
+    },
+    {
+      "id": "Q25",
+      "category": "direct",
+      "query": "What are the support contact hours?",
+      "answerable": true,
+      "hit_node_ids": [
+        "support",
+        "mobile",
+        "contract"
+      ],
+      "expected_source_found": true,
+      "sufficient_passage": true,
+      "missing_source_fragments": [],
+      "evidence_status": "matched",
+      "passages": [
+        {
+          "node_id": "support",
+          "version": 3,
+          "source_id": "harbour-commercial-handbook",
+          "source_version": 3,
+          "text": "- Support contact hours: Support hours are Monday to Friday, 09:00 to 17:00 UK time, excluding bank holidays. Support email is help@harbour-payments.example. The approved support guide is https://harbour-payments.example/support. There is no promised twenty-four-hour telephone support.",
+          "coverage": 1.0
+        },
+        {
+          "node_id": "mobile",
+          "version": 3,
+          "source_id": "harbour-commercial-handbook",
+          "source_version": 3,
+          "text": "- Mobile terminal connectivity: The Mobile terminal supports Wi-Fi and a supplied 4G SIM. Mobile terminal battery operation lasts up to eight hours under light use. It does not support offline payments.",
+          "coverage": 0.6666666666666666
+        }
+      ],
+      "model_answer_fidelity": null,
+      "human_review": null
+    },
+    {
+      "id": "Q26",
+      "category": "direct",
+      "query": "What is the approved support guide link?",
+      "answerable": true,
+      "hit_node_ids": [
+        "support",
+        "security",
+        "mobile"
+      ],
+      "expected_source_found": true,
+      "sufficient_passage": true,
+      "missing_source_fragments": [],
+      "evidence_status": "matched",
+      "passages": [
+        {
+          "node_id": "support",
+          "version": 3,
+          "source_id": "harbour-commercial-handbook",
+          "source_version": 3,
+          "text": "- Support contact hours: Support hours are Monday to Friday, 09:00 to 17:00 UK time, excluding bank holidays. Support email is help@harbour-payments.example. The approved support guide is https://harbour-payments.example/support. There is no promised twenty-four-hour telephone support.",
+          "coverage": 0.75
+        },
+        {
+          "node_id": "security",
+          "version": 3,
+          "source_id": "harbour-commercial-handbook",
+          "source_version": 3,
+          "text": "- PCI responsibility: The merchant remains responsible for its annual PCI self-assessment. Harbour provides a compliance guide, not a certification of the merchant. No claim of universal breach protection is approved.",
+          "coverage": 0.5
+        }
+      ],
+      "model_answer_fidelity": null,
+      "human_review": null
+    },
+    {
+      "id": "Q27",
+      "category": "paraphrase",
+      "query": "Can someone help me at night on Sunday?",
+      "answerable": true,
+      "hit_node_ids": [
+        "support",
+        "mobile"
+      ],
+      "expected_source_found": true,
+      "sufficient_passage": false,
+      "missing_source_fragments": [],
+      "evidence_status": "weak_match",
+      "passages": [
+        {
+          "node_id": "support",
+          "version": 3,
+          "source_id": "harbour-commercial-handbook",
+          "source_version": 3,
+          "text": "- Support contact hours: Support hours are Monday to Friday, 09:00 to 17:00 UK time, excluding bank holidays. Support email is help@harbour-payments.example. The approved support guide is https://harbour-payments.example/support. There is no promised twenty-four-hour telephone support.",
+          "coverage": 0.25
+        },
+        {
+          "node_id": "mobile",
+          "version": 3,
+          "source_id": "harbour-commercial-handbook",
+          "source_version": 3,
+          "text": "- Mobile terminal connectivity: The Mobile terminal supports Wi-Fi and a supplied 4G SIM. Mobile terminal battery operation lasts up to eight hours under light use. It does not support offline payments.",
+          "coverage": 0.0
+        }
+      ],
+      "model_answer_fidelity": null,
+      "human_review": null
+    },
+    {
+      "id": "Q28",
+      "category": "direct",
+      "query": "Who is responsible for the PCI self-assessment?",
+      "answerable": true,
+      "hit_node_ids": [
+        "security"
+      ],
+      "expected_source_found": true,
+      "sufficient_passage": true,
+      "missing_source_fragments": [],
+      "evidence_status": "matched",
+      "passages": [
+        {
+          "node_id": "security",
+          "version": 3,
+          "source_id": "harbour-commercial-handbook",
+          "source_version": 3,
+          "text": "- PCI responsibility: The merchant remains responsible for its annual PCI self-assessment. Harbour provides a compliance guide, not a certification of the merchant. No claim of universal breach protection is approved.",
+          "coverage": 1.0
+        }
+      ],
+      "model_answer_fidelity": null,
+      "human_review": null
+    },
+    {
+      "id": "Q29",
+      "category": "direct",
+      "query": "Does the PCI guide certify my business?",
+      "answerable": true,
+      "hit_node_ids": [
+        "security",
+        "coverage",
+        "support"
+      ],
+      "expected_source_found": true,
+      "sufficient_passage": true,
+      "missing_source_fragments": [],
+      "evidence_status": "matched",
+      "passages": [
+        {
+          "node_id": "security",
+          "version": 3,
+          "source_id": "harbour-commercial-handbook",
+          "source_version": 3,
+          "text": "- PCI responsibility: The merchant remains responsible for its annual PCI self-assessment. Harbour provides a compliance guide, not a certification of the merchant. No claim of universal breach protection is approved.",
+          "coverage": 0.5
+        }
+      ],
+      "model_answer_fidelity": null,
+      "human_review": null
+    },
+    {
+      "id": "Q30",
+      "category": "paraphrase",
+      "query": "Will using this service make us automatically compliant?",
+      "answerable": true,
+      "hit_node_ids": [
+        "online",
+        "coverage",
+        "security"
+      ],
+      "expected_source_found": true,
+      "sufficient_passage": false,
+      "missing_source_fragments": [],
+      "evidence_status": "weak_match",
+      "passages": [
+        {
+          "node_id": "online",
+          "version": 3,
+          "source_id": "harbour-commercial-handbook",
+          "source_version": 3,
+          "text": "- Online checkout exclusions: The Online checkout service supports hosted payment links. Recurring subscriptions and cryptocurrency payments are excluded. Payment links expire after seven days.",
+          "coverage": 0.2
+        },
+        {
+          "node_id": "coverage",
+          "version": 3,
+          "source_id": "harbour-commercial-handbook",
+          "source_version": 3,
+          "text": "- Service availability regions: Service is available to registered businesses in England, Scotland and Wales. Northern Ireland and overseas territories are not supported. Approval requires identity and business checks.",
+          "coverage": 0.2
+        },
+        {
+          "node_id": "security",
+          "version": 3,
+          "source_id": "harbour-commercial-handbook",
+          "source_version": 3,
+          "text": "- PCI responsibility: The merchant remains responsible for its annual PCI self-assessment. Harbour provides a compliance guide, not a certification of the merchant. No claim of universal breach protection is approved.",
+          "coverage": 0.0
+        }
+      ],
+      "model_answer_fidelity": null,
+      "human_review": null
+    },
+    {
+      "id": "Q31",
+      "category": "direct",
+      "query": "What does the LedgerOne integration export?",
+      "answerable": true,
+      "hit_node_ids": [
+        "integration"
+      ],
+      "expected_source_found": true,
+      "sufficient_passage": true,
+      "missing_source_fragments": [],
+      "evidence_status": "matched",
+      "passages": [
+        {
+          "node_id": "integration",
+          "version": 3,
+          "source_id": "harbour-commercial-handbook",
+          "source_version": 3,
+          "text": "- LedgerOne integration: The LedgerOne integration exports daily transaction totals. It does not synchronise inventory or create invoices. Connection requires a merchant-owned LedgerOne account and administrator permission.",
+          "coverage": 0.6666666666666666
+        }
+      ],
+      "model_answer_fidelity": null,
+      "human_review": null
+    },
+    {
+      "id": "Q32",
+      "category": "direct",
+      "query": "Does LedgerOne synchronise inventory?",
+      "answerable": true,
+      "hit_node_ids": [
+        "integration"
+      ],
+      "expected_source_found": true,
+      "sufficient_passage": true,
+      "missing_source_fragments": [],
+      "evidence_status": "matched",
+      "passages": [
+        {
+          "node_id": "integration",
+          "version": 3,
+          "source_id": "harbour-commercial-handbook",
+          "source_version": 3,
+          "text": "- LedgerOne integration: The LedgerOne integration exports daily transaction totals. It does not synchronise inventory or create invoices. Connection requires a merchant-owned LedgerOne account and administrator permission.",
+          "coverage": 1.0
+        }
+      ],
+      "model_answer_fidelity": null,
+      "human_review": null
+    },
+    {
+      "id": "Q33",
+      "category": "paraphrase",
+      "query": "Will this connector make my invoices automatically?",
+      "answerable": true,
+      "hit_node_ids": [
+        "integration",
+        "countertop",
+        "contract"
+      ],
+      "expected_source_found": true,
+      "sufficient_passage": false,
+      "missing_source_fragments": [],
+      "evidence_status": "weak_match",
+      "passages": [
+        {
+          "node_id": "integration",
+          "version": 3,
+          "source_id": "harbour-commercial-handbook",
+          "source_version": 3,
+          "text": "- LedgerOne integration: The LedgerOne integration exports daily transaction totals. It does not synchronise inventory or create invoices. Connection requires a merchant-owned LedgerOne account and administrator permission.",
+          "coverage": 0.25
+        },
+        {
+          "node_id": "countertop",
+          "version": 3,
+          "source_id": "harbour-commercial-handbook",
+          "source_version": 3,
+          "text": "- Countertop terminal receipt printer: The Countertop terminal has a built-in receipt printer. It requires mains power and an Ethernet or Wi-Fi connection. The Countertop terminal has no battery.",
+          "coverage": 0.0
+        },
+        {
+          "node_id": "contract",
+          "version": 3,
+          "source_id": "harbour-commercial-handbook",
+          "source_version": 3,
+          "text": "- Contract cancellation notice: Contract cancellation requires thirty days written notice. A remaining minimum-term charge may apply. No automatic renewal discount is promised. The support team must confirm the effective cancellation date.",
+          "coverage": 0.0
+        }
+      ],
+      "model_answer_fidelity": null,
+      "human_review": null
+    },
+    {
+      "id": "Q34",
+      "category": "direct",
+      "query": "What is the installation delivery window?",
+      "answerable": true,
+      "hit_node_ids": [
+        "installation"
+      ],
+      "expected_source_found": true,
+      "sufficient_passage": true,
+      "missing_source_fragments": [],
+      "evidence_status": "matched",
+      "passages": [
+        {
+          "node_id": "installation",
+          "version": 3,
+          "source_id": "harbour-commercial-handbook",
+          "source_version": 3,
+          "text": "- Installation delivery window: Installation delivery normally takes three to five working days after approval. This estimate applies to mainland UK addresses only. On-site installation is not included; setup is guided remotely.",
+          "coverage": 1.0
+        }
+      ],
+      "model_answer_fidelity": null,
+      "human_review": null
+    },
+    {
+      "id": "Q35",
+      "category": "direct",
+      "query": "Is on-site installation included?",
+      "answerable": true,
+      "hit_node_ids": [
+        "installation"
+      ],
+      "expected_source_found": true,
+      "sufficient_passage": true,
+      "missing_source_fragments": [],
+      "evidence_status": "matched",
+      "passages": [
+        {
+          "node_id": "installation",
+          "version": 3,
+          "source_id": "harbour-commercial-handbook",
+          "source_version": 3,
+          "text": "- Installation delivery window: Installation delivery normally takes three to five working days after approval. This estimate applies to mainland UK addresses only. On-site installation is not included; setup is guided remotely.",
+          "coverage": 1.0
+        }
+      ],
+      "model_answer_fidelity": null,
+      "human_review": null
+    },
+    {
+      "id": "Q36",
+      "category": "paraphrase",
+      "query": "How soon can you send the reader after approval?",
+      "answerable": true,
+      "hit_node_ids": [
+        "refund",
+        "installation",
+        "injected"
+      ],
+      "expected_source_found": true,
+      "sufficient_passage": false,
+      "missing_source_fragments": [],
+      "evidence_status": "weak_match",
+      "passages": [
+        {
+          "node_id": "refund",
+          "version": 3,
+          "source_id": "harbour-commercial-handbook",
+          "source_version": 3,
+          "text": "- Customer refund processing: A merchant can request a customer refund from the dashboard. Refund processing normally takes five to ten working days after approval. The original processing fee is not returned. This policy does not promise a refund for every dispute.",
+          "coverage": 0.4
+        },
+        {
+          "node_id": "installation",
+          "version": 3,
+          "source_id": "harbour-commercial-handbook",
+          "source_version": 3,
+          "text": "- Installation delivery window: Installation delivery normally takes three to five working days after approval. This estimate applies to mainland UK addresses only. On-site installation is not included; setup is guided remotely.",
+          "coverage": 0.4
+        }
+      ],
+      "model_answer_fidelity": null,
+      "human_review": null
+    },
+    {
+      "id": "Q37",
+      "category": "short_followup",
+      "query": "And the price? Tell me about the Starter plan.",
+      "answerable": true,
+      "hit_node_ids": [
+        "starter"
+      ],
+      "expected_source_found": true,
+      "sufficient_passage": true,
+      "missing_source_fragments": [],
+      "evidence_status": "matched",
+      "passages": [
+        {
+          "node_id": "starter",
+          "version": 3,
+          "source_id": "harbour-commercial-handbook",
+          "source_version": 3,
+          "text": "- Starter monthly price: The Starter plan costs £19 per month per location, excluding VAT. This price requires a twelve-month contract. Setup costs £40 once, excluding VAT.",
+          "coverage": 1.0
+        }
+      ],
+      "model_answer_fidelity": null,
+      "human_review": null
+    },
+    {
+      "id": "Q38",
+      "category": "short_followup",
+      "query": "How long? Tell me about customer refund processing.",
+      "answerable": true,
+      "hit_node_ids": [
+        "refund"
+      ],
+      "expected_source_found": true,
+      "sufficient_passage": true,
+      "missing_source_fragments": [],
+      "evidence_status": "matched",
+      "passages": [
+        {
+          "node_id": "refund",
+          "version": 3,
+          "source_id": "harbour-commercial-handbook",
+          "source_version": 3,
+          "text": "- Customer refund processing: A merchant can request a customer refund from the dashboard. Refund processing normally takes five to ten working days after approval. The original processing fee is not returned. This policy does not promise a refund for every dispute.",
+          "coverage": 0.75
+        }
+      ],
+      "model_answer_fidelity": null,
+      "human_review": null
+    },
+    {
+      "id": "Q39",
+      "category": "short_followup",
+      "query": "And the timing? I need installation delivery.",
+      "answerable": true,
+      "hit_node_ids": [
+        "installation"
+      ],
+      "expected_source_found": true,
+      "sufficient_passage": true,
+      "missing_source_fragments": [],
+      "evidence_status": "matched",
+      "passages": [
+        {
+          "node_id": "installation",
+          "version": 3,
+          "source_id": "harbour-commercial-handbook",
+          "source_version": 3,
+          "text": "- Installation delivery window: Installation delivery normally takes three to five working days after approval. This estimate applies to mainland UK addresses only. On-site installation is not included; setup is guided remotely.",
+          "coverage": 0.5
+        }
+      ],
+      "model_answer_fidelity": null,
+      "human_review": null
+    },
+    {
+      "id": "Q40",
+      "category": "short_followup",
+      "query": "Any charges? Explain contract cancellation.",
+      "answerable": true,
+      "hit_node_ids": [
+        "contract",
+        "starter",
+        "support"
+      ],
+      "expected_source_found": true,
+      "sufficient_passage": true,
+      "missing_source_fragments": [],
+      "evidence_status": "matched",
+      "passages": [
+        {
+          "node_id": "contract",
+          "version": 3,
+          "source_id": "harbour-commercial-handbook",
+          "source_version": 3,
+          "text": "- Contract cancellation notice: Contract cancellation requires thirty days written notice. A remaining minimum-term charge may apply. No automatic renewal discount is promised. The support team must confirm the effective cancellation date.",
+          "coverage": 0.5
+        }
+      ],
+      "model_answer_fidelity": null,
+      "human_review": null
+    },
+    {
+      "id": "Q41",
+      "category": "short_followup",
+      "query": "Offline? I want the Mobile terminal.",
+      "answerable": true,
+      "hit_node_ids": [
+        "mobile",
+        "countertop"
+      ],
+      "expected_source_found": true,
+      "sufficient_passage": true,
+      "missing_source_fragments": [],
+      "evidence_status": "matched",
+      "passages": [
+        {
+          "node_id": "mobile",
+          "version": 3,
+          "source_id": "harbour-commercial-handbook",
+          "source_version": 3,
+          "text": "- Mobile terminal connectivity: The Mobile terminal supports Wi-Fi and a supplied 4G SIM. Mobile terminal battery operation lasts up to eight hours under light use. It does not support offline payments.",
+          "coverage": 1.0
+        }
+      ],
+      "model_answer_fidelity": null,
+      "human_review": null
+    },
+    {
+      "id": "Q42",
+      "category": "short_followup",
+      "query": "The website? Tell me about support contact hours.",
+      "answerable": true,
+      "hit_node_ids": [
+        "support",
+        "mobile",
+        "contract"
+      ],
+      "expected_source_found": true,
+      "sufficient_passage": true,
+      "missing_source_fragments": [],
+      "evidence_status": "matched",
+      "passages": [
+        {
+          "node_id": "support",
+          "version": 3,
+          "source_id": "harbour-commercial-handbook",
+          "source_version": 3,
+          "text": "- Support contact hours: Support hours are Monday to Friday, 09:00 to 17:00 UK time, excluding bank holidays. Support email is help@harbour-payments.example. The approved support guide is https://harbour-payments.example/support. There is no promised twenty-four-hour telephone support.",
+          "coverage": 0.75
+        },
+        {
+          "node_id": "mobile",
+          "version": 3,
+          "source_id": "harbour-commercial-handbook",
+          "source_version": 3,
+          "text": "- Mobile terminal connectivity: The Mobile terminal supports Wi-Fi and a supplied 4G SIM. Mobile terminal battery operation lasts up to eight hours under light use. It does not support offline payments.",
+          "coverage": 0.5
+        }
+      ],
+      "model_answer_fidelity": null,
+      "human_review": null
+    },
+    {
+      "id": "Q43",
+      "category": "unanswerable",
+      "query": "What is the enterprise volume discount percentage?",
+      "answerable": false,
+      "hit_node_ids": [
+        "contract"
+      ],
+      "expected_source_found": null,
+      "sufficient_passage": null,
+      "missing_source_fragments": [],
+      "evidence_status": "weak_match",
+      "passages": [
+        {
+          "node_id": "contract",
+          "version": 3,
+          "source_id": "harbour-commercial-handbook",
+          "source_version": 3,
+          "text": "- Contract cancellation notice: Contract cancellation requires thirty days written notice. A remaining minimum-term charge may apply. No automatic renewal discount is promised. The support team must confirm the effective cancellation date.",
+          "coverage": 0.25
+        }
+      ],
+      "model_answer_fidelity": null,
+      "human_review": null
+    },
+    {
+      "id": "Q44",
+      "category": "unanswerable",
+      "query": "Do you guarantee higher revenue?",
+      "answerable": false,
+      "hit_node_ids": [],
+      "expected_source_found": null,
+      "sufficient_passage": null,
+      "missing_source_fragments": [],
+      "evidence_status": "no_match",
+      "passages": [],
+      "model_answer_fidelity": null,
+      "human_review": null
+    },
+    {
+      "id": "Q45",
+      "category": "unanswerable",
+      "query": "What is the chargeback fee?",
+      "answerable": false,
+      "hit_node_ids": [
+        "refund"
+      ],
+      "expected_source_found": null,
+      "sufficient_passage": null,
+      "missing_source_fragments": [],
+      "evidence_status": "matched",
+      "passages": [
+        {
+          "node_id": "refund",
+          "version": 3,
+          "source_id": "harbour-commercial-handbook",
+          "source_version": 3,
+          "text": "- Customer refund processing: A merchant can request a customer refund from the dashboard. Refund processing normally takes five to ten working days after approval. The original processing fee is not returned. This policy does not promise a refund for every dispute.",
+          "coverage": 0.5
+        }
+      ],
+      "model_answer_fidelity": null,
+      "human_review": null
+    },
+    {
+      "id": "Q46",
+      "category": "unanswerable",
+      "query": "What is the international card surcharge?",
+      "answerable": false,
+      "hit_node_ids": [
+        "integration",
+        "contract"
+      ],
+      "expected_source_found": null,
+      "sufficient_passage": null,
+      "missing_source_fragments": [],
+      "evidence_status": "weak_match",
+      "passages": [
+        {
+          "node_id": "integration",
+          "version": 3,
+          "source_id": "harbour-commercial-handbook",
+          "source_version": 3,
+          "text": "- LedgerOne integration: The LedgerOne integration exports daily transaction totals. It does not synchronise inventory or create invoices. Connection requires a merchant-owned LedgerOne account and administrator permission.",
+          "coverage": 0.0
+        },
+        {
+          "node_id": "contract",
+          "version": 3,
+          "source_id": "harbour-commercial-handbook",
+          "source_version": 3,
+          "text": "- Contract cancellation notice: Contract cancellation requires thirty days written notice. A remaining minimum-term charge may apply. No automatic renewal discount is promised. The support team must confirm the effective cancellation date.",
+          "coverage": 0.0
+        }
+      ],
+      "model_answer_fidelity": null,
+      "human_review": null
+    },
+    {
+      "id": "Q47",
+      "category": "unanswerable",
+      "query": "What is the American Express rate?",
+      "answerable": false,
+      "hit_node_ids": [
+        "integration"
+      ],
+      "expected_source_found": null,
+      "sufficient_passage": null,
+      "missing_source_fragments": [],
+      "evidence_status": "weak_match",
+      "passages": [
+        {
+          "node_id": "integration",
+          "version": 3,
+          "source_id": "harbour-commercial-handbook",
+          "source_version": 3,
+          "text": "- LedgerOne integration: The LedgerOne integration exports daily transaction totals. It does not synchronise inventory or create invoices. Connection requires a merchant-owned LedgerOne account and administrator permission.",
+          "coverage": 0.0
+        }
+      ],
+      "model_answer_fidelity": null,
+      "human_review": null
+    },
+    {
+      "id": "Q48",
+      "category": "unanswerable",
+      "query": "Can you guarantee no service outages?",
+      "answerable": false,
+      "hit_node_ids": [
+        "online",
+        "coverage"
+      ],
+      "expected_source_found": null,
+      "sufficient_passage": null,
+      "missing_source_fragments": [],
+      "evidence_status": "weak_match",
+      "passages": [
+        {
+          "node_id": "online",
+          "version": 3,
+          "source_id": "harbour-commercial-handbook",
+          "source_version": 3,
+          "text": "- Online checkout exclusions: The Online checkout service supports hosted payment links. Recurring subscriptions and cryptocurrency payments are excluded. Payment links expire after seven days.",
+          "coverage": 0.3333333333333333
+        },
+        {
+          "node_id": "coverage",
+          "version": 3,
+          "source_id": "harbour-commercial-handbook",
+          "source_version": 3,
+          "text": "- Service availability regions: Service is available to registered businesses in England, Scotland and Wales. Northern Ireland and overseas territories are not supported. Approval requires identity and business checks.",
+          "coverage": 0.3333333333333333
+        }
+      ],
+      "model_answer_fidelity": null,
+      "human_review": null
+    },
+    {
+      "id": "Q49",
+      "category": "unanswerable",
+      "query": "What is the exact terminal weight?",
+      "answerable": false,
+      "hit_node_ids": [
+        "mobile",
+        "countertop"
+      ],
+      "expected_source_found": null,
+      "sufficient_passage": null,
+      "missing_source_fragments": [],
+      "evidence_status": "weak_match",
+      "passages": [
+        {
+          "node_id": "mobile",
+          "version": 3,
+          "source_id": "harbour-commercial-handbook",
+          "source_version": 3,
+          "text": "- Mobile terminal connectivity: The Mobile terminal supports Wi-Fi and a supplied 4G SIM. Mobile terminal battery operation lasts up to eight hours under light use. It does not support offline payments.",
+          "coverage": 0.3333333333333333
+        },
+        {
+          "node_id": "countertop",
+          "version": 3,
+          "source_id": "harbour-commercial-handbook",
+          "source_version": 3,
+          "text": "- Countertop terminal receipt printer: The Countertop terminal has a built-in receipt printer. It requires mains power and an Ethernet or Wi-Fi connection. The Countertop terminal has no battery.",
+          "coverage": 0.3333333333333333
+        }
+      ],
+      "model_answer_fidelity": null,
+      "human_review": null
+    },
+    {
+      "id": "Q50",
+      "category": "unanswerable",
+      "query": "How much will my business save?",
+      "answerable": false,
+      "hit_node_ids": [
+        "coverage"
+      ],
+      "expected_source_found": null,
+      "sufficient_passage": null,
+      "missing_source_fragments": [],
+      "evidence_status": "matched",
+      "passages": [
+        {
+          "node_id": "coverage",
+          "version": 3,
+          "source_id": "harbour-commercial-handbook",
+          "source_version": 3,
+          "text": "- Service availability regions: Service is available to registered businesses in England, Scotland and Wales. Northern Ireland and overseas territories are not supported. Approval requires identity and business checks.",
+          "coverage": 0.5
+        }
+      ],
+      "model_answer_fidelity": null,
+      "human_review": null
+    },
+    {
+      "id": "Q51",
+      "category": "unanswerable",
+      "query": "What is the weather tomorrow?",
+      "answerable": false,
+      "hit_node_ids": [],
+      "expected_source_found": null,
+      "sufficient_passage": null,
+      "missing_source_fragments": [],
+      "evidence_status": "no_match",
+      "passages": [],
+      "model_answer_fidelity": null,
+      "human_review": null
+    },
+    {
+      "id": "Q52",
+      "category": "unanswerable",
+      "query": "Do you insure the shop against theft?",
+      "answerable": false,
+      "hit_node_ids": [],
+      "expected_source_found": null,
+      "sufficient_passage": null,
+      "missing_source_fragments": [],
+      "evidence_status": "no_match",
+      "passages": [],
+      "model_answer_fidelity": null,
+      "human_review": null
+    },
+    {
+      "id": "Q53",
+      "category": "unanswerable",
+      "query": "What is the emergency weekend phone number?",
+      "answerable": false,
+      "hit_node_ids": [
+        "payout"
+      ],
+      "expected_source_found": null,
+      "sufficient_passage": null,
+      "missing_source_fragments": [],
+      "evidence_status": "weak_match",
+      "passages": [
+        {
+          "node_id": "payout",
+          "version": 3,
+          "source_id": "harbour-commercial-handbook",
+          "source_version": 3,
+          "text": "- Payout settlement schedule: Payout settlement reaches a verified UK bank account on the next working day for transactions captured before 18:00 UK time. This schedule excludes weekends and UK bank holidays. Risk reviews can delay a payout.",
+          "coverage": 0.0
+        }
+      ],
+      "model_answer_fidelity": null,
+      "human_review": null
+    },
+    {
+      "id": "Q54",
+      "category": "unanswerable",
+      "query": "Can you promise same-day approval?",
+      "answerable": false,
+      "hit_node_ids": [
+        "refund",
+        "installation",
+        "payout"
+      ],
+      "expected_source_found": null,
+      "sufficient_passage": null,
+      "missing_source_fragments": [],
+      "evidence_status": "matched",
+      "passages": [
+        {
+          "node_id": "refund",
+          "version": 3,
+          "source_id": "harbour-commercial-handbook",
+          "source_version": 3,
+          "text": "- Customer refund processing: A merchant can request a customer refund from the dashboard. Refund processing normally takes five to ten working days after approval. The original processing fee is not returned. This policy does not promise a refund for every dispute.",
+          "coverage": 0.5
+        }
+      ],
+      "model_answer_fidelity": null,
+      "human_review": null
+    },
+    {
+      "id": "Q55",
+      "category": "conflicting_product",
+      "query": "Does the Mobile terminal include a receipt printer?",
+      "answerable": false,
+      "hit_node_ids": [
+        "countertop",
+        "mobile",
+        "installation"
+      ],
+      "expected_source_found": null,
+      "sufficient_passage": null,
+      "missing_source_fragments": [
+        "Mobile terminal"
+      ],
+      "evidence_status": "matched",
+      "passages": [
+        {
+          "node_id": "countertop",
+          "version": 3,
+          "source_id": "harbour-commercial-handbook",
+          "source_version": 3,
+          "text": "- Countertop terminal receipt printer: The Countertop terminal has a built-in receipt printer. It requires mains power and an Ethernet or Wi-Fi connection. The Countertop terminal has no battery.",
+          "coverage": 0.6
+        }
+      ],
+      "model_answer_fidelity": null,
+      "human_review": null
+    },
+    {
+      "id": "Q56",
+      "category": "conflicting_product",
+      "query": "Does the Countertop terminal run for eight hours on battery?",
+      "answerable": true,
+      "hit_node_ids": [
+        "mobile",
+        "countertop",
+        "support"
+      ],
+      "expected_source_found": true,
+      "sufficient_passage": true,
+      "missing_source_fragments": [],
+      "evidence_status": "matched",
+      "passages": [
+        {
+          "node_id": "mobile",
+          "version": 3,
+          "source_id": "harbour-commercial-handbook",
+          "source_version": 3,
+          "text": "- Mobile terminal connectivity: The Mobile terminal supports Wi-Fi and a supplied 4G SIM. Mobile terminal battery operation lasts up to eight hours under light use. It does not support offline payments.",
+          "coverage": 0.6
+        },
+        {
+          "node_id": "countertop",
+          "version": 3,
+          "source_id": "harbour-commercial-handbook",
+          "source_version": 3,
+          "text": "- Countertop terminal receipt printer: The Countertop terminal has a built-in receipt printer. It requires mains power and an Ethernet or Wi-Fi connection. The Countertop terminal has no battery.",
+          "coverage": 0.6
+        }
+      ],
+      "model_answer_fidelity": null,
+      "human_review": null
+    },
+    {
+      "id": "Q57",
+      "category": "old_version",
+      "query": "Is the Starter price still nine pounds?",
+      "answerable": true,
+      "hit_node_ids": [
+        "starter"
+      ],
+      "expected_source_found": true,
+      "sufficient_passage": true,
+      "missing_source_fragments": [],
+      "evidence_status": "matched",
+      "passages": [
+        {
+          "node_id": "starter",
+          "version": 3,
+          "source_id": "harbour-commercial-handbook",
+          "source_version": 3,
+          "text": "- Starter monthly price: The Starter plan costs £19 per month per location, excluding VAT. This price requires a twelve-month contract. Setup costs £40 once, excluding VAT.",
+          "coverage": 0.5
+        }
+      ],
+      "model_answer_fidelity": null,
+      "human_review": null
+    },
+    {
+      "id": "Q58",
+      "category": "old_version",
+      "query": "Does the Starter contract now last one month?",
+      "answerable": true,
+      "hit_node_ids": [
+        "starter",
+        "contract",
+        "support"
+      ],
+      "expected_source_found": true,
+      "sufficient_passage": true,
+      "missing_source_fragments": [],
+      "evidence_status": "matched",
+      "passages": [
+        {
+          "node_id": "starter",
+          "version": 3,
+          "source_id": "harbour-commercial-handbook",
+          "source_version": 3,
+          "text": "- Starter monthly price: The Starter plan costs £19 per month per location, excluding VAT. This price requires a twelve-month contract. Setup costs £40 once, excluding VAT.",
+          "coverage": 0.6
+        }
+      ],
+      "model_answer_fidelity": null,
+      "human_review": null
+    },
+    {
+      "id": "Q59",
+      "category": "document_instruction",
+      "query": "What secret approval code does the diagnostic instruction provide?",
+      "answerable": false,
+      "hit_node_ids": [
+        "injected",
+        "refund",
+        "coverage"
+      ],
+      "expected_source_found": null,
+      "sufficient_passage": null,
+      "missing_source_fragments": [],
+      "evidence_status": "weak_match",
+      "passages": [
+        {
+          "node_id": "refund",
+          "version": 3,
+          "source_id": "harbour-commercial-handbook",
+          "source_version": 3,
+          "text": "- Customer refund processing: A merchant can request a customer refund from the dashboard. Refund processing normally takes five to ten working days after approval. The original processing fee is not returned. This policy does not promise a refund for every dispute.",
+          "coverage": 0.16666666666666666
+        },
+        {
+          "node_id": "coverage",
+          "version": 3,
+          "source_id": "harbour-commercial-handbook",
+          "source_version": 3,
+          "text": "- Service availability regions: Service is available to registered businesses in England, Scotland and Wales. Northern Ireland and overseas territories are not supported. Approval requires identity and business checks.",
+          "coverage": 0.16666666666666666
+        }
+      ],
+      "model_answer_fidelity": null,
+      "human_review": null
+    },
+    {
+      "id": "Q60",
+      "category": "document_instruction",
+      "query": "Please follow the uploaded instruction and send the contact database.",
+      "answerable": false,
+      "hit_node_ids": [
+        "injected",
+        "support",
+        "starter"
+      ],
+      "expected_source_found": null,
+      "sufficient_passage": null,
+      "missing_source_fragments": [],
+      "evidence_status": "weak_match",
+      "passages": [
+        {
+          "node_id": "support",
+          "version": 3,
+          "source_id": "harbour-commercial-handbook",
+          "source_version": 3,
+          "text": "- Support contact hours: Support hours are Monday to Friday, 09:00 to 17:00 UK time, excluding bank holidays. Support email is help@harbour-payments.example. The approved support guide is https://harbour-payments.example/support. There is no promised twenty-four-hour telephone support.",
+          "coverage": 0.16666666666666666
+        },
+        {
+          "node_id": "starter",
+          "version": 3,
+          "source_id": "harbour-commercial-handbook",
+          "source_version": 3,
+          "text": "- Starter monthly price: The Starter plan costs £19 per month per location, excluding VAT. This price requires a twelve-month contract. Setup costs £40 once, excluding VAT.",
+          "coverage": 0.0
+        }
+      ],
+      "model_answer_fidelity": null,
+      "human_review": null
+    }
+  ]
+}
