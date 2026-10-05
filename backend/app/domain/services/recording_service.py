@@ -464,11 +464,39 @@ def _write_wav_file(recordings_dir: str, filepath: str, wav_data: bytes) -> None
     access to ``self``/event-loop state — the thread only ever touches the
     plain, immutable arguments passed in, so there's nothing for it to race.
     """
-    # Local fallback recordings use the same tenant/campaign hierarchy as
-    # object storage. Create the leaf directory, not only the configured
-    # root, so tenants never share a flat filesystem namespace.
-    os.makedirs(os.path.dirname(filepath) or recordings_dir, exist_ok=True)
-    with open(filepath, "wb") as fh:
+    # Match the local read/delete boundary: lexical containment alone permits
+    # an in-root symlink to direct a recording outside the configured storage.
+    root = os.path.realpath(os.path.abspath(recordings_dir))
+    path = os.path.realpath(os.path.abspath(filepath))
+    try:
+        inside = os.path.commonpath((root, path)) == root and path != root
+    except ValueError:
+        inside = False
+    if not inside:
+        raise ValueError("Recording path is outside the configured root")
+
+    # makedirs(mode=...) protects only the leaf, not newly created parents.
+    # Create every missing level privately without changing the process-wide
+    # umask or chmod-ing existing directories owned/configured by the operator.
+    missing = []
+    directory = os.path.dirname(path)
+    while not os.path.exists(directory):
+        missing.append(directory)
+        directory = os.path.dirname(directory)
+    for directory in reversed(missing):
+        try:
+            os.mkdir(directory, mode=0o700)
+        except FileExistsError:
+            if not os.path.isdir(directory):
+                raise
+
+    # mode applies only to newly created files; existing regular-file modes
+    # remain unchanged. Trusted, non-writable storage parents are still needed:
+    # this is not a descriptor-relative traversal against hostile directory swaps.
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+    flags |= getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    descriptor = os.open(path, flags, 0o600)
+    with os.fdopen(descriptor, "wb") as fh:
         fh.write(wav_data)
 
 
