@@ -1,0 +1,145 @@
+FF                                                                       [100%]
+================================== FAILURES ===================================
+_ test_known_cloud_rejection_settles_no_provider_attempt_without_retry[smart] _
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000027AFEBA0680>
+policy = 'smart'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("policy", ["smart", "legacy"])
+    async def test_known_cloud_rejection_settles_no_provider_attempt_without_retry(monkeypatch, policy):
+        import aiohttp
+        from app.workers.dialer_worker import DialerWorker
+        from tests.unit.test_dialer_worker_guard_ordering import _base_worker, _job
+    
+        monkeypatch.setenv("RETRY_POLICY", policy)
+        worker = _base_worker()
+        worker._get_lead_timezone = AsyncMock(return_value=None)
+        worker._make_call = DialerWorker._make_call.__get__(worker)
+        worker._mark_call_intent_not_originated = AsyncMock(return_value=True)
+        worker._record_job_failure_classification = AsyncMock()
+        bodies = []
+    
+        class Response(Context):
+            status = 422
+    
+            async def __aenter__(self):
+                return self
+    
+            async def text(self):
+                return json.dumps({"error": {"code": "cloud_telephony_unavailable", "message": "Cloud calling is unavailable in production."}})
+    
+        class Session(Context):
+            async def __aenter__(self):
+                return self
+    
+            def post(self, _url, **kwargs):
+                bodies.append(kwargs["json"])
+                return Response()
+    
+        monkeypatch.setattr(aiohttp, "ClientSession", Session)
+        job = _job()
+        attempt = job.attempt_number
+        await worker.process_job(job)
+        assert len(bodies) == 1
+        worker._mark_call_intent_not_originated.assert_awaited_once()
+>       worker.queue_service.schedule_retry.assert_not_awaited()
+
+tests\unit\test_cloud_telephony_availability.py:324: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <AsyncMock name='mock.schedule_retry' id='2727284240512'>
+
+    def assert_not_awaited(self):
+        """
+        Assert that the mock was never awaited.
+        """
+        if self.await_count != 0:
+            msg = (f"Expected {self._mock_name or 'mock'} to not have been awaited."
+                   f" Awaited {self.await_count} times.")
+>           raise AssertionError(msg)
+E           AssertionError: Expected schedule_retry to not have been awaited. Awaited 1 times.
+
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:2429: AssertionError
+------------------------------ Captured log call ------------------------------
+ERROR    app.workers.dialer_worker:dialer_worker.py:1301 INTERNAL_SERVICE_TOKEN is not set on the dialer worker � outbound origination will be rejected (401) by the API auth gate. Provision the token in the worker environment.
+ERROR    app.workers.dialer_worker:dialer_worker.py:1332 Telephony bridge rejected call: status=422 body={"error": {"code": "cloud_telephony_unavailable", "message": "Cloud calling is unavailable in production."}} dest=[redacted digits=11 ..67]
+ERROR    app.workers.dialer_worker:dialer_worker.py:1092 dial_failed category=internal reason=unknown_code_cloud_telephony_unavailable attempt=1 next_retry_in=60s job=job-123 lead=lead-123 dest=[redacted digits=11 ..67] err=No call_id returned from telephony provider
+_ test_known_cloud_rejection_settles_no_provider_attempt_without_retry[legacy] _
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000027AFED0EED0>
+policy = 'legacy'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("policy", ["smart", "legacy"])
+    async def test_known_cloud_rejection_settles_no_provider_attempt_without_retry(monkeypatch, policy):
+        import aiohttp
+        from app.workers.dialer_worker import DialerWorker
+        from tests.unit.test_dialer_worker_guard_ordering import _base_worker, _job
+    
+        monkeypatch.setenv("RETRY_POLICY", policy)
+        worker = _base_worker()
+        worker._get_lead_timezone = AsyncMock(return_value=None)
+        worker._make_call = DialerWorker._make_call.__get__(worker)
+        worker._mark_call_intent_not_originated = AsyncMock(return_value=True)
+        worker._record_job_failure_classification = AsyncMock()
+        bodies = []
+    
+        class Response(Context):
+            status = 422
+    
+            async def __aenter__(self):
+                return self
+    
+            async def text(self):
+                return json.dumps({"error": {"code": "cloud_telephony_unavailable", "message": "Cloud calling is unavailable in production."}})
+    
+        class Session(Context):
+            async def __aenter__(self):
+                return self
+    
+            def post(self, _url, **kwargs):
+                bodies.append(kwargs["json"])
+                return Response()
+    
+        monkeypatch.setattr(aiohttp, "ClientSession", Session)
+        job = _job()
+        attempt = job.attempt_number
+        await worker.process_job(job)
+        assert len(bodies) == 1
+        worker._mark_call_intent_not_originated.assert_awaited_once()
+>       worker.queue_service.schedule_retry.assert_not_awaited()
+
+tests\unit\test_cloud_telephony_availability.py:324: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <AsyncMock name='mock.schedule_retry' id='2727285344640'>
+
+    def assert_not_awaited(self):
+        """
+        Assert that the mock was never awaited.
+        """
+        if self.await_count != 0:
+            msg = (f"Expected {self._mock_name or 'mock'} to not have been awaited."
+                   f" Awaited {self.await_count} times.")
+>           raise AssertionError(msg)
+E           AssertionError: Expected schedule_retry to not have been awaited. Awaited 1 times.
+
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:2429: AssertionError
+------------------------------ Captured log call ------------------------------
+ERROR    app.workers.dialer_worker:dialer_worker.py:1301 INTERNAL_SERVICE_TOKEN is not set on the dialer worker � outbound origination will be rejected (401) by the API auth gate. Provision the token in the worker environment.
+ERROR    app.workers.dialer_worker:dialer_worker.py:1332 Telephony bridge rejected call: status=422 body={"error": {"code": "cloud_telephony_unavailable", "message": "Cloud calling is unavailable in production."}} dest=[redacted digits=11 ..67]
+ERROR    app.workers.dialer_worker:dialer_worker.py:1092 dial_failed_legacy attempt=1/3 delay=7200s reason=legacy_no_classification job=job-123 lead=lead-123 dest=[redacted digits=11 ..67] err=No call_id returned from telephony provider
+============================== warnings summary ===============================
+tests/unit/test_cloud_telephony_availability.py::test_known_cloud_rejection_settles_no_provider_attempt_without_retry[smart]
+tests/unit/test_cloud_telephony_availability.py::test_known_cloud_rejection_settles_no_provider_attempt_without_retry[smart]
+tests/unit/test_cloud_telephony_availability.py::test_known_cloud_rejection_settles_no_provider_attempt_without_retry[legacy]
+tests/unit/test_cloud_telephony_availability.py::test_known_cloud_rejection_settles_no_provider_attempt_without_retry[legacy]
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\backend\.venv\Lib\site-packages\pydantic\main.py:250: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/unit/test_cloud_telephony_availability.py::test_known_cloud_rejection_settles_no_provider_attempt_without_retry[smart]
+FAILED tests/unit/test_cloud_telephony_availability.py::test_known_cloud_rejection_settles_no_provider_attempt_without_retry[legacy]
+2 failed, 24 deselected, 4 warnings in 4.29s

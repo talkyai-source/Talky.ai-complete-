@@ -1,0 +1,151 @@
+FF                                                                       [100%]
+================================== FAILURES ===================================
+_ test_unavailable_selection_preserves_original_worker_attempt_through_http[error] _
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000024AF635C0B0>
+envelope = 'error'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("envelope", ["error", "detail"])
+    async def test_unavailable_selection_preserves_original_worker_attempt_through_http(monkeypatch, envelope):
+        import aiohttp
+        from app.workers.dialer_worker import DialerWorker
+        from tests.unit.test_dialer_worker_guard_ordering import _base_worker, _job
+    
+        worker = _base_worker()
+        worker._get_lead_timezone = AsyncMock(return_value=None)
+        worker._make_call = DialerWorker._make_call.__get__(worker)
+        worker._publish_block = AsyncMock()
+        worker._mark_call_intent_not_originated = AsyncMock()
+        worker.queue_service._redefer_inflight = AsyncMock(return_value=True)
+        intent = worker._create_call_intent.return_value
+        worker._load_existing_call_intent.return_value = intent
+        bodies = []
+        response_status = 503
+    
+        class Response(Context):
+            @property
+            def status(self):
+                return response_status
+    
+            async def __aenter__(self):
+                return self
+    
+            async def text(self):
+                return json.dumps({envelope: {"code": "telephony_selection_unavailable"}} if response_status == 503
+                                  else {"status": "calling", "call_id": "provider-one"})
+    
+        class Session(Context):
+            async def __aenter__(self):
+                return self
+    
+            def post(self, _url, **kwargs):
+                bodies.append(kwargs["json"])
+                return Response()
+    
+        monkeypatch.setattr(aiohttp, "ClientSession", Session)
+        job = _job()
+        original_attempt = job.attempt_number
+        await worker.process_job(job)
+>       worker._mark_call_intent_not_originated.assert_not_awaited()
+
+tests\unit\test_cloud_telephony_availability.py:273: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <AsyncMock id='2520973995008'>
+
+    def assert_not_awaited(self):
+        """
+        Assert that the mock was never awaited.
+        """
+        if self.await_count != 0:
+            msg = (f"Expected {self._mock_name or 'mock'} to not have been awaited."
+                   f" Awaited {self.await_count} times.")
+>           raise AssertionError(msg)
+E           AssertionError: Expected mock to not have been awaited. Awaited 1 times.
+
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:2429: AssertionError
+------------------------------ Captured log call ------------------------------
+ERROR    app.workers.dialer_worker:dialer_worker.py:1298 INTERNAL_SERVICE_TOKEN is not set on the dialer worker � outbound origination will be rejected (401) by the API auth gate. Provision the token in the worker environment.
+WARNING  app.workers.dialer_worker:dialer_worker.py:1316 Voice pipeline unavailable (503) � will retry without consuming attempt budget. dest=[redacted digits=11 ..67] body={"error": {"code": "telephony_selection_unavailable"}}
+_ test_unavailable_selection_preserves_original_worker_attempt_through_http[detail] _
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000024AF63B7950>
+envelope = 'detail'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("envelope", ["error", "detail"])
+    async def test_unavailable_selection_preserves_original_worker_attempt_through_http(monkeypatch, envelope):
+        import aiohttp
+        from app.workers.dialer_worker import DialerWorker
+        from tests.unit.test_dialer_worker_guard_ordering import _base_worker, _job
+    
+        worker = _base_worker()
+        worker._get_lead_timezone = AsyncMock(return_value=None)
+        worker._make_call = DialerWorker._make_call.__get__(worker)
+        worker._publish_block = AsyncMock()
+        worker._mark_call_intent_not_originated = AsyncMock()
+        worker.queue_service._redefer_inflight = AsyncMock(return_value=True)
+        intent = worker._create_call_intent.return_value
+        worker._load_existing_call_intent.return_value = intent
+        bodies = []
+        response_status = 503
+    
+        class Response(Context):
+            @property
+            def status(self):
+                return response_status
+    
+            async def __aenter__(self):
+                return self
+    
+            async def text(self):
+                return json.dumps({envelope: {"code": "telephony_selection_unavailable"}} if response_status == 503
+                                  else {"status": "calling", "call_id": "provider-one"})
+    
+        class Session(Context):
+            async def __aenter__(self):
+                return self
+    
+            def post(self, _url, **kwargs):
+                bodies.append(kwargs["json"])
+                return Response()
+    
+        monkeypatch.setattr(aiohttp, "ClientSession", Session)
+        job = _job()
+        original_attempt = job.attempt_number
+        await worker.process_job(job)
+>       worker._mark_call_intent_not_originated.assert_not_awaited()
+
+tests\unit\test_cloud_telephony_availability.py:273: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <AsyncMock id='2520981994672'>
+
+    def assert_not_awaited(self):
+        """
+        Assert that the mock was never awaited.
+        """
+        if self.await_count != 0:
+            msg = (f"Expected {self._mock_name or 'mock'} to not have been awaited."
+                   f" Awaited {self.await_count} times.")
+>           raise AssertionError(msg)
+E           AssertionError: Expected mock to not have been awaited. Awaited 1 times.
+
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:2429: AssertionError
+------------------------------ Captured log call ------------------------------
+ERROR    app.workers.dialer_worker:dialer_worker.py:1298 INTERNAL_SERVICE_TOKEN is not set on the dialer worker � outbound origination will be rejected (401) by the API auth gate. Provision the token in the worker environment.
+WARNING  app.workers.dialer_worker:dialer_worker.py:1316 Voice pipeline unavailable (503) � will retry without consuming attempt budget. dest=[redacted digits=11 ..67] body={"detail": {"code": "telephony_selection_unavailable"}}
+============================== warnings summary ===============================
+tests/unit/test_cloud_telephony_availability.py::test_unavailable_selection_preserves_original_worker_attempt_through_http[error]
+tests/unit/test_cloud_telephony_availability.py::test_unavailable_selection_preserves_original_worker_attempt_through_http[error]
+tests/unit/test_cloud_telephony_availability.py::test_unavailable_selection_preserves_original_worker_attempt_through_http[detail]
+tests/unit/test_cloud_telephony_availability.py::test_unavailable_selection_preserves_original_worker_attempt_through_http[detail]
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\backend\.venv\Lib\site-packages\pydantic\main.py:250: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/unit/test_cloud_telephony_availability.py::test_unavailable_selection_preserves_original_worker_attempt_through_http[error]
+FAILED tests/unit/test_cloud_telephony_availability.py::test_unavailable_selection_preserves_original_worker_attempt_through_http[detail]
+2 failed, 22 deselected, 4 warnings in 2.87s

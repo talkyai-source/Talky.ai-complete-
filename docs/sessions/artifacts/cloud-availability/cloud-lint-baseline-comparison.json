@@ -1,0 +1,59 @@
+{
+  "scope": "existing full-F findings only; CI excludes F401/F841; no introduced finding",
+  "files": [
+    {
+      "file": "backend/app/api/v1/endpoints/telephony_bridge.py",
+      "baseline_diagnostics": [
+        [
+          "F401",
+          "`app.domain.services.telephony.config._RINGING_MAX_AGE_S` imported but unused"
+        ],
+        [
+          "F401",
+          "`datetime.datetime` imported but unused"
+        ],
+        [
+          "F401",
+          "`datetime.timezone` imported but unused"
+        ],
+        [
+          "F841",
+          "Local variable `container` is assigned to but never used"
+        ],
+        [
+          "F841",
+          "Local variable `detector` is assigned to but never used"
+        ]
+      ],
+      "candidate_same_diagnostics": true
+    },
+    {
+      "file": "backend/app/api/v1/endpoints/telephony_providers.py",
+      "baseline_diagnostics": [
+        [
+          "F401",
+          "`fastapi.status` imported but unused"
+        ]
+      ],
+      "candidate_same_diagnostics": true
+    },
+    {
+      "file": "backend/app/workers/dialer_worker.py",
+      "baseline_diagnostics": [
+        [
+          "F401",
+          "`app.domain.services.call_guard.GuardDecision` imported but unused"
+        ],
+        [
+          "F841",
+          "Local variable `leg_id` is assigned to but never used"
+        ],
+        [
+          "F841",
+          "Local variable `talklee_call_id` is assigned to but never used"
+        ]
+      ],
+      "candidate_same_diagnostics": true
+    }
+  ]
+}

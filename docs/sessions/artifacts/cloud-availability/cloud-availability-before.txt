@@ -1,0 +1,93 @@
+{
+Traceback (most recent call last):
+  "scope": "offline actual methods; synthetic DB/queue/provider ports; no credentials, external network, real calls or production changes",
+  "source_head": "add699c4f7bf1fbf603f078e862f7229a04406c8",
+  "cases": [
+    {
+      "case": "production_activation",
+      "provider": "twilio",
+      "bridge_enabled": false,
+      "response": {
+        "active": "twilio"
+      },
+      "pointer_writes": 1,
+      "expected_rejected_without_pointer_change": false
+    },
+    {
+      "case": "production_campaign_start",
+      "provider": "twilio",
+      "success": true,
+      "jobs_enqueued": 1,
+      "expected_no_dispatch": false
+    },
+    {
+      "case": "production_manual_redial",
+      "provider": "twilio",
+      "preview_eligible": true,
+      "receipt_status": "queued",
+      "queue_submissions": 1,
+      "expected_no_dispatch": false
+    },
+    {
+      "case": "production_existing_durable_intent_final_call",
+      "provider": "twilio",
+      "adapter": "asterisk",
+  File "C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\tmp\cloud-availability-before.py", line 123, in <module>
+    asyncio.run(main())
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\runners.py", line 195, in run
+      "originate_count": 1,
+      "selection_reads": 0,
+      "expected_no_sip_origination": false
+    },
+    {
+      "case": "production_activation",
+      "provider": "vonage",
+      "bridge_enabled": false,
+      "response": {
+        "active": "vonage"
+      },
+      "pointer_writes": 1,
+      "expected_rejected_without_pointer_change": false
+    },
+    {
+      "case": "production_campaign_start",
+      "provider": "vonage",
+      "success": true,
+      "jobs_enqueued": 1,
+      "expected_no_dispatch": false
+    },
+    {
+      "case": "production_manual_redial",
+      "provider": "vonage",
+      "preview_eligible": true,
+      "receipt_status": "queued",
+      "queue_submissions": 1,
+      "expected_no_dispatch": false
+    },
+    {
+      "case": "production_existing_durable_intent_final_call",
+      "provider": "vonage",
+      "adapter": "asterisk",
+      "originate_count": 1,
+      "selection_reads": 0,
+      "expected_no_sip_origination": false
+    },
+    {
+      "case": "existing_direct_user_call_guard",
+      "status": 403,
+      "originate_count": 0
+    }
+  ]
+}
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\base_events.py", line 691, in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+  File "C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\tmp\cloud-availability-before.py", line 121, in main
+    assert not failures, f"{len(failures)} expected cloud-availability admission controls failed"
+           ^^^^^^^^^^^^
+AssertionError: 8 expected cloud-availability admission controls failed

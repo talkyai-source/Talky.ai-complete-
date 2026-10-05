@@ -1,0 +1,77 @@
+{
+  "scope": "offline actual methods; synthetic DB/queue/provider ports; no credentials, external network, real calls or production changes",
+  "source_head": "add699c4f7bf1fbf603f078e862f7229a04406c8",
+  "cases": [
+    {
+      "case": "production_activation",
+      "provider": "twilio",
+      "bridge_enabled": false,
+      "response": {
+        "active": "twilio"
+      },
+      "pointer_writes": 1,
+      "expected_rejected_without_pointer_change": false
+    },
+    {
+      "case": "production_campaign_start",
+      "provider": "twilio",
+      "success": true,
+      "jobs_enqueued": 1,
+      "expected_no_dispatch": false
+    },
+    {
+      "case": "production_manual_redial",
+      "provider": "twilio",
+      "preview_eligible": true,
+      "receipt_status": "queued",
+      "queue_submissions": 1,
+      "expected_no_dispatch": false
+    },
+    {
+      "case": "production_existing_durable_intent_final_call",
+      "provider": "twilio",
+      "adapter": "asterisk",
+      "originate_count": 1,
+      "selection_reads": 0,
+      "expected_no_sip_origination": false
+    },
+    {
+      "case": "production_activation",
+      "provider": "vonage",
+      "bridge_enabled": false,
+      "response": {
+        "active": "vonage"
+      },
+      "pointer_writes": 1,
+      "expected_rejected_without_pointer_change": false
+    },
+    {
+      "case": "production_campaign_start",
+      "provider": "vonage",
+      "success": true,
+      "jobs_enqueued": 1,
+      "expected_no_dispatch": false
+    },
+    {
+      "case": "production_manual_redial",
+      "provider": "vonage",
+      "preview_eligible": true,
+      "receipt_status": "queued",
+      "queue_submissions": 1,
+      "expected_no_dispatch": false
+    },
+    {
+      "case": "production_existing_durable_intent_final_call",
+      "provider": "vonage",
+      "adapter": "asterisk",
+      "originate_count": 1,
+      "selection_reads": 0,
+      "expected_no_sip_origination": false
+    },
+    {
+      "case": "existing_direct_user_call_guard",
+      "status": 403,
+      "originate_count": 0
+    }
+  ]
+}
