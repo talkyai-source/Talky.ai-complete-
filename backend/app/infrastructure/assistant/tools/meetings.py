@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 from pydantic import BaseModel, Field
 from app.core.postgres_adapter import Client
+from app.services.connector_resolver import reviewed_authorization_label
 
 logger = logging.getLogger(__name__)
 
@@ -149,7 +150,7 @@ async def book_meeting(
         if not confirm:
             reviewed = await service.review_connector(tenant_id)
             return {"preview": True, "changes": [
-                {"field": "Calendar account", "before": None, "after": reviewed["external_account_id"]},
+                {"field": "Calendar account", "before": None, "after": reviewed_authorization_label(reviewed)},
                 {"field": "Title", "before": None, "after": title},
                 {"field": "Start", "before": None, "after": start_dt.isoformat()},
                 {"field": "Duration", "before": None, "after": f"{duration_minutes} minutes"},
@@ -157,7 +158,7 @@ async def book_meeting(
             ], "note": "No calendar event has been created.", "_apply_args": {
                 "title": title, "start_time": start_dt.isoformat(), "duration_minutes": duration_minutes,
                 "attendees": attendees or [], "lead_id": lead_id, "description": description,
-                "add_video_conference": add_video_conference, "_reviewed_connector": reviewed}}
+                "add_video_conference": add_video_conference, "_reviewed_connector": {key: value for key, value in reviewed.items() if key != "display_label"}}}
 
         if not _reviewed_connector:
             raise ValueError("Review the calendar account in a new proposal before applying.")
@@ -210,7 +211,7 @@ async def update_meeting_tool(
         current = _meeting(tenant_id, db_client, meeting_id)
         if not confirm:
             reviewed = await service.review_meeting(tenant_id, current)
-            changes = [{"field": "Calendar account", "before": None, "after": reviewed["external_account_id"]},
+            changes = [{"field": "Calendar account", "before": None, "after": reviewed_authorization_label(reviewed)},
                        {"field": "Attendees", "before": None, "after": _attendee_display(current)}]
             if new_time:
                 changes.append({"field": "Start", "before": current.get("start_time"), "after": new_start_time.isoformat()})
@@ -218,7 +219,7 @@ async def update_meeting_tool(
                 changes.append({"field": "Title", "before": current.get("title"), "after": new_title})
             return {"preview": True, "changes": changes, "note": "Meeting not changed yet.",
                 "_apply_args": {"meeting_id": meeting_id, "new_time": new_time, "new_title": new_title,
-                    "_reviewed_connector": reviewed, "_reviewed_meeting": service.meeting_identity(current)}}
+                    "_reviewed_connector": {key: value for key, value in reviewed.items() if key != "display_label"}, "_reviewed_meeting": service.meeting_identity(current)}}
 
         if not _reviewed_connector or not _reviewed_meeting:
             raise ValueError("Review this meeting and calendar account before applying.")
@@ -258,10 +259,10 @@ async def cancel_meeting_tool(
         current = _meeting(tenant_id, db_client, meeting_id)
         if not confirm:
             reviewed = await service.review_meeting(tenant_id, current)
-            return {"preview": True, "changes": [{"field": "Calendar account", "before": None, "after": reviewed["external_account_id"]}, {"field": "Meeting", "before": current.get("title"), "after": "Cancelled"},
+            return {"preview": True, "changes": [{"field": "Calendar account", "before": None, "after": reviewed_authorization_label(reviewed)}, {"field": "Meeting", "before": current.get("title"), "after": "Cancelled"},
                 {"field": "Start", "before": None, "after": current.get("start_time")},
                 {"field": "Attendees", "before": None, "after": _attendee_display(current)}], "note": "Meeting not cancelled yet.",
-                "_apply_args": {"meeting_id": meeting_id, "reason": reason, "_reviewed_connector": reviewed,
+                "_apply_args": {"meeting_id": meeting_id, "reason": reason, "_reviewed_connector": {key: value for key, value in reviewed.items() if key != "display_label"},
                     "_reviewed_meeting": service.meeting_identity(current)}}
 
         service = get_meeting_service(db_client)

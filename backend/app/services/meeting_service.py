@@ -11,10 +11,11 @@ from datetime import datetime, timedelta, timezone as dt_timezone
 import asyncio
 from app.core.postgres_adapter import Client
 
-from app.infrastructure.connectors.base import ConnectorFactory
 from app.infrastructure.connectors.encryption import get_encryption_service
-from app.domain.models.meeting import Meeting, MeetingStatus, Attendee
-from app.services.connector_resolver import connector_identity, verify_reviewed_connector, ReviewedConnectorChanged
+from app.services.connector_resolver import (
+    reviewed_authorization_identity, verify_reviewed_authorization,
+    check_reviewed_authorization_current, ReviewedConnectorChanged, reviewed_authorization_label,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +30,7 @@ class CalendarNotConnectedError(Exception):
 class MeetingService:
     """
     Meeting creation service that bridges calendar connectors with database.
-    
+
     Responsibilities:
     - Fetch availability from connected calendar
     - Create calendar events via connector
@@ -37,27 +38,29 @@ class MeetingService:
     - Generate meeting join links (Google Meet / Microsoft Teams)
     - Send calendar invites
     - Handle update/cancel operations
-    
+
     Integration Points:
     - Triggerable from: Voice agent outcome, Assistant agent, Dashboard API
     """
-    
+
     def __init__(self, db_client: Client):
         self.db_client = db_client
         self.supabase = db_client
         self._encryption = get_encryption_service()
-    
+
     async def _get_active_calendar_connector(
         self,
         tenant_id: str,
         connector_id: Optional[str] = None,
+        account_id: Optional[str] = None,
+        reviewed_authorization: bool = False,
     ) -> tuple[Any, str, str]:
         """
         Get active calendar connector for tenant.
-        
+
         Returns:
             Tuple of (connector_instance, connector_id, provider)
-            
+
         Raises:
             CalendarNotConnectedError: If no active calendar connector
         """
@@ -68,6 +71,8 @@ class MeetingService:
             return await resolve_active_connector(
                 self.db_client, tenant_id, "calendar",
                 **({"connector_id": connector_id} if connector_id else {}),
+                **({"account_id": account_id} if account_id else {}),
+                **({"reviewed_authorization": True} if reviewed_authorization else {}),
             )
         except ConnectorNotConnectedError as exc:
             raise CalendarNotConnectedError(exc.message) from exc
@@ -81,30 +86,30 @@ class MeetingService:
     ) -> List[Dict[str, Any]]:
         """
         Get available time slots from connected calendar.
-        
+
         Args:
             tenant_id: Tenant ID
             start_time: Start of availability window
             end_time: End of availability window
             duration_minutes: Required slot duration in minutes
-            
+
         Returns:
             List of available slots: [{"start": datetime, "end": datetime}, ...]
-            
+
         Raises:
             CalendarNotConnectedError: If no calendar is connected
         """
         connector, _, provider = await self._get_active_calendar_connector(tenant_id)
-        
+
         logger.info(f"Getting availability for tenant {tenant_id[:8]}... via {provider}")
-        
+
         # Get available slots from calendar
         available_slots = await connector.get_availability(
             start_time=start_time,
             end_time=end_time,
             duration_minutes=duration_minutes
         )
-        
+
         # Format response
         return [
             {
@@ -116,7 +121,17 @@ class MeetingService:
         ]
 
     async def review_connector(self, tenant_id, connector_id=None):
-        return connector_identity(*await self._get_active_calendar_connector(tenant_id, connector_id))
+        connector, cid, provider = await self._get_active_calendar_connector(tenant_id, connector_id, reviewed_authorization=True)
+        identity = reviewed_authorization_identity(connector, cid, provider)
+        return {**identity, "display_label": getattr(connector, "account_email", None) or reviewed_authorization_label(identity)}
+
+    @staticmethod
+    def _saved_authorization(meeting):
+        metadata = meeting.get("metadata") or {}
+        if "reviewed_connector" in metadata:
+            return metadata["reviewed_connector"]
+        return {"connector_id": meeting.get("connector_id"), "provider": metadata.get("provider"),
+                "external_account_id": metadata.get("external_account_id")}
 
     @staticmethod
     def meeting_identity(meeting):
@@ -126,25 +141,25 @@ class MeetingService:
         return identity
 
     async def review_meeting(self, tenant_id, meeting):
-        metadata = meeting.get("metadata") or {}
-        expected = {"connector_id": meeting.get("connector_id"), "provider": metadata.get("provider"),
-                    "external_account_id": metadata.get("external_account_id")}
+        expected = self._saved_authorization(meeting)
         connector, connector_id, provider = await self._get_active_calendar_connector(
-            tenant_id, connector_id=meeting.get("connector_id"))
-        return verify_reviewed_connector(connector, connector_id, provider, expected)
+            tenant_id, connector_id=meeting.get("connector_id"),
+            account_id=expected.get("account_row_id") if isinstance(expected, dict) else None,
+            reviewed_authorization=True)
+        return verify_reviewed_authorization(connector, connector_id, provider, expected)
 
     async def _meeting_connector(self, tenant_id, meeting, reviewed_connector, reviewed_meeting):
         expected_meeting = self.meeting_identity(meeting)
         if reviewed_meeting is not None and expected_meeting != reviewed_meeting:
             raise ReviewedConnectorChanged("The meeting changed after review. Review a new proposal.")
-        metadata = meeting.get("metadata") or {}
-        persisted = {"connector_id": meeting.get("connector_id"), "provider": metadata.get("provider"),
-                     "external_account_id": metadata.get("external_account_id")}
+        persisted = self._saved_authorization(meeting)
         connector, connector_id, provider = await self._get_active_calendar_connector(
-            tenant_id, connector_id=meeting.get("connector_id"))
-        identity = verify_reviewed_connector(connector, connector_id, provider, persisted)
+            tenant_id, connector_id=meeting.get("connector_id"),
+            account_id=persisted.get("account_row_id") if isinstance(persisted, dict) else None,
+            reviewed_authorization=True)
+        identity = verify_reviewed_authorization(connector, connector_id, provider, persisted)
         if reviewed_connector is not None:
-            verify_reviewed_connector(connector, connector_id, provider, reviewed_connector)
+            verify_reviewed_authorization(connector, connector_id, provider, reviewed_connector)
         # Connector resolution can await refresh/network work. Re-read the
         # tenant-owned event afterwards so approval cannot survive an edit or
         # deletion during that wait. This is the final local event admission;
@@ -152,14 +167,10 @@ class MeetingService:
         current = await self.get_meeting(tenant_id, meeting["id"])
         if not current or self.meeting_identity(current) != expected_meeting:
             raise ReviewedConnectorChanged("The meeting changed after review. Review a new proposal.")
-        current_metadata = current.get("metadata") or {}
-        verify_reviewed_connector(connector, connector_id, provider, {
-            "connector_id": current.get("connector_id"),
-            "provider": current_metadata.get("provider"),
-            "external_account_id": current_metadata.get("external_account_id"),
-        })
+        verify_reviewed_authorization(connector, connector_id, provider, self._saved_authorization(current))
+        check_reviewed_authorization_current(self.db_client, tenant_id, connector, connector_id, provider, identity)
         return connector, connector_id, provider, identity
-    
+
     @staticmethod
     def _required_row(response, operation):
         if getattr(response, "error", None) or not getattr(response, "data", None):
@@ -191,15 +202,15 @@ class MeetingService:
         self._required_row(self.db_client.table("assistant_actions").update({
             "status": status, "output_data": result,
             "completed_at": datetime.now(dt_timezone.utc).isoformat(),
-        }).eq("id", action_id).eq("tenant_id", tenant_id).execute(), "Calendar receipt")
+        }).eq("id", action_id).eq("tenant_id", tenant_id).eq("status", "running").execute(), "Calendar receipt")
 
-    def _unconfirmed(self, tenant_id, action_id, receipt, exc):
+    def _unconfirmed(self, tenant_id, action_id, receipt, exc, *, attempted=True):
         code = getattr(exc, "status_code", None) or getattr(getattr(exc, "response", None), "status_code", None)
         rejected = code is not None and 400 <= code < 500 and code != 408
-        state = "failed" if rejected else "unknown"
+        state = "failed" if rejected or not attempted else "unknown"
         result = {"success": False, "status": state, "confirmation_allowed": False,
                   "action_id": action_id, **receipt,
-                  "error": "Calendar action was rejected." if rejected else
+                  "error": "Calendar action was not dispatched." if not attempted else "Calendar action was rejected." if rejected else
                            "Calendar outcome is unconfirmed; review the saved receipt before retrying."}
         try:
             self._finish_action(tenant_id, action_id, state, result)
@@ -223,15 +234,20 @@ class MeetingService:
                 found = self.db_client.table(table).select("id").eq("tenant_id", tenant_id).eq("id", reference).limit(1).execute()
                 self._required_row(found, f"Linked {table} record")
         connector, connector_id, provider = await self._get_active_calendar_connector(
-            tenant_id, **({"connector_id": reviewed_connector.get("connector_id")} if reviewed_connector else {}))
-        identity = (verify_reviewed_connector(connector, connector_id, provider, reviewed_connector)
-                    if reviewed_connector is not None else connector_identity(connector, connector_id, provider))
+            tenant_id, **({"connector_id": reviewed_connector.get("connector_id")} if reviewed_connector else {}),
+            **({"account_id": reviewed_connector["account_row_id"]} if reviewed_connector and reviewed_connector.get("account_row_id") else {}),
+            reviewed_authorization=True)
+        identity = (verify_reviewed_authorization(connector, connector_id, provider, reviewed_connector)
+                    if reviewed_connector is not None else reviewed_authorization_identity(connector, connector_id, provider))
         end_time = start_time + timedelta(minutes=duration_minutes)
         action_id = self._start_action(tenant_id, "book_meeting", connector_id,
             {"title": title, "start_time": start_time.isoformat(), "duration_minutes": duration_minutes,
              "attendees": attendees, "reviewed_connector": identity}, triggered_by=triggered_by, lead_id=lead_id, call_id=call_id)
         receipt = dict(identity)
+        attempted = False
         try:
+            check_reviewed_authorization_current(self.db_client, tenant_id, connector, connector_id, provider, identity)
+            attempted = True
             event = await connector.create_event(title=title, start_time=start_time, end_time=end_time,
                 description=description, attendees=attendees, add_video_conference=add_video_conference,
                 timezone=timezone)
@@ -247,7 +263,8 @@ class MeetingService:
                 "end_time": end_time.isoformat(), "timezone": timezone, "join_link": join_link,
                 "status": "scheduled", "attendees": [{"email": email, "status": "pending"} for email in attendees],
                 "metadata": {"provider": provider, "calendar_link": metadata.get("htmlLink"),
-                             "triggered_by": triggered_by, "external_account_id": identity["external_account_id"]},
+                             "triggered_by": triggered_by, "reviewed_connector": identity,
+                             **({"external_account_id": identity["external_account_id"]} if identity.get("external_account_id") else {})},
             }).execute(), "Meeting")
             result = {"success": True, "status": "created", "confirmation_allowed": True,
                       **receipt, "meeting_id": row["id"], "action_id": action_id, "title": title,
@@ -260,10 +277,10 @@ class MeetingService:
             self._finish_action(tenant_id, action_id, "completed", result)
             return result
         except asyncio.CancelledError as exc:
-            self._unconfirmed(tenant_id, action_id, receipt, exc)
+            self._unconfirmed(tenant_id, action_id, receipt, exc, attempted=attempted)
             raise
         except Exception as exc:
-            return self._unconfirmed(tenant_id, action_id, receipt, exc)
+            return self._unconfirmed(tenant_id, action_id, receipt, exc, attempted=attempted)
 
     async def update_meeting(
         self, tenant_id: str, meeting_id: str, new_start_time: Optional[datetime] = None,
@@ -302,7 +319,10 @@ class MeetingService:
             {"meeting_id": meeting_id, **updates, "reviewed_connector": identity})
         receipt = {"meeting_id": meeting_id, "external_event_id": external_id,
                    **identity}
+        attempted = False
         try:
+            check_reviewed_authorization_current(self.db_client, tenant_id, connector, connector_id, provider, identity)
+            attempted = True
             event = await connector.update_event(event_id=external_id, title=new_title,
                 start_time=new_start_time, end_time=new_end, description=new_description,
                 attendees=new_attendees)
@@ -315,10 +335,10 @@ class MeetingService:
             self._finish_action(tenant_id, action_id, "completed", result)
             return result
         except asyncio.CancelledError as exc:
-            self._unconfirmed(tenant_id, action_id, receipt, exc)
+            self._unconfirmed(tenant_id, action_id, receipt, exc, attempted=attempted)
             raise
         except Exception as exc:
-            return self._unconfirmed(tenant_id, action_id, receipt, exc)
+            return self._unconfirmed(tenant_id, action_id, receipt, exc, attempted=attempted)
 
     async def cancel_meeting(self, tenant_id: str, meeting_id: str,
                              reason: Optional[str] = None, reviewed_connector=None,
@@ -335,7 +355,10 @@ class MeetingService:
             {"meeting_id": meeting_id, "reason": reason, "reviewed_connector": identity})
         receipt = {"meeting_id": meeting_id, "external_event_id": external_id,
                    **identity}
+        attempted = False
         try:
+            check_reviewed_authorization_current(self.db_client, tenant_id, connector, connector_id, provider, identity)
+            attempted = True
             if await connector.delete_event(external_id) is not True:
                 raise RuntimeError("Calendar provider did not confirm cancellation")
             self._required_row(self.db_client.table("meetings").update({
@@ -352,10 +375,10 @@ class MeetingService:
             self._finish_action(tenant_id, action_id, "completed", result)
             return result
         except asyncio.CancelledError as exc:
-            self._unconfirmed(tenant_id, action_id, receipt, exc)
+            self._unconfirmed(tenant_id, action_id, receipt, exc, attempted=attempted)
             raise
         except Exception as exc:
-            return self._unconfirmed(tenant_id, action_id, receipt, exc)
+            return self._unconfirmed(tenant_id, action_id, receipt, exc, attempted=attempted)
 
     async def get_meeting(
         self,
@@ -366,9 +389,9 @@ class MeetingService:
         response = self.db_client.table("meetings").select(
             "*"
         ).eq("id", meeting_id).eq("tenant_id", tenant_id).single().execute()
-        
+
         return response.data
-    
+
     async def list_meetings(
         self,
         tenant_id: str,
@@ -381,18 +404,18 @@ class MeetingService:
         query = self.db_client.table("meetings").select(
             "*"
         ).eq("tenant_id", tenant_id)
-        
+
         if status:
             query = query.eq("status", status)
         if from_date:
             query = query.gte("start_time", from_date.isoformat())
         if to_date:
             query = query.lte("start_time", to_date.isoformat())
-        
+
         response = query.order("start_time", desc=False).limit(limit).execute()
-        
+
         return response.data or []
-    
+
 # Singleton instance helper
 _meeting_service: Optional[MeetingService] = None
 

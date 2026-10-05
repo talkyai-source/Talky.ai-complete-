@@ -23,8 +23,17 @@ def encryption(monkeypatch):
 
 
 class DB:
-    def __init__(self, fail=None):
+    def __init__(self, fail=None, *, tenant=TENANT):
         self.fail, self.writes, self.filters = fail, [], []
+        self.tenant = tenant
+        self.authorization_rows = {
+            'connectors': [{'id': 'pinned-calendar', 'tenant_id': tenant,
+                'provider': 'google_calendar', 'status': 'active'}],
+            'connector_accounts': [{'id': 'calendar-row', 'tenant_id': tenant,
+                'connector_id': 'pinned-calendar', 'status': 'active',
+                'created_at': '2026-01-01T00:00:00+00:00',
+                'external_account_id': 'calendar-account'}],
+        }
         self.meeting = {'id': 'meeting', 'connector_id': 'pinned-calendar', 'external_event_id': 'event',
             'metadata': {'provider': 'google_calendar', 'external_account_id': 'calendar-account'},
             'start_time': START.isoformat(), 'end_time': (START + timedelta(minutes=30)).isoformat()}
@@ -56,13 +65,18 @@ class Query:
         if self.db.fail == (self.table, self.operation):
             return NS(data=[], error='write failed')
         if self.operation == 'select':
+            if self.table in self.db.authorization_rows:
+                rows = [row for row in self.db.authorization_rows[self.table]
+                    if all(row.get(key) == value for key, value in self.filters)]
+                return NS(data=rows, error=None)
             return NS(data=self.db.meeting if self.table == 'meetings' else [], error=None)
         return NS(data=[{'id': 'audit' if self.table == 'assistant_actions' else 'meeting', **self.payload}], error=None)
 
 
 def service(db):
     subject = MeetingService(db)
-    connector = NS(external_account_id='calendar-account', create_event=AsyncMock(return_value=NS(id='event', video_link='https://example.invalid/meet', metadata={})),
+    connector = NS(tenant_id=db.tenant, account_row_id='calendar-row',
+        external_account_id='calendar-account', create_event=AsyncMock(return_value=NS(id='event', video_link='https://example.invalid/meet', metadata={})),
         update_event=AsyncMock(return_value=NS(id='event')), delete_event=AsyncMock(return_value=True))
     subject._get_active_calendar_connector = AsyncMock(return_value=(connector, 'pinned-calendar', 'google_calendar'))
     return subject, connector
@@ -116,7 +130,8 @@ async def test_calendar_mutations_pin_original_account_and_require_ack(operation
         connector.update_event.return_value = NS(id=None)
         result = await subject.update_meeting(TENANT, 'meeting', new_title='Reviewed title')
     assert result['status'] == 'unknown' and not result['success']
-    subject._get_active_calendar_connector.assert_awaited_once_with(TENANT, connector_id='pinned-calendar')
+    subject._get_active_calendar_connector.assert_awaited_once_with(TENANT,
+        connector_id='pinned-calendar', account_id=None, reviewed_authorization=True)
     assert not any(table == 'meetings' for table, *_ in db.writes)
 
 

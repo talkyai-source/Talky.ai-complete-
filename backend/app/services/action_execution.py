@@ -37,6 +37,9 @@ def unknown_result(action, action_id=None, *, status="unknown"):
 
 
 _RECEIPT_FIELDS = (
+    "identity_version",
+    "tenant_id",
+    "account_row_id",
     "provider",
     "connector_id",
     "external_account_id",

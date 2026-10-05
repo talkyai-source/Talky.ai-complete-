@@ -1,5 +1,4 @@
 import asyncio
-import json
 import threading
 from types import SimpleNamespace as NS
 from unittest.mock import AsyncMock, MagicMock
@@ -46,11 +45,26 @@ class Pool:
 @pytest.fixture(autouse=True)
 def encryption(monkeypatch):
     monkeypatch.setenv('CONNECTOR_ENCRYPTION_KEY', Fernet.generate_key().decode())
+    # These dispatch/receipt controls stub connector resolution. Supply its
+    # corresponding current authorization rows; canonical resolution is tested
+    # through the real OAuth callback in test_reviewed_account_identity.
+    from tests.unit.test_inbox_original_account import _Rows
+    import app.services.email_service as module
+    def client(pool):
+        rows = _Rows()
+        rows.pool = pool
+        rows.rows['connectors'] = [dict(id=cid, tenant_id=TENANT, provider='gmail', status='active')
+                                  for cid in ('connector', 'c')]
+        rows.rows['connector_accounts'] = [dict(id='authorization-row', connector_id=cid,
+            tenant_id=TENANT, status='active', external_account_id='account',
+            created_at='2026-01-01T00:00:00+00:00') for cid in ('connector', 'c')]
+        return rows
+    monkeypatch.setattr(module, 'PostgresClient', client)
 
 
 def email_service(pool):
     service = EmailService(pool, NS(validate_content=MagicMock()))
-    connector = NS(external_account_id='account', send_email=AsyncMock(return_value=NS(id='mail-receipt', thread_id='thread')))
+    connector = NS(tenant_id=TENANT, account_row_id='authorization-row', external_account_id='account', send_email=AsyncMock(return_value=NS(id='mail-receipt', thread_id='thread')))
     service._get_active_email_connector = AsyncMock(return_value=(connector, 'connector', 'gmail'))
     return service, connector
 
@@ -81,7 +95,7 @@ async def test_no_external_send_when_initial_audit_write_fails(kind):
 
 @pytest.mark.parametrize('kind', ['email', 'sms'])
 async def test_external_ack_is_not_confirmed_when_receipt_persistence_fails(kind):
-    service, operation = service_for(kind, Pool(fail='UPDATE'))
+    service, operation = service_for(kind, Pool(fail='UPDATE assistant_actions SET status'))
     result = await send(service, kind)
     assert result['success'] is False and result['status'] == 'unknown'
     assert result['confirmation_allowed'] is False and result['message_id']
@@ -118,19 +132,19 @@ async def test_email_uses_canonical_resolver_for_pool_and_forced_refresh(monkeyp
     assert await service._get_active_email_connector(TENANT, force_refresh=True) == ('connector', 'connector-id', 'gmail')
     assert resolve.await_args.args[0].pool is pool
     assert resolve.await_args.args[1:] == (TENANT, 'email')
-    assert resolve.await_args.kwargs == {'force_refresh': True}
+    assert resolve.await_args.kwargs == {'force_refresh': True, 'reviewed_authorization': True}
 
 
 async def test_email_authentication_retry_only_after_definite_401():
     service, old = email_service(Pool())
     old.send_email.side_effect = ConnectorProviderError(provider='gmail', operation='send_email',
         category='authentication', status_code=401, message='expired')
-    fresh = NS(external_account_id='account', send_email=AsyncMock(return_value=NS(id='refreshed-receipt', thread_id=None)))
+    fresh = NS(tenant_id=TENANT, account_row_id='authorization-row', external_account_id='account', send_email=AsyncMock(return_value=NS(id='refreshed-receipt', thread_id=None)))
     service._get_active_email_connector.side_effect = [(old, 'c', 'gmail'), (fresh, 'c', 'gmail')]
     result = await send(service, 'email')
     assert result['success'] and result['status'] == 'accepted'
     assert result['message_id'] == 'refreshed-receipt'
-    assert service._get_active_email_connector.await_args.kwargs == {'force_refresh': True, 'connector_id': 'c'}
+    assert service._get_active_email_connector.await_args.kwargs == {'force_refresh': True, 'connector_id': 'c', 'account_id': 'authorization-row'}
     old.send_email.assert_awaited_once()
     fresh.send_email.assert_awaited_once()
 

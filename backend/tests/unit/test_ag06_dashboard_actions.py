@@ -7,6 +7,55 @@ from app.services.meeting_service import MeetingService
 from app.infrastructure.assistant.tools import comms, meetings
 
 PIN = {"connector_id": "connector-a", "provider": "gmail", "external_account_id": "account-a"}
+ROW_PIN = {**PIN, "identity_version": "authorization_row_v1", "tenant_id": "tenant",
+           "account_row_id": "email-row"}
+
+
+class AuthorizationDB:
+    """Persisted current authorization and owned pending email intent ports."""
+
+    def __init__(self, account):
+        self.rows = {
+            "connectors": [{"id": "connector-a", "tenant_id": "tenant",
+                "provider": "gmail", "status": "active"}],
+            "connector_accounts": [{"id": "email-row", "tenant_id": "tenant",
+                "connector_id": "connector-a", "status": "active",
+                "created_at": "2026-01-01T00:00:00+00:00", "external_account_id": account}],
+            "assistant_actions": [{"id": "child-action", "tenant_id": "tenant",
+                "status": "pending", "input_data": {}}],
+        }
+
+    def table(self, name):
+        return AuthorizationQuery(self.rows[name])
+
+
+class AuthorizationQuery:
+    def __init__(self, rows):
+        self.rows, self.filters, self.payload = rows, [], None
+        self.as_single, self.count = False, None
+
+    def select(self, *_): return self
+    def order(self, *_, **__): return self
+    def limit(self, count):
+        self.count = count
+        return self
+    def single(self):
+        self.as_single = True
+        return self
+    def eq(self, key, value):
+        self.filters.append((key, value))
+        return self
+    def update(self, payload):
+        self.payload = payload
+        return self
+    def execute(self):
+        rows = [row for row in self.rows if all(row.get(key) == value for key, value in self.filters)]
+        if self.payload is not None:
+            for row in rows:
+                row.update(self.payload)
+        if self.count is not None:
+            rows = rows[:self.count]
+        return SimpleNamespace(data=(rows[0] if rows else None) if self.as_single else rows, error=None)
 
 
 def email_service(account="account-b"):
@@ -14,7 +63,9 @@ def email_service(account="account-b"):
     service.template_manager = MagicMock()
     service._create_action_record = AsyncMock(return_value="child-action")
     service._update_action_status = AsyncMock()
+    service.supabase = AuthorizationDB(account)
     connector = SimpleNamespace(
+        tenant_id="tenant", account_row_id="email-row",
         external_account_id=account,
         send_email=AsyncMock(return_value=SimpleNamespace(id="provider-message")),
     )
@@ -42,7 +93,7 @@ async def test_email_preview_freezes_visible_account_and_content(monkeypatch):
     result = await comms.send_email(
         "tenant", object(), to=["synthetic@example.test"], subject="Subject", body="Body"
     )
-    assert result["_apply_args"]["_reviewed_connector"] == PIN
+    assert result["_apply_args"]["_reviewed_connector"] == ROW_PIN
     assert any("account-a" in str(change["after"]) for change in result["changes"])
     connector.send_email.assert_not_awaited()
 
@@ -52,7 +103,7 @@ async def test_calendar_preview_freezes_account_and_time(monkeypatch):
     service = object.__new__(MeetingService)
     service._get_active_calendar_connector = AsyncMock(
         return_value=(
-            SimpleNamespace(external_account_id="account-a"),
+            SimpleNamespace(tenant_id="tenant", account_row_id="calendar-row", external_account_id="account-a"),
             "connector-a",
             "google_calendar",
         )
@@ -111,7 +162,8 @@ async def test_reviewed_email_auth_refresh_cannot_switch_accounts():
         status_code=401,
         message="expired",
     )
-    fresh = SimpleNamespace(external_account_id="account-b", send_email=AsyncMock())
+    fresh = SimpleNamespace(tenant_id="tenant", account_row_id="email-row",
+        external_account_id="account-b", send_email=AsyncMock())
     service._get_active_email_connector.side_effect = [
         (old, "connector-a", "gmail"),
         (fresh, "connector-a", "gmail"),
@@ -136,8 +188,9 @@ async def test_same_reviewed_account_receipt_is_provider_accepted_not_delivered(
 
 
 @pytest.mark.asyncio
-async def test_missing_external_identity_cannot_create_email_proposal(monkeypatch):
-    service, _ = email_service(None)
+async def test_missing_all_account_proof_cannot_create_email_proposal(monkeypatch):
+    service, connector = email_service(None)
+    connector.account_row_id = None
     monkeypatch.setattr("app.services.email_service.get_email_service", lambda _: service)
     result = await comms.send_email(
         "tenant", object(), to=["synthetic@example.test"], subject="Subject", body="Body"
@@ -153,6 +206,7 @@ async def test_calendar_update_refuses_unproved_or_changed_target(case):
 
     service = object.__new__(MeetingService)
     connector = SimpleNamespace(
+        tenant_id="tenant", account_row_id="calendar-row",
         external_account_id="calendar-a", update_event=AsyncMock(), delete_event=AsyncMock()
     )
     meeting = {
@@ -574,7 +628,8 @@ async def test_direct_email_401_refresh_also_cannot_cross_accounts():
         status_code=401,
         message="expired",
     )
-    fresh = SimpleNamespace(external_account_id="account-b", send_email=AsyncMock())
+    fresh = SimpleNamespace(tenant_id="tenant", account_row_id="email-row",
+        external_account_id="account-b", send_email=AsyncMock())
     service._get_active_email_connector.side_effect = [
         (old, "connector-a", "gmail"),
         (fresh, "connector-a", "gmail"),
@@ -829,7 +884,7 @@ async def test_calendar_rechecks_reviewed_meeting_after_connector_resolution(ope
     from tests.unit.test_calendar_delivery_contract import DB, service as calendar_service
     from app.services.connector_resolver import ReviewedConnectorChanged
 
-    db = DB()
+    db = DB(tenant="tenant")
     subject, connector = calendar_service(db)
     reviewed = subject.meeting_identity(db.meeting)
     pin = {

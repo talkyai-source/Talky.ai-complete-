@@ -8,6 +8,7 @@ from typing import Optional, List, Dict, Any
 from datetime import datetime, timezone
 from pydantic import BaseModel, Field
 from app.core.postgres_adapter import Client
+from app.services.connector_resolver import reviewed_authorization_label
 
 logger = logging.getLogger(__name__)
 
@@ -92,8 +93,8 @@ async def report_issue(
     if not confirm:
         try:
             reviewed = await get_email_service(db_client).review_connector(tenant_id)
-            sender = {"kind": "tenant", "connector": reviewed}
-            sender_label = reviewed["external_account_id"]
+            sender = {"kind": "tenant", "connector": {key: value for key, value in reviewed.items() if key != "display_label"}}
+            sender_label = reviewed_authorization_label(reviewed)
         except EmailNotConnectedError:
             if not SMTPConnector.is_configured():
                 return {"success": False, "status": "failed", "error": "Support email is not configured."}
@@ -281,7 +282,7 @@ async def send_email(
             return {
                 "preview": True,
                 "changes": [
-                    {"field": "Sending account", "before": None, "after": reviewed["external_account_id"]},
+                    {"field": "Sending account", "before": None, "after": reviewed_authorization_label(reviewed)},
                     {"field": "To", "before": None, "after": ", ".join(recipients)},
                     {"field": "Subject", "before": None, "after": eff_subject},
                     {"field": "Body", "before": None, "after": preview_body},
@@ -289,7 +290,7 @@ async def send_email(
                 "note": "Not sent yet.",
                 "_apply_args": {"to": recipients, "subject": eff_subject, "body": eff_body,
                     "body_html": eff_html, "lead_ids": lead_ids, "connector_id": reviewed["connector_id"],
-                    "_reviewed_connector": reviewed},
+                    "_reviewed_connector": {key: value for key, value in reviewed.items() if key != "display_label"}},
             }
 
         from app.services.email_service import get_email_service, EmailNotConnectedError

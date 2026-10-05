@@ -53,6 +53,106 @@ def verify_reviewed_connector(connector, connector_id, provider, reviewed) -> di
     return current
 
 
+REVIEWED_AUTHORIZATION_VERSION = "authorization_row_v1"
+
+
+def reviewed_authorization_identity(connector, connector_id, provider) -> dict:
+    """Email/calendar approval binds a local authorization, not an invented subject."""
+    proof = {"identity_version": REVIEWED_AUTHORIZATION_VERSION,
+             "tenant_id": getattr(connector, "tenant_id", None),
+             "connector_id": connector_id, "provider": provider,
+             "account_row_id": getattr(connector, "account_row_id", None)}
+    if any(not isinstance(value, str) or not value.strip() for value in proof.values()):
+        raise ReviewedConnectorChanged("The original authorization is unavailable. Review a new proposal.")
+    proof = {key: value.strip() for key, value in proof.items()}
+    external = getattr(connector, "external_account_id", None)
+    if isinstance(external, str) and external.strip():
+        proof["external_account_id"] = external.strip()
+    return proof
+
+
+def verify_reviewed_authorization(connector, connector_id, provider, reviewed) -> dict:
+    current = reviewed_authorization_identity(connector, connector_id, provider)
+    if not isinstance(reviewed, dict):
+        raise ReviewedConnectorChanged("The original authorization proof is unavailable.")
+    if "identity_version" not in reviewed:
+        # Real historical provider identity remains usable. Missing originals
+        # are never replaced with the currently connected account.
+        verify_reviewed_connector(connector, connector_id, provider, reviewed)
+    elif (reviewed.get("identity_version") != REVIEWED_AUTHORIZATION_VERSION
+          or any(reviewed.get(key) != current[key] for key in
+                 ("tenant_id", "connector_id", "provider", "account_row_id"))
+          or reviewed.get("external_account_id") != current.get("external_account_id")):
+        raise ReviewedConnectorChanged("The authorization changed after review. Review a new proposal.")
+    return current
+
+
+def reviewed_authorization_label(proof) -> str:
+    """A descriptive label is never substituted for a provider account ID."""
+    if isinstance(proof.get("display_label"), str) and proof["display_label"].strip():
+        return proof["display_label"].strip()
+    if proof.get("external_account_id"):
+        return proof["external_account_id"]
+    provider = str(proof.get("provider") or "Provider").replace("_", " ")
+    return f"{provider} authorization ({str(proof.get('account_row_id') or '')[:8]})"
+
+
+def _reviewed_account_row(db_client, tenant_id, connector_id, provider, account_id=None):
+    """Newest creation-time authorization for reviewed effects only.
+
+    Creation time is stable under canonical writers, not DB-immutable. A token
+    refresh must not promote an older authorization over a newer reconnect.
+    These local admission reads cannot atomically cancel a later remote effect.
+    """
+    parent = db_client.table("connectors").select("id").eq("tenant_id", tenant_id).eq(
+        "id", connector_id).eq("provider", provider).eq("status", "active").execute()
+    if getattr(parent, "error", None):
+        raise ConnectorLookupError("reviewed authorization")
+    if not getattr(parent, "data", None):
+        raise ReviewedConnectorChanged("The reviewed connection is no longer active.")
+    response = db_client.table("connector_accounts").select(
+        "id,created_at,external_account_id,account_email,access_token_encrypted,refresh_token_encrypted,"
+        "token_expires_at,last_refreshed_at"
+    ).eq("tenant_id", tenant_id).eq("connector_id", connector_id).eq(
+        "status", "active").order("created_at", desc=True).limit(2).execute()
+    if getattr(response, "error", None):
+        raise ConnectorLookupError("reviewed authorization")
+    rows = getattr(response, "data", None) or []
+    if not isinstance(rows, list) or not rows:
+        raise ReviewedConnectorChanged("The reviewed authorization is no longer active.")
+    try:
+        dates = []
+        for row in rows:
+            value = row["created_at"]
+            if not isinstance(value, (str, datetime)):
+                raise ValueError("missing creation time")
+            parsed = value if isinstance(value, datetime) else datetime.fromisoformat(value.replace("Z", "+00:00"))
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            dates.append(parsed.astimezone(timezone.utc))
+        if len(dates) > 1 and dates[0] <= dates[1]:
+            raise ValueError("ambiguous creation order")
+        if not isinstance(rows[0]["id"], str) or not rows[0]["id"]:
+            raise ValueError("missing authorization row")
+    except (KeyError, TypeError, ValueError, OverflowError) as exc:
+        raise ReviewedConnectorChanged("The current authorization cannot be established. Reconnect and review.") from exc
+    if account_id is not None and str(rows[0]["id"]) != str(account_id):
+        raise ReviewedConnectorChanged("The connected authorization changed after review.")
+    return rows[0]
+
+
+def check_reviewed_authorization_current(db_client, tenant_id, connector, connector_id, provider, proof):
+    identity = verify_reviewed_authorization(connector, connector_id, provider, proof)
+    if identity["tenant_id"] != str(tenant_id):
+        raise ReviewedConnectorChanged("The reviewed authorization belongs to another tenant.")
+    row = _reviewed_account_row(db_client, tenant_id, connector_id, provider, identity["account_row_id"])
+    stored_external = row.get("external_account_id")
+    stored_external = stored_external.strip() if isinstance(stored_external, str) and stored_external.strip() else None
+    if identity.get("external_account_id") != stored_external:
+        raise ReviewedConnectorChanged("The provider account changed after review.")
+    return identity
+
+
 @dataclass(frozen=True, repr=False)
 class ConnectorAuthorizationSnapshot:
     """Private persistence proof; never a public or provider identity receipt."""
@@ -280,6 +380,7 @@ async def resolve_active_connector(
     provider: Optional[str] = None,
     connector_id: Optional[str] = None,
     account_id: Optional[str] = None,
+    reviewed_authorization: bool = False,
 ) -> Tuple[BaseConnector, str, str]:
     """Return ``(connector, connector_id, provider)`` for the tenant's active
     connector of ``connector_type`` ("email" | "drive" | "calendar" | ...),
@@ -291,6 +392,8 @@ async def resolve_active_connector(
     ``account_id`` pins an existing active authorization row; a missing pinned row never
     falls back to another account. Returned ``account_row_id`` identifies that
     local authorization, not a provider-stable external account identity.
+    Reviewed email/calendar effects opt into unique creation-time selection;
+    ordinary reads and CRM retain their existing refresh-time ordering.
 
     Raises ``ConnectorNotConnectedError`` when nothing is connected/usable.
     """
@@ -351,19 +454,16 @@ async def resolve_active_connector(
         )
         if account_id is not None:
             account_query = account_query.eq("id", account_id)
-        acc = (
-            account_query.order("last_refreshed_at", desc=True)
-            .limit(1)
-            .execute()
-        )
-        if getattr(acc, "error", None):
-            logger.error(
-                "resolve_active_connector: connector_accounts query error cid=%s err=%s",
-                cid, acc.error,
-            )
-            raise ConnectorLookupError(connector_type, str(acc.error))
-        adata = acc.data
-        account_rows = adata if isinstance(adata, list) else ([adata] if isinstance(adata, dict) else [])
+        if reviewed_authorization:
+            selected = _reviewed_account_row(db_client, tenant_id, cid, row["provider"], account_id)
+            account_rows = [selected]
+        else:
+            acc = account_query.order("last_refreshed_at", desc=True).limit(1).execute()
+            if getattr(acc, "error", None):
+                logger.error("resolve_active_connector: connector_accounts query error cid=%s err=%s", cid, acc.error)
+                raise ConnectorLookupError(connector_type, str(acc.error))
+            adata = acc.data
+            account_rows = adata if isinstance(adata, list) else ([adata] if isinstance(adata, dict) else [])
         if account_id is not None and not account_rows:
             first_failure_reason = "account_unavailable"
         for arow in account_rows:
@@ -429,6 +529,8 @@ async def resolve_active_connector(
     connector = ConnectorFactory.create(provider=provider, tenant_id=tenant_id, connector_id=connector_id)
     connector.external_account_id = str(acc_data.get("external_account_id") or "") or None
     connector.account_row_id = str(acc_data["id"])
+    if reviewed_authorization:
+        connector.account_email = acc_data.get("account_email")
     connector._authorization_snapshot = _authorization_snapshot_for_row(tenant_id, connector_id, provider, acc_data)
     row_config = _coerce_config(rows[0].get("config") if isinstance(rows[0], dict) else None)
     if row_config is not None:
@@ -476,4 +578,7 @@ async def resolve_active_connector(
             raise ConnectorLookupError(connector_type, str(exc)) from exc
 
     await connector.set_access_token(access_token)
+    if reviewed_authorization:
+        check_reviewed_authorization_current(db_client, tenant_id, connector, connector_id, provider,
+                                             reviewed_authorization_identity(connector, connector_id, provider))
     return connector, connector_id, provider

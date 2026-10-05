@@ -258,4 +258,5 @@ async def test_action_status_update_is_tenant_scoped():
         if "UPDATE assistant_actions" in query
     )
     assert "AND tenant_id = $3" in query
-    assert args == ("completed", "action-1", TENANT_ID)
+    assert "AND status = $4" in query
+    assert args == ("completed", "action-1", TENANT_ID, "pending")
