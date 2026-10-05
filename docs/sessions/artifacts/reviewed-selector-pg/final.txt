@@ -1,0 +1,20 @@
+connector_resolver: token write-back failed for f5ccf1eb-58a1-456b-8c7e-fffc4ddb5c92: no matching account row
+connector_resolver: token write-back failed for f5ccf1eb-58a1-456b-8c7e-fffc4ddb5c92: no matching account row
+{
+  "baseline": false,
+  "native_row": {
+    "id_type": "asyncpg.pgproto.pgproto.UUID",
+    "id_is_string": false,
+    "id_is_uuid": true,
+    "created_at_type": "datetime"
+  },
+  "selection": {
+    "success": true,
+    "selected_id_type": "str",
+    "selected_id_matches": true
+  },
+  "public_unchanged": true,
+  "source_unchanged": true,
+  "schema_removed": true,
+  "role_removed": true
+}

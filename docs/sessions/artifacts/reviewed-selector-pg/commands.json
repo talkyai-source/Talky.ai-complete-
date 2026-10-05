@@ -1,0 +1,114 @@
+{
+  "source_commit": "5bdec4f32eaca4ba443a653746b9b8edd55a8253",
+  "python": "C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/backend/.venv/Scripts/python.exe",
+  "explicit_shell_environment": {
+    "PYTHONUTF8": "1",
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "PYTHONPATH": "C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/tmp/postgres-matrix-20261005/tmp/exact-requirements-20261005/packages;C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/tmp/production-ready-ag07-20261005/tmp/op02-testdeps"
+  },
+  "environment_scope": "Explicit assignments only; other inherited process environment not serialized. Probe sets ENVIRONMENT=test, unavailable default DATABASE_URL and task-local storage internally, then overrides adapter DSN with its generated restricted private-schema role.",
+  "cwd_for_probes_and_lint": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\reviewed-selector-pg-20261006",
+  "cwd_for_pytest": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\reviewed-selector-pg-20261006\\backend",
+  "commands": [
+    {
+      "argv": [
+        "docs/sessions/artifacts/reviewed-selector-pg/probe.py",
+        "--baseline",
+        "--output",
+        "docs/sessions/artifacts/reviewed-selector-pg/baseline-result.json"
+      ],
+      "stdout_stderr": "baseline.txt",
+      "exit_code": 1,
+      "executed_script_snapshot": "initial-probe.py",
+      "meaning": "Harness network guard blocked Windows worker event-loop self-pipe; owned objects cleaned."
+    },
+    {
+      "argv": [
+        "docs/sessions/artifacts/reviewed-selector-pg/probe.py",
+        "--baseline",
+        "--output",
+        "docs/sessions/artifacts/reviewed-selector-pg/baseline-uuid-result.json"
+      ],
+      "stdout_stderr": "baseline-uuid.txt",
+      "exit_code": 0,
+      "executed_script_snapshot": "baseline-uuid-probe.py",
+      "meaning": "Confirmed original selector defect against actual UUID adapter row."
+    },
+    {
+      "argv": [
+        "-m",
+        "pytest",
+        "tests/unit/test_reviewed_selector_identity_types.py",
+        "-q",
+        "--tb=short",
+        "--disable-warnings"
+      ],
+      "stdout_stderr": "identity-red.txt",
+      "exit_code": 1,
+      "result": {
+        "failed": 5,
+        "passed": 11
+      }
+    },
+    {
+      "argv": [
+        "-m",
+        "pytest",
+        "tests/unit/test_reviewed_selector_identity_types.py",
+        "tests/unit/test_reviewed_account_identity.py",
+        "tests/unit/test_inbox_original_account.py",
+        "tests/unit/test_inbox_authorization_health.py",
+        "-q",
+        "--tb=short",
+        "--disable-warnings"
+      ],
+      "stdout_stderr": "focused-final.txt",
+      "exit_code": 0,
+      "result": {
+        "passed": 168,
+        "failed": 0,
+        "skipped": 0,
+        "seconds": 11.41
+      }
+    },
+    {
+      "argv": [
+        "docs/sessions/artifacts/reviewed-selector-pg/probe.py",
+        "--output",
+        "docs/sessions/artifacts/reviewed-selector-pg/final-result.json"
+      ],
+      "stdout_stderr": "final.txt",
+      "exit_code": 0,
+      "executed_script_snapshot": "probe.py",
+      "result": {
+        "controls_passed": 12
+      }
+    },
+    {
+      "argv": [
+        "-m",
+        "ruff",
+        "check",
+        "--select",
+        "F",
+        "backend/app/services/connector_resolver.py",
+        "backend/tests/unit/test_reviewed_selector_identity_types.py",
+        "docs/sessions/artifacts/reviewed-selector-pg/probe.py",
+        "docs/sessions/artifacts/reviewed-selector-pg/baseline-uuid-probe.py",
+        "docs/sessions/artifacts/reviewed-selector-pg/initial-probe.py"
+      ],
+      "stdout_stderr": "lint.txt",
+      "exit_code": 0
+    }
+  ],
+  "source_commit_preflight": {
+    "argv": [
+      "git",
+      "diff",
+      "--cached",
+      "--check"
+    ],
+    "exit_code": 0
+  },
+  "reproduction": "Use final probe with a fresh --output path only after source freeze and reserving the disposable database. Probe refuses to overwrite results. The baseline snapshots require original pre-fix source; they assert the defect, not successful behavior."
+}
