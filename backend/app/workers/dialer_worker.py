@@ -672,11 +672,8 @@ class DialerWorker:
                         rules=rules,
                         retry_after_seconds=5,
                     )
-                    await self.queue_service.schedule_retry(job, delay_seconds=5)
-                    await self._update_job_status(
-                        job,
-                        JobStatus.RETRY_SCHEDULED,
-                        reason="batch_capacity",
+                    await self._redefer_before_intent_resolution(
+                        job, reason="batch_capacity", delay_seconds=5,
                     )
                     return
 
@@ -706,11 +703,8 @@ class DialerWorker:
                         rules=rules,
                         retry_after_seconds=wait,
                     )
-                    await self.queue_service.schedule_retry(job, delay_seconds=wait)
-                    await self._update_job_status(
-                        job,
-                        JobStatus.RETRY_SCHEDULED,
-                        reason="call_gap",
+                    await self._redefer_before_intent_resolution(
+                        job, reason="call_gap", delay_seconds=wait,
                     )
                     return
 
@@ -739,11 +733,8 @@ class DialerWorker:
                     rules=rules,
                     retry_after_seconds=_tenant_wait,
                 )
-                await self.queue_service.schedule_retry(job, delay_seconds=_tenant_wait)
-                await self._update_job_status(
-                    job,
-                    JobStatus.RETRY_SCHEDULED,
-                    reason="tenant_gap",
+                await self._redefer_before_intent_resolution(
+                    job, reason="tenant_gap", delay_seconds=_tenant_wait,
                 )
                 return
             tenant_pacing_claimed = True
@@ -793,23 +784,10 @@ class DialerWorker:
                         rules=rules,
                         retry_after_seconds=60,
                     )
-                    await self.queue_service.schedule_retry(job, delay_seconds=60)
-                    # RETRY_SCHEDULED, not SKIPPED. `schedule_retry` just put a
-                    # LIVE copy of this job in Redis's scheduled set — it is
-                    # coming back in 60s. SKIPPED is a TERMINAL status and is
-                    # therefore outside the partial unique index
-                    # uq_dialer_jobs_one_active_per_lead, so for that whole
-                    # window the lead looks like it has no active job: a
-                    # campaign restart or a "call this list" re-entry creates a
-                    # SECOND job, and both eventually dial the same person
-                    # minutes apart. Every sibling gate here (batch capacity,
-                    # call gap, tenant gap, voice pipeline) already writes
-                    # RETRY_SCHEDULED; these two call-guard branches were the
-                    # odd ones out.
-                    await self._update_job_status(
-                        job,
-                        JobStatus.RETRY_SCHEDULED,
-                        reason="call_guard_throttled",
+                    # Admission has not attempted a call. Keep the original
+                    # attempt and durable active owner while waiting.
+                    await self._redefer_before_intent_resolution(
+                        job, reason="call_guard_throttled", delay_seconds=60,
                     )
                     return
                 elif guard_decision == "queue":
@@ -820,15 +798,8 @@ class DialerWorker:
                         rules=rules,
                         retry_after_seconds=30,
                     )
-                    await self.queue_service.schedule_retry(job, delay_seconds=30)
-                    # See the throttle branch above — SKIPPED here would drop
-                    # the lead out of the active-job dedup index while a live
-                    # retry is still pending in Redis, allowing a duplicate
-                    # job (and so a duplicate call) for the same person.
-                    await self._update_job_status(
-                        job,
-                        JobStatus.RETRY_SCHEDULED,
-                        reason="call_guard_queued",
+                    await self._redefer_before_intent_resolution(
+                        job, reason="call_guard_queued", delay_seconds=30,
                     )
                     return
 
