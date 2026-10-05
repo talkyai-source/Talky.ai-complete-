@@ -4,6 +4,7 @@ Synthetic local effects only; no provider or network delivery is claimed.
 """
 
 import asyncio
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import uuid4
@@ -12,6 +13,7 @@ import httpx
 import pytest
 import pytest_asyncio
 from fastapi import FastAPI
+from alembic.script import ScriptDirectory
 
 from app.api.v1.dependencies import CurrentUser, get_current_user, get_db_client
 from app.api.v1.endpoints import assistant_ws
@@ -65,7 +67,11 @@ async def lookup(db, proposal="prop_synthetic", tenant=None, actor=None):
 
 async def test_committed_concurrent_claim_and_lost_response_recovery(receipt_db):
     db = receipt_db
-    assert db.migration_head in {"0058_crm_contact_effect", "0059_auth_identity_contract"}
+    # Require the original schema prerequisite; later applied migrations do
+    # not invalidate the concurrent-claim/lost-response behavior below.
+    scripts = ScriptDirectory(str(Path(__file__).resolve().parents[2] / "Alembic"))
+    applied = {revision.revision for revision in scripts.iterate_revisions(db.migration_head, "base")}
+    assert "0058_crm_contact_effect" in applied
     entered, release = asyncio.Event(), asyncio.Event()
     effects = []
 

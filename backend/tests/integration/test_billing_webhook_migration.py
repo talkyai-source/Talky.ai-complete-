@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import re
 import asyncio
 import sys
 from contextlib import asynccontextmanager
@@ -174,9 +175,22 @@ async def test_database_rejects_ambiguous_new_states(webhook_db, table, column, 
 
 async def test_actual_alembic_downgrade_refuses_to_destroy_receipts(webhook_db):
     fixture = webhook_db
+    # Keep the original revision's guard covered even when a newer revision
+    # refuses first during the actual CLI rollback.
+    with pytest.raises(RuntimeError, match="identities must be retained"):
+        migration_module().downgrade()
     async with acquire_with_tenant(fixture.admin, None) as conn:
         await conn.execute("INSERT INTO processed_webhook_events(event_id) VALUES($1)", fixture.prefix)
+        await conn.execute("""INSERT INTO billing_webhook_notifications
+            (delivery_key,event_id,event_type,kind,subject,body)
+            VALUES($1,$1,'invoice.paid','receipt','Synthetic','Synthetic')""", fixture.prefix)
+        await conn.execute("""INSERT INTO billing_webhook_review_log(event_id,operator,decision,reason)
+            VALUES($1,'synthetic operator','retain','Synthetic review')""", fixture.prefix)
         before = await conn.fetchval("SELECT version_num FROM alembic_version")
+        evidence_before = {
+            table: dict(await conn.fetchrow(f"SELECT * FROM {table} WHERE event_id=$1", fixture.prefix))
+            for table in TABLES
+        }
     process = await asyncio.create_subprocess_exec(
         sys.executable, "-m", "alembic", "downgrade", "0053_billing_price_options",
         cwd=Path(__file__).resolve().parents[2],
@@ -189,14 +203,15 @@ async def test_actual_alembic_downgrade_refuses_to_destroy_receipts(webhook_db):
         if process.returncode is None:
             process.kill()
             await process.wait()
-    # A newer append-only observation migration may be the first refusal on
-    # the path. Require the explicit retention guard, then prove no revision or
-    # receipt data changed; do not pin this to the old 0054 exception wording.
-    assert process.returncode != 0 and any(message in output for message in (
-        b"Billing event, delivery and review identities must be retained",
-        b"Invoice observations must be retained",
-        b"Refund observations must be retained",
-    ))
+    # A newer retention guard may refuse first. Require an explicit downgrade
+    # RuntimeError, rather than accepting an unrelated connection/SQL failure,
+    # and prove the marker and every owned receipt remain exactly unchanged.
+    output = output.decode("utf-8", errors="replace")
+    assert process.returncode != 0
+    assert re.search(r'File "[^\"]+[\\/]Alembic[\\/]versions[\\/][^\"]+\.py", line \d+, in downgrade', output)
+    assert re.search(r"(?m)^RuntimeError: .+", output)
     async with acquire_with_tenant(fixture.admin, None) as conn:
         assert await conn.fetchval("SELECT version_num FROM alembic_version") == before
-        assert await conn.fetchval("SELECT state FROM processed_webhook_events WHERE event_id=$1", fixture.prefix) == "legacy_unverified"
+        for table in TABLES:
+            row = await conn.fetchrow(f"SELECT * FROM {table} WHERE event_id=$1", fixture.prefix)
+            assert dict(row) == evidence_before[table]

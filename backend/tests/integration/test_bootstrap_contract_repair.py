@@ -667,6 +667,10 @@ def test_billing_ledger_is_append_only_for_tenant_service_and_owner_contexts() -
                 ledger_a_insert = uuid.uuid4().int % 9_000_000_000_000_000_000
                 ledger_b_bypass = uuid.uuid4().int % 9_000_000_000_000_000_000
                 connection.execute(text("SET LOCAL app.bypass_rls='on'"))
+                retained_rows_sql = """SELECT count(*),
+                    md5(COALESCE(string_agg(row_to_json(ledger)::text, '' ORDER BY id), ''))
+                    FROM billing_ledger AS ledger"""
+                retained_before = connection.execute(text(retained_rows_sql)).one()
                 connection.execute(
                     text(
                         """
@@ -744,10 +748,17 @@ def test_billing_ledger_is_append_only_for_tenant_service_and_owner_contexts() -
                     ),
                     {"id": ledger_b_bypass, "tenant_b": tenant_b},
                 )
-                assert (
-                    connection.execute(text("SELECT count(*) FROM billing_ledger")).scalar_one()
-                    == 3
-                )
+                # Bypass sees retained rows from other fixtures too. Prove
+                # access to these exact cross-tenant identities, without
+                # assuming the append-only table starts empty.
+                owned = {"first": ledger_a, "second": ledger_a_insert, "third": ledger_b_bypass}
+                rows = connection.execute(text("""SELECT id,tenant_id,minutes_delta
+                    FROM billing_ledger WHERE id IN (:first,:second,:third)"""), owned)
+                assert set(rows) == {
+                    (ledger_a, tenant_a, 100),
+                    (ledger_a_insert, tenant_a, 5),
+                    (ledger_b_bypass, tenant_b, 7),
+                }
                 assert (
                     connection.execute(text("UPDATE billing_ledger SET minutes_delta=888")).rowcount
                     == 0
@@ -773,6 +784,8 @@ def test_billing_ledger_is_append_only_for_tenant_service_and_owner_contexts() -
                     {"id": ledger_a},
                 ).one()
                 assert persisted == (100, "immutable fixture")
+                assert connection.execute(text(retained_rows_sql +
+                    " WHERE id NOT IN (:first,:second,:third)"), owned).one() == retained_before
             finally:
                 transaction.rollback()
     finally:
@@ -866,11 +879,18 @@ def test_crm_receipt_cli_downgrade_refuses_without_moving_marker_or_losing_ident
                 {"tenant": tenant, "call": call, "connector": connector})
         assert before == CURRENT_HEAD
 
+        # Exercise the original guard directly: a newer retention guard may
+        # stop the CLI before this revision is reached.
+        with engine.begin() as connection:
+            with pytest.raises(RuntimeError, match="Refusing to downgrade 0048"):
+                _run_downgrade(connection, importlib.import_module("Alembic.versions.0048_crm_deliveries"))
+
         # Newer additive migrations may retain their columns on downgrade.
         # Crossing the durable receipt boundary must fail atomically.
         result = _run_alembic(dsn, "downgrade", "0047_protect_ai_config_backup")
         assert result.returncode != 0
-        assert "Refusing to downgrade 0048" in result.stderr
+        assert re.search(r'File "[^\"]+[\\/]Alembic[\\/]versions[\\/][^\"]+\.py", line \d+, in downgrade', result.stderr)
+        assert re.search(r"(?m)^RuntimeError: .+", result.stderr)
 
         with engine.connect() as connection:
             connection.execute(text("SET LOCAL app.bypass_rls = 'on'"))
