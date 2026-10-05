@@ -529,6 +529,54 @@ export interface CalendarInspection {
     observed_event_id: string | null;
 }
 
+export interface AcknowledgementRecoveryRequest {
+    request_id: string;
+    expected_source_digest: string;
+    reason: string;
+}
+
+export interface AcknowledgementRecoveryCapability {
+    source_digest: string;
+    provider_status: 'accepted' | 'provider_accepted';
+}
+
+export interface AcknowledgementRecoveryRecord extends AcknowledgementRecoveryCapability {
+    id: string;
+    action_id: string;
+    actor_id: string;
+    actor_role: 'platform_admin';
+    request_id: string;
+    reason: string;
+    original_status: 'unknown';
+    recovered_status: 'completed';
+    recorded_at: string;
+}
+
+const recoveryUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+export const isRecoveryUuid = (value: unknown): value is string => typeof value === 'string' && recoveryUuid.test(value);
+export const isRecoveryReason = (value: unknown): value is string => typeof value === 'string'
+    && value.length > 0 && value.length <= 500 && value === value.trim()
+    && Array.from(value).every((character) => {
+        const code = character.charCodeAt(0);
+        return code >= 32 && (code < 127 || code > 159);
+    });
+
+export function isAcknowledgementRecoveryCapability(value: unknown): value is AcknowledgementRecoveryCapability {
+    const item = recordValue(value);
+    return Boolean(item && typeof item.source_digest === 'string' && /^[a-f0-9]{64}$/.test(item.source_digest)
+        && (item.provider_status === 'accepted' || item.provider_status === 'provider_accepted'));
+}
+
+export function isAcknowledgementRecoveryRecord(value: unknown, actionId: string): value is AcknowledgementRecoveryRecord {
+    const item = recordValue(value);
+    return Boolean(item && isAcknowledgementRecoveryCapability(item) && isRecoveryUuid(item.id)
+        && isRecoveryUuid(item.action_id) && item.action_id === actionId && isRecoveryUuid(item.actor_id)
+        && isRecoveryUuid(item.request_id) && item.actor_role === 'platform_admin' && isRecoveryReason(item.reason)
+        && item.original_status === 'unknown' && item.recovered_status === 'completed'
+        && typeof item.recorded_at === 'string' && item.recorded_at.length <= 64
+        && Number.isFinite(Date.parse(item.recorded_at)));
+}
+
 export interface ActionDetail extends ActionItem {
     conversation_id: string | null;
     call_id: string | null;
@@ -541,6 +589,8 @@ export interface ActionDetail extends ActionItem {
     output_data: Record<string, unknown> | null;
     email_inspection_available?: boolean;
     calendar_inspection_available?: boolean;
+    acknowledgement_recovery?: AcknowledgementRecoveryCapability | null;
+    acknowledgement_recovery_record?: AcknowledgementRecoveryRecord | null;
     saved_receipt?: {
         action_id: string;
         status: string;
@@ -1085,6 +1135,7 @@ interface ApiResponse<T> {
     error?: {
         code: string;
         message: string;
+        status?: number;
         details?: unknown;
     };
 }
@@ -1151,6 +1202,7 @@ interface RequestOptions {
 class ApiClient {
     private baseUrl: string;
     private token: string | null = null;
+    private authGeneration = 0;
 
     constructor(baseUrl: string) {
         this.baseUrl = baseUrl;
@@ -1161,6 +1213,7 @@ class ApiClient {
     }
 
     setToken(token: string | null) {
+        if (this.token !== token) this.authGeneration += 1;
         this.token = token;
         if (token) {
             localStorage.setItem('admin_token', token);
@@ -1171,6 +1224,10 @@ class ApiClient {
 
     getToken(): string | null {
         return this.token;
+    }
+
+    getAuthGeneration(): number {
+        return this.authGeneration;
     }
 
     private async request<T>(endpoint: string, options: RequestOptions = {}): Promise<ApiResponse<T>> {
@@ -1198,7 +1255,7 @@ class ApiClient {
             const data: unknown = await response.json();
 
             if (!response.ok) {
-                return { error: normalizeAdminApiError(data) };
+                return { error: { ...normalizeAdminApiError(data), status: response.status } };
             }
 
             return { data: data as T };
@@ -1668,6 +1725,11 @@ class ApiClient {
 
     async getActionDetail(actionId: string) {
         return this.request<ActionDetail>(`/admin/actions/${actionId}`);
+    }
+
+    async recoverSavedAcknowledgement(actionId: string, body: AcknowledgementRecoveryRequest) {
+        return this.request<AcknowledgementRecoveryRecord>(`/admin/actions/${encodeURIComponent(actionId)}/recover-acknowledgement`,
+            { method: 'POST', body, timeoutMs: 25000 });
     }
 
     async retryAction(actionId: string) {

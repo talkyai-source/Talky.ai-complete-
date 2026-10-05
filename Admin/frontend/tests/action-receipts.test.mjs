@@ -10,14 +10,17 @@ import { renderToStaticMarkup } from 'react-dom/server';
 const bundle = await build({
     stdin: { contents: `export { ActionDetailDrawer } from './src/components/ActionDetailDrawer';
         export { ActionsTable } from './src/components/ActionsTable';
+        export { AuthProvider } from './src/lib/auth';
         export { ActionReceiptPanel } from './src/components/ActionReceiptPanel'; export { api } from './src/lib/api';`,
         resolveDir: fileURLToPath(new URL('..', import.meta.url)) },
     bundle: true, write: false, platform: 'node', format: 'cjs', packages: 'external',
     define: { 'import.meta.env': '{}' }, jsx: 'automatic',
     plugins: [{ name: 'actual-action-hooks', setup(build) {
-        build.onResolve({ filter: /^react$/ }, (args) => /(?:ActionDetailDrawer|ActionsTable|ActionReceiptPanel)\.tsx$/.test(args.importer)
+        build.onResolve({ filter: /^react$/, namespace: 'synthetic' }, () => ({ path: 'react', external: true }));
+        build.onResolve({ filter: /^react$/ }, (args) => /(?:ActionDetailDrawer|ActionsTable|ActionReceiptPanel|auth)\.tsx$/.test(args.importer)
             ? { path: 'hooks', namespace: 'synthetic' } : undefined);
         build.onLoad({ filter: /.*/, namespace: 'synthetic' }, () => ({ contents: `
+            export { createContext, useContext } from 'react';
             export const useState = (...a) => globalThis.__actionHooks.useState(...a);
             export const useRef = (...a) => globalThis.__actionHooks.useRef(...a);
             export const useCallback = (fn) => fn;
@@ -26,8 +29,27 @@ const bundle = await build({
 });
 const loaded = { exports: {} };
 new Function('require', 'module', 'exports', bundle.outputFiles[0].text)(createRequire(import.meta.url), loaded, loaded.exports);
-const { ActionDetailDrawer, ActionsTable, ActionReceiptPanel, api } = loaded.exports;
+const { ActionDetailDrawer, ActionsTable, ActionReceiptPanel, AuthProvider, api } = loaded.exports;
 const settle = () => new Promise((resolve) => setImmediate(resolve));
+
+const recoveryActionId = '10000000-0000-4000-8000-000000000001';
+const recoveryDigest = 'a'.repeat(64);
+const recoverable = () => action(recoveryActionId, 'unknown', {
+    acknowledgement_recovery: { source_digest: recoveryDigest, provider_status: 'accepted' },
+});
+const labelledButton = (tree, label) => walk(tree, (n) => n.type === 'button' && n.props.children === label);
+
+test('saved acknowledgement recovery requires an explicit reason and confirmation, with no automatic request', () => {
+    const h = hooks();
+    try {
+        const tree = h.render(ActionReceiptPanel, { action: recoverable(), onReloadReceipt: async () => null });
+        const button = labelledButton(tree, 'Recover saved acknowledgement');
+        assert.ok(button);
+        assert.equal(button.props.disabled, true);
+        assert.ok(walk(tree, (n) => n.type === 'textarea' && n.props['aria-label'] === 'Recovery reason'));
+        assert.match(renderToStaticMarkup(tree), /does not send another email/);
+    } finally { h.close(); }
+});
 
 function hooks(initial = []) {
     const values = [...initial], effects = [], pending = [];
@@ -511,3 +533,363 @@ test('calendar API inspection makes one exact GET with no caller-supplied accoun
         assert.equal(requests[0].options.method, 'GET'); assert.equal(requests[0].options.body, undefined);
     } finally { globalThis.fetch = original; }
 });
+
+function recoveryTest() {
+    const h = hooks(), original = api.recoverSavedAcknowledgement, oldStorage = globalThis.localStorage, token = api.getToken();
+    const storage = new Map();
+    globalThis.localStorage = { getItem(key) { return storage.get(key) ?? null; },
+        setItem(key, value) { storage.set(key, value); }, removeItem(key) { storage.delete(key); } };
+    api.setToken(crypto.randomUUID());
+    return { h, close() { h.close(); api.recoverSavedAcknowledgement = original; api.setToken(token); globalThis.localStorage = oldStorage; } };
+}
+const recordFor = (request, extra = {}) => ({
+    id: '20000000-0000-4000-8000-000000000001', action_id: recoveryActionId,
+    actor_id: '30000000-0000-4000-8000-000000000001', actor_role: 'platform_admin',
+    request_id: request.request_id, source_digest: request.expected_source_digest, reason: request.reason,
+    original_status: 'unknown', recovered_status: 'completed', provider_status: 'accepted',
+    recorded_at: '2026-10-06T14:00:00Z', ...extra,
+});
+const recovered = (request) => {
+    const item = action(recoveryActionId, 'completed', { acknowledgement_recovery_record: recordFor(request) });
+    item.saved_receipt.success = true; item.saved_receipt.confirmation_allowed = true;
+    return item;
+};
+async function confirmRecovery(h, props, reason = 'Reviewed the original saved acknowledgement.') {
+    let tree = h.render(ActionReceiptPanel, props);
+    walk(tree, (n) => n.type === 'textarea').props.onChange({ target: { value: reason } });
+    tree = h.render(ActionReceiptPanel, props);
+    labelledButton(tree, 'Recover saved acknowledgement').props.onClick();
+    tree = h.render(ActionReceiptPanel, props);
+    labelledButton(tree, 'Confirm saved acknowledgement recovery').props.onClick();
+    await settle();
+}
+
+for (const reason of ['', '   ', 'line\nbreak', '\u007f', 'x'.repeat(501)]) {
+    test(`recovery rejects invalid reason ${JSON.stringify(reason).slice(0, 35)}`, () => {
+        const { h, close } = recoveryTest(), props = { action: recoverable(), onReloadReceipt: async () => null };
+        try {
+            walk(h.render(ActionReceiptPanel, props), (n) => n.type === 'textarea').props.onChange({ target: { value: reason } });
+            assert.equal(labelledButton(h.render(ActionReceiptPanel, props), 'Recover saved acknowledgement').props.disabled, true);
+        } finally { close(); }
+    });
+}
+
+for (const variant of ['missing', 'digest', 'enum', 'wrong-type', 'wrong-status', 'wrong-receipt', 'no-reload']) {
+    test(`recovery availability rejects ${variant}`, () => {
+        const { h, close } = recoveryTest(), item = recoverable(), props = { action: item, onReloadReceipt: async () => null };
+        if (variant === 'missing') delete item.acknowledgement_recovery;
+        if (variant === 'digest') item.acknowledgement_recovery.source_digest = 'A'.repeat(64);
+        if (variant === 'enum') item.acknowledgement_recovery.provider_status = 'delivered';
+        if (variant === 'wrong-type') item.type = 'book_meeting';
+        if (variant === 'wrong-status') item.status = item.saved_receipt.status = 'completed';
+        if (variant === 'wrong-receipt') item.saved_receipt.action_id = 'other';
+        if (variant === 'no-reload') delete props.onReloadReceipt;
+        try { assert.equal(labelledButton(h.render(ActionReceiptPanel, props), 'Recover saved acknowledgement'), null); }
+        finally { close(); }
+    });
+}
+
+for (const error of [401, 403, 404, 409, 422, 503, 'network', 'throw']) {
+    test(`recovery ${error} preserves the exact pending review and gates replay`, async () => {
+        const { h, close } = recoveryTest(), calls = [];
+        const props = { action: recoverable(), onReloadReceipt: async () => recoverable() };
+        api.recoverSavedAcknowledgement = async (id, body) => {
+            calls.push({ id, body: structuredClone(body) });
+            if (error === 'throw') throw new Error('private exception');
+            return { error: { status: typeof error === 'number' ? error : undefined, message: 'private error', code: 'UNKNOWN_ERROR' } };
+        };
+        try {
+            await confirmRecovery(h, props, '  Same original review.  ');
+            const first = calls[0]; assert.equal(first.body.reason, 'Same original review.');
+            let tree = h.render(ActionReceiptPanel, props);
+            assert.doesNotMatch(renderToStaticMarkup(tree), /private error|private exception/);
+            const blocked = [401, 403, 404, 409, 422].includes(error);
+            assert.equal(labelledButton(tree, 'Retry same recovery request').props.disabled, blocked);
+            if (blocked) {
+                labelledButton(tree, 'Retry same recovery request').props.onClick(); await settle(); assert.equal(calls.length, 1);
+                labelledButton(tree, 'Reload saved receipt').props.onClick(); await settle();
+                tree = h.render(ActionReceiptPanel, props);
+            }
+            labelledButton(tree, 'Retry same recovery request').props.onClick(); await settle();
+            assert.deepEqual(calls[1], first);
+        } finally { close(); }
+    });
+}
+
+for (const [field, value] of [
+    ['id', 'not-uuid'], ['action_id', '40000000-0000-4000-8000-000000000001'], ['actor_id', {}], ['actor_role', 'tenant_admin'],
+    ['request_id', '40000000-0000-4000-8000-000000000001'], ['source_digest', 'b'.repeat(64)], ['reason', 'other'],
+    ['provider_status', 'provider_accepted'], ['original_status', 'failed'], ['recovered_status', 'delivered'],
+    ['recorded_at', {}], ['recorded_at', []], ['recorded_at', 'invalid'],
+]) {
+    test(`malformed recovery ${field} ${JSON.stringify(value)} remains unconfirmed without a detail refresh`, async () => {
+        const { h, close } = recoveryTest(); let reads = 0;
+        const props = { action: recoverable(), onReloadReceipt: async () => { reads++; return null; } };
+        api.recoverSavedAcknowledgement = async (_, body) => ({ data: recordFor(body, { [field]: value }) });
+        try {
+            await confirmRecovery(h, props);
+            const html = renderToStaticMarkup(h.render(ActionReceiptPanel, props));
+            assert.match(html, /Recovery is unconfirmed/); assert.doesNotMatch(html, /Saved acknowledgement recovered/);
+            assert.equal(reads, 0);
+        } finally { close(); }
+    });
+}
+
+test('double recovery confirmation sends once and successful refresh displays only the safe saved summary', async () => {
+    const { h, close } = recoveryTest(); let release, calls = 0, body;
+    const props = { action: recoverable(), onReloadReceipt: async () => (props.action = recovered(body)) };
+    api.recoverSavedAcknowledgement = (_, request) => { calls++; body = request; return new Promise((resolve) => { release = resolve; }); };
+    try {
+        await confirmRecovery(h, props);
+        labelledButton(h.render(ActionReceiptPanel, props), 'Retry same recovery request').props.onClick();
+        assert.equal(calls, 1);
+        release({ data: { ...recordFor(body), private_payload: 'never display this' } }); await settle();
+        h.render(ActionReceiptPanel, props);
+        const html = renderToStaticMarkup(h.render(ActionReceiptPanel, props));
+        assert.match(html, /Saved acknowledgement recovered/); assert.match(html, /Reviewed by platform admin/);
+        assert.match(html, /unknown → completed/); assert.doesNotMatch(html, /never display this|Retry same recovery request/);
+    } finally { close(); }
+});
+
+test('unconfirmed recovery survives panel reopen and reuses exact request without automatic replay', async () => {
+    const { h, close } = recoveryTest(), calls = [], props = { action: recoverable(), onReloadReceipt: async () => null };
+    api.recoverSavedAcknowledgement = async (_, body) => { calls.push(structuredClone(body)); return { error: { status: 503 } }; };
+    const reopened = hooks();
+    try {
+        await confirmRecovery(h, props); h.close();
+        const tree = reopened.render(ActionReceiptPanel, props);
+        assert.equal(calls.length, 1); assert.equal(walk(tree, (n) => n.type === 'textarea'), null);
+        labelledButton(tree, 'Retry same recovery request').props.onClick(); await settle();
+        assert.deepEqual(calls[1], calls[0]);
+    } finally { reopened.close(); close(); }
+});
+
+test('late recovery result after selection change cannot refresh or change the selected action', async () => {
+    const { h, close } = recoveryTest(); let release, body, reads = 0;
+    api.recoverSavedAcknowledgement = (_, request) => { body = request; return new Promise((resolve) => { release = resolve; }); };
+    const props = { action: recoverable(), onReloadReceipt: async () => { reads++; return recovered(body); } };
+    try {
+        await confirmRecovery(h, props);
+        const other = { action: action('B'), onReloadReceipt: props.onReloadReceipt };
+        h.render(ActionReceiptPanel, other);
+        release({ data: recordFor(body) }); await settle();
+        const html = renderToStaticMarkup(h.render(ActionReceiptPanel, other));
+        assert.equal(reads, 0); assert.doesNotMatch(html, /original-10000000|Saved acknowledgement recovered|Review reason:/);
+    } finally { close(); }
+});
+
+test('auth change discards previous review state and rejects an in-flight old-session response', async () => {
+    const { h, close } = recoveryTest(); let release, body, reads = 0;
+    api.recoverSavedAcknowledgement = (_, request) => { body = request; return new Promise((resolve) => { release = resolve; }); };
+    const props = { action: recoverable(), onReloadReceipt: async () => { reads++; return recovered(body); } };
+    try {
+        await confirmRecovery(h, props, 'Prior admin private review');
+        api.setToken('different-synthetic-session');
+        release({ data: recordFor(body) }); await settle();
+        h.render(ActionReceiptPanel, props);
+        const html = renderToStaticMarkup(h.render(ActionReceiptPanel, props));
+        assert.equal(reads, 0); assert.doesNotMatch(html, /Prior admin private review|Retry same recovery request|Saved acknowledgement recovered/);
+    } finally { close(); }
+});
+
+test('drawer reload updates header and receipt together and ignores a later foreign selection', async () => {
+    const { h, close } = recoveryTest(), original = api.getActionDetail; let release;
+    api.getActionDetail = async () => ({ data: recoverable() });
+    const props = { actionId: recoveryActionId, onClose() {} };
+    try {
+        h.render(ActionDetailDrawer, props); await settle();
+        let tree = h.render(ActionDetailDrawer, props);
+        const reload = walk(tree, (n) => n.type === ActionReceiptPanel).props.onReloadReceipt;
+        api.getActionDetail = () => new Promise((resolve) => { release = resolve; });
+        const pending = reload();
+        assert.match(renderToStaticMarkup(h.render(ActionDetailDrawer, props)), />Unknown</);
+        const saved = recovered({ request_id: '40000000-0000-4000-8000-000000000001', expected_source_digest: recoveryDigest, reason: 'Reviewed.' });
+        release({ data: saved }); await pending;
+        tree = h.render(ActionDetailDrawer, props);
+        const html = renderToStaticMarkup(tree);
+        assert.match(html, />Completed</); assert.match(html, /Acknowledgement recorded/); assert.match(html, /Saved acknowledgement recovered/);
+        const staleReload = walk(tree, (n) => n.type === ActionReceiptPanel).props.onReloadReceipt;
+        const stale = staleReload();
+        api.getActionDetail = async () => ({ data: action('B') });
+        h.render(ActionDetailDrawer, { ...props, actionId: 'B' }); await settle();
+        release({ data: saved }); assert.equal(await stale, null);
+        assert.match(renderToStaticMarkup(h.render(ActionDetailDrawer, { ...props, actionId: 'B' })), /Synthetic tenant B/);
+    } finally { api.getActionDetail = original; close(); }
+});
+
+test('recovery API preserves exact POST fields and actual HTTP status', async () => {
+    const original = globalThis.fetch, requests = [];
+    const body = { request_id: '40000000-0000-4000-8000-000000000001', expected_source_digest: recoveryDigest, reason: 'Reviewed.' };
+    globalThis.fetch = async (url, options) => { requests.push({ url, options }); return new Response(JSON.stringify({ detail: 'Conflict' }), { status: 409 }); };
+    try {
+        const response = await api.recoverSavedAcknowledgement('A/B', body);
+        assert.equal(response.error.status, 409); assert.equal(response.error.message, 'Conflict');
+        assert.match(requests[0].url, /\/admin\/actions\/A%2FB\/recover-acknowledgement$/);
+        assert.equal(requests[0].options.method, 'POST'); assert.deepEqual(JSON.parse(requests[0].options.body), body);
+        assert.equal(requests.length, 1);
+    } finally { globalThis.fetch = original; }
+});
+
+test('changed saved evidence holds the original review without replacing its request ID', async () => {
+    const { h, close } = recoveryTest(), calls = [], props = { action: recoverable(), onReloadReceipt: async () => props.action };
+    api.recoverSavedAcknowledgement = async (_, body) => { calls.push(structuredClone(body)); return { error: { status: 503 } }; };
+    try {
+        await confirmRecovery(h, props);
+        props.action = { ...props.action, acknowledgement_recovery: { source_digest: 'b'.repeat(64), provider_status: 'accepted' } };
+        h.render(ActionReceiptPanel, props);
+        labelledButton(h.render(ActionReceiptPanel, props), 'Retry same recovery request').props.onClick(); await settle();
+        assert.equal(calls.length, 1);
+        let tree = h.render(ActionReceiptPanel, props);
+        assert.equal(labelledButton(tree, 'Retry same recovery request').props.disabled, true);
+        labelledButton(tree, 'Reload saved receipt').props.onClick(); await settle();
+        tree = h.render(ActionReceiptPanel, props);
+        assert.match(renderToStaticMarkup(tree), /previous request remains held/);
+        assert.equal(labelledButton(tree, 'Retry same recovery request').props.disabled, true);
+        assert.equal(walk(tree, (n) => n.type === 'textarea'), null);
+    } finally { close(); }
+});
+
+for (const refresh of ['throws', 'missing', 'foreign', 'old']) {
+    test(`valid recovery response with ${refresh} detail retains uncertainty and original request`, async () => {
+        const { h, close } = recoveryTest(), calls = [];
+        const props = { action: recoverable(), onReloadReceipt: async () => {
+            if (refresh === 'throws') throw new Error('private');
+            return refresh === 'missing' ? null : refresh === 'foreign' ? action('B') : recoverable();
+        } };
+        api.recoverSavedAcknowledgement = async (_, body) => { calls.push(structuredClone(body)); return { data: recordFor(body) }; };
+        try {
+            await confirmRecovery(h, props);
+            let tree = h.render(ActionReceiptPanel, props);
+            assert.match(renderToStaticMarkup(tree), /unconfirmed/); assert.doesNotMatch(renderToStaticMarkup(tree), /Saved acknowledgement recovered|private/);
+            labelledButton(tree, 'Retry same recovery request').props.onClick(); await settle();
+            assert.deepEqual(calls[1], calls[0]);
+            tree = h.render(ActionReceiptPanel, props);
+            assert.equal(walk(tree, (n) => n.type === 'textarea'), null);
+        } finally { close(); }
+    });
+}
+
+for (const variant of ['wrong-action', 'invalid-time', 'object-reason', 'mismatched-receipt', 'unconfirmed-receipt']) {
+    test(`saved recovery summary rejects ${variant}`, () => {
+        const { h, close } = recoveryTest();
+        const item = recovered({ request_id: '40000000-0000-4000-8000-000000000001', expected_source_digest: recoveryDigest, reason: 'Private reviewed reason' });
+        if (variant === 'wrong-action') item.acknowledgement_recovery_record.action_id = '40000000-0000-4000-8000-000000000001';
+        if (variant === 'invalid-time') item.acknowledgement_recovery_record.recorded_at = {};
+        if (variant === 'object-reason') item.acknowledgement_recovery_record.reason = {};
+        if (variant === 'mismatched-receipt') item.saved_receipt.action_id = 'B';
+        if (variant === 'unconfirmed-receipt') item.saved_receipt.confirmation_allowed = false;
+        try {
+            const html = renderToStaticMarkup(h.render(ActionReceiptPanel, { action: item }));
+            assert.doesNotMatch(html, /Saved acknowledgement recovered|Private reviewed reason/);
+        } finally { close(); }
+    });
+}
+
+test('pending review capacity refuses new requests without evicting an uncertain original', async () => {
+    const { h, close } = recoveryTest(), calls = [], props = { action: recoverable(), onReloadReceipt: async () => null };
+    api.recoverSavedAcknowledgement = async (id, body) => { calls.push({ id, body: structuredClone(body) }); return { error: { status: 503 } }; };
+    try {
+        for (let i = 1; i <= 33; i++) {
+            const id = `10000000-0000-4000-8000-${String(i).padStart(12, '0')}`;
+            props.action = { ...recoverable(), id, saved_receipt: { ...recoverable().saved_receipt, action_id: id } };
+            h.render(ActionReceiptPanel, props);
+            await confirmRecovery(h, props);
+        }
+        assert.equal(calls.length, 32);
+        assert.match(renderToStaticMarkup(h.render(ActionReceiptPanel, props)), /Resolve an existing pending recovery/);
+        props.action = recoverable(); h.render(ActionReceiptPanel, props);
+        labelledButton(h.render(ActionReceiptPanel, props), 'Retry same recovery request').props.onClick(); await settle();
+        assert.deepEqual(calls[32], calls[0]);
+    } finally { close(); }
+});
+
+test('actual AuthProvider login and logout update API authentication and invalidate pending recovery', async () => {
+    const { h, close } = recoveryTest(), auth = hooks(), originalFetch = globalThis.fetch, calls = [];
+    let release, body, reads = 0;
+    globalThis.fetch = async (url, options) => {
+        calls.push({ url, options });
+        if (url.endsWith('/auth/login')) return new Response(JSON.stringify({ access_token: 'new-admin-session', user_id: 'new-admin', role: 'platform_admin', email: 'admin@example.invalid' }));
+        if (url.endsWith('/auth/me')) return new Response(JSON.stringify({ id: 'admin', email: 'admin@example.invalid', role: 'platform_admin' }));
+        return new Response(JSON.stringify({}));
+    };
+    api.recoverSavedAcknowledgement = (_, request) => { body = request; return new Promise((resolve) => { release = resolve; }); };
+    const props = { action: recoverable(), onReloadReceipt: async () => { reads++; return recovered(body); } };
+    try {
+        auth.render(AuthProvider, {}); await settle();
+        await confirmRecovery(h, props, 'Previous actor private review');
+        const oldGeneration = api.getAuthGeneration();
+        await auth.render(AuthProvider, {}).props.value.logout();
+        assert.equal(api.getToken(), null); assert.equal(localStorage.getItem('admin_token'), null);
+        assert.ok(api.getAuthGeneration() > oldGeneration);
+        assert.equal(await auth.render(AuthProvider, {}).props.value.login('admin@example.invalid', 'synthetic'), true);
+        assert.equal(api.getToken(), 'new-admin-session');
+        await api.getActionDetail(recoveryActionId);
+        assert.equal(calls.at(-1).options.headers.Authorization, 'Bearer new-admin-session');
+        release({ data: recordFor(body) }); await settle();
+        h.render(ActionReceiptPanel, props);
+        const html = renderToStaticMarkup(h.render(ActionReceiptPanel, props));
+        assert.equal(reads, 0); assert.doesNotMatch(html, /Previous actor private review|Retry same recovery request/);
+    } finally { globalThis.fetch = originalFetch; auth.close(); close(); }
+});
+
+for (const variant of ['stored', 'absent', 'rejected']) {
+    test(`actual AuthProvider initial ${variant} token synchronizes the API session`, async () => {
+        const { close } = recoveryTest(), auth = hooks(), originalFetch = globalThis.fetch, sent = [];
+        if (variant === 'absent') localStorage.removeItem('admin_token');
+        else localStorage.setItem('admin_token', 'stored-admin-session');
+        globalThis.fetch = async (_, options) => {
+            sent.push(options.headers.Authorization);
+            return new Response(JSON.stringify(variant === 'rejected' ? { detail: 'Unauthorized' }
+                : { id: 'admin', email: 'admin@example.invalid', role: 'platform_admin' }), { status: variant === 'rejected' ? 401 : 200 });
+        };
+        try {
+            auth.render(AuthProvider, {}); await settle();
+            assert.equal(api.getToken(), variant === 'stored' ? 'stored-admin-session' : null);
+            assert.deepEqual(sent, variant === 'absent' ? [] : ['Bearer stored-admin-session']);
+            assert.equal(auth.render(AuthProvider, {}).props.value.isAuthenticated, variant === 'stored');
+        } finally { globalThis.fetch = originalFetch; auth.close(); close(); }
+    });
+}
+
+test('stale drawer and panel reload callbacks cannot adopt a newer session before effect cleanup', async () => {
+    const { h, close } = recoveryTest(), panel = hooks(), original = api.getActionDetail; let reads = 0, panelReads = 0;
+    api.getActionDetail = async () => { reads++; return { data: recoverable() }; };
+    const props = { actionId: recoveryActionId, onClose() {} };
+    try {
+        h.render(ActionDetailDrawer, props); await settle();
+        const drawerReload = walk(h.render(ActionDetailDrawer, props), (n) => n.type === ActionReceiptPanel).props.onReloadReceipt;
+        const panelReload = labelledButton(panel.render(ActionReceiptPanel, { action: recoverable(), onReloadReceipt: async () => { panelReads++; return recoverable(); } }), 'Reload saved receipt').props.onClick;
+        api.setToken('other-session-before-render');
+        assert.equal(await drawerReload(), null);
+        panelReload(); await settle();
+        assert.equal(reads, 1); assert.equal(panelReads, 0);
+    } finally { api.getActionDetail = original; panel.close(); close(); }
+});
+
+for (const variant of ['same-source', 'different-source', 'malformed', 'unconfirmed']) {
+    test(`another review's ${variant} saved recovery retires only a proven resolved pending entry`, async () => {
+        const { h, close } = recoveryTest(), props = { action: recoverable(), onReloadReceipt: async () => null };
+        let body;
+        api.recoverSavedAcknowledgement = async (_, request) => { body = request; return { error: { status: 503 } }; };
+        try {
+            await confirmRecovery(h, props, 'Original pending review');
+            const other = recovered(body);
+            Object.assign(other.acknowledgement_recovery_record, {
+                actor_id: '40000000-0000-4000-8000-000000000001', request_id: '50000000-0000-4000-8000-000000000001', reason: 'Another admin review',
+            });
+            if (variant === 'different-source') other.acknowledgement_recovery_record.source_digest = 'b'.repeat(64);
+            if (variant === 'malformed') other.acknowledgement_recovery_record.actor_id = 'bad';
+            if (variant === 'unconfirmed') other.saved_receipt.confirmation_allowed = false;
+            props.onReloadReceipt = async () => other;
+            labelledButton(h.render(ActionReceiptPanel, props), 'Reload saved receipt').props.onClick(); await settle();
+            props.action = other; h.render(ActionReceiptPanel, props);
+            const html = renderToStaticMarkup(h.render(ActionReceiptPanel, props));
+            if (variant === 'same-source') {
+                assert.doesNotMatch(html, /Original pending review|Retry same recovery request/);
+                assert.match(html, /Another admin review/);
+            } else {
+                assert.match(html, /Original pending review|Retry same recovery request/);
+            }
+        } finally { close(); }
+    });
+}

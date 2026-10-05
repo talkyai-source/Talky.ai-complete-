@@ -57,6 +57,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
 
         const token = localStorage.getItem(TOKEN_KEY);
+        api.setToken(token);
         if (!token) {
             setState({
                 user: null,
@@ -79,7 +80,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 return;
             }
             // Token rejected — clear it.
-            localStorage.removeItem(TOKEN_KEY);
+            api.setToken(null);
             setState({
                 user: null,
                 isLoading: false,
@@ -157,7 +158,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 }));
                 return false;
             }
-            localStorage.setItem(TOKEN_KEY, res.data.access_token);
+            api.setToken(res.data.access_token);
             // /auth/login returns flat fields (no nested user object).
             setState({
                 user: {
@@ -187,7 +188,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         } catch {
             // Token may already be invalidated server-side; clear locally regardless.
         }
-        localStorage.removeItem(TOKEN_KEY);
+        api.setToken(null);
         setState({
             user: null,
             isLoading: false,

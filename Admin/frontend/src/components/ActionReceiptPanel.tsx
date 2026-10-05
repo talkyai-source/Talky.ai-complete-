@@ -1,6 +1,32 @@
 import { useEffect, useRef, useState } from 'react';
-import { api } from '../lib/api';
-import type { ActionDetail, CalendarInspection, EmailInspection } from '../lib/api';
+import { api, isAcknowledgementRecoveryCapability, isAcknowledgementRecoveryRecord, isRecoveryReason, isRecoveryUuid } from '../lib/api';
+import type { ActionDetail, AcknowledgementRecoveryRequest, CalendarInspection, EmailInspection } from '../lib/api';
+
+type PendingRecovery = { request: AcknowledgementRecoveryRequest; providerStatus: string; reloadRequired: boolean };
+// Memory only, bounded, and scoped to the current authentication generation.
+// Uncertain requests are never evicted to make room for a new request.
+const pendingRecoveries = new Map<string, PendingRecovery>();
+let recoverySession = -1;
+function pendingRecovery(actionId: string): PendingRecovery | undefined {
+    if (recoverySession !== api.getAuthGeneration()) {
+        pendingRecoveries.clear();
+        recoverySession = api.getAuthGeneration();
+    }
+    return pendingRecoveries.get(actionId);
+}
+
+function resolvesPending(action: ActionDetail, pending: PendingRecovery): boolean {
+    const record = action.acknowledgement_recovery_record;
+    return action.status === 'completed' && action.saved_receipt?.action_id === action.id
+        && action.saved_receipt.status === 'completed' && action.saved_receipt.success === true
+        && action.saved_receipt.confirmation_allowed === true && isAcknowledgementRecoveryRecord(record, action.id)
+        && record.source_digest === pending.request.expected_source_digest && record.provider_status === pending.providerStatus;
+}
+
+function confirmsPending(action: ActionDetail, pending: PendingRecovery): boolean {
+    return resolvesPending(action, pending) && action.acknowledgement_recovery_record?.request_id === pending.request.request_id
+        && action.acknowledgement_recovery_record?.reason === pending.request.reason;
+}
 
 const referenceLabels = {
     identity_version: 'Saved identity proof',
@@ -42,7 +68,10 @@ const calendarObservationReasons = {
     saved_proof_unavailable: 'A complete, consistent original authorization and event reference is unavailable.',
 };
 
-export function ActionReceiptPanel({ action }: { action: ActionDetail }) {
+export function ActionReceiptPanel({ action, onReloadReceipt }: {
+    action: ActionDetail;
+    onReloadReceipt?: () => Promise<ActionDetail | null>;
+}) {
     const saved = action.saved_receipt;
     const matches = saved?.action_id === action.id && saved.status === action.status;
     const refs = matches ? saved.receipt : undefined;
@@ -59,6 +88,32 @@ export function ActionReceiptPanel({ action }: { action: ActionDetail }) {
     const [failed, setFailed] = useState(false);
     const generation = useRef(0);
     const inFlight = useRef(false);
+    const session = api.getAuthGeneration();
+    const [reason, setReason] = useState('');
+    const [confirmRecovery, setConfirmRecovery] = useState(false);
+    const [recovering, setRecovering] = useState(false);
+    const [recoveryMessage, setRecoveryMessage] = useState('');
+    const recoveryFlight = useRef(false);
+    const recoveryGeneration = useRef(0);
+    const cachedRecovery = pendingRecovery(action.id);
+    const unresolved = cachedRecovery && !resolvesPending(action, cachedRecovery) ? cachedRecovery : undefined;
+    const capability = action.acknowledgement_recovery;
+    const recoveryRecord = isAcknowledgementRecoveryRecord(action.acknowledgement_recovery_record, action.id)
+        ? action.acknowledgement_recovery_record : null;
+    const canRecover = Boolean(onReloadReceipt && matches && action.type === 'send_email' && action.status === 'unknown'
+        && isRecoveryUuid(action.id) && isAcknowledgementRecoveryCapability(capability) && !action.acknowledgement_recovery_record);
+    const recoverySelection = JSON.stringify([selection, session, capability?.source_digest, capability?.provider_status,
+        recoveryRecord?.id]);
+    useEffect(() => {
+        recoveryGeneration.current += 1;
+        recoveryFlight.current = false;
+        setReason(''); setConfirmRecovery(false); setRecovering(false); setRecoveryMessage('');
+        return () => { recoveryGeneration.current += 1; };
+    }, [recoverySelection]);
+    useEffect(() => {
+        const existing = pendingRecovery(action.id);
+        if (existing && resolvesPending(action, existing)) pendingRecoveries.delete(action.id);
+    }, [action]);
     useEffect(() => {
         generation.current += 1;
         inFlight.current = false;
@@ -101,6 +156,91 @@ export function ActionReceiptPanel({ action }: { action: ActionDetail }) {
     const currentId = currentObservation && (calendar
         ? ('observed_event_id' in currentObservation ? currentObservation.observed_event_id : null)
         : ('observed_message_id' in currentObservation ? currentObservation.observed_message_id : null));
+
+    const reloadReceipt = async () => {
+        if (!onReloadReceipt || recoveryFlight.current || session !== api.getAuthGeneration()) return;
+        const ownGeneration = recoveryGeneration.current;
+        const ownSession = session;
+        const active = () => ownSession === api.getAuthGeneration() && ownGeneration === recoveryGeneration.current;
+        recoveryFlight.current = true; setRecovering(true);
+        try {
+            const refreshed = await onReloadReceipt();
+            if (!active()) return;
+            const existing = pendingRecovery(action.id);
+            if (!refreshed || refreshed.id !== action.id) {
+                setRecoveryMessage('Receipt reload failed. The previous request is preserved.');
+            } else if (existing && resolvesPending(refreshed, existing)) {
+                pendingRecoveries.delete(action.id);
+                setRecoveryMessage(confirmsPending(refreshed, existing) ? 'Saved acknowledgement recovery recorded.'
+                    : 'The saved receipt records recovery under another review.');
+            } else {
+                if (existing) existing.reloadRequired = !(refreshed.status === 'unknown'
+                    && isAcknowledgementRecoveryCapability(refreshed.acknowledgement_recovery)
+                    && refreshed.acknowledgement_recovery.source_digest === existing.request.expected_source_digest
+                    && refreshed.acknowledgement_recovery.provider_status === existing.providerStatus);
+                setRecoveryMessage(existing?.reloadRequired
+                    ? 'The saved evidence or authority has changed. The previous request remains held.'
+                    : 'Receipt reloaded. Any retry uses the same recorded review request.');
+            }
+        } catch {
+            if (active()) setRecoveryMessage('Receipt reload failed. The previous request is preserved.');
+        } finally {
+            if (active()) { recoveryFlight.current = false; setRecovering(false); }
+        }
+    };
+
+    const recover = async () => {
+        if (!canRecover || recoveryFlight.current || api.getAuthGeneration() !== session) return;
+        let request = pendingRecovery(action.id);
+        if (request?.reloadRequired) return;
+        if (!request) {
+            if (!confirmRecovery || !isRecoveryReason(reason.trim()) || !isAcknowledgementRecoveryCapability(capability)) return;
+            if (pendingRecoveries.size >= 32) {
+                setRecoveryMessage('Resolve an existing pending recovery before starting another.'); return;
+            }
+            request = { request: { request_id: crypto.randomUUID(), expected_source_digest: capability.source_digest, reason: reason.trim() },
+                providerStatus: capability.provider_status, reloadRequired: false };
+            pendingRecoveries.set(action.id, request);
+        } else if (!isAcknowledgementRecoveryCapability(capability)
+            || request.request.expected_source_digest !== capability.source_digest || request.providerStatus !== capability.provider_status) {
+            request.reloadRequired = true; setRecoveryMessage('Saved evidence changed. Reload the receipt before another request.'); return;
+        }
+        const ownGeneration = recoveryGeneration.current;
+        const active = () => session === api.getAuthGeneration() && ownGeneration === recoveryGeneration.current;
+        recoveryFlight.current = true; setRecovering(true); setConfirmRecovery(false); setRecoveryMessage('');
+        try {
+            const response = await api.recoverSavedAcknowledgement(action.id, request.request);
+            if (!active()) return;
+            if (response.error) {
+                const status = response.error.status;
+                request.reloadRequired = status === 401 || status === 403 || status === 409 || status === 404 || status === 422;
+                setRecoveryMessage(status === 401 || status === 403
+                    ? 'Current platform admin authority or session is unavailable. Reload the receipt after signing in.'
+                    : request.reloadRequired ? 'Recovery was not confirmed. Reload the receipt before another request.'
+                        : 'Recovery is unconfirmed. Reload the receipt or retry the same request.');
+                return;
+            }
+            const record = response.data;
+            if (!isAcknowledgementRecoveryRecord(record, action.id) || record.request_id !== request.request.request_id
+                || record.source_digest !== request.request.expected_source_digest || record.reason !== request.request.reason
+                || record.provider_status !== request.providerStatus) {
+                setRecoveryMessage('Recovery is unconfirmed. Reload the receipt or retry the same request.'); return;
+            }
+            const refreshed = await onReloadReceipt!();
+            if (!active()) return;
+            if (refreshed?.id === action.id && resolvesPending(refreshed, request)) {
+                pendingRecoveries.delete(action.id);
+                setRecoveryMessage(confirmsPending(refreshed, request) ? 'Saved acknowledgement recovery recorded.'
+                    : 'The saved receipt records recovery under another review.');
+            } else {
+                setRecoveryMessage('Recovery response received; the refreshed receipt is unconfirmed. Reload the receipt or retry the same request.');
+            }
+        } catch {
+            if (active()) setRecoveryMessage('Recovery is unconfirmed. Reload the receipt or retry the same request.');
+        } finally {
+            if (active()) { recoveryFlight.current = false; setRecovering(false); }
+        }
+    };
     return <section className="action-audit" aria-label="Saved action receipt">
         <h4>Saved action receipt</h4>
         <p><strong>{confirmed ? 'Acknowledgement recorded' : 'Outcome unverified'}</strong></p>
@@ -116,6 +256,37 @@ export function ActionReceiptPanel({ action }: { action: ActionDetail }) {
                 <span className="label">{label}</span><span className="value mono">{valid ? value : 'Unavailable'}</span>
             </div>;
         })}
+        {recoveryRecord && confirmed && action.status === 'completed' && <div aria-label="Saved acknowledgement recovery">
+            <h4>Saved acknowledgement recovered</h4>
+            <p>This records provider acceptance only. It does not establish delivery or payload correctness.</p>
+            <p>Reviewed by platform admin: {recoveryRecord.actor_id}</p>
+            <p>Recorded at: {recoveryRecord.recorded_at}</p>
+            <p>Reason: {recoveryRecord.reason}</p>
+            <p>Status: {recoveryRecord.original_status} → {recoveryRecord.recovered_status}</p>
+            <p>Recorded provider status: {recoveryRecord.provider_status}</p>
+        </div>}
+        {onReloadReceipt && (canRecover || unresolved) && <div aria-label="Recover saved acknowledgement">
+            <p>Restore the provider acceptance already saved for this action. This does not send another email or establish delivery or payload correctness.</p>
+            {unresolved ? <>
+                <p>A review request is pending. Its reason and request ID are preserved until the saved receipt confirms recovery.</p>
+                <p>Review reason: {unresolved.request.reason}</p>
+                <button type="button" className="btn btn-secondary btn-sm" disabled={recovering || unresolved.reloadRequired || !canRecover}
+                    onClick={() => void recover()}>Retry same recovery request</button>
+            </> : <>
+                <label>Recovery reason<textarea aria-label="Recovery reason" maxLength={500} value={reason} disabled={recovering}
+                    onChange={(event) => { setReason(event.target.value); setConfirmRecovery(false); }} /></label>
+                {confirmRecovery ? <>
+                    <p>Confirm restoring this saved acknowledgement with the reason above?</p>
+                    <button type="button" className="btn btn-primary btn-sm" disabled={recovering}
+                        onClick={() => void recover()}>Confirm saved acknowledgement recovery</button>
+                    <button type="button" className="btn btn-secondary btn-sm" disabled={recovering}
+                        onClick={() => setConfirmRecovery(false)}>Keep held</button>
+                </> : <button type="button" className="btn btn-secondary btn-sm" disabled={!isRecoveryReason(reason.trim()) || recovering}
+                    onClick={() => setConfirmRecovery(true)}>Recover saved acknowledgement</button>}
+            </>}
+            <button type="button" className="btn btn-secondary btn-sm" disabled={recovering} onClick={() => void reloadReceipt()}>Reload saved receipt</button>
+            <div aria-live="polite">{recovering ? <p>Checking saved acknowledgement…</p> : recoveryMessage && <p>{recoveryMessage}</p>}</div>
+        </div>}
         {canInspect && <div>
             <button type="button" className="btn btn-secondary btn-sm" disabled={pending} onClick={() => void inspect()}>
                 {pending ? 'Inspecting original authorization…' : calendar ? 'Inspect saved calendar event' : 'Inspect saved Gmail message'}

@@ -70,6 +70,7 @@ export function ActionDetailDrawer({ actionId, onClose, onRetry }: ActionDetailD
     const [confirmRetry, setConfirmRetry] = useState(false);
 
     const selection = useRef<{ id: string | null; active: boolean } | null>(null);
+    const session = api.getAuthGeneration();
 
     useEffect(() => {
         const owner = { id: actionId, active: true };
@@ -85,8 +86,8 @@ export function ActionDetailDrawer({ actionId, onClose, onRetry }: ActionDetailD
             const fetchAction = async () => {
                 try {
                     const response = await api.getActionDetail(actionId);
-                    if (!owner.active) return;
-                    if (!response.data || response.data.id !== actionId) {
+                    if (!owner.active || api.getAuthGeneration() !== session) return;
+                    if (response.error || !response.data || response.data.id !== actionId) {
                         throw new Error('The selected action receipt is unavailable.');
                     }
                     setAction(response.data);
@@ -99,7 +100,16 @@ export function ActionDetailDrawer({ actionId, onClose, onRetry }: ActionDetailD
             void fetchAction();
         }
         return () => { owner.active = false; };
-    }, [actionId]);
+    }, [actionId, session]);
+
+    const reloadReceipt = async (): Promise<ActionDetail | null> => {
+        const owner = selection.current;
+        if (session !== api.getAuthGeneration() || !owner?.active || owner.id !== actionId || action?.id !== actionId) return null;
+        const response = await api.getActionDetail(actionId);
+        if (!owner.active || api.getAuthGeneration() !== session || response.error || !response.data || response.data.id !== actionId) return null;
+        setAction(response.data);
+        return response.data;
+    };
 
     const handleRetry = async () => {
         const owner = selection.current;
@@ -260,7 +270,7 @@ export function ActionDetailDrawer({ actionId, onClose, onRetry }: ActionDetailD
                                 </div>
                             )}
 
-                            <ActionReceiptPanel action={action} />
+                            <ActionReceiptPanel action={action} onReloadReceipt={reloadReceipt} />
 
                             {/* Audit Info */}
                             {(action.ip_address || action.idempotency_key) && (
