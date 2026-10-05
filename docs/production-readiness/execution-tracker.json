@@ -695,9 +695,10 @@
           "path": "docs/sessions/2026-10-05-exact-integration-verification.md",
           "kind": "combined_selection_action_guard_and_audio_storage_regression",
           "candidate": "bbbb9450dfbff9e0436493a3b7b870a64481b77a"
-        }
+        },
+        "docs/sessions/2026-10-05-inbox-health-lock-design.md"
       ],
-      "blocker": null,
+      "blocker": "Original-account inbox retry compatibility and atomic stale-auth health writes remain under repair. The account-health locking proposal passed isolated PostgreSQL design checks, not repaired-application tests. Supported original-receipt inspection/operator resolution and designated provider/browser acceptance remain open.",
       "next_action": "Complete original-account evidence inspection and approved durable operator resolution of held outcomes; saved receipt display and selection ownership are locally verified. Missing IDs, timeouts and empty searches do not authorize resend. Designated provider/browser acceptance remains open.",
       "target_date": null
     },
@@ -767,7 +768,8 @@
           "kind": "combined_selection_action_guard_and_audio_storage_regression",
           "candidate": "bbbb9450dfbff9e0436493a3b7b870a64481b77a"
         },
-        "docs/sessions/2026-10-05-cloud-telephony-availability.md"
+        "docs/sessions/2026-10-05-cloud-telephony-availability.md",
+        "docs/sessions/artifacts/provider-proof-fence/verification.md"
       ],
       "blocker": "A05 cleanup and documented crash contract are locally verified; remaining architecture dispositions follow lifecycle/provider/configuration owning repairs. No full architecture or live/release claim.",
       "next_action": "Retain selected-session/profile ownership, authoritative availability and bounded A05 closure. Legacy cloud callbacks and unsupported production selections are contained without adding a cloud route. Remaining unknown-provider/operator reconciliation and deployed acceptance follow OP02/OP05/OP12.",
@@ -1004,10 +1006,11 @@
           "kind": "combined_selection_action_guard_and_audio_storage_regression",
           "candidate": "bbbb9450dfbff9e0436493a3b7b870a64481b77a"
         },
-        "docs/sessions/2026-10-05-cloud-telephony-availability.md"
+        "docs/sessions/2026-10-05-cloud-telephony-availability.md",
+        "docs/sessions/artifacts/provider-proof-fence/verification.md"
       ],
-      "blocker": "Local pacing, DNC settlement, selected warmup ownership and unsupported-cloud admission/retry boundaries pass. Unknown-provider/ambiguous-owner reconciliation and actual queue/process/PBX recovery acceptance remain open.",
-      "next_action": "Complete designated failure/recovery acceptance and existing ambiguous-owner reconciliation; retain true call outcomes, retry ownership, selected profile and selected route without blind redial or session reconstruction.",
+      "blocker": "Local pacing, DNC settlement, selected warmup, cloud-selection and saved-provider termination boundaries pass. Unknown-provider/ambiguous-owner resolution, complete inbound linked-leg proof during a context-load outage and actual queue/process/PBX recovery acceptance remain open.",
+      "next_action": "Retain saved concrete parent/linked-leg provider checks before namespace-specific hangup proof. Investigate the separately identified inbound context-load outage, then complete designated recovery acceptance and existing ambiguous-owner resolution without blind redial or session reconstruction. Matching provider family alone is not original PBX host/account proof.",
       "target_date": null
     },
     {
@@ -1363,7 +1366,8 @@
           "path": "docs/sessions/2026-10-05-exact-integration-verification.md",
           "kind": "combined_selection_action_guard_and_audio_storage_regression",
           "candidate": "bbbb9450dfbff9e0436493a3b7b870a64481b77a"
-        }
+        },
+        "docs/sessions/artifacts/provider-proof-fence/verification.md"
       ],
       "blocker": null,
       "next_action": "Retain exact-dependency full backend and migrated database results; reconcile subsequent bounded changes and current main/deployment before controlled acceptance. Preserve original user work; no deployed proof is inferred.",

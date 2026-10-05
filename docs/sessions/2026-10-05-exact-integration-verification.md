@@ -280,3 +280,36 @@ deployment occurred. There are still **27 eligible unfinished packages**, the
 separate AG03 candidate and three deferred packages. All 15 final gates and 22
 scenario gates remain not run. The next inspections concern existing held-action
 and ambiguous-call recovery; live/operator prerequisites are still outstanding.
+
+## Saved-provider termination proof and inbox health investigation
+
+Source `c9d3f87e`, integrated as `e5e0bc29`, prevents an Asterisk absence response
+from finalizing a durable call owned by another provider. Admin, tenant, raw,
+campaign-batch and transfer-fallback paths supply the saved concrete provider and
+every selected active linked leg's provider before any adapter request. Conflicting
+duplicate IDs remain visible to validation. Recovery validates persisted linked
+legs before deduplicating them. Existing adapter-owned shutdown and compensation
+remain available.
+
+The [owner verification](artifacts/provider-proof-fence/verification.md) records
+**278 passing tests, zero failures and zero skips** in two disjoint focused runs.
+CI Ruff, strict F checks on the new module and whitespace checks passed. Root and
+RT reviewed the source, which was cherry-picked without conflicts; this is not
+an additional root test run. The stricter exploratory lint findings are preserved
+and were not hidden by changing lint policy.
+
+This proves the bounded provider-family fence, not original PBX host/account
+identity or full recovery. The separate inbound lease-loss fallback still needs
+investigation when durable linked-leg context cannot be loaded. Unknown-provider
+and ambiguous-owner cases stay held.
+
+An [inbox health-write design experiment](2026-10-05-inbox-health-lock-design.md)
+passed seven isolated PostgreSQL concurrency cases with public rows/catalog state
+unchanged and all private objects removed. It supports one atomic parent/account
+write guarded by the failed authorization's generation. It is not application
+implementation proof. The earlier inbox retry draft was withheld when independent
+review found that canonical Gmail connections have no external subject ID; its
+compatibility correction is being verified against the actual OAuth/resolver path.
+
+Changes and evidence remain locally committed. No package, final gate, scenario,
+deferred item, provider acceptance or deployment status was promoted.
