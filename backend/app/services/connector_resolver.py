@@ -13,6 +13,9 @@ their existing dedicated services.
 from __future__ import annotations
 
 import logging
+import hashlib
+import json
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, List, Optional, Tuple
 
@@ -50,6 +53,60 @@ def verify_reviewed_connector(connector, connector_id, provider, reviewed) -> di
     return current
 
 
+@dataclass(frozen=True, repr=False)
+class ConnectorAuthorizationSnapshot:
+    """Private persistence proof; never a public or provider identity receipt."""
+
+    tenant_id: str
+    connector_id: str
+    provider: str
+    account_row_id: str
+    generation_sha256: str
+
+
+def _authorization_snapshot_for_row(tenant_id, connector_id, provider, row):
+    """Hash the exact stored generation, without retaining credential material."""
+    try:
+        identity = [tenant_id, connector_id, provider, str(row["id"])]
+        if any(not isinstance(value, str) or not value.strip() for value in identity):
+            return None
+        stored = {
+            key: row[key]
+            for key in (
+                "access_token_encrypted",
+                "refresh_token_encrypted",
+                "external_account_id",
+                "token_expires_at",
+                "last_refreshed_at",
+            )
+        }
+        if (
+            not isinstance(stored["access_token_encrypted"], str)
+            or not stored["access_token_encrypted"]
+        ):
+            return None
+        for key in ("refresh_token_encrypted", "external_account_id"):
+            if stored[key] is not None and not isinstance(stored[key], str):
+                return None
+        for key in ("token_expires_at", "last_refreshed_at"):
+            value = stored[key]
+            if value is not None:
+                parsed = (
+                    value
+                    if isinstance(value, datetime)
+                    else datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+                )
+                if parsed.tzinfo is None:
+                    parsed = parsed.replace(tzinfo=timezone.utc)
+                stored[key] = parsed.astimezone(timezone.utc).isoformat()
+        digest = hashlib.sha256(
+            json.dumps(stored, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+        return ConnectorAuthorizationSnapshot(*identity, digest)
+    except (KeyError, TypeError, ValueError, OverflowError):
+        return None
+
+
 class ConnectorNotConnectedError(Exception):
     """No active connector of the requested type for this tenant."""
 
@@ -61,11 +118,13 @@ class ConnectorNotConnectedError(Exception):
         connector_id: str | None = None,
         provider_confirmed: bool = False,
         reason: str | None = None,
+        authorization_snapshot: ConnectorAuthorizationSnapshot | None = None,
     ):
         self.connector_type = connector_type
         self.connector_id = connector_id
         self.provider_confirmed = provider_confirmed
         self.reason = reason
+        self.authorization_snapshot = authorization_snapshot
         self.message = message or (
             f"No {connector_type} integration is connected. "
             f"Connect it from the Connectors page (left sidebar)."
@@ -160,6 +219,15 @@ async def _refresh_and_store(
         detail = str(getattr(write, "error", None) or "no matching account row")
         logger.error("connector_resolver: token write-back failed for %s: %s", connector_id, detail)
         raise _ConnectorTokenStoreError(detail)
+    # The returned row is the database's acknowledged generation. Never
+    # re-encrypt to construct proof: encryption can produce different ciphertext.
+    stored_rows = write.data if isinstance(write.data, list) else [write.data]
+    stored_row = stored_rows[0] if len(stored_rows) == 1 else None
+    connector._authorization_snapshot = (
+        _authorization_snapshot_for_row(tenant_id, connector_id, connector.provider_name, stored_row)
+        if isinstance(stored_row, dict) and str(stored_row.get("id")) == account_id
+        else None
+    )
     return new_tokens.access_token
 
 
@@ -271,6 +339,7 @@ async def resolve_active_connector(
     should_refresh = False
     first_failure_id = str(rows[0]["id"])
     first_failure_reason = "access_unusable"
+    first_failure_snapshot = None
     for row in rows[:1]:
         cid = str(row["id"])
         account_query = (
@@ -298,6 +367,7 @@ async def resolve_active_connector(
         if account_id is not None and not account_rows:
             first_failure_reason = "account_unavailable"
         for arow in account_rows:
+            first_failure_snapshot = _authorization_snapshot_for_row(tenant_id, cid, row["provider"], arow)
             try:
                 candidate_access = enc.decrypt(arow["access_token_encrypted"])
                 if not candidate_access:
@@ -353,11 +423,13 @@ async def resolve_active_connector(
             unavailable_message,
             connector_id=first_failure_id,
             reason=first_failure_reason,
+            authorization_snapshot=first_failure_snapshot,
         )
 
     connector = ConnectorFactory.create(provider=provider, tenant_id=tenant_id, connector_id=connector_id)
     connector.external_account_id = str(acc_data.get("external_account_id") or "") or None
     connector.account_row_id = str(acc_data["id"])
+    connector._authorization_snapshot = _authorization_snapshot_for_row(tenant_id, connector_id, provider, acc_data)
     row_config = _coerce_config(rows[0].get("config") if isinstance(rows[0], dict) else None)
     if row_config is not None:
         connector.apply_config(row_config)
@@ -390,6 +462,7 @@ async def resolve_active_connector(
                     f"Your {connector_type} authorization expired. Please reconnect.",
                     connector_id=connector_id,
                     provider_confirmed=True,
+                    authorization_snapshot=connector._authorization_snapshot,
                 ) from exc
             raise
         except (httpx.TimeoutException, httpx.RequestError):

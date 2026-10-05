@@ -3,7 +3,7 @@
 import asyncio
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
@@ -71,7 +71,7 @@ async def test_refresh_cannot_read_a_replacement_identity(monkeypatch, account, 
     original, replacement = connector(), connector(account, provider)
     operation = AsyncMock(side_effect=[rejected(), {"wrong_account": True}])
     resolver = AsyncMock(return_value=(replacement, row, provider))
-    marker = Mock()
+    marker = AsyncMock()
     monkeypatch.setattr(connector_resolver, "resolve_active_connector", resolver)
     monkeypatch.setattr(inbox, "_mark_email_authorization_expired", marker)
 
@@ -181,7 +181,7 @@ async def test_other_failure_does_not_refresh(monkeypatch, failure):
 async def test_second_same_account_401_does_not_start_another_read(monkeypatch):
     operation = AsyncMock(side_effect=rejected())
     resolver = AsyncMock(return_value=(connector(), "connector-a", "gmail"))
-    marker = Mock()
+    marker = AsyncMock()
     monkeypatch.setattr(connector_resolver, "resolve_active_connector", resolver)
     monkeypatch.setattr(inbox, "_mark_email_authorization_expired", marker)
     with pytest.raises(ConnectorProviderError):
@@ -204,7 +204,7 @@ async def test_foreign_refresh_failure_cannot_expire_or_read_replacement(monkeyp
             ),
         ]
     )
-    marker = Mock()
+    marker = AsyncMock()
     monkeypatch.setattr(connector_resolver, "resolve_active_connector", resolver)
     monkeypatch.setattr(inbox, "_mark_email_authorization_expired", marker)
     result = (
@@ -234,7 +234,7 @@ async def test_actual_list_and_read_keep_result_contract(monkeypatch, list_mode,
     resolver = AsyncMock(
         side_effect=[(original, "connector-a", "gmail"), (refreshed, "connector-a", "gmail")]
     )
-    marker = Mock()
+    marker = AsyncMock()
     monkeypatch.setattr(connector_resolver, "resolve_active_connector", resolver)
     monkeypatch.setattr(inbox, "_mark_email_authorization_expired", marker)
 
@@ -469,7 +469,7 @@ async def test_actual_resolver_never_refreshes_replacement_after_first_401(
         raise rejected()
 
     monkeypatch.setattr(GmailConnector, "get_email", first_read)
-    marker = Mock()
+    marker = AsyncMock()
     monkeypatch.setattr(inbox, "_mark_email_authorization_expired", marker)
     result = await inbox.read_email("tenant-a", db, "synthetic-message")
     assert result["success"] is False
@@ -497,7 +497,7 @@ async def test_actual_resolver_does_not_retry_when_row_lost_during_refresh(
     refresh.side_effect = changed_during_refresh
     operation = AsyncMock(side_effect=[rejected(), EmailMessage(id="should-not-read")])
     monkeypatch.setattr(GmailConnector, "get_email", operation)
-    marker = Mock()
+    marker = AsyncMock()
     monkeypatch.setattr(inbox, "_mark_email_authorization_expired", marker)
     result = await inbox.read_email("tenant-a", db, "synthetic-message")
     assert result["success"] is False
@@ -505,3 +505,130 @@ async def test_actual_resolver_does_not_retry_when_row_lost_during_refresh(
     operation.assert_awaited_once()
     refresh.assert_awaited_once()
     marker.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_missing_refresh_does_not_expire_newer_credentials_after_original_401(
+    monkeypatch, canonical_gmail
+):
+    db, account, refresh = canonical_gmail
+
+    async def first_read(_self, _message_id):
+        account["access_token_encrypted"] = "synthetic:newer-authorization"
+        account["refresh_token_encrypted"] = None
+        account["last_refreshed_at"] = "2099-01-01T00:00:00Z"
+        raise rejected()
+
+    monkeypatch.setattr(GmailConnector, "get_email", first_read)
+    result = await inbox.read_email("tenant-a", db, "synthetic-message")
+    assert result["success"] is False
+    assert account["status"] == "active"
+    assert db.rows["connectors"][0]["status"] == "active"
+    refresh.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_unproven_initial_auth_failure_does_not_expire_any_account(
+    monkeypatch, canonical_gmail
+):
+    db, account, _refresh = canonical_gmail
+    monkeypatch.setattr(
+        connector_resolver,
+        "resolve_active_connector",
+        AsyncMock(
+            side_effect=connector_resolver.ConnectorNotConnectedError(
+                "email",
+                connector_id="connector-a",
+                provider_confirmed=True,
+            )
+        ),
+    )
+    result = await inbox.read_email("tenant-a", db, "synthetic-message")
+    assert result["success"] is False
+    assert account["status"] == "active"
+    assert db.rows["connectors"][0]["status"] == "active"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("initial", [False, True])
+async def test_provider_confirmed_refresh_error_carries_attempted_generation_once(
+    monkeypatch, canonical_gmail, initial
+):
+    db, account, refresh = canonical_gmail
+    if initial:
+        account["token_expires_at"] = "2020-01-01T00:00:00Z"
+    original = connector_resolver._authorization_snapshot_for_row(
+        "tenant-a", "connector-a", "gmail", account
+    )
+    refresh.side_effect = rejected()
+    monkeypatch.setattr(GmailConnector, "get_email", AsyncMock(side_effect=rejected()))
+    marker = AsyncMock(return_value=True)
+    monkeypatch.setattr(inbox, "_mark_email_authorization_expired", marker)
+    result = await inbox.read_email("tenant-a", db, "synthetic-message")
+    assert result["success"] is False
+    marker.assert_awaited_once()
+    assert marker.await_args.kwargs["authorization"] == original
+
+
+@pytest.mark.asyncio
+async def test_second_401_uses_only_refreshed_acknowledged_generation(monkeypatch, canonical_gmail):
+    db, account, refresh = canonical_gmail
+    original = connector_resolver._authorization_snapshot_for_row(
+        "tenant-a", "connector-a", "gmail", account
+    )
+    refresh.return_value = OAuthTokens(
+        access_token="synthetic-new-access", refresh_token="synthetic-new-refresh"
+    )
+    monkeypatch.setattr(GmailConnector, "get_email", AsyncMock(side_effect=rejected()))
+    marker = AsyncMock(return_value=True)
+    monkeypatch.setattr(inbox, "_mark_email_authorization_expired", marker)
+    result = await inbox.read_email("tenant-a", db, "synthetic-message")
+    assert result["success"] is False
+    current = connector_resolver._authorization_snapshot_for_row(
+        "tenant-a", "connector-a", "gmail", account
+    )
+    assert current != original
+    marker.assert_awaited_once()
+    assert marker.await_args.kwargs["authorization"] == current
+
+
+@pytest.mark.asyncio
+async def test_missing_refresh_passes_original_rejected_generation_not_newer_lookup(
+    monkeypatch, canonical_gmail
+):
+    db, account, refresh = canonical_gmail
+    original = connector_resolver._authorization_snapshot_for_row(
+        "tenant-a", "connector-a", "gmail", account
+    )
+
+    async def first_read(_self, _id):
+        account["access_token_encrypted"] = "synthetic:new-access"
+        account["refresh_token_encrypted"] = None
+        raise rejected()
+
+    monkeypatch.setattr(GmailConnector, "get_email", first_read)
+    marker = AsyncMock(return_value=False)
+    monkeypatch.setattr(inbox, "_mark_email_authorization_expired", marker)
+    await inbox.read_email("tenant-a", db, "synthetic-message")
+    marker.assert_awaited_once()
+    assert marker.await_args.kwargs["authorization"] == original
+    assert marker.await_args.kwargs[
+        "authorization"
+    ] != connector_resolver._authorization_snapshot_for_row(
+        "tenant-a", "connector-a", "gmail", account
+    )
+    refresh.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_unavailable_private_generation_does_not_break_valid_initial_read(
+    monkeypatch, canonical_gmail
+):
+    db, account, refresh = canonical_gmail
+    account["last_refreshed_at"] = "malformed-legacy-timestamp"
+    monkeypatch.setattr(
+        GmailConnector, "get_email", AsyncMock(return_value=EmailMessage(id="synthetic-message"))
+    )
+    result = await inbox.read_email("tenant-a", db, "synthetic-message")
+    assert result["success"] is True
+    refresh.assert_not_awaited()

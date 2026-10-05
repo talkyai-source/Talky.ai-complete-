@@ -311,7 +311,7 @@ async def test_read_emails_retries_one_401_after_forced_refresh(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_unrecoverable_401_downgrades_connector_status(monkeypatch):
+async def test_unrecoverable_401_without_generation_does_not_write_broad_status(monkeypatch):
     rejected = ConnectorProviderError(
         provider="gmail",
         operation="list_emails",
@@ -342,8 +342,8 @@ async def test_unrecoverable_401_downgrades_connector_status(monkeypatch):
     assert result["success"] is False
     assert result["email_required"] is True
     assert result["error_code"] == "email_not_connected"
-    assert ("connector_accounts", "update") in db.operations
-    assert ("connectors", "update") in db.operations
+    # Connector ID alone cannot identify the rejected credential generation.
+    assert db.operations == []
 
 
 @pytest.mark.asyncio
@@ -369,7 +369,7 @@ async def test_local_connector_failure_does_not_expire_database_status(monkeypat
 
 
 @pytest.mark.asyncio
-async def test_401_then_same_connector_missing_refresh_marks_expired(monkeypatch):
+async def test_401_then_missing_refresh_without_generation_does_not_write_broad_status(monkeypatch):
     rejected = ConnectorProviderError(
         provider="gmail",
         operation="list_emails",
@@ -398,8 +398,8 @@ async def test_401_then_same_connector_missing_refresh_marks_expired(monkeypatch
     result = await read_emails("tenant-1", db, max_results=5)
 
     assert result["error_code"] == "email_not_connected"
-    assert ("connector_accounts", "update") in db.operations
-    assert ("connectors", "update") in db.operations
+    # Connector ID alone cannot identify the rejected credential generation.
+    assert db.operations == []
 
 
 def test_status_health_rejects_missing_gmail_read_scope(monkeypatch):
