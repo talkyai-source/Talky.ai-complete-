@@ -469,10 +469,11 @@
       "plan_anchor": "ag02-make-knowledge-uncertainty-honest-and-verify-the-existing-retrieval-chain",
       "evidence": [
         "docs/sessions/2026-10-05-ag02-implementation.md",
-        "docs/sessions/artifacts/ag02/verification.json"
+        "docs/sessions/artifacts/ag02/verification.json",
+        "docs/sessions/artifacts/ag02-normalization/investigation.md"
       ],
-      "blocker": null,
-      "next_action": "Meet unchanged retrieval targets on approved campaign knowledge and complete reviewed provider/telephone acceptance; retain failed synthetic corpus evidence.",
+      "blocker": "Unchanged synthetic retrieval quality remains below the sufficient-evidence target. Two local normalization proposals were rejected after unrelated passages became answerable; no algorithm, dependency or threshold change was accepted. Approved representative campaign corpus and live/profile content review remain pending.",
+      "next_action": "Qualify existing ingestion/enrichment and source-only retrieval on a versioned content-owner-reviewed campaign corpus. Preserve the raw-source failure, rejected normalization evidence and unchanged quality thresholds; complete reviewed provider/telephone acceptance.",
       "target_date": null,
       "execution_note": "Local candidate 69d09fe575831c42a14b28c0a7417ca1b388c492: 791 combined backend and 9 PostgreSQL tests passed. Synthetic 60-question quality gate failed (pinned 93.33/71.11%, SQL 88.89/68.89%, targets 90/85%). No provider calls, push or deployment; no package closure."
     },
@@ -909,8 +910,8 @@
           "candidate": "5c26f311"
         }
       ],
-      "blocker": "All five remaining pre-intent pacing branches now preserve attempts; native DNC schema/persistence and speech are repaired locally. Lead finalization/retry suppression follow-up, ambiguous-owner reconciliation and actual queue/process/PBX acceptance remain open.",
-      "next_action": "Finish DNC finalization/outbox recovery without changing true call outcomes or newer attempt ownership, then complete designated failure/recovery acceptance.",
+      "blocker": "Pre-intent pacing attempts, native DNC persistence/speech, durable DNC settlement and bulk suppression are repaired locally. Selected warmup ownership under long ringing, ambiguous-owner reconciliation and actual queue/process/PBX acceptance remain open.",
+      "next_action": "Repair and verify selected warmup ownership and terminal admission races without changing true call outcomes, retry ownership or selected route; then complete designated failure/recovery acceptance.",
       "target_date": null
     },
     {

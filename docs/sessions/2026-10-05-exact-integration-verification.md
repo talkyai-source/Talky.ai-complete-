@@ -109,3 +109,20 @@ The local branch, candidate and tracked working tree were unchanged by the fetch
 [Exact metadata](artifacts/remote-baseline/read-only-main.json) records the check.
 This establishes source ancestry at that time, not the deployed revision, remote
 CI success or release approval. No push, merge or deployment occurred.
+
+## Rejected retrieval experiments
+
+The [AG02 investigation](artifacts/ag02-normalization/investigation.md) preserves
+two local normalization proposals and their counterexamples. Both were rejected:
+the original proposal admitted unrelated word stems, and the narrower plural
+proposal still admitted passages missing the question's critical noun. Its
+unchanged gold experiment improved sufficient evidence from 32/45 to 34/45,
+still below the existing 85% target. Those are prototype results only; the
+application remains at the recorded 32/45 pinned and 31/45 SQL baseline.
+
+Evidence-only commit `5ee81294` was integrated as `f0e1bc30`. No application,
+dependency, prompt, gold fixture or threshold changed. Deliberately failing
+experimental controls remain reproducible in the artifact directory and are
+not part of the normal unit suite. A content-owner-reviewed campaign corpus
+and qualification of existing ingestion/enrichment remain outstanding; neither
+enrichment nor local normalization is claimed to close the quality gap.
