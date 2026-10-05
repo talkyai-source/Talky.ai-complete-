@@ -6,12 +6,13 @@ Day 25: Meeting Booking Feature
 """
 import os
 import logging
+import re
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timedelta
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 import httpx
 
-from app.infrastructure.connectors.base import ConnectorFactory, OAuthTokens
+from app.infrastructure.connectors.base import ConnectorFactory, ConnectorProviderError, OAuthTokens
 from app.infrastructure.connectors.calendar.base import CalendarProvider, CalendarEvent, utc_datetime, available_intervals
 
 logger = logging.getLogger(__name__)
@@ -272,6 +273,28 @@ class OutlookCalendarConnector(CalendarProvider):
                 metadata={"webLink": data.get("webLink")}
             )
     
+    async def get_event_reference(self, event_id: str) -> str:
+        """Observe one saved default-calendar reference; never infer action success."""
+        if not isinstance(event_id, str) or re.fullmatch(r"(?!\.{1,2}$)[!-~]{1,512}", event_id) is None:
+            raise ValueError("Invalid saved event reference")
+        async with httpx.AsyncClient(timeout=10) as client:
+            response = await client.get(
+                f"{self.API_BASE_URL}/me/calendar/events/{quote(event_id, safe='')}",
+                headers=self._get_auth_headers(), params={"$select": "id"},
+            )
+        if response.status_code != 200:
+            raise ConnectorProviderError(
+                provider=self.provider_name, operation="get_event_reference",
+                category="not_found" if response.status_code in (404, 410) else "provider_error",
+                status_code=response.status_code, message="Calendar observation unavailable",
+            )
+        data = response.json()
+        # Project only the reference, without dates, subject, attendees,
+        # body, or provider diagnostics.
+        if not isinstance(data, dict) or data.get("id") != event_id:
+            raise ValueError("Calendar observation reference mismatch")
+        return event_id
+
     async def update_event(
         self,
         event_id: str,

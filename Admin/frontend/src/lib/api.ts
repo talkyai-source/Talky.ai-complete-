@@ -520,6 +520,15 @@ export interface EmailInspection {
     observed_message_id: string | null;
 }
 
+export interface CalendarInspection {
+    action_id: string;
+    outcome: 'observed_event' | 'not_observed' | 'unavailable';
+    reason: 'exact_event_observed_only' | 'absence_is_inconclusive' | 'saved_proof_unavailable'
+        | 'original_authorization_unavailable' | 'provider_read_unavailable';
+    observed_at: string;
+    observed_event_id: string | null;
+}
+
 export interface ActionDetail extends ActionItem {
     conversation_id: string | null;
     call_id: string | null;
@@ -531,6 +540,7 @@ export interface ActionDetail extends ActionItem {
     input_data: Record<string, unknown> | null;
     output_data: Record<string, unknown> | null;
     email_inspection_available?: boolean;
+    calendar_inspection_available?: boolean;
     saved_receipt?: {
         action_id: string;
         status: string;
@@ -1669,6 +1679,11 @@ class ApiClient {
 
     async inspectAdminEmailAction(actionId: string) {
         return this.request<EmailInspection>(`/admin/actions/${encodeURIComponent(actionId)}/email-inspection`,
+            { timeoutMs: 25000 });
+    }
+
+    async inspectAdminCalendarAction(actionId: string) {
+        return this.request<CalendarInspection>(`/admin/actions/${encodeURIComponent(actionId)}/calendar-inspection`,
             { timeoutMs: 25000 });
     }
 

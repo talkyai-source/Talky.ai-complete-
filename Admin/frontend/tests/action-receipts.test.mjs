@@ -342,3 +342,172 @@ test('Gmail API inspection makes one GET with only saved action ID', async () =>
         assert.equal(requests[0].options.method, 'GET'); assert.equal(requests[0].options.body, undefined);
     } finally { globalThis.fetch = original; }
 });
+
+const calendarItem = (id = 'A') => {
+    const item = inspectable(id);
+    item.type = 'book_meeting';
+    item.email_inspection_available = false;
+    item.calendar_inspection_available = true;
+    item.saved_receipt.receipt.provider = 'google_calendar';
+    item.saved_receipt.receipt.external_event_id = `event-${id}`;
+    delete item.saved_receipt.receipt.message_id;
+    return item;
+};
+const calendarResult = (id = 'A', outcome = 'observed_event', reason = 'exact_event_observed_only') => ({
+    action_id: id, outcome, reason, observed_event_id: outcome === 'observed_event' ? `event-${id}` : null,
+    observed_at: '2026-10-06T04:00:00Z',
+});
+const calendarButton = (tree) => walk(tree, (node) => node.type === 'button' && node.props.children === 'Inspect saved calendar event');
+
+test('calendar exact observation is explicit, one read, and never an active booking or completed action', async () => {
+    const h = hooks(), original = api.inspectAdminCalendarAction, item = calendarItem(), before = structuredClone(item);
+    let reads = 0, release;
+    api.inspectAdminCalendarAction = () => { reads++; return new Promise((resolve) => { release = resolve; }); };
+    try {
+        const tree = h.render(ActionReceiptPanel, { action: item });
+        assert.equal(reads, 0);
+        const click = calendarButton(tree).props.onClick;
+        click(); click(); assert.equal(reads, 1);
+        release({ data: calendarResult() }); await settle();
+        const html = renderToStaticMarkup(h.render(ActionReceiptPanel, { action: item }));
+        assert.match(html, /Exact event reference observed/);
+        assert.match(html, /cancelled or deleted reference/);
+        assert.match(html, /does not prove an active booking or that creation, update, or cancellation succeeded/);
+        assert.match(html, /Outcome unverified/); assert.match(html, /Observed event ID: event-A/);
+        assert.deepEqual(item, before);
+    } finally { h.close(); api.inspectAdminCalendarAction = original; }
+});
+
+for (const [outcome, reason] of [
+    ['not_observed', 'absence_is_inconclusive'], ['unavailable', 'saved_proof_unavailable'],
+    ['unavailable', 'original_authorization_unavailable'], ['unavailable', 'provider_read_unavailable'],
+]) {
+    test(`calendar ${reason} retains uncertainty without retry`, async () => {
+        const h = hooks(), original = api.inspectAdminCalendarAction, item = calendarItem();
+        api.inspectAdminCalendarAction = async () => ({ data: calendarResult('A', outcome, reason) });
+        try {
+            calendarButton(h.render(ActionReceiptPanel, { action: item })).props.onClick(); await settle();
+            const html = renderToStaticMarkup(h.render(ActionReceiptPanel, { action: item }));
+            assert.match(html, /Outcome unverified/);
+            assert.match(html, outcome === 'not_observed' ? /does not prove non-execution or make another calendar action safe/ : /Inspection unavailable/);
+            assert.doesNotMatch(html, />Retry<|>Resolve<|>Complete<|Observed event ID/);
+        } finally { h.close(); api.inspectAdminCalendarAction = original; }
+    });
+}
+
+for (const bad of ['action', 'event', 'outcome', 'reason', 'inherited', 'contradictory', 'wrong_field', 'throw']) {
+    test(`calendar ${bad} response cannot become an observation`, async () => {
+        const h = hooks(), original = api.inspectAdminCalendarAction, item = calendarItem(), result = calendarResult();
+        if (bad === 'action') result.action_id = 'B';
+        if (bad === 'event') result.observed_event_id = 'different';
+        if (bad === 'outcome') result.outcome = 'completed';
+        if (bad === 'reason') result.reason = 'booked';
+        if (bad === 'inherited') result.outcome = 'constructor';
+        if (bad === 'contradictory') result.reason = 'absence_is_inconclusive';
+        if (bad === 'wrong_field') { delete result.observed_event_id; result.observed_message_id = 'event-A'; }
+        api.inspectAdminCalendarAction = async () => {
+            if (bad === 'throw') throw new Error('private details');
+            return { data: result };
+        };
+        try {
+            calendarButton(h.render(ActionReceiptPanel, { action: item })).props.onClick(); await settle();
+            const html = renderToStaticMarkup(h.render(ActionReceiptPanel, { action: item }));
+            assert.match(html, /Inspection unavailable. Saved receipt unchanged/);
+            assert.doesNotMatch(html, /Observed event ID|private details/);
+        } finally { h.close(); api.inspectAdminCalendarAction = original; }
+    });
+}
+
+for (const change of ['action', 'event', 'account', 'kind']) {
+    test(`late calendar read is discarded when ${change} selection changes`, async () => {
+        const h = hooks(), original = api.inspectAdminCalendarAction, item = calendarItem();
+        let release;
+        api.inspectAdminCalendarAction = () => new Promise((resolve) => { release = resolve; });
+        try {
+            calendarButton(h.render(ActionReceiptPanel, { action: item })).props.onClick();
+            const replacement = change === 'action' ? calendarItem('B') : change === 'kind' ? inspectable() : structuredClone(item);
+            if (change === 'event') replacement.saved_receipt.receipt.external_event_id = 'new-event';
+            if (change === 'account') replacement.saved_receipt.receipt.account_row_id = 'new-row';
+            h.render(ActionReceiptPanel, { action: replacement });
+            release({ data: calendarResult() }); await settle();
+            const html = renderToStaticMarkup(h.render(ActionReceiptPanel, { action: replacement }));
+            assert.doesNotMatch(html, /Exact event reference observed|Observed event ID|Inspecting original/);
+        } finally { h.close(); api.inspectAdminCalendarAction = original; }
+    });
+}
+
+test('calendar unavailable, conflicting availability and mismatched receipt offer no inspection', () => {
+    for (const variant of ['unavailable', 'both', 'mismatched']) {
+        const h = hooks(), item = calendarItem();
+        if (variant === 'unavailable') item.calendar_inspection_available = false;
+        if (variant === 'both') item.email_inspection_available = true;
+        if (variant === 'mismatched') item.saved_receipt.action_id = 'B';
+        try {
+            const tree = h.render(ActionReceiptPanel, { action: item });
+            assert.equal(calendarButton(tree), null); assert.equal(inspectionButton(tree), null);
+        } finally { h.close(); }
+    }
+});
+
+for (const calendar of [false, true]) {
+    test(`${calendar ? 'calendar' : 'Gmail'} mixed response fields never substitute the displayed reference`, async () => {
+        const h = hooks(), method = calendar ? 'inspectAdminCalendarAction' : 'inspectAdminEmailAction', original = api[method];
+        const item = calendar ? calendarItem() : inspectable();
+        const result = calendar ? { ...calendarResult(), observed_message_id: 'foreign-reference' }
+            : { ...inspection(), observed_event_id: 'foreign-reference' };
+        api[method] = async () => ({ data: result });
+        try {
+            const tree = h.render(ActionReceiptPanel, { action: item });
+            (calendar ? calendarButton(tree) : inspectionButton(tree)).props.onClick(); await settle();
+            const html = renderToStaticMarkup(h.render(ActionReceiptPanel, { action: item }));
+            assert.match(html, calendar ? /Observed event ID: event-A/ : /Observed message ID: message-A/);
+            assert.doesNotMatch(html, /foreign-reference/);
+        } finally { h.close(); api[method] = original; }
+    });
+}
+
+for (const calendar of [false, true]) {
+    for (const reference of [undefined, '']) {
+        test(`${calendar ? 'calendar' : 'Gmail'} missing or blank matching references cannot prove an observation`, async () => {
+            const h = hooks(), method = calendar ? 'inspectAdminCalendarAction' : 'inspectAdminEmailAction', original = api[method];
+            const item = calendar ? calendarItem() : inspectable(), result = calendar ? calendarResult() : inspection();
+            item.saved_receipt.receipt[calendar ? 'external_event_id' : 'message_id'] = reference;
+            result[calendar ? 'observed_event_id' : 'observed_message_id'] = reference;
+            api[method] = async () => ({ data: result });
+            try {
+                const tree = h.render(ActionReceiptPanel, { action: item });
+                (calendar ? calendarButton(tree) : inspectionButton(tree)).props.onClick(); await settle();
+                const html = renderToStaticMarkup(h.render(ActionReceiptPanel, { action: item }));
+                assert.match(html, /Inspection unavailable. Saved receipt unchanged/);
+                assert.doesNotMatch(html, /Observed event ID|Observed message ID|Observed at:/);
+            } finally { h.close(); api[method] = original; }
+        });
+    }
+    for (const timestamp of [{ private: 'bad value' }, [], 'invalid timestamp']) {
+        test(`${calendar ? 'calendar' : 'Gmail'} invalid ${typeof timestamp} timestamp is rejected before rendering`, async () => {
+            const h = hooks(), method = calendar ? 'inspectAdminCalendarAction' : 'inspectAdminEmailAction', original = api[method];
+            const item = calendar ? calendarItem() : inspectable();
+            const result = calendar ? calendarResult() : inspection();
+            result.observed_at = timestamp;
+            api[method] = async () => ({ data: result });
+            try {
+                const tree = h.render(ActionReceiptPanel, { action: item });
+                (calendar ? calendarButton(tree) : inspectionButton(tree)).props.onClick(); await settle();
+                const html = renderToStaticMarkup(h.render(ActionReceiptPanel, { action: item }));
+                assert.match(html, /Inspection unavailable. Saved receipt unchanged/);
+                assert.doesNotMatch(html, /Observed at:|Observed event ID|Observed message ID|bad value/);
+            } finally { h.close(); api[method] = original; }
+        });
+    }
+}
+
+test('calendar API inspection makes one exact GET with no caller-supplied account or mutation payload', async () => {
+    const original = globalThis.fetch, requests = [];
+    globalThis.fetch = async (url, options) => { requests.push({ url, options }); return new Response(JSON.stringify(calendarResult())); };
+    try {
+        await api.inspectAdminCalendarAction('A/B');
+        assert.equal(requests.length, 1);
+        assert.match(requests[0].url, /\/admin\/actions\/A%2FB\/calendar-inspection$/);
+        assert.equal(requests[0].options.method, 'GET'); assert.equal(requests[0].options.body, undefined);
+    } finally { globalThis.fetch = original; }
+});

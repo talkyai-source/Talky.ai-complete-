@@ -55,8 +55,19 @@ _EMAIL_PROOF_FIELDS = ("identity_version", "tenant_id", "connector_id", "provide
 
 
 def _gmail_inspection_bundle(row):
+    return _saved_inspection_bundle(row, action_types=("send_email",), providers=("gmail",),
+                                    reference_key="message_id", reference_pattern=r"[A-Za-z0-9_-]{1,256}")
+
+
+def _calendar_inspection_bundle(row):
+    return _saved_inspection_bundle(row, action_types=("book_meeting", "update_meeting", "cancel_meeting"),
+                                    providers=("google_calendar", "outlook_calendar"),
+                                    reference_key="external_event_id", reference_pattern=r"(?!\.{1,2}$)[!-~]{1,512}")
+
+
+def _saved_inspection_bundle(row, *, action_types, providers, reference_key, reference_pattern):
     """One co-persisted proof/reference, never a flattened or inferred receipt."""
-    if row.get("type") != "send_email":
+    if row.get("type") not in action_types:
         return None
     output = _object(row.get("output_data"))
     nested = output.get("provider_result")
@@ -65,14 +76,14 @@ def _gmail_inspection_bundle(row):
     sources = [output] + ([nested] if isinstance(nested, dict) else [])
     if any(source.get("action_id") is not None and str(source["action_id"]) != str(row.get("id")) for source in sources):
         return None
-    evidence = [source for source in sources if any(key in source for key in (*_EMAIL_PROOF_FIELDS, "message_id"))]
+    evidence = [source for source in sources if any(key in source for key in (*_EMAIL_PROOF_FIELDS, reference_key))]
     if not evidence:
         return None
     bundles = []
     for source in evidence:
         # A partial contradictory wrapper is not silently ignored or stitched
         # to a nested result. Bulk receipts require their own supported contract.
-        if "receipts" in source or source.get("identity_version") != "authorization_row_v1" or source.get("provider") != "gmail":
+        if "receipts" in source or source.get("identity_version") != "authorization_row_v1" or source.get("provider") not in providers:
             return None
         try:
             proof = {key: source[key] for key in _EMAIL_PROOF_FIELDS if key != "external_account_id"}
@@ -88,8 +99,8 @@ def _gmail_inspection_bundle(row):
             return None
         if external is not None:
             proof["external_account_id"] = external
-        message_id = source.get("message_id")
-        if not isinstance(message_id, str) or re.fullmatch(r"[A-Za-z0-9_-]{1,256}", message_id) is None:
+        message_id = source.get(reference_key)
+        if not isinstance(message_id, str) or re.fullmatch(reference_pattern, message_id) is None:
             return None
         if row.get("connector_id") is not None and str(row["connector_id"]) != proof["connector_id"]:
             return None
@@ -109,7 +120,8 @@ def _gmail_inspection_bundle(row):
     for reviewed in reviewed_proofs:
         if not isinstance(reviewed, dict) or any(reviewed.get(key) != proof.get(key) for key in _EMAIL_PROOF_FIELDS):
             return None
-    if any("receipts" in source or "message_ids" in source for source in sources):
+    bulk_keys = ("receipts", "message_ids") + (("event_ids", "external_event_ids") if reference_key == "external_event_id" else ())
+    if any(any(key in source for key in bulk_keys) for source in sources):
         return None
     return proof, message_id
 
@@ -121,6 +133,15 @@ class EmailInspection(AdminResponseModel):
                     "original_authorization_unavailable", "provider_read_unavailable"]
     observed_at: str
     observed_message_id: Optional[str] = None
+
+
+class CalendarInspection(AdminResponseModel):
+    action_id: str
+    outcome: Literal["observed_event", "not_observed", "unavailable"]
+    reason: Literal["exact_event_observed_only", "absence_is_inconclusive", "saved_proof_unavailable",
+                    "original_authorization_unavailable", "provider_read_unavailable"]
+    observed_at: str
+    observed_event_id: Optional[str] = None
 
 
 def _is_callback(row):
@@ -202,6 +223,7 @@ class ActionDetail(AdminResponseModel):
     output_data: Optional[dict] = None
     saved_receipt: Optional[dict] = None
     email_inspection_available: bool = False
+    calendar_inspection_available: bool = False
     error: Optional[str] = None
     
     # Audit
@@ -382,6 +404,8 @@ async def get_admin_action_detail(
             saved_receipt=public_action_receipt(action),
             email_inspection_available=(normalize_role(admin_user.role) == UserRole.PLATFORM_ADMIN
                                         and _gmail_inspection_bundle(action) is not None),
+            calendar_inspection_available=(normalize_role(admin_user.role) == UserRole.PLATFORM_ADMIN
+                                           and _calendar_inspection_bundle(action) is not None),
             error=action.get("error"),
             ip_address=str(action["ip_address"]) if action.get("ip_address") else None,
             user_agent=action.get("user_agent"),
@@ -457,6 +481,64 @@ async def inspect_admin_email_action(
         return observation("observed_message", "exact_message_observed_only", message_id)
     except ConnectorProviderError as exc:
         if exc.provider == "gmail" and exc.operation == "get_email" and exc.status_code == 404:
+            return observation("not_observed", "absence_is_inconclusive")
+        return observation("unavailable", "provider_read_unavailable")
+    except Exception:
+        return observation("unavailable", "provider_read_unavailable")
+
+
+@router.get("/actions/{action_id}/calendar-inspection", response_model=CalendarInspection)
+async def inspect_admin_calendar_action(
+    action_id: UUID,
+    response: Response,
+    admin_user: CurrentUser = Depends(require_platform_admin),
+    db_client: Client = Depends(get_db_client),
+):
+    """Observe the saved event in its original authorization without effects."""
+    response.headers["Cache-Control"] = "no-store"
+    selected_id = str(action_id)
+
+    def observation(outcome, reason, event_id=None):
+        return CalendarInspection(action_id=selected_id, outcome=outcome, reason=reason,
+                                  observed_at=datetime.now(timezone.utc).isoformat(), observed_event_id=event_id)
+
+    try:
+        saved = db_client.table("assistant_actions").select(
+            "id,tenant_id,type,connector_id,input_data,output_data").eq("id", selected_id).single().execute()
+        if getattr(saved, "error", None):
+            raise RuntimeError("Saved action lookup unavailable")
+        if not saved.data:
+            raise HTTPException(status_code=404, detail="Action not found")
+        if str(saved.data.get("id")) != selected_id:
+            raise RuntimeError("Saved action identity mismatch")
+        bundle = _calendar_inspection_bundle(saved.data)
+        if bundle is None:
+            return observation("unavailable", "saved_proof_unavailable")
+        proof, event_id = bundle
+    except HTTPException:
+        raise
+    except Exception:
+        return observation("unavailable", "saved_proof_unavailable")
+
+    try:
+        async with asyncio.timeout(10):
+            connector, connector_id, provider = await resolve_active_connector(
+                db_client, proof["tenant_id"], "calendar", read_only=True,
+                provider=proof["provider"], connector_id=proof["connector_id"], account_id=proof["account_row_id"],
+                external_account_id=proof.get("external_account_id"),
+            )
+            verify_reviewed_authorization(connector, connector_id, provider, proof)
+    except Exception:
+        return observation("unavailable", "original_authorization_unavailable")
+
+    try:
+        async with asyncio.timeout(10):
+            observed_id = await connector.get_event_reference(event_id)
+        if observed_id != event_id:
+            return observation("unavailable", "provider_read_unavailable")
+        return observation("observed_event", "exact_event_observed_only", event_id)
+    except ConnectorProviderError as exc:
+        if exc.provider == provider and exc.operation == "get_event_reference" and exc.status_code in (404, 410):
             return observation("not_observed", "absence_is_inconclusive")
         return observation("unavailable", "provider_read_unavailable")
     except Exception:
