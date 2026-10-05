@@ -6,6 +6,8 @@ This is the execution plan for making the existing product worth paying for. It 
 
 **Feature freeze: no unrelated feature work, new providers, new offerings or broad redesigns until this plan meets its completion criteria.** Existing features must become dependable before the product grows. Correctness repairs, necessary small persistence changes, acceptance tests, documentation and the existing release procedure are within scope. Changing a model, adding prompt rules or hiding a screen is not evidence of production readiness.
 
+**Repository follow-up — 5 October 2026:** The [regression checkpoint](sessions/2026-10-05-repository-regression-checkpoint.md) records native DNC schema/persistence/speech, pacing, authentication and recording-privacy repairs; 774 dashboard checks passed, while the latest whole-backend run retains one replay-contract failure (11,749 passed, 20 skipped). Four PostgreSQL fixture failures have focused corrections; combined exact-dependency verification and DNC finalization remain in progress. No final gate or package is closed.
+
 ## 1 Fixed scope and baseline
 
 The baseline is frozen to the findings already reported. Confirmed defects require repairs. Design risks require a bounded reproduction or proof before deciding whether code must change. Unknown quality requires measurement. Candidate repairs require preservation, integration and deployment verification, not automatic reimplementation.

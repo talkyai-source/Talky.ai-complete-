@@ -53,7 +53,16 @@
     "op05_hold_followup_commit": "d26f0ff026c76c1ca53ad710fcee249a7116787a",
     "op07_recording_commit": "84ab5bfbc6f58595487b09ba44fd574f18012ebd",
     "op11_reporting_commit": "3f43d397e4e0e0c976416a6d12c2b160502b9954",
-    "operations_validation_commit": "fec31d4b94d9ad97fc5b26b643aedeaedfd03d64"
+    "operations_validation_commit": "fec31d4b94d9ad97fc5b26b643aedeaedfd03d64",
+    "dnc_schema_commit": "5d1dac42fc91bac702ce295cfd8b5f064d003bca",
+    "native_dnc_persistence_commit": "1da5c253f307fdd6060a80826d35f12edd79583f",
+    "native_dnc_speech_commit": "d7fecbaa6d8d16edaa5bc6a4e87ec645c8e9dd82",
+    "pacing_followup_commit": "b875585fbf8b590bfc5f139e8bf4f20a56b3da64",
+    "recording_privacy_commit": "c632f3535b030e58c3e9245f11fe6670f0c26a67",
+    "api_auth_availability_commit": "12b262435636fb5ef2a342509bd97d858633fb8f",
+    "postgres_matrix_fixture_commit": "3435fe353d10b5ff97b5785a3d73068273606ba7",
+    "retention_copy_commit": "db482b89d6072ff45b18e7647939278d8d57b0ae",
+    "migrated_ci_extension_commit": "91e37616461a9ed4849ab7564350945c15eb915a"
   },
   "status_rules": {
     "execution": [
@@ -111,6 +120,10 @@
         {
           "path": "docs/sessions/2026-10-04-cp01-public-claims.md",
           "kind": "bounded_claim_inventory"
+        },
+        {
+          "path": "docs/sessions/2026-10-05-op07-data-lifecycle-inventory.md",
+          "kind": "bounded_local_followup_not_release_acceptance"
         }
       ],
       "blocker": "Code and local boundary checks complete. Automatic approval review blocked final loopback Next preview launch (blocked by policy). Production configuration, intake owner/retention and release acceptance remain unverified.",
@@ -153,7 +166,7 @@
         }
       ],
       "blocker": "Approved monthly/annual provider price mappings and designated-account signed lifecycle evidence are unverified. CP03 webhook recovery/order, CP04 invoice truth, CP06 communication/cancellation and legacy open-checkout reconciliation remain release dependencies. Annual containment and card-only checkout are not full billing completion.",
-      "next_action": "Proceed to CP03 durable webhook recovery; obtain approved price mappings, reconcile legacy pending sessions and complete designated-account/browser acceptance before release. Preserve existing calendar-month allowance pending billing-owner acceptance.",
+      "next_action": "Obtain approved price mappings, reconcile legacy pending sessions and complete designated-account/browser acceptance. Preserve existing calendar-month allowance pending billing-owner acceptance.",
       "target_date": null
     },
     {
@@ -354,6 +367,10 @@
         {
           "path": "docs/production-readiness/first-call-setup.md",
           "kind": "existing_journey_guide_not_customer_acceptance"
+        },
+        {
+          "path": "docs/sessions/2026-10-05-api-auth-availability-repair.md",
+          "kind": "bounded_local_followup_not_release_acceptance"
         }
       ],
       "blocker": "Designated inbox/device/browser recovery, cross-tab cookie behavior, deployed compatibility, first authorized call and operator reconciliation remain unverified. The advertised staff invitation/acceptance journey is absent; assisted setup does not close F05.",
@@ -383,7 +400,7 @@
       "plan_anchor": "cp09-supportability-and-decisive-customer-ux-acceptance",
       "evidence": [],
       "blocker": null,
-      "next_action": "Deferred for later at the user’s request on 5 October 2026. Leave unfinished and retain all existing findings and acceptance requirements. AG01 is the next package to discuss; CP08 remains planned and unstarted, without an explicit deferral. Existing CP07 gaps and the feature freeze remain unchanged.",
+      "next_action": "Deferred at the user’s request on 5 October 2026. Preserve findings and acceptance requirements; do not resume. CP08 and eligible agent/operating packages remain in progress.",
       "target_date": null
     },
     {
@@ -410,10 +427,14 @@
       "plan_anchor": "ag01-make-the-saved-profile-equal-the-effective-runtime-profile",
       "evidence": [
         "docs/sessions/2026-10-05-ag01-implementation.md",
-        "docs/sessions/artifacts/ag01/verification.json"
+        "docs/sessions/artifacts/ag01/verification.json",
+        {
+          "path": "docs/sessions/2026-10-05-branding-inventory-regressions.md",
+          "kind": "bounded_local_followup_not_release_acceptance"
+        }
       ],
       "blocker": null,
-      "next_action": "Verify coordinated release and designated live profiles; retain CP08 shared HTTP identity boundary and outstanding full-repository checks. Continue AG02 knowledge correctness next; no readiness closure.",
+      "next_action": "Verify the coordinated release and designated live profiles; finish exact-dependency combined verification while preserving the shared HTTP identity boundary. No readiness closure.",
       "target_date": null,
       "execution_note": "Local candidate 4f47123f: 818 backend passes/1 skip, 38 focused frontend passes, typecheck/build/CI-rule Ruff/scoped ESLint pass. Broader frontend 673 passes/1 baseline failure/2 skips; full lint has baseline configuration error. No real provider calls, migration, push or deployment."
     },
@@ -441,7 +462,7 @@
         "docs/sessions/artifacts/ag02/verification.json"
       ],
       "blocker": null,
-      "next_action": "Meet the unchanged corpus targets on approved campaign knowledge and run reviewed provider/telephone acceptance; continue AG03 deterministic relationship memory work.",
+      "next_action": "Meet unchanged retrieval targets on approved campaign knowledge and complete reviewed provider/telephone acceptance; retain failed synthetic corpus evidence.",
       "target_date": null,
       "execution_note": "Local candidate 69d09fe575831c42a14b28c0a7417ca1b388c492: 791 combined backend and 9 PostgreSQL tests passed. Synthetic 60-question quality gate failed (pinned 93.33/71.11%, SQL 88.89/68.89%, targets 90/85%). No provider calls, push or deployment; no package closure."
     },
@@ -517,7 +538,7 @@
         }
       ],
       "blocker": "Captured Groq semantic failure retained. Proposed matrix37/50mapped by offline replay; intended profile roster/rubric/cohort unratified; live/human/audio/effect acceptance not run. AG02 retrieval gate remains failed.",
-      "next_action": "Continue AG05 source-revision and durable Leads repairs; complete missing common-runner conditions and authorized per-profile/human/telephone acceptance without treating canned output as model approval.",
+      "next_action": "Correct the native replay persistence prerequisite, then address meaningful missing common-runner boundaries and authorized per-profile/human/telephone acceptance. Preserve the captured semantic failure.",
       "target_date": null,
       "execution_note": "1797 tests passed0skip;170offline rows1120controlchecks0failed;1retained semantic failure/169unreviewed. Local source commit only; no provider call/push/deploy."
     },
@@ -555,7 +576,7 @@
         }
       ],
       "blocker": "Local source, persistence and display repairs pass. Exact contact cohort accuracy, qualification precision/recall and correction burden, real Sales Hub browser acceptance, connector frozen-payload handling and release acceptance remain unverified. Same-process retry cannot recover evidence that was never committed before process death.",
-      "next_action": "Continue AG06 current/frozen connector evidence, original account and unknown-outcome handling; obtain approved cohort/profile and complete real browser/live acceptance before claiming AG05 closure.",
+      "next_action": "Complete approved cohort/profile, browser and real connector acceptance for saved source/confirmation evidence. Retain unknown save states and no unsupported contact confirmation.",
       "target_date": null
     },
     {
@@ -818,10 +839,18 @@
           "path": "docs/sessions/2026-10-05-operations-integration-checkpoint.md",
           "kind": "integrated_verification_with_limits",
           "candidate": "d26f0ff026c76c1ca53ad710fcee249a7116787a"
+        },
+        {
+          "path": "docs/sessions/2026-10-05-op05-pacing-holds.md",
+          "kind": "bounded_local_followup_not_release_acceptance"
+        },
+        {
+          "path": "docs/sessions/2026-10-05-dnc-schema-verification.md",
+          "kind": "bounded_local_followup_not_release_acceptance"
         }
       ],
-      "blocker": "Same-attempt holds and durable due ownership are repaired locally. Ambiguous owners require reconciliation; real Redis/process/PBX lifecycle and native DNC acceptance remain unfinished.",
-      "next_action": "Complete in-scope DNC persistence and approved failure/recovery acceptance without age-only ownership release or blind origination replay.",
+      "blocker": "All five remaining pre-intent pacing branches now preserve attempts; native DNC schema/persistence and speech are repaired locally. Lead finalization/retry suppression follow-up, ambiguous-owner reconciliation and actual queue/process/PBX acceptance remain open.",
+      "next_action": "Finish DNC finalization/outbox recovery without changing true call outcomes or newer attempt ownership, then complete designated failure/recovery acceptance.",
       "target_date": null
     },
     {
@@ -888,10 +917,22 @@
           "path": "docs/sessions/2026-10-05-operations-integration-checkpoint.md",
           "kind": "integrated_verification_with_limits",
           "candidate": "d26f0ff026c76c1ca53ad710fcee249a7116787a"
+        },
+        {
+          "path": "docs/sessions/2026-10-05-dnc-schema-verification.md",
+          "kind": "bounded_local_followup_not_release_acceptance"
+        },
+        {
+          "path": "docs/sessions/2026-10-05-native-dnc-speech-verification.md",
+          "kind": "bounded_local_followup_not_release_acceptance"
+        },
+        {
+          "path": "docs/sessions/2026-10-05-op07-data-lifecycle-inventory.md",
+          "kind": "bounded_local_followup_not_release_acceptance"
         }
       ],
-      "blocker": "Recording ownership/policy/delivery receipts repaired locally. Native DNC, approved retention/export/delete rules and per-store operating acceptance remain unfinished.",
-      "next_action": "Finish the bounded native DNC repair, then validate existing authorized recording/data lifecycle against approved rules and designated stores.",
+      "blocker": "Native DNC persistence/speech and recording creation boundaries are repaired locally. DNC lead/retry settlement follow-up and approved retention/export/delete rules with per-store execution remain open.",
+      "next_action": "Integrate verified DNC settlement/bulk acknowledgement repair; complete approved recording/data lifecycle and reconcile deployed supplier/retention promises.",
       "target_date": null
     },
     {
@@ -1016,6 +1057,10 @@
           "path": "docs/sessions/2026-10-05-operations-integration-checkpoint.md",
           "kind": "integrated_verification_with_limits",
           "candidate": "d26f0ff026c76c1ca53ad710fcee249a7116787a"
+        },
+        {
+          "path": "docs/sessions/2026-10-05-op11-recording-privacy.md",
+          "kind": "bounded_local_followup_not_release_acceptance"
         }
       ],
       "blocker": "Supplier-cost ingestion/reconciliation is unavailable; deployed privilege and filesystem/account scopes have not been exercised.",
@@ -1046,6 +1091,10 @@
           "path": "docs/sessions/2026-10-05-operating-acceptance-baseline.md",
           "kind": "existing_offline_control_validation_and_remaining_acceptance",
           "candidate": "e5cfff12773b259db516ab76ad53d417c3f5edc0"
+        },
+        {
+          "path": "docs/sessions/2026-10-05-repository-regression-checkpoint.md",
+          "kind": "bounded_local_followup_not_release_acceptance"
         }
       ],
       "blocker": null,
@@ -1099,10 +1148,14 @@
             "backend/app/domain/services/minutes_quota.py:118",
             "backend/app/domain/services/voice_pipeline/tts_playback.py:469"
           ]
+        },
+        {
+          "path": "docs/sessions/2026-10-05-repository-regression-checkpoint.md",
+          "kind": "bounded_local_followup_not_release_acceptance"
         }
       ],
       "blocker": null,
-      "next_action": "Complete current main/candidate/deployment reconciliation and preserve existing fixes, then execute CP01 within the fixed scope. Local coding-defect review is complete; full RG01 is not.",
+      "next_action": "Complete remaining integrated regressions with exact declared dependency versions and current candidate/main/deployment reconciliation; retain original user work and evidence. No deployment proof is inferred from local checks.",
       "target_date": null
     },
     {

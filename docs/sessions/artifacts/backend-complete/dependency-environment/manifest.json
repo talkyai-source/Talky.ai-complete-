@@ -1,0 +1,62 @@
+{
+  "created_utc": "2026-10-05T04:54:07.8987335Z",
+  "requirements_sha256": "2564e9ed1f871f5597bba5830149cfdfab706ac27c5215263b20377bad6f9915",
+  "requirements_last_change": "30faff4840db9ebb2803e0bbdce4b9ce1cb6d9a7",
+  "python": "C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/backend/.venv/Scripts/python.exe",
+  "target": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\postgres-matrix-20261005\\tmp\\exact-requirements-20261005/packages",
+  "lua_fallback": "C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/tmp/production-ready-ag07-20261005/tmp/op02-testdeps",
+  "pythonpath_order": [
+    "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\postgres-matrix-20261005\\tmp\\exact-requirements-20261005/packages",
+    "C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/tmp/production-ready-ag07-20261005/tmp/op02-testdeps"
+  ],
+  "install_arguments": [
+    "-m",
+    "pip",
+    "install",
+    "--target",
+    "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\postgres-matrix-20261005\\tmp\\exact-requirements-20261005/packages",
+    "--no-deps",
+    "urllib3==2.8.0",
+    "PyJWT==2.15.1"
+  ],
+  "verification_arguments": [
+    "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\postgres-matrix-20261005\\tmp\\exact-requirements-20261005/verify_parity.py",
+    "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\production-ready-20261004\\backend\\requirements.txt",
+    "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\postgres-matrix-20261005\\tmp\\exact-requirements-20261005/overlay-parity.json",
+    "--expected-target",
+    "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\postgres-matrix-20261005\\tmp\\exact-requirements-20261005/packages"
+  ],
+  "active_declared_requirements": 62,
+  "mismatches_before": [
+    {
+      "requirement": "urllib3==2.8.0",
+      "active": true,
+      "installed": "2.7.0",
+      "satisfied": false
+    },
+    {
+      "requirement": "PyJWT==2.15.1",
+      "active": true,
+      "installed": "2.13.0",
+      "satisfied": false
+    }
+  ],
+  "mismatches_after": [],
+  "default_shared_imports_unchanged": true,
+  "artifacts": [
+    "pip-install.txt",
+    "verify_parity.py",
+    "base-parity.json",
+    "overlay-parity.json",
+    "overlay-plus-lua-parity.json",
+    "lua-import.txt",
+    "base-after-parity.json"
+  ],
+  "explanation": "Requirements gained these exact pins in30faff48; the shared original venv still resolves the previously installed versions. Source checkouts do not synchronize a pre-existing venv. No installer history establishes why it was not refreshed; older-version runs remain useful but cannot be labeled exact-pin verification.",
+  "limits": [
+    "No shared original venv or tracked requirements changed.",
+    "All62 active declared version requirements satisfy their markers/specifiers; this is not a new clean resolver environment or all-transitive-package audit.",
+    "No tests, live providers, or database actions performed by this dependency task.",
+    "The task-only target must precede the test-only Lua fallback in PYTHONPATH for the parent follow-up run."
+  ]
+}
