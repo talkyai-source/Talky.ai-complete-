@@ -1,0 +1,43 @@
+{
+  "result": {
+    "success": false,
+    "error": "No email integration is connected. Connect it from the Connectors page (left sidebar).",
+    "email_required": true,
+    "error_code": "email_not_connected"
+  },
+  "replacement_rows": {
+    "connector_accounts": {
+      "connector_id": "synthetic-connector",
+      "tenant_id": "synthetic-tenant",
+      "external_account_id": "synthetic-replacement-b",
+      "status": "expired"
+    },
+    "connectors": {
+      "id": "synthetic-connector",
+      "tenant_id": "synthetic-tenant",
+      "status": "expired"
+    }
+  },
+  "observed_writes": [
+    {
+      "table": "connector_accounts",
+      "filters": {
+        "connector_id": "synthetic-connector",
+        "tenant_id": "synthetic-tenant",
+        "status": "active"
+      },
+      "matched": true
+    },
+    {
+      "table": "connectors",
+      "filters": {
+        "id": "synthetic-connector",
+        "tenant_id": "synthetic-tenant",
+        "status": "active"
+      },
+      "matched": true
+    }
+  ],
+  "real_database_operations": 0,
+  "provider_calls": 0
+}

@@ -1,0 +1,58 @@
+FF                                                                       [100%]
+================================== FAILURES ===================================
+____ test_foreign_refresh_failure_cannot_expire_or_read_replacement[False] ____
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000029804832120>
+list_mode = False
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("list_mode", [False, True])
+    async def test_foreign_refresh_failure_cannot_expire_or_read_replacement(monkeypatch, list_mode):
+        original = connector()
+        method = "list_emails" if list_mode else "get_email"
+        setattr(original, method, AsyncMock(side_effect=rejected()))
+        resolver = AsyncMock(side_effect=[(original, "connector-a", "gmail"),
+            connector_resolver.ConnectorNotConnectedError("email", connector_id="connector-b",
+                                                         provider_confirmed=True)])
+        marker = Mock()
+        monkeypatch.setattr(connector_resolver, "resolve_active_connector", resolver)
+        monkeypatch.setattr(inbox, "_mark_email_authorization_expired", marker)
+        result = (await inbox.read_emails("tenant-a", object()) if list_mode
+                  else await inbox.read_email("tenant-a", object(), "synthetic-message"))
+        assert result["success"] is False
+>       assert result["error_code"] == "email_account_changed"
+E       AssertionError: assert 'email_not_connected' == 'email_account_changed'
+E         - email_account_changed
+E         + email_not_connected
+
+tests\unit\test_inbox_original_account.py:157: AssertionError
+____ test_foreign_refresh_failure_cannot_expire_or_read_replacement[True] _____
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000029804867FE0>
+list_mode = True
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("list_mode", [False, True])
+    async def test_foreign_refresh_failure_cannot_expire_or_read_replacement(monkeypatch, list_mode):
+        original = connector()
+        method = "list_emails" if list_mode else "get_email"
+        setattr(original, method, AsyncMock(side_effect=rejected()))
+        resolver = AsyncMock(side_effect=[(original, "connector-a", "gmail"),
+            connector_resolver.ConnectorNotConnectedError("email", connector_id="connector-b",
+                                                         provider_confirmed=True)])
+        marker = Mock()
+        monkeypatch.setattr(connector_resolver, "resolve_active_connector", resolver)
+        monkeypatch.setattr(inbox, "_mark_email_authorization_expired", marker)
+        result = (await inbox.read_emails("tenant-a", object()) if list_mode
+                  else await inbox.read_email("tenant-a", object(), "synthetic-message"))
+        assert result["success"] is False
+>       assert result["error_code"] == "email_account_changed"
+E       AssertionError: assert 'email_not_connected' == 'email_account_changed'
+E         - email_account_changed
+E         + email_not_connected
+
+tests\unit\test_inbox_original_account.py:157: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/unit/test_inbox_original_account.py::test_foreign_refresh_failure_cannot_expire_or_read_replacement[False]
+FAILED tests/unit/test_inbox_original_account.py::test_foreign_refresh_failure_cannot_expire_or_read_replacement[True]
+2 failed, 18 deselected in 1.32s

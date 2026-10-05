@@ -1,0 +1,37 @@
+{
+  "source_sha256": "8792179ff1fcd27d1d6b108d9c24b6a240f4165a1a166723a46a71abd5ed85c2",
+  "observations": [
+    {
+      "refresh_account": "synthetic-b",
+      "observed_accounts": [
+        "synthetic-a"
+      ],
+      "result": null,
+      "error_type": "ReviewedConnectorChanged",
+      "resolver_kwargs": {
+        "force_refresh": true,
+        "connector_id": "synthetic-connector",
+        "provider": "gmail"
+      }
+    },
+    {
+      "refresh_account": "synthetic-a",
+      "observed_accounts": [
+        "synthetic-a",
+        "synthetic-a"
+      ],
+      "result": {
+        "message_id": "synthetic-message",
+        "read_account": "synthetic-a"
+      },
+      "error_type": null,
+      "resolver_kwargs": {
+        "force_refresh": true,
+        "connector_id": "synthetic-connector",
+        "provider": "gmail"
+      }
+    }
+  ],
+  "provider_calls": 0,
+  "database_calls": 0
+}
