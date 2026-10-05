@@ -1,0 +1,172 @@
+FFFFFFFFFFFF                                                             [100%]
+================================== FAILURES ===================================
+_ test_exact_contact_confirmation_owns_source_affirmation_and_playback_receipt[completed-openai] _
+backend\tests\unit\test_ag04_native_qualification.py:173: in test_exact_contact_confirmation_owns_source_affirmation_and_playback_receipt
+    case = next(c for c in corpus["scenarios"] if c["id"] == "native.contact_confirmation_" + receipt)
+E   StopIteration
+
+The above exception was the direct cause of the following exception:
+..\..\backend\.venv\Lib\site-packages\pytest_asyncio\plugin.py:430: in runtest
+    super().runtest()
+..\..\backend\.venv\Lib\site-packages\pytest_asyncio\plugin.py:887: in inner
+    _loop.run_until_complete(task)
+..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\base_events.py:691: in run_until_complete
+    return future.result()
+E   RuntimeError: coroutine raised StopIteration
+_ test_exact_contact_confirmation_owns_source_affirmation_and_playback_receipt[completed-xai] _
+backend\tests\unit\test_ag04_native_qualification.py:173: in test_exact_contact_confirmation_owns_source_affirmation_and_playback_receipt
+    case = next(c for c in corpus["scenarios"] if c["id"] == "native.contact_confirmation_" + receipt)
+E   StopIteration
+
+The above exception was the direct cause of the following exception:
+..\..\backend\.venv\Lib\site-packages\pytest_asyncio\plugin.py:430: in runtest
+    super().runtest()
+..\..\backend\.venv\Lib\site-packages\pytest_asyncio\plugin.py:887: in inner
+    _loop.run_until_complete(task)
+..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\base_events.py:691: in run_until_complete
+    return future.result()
+E   RuntimeError: coroutine raised StopIteration
+_ test_exact_contact_confirmation_owns_source_affirmation_and_playback_receipt[stale-openai] _
+backend\tests\unit\test_ag04_native_qualification.py:173: in test_exact_contact_confirmation_owns_source_affirmation_and_playback_receipt
+    case = next(c for c in corpus["scenarios"] if c["id"] == "native.contact_confirmation_" + receipt)
+E   StopIteration
+
+The above exception was the direct cause of the following exception:
+..\..\backend\.venv\Lib\site-packages\pytest_asyncio\plugin.py:430: in runtest
+    super().runtest()
+..\..\backend\.venv\Lib\site-packages\pytest_asyncio\plugin.py:887: in inner
+    _loop.run_until_complete(task)
+..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\base_events.py:691: in run_until_complete
+    return future.result()
+E   RuntimeError: coroutine raised StopIteration
+_ test_exact_contact_confirmation_owns_source_affirmation_and_playback_receipt[stale-xai] _
+backend\tests\unit\test_ag04_native_qualification.py:173: in test_exact_contact_confirmation_owns_source_affirmation_and_playback_receipt
+    case = next(c for c in corpus["scenarios"] if c["id"] == "native.contact_confirmation_" + receipt)
+E   StopIteration
+
+The above exception was the direct cause of the following exception:
+..\..\backend\.venv\Lib\site-packages\pytest_asyncio\plugin.py:430: in runtest
+    super().runtest()
+..\..\backend\.venv\Lib\site-packages\pytest_asyncio\plugin.py:887: in inner
+    _loop.run_until_complete(task)
+..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\base_events.py:691: in run_until_complete
+    return future.result()
+E   RuntimeError: coroutine raised StopIteration
+_ test_exact_contact_confirmation_owns_source_affirmation_and_playback_receipt[unknown-openai] _
+backend\tests\unit\test_ag04_native_qualification.py:173: in test_exact_contact_confirmation_owns_source_affirmation_and_playback_receipt
+    case = next(c for c in corpus["scenarios"] if c["id"] == "native.contact_confirmation_" + receipt)
+E   StopIteration
+
+The above exception was the direct cause of the following exception:
+..\..\backend\.venv\Lib\site-packages\pytest_asyncio\plugin.py:430: in runtest
+    super().runtest()
+..\..\backend\.venv\Lib\site-packages\pytest_asyncio\plugin.py:887: in inner
+    _loop.run_until_complete(task)
+..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\base_events.py:691: in run_until_complete
+    return future.result()
+E   RuntimeError: coroutine raised StopIteration
+_ test_exact_contact_confirmation_owns_source_affirmation_and_playback_receipt[unknown-xai] _
+backend\tests\unit\test_ag04_native_qualification.py:173: in test_exact_contact_confirmation_owns_source_affirmation_and_playback_receipt
+    case = next(c for c in corpus["scenarios"] if c["id"] == "native.contact_confirmation_" + receipt)
+E   StopIteration
+
+The above exception was the direct cause of the following exception:
+..\..\backend\.venv\Lib\site-packages\pytest_asyncio\plugin.py:430: in runtest
+    super().runtest()
+..\..\backend\.venv\Lib\site-packages\pytest_asyncio\plugin.py:887: in inner
+    _loop.run_until_complete(task)
+..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\base_events.py:691: in run_until_complete
+    return future.result()
+E   RuntimeError: coroutine raised StopIteration
+_ test_exact_contact_confirmation_owns_source_affirmation_and_playback_receipt[transmitted-openai] _
+backend\tests\unit\test_ag04_native_qualification.py:173: in test_exact_contact_confirmation_owns_source_affirmation_and_playback_receipt
+    case = next(c for c in corpus["scenarios"] if c["id"] == "native.contact_confirmation_" + receipt)
+E   StopIteration
+
+The above exception was the direct cause of the following exception:
+..\..\backend\.venv\Lib\site-packages\pytest_asyncio\plugin.py:430: in runtest
+    super().runtest()
+..\..\backend\.venv\Lib\site-packages\pytest_asyncio\plugin.py:887: in inner
+    _loop.run_until_complete(task)
+..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\base_events.py:691: in run_until_complete
+    return future.result()
+E   RuntimeError: coroutine raised StopIteration
+_ test_exact_contact_confirmation_owns_source_affirmation_and_playback_receipt[transmitted-xai] _
+backend\tests\unit\test_ag04_native_qualification.py:173: in test_exact_contact_confirmation_owns_source_affirmation_and_playback_receipt
+    case = next(c for c in corpus["scenarios"] if c["id"] == "native.contact_confirmation_" + receipt)
+E   StopIteration
+
+The above exception was the direct cause of the following exception:
+..\..\backend\.venv\Lib\site-packages\pytest_asyncio\plugin.py:430: in runtest
+    super().runtest()
+..\..\backend\.venv\Lib\site-packages\pytest_asyncio\plugin.py:887: in inner
+    _loop.run_until_complete(task)
+..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\base_events.py:691: in run_until_complete
+    return future.result()
+E   RuntimeError: coroutine raised StopIteration
+_ test_exact_contact_confirmation_owns_source_affirmation_and_playback_receipt[interrupted-openai] _
+backend\tests\unit\test_ag04_native_qualification.py:173: in test_exact_contact_confirmation_owns_source_affirmation_and_playback_receipt
+    case = next(c for c in corpus["scenarios"] if c["id"] == "native.contact_confirmation_" + receipt)
+E   StopIteration
+
+The above exception was the direct cause of the following exception:
+..\..\backend\.venv\Lib\site-packages\pytest_asyncio\plugin.py:430: in runtest
+    super().runtest()
+..\..\backend\.venv\Lib\site-packages\pytest_asyncio\plugin.py:887: in inner
+    _loop.run_until_complete(task)
+..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\base_events.py:691: in run_until_complete
+    return future.result()
+E   RuntimeError: coroutine raised StopIteration
+_ test_exact_contact_confirmation_owns_source_affirmation_and_playback_receipt[interrupted-xai] _
+backend\tests\unit\test_ag04_native_qualification.py:173: in test_exact_contact_confirmation_owns_source_affirmation_and_playback_receipt
+    case = next(c for c in corpus["scenarios"] if c["id"] == "native.contact_confirmation_" + receipt)
+E   StopIteration
+
+The above exception was the direct cause of the following exception:
+..\..\backend\.venv\Lib\site-packages\pytest_asyncio\plugin.py:430: in runtest
+    super().runtest()
+..\..\backend\.venv\Lib\site-packages\pytest_asyncio\plugin.py:887: in inner
+    _loop.run_until_complete(task)
+..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\base_events.py:691: in run_until_complete
+    return future.result()
+E   RuntimeError: coroutine raised StopIteration
+_ test_historical_dnc_recollection_has_no_current_optout_or_close_authority[openai] _
+backend\tests\unit\test_ag04_native_qualification.py:211: in test_historical_dnc_recollection_has_no_current_optout_or_close_authority
+    case = next(c for c in corpus["scenarios"] if c["id"] == "native.historical_dnc_recollection")
+E   StopIteration
+
+The above exception was the direct cause of the following exception:
+..\..\backend\.venv\Lib\site-packages\pytest_asyncio\plugin.py:430: in runtest
+    super().runtest()
+..\..\backend\.venv\Lib\site-packages\pytest_asyncio\plugin.py:887: in inner
+    _loop.run_until_complete(task)
+..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\base_events.py:691: in run_until_complete
+    return future.result()
+E   RuntimeError: coroutine raised StopIteration
+_ test_historical_dnc_recollection_has_no_current_optout_or_close_authority[xai] _
+backend\tests\unit\test_ag04_native_qualification.py:211: in test_historical_dnc_recollection_has_no_current_optout_or_close_authority
+    case = next(c for c in corpus["scenarios"] if c["id"] == "native.historical_dnc_recollection")
+E   StopIteration
+
+The above exception was the direct cause of the following exception:
+..\..\backend\.venv\Lib\site-packages\pytest_asyncio\plugin.py:430: in runtest
+    super().runtest()
+..\..\backend\.venv\Lib\site-packages\pytest_asyncio\plugin.py:887: in inner
+    _loop.run_until_complete(task)
+..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\base_events.py:691: in run_until_complete
+    return future.result()
+E   RuntimeError: coroutine raised StopIteration
+=========================== short test summary info ===========================
+FAILED backend\tests\unit\test_ag04_native_qualification.py::test_exact_contact_confirmation_owns_source_affirmation_and_playback_receipt[completed-openai]
+FAILED backend\tests\unit\test_ag04_native_qualification.py::test_exact_contact_confirmation_owns_source_affirmation_and_playback_receipt[completed-xai]
+FAILED backend\tests\unit\test_ag04_native_qualification.py::test_exact_contact_confirmation_owns_source_affirmation_and_playback_receipt[stale-openai]
+FAILED backend\tests\unit\test_ag04_native_qualification.py::test_exact_contact_confirmation_owns_source_affirmation_and_playback_receipt[stale-xai]
+FAILED backend\tests\unit\test_ag04_native_qualification.py::test_exact_contact_confirmation_owns_source_affirmation_and_playback_receipt[unknown-openai]
+FAILED backend\tests\unit\test_ag04_native_qualification.py::test_exact_contact_confirmation_owns_source_affirmation_and_playback_receipt[unknown-xai]
+FAILED backend\tests\unit\test_ag04_native_qualification.py::test_exact_contact_confirmation_owns_source_affirmation_and_playback_receipt[transmitted-openai]
+FAILED backend\tests\unit\test_ag04_native_qualification.py::test_exact_contact_confirmation_owns_source_affirmation_and_playback_receipt[transmitted-xai]
+FAILED backend\tests\unit\test_ag04_native_qualification.py::test_exact_contact_confirmation_owns_source_affirmation_and_playback_receipt[interrupted-openai]
+FAILED backend\tests\unit\test_ag04_native_qualification.py::test_exact_contact_confirmation_owns_source_affirmation_and_playback_receipt[interrupted-xai]
+FAILED backend\tests\unit\test_ag04_native_qualification.py::test_historical_dnc_recollection_has_no_current_optout_or_close_authority[openai]
+FAILED backend\tests\unit\test_ag04_native_qualification.py::test_historical_dnc_recollection_has_no_current_optout_or_close_authority[xai]
+12 failed, 23 deselected in 6.57s

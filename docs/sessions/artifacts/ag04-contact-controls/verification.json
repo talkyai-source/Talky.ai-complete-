@@ -1,0 +1,78 @@
+{
+  "candidate_revision": "7bc0023e68419a27d7c932ab1f4eff2df40057b5",
+  "baseline_revision": "88d1bbfaf37541ed33f6a2129535c518b7b9f72a",
+  "source_scope": "Five existing qualification runner/fixture/test files; no application, prompt, matrix, evaluator or threshold changes.",
+  "working_directory": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag04-contact-controls-20261005\\backend",
+  "interpreter": "C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/backend/.venv/Scripts/python.exe",
+  "environment": {
+    "ENVIRONMENT": "test",
+    "PYTHONPATH_order": [
+      "C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/tmp/postgres-matrix-20261005/tmp/exact-requirements-20261005/packages",
+      "C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/tmp/production-ready-ag07-20261005/tmp/op02-testdeps"
+    ]
+  },
+  "dependency_evidence": "dependency-parity.json; 62 active directly declared production requirements satisfy marker-aware installed-version checks. Not a fresh transitive resolution.",
+  "checks": [
+    {
+      "command": "python -m pytest backend/tests/unit/test_ag04_native_qualification.py -k \"exact_contact_confirmation or historical_dnc_recollection\" -q --tb=short",
+      "cwd": "repository root",
+      "exit_code": 1,
+      "failed": 12,
+      "deselected": 23,
+      "output": "fixture-gap-before.txt",
+      "meaning": "Declared controls absent before extension; not a production behavior failure."
+    },
+    {
+      "command": "python -m pytest tests/unit/test_ag04_native_qualification.py tests/unit/test_ag04_traditional_qualification.py tests/unit/test_ag04_qualification_gate.py -q --tb=short",
+      "exit_code": 0,
+      "passed": 97,
+      "skipped": 0,
+      "warnings": 1049,
+      "output": "focused-tests.txt"
+    },
+    {
+      "command": "python -m ruff check --select F backend/tests/qualification/ag04_native.py backend/tests/unit/test_ag04_native_qualification.py backend/tests/unit/test_ag04_traditional_qualification.py",
+      "cwd": "repository root",
+      "exit_code": 0,
+      "output": "lint.txt"
+    },
+    {
+      "command": "python -m scripts.evaluate_ag04_conversations --output ../docs/sessions/artifacts/ag04-contact-controls/replay.json",
+      "exit_code": 1,
+      "expected_reason": "Preserved historical Groq semantic failure. Offline success never grants approval.",
+      "observed_rows": 190,
+      "control_checks": 1296,
+      "control_failures": 0,
+      "evidence_errors": 0,
+      "network_attempts": 0,
+      "output": "replay.json.gz",
+      "console": "replay-console.txt"
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0
+    },
+    {
+      "command": "python C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/tmp/postgres-matrix-20261005/tmp/exact-requirements-20261005/verify_parity.py backend/requirements.txt docs/sessions/artifacts/ag04-contact-controls/dependency-parity.json --expected-target C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/tmp/postgres-matrix-20261005/tmp/exact-requirements-20261005/packages",
+      "cwd": "repository root",
+      "exit_code": 0,
+      "active_declared_requirements": 62,
+      "failures": 0,
+      "output": "dependency-parity.json",
+      "verifier_scope": "Read-only verifier retained in existing ignored task dependency overlay; paths containing spaces were passed as separately quoted arguments."
+    }
+  ],
+  "review": {
+    "reviewer": "audio_audit",
+    "scope": "Read-only five-file extension; actual receipt/source authority and preservation of semantic limits. No independent test execution.",
+    "result": "No material defect found."
+  },
+  "limits": [
+    "Synthetic ASR, provider events and transport acknowledgements only; no actual provider/network/telephone/DB/customer action.",
+    "Native exact-contact confirmation only; traditional fake TTS has no correlated readback receipt and is not newly mapped to that condition.",
+    "Historical DNC is mapped in both runners. Five contact receipt variants and provider repeats count as one canonical condition.",
+    "39 of 50 proposed canonical conditions observed somewhere; not complete per-profile qualification or 39 human passes.",
+    "Scripted control outputs do not measure natural model behavior, spoken-email accuracy, hearing, durable contact persistence or delivery.",
+    "Original Groq failure preserved; live/human/acoustic qualification remains not_run."
+  ]
+}

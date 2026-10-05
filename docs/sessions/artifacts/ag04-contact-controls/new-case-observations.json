@@ -1,0 +1,3284 @@
+[
+  {
+    "scenario_id": "ag04.historical_dnc_recollection",
+    "engine": "traditional",
+    "profile": {
+      "provider": "groq",
+      "model": "openai/gpt-oss-20b",
+      "voice": "synthetic-no-audio",
+      "settings": {
+        "temperature": 0.2,
+        "visible_token_target": 300
+      },
+      "mode": "offline_replay"
+    },
+    "raw_output": [
+      "What would you like to know about our opening hours? [[END_CALL]]"
+    ],
+    "submitted_speech": [
+      "What would you like to know about our opening hours?"
+    ],
+    "history": [
+      {
+        "role": "assistant",
+        "content": "What would you like help with?"
+      },
+      {
+        "role": "user",
+        "content": "Last year I told another company to stop calling me. What are your opening hours?"
+      },
+      {
+        "role": "assistant",
+        "content": "What would you like to know about our opening hours?"
+      }
+    ],
+    "end": {
+      "requested": false,
+      "shutdown_count": 0,
+      "dnc_flag": false,
+      "dnc_effect_count": 0
+    },
+    "effects": {
+      "attempts": [],
+      "accepted": 0
+    },
+    "findings": {
+      "control": [
+        {
+          "id": "runner_completed",
+          "pass": true,
+          "detail": "No runner exception; errors=[]"
+        },
+        {
+          "id": "close_authority",
+          "pass": true,
+          "detail": "Synthetic gateway hangup count=0; expected end=False"
+        },
+        {
+          "id": "optout_authority",
+          "pass": true,
+          "detail": "Opt-out flag must follow actual caller intent, not generated text."
+        },
+        {
+          "id": "optout_effect",
+          "pass": true,
+          "detail": "A claimed opt-out needs the synthetic persistence port once; no real database was written."
+        },
+        {
+          "id": "no_unapproved_effect",
+          "pass": true,
+          "detail": "Actual intercepted external executor results."
+        },
+        {
+          "id": "history_submission:0",
+          "pass": true,
+          "detail": "Actual committed assistant history equals successful synthetic TTS submissions; neither proves hearing."
+        }
+      ],
+      "semantic": [
+        {
+          "id": "semantic_rubric",
+          "status": "unreviewed",
+          "detail": "Recollection of another company's past opt-out does not authorize a current opt-out or close."
+        }
+      ]
+    }
+  },
+  {
+    "scenario_id": "ag04.historical_dnc_recollection",
+    "engine": "traditional",
+    "profile": {
+      "provider": "cerebras",
+      "model": "gpt-oss-120b",
+      "voice": "synthetic-no-audio",
+      "settings": {
+        "temperature": 0.2,
+        "visible_token_target": 300
+      },
+      "mode": "offline_replay"
+    },
+    "raw_output": [
+      "What would you like to know about our opening hours? [[END_CALL]]"
+    ],
+    "submitted_speech": [
+      "What would you like to know about our opening hours?"
+    ],
+    "history": [
+      {
+        "role": "assistant",
+        "content": "What would you like help with?"
+      },
+      {
+        "role": "user",
+        "content": "Last year I told another company to stop calling me. What are your opening hours?"
+      },
+      {
+        "role": "assistant",
+        "content": "What would you like to know about our opening hours?"
+      }
+    ],
+    "end": {
+      "requested": false,
+      "shutdown_count": 0,
+      "dnc_flag": false,
+      "dnc_effect_count": 0
+    },
+    "effects": {
+      "attempts": [],
+      "accepted": 0
+    },
+    "findings": {
+      "control": [
+        {
+          "id": "runner_completed",
+          "pass": true,
+          "detail": "No runner exception; errors=[]"
+        },
+        {
+          "id": "close_authority",
+          "pass": true,
+          "detail": "Synthetic gateway hangup count=0; expected end=False"
+        },
+        {
+          "id": "optout_authority",
+          "pass": true,
+          "detail": "Opt-out flag must follow actual caller intent, not generated text."
+        },
+        {
+          "id": "optout_effect",
+          "pass": true,
+          "detail": "A claimed opt-out needs the synthetic persistence port once; no real database was written."
+        },
+        {
+          "id": "no_unapproved_effect",
+          "pass": true,
+          "detail": "Actual intercepted external executor results."
+        },
+        {
+          "id": "history_submission:0",
+          "pass": true,
+          "detail": "Actual committed assistant history equals successful synthetic TTS submissions; neither proves hearing."
+        }
+      ],
+      "semantic": [
+        {
+          "id": "semantic_rubric",
+          "status": "unreviewed",
+          "detail": "Recollection of another company's past opt-out does not authorize a current opt-out or close."
+        }
+      ]
+    }
+  },
+  {
+    "scenario_id": "ag04.historical_dnc_recollection",
+    "engine": "traditional",
+    "profile": {
+      "provider": "openai",
+      "model": "gpt-6-luna",
+      "voice": "synthetic-no-audio",
+      "settings": {
+        "temperature": 0.2,
+        "visible_token_target": 300
+      },
+      "mode": "offline_replay"
+    },
+    "raw_output": [
+      "What would you like to know about our opening hours? [[END_CALL]]"
+    ],
+    "submitted_speech": [
+      "What would you like to know about our opening hours?"
+    ],
+    "history": [
+      {
+        "role": "assistant",
+        "content": "What would you like help with?"
+      },
+      {
+        "role": "user",
+        "content": "Last year I told another company to stop calling me. What are your opening hours?"
+      },
+      {
+        "role": "assistant",
+        "content": "What would you like to know about our opening hours?"
+      }
+    ],
+    "end": {
+      "requested": false,
+      "shutdown_count": 0,
+      "dnc_flag": false,
+      "dnc_effect_count": 0
+    },
+    "effects": {
+      "attempts": [],
+      "accepted": 0
+    },
+    "findings": {
+      "control": [
+        {
+          "id": "runner_completed",
+          "pass": true,
+          "detail": "No runner exception; errors=[]"
+        },
+        {
+          "id": "close_authority",
+          "pass": true,
+          "detail": "Synthetic gateway hangup count=0; expected end=False"
+        },
+        {
+          "id": "optout_authority",
+          "pass": true,
+          "detail": "Opt-out flag must follow actual caller intent, not generated text."
+        },
+        {
+          "id": "optout_effect",
+          "pass": true,
+          "detail": "A claimed opt-out needs the synthetic persistence port once; no real database was written."
+        },
+        {
+          "id": "no_unapproved_effect",
+          "pass": true,
+          "detail": "Actual intercepted external executor results."
+        },
+        {
+          "id": "history_submission:0",
+          "pass": true,
+          "detail": "Actual committed assistant history equals successful synthetic TTS submissions; neither proves hearing."
+        }
+      ],
+      "semantic": [
+        {
+          "id": "semantic_rubric",
+          "status": "unreviewed",
+          "detail": "Recollection of another company's past opt-out does not authorize a current opt-out or close."
+        }
+      ]
+    }
+  },
+  {
+    "scenario_id": "ag04.historical_dnc_recollection",
+    "engine": "traditional",
+    "profile": {
+      "provider": "gemini",
+      "model": "gemini-3.8-flash",
+      "voice": "synthetic-no-audio",
+      "settings": {
+        "temperature": 0.2,
+        "visible_token_target": 300
+      },
+      "mode": "offline_replay"
+    },
+    "raw_output": [
+      "What would you like to know about our opening hours? [[END_CALL]]"
+    ],
+    "submitted_speech": [
+      "What would you like to know about our opening hours?"
+    ],
+    "history": [
+      {
+        "role": "assistant",
+        "content": "What would you like help with?"
+      },
+      {
+        "role": "user",
+        "content": "Last year I told another company to stop calling me. What are your opening hours?"
+      },
+      {
+        "role": "assistant",
+        "content": "What would you like to know about our opening hours?"
+      }
+    ],
+    "end": {
+      "requested": false,
+      "shutdown_count": 0,
+      "dnc_flag": false,
+      "dnc_effect_count": 0
+    },
+    "effects": {
+      "attempts": [],
+      "accepted": 0
+    },
+    "findings": {
+      "control": [
+        {
+          "id": "runner_completed",
+          "pass": true,
+          "detail": "No runner exception; errors=[]"
+        },
+        {
+          "id": "close_authority",
+          "pass": true,
+          "detail": "Synthetic gateway hangup count=0; expected end=False"
+        },
+        {
+          "id": "optout_authority",
+          "pass": true,
+          "detail": "Opt-out flag must follow actual caller intent, not generated text."
+        },
+        {
+          "id": "optout_effect",
+          "pass": true,
+          "detail": "A claimed opt-out needs the synthetic persistence port once; no real database was written."
+        },
+        {
+          "id": "no_unapproved_effect",
+          "pass": true,
+          "detail": "Actual intercepted external executor results."
+        },
+        {
+          "id": "history_submission:0",
+          "pass": true,
+          "detail": "Actual committed assistant history equals successful synthetic TTS submissions; neither proves hearing."
+        }
+      ],
+      "semantic": [
+        {
+          "id": "semantic_rubric",
+          "status": "unreviewed",
+          "detail": "Recollection of another company's past opt-out does not authorize a current opt-out or close."
+        }
+      ]
+    }
+  },
+  {
+    "scenario_id": "native.contact_confirmation_completed",
+    "engine": "native",
+    "profile": {
+      "provider": "openai",
+      "model": "gpt-realtime-2",
+      "voice": "ash",
+      "settings": {
+        "reasoning_effort": "low"
+      },
+      "mode": "offline_replay",
+      "hidden_opt_in": false
+    },
+    "raw_output": [
+      {
+        "response_id": "response-1",
+        "text": "Your email is alex@example.com, correct?",
+        "status": "completed"
+      }
+    ],
+    "submitted_speech": [
+      "Your email is alex@example.com, correct?"
+    ],
+    "history": [
+      {
+        "role": "user",
+        "content": "My email is alex at example dot com.",
+        "timestamp": "2026-10-05T05:23:12.185183",
+        "confidence": null,
+        "talklee_call_id": null,
+        "turn_index": 0,
+        "event_type": "utterance",
+        "is_final": true,
+        "audio_window_start": null,
+        "audio_window_end": null,
+        "include_in_plaintext": true,
+        "metadata": {
+          "provider_item_id": "contact-source",
+          "caller_turn_order": 1
+        }
+      },
+      {
+        "role": "assistant",
+        "content": "Your email is alex@example.com, correct?",
+        "timestamp": "2026-10-05T05:23:12.186186",
+        "confidence": null,
+        "talklee_call_id": null,
+        "turn_index": 1,
+        "event_type": "utterance",
+        "is_final": null,
+        "audio_window_start": null,
+        "audio_window_end": null,
+        "include_in_plaintext": true,
+        "metadata": {
+          "delivery": {
+            "utterance_id": "rt-1",
+            "status": "completed",
+            "evidence": "transport_played",
+            "played_ms": 40
+          }
+        }
+      },
+      {
+        "role": "user",
+        "content": "Yes.",
+        "timestamp": "2026-10-05T05:23:12.189185",
+        "confidence": null,
+        "talklee_call_id": null,
+        "turn_index": 2,
+        "event_type": "utterance",
+        "is_final": true,
+        "audio_window_start": null,
+        "audio_window_end": null,
+        "include_in_plaintext": true,
+        "metadata": {
+          "provider_item_id": "contact-confirmation",
+          "caller_turn_order": 2
+        }
+      }
+    ],
+    "end": {
+      "requested": false,
+      "shutdown_count": 0,
+      "dnc_flag": false,
+      "dnc_effect_count": null
+    },
+    "effects": {
+      "attempts": [],
+      "accepted": 0,
+      "external_execution": "not_run; no business action capability or database configured",
+      "tool_results": [],
+      "dnc_persistence_receipts": [],
+      "dnc_database_writes": 0
+    },
+    "findings": {
+      "control": [
+        {
+          "id": "email",
+          "pass": true,
+          "detail": {
+            "expected": "alex@example.com",
+            "observed": "alex@example.com"
+          }
+        },
+        {
+          "id": "email_confirmed",
+          "pass": true,
+          "detail": {
+            "expected": true,
+            "observed": true
+          }
+        },
+        {
+          "id": "email_capture_status",
+          "pass": true,
+          "detail": {
+            "expected": "confirmed",
+            "observed": "confirmed"
+          }
+        },
+        {
+          "id": "email_value_source",
+          "pass": true,
+          "detail": {
+            "expected": {
+              "provider_item_id": "contact-source",
+              "caller_turn_order": 1,
+              "revision_sha256": "b92727742b9e9a5c477d5d802770316b82d6a3205cdc5c8d3dc8f8688e03b5e1"
+            },
+            "observed": {
+              "provider_item_id": "contact-source",
+              "caller_turn_order": 1,
+              "revision_sha256": "b92727742b9e9a5c477d5d802770316b82d6a3205cdc5c8d3dc8f8688e03b5e1"
+            }
+          }
+        },
+        {
+          "id": "email_confirmation_source",
+          "pass": true,
+          "detail": {
+            "expected": {
+              "provider_item_id": "contact-confirmation",
+              "caller_turn_order": 2,
+              "revision_sha256": "5f9a2b795615ba6a3d5455fd5624d773fbca5bcd16249c421fd37411dc9837da"
+            },
+            "observed": {
+              "provider_item_id": "contact-confirmation",
+              "caller_turn_order": 2,
+              "revision_sha256": "5f9a2b795615ba6a3d5455fd5624d773fbca5bcd16249c421fd37411dc9837da"
+            }
+          }
+        },
+        {
+          "id": "email_readback",
+          "pass": true,
+          "detail": {
+            "expected": {
+              "utterance_id": "rt-1",
+              "status": "completed",
+              "evidence": "transport_played"
+            },
+            "observed": {
+              "utterance_id": "rt-1",
+              "status": "completed",
+              "evidence": "transport_played"
+            }
+          }
+        },
+        {
+          "id": "submissions",
+          "pass": true,
+          "detail": {
+            "expected": 1,
+            "observed": 1
+          }
+        },
+        {
+          "id": "shutdowns",
+          "pass": true,
+          "detail": {
+            "expected": 0,
+            "observed": 0
+          }
+        },
+        {
+          "id": "dnc",
+          "pass": true,
+          "detail": {
+            "expected": false,
+            "observed": false
+          }
+        },
+        {
+          "id": "dnc_attempts",
+          "pass": true,
+          "detail": {
+            "expected": 0,
+            "observed": 0
+          }
+        }
+      ],
+      "semantic": [
+        {
+          "id": "profile_quality",
+          "status": "unreviewed",
+          "detail": "Scripted responses test runtime admission, not whether this model produces the right answer."
+        }
+      ]
+    },
+    "contacts": {
+      "email": {
+        "value": "alex@example.com",
+        "confirmed": true,
+        "capture_status": "confirmed",
+        "confirmation_evidence": "readback_and_caller_affirmation",
+        "value_source": {
+          "provider_item_id": "contact-source",
+          "caller_turn_order": 1,
+          "revision_sha256": "b92727742b9e9a5c477d5d802770316b82d6a3205cdc5c8d3dc8f8688e03b5e1"
+        },
+        "confirmation_source": {
+          "provider_item_id": "contact-confirmation",
+          "caller_turn_order": 2,
+          "revision_sha256": "5f9a2b795615ba6a3d5455fd5624d773fbca5bcd16249c421fd37411dc9837da"
+        },
+        "status_source": {
+          "provider_item_id": "contact-confirmation",
+          "caller_turn_order": 2,
+          "revision_sha256": "5f9a2b795615ba6a3d5455fd5624d773fbca5bcd16249c421fd37411dc9837da"
+        },
+        "readback": {
+          "utterance_id": "rt-1",
+          "status": "completed",
+          "evidence": "transport_played"
+        }
+      },
+      "phone": {
+        "value": null,
+        "confirmed": false,
+        "capture_status": null,
+        "confirmation_evidence": null,
+        "value_source": null,
+        "confirmation_source": null,
+        "status_source": null,
+        "readback": null
+      }
+    },
+    "media": {
+      "generated_codec": "pcmu/8000",
+      "submitted_codec": "pcm_s16le/8000",
+      "generated_bytes": 320,
+      "submitted_bytes": 640,
+      "submissions": [
+        {
+          "utterance_id": "rt-1",
+          "candidate_text": "Your email is alex@example.com, correct?",
+          "pcm_bytes": 640,
+          "sha256": "9e132485d5107211de325a45e7917cbe3e4b5b9cde3e4ee91d7d2102317759ee"
+        }
+      ],
+      "receipts": [
+        {
+          "utterance_id": "rt-1",
+          "status": "completed",
+          "evidence": "transport_played",
+          "played_ms": 40
+        }
+      ],
+      "receipt_origin": "synthetic gateway fixture",
+      "clear_count": 2,
+      "truncate_events": []
+    }
+  },
+  {
+    "scenario_id": "native.contact_confirmation_completed",
+    "engine": "native",
+    "profile": {
+      "provider": "xai",
+      "model": "grok-voice-think-fast-1.0",
+      "voice": "eve",
+      "settings": {
+        "reasoning_effort": "high",
+        "turn_detection": {
+          "type": "server_vad",
+          "threshold": 0.85
+        }
+      },
+      "mode": "offline_replay",
+      "hidden_opt_in": true
+    },
+    "raw_output": [
+      {
+        "response_id": "response-1",
+        "text": "Your email is alex@example.com, correct?",
+        "status": "completed"
+      }
+    ],
+    "submitted_speech": [
+      "Your email is alex@example.com, correct?"
+    ],
+    "history": [
+      {
+        "role": "user",
+        "content": "My email is alex at example dot com.",
+        "timestamp": "2026-10-05T05:23:12.193188",
+        "confidence": null,
+        "talklee_call_id": null,
+        "turn_index": 0,
+        "event_type": "utterance",
+        "is_final": true,
+        "audio_window_start": null,
+        "audio_window_end": null,
+        "include_in_plaintext": true,
+        "metadata": {
+          "provider_item_id": "contact-source",
+          "caller_turn_order": 1
+        }
+      },
+      {
+        "role": "assistant",
+        "content": "Your email is alex@example.com, correct?",
+        "timestamp": "2026-10-05T05:23:12.194187",
+        "confidence": null,
+        "talklee_call_id": null,
+        "turn_index": 1,
+        "event_type": "utterance",
+        "is_final": null,
+        "audio_window_start": null,
+        "audio_window_end": null,
+        "include_in_plaintext": true,
+        "metadata": {
+          "delivery": {
+            "utterance_id": "rt-1",
+            "status": "completed",
+            "evidence": "transport_played",
+            "played_ms": 40
+          }
+        }
+      },
+      {
+        "role": "user",
+        "content": "Yes.",
+        "timestamp": "2026-10-05T05:23:12.196185",
+        "confidence": null,
+        "talklee_call_id": null,
+        "turn_index": 2,
+        "event_type": "utterance",
+        "is_final": true,
+        "audio_window_start": null,
+        "audio_window_end": null,
+        "include_in_plaintext": true,
+        "metadata": {
+          "provider_item_id": "contact-confirmation",
+          "caller_turn_order": 2
+        }
+      }
+    ],
+    "end": {
+      "requested": false,
+      "shutdown_count": 0,
+      "dnc_flag": false,
+      "dnc_effect_count": null
+    },
+    "effects": {
+      "attempts": [],
+      "accepted": 0,
+      "external_execution": "not_run; no business action capability or database configured",
+      "tool_results": [],
+      "dnc_persistence_receipts": [],
+      "dnc_database_writes": 0
+    },
+    "findings": {
+      "control": [
+        {
+          "id": "email",
+          "pass": true,
+          "detail": {
+            "expected": "alex@example.com",
+            "observed": "alex@example.com"
+          }
+        },
+        {
+          "id": "email_confirmed",
+          "pass": true,
+          "detail": {
+            "expected": true,
+            "observed": true
+          }
+        },
+        {
+          "id": "email_capture_status",
+          "pass": true,
+          "detail": {
+            "expected": "confirmed",
+            "observed": "confirmed"
+          }
+        },
+        {
+          "id": "email_value_source",
+          "pass": true,
+          "detail": {
+            "expected": {
+              "provider_item_id": "contact-source",
+              "caller_turn_order": 1,
+              "revision_sha256": "b92727742b9e9a5c477d5d802770316b82d6a3205cdc5c8d3dc8f8688e03b5e1"
+            },
+            "observed": {
+              "provider_item_id": "contact-source",
+              "caller_turn_order": 1,
+              "revision_sha256": "b92727742b9e9a5c477d5d802770316b82d6a3205cdc5c8d3dc8f8688e03b5e1"
+            }
+          }
+        },
+        {
+          "id": "email_confirmation_source",
+          "pass": true,
+          "detail": {
+            "expected": {
+              "provider_item_id": "contact-confirmation",
+              "caller_turn_order": 2,
+              "revision_sha256": "5f9a2b795615ba6a3d5455fd5624d773fbca5bcd16249c421fd37411dc9837da"
+            },
+            "observed": {
+              "provider_item_id": "contact-confirmation",
+              "caller_turn_order": 2,
+              "revision_sha256": "5f9a2b795615ba6a3d5455fd5624d773fbca5bcd16249c421fd37411dc9837da"
+            }
+          }
+        },
+        {
+          "id": "email_readback",
+          "pass": true,
+          "detail": {
+            "expected": {
+              "utterance_id": "rt-1",
+              "status": "completed",
+              "evidence": "transport_played"
+            },
+            "observed": {
+              "utterance_id": "rt-1",
+              "status": "completed",
+              "evidence": "transport_played"
+            }
+          }
+        },
+        {
+          "id": "submissions",
+          "pass": true,
+          "detail": {
+            "expected": 1,
+            "observed": 1
+          }
+        },
+        {
+          "id": "shutdowns",
+          "pass": true,
+          "detail": {
+            "expected": 0,
+            "observed": 0
+          }
+        },
+        {
+          "id": "dnc",
+          "pass": true,
+          "detail": {
+            "expected": false,
+            "observed": false
+          }
+        },
+        {
+          "id": "dnc_attempts",
+          "pass": true,
+          "detail": {
+            "expected": 0,
+            "observed": 0
+          }
+        }
+      ],
+      "semantic": [
+        {
+          "id": "profile_quality",
+          "status": "unreviewed",
+          "detail": "Scripted responses test runtime admission, not whether this model produces the right answer."
+        }
+      ]
+    },
+    "contacts": {
+      "email": {
+        "value": "alex@example.com",
+        "confirmed": true,
+        "capture_status": "confirmed",
+        "confirmation_evidence": "readback_and_caller_affirmation",
+        "value_source": {
+          "provider_item_id": "contact-source",
+          "caller_turn_order": 1,
+          "revision_sha256": "b92727742b9e9a5c477d5d802770316b82d6a3205cdc5c8d3dc8f8688e03b5e1"
+        },
+        "confirmation_source": {
+          "provider_item_id": "contact-confirmation",
+          "caller_turn_order": 2,
+          "revision_sha256": "5f9a2b795615ba6a3d5455fd5624d773fbca5bcd16249c421fd37411dc9837da"
+        },
+        "status_source": {
+          "provider_item_id": "contact-confirmation",
+          "caller_turn_order": 2,
+          "revision_sha256": "5f9a2b795615ba6a3d5455fd5624d773fbca5bcd16249c421fd37411dc9837da"
+        },
+        "readback": {
+          "utterance_id": "rt-1",
+          "status": "completed",
+          "evidence": "transport_played"
+        }
+      },
+      "phone": {
+        "value": null,
+        "confirmed": false,
+        "capture_status": null,
+        "confirmation_evidence": null,
+        "value_source": null,
+        "confirmation_source": null,
+        "status_source": null,
+        "readback": null
+      }
+    },
+    "media": {
+      "generated_codec": "pcmu/8000",
+      "submitted_codec": "pcm_s16le/8000",
+      "generated_bytes": 320,
+      "submitted_bytes": 640,
+      "submissions": [
+        {
+          "utterance_id": "rt-1",
+          "candidate_text": "Your email is alex@example.com, correct?",
+          "pcm_bytes": 640,
+          "sha256": "9e132485d5107211de325a45e7917cbe3e4b5b9cde3e4ee91d7d2102317759ee"
+        }
+      ],
+      "receipts": [
+        {
+          "utterance_id": "rt-1",
+          "status": "completed",
+          "evidence": "transport_played",
+          "played_ms": 40
+        }
+      ],
+      "receipt_origin": "synthetic gateway fixture",
+      "clear_count": 2,
+      "truncate_events": []
+    }
+  },
+  {
+    "scenario_id": "native.contact_confirmation_stale",
+    "engine": "native",
+    "profile": {
+      "provider": "openai",
+      "model": "gpt-realtime-2",
+      "voice": "ash",
+      "settings": {
+        "reasoning_effort": "low"
+      },
+      "mode": "offline_replay",
+      "hidden_opt_in": false
+    },
+    "raw_output": [
+      {
+        "response_id": "response-1",
+        "text": "Your email is alex@example.com, correct?",
+        "status": "completed"
+      }
+    ],
+    "submitted_speech": [],
+    "history": [
+      {
+        "role": "user",
+        "content": "My email is alex at example dot com.",
+        "timestamp": "2026-10-05T05:23:12.200182",
+        "confidence": null,
+        "talklee_call_id": null,
+        "turn_index": 0,
+        "event_type": "utterance",
+        "is_final": true,
+        "audio_window_start": null,
+        "audio_window_end": null,
+        "include_in_plaintext": true,
+        "metadata": {
+          "provider_item_id": "contact-source",
+          "caller_turn_order": 1
+        }
+      },
+      {
+        "role": "assistant",
+        "content": "Your email is alex@example.com, correct?",
+        "timestamp": "2026-10-05T05:23:12.201185",
+        "confidence": null,
+        "talklee_call_id": null,
+        "turn_index": 1,
+        "event_type": "utterance",
+        "is_final": null,
+        "audio_window_start": null,
+        "audio_window_end": null,
+        "include_in_plaintext": true,
+        "metadata": {
+          "delivery": {
+            "utterance_id": "expired-utterance",
+            "status": "completed",
+            "evidence": "transport_played",
+            "played_ms": 40
+          }
+        }
+      },
+      {
+        "role": "user",
+        "content": "Yes.",
+        "timestamp": "2026-10-05T05:23:12.202187",
+        "confidence": null,
+        "talklee_call_id": null,
+        "turn_index": 2,
+        "event_type": "utterance",
+        "is_final": true,
+        "audio_window_start": null,
+        "audio_window_end": null,
+        "include_in_plaintext": true,
+        "metadata": {
+          "provider_item_id": "contact-confirmation",
+          "caller_turn_order": 2
+        }
+      }
+    ],
+    "end": {
+      "requested": false,
+      "shutdown_count": 0,
+      "dnc_flag": false,
+      "dnc_effect_count": null
+    },
+    "effects": {
+      "attempts": [],
+      "accepted": 0,
+      "external_execution": "not_run; no business action capability or database configured",
+      "tool_results": [],
+      "dnc_persistence_receipts": [],
+      "dnc_database_writes": 0
+    },
+    "findings": {
+      "control": [
+        {
+          "id": "email",
+          "pass": true,
+          "detail": {
+            "expected": "alex@example.com",
+            "observed": "alex@example.com"
+          }
+        },
+        {
+          "id": "email_confirmed",
+          "pass": true,
+          "detail": {
+            "expected": false,
+            "observed": false
+          }
+        },
+        {
+          "id": "email_capture_status",
+          "pass": true,
+          "detail": {
+            "expected": "awaiting_confirmation",
+            "observed": "awaiting_confirmation"
+          }
+        },
+        {
+          "id": "email_value_source",
+          "pass": true,
+          "detail": {
+            "expected": {
+              "provider_item_id": "contact-source",
+              "caller_turn_order": 1,
+              "revision_sha256": "b92727742b9e9a5c477d5d802770316b82d6a3205cdc5c8d3dc8f8688e03b5e1"
+            },
+            "observed": {
+              "provider_item_id": "contact-source",
+              "caller_turn_order": 1,
+              "revision_sha256": "b92727742b9e9a5c477d5d802770316b82d6a3205cdc5c8d3dc8f8688e03b5e1"
+            }
+          }
+        },
+        {
+          "id": "email_confirmation_source",
+          "pass": true,
+          "detail": {
+            "expected": null,
+            "observed": null
+          }
+        },
+        {
+          "id": "email_readback",
+          "pass": true,
+          "detail": {
+            "expected": null,
+            "observed": null
+          }
+        },
+        {
+          "id": "submissions",
+          "pass": true,
+          "detail": {
+            "expected": 1,
+            "observed": 1
+          }
+        },
+        {
+          "id": "shutdowns",
+          "pass": true,
+          "detail": {
+            "expected": 0,
+            "observed": 0
+          }
+        },
+        {
+          "id": "dnc",
+          "pass": true,
+          "detail": {
+            "expected": false,
+            "observed": false
+          }
+        },
+        {
+          "id": "dnc_attempts",
+          "pass": true,
+          "detail": {
+            "expected": 0,
+            "observed": 0
+          }
+        }
+      ],
+      "semantic": [
+        {
+          "id": "profile_quality",
+          "status": "unreviewed",
+          "detail": "Scripted responses test runtime admission, not whether this model produces the right answer."
+        }
+      ]
+    },
+    "contacts": {
+      "email": {
+        "value": "alex@example.com",
+        "confirmed": false,
+        "capture_status": "awaiting_confirmation",
+        "confirmation_evidence": null,
+        "value_source": {
+          "provider_item_id": "contact-source",
+          "caller_turn_order": 1,
+          "revision_sha256": "b92727742b9e9a5c477d5d802770316b82d6a3205cdc5c8d3dc8f8688e03b5e1"
+        },
+        "confirmation_source": null,
+        "status_source": {
+          "provider_item_id": "contact-source",
+          "caller_turn_order": 1,
+          "revision_sha256": "b92727742b9e9a5c477d5d802770316b82d6a3205cdc5c8d3dc8f8688e03b5e1"
+        },
+        "readback": null
+      },
+      "phone": {
+        "value": null,
+        "confirmed": false,
+        "capture_status": null,
+        "confirmation_evidence": null,
+        "value_source": null,
+        "confirmation_source": null,
+        "status_source": null,
+        "readback": null
+      }
+    },
+    "media": {
+      "generated_codec": "pcmu/8000",
+      "submitted_codec": "pcm_s16le/8000",
+      "generated_bytes": 320,
+      "submitted_bytes": 640,
+      "submissions": [
+        {
+          "utterance_id": "rt-1",
+          "candidate_text": "Your email is alex@example.com, correct?",
+          "pcm_bytes": 640,
+          "sha256": "9e132485d5107211de325a45e7917cbe3e4b5b9cde3e4ee91d7d2102317759ee"
+        }
+      ],
+      "receipts": [
+        {
+          "utterance_id": "expired-utterance",
+          "status": "completed",
+          "evidence": "transport_played",
+          "played_ms": 40
+        }
+      ],
+      "receipt_origin": "synthetic gateway fixture",
+      "clear_count": 1,
+      "truncate_events": []
+    }
+  },
+  {
+    "scenario_id": "native.contact_confirmation_stale",
+    "engine": "native",
+    "profile": {
+      "provider": "xai",
+      "model": "grok-voice-think-fast-1.0",
+      "voice": "eve",
+      "settings": {
+        "reasoning_effort": "high",
+        "turn_detection": {
+          "type": "server_vad",
+          "threshold": 0.85
+        }
+      },
+      "mode": "offline_replay",
+      "hidden_opt_in": true
+    },
+    "raw_output": [
+      {
+        "response_id": "response-1",
+        "text": "Your email is alex@example.com, correct?",
+        "status": "completed"
+      }
+    ],
+    "submitted_speech": [],
+    "history": [
+      {
+        "role": "user",
+        "content": "My email is alex at example dot com.",
+        "timestamp": "2026-10-05T05:23:12.206183",
+        "confidence": null,
+        "talklee_call_id": null,
+        "turn_index": 0,
+        "event_type": "utterance",
+        "is_final": true,
+        "audio_window_start": null,
+        "audio_window_end": null,
+        "include_in_plaintext": true,
+        "metadata": {
+          "provider_item_id": "contact-source",
+          "caller_turn_order": 1
+        }
+      },
+      {
+        "role": "assistant",
+        "content": "Your email is alex@example.com, correct?",
+        "timestamp": "2026-10-05T05:23:12.207185",
+        "confidence": null,
+        "talklee_call_id": null,
+        "turn_index": 1,
+        "event_type": "utterance",
+        "is_final": null,
+        "audio_window_start": null,
+        "audio_window_end": null,
+        "include_in_plaintext": true,
+        "metadata": {
+          "delivery": {
+            "utterance_id": "expired-utterance",
+            "status": "completed",
+            "evidence": "transport_played",
+            "played_ms": 40
+          }
+        }
+      },
+      {
+        "role": "user",
+        "content": "Yes.",
+        "timestamp": "2026-10-05T05:23:12.208186",
+        "confidence": null,
+        "talklee_call_id": null,
+        "turn_index": 2,
+        "event_type": "utterance",
+        "is_final": true,
+        "audio_window_start": null,
+        "audio_window_end": null,
+        "include_in_plaintext": true,
+        "metadata": {
+          "provider_item_id": "contact-confirmation",
+          "caller_turn_order": 2
+        }
+      }
+    ],
+    "end": {
+      "requested": false,
+      "shutdown_count": 0,
+      "dnc_flag": false,
+      "dnc_effect_count": null
+    },
+    "effects": {
+      "attempts": [],
+      "accepted": 0,
+      "external_execution": "not_run; no business action capability or database configured",
+      "tool_results": [],
+      "dnc_persistence_receipts": [],
+      "dnc_database_writes": 0
+    },
+    "findings": {
+      "control": [
+        {
+          "id": "email",
+          "pass": true,
+          "detail": {
+            "expected": "alex@example.com",
+            "observed": "alex@example.com"
+          }
+        },
+        {
+          "id": "email_confirmed",
+          "pass": true,
+          "detail": {
+            "expected": false,
+            "observed": false
+          }
+        },
+        {
+          "id": "email_capture_status",
+          "pass": true,
+          "detail": {
+            "expected": "awaiting_confirmation",
+            "observed": "awaiting_confirmation"
+          }
+        },
+        {
+          "id": "email_value_source",
+          "pass": true,
+          "detail": {
+            "expected": {
+              "provider_item_id": "contact-source",
+              "caller_turn_order": 1,
+              "revision_sha256": "b92727742b9e9a5c477d5d802770316b82d6a3205cdc5c8d3dc8f8688e03b5e1"
+            },
+            "observed": {
+              "provider_item_id": "contact-source",
+              "caller_turn_order": 1,
+              "revision_sha256": "b92727742b9e9a5c477d5d802770316b82d6a3205cdc5c8d3dc8f8688e03b5e1"
+            }
+          }
+        },
+        {
+          "id": "email_confirmation_source",
+          "pass": true,
+          "detail": {
+            "expected": null,
+            "observed": null
+          }
+        },
+        {
+          "id": "email_readback",
+          "pass": true,
+          "detail": {
+            "expected": null,
+            "observed": null
+          }
+        },
+        {
+          "id": "submissions",
+          "pass": true,
+          "detail": {
+            "expected": 1,
+            "observed": 1
+          }
+        },
+        {
+          "id": "shutdowns",
+          "pass": true,
+          "detail": {
+            "expected": 0,
+            "observed": 0
+          }
+        },
+        {
+          "id": "dnc",
+          "pass": true,
+          "detail": {
+            "expected": false,
+            "observed": false
+          }
+        },
+        {
+          "id": "dnc_attempts",
+          "pass": true,
+          "detail": {
+            "expected": 0,
+            "observed": 0
+          }
+        }
+      ],
+      "semantic": [
+        {
+          "id": "profile_quality",
+          "status": "unreviewed",
+          "detail": "Scripted responses test runtime admission, not whether this model produces the right answer."
+        }
+      ]
+    },
+    "contacts": {
+      "email": {
+        "value": "alex@example.com",
+        "confirmed": false,
+        "capture_status": "awaiting_confirmation",
+        "confirmation_evidence": null,
+        "value_source": {
+          "provider_item_id": "contact-source",
+          "caller_turn_order": 1,
+          "revision_sha256": "b92727742b9e9a5c477d5d802770316b82d6a3205cdc5c8d3dc8f8688e03b5e1"
+        },
+        "confirmation_source": null,
+        "status_source": {
+          "provider_item_id": "contact-source",
+          "caller_turn_order": 1,
+          "revision_sha256": "b92727742b9e9a5c477d5d802770316b82d6a3205cdc5c8d3dc8f8688e03b5e1"
+        },
+        "readback": null
+      },
+      "phone": {
+        "value": null,
+        "confirmed": false,
+        "capture_status": null,
+        "confirmation_evidence": null,
+        "value_source": null,
+        "confirmation_source": null,
+        "status_source": null,
+        "readback": null
+      }
+    },
+    "media": {
+      "generated_codec": "pcmu/8000",
+      "submitted_codec": "pcm_s16le/8000",
+      "generated_bytes": 320,
+      "submitted_bytes": 640,
+      "submissions": [
+        {
+          "utterance_id": "rt-1",
+          "candidate_text": "Your email is alex@example.com, correct?",
+          "pcm_bytes": 640,
+          "sha256": "9e132485d5107211de325a45e7917cbe3e4b5b9cde3e4ee91d7d2102317759ee"
+        }
+      ],
+      "receipts": [
+        {
+          "utterance_id": "expired-utterance",
+          "status": "completed",
+          "evidence": "transport_played",
+          "played_ms": 40
+        }
+      ],
+      "receipt_origin": "synthetic gateway fixture",
+      "clear_count": 1,
+      "truncate_events": []
+    }
+  },
+  {
+    "scenario_id": "native.contact_confirmation_unknown",
+    "engine": "native",
+    "profile": {
+      "provider": "openai",
+      "model": "gpt-realtime-2",
+      "voice": "ash",
+      "settings": {
+        "reasoning_effort": "low"
+      },
+      "mode": "offline_replay",
+      "hidden_opt_in": false
+    },
+    "raw_output": [
+      {
+        "response_id": "response-1",
+        "text": "Your email is alex@example.com, correct?",
+        "status": "completed"
+      }
+    ],
+    "submitted_speech": [],
+    "history": [
+      {
+        "role": "user",
+        "content": "My email is alex at example dot com.",
+        "timestamp": "2026-10-05T05:23:12.212186",
+        "confidence": null,
+        "talklee_call_id": null,
+        "turn_index": 0,
+        "event_type": "utterance",
+        "is_final": true,
+        "audio_window_start": null,
+        "audio_window_end": null,
+        "include_in_plaintext": true,
+        "metadata": {
+          "provider_item_id": "contact-source",
+          "caller_turn_order": 1
+        }
+      },
+      {
+        "role": "assistant",
+        "content": "Your email is alex@example.com, correct?",
+        "timestamp": "2026-10-05T05:23:12.213187",
+        "confidence": null,
+        "talklee_call_id": null,
+        "turn_index": 1,
+        "event_type": "utterance",
+        "is_final": null,
+        "audio_window_start": null,
+        "audio_window_end": null,
+        "include_in_plaintext": true,
+        "metadata": {
+          "delivery": {
+            "utterance_id": "rt-1",
+            "status": "unknown",
+            "evidence": "unknown",
+            "played_ms": 0
+          }
+        }
+      },
+      {
+        "role": "user",
+        "content": "Yes.",
+        "timestamp": "2026-10-05T05:23:12.214187",
+        "confidence": null,
+        "talklee_call_id": null,
+        "turn_index": 2,
+        "event_type": "utterance",
+        "is_final": true,
+        "audio_window_start": null,
+        "audio_window_end": null,
+        "include_in_plaintext": true,
+        "metadata": {
+          "provider_item_id": "contact-confirmation",
+          "caller_turn_order": 2
+        }
+      }
+    ],
+    "end": {
+      "requested": false,
+      "shutdown_count": 0,
+      "dnc_flag": false,
+      "dnc_effect_count": null
+    },
+    "effects": {
+      "attempts": [],
+      "accepted": 0,
+      "external_execution": "not_run; no business action capability or database configured",
+      "tool_results": [],
+      "dnc_persistence_receipts": [],
+      "dnc_database_writes": 0
+    },
+    "findings": {
+      "control": [
+        {
+          "id": "email",
+          "pass": true,
+          "detail": {
+            "expected": "alex@example.com",
+            "observed": "alex@example.com"
+          }
+        },
+        {
+          "id": "email_confirmed",
+          "pass": true,
+          "detail": {
+            "expected": false,
+            "observed": false
+          }
+        },
+        {
+          "id": "email_capture_status",
+          "pass": true,
+          "detail": {
+            "expected": "awaiting_confirmation",
+            "observed": "awaiting_confirmation"
+          }
+        },
+        {
+          "id": "email_value_source",
+          "pass": true,
+          "detail": {
+            "expected": {
+              "provider_item_id": "contact-source",
+              "caller_turn_order": 1,
+              "revision_sha256": "b92727742b9e9a5c477d5d802770316b82d6a3205cdc5c8d3dc8f8688e03b5e1"
+            },
+            "observed": {
+              "provider_item_id": "contact-source",
+              "caller_turn_order": 1,
+              "revision_sha256": "b92727742b9e9a5c477d5d802770316b82d6a3205cdc5c8d3dc8f8688e03b5e1"
+            }
+          }
+        },
+        {
+          "id": "email_confirmation_source",
+          "pass": true,
+          "detail": {
+            "expected": null,
+            "observed": null
+          }
+        },
+        {
+          "id": "email_readback",
+          "pass": true,
+          "detail": {
+            "expected": null,
+            "observed": null
+          }
+        },
+        {
+          "id": "submissions",
+          "pass": true,
+          "detail": {
+            "expected": 1,
+            "observed": 1
+          }
+        },
+        {
+          "id": "shutdowns",
+          "pass": true,
+          "detail": {
+            "expected": 0,
+            "observed": 0
+          }
+        },
+        {
+          "id": "dnc",
+          "pass": true,
+          "detail": {
+            "expected": false,
+            "observed": false
+          }
+        },
+        {
+          "id": "dnc_attempts",
+          "pass": true,
+          "detail": {
+            "expected": 0,
+            "observed": 0
+          }
+        }
+      ],
+      "semantic": [
+        {
+          "id": "profile_quality",
+          "status": "unreviewed",
+          "detail": "Scripted responses test runtime admission, not whether this model produces the right answer."
+        }
+      ]
+    },
+    "contacts": {
+      "email": {
+        "value": "alex@example.com",
+        "confirmed": false,
+        "capture_status": "awaiting_confirmation",
+        "confirmation_evidence": null,
+        "value_source": {
+          "provider_item_id": "contact-source",
+          "caller_turn_order": 1,
+          "revision_sha256": "b92727742b9e9a5c477d5d802770316b82d6a3205cdc5c8d3dc8f8688e03b5e1"
+        },
+        "confirmation_source": null,
+        "status_source": {
+          "provider_item_id": "contact-source",
+          "caller_turn_order": 1,
+          "revision_sha256": "b92727742b9e9a5c477d5d802770316b82d6a3205cdc5c8d3dc8f8688e03b5e1"
+        },
+        "readback": null
+      },
+      "phone": {
+        "value": null,
+        "confirmed": false,
+        "capture_status": null,
+        "confirmation_evidence": null,
+        "value_source": null,
+        "confirmation_source": null,
+        "status_source": null,
+        "readback": null
+      }
+    },
+    "media": {
+      "generated_codec": "pcmu/8000",
+      "submitted_codec": "pcm_s16le/8000",
+      "generated_bytes": 320,
+      "submitted_bytes": 640,
+      "submissions": [
+        {
+          "utterance_id": "rt-1",
+          "candidate_text": "Your email is alex@example.com, correct?",
+          "pcm_bytes": 640,
+          "sha256": "9e132485d5107211de325a45e7917cbe3e4b5b9cde3e4ee91d7d2102317759ee"
+        }
+      ],
+      "receipts": [
+        {
+          "utterance_id": "rt-1",
+          "status": "unknown",
+          "evidence": "unknown",
+          "played_ms": 0
+        }
+      ],
+      "receipt_origin": "synthetic gateway fixture",
+      "clear_count": 1,
+      "truncate_events": []
+    }
+  },
+  {
+    "scenario_id": "native.contact_confirmation_unknown",
+    "engine": "native",
+    "profile": {
+      "provider": "xai",
+      "model": "grok-voice-think-fast-1.0",
+      "voice": "eve",
+      "settings": {
+        "reasoning_effort": "high",
+        "turn_detection": {
+          "type": "server_vad",
+          "threshold": 0.85
+        }
+      },
+      "mode": "offline_replay",
+      "hidden_opt_in": true
+    },
+    "raw_output": [
+      {
+        "response_id": "response-1",
+        "text": "Your email is alex@example.com, correct?",
+        "status": "completed"
+      }
+    ],
+    "submitted_speech": [],
+    "history": [
+      {
+        "role": "user",
+        "content": "My email is alex at example dot com.",
+        "timestamp": "2026-10-05T05:23:12.218187",
+        "confidence": null,
+        "talklee_call_id": null,
+        "turn_index": 0,
+        "event_type": "utterance",
+        "is_final": true,
+        "audio_window_start": null,
+        "audio_window_end": null,
+        "include_in_plaintext": true,
+        "metadata": {
+          "provider_item_id": "contact-source",
+          "caller_turn_order": 1
+        }
+      },
+      {
+        "role": "assistant",
+        "content": "Your email is alex@example.com, correct?",
+        "timestamp": "2026-10-05T05:23:12.219186",
+        "confidence": null,
+        "talklee_call_id": null,
+        "turn_index": 1,
+        "event_type": "utterance",
+        "is_final": null,
+        "audio_window_start": null,
+        "audio_window_end": null,
+        "include_in_plaintext": true,
+        "metadata": {
+          "delivery": {
+            "utterance_id": "rt-1",
+            "status": "unknown",
+            "evidence": "unknown",
+            "played_ms": 0
+          }
+        }
+      },
+      {
+        "role": "user",
+        "content": "Yes.",
+        "timestamp": "2026-10-05T05:23:12.220186",
+        "confidence": null,
+        "talklee_call_id": null,
+        "turn_index": 2,
+        "event_type": "utterance",
+        "is_final": true,
+        "audio_window_start": null,
+        "audio_window_end": null,
+        "include_in_plaintext": true,
+        "metadata": {
+          "provider_item_id": "contact-confirmation",
+          "caller_turn_order": 2
+        }
+      }
+    ],
+    "end": {
+      "requested": false,
+      "shutdown_count": 0,
+      "dnc_flag": false,
+      "dnc_effect_count": null
+    },
+    "effects": {
+      "attempts": [],
+      "accepted": 0,
+      "external_execution": "not_run; no business action capability or database configured",
+      "tool_results": [],
+      "dnc_persistence_receipts": [],
+      "dnc_database_writes": 0
+    },
+    "findings": {
+      "control": [
+        {
+          "id": "email",
+          "pass": true,
+          "detail": {
+            "expected": "alex@example.com",
+            "observed": "alex@example.com"
+          }
+        },
+        {
+          "id": "email_confirmed",
+          "pass": true,
+          "detail": {
+            "expected": false,
+            "observed": false
+          }
+        },
+        {
+          "id": "email_capture_status",
+          "pass": true,
+          "detail": {
+            "expected": "awaiting_confirmation",
+            "observed": "awaiting_confirmation"
+          }
+        },
+        {
+          "id": "email_value_source",
+          "pass": true,
+          "detail": {
+            "expected": {
+              "provider_item_id": "contact-source",
+              "caller_turn_order": 1,
+              "revision_sha256": "b92727742b9e9a5c477d5d802770316b82d6a3205cdc5c8d3dc8f8688e03b5e1"
+            },
+            "observed": {
+              "provider_item_id": "contact-source",
+              "caller_turn_order": 1,
+              "revision_sha256": "b92727742b9e9a5c477d5d802770316b82d6a3205cdc5c8d3dc8f8688e03b5e1"
+            }
+          }
+        },
+        {
+          "id": "email_confirmation_source",
+          "pass": true,
+          "detail": {
+            "expected": null,
+            "observed": null
+          }
+        },
+        {
+          "id": "email_readback",
+          "pass": true,
+          "detail": {
+            "expected": null,
+            "observed": null
+          }
+        },
+        {
+          "id": "submissions",
+          "pass": true,
+          "detail": {
+            "expected": 1,
+            "observed": 1
+          }
+        },
+        {
+          "id": "shutdowns",
+          "pass": true,
+          "detail": {
+            "expected": 0,
+            "observed": 0
+          }
+        },
+        {
+          "id": "dnc",
+          "pass": true,
+          "detail": {
+            "expected": false,
+            "observed": false
+          }
+        },
+        {
+          "id": "dnc_attempts",
+          "pass": true,
+          "detail": {
+            "expected": 0,
+            "observed": 0
+          }
+        }
+      ],
+      "semantic": [
+        {
+          "id": "profile_quality",
+          "status": "unreviewed",
+          "detail": "Scripted responses test runtime admission, not whether this model produces the right answer."
+        }
+      ]
+    },
+    "contacts": {
+      "email": {
+        "value": "alex@example.com",
+        "confirmed": false,
+        "capture_status": "awaiting_confirmation",
+        "confirmation_evidence": null,
+        "value_source": {
+          "provider_item_id": "contact-source",
+          "caller_turn_order": 1,
+          "revision_sha256": "b92727742b9e9a5c477d5d802770316b82d6a3205cdc5c8d3dc8f8688e03b5e1"
+        },
+        "confirmation_source": null,
+        "status_source": {
+          "provider_item_id": "contact-source",
+          "caller_turn_order": 1,
+          "revision_sha256": "b92727742b9e9a5c477d5d802770316b82d6a3205cdc5c8d3dc8f8688e03b5e1"
+        },
+        "readback": null
+      },
+      "phone": {
+        "value": null,
+        "confirmed": false,
+        "capture_status": null,
+        "confirmation_evidence": null,
+        "value_source": null,
+        "confirmation_source": null,
+        "status_source": null,
+        "readback": null
+      }
+    },
+    "media": {
+      "generated_codec": "pcmu/8000",
+      "submitted_codec": "pcm_s16le/8000",
+      "generated_bytes": 320,
+      "submitted_bytes": 640,
+      "submissions": [
+        {
+          "utterance_id": "rt-1",
+          "candidate_text": "Your email is alex@example.com, correct?",
+          "pcm_bytes": 640,
+          "sha256": "9e132485d5107211de325a45e7917cbe3e4b5b9cde3e4ee91d7d2102317759ee"
+        }
+      ],
+      "receipts": [
+        {
+          "utterance_id": "rt-1",
+          "status": "unknown",
+          "evidence": "unknown",
+          "played_ms": 0
+        }
+      ],
+      "receipt_origin": "synthetic gateway fixture",
+      "clear_count": 1,
+      "truncate_events": []
+    }
+  },
+  {
+    "scenario_id": "native.contact_confirmation_transmitted",
+    "engine": "native",
+    "profile": {
+      "provider": "openai",
+      "model": "gpt-realtime-2",
+      "voice": "ash",
+      "settings": {
+        "reasoning_effort": "low"
+      },
+      "mode": "offline_replay",
+      "hidden_opt_in": false
+    },
+    "raw_output": [
+      {
+        "response_id": "response-1",
+        "text": "Your email is alex@example.com, correct?",
+        "status": "completed"
+      }
+    ],
+    "submitted_speech": [],
+    "history": [
+      {
+        "role": "user",
+        "content": "My email is alex at example dot com.",
+        "timestamp": "2026-10-05T05:23:12.224183",
+        "confidence": null,
+        "talklee_call_id": null,
+        "turn_index": 0,
+        "event_type": "utterance",
+        "is_final": true,
+        "audio_window_start": null,
+        "audio_window_end": null,
+        "include_in_plaintext": true,
+        "metadata": {
+          "provider_item_id": "contact-source",
+          "caller_turn_order": 1
+        }
+      },
+      {
+        "role": "assistant",
+        "content": "Your email is alex@example.com, correct?",
+        "timestamp": "2026-10-05T05:23:12.225186",
+        "confidence": null,
+        "talklee_call_id": null,
+        "turn_index": 1,
+        "event_type": "utterance",
+        "is_final": null,
+        "audio_window_start": null,
+        "audio_window_end": null,
+        "include_in_plaintext": true,
+        "metadata": {
+          "delivery": {
+            "utterance_id": "rt-1",
+            "status": "completed",
+            "evidence": "transmitted",
+            "played_ms": 0
+          }
+        }
+      },
+      {
+        "role": "user",
+        "content": "Yes.",
+        "timestamp": "2026-10-05T05:23:12.225186",
+        "confidence": null,
+        "talklee_call_id": null,
+        "turn_index": 2,
+        "event_type": "utterance",
+        "is_final": true,
+        "audio_window_start": null,
+        "audio_window_end": null,
+        "include_in_plaintext": true,
+        "metadata": {
+          "provider_item_id": "contact-confirmation",
+          "caller_turn_order": 2
+        }
+      }
+    ],
+    "end": {
+      "requested": false,
+      "shutdown_count": 0,
+      "dnc_flag": false,
+      "dnc_effect_count": null
+    },
+    "effects": {
+      "attempts": [],
+      "accepted": 0,
+      "external_execution": "not_run; no business action capability or database configured",
+      "tool_results": [],
+      "dnc_persistence_receipts": [],
+      "dnc_database_writes": 0
+    },
+    "findings": {
+      "control": [
+        {
+          "id": "email",
+          "pass": true,
+          "detail": {
+            "expected": "alex@example.com",
+            "observed": "alex@example.com"
+          }
+        },
+        {
+          "id": "email_confirmed",
+          "pass": true,
+          "detail": {
+            "expected": false,
+            "observed": false
+          }
+        },
+        {
+          "id": "email_capture_status",
+          "pass": true,
+          "detail": {
+            "expected": "awaiting_confirmation",
+            "observed": "awaiting_confirmation"
+          }
+        },
+        {
+          "id": "email_value_source",
+          "pass": true,
+          "detail": {
+            "expected": {
+              "provider_item_id": "contact-source",
+              "caller_turn_order": 1,
+              "revision_sha256": "b92727742b9e9a5c477d5d802770316b82d6a3205cdc5c8d3dc8f8688e03b5e1"
+            },
+            "observed": {
+              "provider_item_id": "contact-source",
+              "caller_turn_order": 1,
+              "revision_sha256": "b92727742b9e9a5c477d5d802770316b82d6a3205cdc5c8d3dc8f8688e03b5e1"
+            }
+          }
+        },
+        {
+          "id": "email_confirmation_source",
+          "pass": true,
+          "detail": {
+            "expected": null,
+            "observed": null
+          }
+        },
+        {
+          "id": "email_readback",
+          "pass": true,
+          "detail": {
+            "expected": null,
+            "observed": null
+          }
+        },
+        {
+          "id": "submissions",
+          "pass": true,
+          "detail": {
+            "expected": 1,
+            "observed": 1
+          }
+        },
+        {
+          "id": "shutdowns",
+          "pass": true,
+          "detail": {
+            "expected": 0,
+            "observed": 0
+          }
+        },
+        {
+          "id": "dnc",
+          "pass": true,
+          "detail": {
+            "expected": false,
+            "observed": false
+          }
+        },
+        {
+          "id": "dnc_attempts",
+          "pass": true,
+          "detail": {
+            "expected": 0,
+            "observed": 0
+          }
+        }
+      ],
+      "semantic": [
+        {
+          "id": "profile_quality",
+          "status": "unreviewed",
+          "detail": "Scripted responses test runtime admission, not whether this model produces the right answer."
+        }
+      ]
+    },
+    "contacts": {
+      "email": {
+        "value": "alex@example.com",
+        "confirmed": false,
+        "capture_status": "awaiting_confirmation",
+        "confirmation_evidence": null,
+        "value_source": {
+          "provider_item_id": "contact-source",
+          "caller_turn_order": 1,
+          "revision_sha256": "b92727742b9e9a5c477d5d802770316b82d6a3205cdc5c8d3dc8f8688e03b5e1"
+        },
+        "confirmation_source": null,
+        "status_source": {
+          "provider_item_id": "contact-source",
+          "caller_turn_order": 1,
+          "revision_sha256": "b92727742b9e9a5c477d5d802770316b82d6a3205cdc5c8d3dc8f8688e03b5e1"
+        },
+        "readback": null
+      },
+      "phone": {
+        "value": null,
+        "confirmed": false,
+        "capture_status": null,
+        "confirmation_evidence": null,
+        "value_source": null,
+        "confirmation_source": null,
+        "status_source": null,
+        "readback": null
+      }
+    },
+    "media": {
+      "generated_codec": "pcmu/8000",
+      "submitted_codec": "pcm_s16le/8000",
+      "generated_bytes": 320,
+      "submitted_bytes": 640,
+      "submissions": [
+        {
+          "utterance_id": "rt-1",
+          "candidate_text": "Your email is alex@example.com, correct?",
+          "pcm_bytes": 640,
+          "sha256": "9e132485d5107211de325a45e7917cbe3e4b5b9cde3e4ee91d7d2102317759ee"
+        }
+      ],
+      "receipts": [
+        {
+          "utterance_id": "rt-1",
+          "status": "completed",
+          "evidence": "transmitted",
+          "played_ms": 0
+        }
+      ],
+      "receipt_origin": "synthetic gateway fixture",
+      "clear_count": 1,
+      "truncate_events": []
+    }
+  },
+  {
+    "scenario_id": "native.contact_confirmation_transmitted",
+    "engine": "native",
+    "profile": {
+      "provider": "xai",
+      "model": "grok-voice-think-fast-1.0",
+      "voice": "eve",
+      "settings": {
+        "reasoning_effort": "high",
+        "turn_detection": {
+          "type": "server_vad",
+          "threshold": 0.85
+        }
+      },
+      "mode": "offline_replay",
+      "hidden_opt_in": true
+    },
+    "raw_output": [
+      {
+        "response_id": "response-1",
+        "text": "Your email is alex@example.com, correct?",
+        "status": "completed"
+      }
+    ],
+    "submitted_speech": [],
+    "history": [
+      {
+        "role": "user",
+        "content": "My email is alex at example dot com.",
+        "timestamp": "2026-10-05T05:23:12.229182",
+        "confidence": null,
+        "talklee_call_id": null,
+        "turn_index": 0,
+        "event_type": "utterance",
+        "is_final": true,
+        "audio_window_start": null,
+        "audio_window_end": null,
+        "include_in_plaintext": true,
+        "metadata": {
+          "provider_item_id": "contact-source",
+          "caller_turn_order": 1
+        }
+      },
+      {
+        "role": "assistant",
+        "content": "Your email is alex@example.com, correct?",
+        "timestamp": "2026-10-05T05:23:12.230184",
+        "confidence": null,
+        "talklee_call_id": null,
+        "turn_index": 1,
+        "event_type": "utterance",
+        "is_final": null,
+        "audio_window_start": null,
+        "audio_window_end": null,
+        "include_in_plaintext": true,
+        "metadata": {
+          "delivery": {
+            "utterance_id": "rt-1",
+            "status": "completed",
+            "evidence": "transmitted",
+            "played_ms": 0
+          }
+        }
+      },
+      {
+        "role": "user",
+        "content": "Yes.",
+        "timestamp": "2026-10-05T05:23:12.231185",
+        "confidence": null,
+        "talklee_call_id": null,
+        "turn_index": 2,
+        "event_type": "utterance",
+        "is_final": true,
+        "audio_window_start": null,
+        "audio_window_end": null,
+        "include_in_plaintext": true,
+        "metadata": {
+          "provider_item_id": "contact-confirmation",
+          "caller_turn_order": 2
+        }
+      }
+    ],
+    "end": {
+      "requested": false,
+      "shutdown_count": 0,
+      "dnc_flag": false,
+      "dnc_effect_count": null
+    },
+    "effects": {
+      "attempts": [],
+      "accepted": 0,
+      "external_execution": "not_run; no business action capability or database configured",
+      "tool_results": [],
+      "dnc_persistence_receipts": [],
+      "dnc_database_writes": 0
+    },
+    "findings": {
+      "control": [
+        {
+          "id": "email",
+          "pass": true,
+          "detail": {
+            "expected": "alex@example.com",
+            "observed": "alex@example.com"
+          }
+        },
+        {
+          "id": "email_confirmed",
+          "pass": true,
+          "detail": {
+            "expected": false,
+            "observed": false
+          }
+        },
+        {
+          "id": "email_capture_status",
+          "pass": true,
+          "detail": {
+            "expected": "awaiting_confirmation",
+            "observed": "awaiting_confirmation"
+          }
+        },
+        {
+          "id": "email_value_source",
+          "pass": true,
+          "detail": {
+            "expected": {
+              "provider_item_id": "contact-source",
+              "caller_turn_order": 1,
+              "revision_sha256": "b92727742b9e9a5c477d5d802770316b82d6a3205cdc5c8d3dc8f8688e03b5e1"
+            },
+            "observed": {
+              "provider_item_id": "contact-source",
+              "caller_turn_order": 1,
+              "revision_sha256": "b92727742b9e9a5c477d5d802770316b82d6a3205cdc5c8d3dc8f8688e03b5e1"
+            }
+          }
+        },
+        {
+          "id": "email_confirmation_source",
+          "pass": true,
+          "detail": {
+            "expected": null,
+            "observed": null
+          }
+        },
+        {
+          "id": "email_readback",
+          "pass": true,
+          "detail": {
+            "expected": null,
+            "observed": null
+          }
+        },
+        {
+          "id": "submissions",
+          "pass": true,
+          "detail": {
+            "expected": 1,
+            "observed": 1
+          }
+        },
+        {
+          "id": "shutdowns",
+          "pass": true,
+          "detail": {
+            "expected": 0,
+            "observed": 0
+          }
+        },
+        {
+          "id": "dnc",
+          "pass": true,
+          "detail": {
+            "expected": false,
+            "observed": false
+          }
+        },
+        {
+          "id": "dnc_attempts",
+          "pass": true,
+          "detail": {
+            "expected": 0,
+            "observed": 0
+          }
+        }
+      ],
+      "semantic": [
+        {
+          "id": "profile_quality",
+          "status": "unreviewed",
+          "detail": "Scripted responses test runtime admission, not whether this model produces the right answer."
+        }
+      ]
+    },
+    "contacts": {
+      "email": {
+        "value": "alex@example.com",
+        "confirmed": false,
+        "capture_status": "awaiting_confirmation",
+        "confirmation_evidence": null,
+        "value_source": {
+          "provider_item_id": "contact-source",
+          "caller_turn_order": 1,
+          "revision_sha256": "b92727742b9e9a5c477d5d802770316b82d6a3205cdc5c8d3dc8f8688e03b5e1"
+        },
+        "confirmation_source": null,
+        "status_source": {
+          "provider_item_id": "contact-source",
+          "caller_turn_order": 1,
+          "revision_sha256": "b92727742b9e9a5c477d5d802770316b82d6a3205cdc5c8d3dc8f8688e03b5e1"
+        },
+        "readback": null
+      },
+      "phone": {
+        "value": null,
+        "confirmed": false,
+        "capture_status": null,
+        "confirmation_evidence": null,
+        "value_source": null,
+        "confirmation_source": null,
+        "status_source": null,
+        "readback": null
+      }
+    },
+    "media": {
+      "generated_codec": "pcmu/8000",
+      "submitted_codec": "pcm_s16le/8000",
+      "generated_bytes": 320,
+      "submitted_bytes": 640,
+      "submissions": [
+        {
+          "utterance_id": "rt-1",
+          "candidate_text": "Your email is alex@example.com, correct?",
+          "pcm_bytes": 640,
+          "sha256": "9e132485d5107211de325a45e7917cbe3e4b5b9cde3e4ee91d7d2102317759ee"
+        }
+      ],
+      "receipts": [
+        {
+          "utterance_id": "rt-1",
+          "status": "completed",
+          "evidence": "transmitted",
+          "played_ms": 0
+        }
+      ],
+      "receipt_origin": "synthetic gateway fixture",
+      "clear_count": 1,
+      "truncate_events": []
+    }
+  },
+  {
+    "scenario_id": "native.contact_confirmation_interrupted",
+    "engine": "native",
+    "profile": {
+      "provider": "openai",
+      "model": "gpt-realtime-2",
+      "voice": "ash",
+      "settings": {
+        "reasoning_effort": "low"
+      },
+      "mode": "offline_replay",
+      "hidden_opt_in": false
+    },
+    "raw_output": [
+      {
+        "response_id": "response-1",
+        "text": "Your email is alex@example.com, correct?",
+        "status": "completed"
+      }
+    ],
+    "submitted_speech": [],
+    "history": [
+      {
+        "role": "user",
+        "content": "My email is alex at example dot com.",
+        "timestamp": "2026-10-05T05:23:12.235184",
+        "confidence": null,
+        "talklee_call_id": null,
+        "turn_index": 0,
+        "event_type": "utterance",
+        "is_final": true,
+        "audio_window_start": null,
+        "audio_window_end": null,
+        "include_in_plaintext": true,
+        "metadata": {
+          "provider_item_id": "contact-source",
+          "caller_turn_order": 1
+        }
+      },
+      {
+        "role": "assistant",
+        "content": "Your email is alex@example.com, correct?",
+        "timestamp": "2026-10-05T05:23:12.236187",
+        "confidence": null,
+        "talklee_call_id": null,
+        "turn_index": 1,
+        "event_type": "utterance",
+        "is_final": null,
+        "audio_window_start": null,
+        "audio_window_end": null,
+        "include_in_plaintext": true,
+        "metadata": {
+          "delivery": {
+            "utterance_id": "rt-1",
+            "status": "interrupted",
+            "evidence": "unknown"
+          }
+        }
+      },
+      {
+        "role": "user",
+        "content": "Yes.",
+        "timestamp": "2026-10-05T05:23:12.237186",
+        "confidence": null,
+        "talklee_call_id": null,
+        "turn_index": 2,
+        "event_type": "utterance",
+        "is_final": true,
+        "audio_window_start": null,
+        "audio_window_end": null,
+        "include_in_plaintext": true,
+        "metadata": {
+          "provider_item_id": "contact-confirmation",
+          "caller_turn_order": 2
+        }
+      }
+    ],
+    "end": {
+      "requested": false,
+      "shutdown_count": 0,
+      "dnc_flag": false,
+      "dnc_effect_count": null
+    },
+    "effects": {
+      "attempts": [],
+      "accepted": 0,
+      "external_execution": "not_run; no business action capability or database configured",
+      "tool_results": [],
+      "dnc_persistence_receipts": [],
+      "dnc_database_writes": 0
+    },
+    "findings": {
+      "control": [
+        {
+          "id": "email",
+          "pass": true,
+          "detail": {
+            "expected": "alex@example.com",
+            "observed": "alex@example.com"
+          }
+        },
+        {
+          "id": "email_confirmed",
+          "pass": true,
+          "detail": {
+            "expected": false,
+            "observed": false
+          }
+        },
+        {
+          "id": "email_capture_status",
+          "pass": true,
+          "detail": {
+            "expected": "awaiting_confirmation",
+            "observed": "awaiting_confirmation"
+          }
+        },
+        {
+          "id": "email_value_source",
+          "pass": true,
+          "detail": {
+            "expected": {
+              "provider_item_id": "contact-source",
+              "caller_turn_order": 1,
+              "revision_sha256": "b92727742b9e9a5c477d5d802770316b82d6a3205cdc5c8d3dc8f8688e03b5e1"
+            },
+            "observed": {
+              "provider_item_id": "contact-source",
+              "caller_turn_order": 1,
+              "revision_sha256": "b92727742b9e9a5c477d5d802770316b82d6a3205cdc5c8d3dc8f8688e03b5e1"
+            }
+          }
+        },
+        {
+          "id": "email_confirmation_source",
+          "pass": true,
+          "detail": {
+            "expected": null,
+            "observed": null
+          }
+        },
+        {
+          "id": "email_readback",
+          "pass": true,
+          "detail": {
+            "expected": null,
+            "observed": null
+          }
+        },
+        {
+          "id": "submissions",
+          "pass": true,
+          "detail": {
+            "expected": 1,
+            "observed": 1
+          }
+        },
+        {
+          "id": "shutdowns",
+          "pass": true,
+          "detail": {
+            "expected": 0,
+            "observed": 0
+          }
+        },
+        {
+          "id": "dnc",
+          "pass": true,
+          "detail": {
+            "expected": false,
+            "observed": false
+          }
+        },
+        {
+          "id": "dnc_attempts",
+          "pass": true,
+          "detail": {
+            "expected": 0,
+            "observed": 0
+          }
+        }
+      ],
+      "semantic": [
+        {
+          "id": "profile_quality",
+          "status": "unreviewed",
+          "detail": "Scripted responses test runtime admission, not whether this model produces the right answer."
+        }
+      ]
+    },
+    "contacts": {
+      "email": {
+        "value": "alex@example.com",
+        "confirmed": false,
+        "capture_status": "awaiting_confirmation",
+        "confirmation_evidence": null,
+        "value_source": {
+          "provider_item_id": "contact-source",
+          "caller_turn_order": 1,
+          "revision_sha256": "b92727742b9e9a5c477d5d802770316b82d6a3205cdc5c8d3dc8f8688e03b5e1"
+        },
+        "confirmation_source": null,
+        "status_source": {
+          "provider_item_id": "contact-source",
+          "caller_turn_order": 1,
+          "revision_sha256": "b92727742b9e9a5c477d5d802770316b82d6a3205cdc5c8d3dc8f8688e03b5e1"
+        },
+        "readback": null
+      },
+      "phone": {
+        "value": null,
+        "confirmed": false,
+        "capture_status": null,
+        "confirmation_evidence": null,
+        "value_source": null,
+        "confirmation_source": null,
+        "status_source": null,
+        "readback": null
+      }
+    },
+    "media": {
+      "generated_codec": "pcmu/8000",
+      "submitted_codec": "pcm_s16le/8000",
+      "generated_bytes": 320,
+      "submitted_bytes": 640,
+      "submissions": [
+        {
+          "utterance_id": "rt-1",
+          "candidate_text": "Your email is alex@example.com, correct?",
+          "pcm_bytes": 640,
+          "sha256": "9e132485d5107211de325a45e7917cbe3e4b5b9cde3e4ee91d7d2102317759ee"
+        }
+      ],
+      "receipts": [],
+      "receipt_origin": "synthetic gateway fixture",
+      "clear_count": 2,
+      "truncate_events": [
+        {
+          "type": "conversation.item.truncate",
+          "item_id": "response-1-item",
+          "content_index": 0,
+          "audio_end_ms": 0
+        }
+      ]
+    }
+  },
+  {
+    "scenario_id": "native.contact_confirmation_interrupted",
+    "engine": "native",
+    "profile": {
+      "provider": "xai",
+      "model": "grok-voice-think-fast-1.0",
+      "voice": "eve",
+      "settings": {
+        "reasoning_effort": "high",
+        "turn_detection": {
+          "type": "server_vad",
+          "threshold": 0.85
+        }
+      },
+      "mode": "offline_replay",
+      "hidden_opt_in": true
+    },
+    "raw_output": [
+      {
+        "response_id": "response-1",
+        "text": "Your email is alex@example.com, correct?",
+        "status": "completed"
+      }
+    ],
+    "submitted_speech": [],
+    "history": [
+      {
+        "role": "user",
+        "content": "My email is alex at example dot com.",
+        "timestamp": "2026-10-05T05:23:12.240183",
+        "confidence": null,
+        "talklee_call_id": null,
+        "turn_index": 0,
+        "event_type": "utterance",
+        "is_final": true,
+        "audio_window_start": null,
+        "audio_window_end": null,
+        "include_in_plaintext": true,
+        "metadata": {
+          "provider_item_id": "contact-source",
+          "caller_turn_order": 1
+        }
+      },
+      {
+        "role": "assistant",
+        "content": "Your email is alex@example.com, correct?",
+        "timestamp": "2026-10-05T05:23:12.241185",
+        "confidence": null,
+        "talklee_call_id": null,
+        "turn_index": 1,
+        "event_type": "utterance",
+        "is_final": null,
+        "audio_window_start": null,
+        "audio_window_end": null,
+        "include_in_plaintext": true,
+        "metadata": {
+          "delivery": {
+            "utterance_id": "rt-1",
+            "status": "interrupted",
+            "evidence": "unknown"
+          }
+        }
+      },
+      {
+        "role": "user",
+        "content": "Yes.",
+        "timestamp": "2026-10-05T05:23:12.242185",
+        "confidence": null,
+        "talklee_call_id": null,
+        "turn_index": 2,
+        "event_type": "utterance",
+        "is_final": true,
+        "audio_window_start": null,
+        "audio_window_end": null,
+        "include_in_plaintext": true,
+        "metadata": {
+          "provider_item_id": "contact-confirmation",
+          "caller_turn_order": 2
+        }
+      }
+    ],
+    "end": {
+      "requested": false,
+      "shutdown_count": 0,
+      "dnc_flag": false,
+      "dnc_effect_count": null
+    },
+    "effects": {
+      "attempts": [],
+      "accepted": 0,
+      "external_execution": "not_run; no business action capability or database configured",
+      "tool_results": [],
+      "dnc_persistence_receipts": [],
+      "dnc_database_writes": 0
+    },
+    "findings": {
+      "control": [
+        {
+          "id": "email",
+          "pass": true,
+          "detail": {
+            "expected": "alex@example.com",
+            "observed": "alex@example.com"
+          }
+        },
+        {
+          "id": "email_confirmed",
+          "pass": true,
+          "detail": {
+            "expected": false,
+            "observed": false
+          }
+        },
+        {
+          "id": "email_capture_status",
+          "pass": true,
+          "detail": {
+            "expected": "awaiting_confirmation",
+            "observed": "awaiting_confirmation"
+          }
+        },
+        {
+          "id": "email_value_source",
+          "pass": true,
+          "detail": {
+            "expected": {
+              "provider_item_id": "contact-source",
+              "caller_turn_order": 1,
+              "revision_sha256": "b92727742b9e9a5c477d5d802770316b82d6a3205cdc5c8d3dc8f8688e03b5e1"
+            },
+            "observed": {
+              "provider_item_id": "contact-source",
+              "caller_turn_order": 1,
+              "revision_sha256": "b92727742b9e9a5c477d5d802770316b82d6a3205cdc5c8d3dc8f8688e03b5e1"
+            }
+          }
+        },
+        {
+          "id": "email_confirmation_source",
+          "pass": true,
+          "detail": {
+            "expected": null,
+            "observed": null
+          }
+        },
+        {
+          "id": "email_readback",
+          "pass": true,
+          "detail": {
+            "expected": null,
+            "observed": null
+          }
+        },
+        {
+          "id": "submissions",
+          "pass": true,
+          "detail": {
+            "expected": 1,
+            "observed": 1
+          }
+        },
+        {
+          "id": "shutdowns",
+          "pass": true,
+          "detail": {
+            "expected": 0,
+            "observed": 0
+          }
+        },
+        {
+          "id": "dnc",
+          "pass": true,
+          "detail": {
+            "expected": false,
+            "observed": false
+          }
+        },
+        {
+          "id": "dnc_attempts",
+          "pass": true,
+          "detail": {
+            "expected": 0,
+            "observed": 0
+          }
+        }
+      ],
+      "semantic": [
+        {
+          "id": "profile_quality",
+          "status": "unreviewed",
+          "detail": "Scripted responses test runtime admission, not whether this model produces the right answer."
+        }
+      ]
+    },
+    "contacts": {
+      "email": {
+        "value": "alex@example.com",
+        "confirmed": false,
+        "capture_status": "awaiting_confirmation",
+        "confirmation_evidence": null,
+        "value_source": {
+          "provider_item_id": "contact-source",
+          "caller_turn_order": 1,
+          "revision_sha256": "b92727742b9e9a5c477d5d802770316b82d6a3205cdc5c8d3dc8f8688e03b5e1"
+        },
+        "confirmation_source": null,
+        "status_source": {
+          "provider_item_id": "contact-source",
+          "caller_turn_order": 1,
+          "revision_sha256": "b92727742b9e9a5c477d5d802770316b82d6a3205cdc5c8d3dc8f8688e03b5e1"
+        },
+        "readback": null
+      },
+      "phone": {
+        "value": null,
+        "confirmed": false,
+        "capture_status": null,
+        "confirmation_evidence": null,
+        "value_source": null,
+        "confirmation_source": null,
+        "status_source": null,
+        "readback": null
+      }
+    },
+    "media": {
+      "generated_codec": "pcmu/8000",
+      "submitted_codec": "pcm_s16le/8000",
+      "generated_bytes": 320,
+      "submitted_bytes": 640,
+      "submissions": [
+        {
+          "utterance_id": "rt-1",
+          "candidate_text": "Your email is alex@example.com, correct?",
+          "pcm_bytes": 640,
+          "sha256": "9e132485d5107211de325a45e7917cbe3e4b5b9cde3e4ee91d7d2102317759ee"
+        }
+      ],
+      "receipts": [],
+      "receipt_origin": "synthetic gateway fixture",
+      "clear_count": 2,
+      "truncate_events": [
+        {
+          "type": "conversation.item.truncate",
+          "item_id": "response-1-item",
+          "content_index": 0,
+          "audio_end_ms": 0
+        }
+      ]
+    }
+  },
+  {
+    "scenario_id": "native.historical_dnc_recollection",
+    "engine": "native",
+    "profile": {
+      "provider": "openai",
+      "model": "gpt-realtime-2",
+      "voice": "ash",
+      "settings": {
+        "reasoning_effort": "low"
+      },
+      "mode": "offline_replay",
+      "hidden_opt_in": false
+    },
+    "raw_output": [
+      {
+        "response_id": "response-2",
+        "text": "What would you like to know about our opening hours?",
+        "status": "completed"
+      }
+    ],
+    "submitted_speech": [
+      "What would you like to know about our opening hours?"
+    ],
+    "history": [
+      {
+        "role": "user",
+        "content": "Last year I told another company to stop calling me. What are your opening hours?",
+        "timestamp": "2026-10-05T05:23:12.245184",
+        "confidence": null,
+        "talklee_call_id": null,
+        "turn_index": 0,
+        "event_type": "utterance",
+        "is_final": true,
+        "audio_window_start": null,
+        "audio_window_end": null,
+        "include_in_plaintext": true,
+        "metadata": {
+          "provider_item_id": "caller-1",
+          "caller_turn_order": 1
+        }
+      },
+      {
+        "role": "assistant",
+        "content": "What would you like to know about our opening hours?",
+        "timestamp": "2026-10-05T05:23:12.246185",
+        "confidence": null,
+        "talklee_call_id": null,
+        "turn_index": 1,
+        "event_type": "utterance",
+        "is_final": null,
+        "audio_window_start": null,
+        "audio_window_end": null,
+        "include_in_plaintext": true,
+        "metadata": {
+          "delivery": {
+            "utterance_id": "rt-1",
+            "status": "completed",
+            "evidence": "transport_played",
+            "played_ms": 40
+          }
+        }
+      }
+    ],
+    "end": {
+      "requested": false,
+      "shutdown_count": 0,
+      "dnc_flag": false,
+      "dnc_effect_count": null
+    },
+    "effects": {
+      "attempts": [
+        "end_call"
+      ],
+      "accepted": 0,
+      "external_execution": "not_run; no business action capability or database configured",
+      "tool_results": [
+        {
+          "version": 1,
+          "action": "end_call",
+          "success": false,
+          "status": "caller_intent_unconfirmed",
+          "confirmation_allowed": false,
+          "message": "The caller has not clearly ended the conversation."
+        }
+      ],
+      "dnc_persistence_receipts": [],
+      "dnc_database_writes": 0
+    },
+    "findings": {
+      "control": [
+        {
+          "id": "shutdowns",
+          "pass": true,
+          "detail": {
+            "expected": 0,
+            "observed": 0
+          }
+        },
+        {
+          "id": "end_requested",
+          "pass": true,
+          "detail": {
+            "expected": false,
+            "observed": false
+          }
+        },
+        {
+          "id": "dnc",
+          "pass": true,
+          "detail": {
+            "expected": false,
+            "observed": false
+          }
+        },
+        {
+          "id": "dnc_attempts",
+          "pass": true,
+          "detail": {
+            "expected": 0,
+            "observed": 0
+          }
+        },
+        {
+          "id": "tool_statuses",
+          "pass": true,
+          "detail": {
+            "expected": [
+              "caller_intent_unconfirmed"
+            ],
+            "observed": [
+              "caller_intent_unconfirmed"
+            ]
+          }
+        },
+        {
+          "id": "submissions",
+          "pass": true,
+          "detail": {
+            "expected": 1,
+            "observed": 1
+          }
+        }
+      ],
+      "semantic": [
+        {
+          "id": "profile_quality",
+          "status": "unreviewed",
+          "detail": "Scripted responses test runtime admission, not whether this model produces the right answer."
+        }
+      ]
+    },
+    "contacts": {
+      "email": {
+        "value": null,
+        "confirmed": false,
+        "capture_status": null,
+        "confirmation_evidence": null,
+        "value_source": null,
+        "confirmation_source": null,
+        "status_source": null,
+        "readback": null
+      },
+      "phone": {
+        "value": null,
+        "confirmed": false,
+        "capture_status": null,
+        "confirmation_evidence": null,
+        "value_source": null,
+        "confirmation_source": null,
+        "status_source": null,
+        "readback": null
+      }
+    },
+    "media": {
+      "generated_codec": "pcmu/8000",
+      "submitted_codec": "pcm_s16le/8000",
+      "generated_bytes": 320,
+      "submitted_bytes": 640,
+      "submissions": [
+        {
+          "utterance_id": "rt-1",
+          "candidate_text": "What would you like to know about our opening hours?",
+          "pcm_bytes": 640,
+          "sha256": "9e132485d5107211de325a45e7917cbe3e4b5b9cde3e4ee91d7d2102317759ee"
+        }
+      ],
+      "receipts": [
+        {
+          "utterance_id": "rt-1",
+          "status": "completed",
+          "evidence": "transport_played",
+          "played_ms": 40
+        }
+      ],
+      "receipt_origin": "synthetic gateway fixture",
+      "clear_count": 0,
+      "truncate_events": []
+    }
+  },
+  {
+    "scenario_id": "native.historical_dnc_recollection",
+    "engine": "native",
+    "profile": {
+      "provider": "xai",
+      "model": "grok-voice-think-fast-1.0",
+      "voice": "eve",
+      "settings": {
+        "reasoning_effort": "high",
+        "turn_detection": {
+          "type": "server_vad",
+          "threshold": 0.85
+        }
+      },
+      "mode": "offline_replay",
+      "hidden_opt_in": true
+    },
+    "raw_output": [
+      {
+        "response_id": "response-2",
+        "text": "What would you like to know about our opening hours?",
+        "status": "completed"
+      }
+    ],
+    "submitted_speech": [
+      "What would you like to know about our opening hours?"
+    ],
+    "history": [
+      {
+        "role": "user",
+        "content": "Last year I told another company to stop calling me. What are your opening hours?",
+        "timestamp": "2026-10-05T05:23:12.248185",
+        "confidence": null,
+        "talklee_call_id": null,
+        "turn_index": 0,
+        "event_type": "utterance",
+        "is_final": true,
+        "audio_window_start": null,
+        "audio_window_end": null,
+        "include_in_plaintext": true,
+        "metadata": {
+          "provider_item_id": "caller-1",
+          "caller_turn_order": 1
+        }
+      },
+      {
+        "role": "assistant",
+        "content": "What would you like to know about our opening hours?",
+        "timestamp": "2026-10-05T05:23:12.250185",
+        "confidence": null,
+        "talklee_call_id": null,
+        "turn_index": 1,
+        "event_type": "utterance",
+        "is_final": null,
+        "audio_window_start": null,
+        "audio_window_end": null,
+        "include_in_plaintext": true,
+        "metadata": {
+          "delivery": {
+            "utterance_id": "rt-1",
+            "status": "completed",
+            "evidence": "transport_played",
+            "played_ms": 40
+          }
+        }
+      }
+    ],
+    "end": {
+      "requested": false,
+      "shutdown_count": 0,
+      "dnc_flag": false,
+      "dnc_effect_count": null
+    },
+    "effects": {
+      "attempts": [
+        "end_call"
+      ],
+      "accepted": 0,
+      "external_execution": "not_run; no business action capability or database configured",
+      "tool_results": [
+        {
+          "version": 1,
+          "action": "end_call",
+          "success": false,
+          "status": "caller_intent_unconfirmed",
+          "confirmation_allowed": false,
+          "message": "The caller has not clearly ended the conversation."
+        }
+      ],
+      "dnc_persistence_receipts": [],
+      "dnc_database_writes": 0
+    },
+    "findings": {
+      "control": [
+        {
+          "id": "shutdowns",
+          "pass": true,
+          "detail": {
+            "expected": 0,
+            "observed": 0
+          }
+        },
+        {
+          "id": "end_requested",
+          "pass": true,
+          "detail": {
+            "expected": false,
+            "observed": false
+          }
+        },
+        {
+          "id": "dnc",
+          "pass": true,
+          "detail": {
+            "expected": false,
+            "observed": false
+          }
+        },
+        {
+          "id": "dnc_attempts",
+          "pass": true,
+          "detail": {
+            "expected": 0,
+            "observed": 0
+          }
+        },
+        {
+          "id": "tool_statuses",
+          "pass": true,
+          "detail": {
+            "expected": [
+              "caller_intent_unconfirmed"
+            ],
+            "observed": [
+              "caller_intent_unconfirmed"
+            ]
+          }
+        },
+        {
+          "id": "submissions",
+          "pass": true,
+          "detail": {
+            "expected": 1,
+            "observed": 1
+          }
+        }
+      ],
+      "semantic": [
+        {
+          "id": "profile_quality",
+          "status": "unreviewed",
+          "detail": "Scripted responses test runtime admission, not whether this model produces the right answer."
+        }
+      ]
+    },
+    "contacts": {
+      "email": {
+        "value": null,
+        "confirmed": false,
+        "capture_status": null,
+        "confirmation_evidence": null,
+        "value_source": null,
+        "confirmation_source": null,
+        "status_source": null,
+        "readback": null
+      },
+      "phone": {
+        "value": null,
+        "confirmed": false,
+        "capture_status": null,
+        "confirmation_evidence": null,
+        "value_source": null,
+        "confirmation_source": null,
+        "status_source": null,
+        "readback": null
+      }
+    },
+    "media": {
+      "generated_codec": "pcmu/8000",
+      "submitted_codec": "pcm_s16le/8000",
+      "generated_bytes": 320,
+      "submitted_bytes": 640,
+      "submissions": [
+        {
+          "utterance_id": "rt-1",
+          "candidate_text": "What would you like to know about our opening hours?",
+          "pcm_bytes": 640,
+          "sha256": "9e132485d5107211de325a45e7917cbe3e4b5b9cde3e4ee91d7d2102317759ee"
+        }
+      ],
+      "receipts": [
+        {
+          "utterance_id": "rt-1",
+          "status": "completed",
+          "evidence": "transport_played",
+          "played_ms": 40
+        }
+      ],
+      "receipt_origin": "synthetic gateway fixture",
+      "clear_count": 0,
+      "truncate_events": []
+    }
+  }
+]
