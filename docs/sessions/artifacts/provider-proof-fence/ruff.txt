@@ -1,0 +1,141 @@
+backend\app\api\v1\endpoints\telephony_bridge.py:35:22: F401 [*] `datetime.datetime` imported but unused
+   |
+33 | from contextlib import asynccontextmanager
+34 | from dataclasses import dataclass, replace
+35 | from datetime import datetime, timezone
+   |                      ^^^^^^^^ F401
+36 | from uuid import UUID, uuid4
+37 | from typing import Literal, Optional
+   |
+   = help: Remove unused import
+
+backend\app\api\v1\endpoints\telephony_bridge.py:35:32: F401 [*] `datetime.timezone` imported but unused
+   |
+33 | from contextlib import asynccontextmanager
+34 | from dataclasses import dataclass, replace
+35 | from datetime import datetime, timezone
+   |                                ^^^^^^^^ F401
+36 | from uuid import UUID, uuid4
+37 | from typing import Literal, Optional
+   |
+   = help: Remove unused import
+
+backend\app\api\v1\endpoints\telephony_bridge.py:79:5: F401 [*] `app.domain.services.telephony.config._RINGING_MAX_AGE_S` imported but unused
+   |
+77 | from app.domain.services.telephony.config import (  # noqa: E402
+78 |     _MAX_TELEPHONY_SESSIONS,
+79 |     _RINGING_MAX_AGE_S,
+   |     ^^^^^^^^^^^^^^^^^^ F401
+80 | )
+81 | from app.domain.services.telephony.adapter_registry import (  # noqa: E402
+   |
+   = help: Remove unused import: `app.domain.services.telephony.config._RINGING_MAX_AGE_S`
+
+backend\app\api\v1\endpoints\telephony_bridge.py:600:9: F841 Local variable `container` is assigned to but never used
+    |
+598 |     provider_health: dict = {}
+599 |     try:
+600 |         container = _get_orchestrator().__class__  # just a way to import lazily
+    |         ^^^^^^^^^ F841
+601 |         from app.core.container import get_container
+    |
+    = help: Remove assignment to unused variable `container`
+
+backend\app\api\v1\endpoints\telephony_bridge.py:2441:13: F841 Local variable `detector` is assigned to but never used
+     |
+2439 |         # Trigger post-call abuse detection (async)
+2440 |         try:
+2441 |             detector = AbuseDetectionService(
+     |             ^^^^^^^^ F841
+2442 |                 db_pool=container.db_pool,
+2443 |                 redis_client=getattr(container, "redis", None),
+     |
+     = help: Remove assignment to unused variable `detector`
+
+backend\app\domain\services\telephony\lifecycle.py:3495:76: F401 [*] `app.services.scripts.prompts.inbound.TRUE_INBOUND_DIRECTIVE` imported but unused
+     |
+3495 | from app.services.scripts.prompts.inbound import TRUE_INBOUND_DIRECTIVE as _TRUE_INBOUND_DIRECTIVE
+     |                                                                            ^^^^^^^^^^^^^^^^^^^^^^^ F401
+3496 |
+3497 | _AFTER_HOURS_VOICEMAIL_DIRECTIVE = """\
+     |
+     = help: Remove unused import: `app.services.scripts.prompts.inbound.TRUE_INBOUND_DIRECTIVE`
+
+backend\app\main.py:20:5: F401 [*] `app.api.operational.health_check` imported but unused
+   |
+18 | from app.api.v1.routes import api_router
+19 | from app.api.operational import (
+20 |     health_check,
+   |     ^^^^^^^^^^^^ F401
+21 |     prometheus_metrics,
+22 |     register_operational_routes,
+   |
+   = help: Remove unused import
+
+backend\app\main.py:21:5: F401 [*] `app.api.operational.prometheus_metrics` imported but unused
+   |
+19 | from app.api.operational import (
+20 |     health_check,
+21 |     prometheus_metrics,
+   |     ^^^^^^^^^^^^^^^^^^ F401
+22 |     register_operational_routes,
+23 |     root,
+   |
+   = help: Remove unused import
+
+backend\app\main.py:23:5: F401 [*] `app.api.operational.root` imported but unused
+   |
+21 |     prometheus_metrics,
+22 |     register_operational_routes,
+23 |     root,
+   |     ^^^^ F401
+24 | )
+25 | from app.core.app_bootstrap import configure_logging, configure_middleware
+   |
+   = help: Remove unused import
+
+backend\tests\unit\test_freeswitch_transfer_api.py:23:5: F401 [*] `app.infrastructure.telephony.freeswitch_esl.TransferResult` imported but unused
+   |
+21 | from app.api.v1.endpoints import telephony_bridge
+22 | from app.infrastructure.telephony.freeswitch_esl import (
+23 |     TransferResult,
+   |     ^^^^^^^^^^^^^^ F401
+24 |     TransferMode,
+25 |     TransferLeg,
+   |
+   = help: Remove unused import
+
+backend\tests\unit\test_freeswitch_transfer_api.py:24:5: F401 [*] `app.infrastructure.telephony.freeswitch_esl.TransferMode` imported but unused
+   |
+22 | from app.infrastructure.telephony.freeswitch_esl import (
+23 |     TransferResult,
+24 |     TransferMode,
+   |     ^^^^^^^^^^^^ F401
+25 |     TransferLeg,
+26 |     TransferStatus,
+   |
+   = help: Remove unused import
+
+backend\tests\unit\test_freeswitch_transfer_api.py:25:5: F401 [*] `app.infrastructure.telephony.freeswitch_esl.TransferLeg` imported but unused
+   |
+23 |     TransferResult,
+24 |     TransferMode,
+25 |     TransferLeg,
+   |     ^^^^^^^^^^^ F401
+26 |     TransferStatus,
+27 | )
+   |
+   = help: Remove unused import
+
+backend\tests\unit\test_freeswitch_transfer_api.py:26:5: F401 [*] `app.infrastructure.telephony.freeswitch_esl.TransferStatus` imported but unused
+   |
+24 |     TransferMode,
+25 |     TransferLeg,
+26 |     TransferStatus,
+   |     ^^^^^^^^^^^^^^ F401
+27 | )
+   |
+   = help: Remove unused import
+
+Found 13 errors.
+[*] 11 fixable with the `--fix` option (2 hidden fixes can be enabled with the `--unsafe-fixes` option).

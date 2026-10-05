@@ -1,0 +1,126 @@
+FFFFFFF.FFFFFF.FFF                                                       [100%]
+================================== FAILURES ===================================
+_______ test_admin_absence_proof_requires_saved_provider_family[twilio] _______
+tests\unit\test_provider_family_termination.py:83: in test_admin_absence_proof_requires_saved_provider_family
+    with pytest.raises(HTTPException) as exc:
+E   Failed: DID NOT RAISE <class 'fastapi.exceptions.HTTPException'>
+------------------------------ Captured log call ------------------------------
+WARNING  app.infrastructure.telephony.asterisk_adapter:asterisk_adapter.py:264 AsteriskAdapter: ARI password is a known default � set ASTERISK_ARI_PASSWORD env var in production
+_______ test_admin_absence_proof_requires_saved_provider_family[vonage] _______
+tests\unit\test_provider_family_termination.py:83: in test_admin_absence_proof_requires_saved_provider_family
+    with pytest.raises(HTTPException) as exc:
+E   Failed: DID NOT RAISE <class 'fastapi.exceptions.HTTPException'>
+------------------------------ Captured log call ------------------------------
+WARNING  app.infrastructure.telephony.asterisk_adapter:asterisk_adapter.py:264 AsteriskAdapter: ARI password is a known default � set ASTERISK_ARI_PASSWORD env var in production
+________ test_admin_absence_proof_requires_saved_provider_family[None] ________
+tests\unit\test_provider_family_termination.py:83: in test_admin_absence_proof_requires_saved_provider_family
+    with pytest.raises(HTTPException) as exc:
+E   Failed: DID NOT RAISE <class 'fastapi.exceptions.HTTPException'>
+------------------------------ Captured log call ------------------------------
+WARNING  app.infrastructure.telephony.asterisk_adapter:asterisk_adapter.py:264 AsteriskAdapter: ARI password is a known default � set ASTERISK_ARI_PASSWORD env var in production
+__________ test_admin_absence_proof_requires_saved_provider_family[] __________
+tests\unit\test_provider_family_termination.py:83: in test_admin_absence_proof_requires_saved_provider_family
+    with pytest.raises(HTTPException) as exc:
+E   Failed: DID NOT RAISE <class 'fastapi.exceptions.HTTPException'>
+------------------------------ Captured log call ------------------------------
+WARNING  app.infrastructure.telephony.asterisk_adapter:asterisk_adapter.py:264 AsteriskAdapter: ARI password is a known default � set ASTERISK_ARI_PASSWORD env var in production
+______ test_admin_absence_proof_requires_saved_provider_family[unknown] _______
+tests\unit\test_provider_family_termination.py:83: in test_admin_absence_proof_requires_saved_provider_family
+    with pytest.raises(HTTPException) as exc:
+E   Failed: DID NOT RAISE <class 'fastapi.exceptions.HTTPException'>
+------------------------------ Captured log call ------------------------------
+WARNING  app.infrastructure.telephony.asterisk_adapter:asterisk_adapter.py:264 AsteriskAdapter: ARI password is a known default � set ASTERISK_ARI_PASSWORD env var in production
+________ test_admin_absence_proof_requires_saved_provider_family[sip] _________
+tests\unit\test_provider_family_termination.py:83: in test_admin_absence_proof_requires_saved_provider_family
+    with pytest.raises(HTTPException) as exc:
+E   Failed: DID NOT RAISE <class 'fastapi.exceptions.HTTPException'>
+------------------------------ Captured log call ------------------------------
+WARNING  app.infrastructure.telephony.asterisk_adapter:asterisk_adapter.py:264 AsteriskAdapter: ARI password is a known default � set ASTERISK_ARI_PASSWORD env var in production
+____ test_admin_absence_proof_requires_saved_provider_family[sip/asterisk] ____
+tests\unit\test_provider_family_termination.py:83: in test_admin_absence_proof_requires_saved_provider_family
+    with pytest.raises(HTTPException) as exc:
+E   Failed: DID NOT RAISE <class 'fastapi.exceptions.HTTPException'>
+------------------------------ Captured log call ------------------------------
+WARNING  app.infrastructure.telephony.asterisk_adapter:asterisk_adapter.py:264 AsteriskAdapter: ARI password is a known default � set ASTERISK_ARI_PASSWORD env var in production
+____ test_actual_context_retains_all_leg_authority_before_any_io[asterisk] ____
+tests\unit\test_provider_family_termination.py:105: in test_actual_context_retains_all_leg_authority_before_any_io
+    proof = await termination.request_confirmed_hangup(adapter, context.provider_call_id, expected_provider=context.provider, provider_leg_ids=context.provider_leg_ids, provider_legs=context.provider_legs)
+E   AttributeError: 'TerminationContext' object has no attribute 'provider_legs'. Did you mean: 'provider_leg_ids'?
+------------------------------ Captured log call ------------------------------
+WARNING  app.infrastructure.telephony.asterisk_adapter:asterisk_adapter.py:264 AsteriskAdapter: ARI password is a known default � set ASTERISK_ARI_PASSWORD env var in production
+_____ test_actual_context_retains_all_leg_authority_before_any_io[twilio] _____
+tests\unit\test_provider_family_termination.py:105: in test_actual_context_retains_all_leg_authority_before_any_io
+    proof = await termination.request_confirmed_hangup(adapter, context.provider_call_id, expected_provider=context.provider, provider_leg_ids=context.provider_leg_ids, provider_legs=context.provider_legs)
+E   AttributeError: 'TerminationContext' object has no attribute 'provider_legs'. Did you mean: 'provider_leg_ids'?
+------------------------------ Captured log call ------------------------------
+WARNING  app.infrastructure.telephony.asterisk_adapter:asterisk_adapter.py:264 AsteriskAdapter: ARI password is a known default � set ASTERISK_ARI_PASSWORD env var in production
+_____ test_actual_context_retains_all_leg_authority_before_any_io[vonage] _____
+tests\unit\test_provider_family_termination.py:105: in test_actual_context_retains_all_leg_authority_before_any_io
+    proof = await termination.request_confirmed_hangup(adapter, context.provider_call_id, expected_provider=context.provider, provider_leg_ids=context.provider_leg_ids, provider_legs=context.provider_legs)
+E   AttributeError: 'TerminationContext' object has no attribute 'provider_legs'. Did you mean: 'provider_leg_ids'?
+------------------------------ Captured log call ------------------------------
+WARNING  app.infrastructure.telephony.asterisk_adapter:asterisk_adapter.py:264 AsteriskAdapter: ARI password is a known default � set ASTERISK_ARI_PASSWORD env var in production
+______ test_actual_context_retains_all_leg_authority_before_any_io[sip] _______
+tests\unit\test_provider_family_termination.py:105: in test_actual_context_retains_all_leg_authority_before_any_io
+    proof = await termination.request_confirmed_hangup(adapter, context.provider_call_id, expected_provider=context.provider, provider_leg_ids=context.provider_leg_ids, provider_legs=context.provider_legs)
+E   AttributeError: 'TerminationContext' object has no attribute 'provider_legs'. Did you mean: 'provider_leg_ids'?
+------------------------------ Captured log call ------------------------------
+WARNING  app.infrastructure.telephony.asterisk_adapter:asterisk_adapter.py:264 AsteriskAdapter: ARI password is a known default � set ASTERISK_ARI_PASSWORD env var in production
+____ test_actual_context_retains_all_leg_authority_before_any_io[unknown] _____
+tests\unit\test_provider_family_termination.py:105: in test_actual_context_retains_all_leg_authority_before_any_io
+    proof = await termination.request_confirmed_hangup(adapter, context.provider_call_id, expected_provider=context.provider, provider_leg_ids=context.provider_leg_ids, provider_legs=context.provider_legs)
+E   AttributeError: 'TerminationContext' object has no attribute 'provider_legs'. Did you mean: 'provider_leg_ids'?
+------------------------------ Captured log call ------------------------------
+WARNING  app.infrastructure.telephony.asterisk_adapter:asterisk_adapter.py:264 AsteriskAdapter: ARI password is a known default � set ASTERISK_ARI_PASSWORD env var in production
+______ test_actual_context_retains_all_leg_authority_before_any_io[None] ______
+tests\unit\test_provider_family_termination.py:105: in test_actual_context_retains_all_leg_authority_before_any_io
+    proof = await termination.request_confirmed_hangup(adapter, context.provider_call_id, expected_provider=context.provider, provider_leg_ids=context.provider_leg_ids, provider_legs=context.provider_legs)
+E   AttributeError: 'TerminationContext' object has no attribute 'provider_legs'. Did you mean: 'provider_leg_ids'?
+------------------------------ Captured log call ------------------------------
+WARNING  app.infrastructure.telephony.asterisk_adapter:asterisk_adapter.py:264 AsteriskAdapter: ARI password is a known default � set ASTERISK_ARI_PASSWORD env var in production
+___ test_inbound_lease_loss_does_not_settle_with_unrelated_adapter[twilio] ____
+tests\unit\test_provider_family_termination.py:128: in test_inbound_lease_loss_does_not_settle_with_unrelated_adapter
+    assert result is (provider == "asterisk")
+E   AssertionError: assert True is ('twilio' == 'asterisk'
+E     - asterisk
+E     + twilio)
+------------------------------ Captured log call ------------------------------
+WARNING  app.infrastructure.telephony.asterisk_adapter:asterisk_adapter.py:264 AsteriskAdapter: ARI password is a known default � set ASTERISK_ARI_PASSWORD env var in production
+____ test_inbound_lease_loss_does_not_settle_with_unrelated_adapter[None] _____
+tests\unit\test_provider_family_termination.py:128: in test_inbound_lease_loss_does_not_settle_with_unrelated_adapter
+    assert result is (provider == "asterisk")
+E   AssertionError: assert True is (None == 'asterisk')
+------------------------------ Captured log call ------------------------------
+WARNING  app.infrastructure.telephony.asterisk_adapter:asterisk_adapter.py:264 AsteriskAdapter: ARI password is a known default � set ASTERISK_ARI_PASSWORD env var in production
+_____ test_inbound_lease_loss_does_not_settle_with_unrelated_adapter[sip] _____
+tests\unit\test_provider_family_termination.py:128: in test_inbound_lease_loss_does_not_settle_with_unrelated_adapter
+    assert result is (provider == "asterisk")
+E   AssertionError: assert True is ('sip' == 'asterisk'
+E     - asterisk
+E     + sip)
+------------------------------ Captured log call ------------------------------
+WARNING  app.infrastructure.telephony.asterisk_adapter:asterisk_adapter.py:264 AsteriskAdapter: ARI password is a known default � set ASTERISK_ARI_PASSWORD env var in production
+============================== warnings summary ===============================
+app\api\v1\endpoints\admin\health\_shared.py:16
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\provider-proof-fence-20261005\backend\app\api\v1\endpoints\admin\health\_shared.py:16: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    _server_start_time = datetime.utcnow()
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/unit/test_provider_family_termination.py::test_admin_absence_proof_requires_saved_provider_family[twilio]
+FAILED tests/unit/test_provider_family_termination.py::test_admin_absence_proof_requires_saved_provider_family[vonage]
+FAILED tests/unit/test_provider_family_termination.py::test_admin_absence_proof_requires_saved_provider_family[None]
+FAILED tests/unit/test_provider_family_termination.py::test_admin_absence_proof_requires_saved_provider_family[]
+FAILED tests/unit/test_provider_family_termination.py::test_admin_absence_proof_requires_saved_provider_family[unknown]
+FAILED tests/unit/test_provider_family_termination.py::test_admin_absence_proof_requires_saved_provider_family[sip]
+FAILED tests/unit/test_provider_family_termination.py::test_admin_absence_proof_requires_saved_provider_family[sip/asterisk]
+FAILED tests/unit/test_provider_family_termination.py::test_actual_context_retains_all_leg_authority_before_any_io[asterisk]
+FAILED tests/unit/test_provider_family_termination.py::test_actual_context_retains_all_leg_authority_before_any_io[twilio]
+FAILED tests/unit/test_provider_family_termination.py::test_actual_context_retains_all_leg_authority_before_any_io[vonage]
+FAILED tests/unit/test_provider_family_termination.py::test_actual_context_retains_all_leg_authority_before_any_io[sip]
+FAILED tests/unit/test_provider_family_termination.py::test_actual_context_retains_all_leg_authority_before_any_io[unknown]
+FAILED tests/unit/test_provider_family_termination.py::test_actual_context_retains_all_leg_authority_before_any_io[None]
+FAILED tests/unit/test_provider_family_termination.py::test_inbound_lease_loss_does_not_settle_with_unrelated_adapter[twilio]
+FAILED tests/unit/test_provider_family_termination.py::test_inbound_lease_loss_does_not_settle_with_unrelated_adapter[None]
+FAILED tests/unit/test_provider_family_termination.py::test_inbound_lease_loss_does_not_settle_with_unrelated_adapter[sip]
+16 failed, 2 passed, 1 warning in 16.23s

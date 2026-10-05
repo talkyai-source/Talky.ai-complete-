@@ -1,0 +1,167 @@
+{
+  "source_candidate": "bbbb9450dfbff9e0436493a3b7b870a64481b77a",
+  "scope": "Actual Admin terminate endpoint, durable-context helper, shared HangupProof helper and Asterisk confirmation adapter; synthetic in-memory SQL/ARI/audit ports. Direct method invocation does not qualify HTTP auth, real database or actual provider termination.",
+  "blocked_network_attempts": [],
+  "rows": [
+    {
+      "saved_provider": "asterisk",
+      "adapter": "asterisk",
+      "ari_requests": [
+        {
+          "method": "DELETE",
+          "path": "/channels/synthetic-original-provider-leg",
+          "status": 404
+        }
+      ],
+      "db_writes": [
+        "termination_pending",
+        "terminal_update"
+      ],
+      "saved_status_after": "ended",
+      "result": {
+        "status": "confirmed",
+        "detail": "Provider/PBX termination confirmed and call closed",
+        "call_id": "00000000-0000-4000-8000-000000000001",
+        "previous_status": "in_call",
+        "new_status": "ended",
+        "call_status": "ended",
+        "termination_status": "confirmed",
+        "provider_hangup_requested": true,
+        "provider_hangup_confirmed": true,
+        "provider_hangup_error": null,
+        "settlement_deferred": false
+      },
+      "audit_actions": [
+        "admin_ended_call"
+      ]
+    },
+    {
+      "saved_provider": "twilio",
+      "adapter": "asterisk",
+      "ari_requests": [
+        {
+          "method": "DELETE",
+          "path": "/channels/synthetic-original-provider-leg",
+          "status": 404
+        }
+      ],
+      "db_writes": [
+        "termination_pending",
+        "terminal_update"
+      ],
+      "saved_status_after": "ended",
+      "result": {
+        "status": "confirmed",
+        "detail": "Provider/PBX termination confirmed and call closed",
+        "call_id": "00000000-0000-4000-8000-000000000001",
+        "previous_status": "in_call",
+        "new_status": "ended",
+        "call_status": "ended",
+        "termination_status": "confirmed",
+        "provider_hangup_requested": true,
+        "provider_hangup_confirmed": true,
+        "provider_hangup_error": null,
+        "settlement_deferred": false
+      },
+      "audit_actions": [
+        "admin_ended_call"
+      ]
+    },
+    {
+      "saved_provider": "vonage",
+      "adapter": "asterisk",
+      "ari_requests": [
+        {
+          "method": "DELETE",
+          "path": "/channels/synthetic-original-provider-leg",
+          "status": 404
+        }
+      ],
+      "db_writes": [
+        "termination_pending",
+        "terminal_update"
+      ],
+      "saved_status_after": "ended",
+      "result": {
+        "status": "confirmed",
+        "detail": "Provider/PBX termination confirmed and call closed",
+        "call_id": "00000000-0000-4000-8000-000000000001",
+        "previous_status": "in_call",
+        "new_status": "ended",
+        "call_status": "ended",
+        "termination_status": "confirmed",
+        "provider_hangup_requested": true,
+        "provider_hangup_confirmed": true,
+        "provider_hangup_error": null,
+        "settlement_deferred": false
+      },
+      "audit_actions": [
+        "admin_ended_call"
+      ]
+    },
+    {
+      "saved_provider": null,
+      "adapter": "asterisk",
+      "ari_requests": [
+        {
+          "method": "DELETE",
+          "path": "/channels/synthetic-original-provider-leg",
+          "status": 404
+        }
+      ],
+      "db_writes": [
+        "termination_pending",
+        "terminal_update"
+      ],
+      "saved_status_after": "ended",
+      "result": {
+        "status": "confirmed",
+        "detail": "Provider/PBX termination confirmed and call closed",
+        "call_id": "00000000-0000-4000-8000-000000000001",
+        "previous_status": "in_call",
+        "new_status": "ended",
+        "call_status": "ended",
+        "termination_status": "confirmed",
+        "provider_hangup_requested": true,
+        "provider_hangup_confirmed": true,
+        "provider_hangup_error": null,
+        "settlement_deferred": false
+      },
+      "audit_actions": [
+        "admin_ended_call"
+      ]
+    },
+    {
+      "saved_provider": "unknown",
+      "adapter": "asterisk",
+      "ari_requests": [
+        {
+          "method": "DELETE",
+          "path": "/channels/synthetic-original-provider-leg",
+          "status": 404
+        }
+      ],
+      "db_writes": [
+        "termination_pending",
+        "terminal_update"
+      ],
+      "saved_status_after": "ended",
+      "result": {
+        "status": "confirmed",
+        "detail": "Provider/PBX termination confirmed and call closed",
+        "call_id": "00000000-0000-4000-8000-000000000001",
+        "previous_status": "in_call",
+        "new_status": "ended",
+        "call_status": "ended",
+        "termination_status": "confirmed",
+        "provider_hangup_requested": true,
+        "provider_hangup_confirmed": true,
+        "provider_hangup_error": null,
+        "settlement_deferred": false
+      },
+      "audit_actions": [
+        "admin_ended_call"
+      ]
+    }
+  ]
+}

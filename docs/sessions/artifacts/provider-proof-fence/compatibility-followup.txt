@@ -1,0 +1,107 @@
+........................................................................ [ 31%]
+..............FFFFFF.................................................... [ 63%]
+........................................................................ [ 94%]
+............                                                             [100%]
+================================== FAILURES ===================================
+________ test_admin_terminate_requests_provider_hangup_and_closes_row _________
+tests\unit\test_admin_operational_media_controls.py:191: in mark
+    provider=conn.row.get("provider"),
+E   AttributeError: '_TerminateConn' object has no attribute 'row'
+
+The above exception was the direct cause of the following exception:
+tests\unit\test_admin_operational_media_controls.py:228: in test_admin_terminate_requests_provider_hangup_and_closes_row
+    result = await calls.terminate_call(
+app\api\v1\endpoints\admin\calls.py:773: in terminate_call
+    raise HTTPException(
+E   fastapi.exceptions.HTTPException: 503: {'error': 'termination_context_unavailable', 'call_id': '8c3b2b67-94d0-4e1f-b593-cf1b71d62640', 'call_status': 'in_call', 'termination_status': 'failed', 'provider_hangup_requested': False, 'provider_hangup_confirmed': False, 'provider_hangup_error': 'linked_leg_lookup_failed'}
+---------------------------- Captured stderr call -----------------------------
+13:09:52 ERROR    [app.api.v1.endpoints.admin.calls] [req=-] [call=-] admin_call_termination_leg_lookup_failed call=8c3b2b67-94d0-4e1f-b593-cf1b71d62640 err_type=AttributeError
+------------------------------ Captured log call ------------------------------
+ERROR    app.api.v1.endpoints.admin.calls:calls.py:768 admin_call_termination_leg_lookup_failed call=8c3b2b67-94d0-4e1f-b593-cf1b71d62640 err_type=AttributeError
+_____ test_admin_terminate_keeps_call_live_without_provider_confirmation ______
+tests\unit\test_admin_operational_media_controls.py:292: in test_admin_terminate_keeps_call_live_without_provider_confirmation
+    assert exc_info.value.status_code == 504
+E   AssertionError: assert 503 == 504
+E    +  where 503 = HTTPException(status_code=503, detail={'error': 'termination_context_unavailable', 'call_id': '2e60c989-efdd-4e7f-9be8...der_hangup_requested': False, 'provider_hangup_confirmed': False, 'provider_hangup_error': 'linked_leg_lookup_failed'}).status_code
+E    +    where HTTPException(status_code=503, detail={'error': 'termination_context_unavailable', 'call_id': '2e60c989-efdd-4e7f-9be8...der_hangup_requested': False, 'provider_hangup_confirmed': False, 'provider_hangup_error': 'linked_leg_lookup_failed'}) = <ExceptionInfo HTTPException(status_code=503, detail={'error': 'termination_context_unavailable', 'call_id': '2e60c989...p_requested': False, 'provider_hangup_confirmed': False, 'provider_hangup_error': 'linked_leg_lookup_failed'}) tblen=2>.value
+---------------------------- Captured stderr call -----------------------------
+13:09:56 ERROR    [app.api.v1.endpoints.admin.calls] [req=-] [call=-] admin_call_termination_leg_lookup_failed call=2e60c989-efdd-4e7f-9be8-9139258859f0 err_type=AttributeError
+------------------------------ Captured log call ------------------------------
+ERROR    app.api.v1.endpoints.admin.calls:calls.py:768 admin_call_termination_leg_lookup_failed call=2e60c989-efdd-4e7f-9be8-9139258859f0 err_type=AttributeError
+______ test_admin_terminal_replay_still_requires_provider_absence_proof _______
+tests\unit\test_admin_operational_media_controls.py:344: in test_admin_terminal_replay_still_requires_provider_absence_proof
+    assert exc_info.value.status_code == 504
+E   AssertionError: assert 503 == 504
+E    +  where 503 = HTTPException(status_code=503, detail={'error': 'termination_context_unavailable', 'call_id': '968a918f-c21c-44eb-971e...der_hangup_requested': False, 'provider_hangup_confirmed': False, 'provider_hangup_error': 'linked_leg_lookup_failed'}).status_code
+E    +    where HTTPException(status_code=503, detail={'error': 'termination_context_unavailable', 'call_id': '968a918f-c21c-44eb-971e...der_hangup_requested': False, 'provider_hangup_confirmed': False, 'provider_hangup_error': 'linked_leg_lookup_failed'}) = <ExceptionInfo HTTPException(status_code=503, detail={'error': 'termination_context_unavailable', 'call_id': '968a918f...p_requested': False, 'provider_hangup_confirmed': False, 'provider_hangup_error': 'linked_leg_lookup_failed'}) tblen=2>.value
+---------------------------- Captured stderr call -----------------------------
+13:09:56 ERROR    [app.api.v1.endpoints.admin.calls] [req=-] [call=-] admin_call_termination_leg_lookup_failed call=968a918f-c21c-44eb-971e-36e3a2b52325 err_type=AttributeError
+------------------------------ Captured log call ------------------------------
+ERROR    app.api.v1.endpoints.admin.calls:calls.py:768 admin_call_termination_leg_lookup_failed call=968a918f-c21c-44eb-971e-36e3a2b52325 err_type=AttributeError
+_ test_admin_terminal_replay_reports_confirmation_only_after_pbx_proof[ended] _
+tests\unit\test_admin_operational_media_controls.py:191: in mark
+    provider=conn.row.get("provider"),
+E   AttributeError: '_TerminateConn' object has no attribute 'row'
+
+The above exception was the direct cause of the following exception:
+tests\unit\test_admin_operational_media_controls.py:378: in test_admin_terminal_replay_reports_confirmation_only_after_pbx_proof
+    result = await calls.terminate_call(
+app\api\v1\endpoints\admin\calls.py:773: in terminate_call
+    raise HTTPException(
+E   fastapi.exceptions.HTTPException: 503: {'error': 'termination_context_unavailable', 'call_id': 'dc07c760-55fc-474a-a30b-5a3d3a5fdb93', 'call_status': 'ended', 'termination_status': 'failed', 'provider_hangup_requested': False, 'provider_hangup_confirmed': False, 'provider_hangup_error': 'linked_leg_lookup_failed'}
+---------------------------- Captured stderr call -----------------------------
+13:09:56 ERROR    [app.api.v1.endpoints.admin.calls] [req=-] [call=-] admin_call_termination_leg_lookup_failed call=dc07c760-55fc-474a-a30b-5a3d3a5fdb93 err_type=AttributeError
+------------------------------ Captured log call ------------------------------
+ERROR    app.api.v1.endpoints.admin.calls:calls.py:768 admin_call_termination_leg_lookup_failed call=dc07c760-55fc-474a-a30b-5a3d3a5fdb93 err_type=AttributeError
+_ test_admin_terminal_replay_reports_confirmation_only_after_pbx_proof[cancelled] _
+tests\unit\test_admin_operational_media_controls.py:191: in mark
+    provider=conn.row.get("provider"),
+E   AttributeError: '_TerminateConn' object has no attribute 'row'
+
+The above exception was the direct cause of the following exception:
+tests\unit\test_admin_operational_media_controls.py:378: in test_admin_terminal_replay_reports_confirmation_only_after_pbx_proof
+    result = await calls.terminate_call(
+app\api\v1\endpoints\admin\calls.py:773: in terminate_call
+    raise HTTPException(
+E   fastapi.exceptions.HTTPException: 503: {'error': 'termination_context_unavailable', 'call_id': '6f15f7b2-7222-4d5b-85b9-efd0ae491925', 'call_status': 'cancelled', 'termination_status': 'failed', 'provider_hangup_requested': False, 'provider_hangup_confirmed': False, 'provider_hangup_error': 'linked_leg_lookup_failed'}
+---------------------------- Captured stderr call -----------------------------
+13:09:56 ERROR    [app.api.v1.endpoints.admin.calls] [req=-] [call=-] admin_call_termination_leg_lookup_failed call=6f15f7b2-7222-4d5b-85b9-efd0ae491925 err_type=AttributeError
+------------------------------ Captured log call ------------------------------
+ERROR    app.api.v1.endpoints.admin.calls:calls.py:768 admin_call_termination_leg_lookup_failed call=6f15f7b2-7222-4d5b-85b9-efd0ae491925 err_type=AttributeError
+_ test_admin_terminal_replay_reports_confirmation_only_after_pbx_proof[rejected] _
+tests\unit\test_admin_operational_media_controls.py:191: in mark
+    provider=conn.row.get("provider"),
+E   AttributeError: '_TerminateConn' object has no attribute 'row'
+
+The above exception was the direct cause of the following exception:
+tests\unit\test_admin_operational_media_controls.py:378: in test_admin_terminal_replay_reports_confirmation_only_after_pbx_proof
+    result = await calls.terminate_call(
+app\api\v1\endpoints\admin\calls.py:773: in terminate_call
+    raise HTTPException(
+E   fastapi.exceptions.HTTPException: 503: {'error': 'termination_context_unavailable', 'call_id': 'c4b4264c-500e-444c-b6dc-2347efd915b4', 'call_status': 'rejected', 'termination_status': 'failed', 'provider_hangup_requested': False, 'provider_hangup_confirmed': False, 'provider_hangup_error': 'linked_leg_lookup_failed'}
+---------------------------- Captured stderr call -----------------------------
+13:09:56 ERROR    [app.api.v1.endpoints.admin.calls] [req=-] [call=-] admin_call_termination_leg_lookup_failed call=c4b4264c-500e-444c-b6dc-2347efd915b4 err_type=AttributeError
+------------------------------ Captured log call ------------------------------
+ERROR    app.api.v1.endpoints.admin.calls:calls.py:768 admin_call_termination_leg_lookup_failed call=c4b4264c-500e-444c-b6dc-2347efd915b4 err_type=AttributeError
+============================== warnings summary ===============================
+app\api\v1\endpoints\admin\health\_shared.py:16
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\provider-proof-fence-20261005\backend\app\api\v1\endpoints\admin\health\_shared.py:16: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    _server_start_time = datetime.utcnow()
+
+app\api\v1\endpoints\abuse_monitoring.py:147
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\provider-proof-fence-20261005\backend\app\api\v1\endpoints\abuse_monitoring.py:147: FastAPIDeprecationWarning: `regex` has been deprecated, please use `pattern` instead
+    severity: Optional[str] = Query(None, regex="^(low|medium|high|critical)$"),
+
+app\api\v1\endpoints\abuse_monitoring.py:684
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\provider-proof-fence-20261005\backend\app\api\v1\endpoints\abuse_monitoring.py:684: FastAPIDeprecationWarning: `regex` has been deprecated, please use `pattern` instead
+    min_severity: str = Query("high", regex="^(medium|high|critical)$"),
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/unit/test_admin_operational_media_controls.py::test_admin_terminate_requests_provider_hangup_and_closes_row
+FAILED tests/unit/test_admin_operational_media_controls.py::test_admin_terminate_keeps_call_live_without_provider_confirmation
+FAILED tests/unit/test_admin_operational_media_controls.py::test_admin_terminal_replay_still_requires_provider_absence_proof
+FAILED tests/unit/test_admin_operational_media_controls.py::test_admin_terminal_replay_reports_confirmation_only_after_pbx_proof[ended]
+FAILED tests/unit/test_admin_operational_media_controls.py::test_admin_terminal_replay_reports_confirmation_only_after_pbx_proof[cancelled]
+FAILED tests/unit/test_admin_operational_media_controls.py::test_admin_terminal_replay_reports_confirmation_only_after_pbx_proof[rejected]
+6 failed, 222 passed, 3 warnings in 35.10s

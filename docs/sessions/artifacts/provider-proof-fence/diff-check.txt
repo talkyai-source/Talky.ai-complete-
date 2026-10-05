@@ -1,0 +1,12 @@
+warning: in the working copy of 'backend/app/api/v1/endpoints/admin/calls.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'backend/app/api/v1/endpoints/calls.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'backend/app/api/v1/endpoints/telephony_bridge.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'backend/app/main.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'backend/tests/unit/test_admin_operational_media_controls.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'backend/tests/unit/test_confirmation_aware_call_endpoints.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'backend/tests/unit/test_confirmation_aware_hangup.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'backend/tests/unit/test_freeswitch_transfer_api.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'backend/tests/unit/test_inbound_lifecycle_fail_closed.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'backend/tests/unit/test_main_telephony_shutdown.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'backend/tests/unit/test_outbound_campaign_boundaries.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'backend/tests/unit/test_telephony_orphan_recovery_confirmation.py', CRLF will be replaced by LF the next time Git touches it
