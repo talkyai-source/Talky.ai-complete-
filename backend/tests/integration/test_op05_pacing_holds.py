@@ -5,10 +5,11 @@ import pytest
 
 from app.domain.models.dialer_job import DialerJob
 from app.workers.dialer_worker import DialerWorker
-from tests.integration.test_op05_pre_attempt_holds import assert_one_owner, hold_db as hold_db
+from tests.integration import test_op05_pre_attempt_holds as hold_contract
 from tests.unit.test_op05_pacing_holds import CASES, pacing_worker
 
 pytestmark = pytest.mark.integration
+hold_db = hold_contract.hold_db
 
 
 @pytest.mark.parametrize("reason,delay", CASES)
@@ -30,10 +31,10 @@ async def test_pacing_retains_database_owner_and_original_redis_attempt(hold_db,
         if denied:
             assert await queue._redis.zcard(queue.SCHEDULED_ZSET) == 0
             assert await queue._redis.hget(queue.INFLIGHT_HASH, job.job_id) == original_payload
-            await assert_one_owner(db, "processing")
+            await hold_contract.assert_one_owner(db, "processing")
             await db.admin.execute(f'GRANT UPDATE ON dialer_jobs TO "{db.role}"')
             await worker.process_job(job)
-        await assert_one_owner(db, "retry_scheduled")
+        await hold_contract.assert_one_owner(db, "retry_scheduled")
         entries = await queue._redis.zrange(queue.SCHEDULED_ZSET, 0, -1, withscores=True)
         assert len(entries) == 1
         payload, due = entries[0]
