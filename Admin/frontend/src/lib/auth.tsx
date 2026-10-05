@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { api, type AdminUser } from './api';
 
 // Dummy admin user used only when VITE_USE_DUMMY_AUTH=true (dev / Storybook).
@@ -43,10 +43,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         isAuthenticated: false,
         error: null,
     });
+    const authOperation = useRef(0);
+    // Only the latest operation in this mounted provider/session may publish
+    // state or change the token after an asynchronous response.
+    const beginOperation = () => {
+        const operation = ++authOperation.current;
+        const session = api.getAuthGeneration();
+        return () => operation === authOperation.current && session === api.getAuthGeneration();
+    };
 
     const checkAuth = async () => {
         if (USE_DUMMY_AUTH) {
+            const isCurrent = beginOperation();
             await new Promise((resolve) => setTimeout(resolve, 300));
+            if (!isCurrent()) return;
             setState({
                 user: DUMMY_ADMIN_USER,
                 isLoading: false,
@@ -58,6 +68,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         const token = localStorage.getItem(TOKEN_KEY);
         api.setToken(token);
+        const isCurrent = beginOperation();
         if (!token) {
             setState({
                 user: null,
@@ -70,6 +81,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         try {
             const res = await api.verifyToken();
+            if (!isCurrent()) return;
             if (res.data?.valid && res.data.user) {
                 setState({
                     user: res.data.user,
@@ -88,6 +100,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 error: null,
             });
         } catch (err) {
+            if (!isCurrent()) return;
             // Backend unreachable — keep the user out rather than silently
             // logging them in.
             setState({
@@ -100,10 +113,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
 
     const login = async (email: string, password: string): Promise<boolean> => {
+        const isCurrent = beginOperation();
         setState((prev) => ({ ...prev, isLoading: true, error: null }));
 
         if (USE_DUMMY_AUTH) {
             await new Promise((resolve) => setTimeout(resolve, 500));
+            if (!isCurrent()) return false;
             if (email && password) {
                 setState({
                     user: { ...DUMMY_ADMIN_USER, email },
@@ -132,6 +147,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         try {
             const res = await api.login(email, password);
+            if (!isCurrent()) return false;
             if (res.error) {
                 setState((prev) => ({
                     ...prev,
@@ -173,6 +189,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             });
             return true;
         } catch (err) {
+            if (!isCurrent()) return false;
             setState((prev) => ({
                 ...prev,
                 isLoading: false,
@@ -183,11 +200,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
 
     const logout = async () => {
+        const isCurrent = beginOperation();
         try {
             if (!USE_DUMMY_AUTH) await api.logout();
         } catch {
             // Token may already be invalidated server-side; clear locally regardless.
         }
+        if (!isCurrent()) return;
         api.setToken(null);
         setState({
             user: null,
@@ -199,6 +218,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     useEffect(() => {
         void checkAuth();
+        return () => { authOperation.current += 1; };
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- Initial check only; async ownership uses current API/ref state.
     }, []);
 
     return (
