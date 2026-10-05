@@ -1,0 +1,85 @@
+FFFFFFFFF.....................                                           [100%]
+================================== FAILURES ===================================
+__________ TestPasswordResetRevokesBothStores.test_revokes_sessions ___________
+tests\security\test_credential_revocation.py:166: in test_revokes_sessions
+    await _call_reset(_db_client(conn))
+tests\security\test_credential_revocation.py:149: in _call_reset
+    return await pr_mod.reset_password(
+app\api\v1\endpoints\auth\password_reset.py:409: in reset_password
+    raise HTTPException(
+E   fastapi.exceptions.HTTPException: 400: Invalid or expired reset code. Request a new code.
+_______ TestPasswordResetRevokesBothStores.test_revokes_refresh_tokens ________
+tests\security\test_credential_revocation.py:175: in test_revokes_refresh_tokens
+    await _call_reset(_db_client(conn))
+tests\security\test_credential_revocation.py:149: in _call_reset
+    return await pr_mod.reset_password(
+app\api\v1\endpoints\auth\password_reset.py:409: in reset_password
+    raise HTTPException(
+E   fastapi.exceptions.HTTPException: 400: Invalid or expired reset code. Request a new code.
+_ TestPasswordResetRevokesBothStores.test_refresh_revocation_is_not_scoped_to_one_family _
+tests\security\test_credential_revocation.py:188: in test_refresh_revocation_is_not_scoped_to_one_family
+    await _call_reset(_db_client(conn))
+tests\security\test_credential_revocation.py:149: in _call_reset
+    return await pr_mod.reset_password(
+app\api\v1\endpoints\auth\password_reset.py:409: in reset_password
+    raise HTTPException(
+E   fastapi.exceptions.HTTPException: 400: Invalid or expired reset code. Request a new code.
+_ TestPasswordResetRevokesBothStores.test_both_revocations_share_the_password_transaction _
+tests\security\test_credential_revocation.py:198: in test_both_revocations_share_the_password_transaction
+    await _call_reset(_db_client(conn))
+tests\security\test_credential_revocation.py:149: in _call_reset
+    return await pr_mod.reset_password(
+app\api\v1\endpoints\auth\password_reset.py:409: in reset_password
+    raise HTTPException(
+E   fastapi.exceptions.HTTPException: 400: Invalid or expired reset code. Request a new code.
+_ TestPasswordResetRevokesBothStores.test_password_update_precedes_revocation _
+tests\security\test_credential_revocation.py:206: in test_password_update_precedes_revocation
+    await _call_reset(_db_client(conn))
+tests\security\test_credential_revocation.py:149: in _call_reset
+    return await pr_mod.reset_password(
+app\api\v1\endpoints\auth\password_reset.py:409: in reset_password
+    raise HTTPException(
+E   fastapi.exceptions.HTTPException: 400: Invalid or expired reset code. Request a new code.
+___________ TestPasswordResetRevokesBothStores.test_returns_success ___________
+tests\security\test_credential_revocation.py:213: in test_returns_success
+    result = await _call_reset(_db_client(conn))
+tests\security\test_credential_revocation.py:149: in _call_reset
+    return await pr_mod.reset_password(
+app\api\v1\endpoints\auth\password_reset.py:409: in reset_password
+    raise HTTPException(
+E   fastapi.exceptions.HTTPException: 400: Invalid or expired reset code. Request a new code.
+______ TestRevokedReasonCheckConstraint.test_prefers_the_accurate_reason ______
+tests\security\test_credential_revocation.py:230: in test_prefers_the_accurate_reason
+    await _call_reset(_db_client(conn))
+tests\security\test_credential_revocation.py:149: in _call_reset
+    return await pr_mod.reset_password(
+app\api\v1\endpoints\auth\password_reset.py:409: in reset_password
+    raise HTTPException(
+E   fastapi.exceptions.HTTPException: 400: Invalid or expired reset code. Request a new code.
+_ TestRevokedReasonCheckConstraint.test_falls_back_when_constraint_rejects_the_reason _
+tests\security\test_credential_revocation.py:252: in test_falls_back_when_constraint_rejects_the_reason
+    result = await _call_reset(_db_client(conn))
+tests\security\test_credential_revocation.py:149: in _call_reset
+    return await pr_mod.reset_password(
+app\api\v1\endpoints\auth\password_reset.py:409: in reset_password
+    raise HTTPException(
+E   fastapi.exceptions.HTTPException: 400: Invalid or expired reset code. Request a new code.
+___ TestRevokedReasonCheckConstraint.test_savepoint_wraps_the_first_attempt ___
+tests\security\test_credential_revocation.py:266: in test_savepoint_wraps_the_first_attempt
+    await _call_reset(_db_client(conn))
+tests\security\test_credential_revocation.py:149: in _call_reset
+    return await pr_mod.reset_password(
+app\api\v1\endpoints\auth\password_reset.py:409: in reset_password
+    raise HTTPException(
+E   fastapi.exceptions.HTTPException: 400: Invalid or expired reset code. Request a new code.
+=========================== short test summary info ===========================
+FAILED tests/security/test_credential_revocation.py::TestPasswordResetRevokesBothStores::test_revokes_sessions
+FAILED tests/security/test_credential_revocation.py::TestPasswordResetRevokesBothStores::test_revokes_refresh_tokens
+FAILED tests/security/test_credential_revocation.py::TestPasswordResetRevokesBothStores::test_refresh_revocation_is_not_scoped_to_one_family
+FAILED tests/security/test_credential_revocation.py::TestPasswordResetRevokesBothStores::test_both_revocations_share_the_password_transaction
+FAILED tests/security/test_credential_revocation.py::TestPasswordResetRevokesBothStores::test_password_update_precedes_revocation
+FAILED tests/security/test_credential_revocation.py::TestPasswordResetRevokesBothStores::test_returns_success
+FAILED tests/security/test_credential_revocation.py::TestRevokedReasonCheckConstraint::test_prefers_the_accurate_reason
+FAILED tests/security/test_credential_revocation.py::TestRevokedReasonCheckConstraint::test_falls_back_when_constraint_rejects_the_reason
+FAILED tests/security/test_credential_revocation.py::TestRevokedReasonCheckConstraint::test_savepoint_wraps_the_first_attempt
+9 failed, 21 passed in 10.32s

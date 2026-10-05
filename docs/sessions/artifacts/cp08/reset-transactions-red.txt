@@ -1,0 +1,26 @@
+FFF.                                                                     [100%]
+================================== FAILURES ===================================
+___ test_reset_success_survives_cleanup_failure_but_code_cannot_be_replayed ___
+tests\integration\test_cp08_credential_transactions.py:140: in test_reset_success_survives_cleanup_failure_but_code_cannot_be_replayed
+    result=await reset.reset_password(request(),body,db.client,SimpleNamespace(log=AsyncMock()))
+app\api\v1\endpoints\auth\password_reset.py:441: in reset_password
+    await redis.delete(_reset_redis_key(email))
+tests\integration\test_cp08_credential_transactions.py:118: in delete
+    if self.fail_cleanup: raise RuntimeError('synthetic cleanup outage')
+E   RuntimeError: synthetic cleanup outage
+___________ test_concurrent_reset_code_has_one_committed_generation ___________
+tests\integration\test_cp08_credential_transactions.py:166: in test_concurrent_reset_code_has_one_committed_generation
+    assert sorted(await asyncio.gather(attempt('first'),attempt('second')))==[False,True]
+E   assert [True, True] == [False, True]
+E     At index 0 diff: True != False
+E     Use -v to get more diff
+______________ test_reset_cleanup_cannot_delete_a_newer_request _______________
+tests\integration\test_cp08_credential_transactions.py:180: in test_reset_cleanup_cannot_delete_a_newer_request
+    assert redis.raw==newer
+E   assert None == '{"synthetic": "newer-reset-request"}'
+E    +  where None = <tests.integration.test_cp08_credential_transactions.ResetRedis object at 0x00000275DB9E44D0>.raw
+=========================== short test summary info ===========================
+FAILED tests/integration/test_cp08_credential_transactions.py::test_reset_success_survives_cleanup_failure_but_code_cannot_be_replayed
+FAILED tests/integration/test_cp08_credential_transactions.py::test_concurrent_reset_code_has_one_committed_generation
+FAILED tests/integration/test_cp08_credential_transactions.py::test_reset_cleanup_cannot_delete_a_newer_request
+3 failed, 1 passed, 4 deselected in 6.46s

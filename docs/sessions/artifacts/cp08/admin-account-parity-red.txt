@@ -1,0 +1,65 @@
+FFF                                                                      [100%]
+================================== FAILURES ===================================
+_____ test_admin_created_tenant_user_can_sign_in_with_current_membership ______
+
+identity_db = namespace(admin=<asyncpg.connection.Connection object at 0x000001CAC2BF09B0>, pool=<asyncpg.pool.Pool object at 0x0000...amespace(pool=<asyncpg.pool.Pool object at 0x000001CABF9DBB60>), http=<httpx.AsyncClient object at 0x000001CAC2C36C30>)
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001CAC2C06AB0>
+
+    async def test_admin_created_tenant_user_can_sign_in_with_current_membership(identity_db,monkeypatch):
+        db=identity_db
+        await db.admin.execute("UPDATE user_profiles SET role='platform_admin' WHERE id=$1",db.users[0])
+        email=f'{uuid4()}@example.com'
+        monkeypatch.setattr(admin_users,'hash_password',lambda _:'synthetic')
+        try:
+            created=await db.http.post('/admin/users',headers=auth(),json={'name':'Synthetic staff','email':email,'password':'Synthetic-Password-42!','role':'user','tenant_id':str(db.tenants[0])})
+            assert created.status_code==201,created.text
+            new_user=created.json()['id']
+            membership=await db.admin.fetchrow("SELECT tu.status,r.name FROM tenant_users tu JOIN roles r ON r.id=tu.role_id WHERE user_id=$1 AND tenant_id=$2",new_user,db.tenants[0])
+>           assert membership and membership['status']=='active' and membership['name']=='user'
+E           assert (None)
+
+tests\integration\test_cp08_current_identity.py:772: AssertionError
+_____ test_admin_role_edit_changes_effective_membership_not_just_profile ______
+
+identity_db = namespace(admin=<asyncpg.connection.Connection object at 0x000001CAC2E427B0>, pool=<asyncpg.pool.Pool object at 0x0000...amespace(pool=<asyncpg.pool.Pool object at 0x000001CAC2F7E560>), http=<httpx.AsyncClient object at 0x000001CAC2FA4FE0>)
+
+    async def test_admin_role_edit_changes_effective_membership_not_just_profile(identity_db):
+        db=identity_db
+        await db.admin.execute("UPDATE user_profiles SET role='platform_admin' WHERE id=$1",db.users[0])
+        edited=await db.http.patch(f'/admin/users/{db.users[1]}',headers=auth(),json={'role':'readonly'})
+        assert edited.status_code==200,edited.text
+        actual=await db.http.get('/identity',headers={'authorization':'Bearer 1'})
+>       assert actual.status_code==200 and actual.json()['role']=='readonly'
+E       AssertionError: assert (200 == 200 and 'tenant_admin' == 'readonly'
+E        +  where 200 = <Response [200 OK]>.status_code
+E         - readonly
+E         + tenant_admin)
+
+tests\integration\test_cp08_current_identity.py:791: AssertionError
+_________ test_admin_create_membership_failure_rolls_back_new_profile _________
+
+identity_db = namespace(admin=<asyncpg.connection.Connection object at 0x000001CAC2F9D310>, pool=<asyncpg.pool.Pool object at 0x0000...amespace(pool=<asyncpg.pool.Pool object at 0x000001CAC2F7E820>), http=<httpx.AsyncClient object at 0x000001CAC2FD3FB0>)
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001CAC301E870>
+
+    async def test_admin_create_membership_failure_rolls_back_new_profile(identity_db,monkeypatch):
+        db=identity_db
+        await db.admin.execute("UPDATE user_profiles SET role='platform_admin' WHERE id=$1",db.users[0])
+        await db.admin.execute(f'REVOKE INSERT ON tenant_users FROM "{db.role}"')
+        email=f'{uuid4()}@example.com'
+        monkeypatch.setattr(admin_users,'hash_password',lambda _:'synthetic')
+        try:
+>           with pytest.raises(asyncpg.InsufficientPrivilegeError):
+E           Failed: DID NOT RAISE <class 'asyncpg.exceptions.InsufficientPrivilegeError'>
+
+tests\integration\test_cp08_current_identity.py:801: Failed
+============================== warnings summary ===============================
+app\api\v1\endpoints\admin\health\_shared.py:16
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\backend\app\api\v1\endpoints\admin\health\_shared.py:16: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    _server_start_time = datetime.utcnow()
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/integration/test_cp08_current_identity.py::test_admin_created_tenant_user_can_sign_in_with_current_membership
+FAILED tests/integration/test_cp08_current_identity.py::test_admin_role_edit_changes_effective_membership_not_just_profile
+FAILED tests/integration/test_cp08_current_identity.py::test_admin_create_membership_failure_rolls_back_new_profile
+3 failed, 46 deselected, 1 warning in 6.40s

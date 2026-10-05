@@ -1,0 +1,364 @@
+✖ local GET /auth cannot authenticate or mutate legacy identity (3.4503ms)
+✖ local GET /auth/me cannot authenticate or mutate legacy identity (0.6159ms)
+✖ local GET /me cannot authenticate or mutate legacy identity (0.4642ms)
+✖ local POST /auth/register cannot authenticate or mutate legacy identity (3.1651ms)
+✖ local POST /auth/login cannot authenticate or mutate legacy identity (0.6319ms)
+✖ local POST /auth/refresh cannot authenticate or mutate legacy identity (0.4406ms)
+✖ local POST /auth/mfa/verify cannot authenticate or mutate legacy identity (0.38ms)
+✖ local DELETE /auth/passkeys/synthetic cannot authenticate or mutate legacy identity (0.4227ms)
+✖ local PATCH /auth/profile cannot authenticate or mutate legacy identity (0.4324ms)
+✖ SSR verifies canonical talky_at cookies with the current backend (29.3186ms)
+✖ SSR verifies canonical talky_sid cookies with the current backend (3.3523ms)
+✖ SSR verifies canonical talky_at cookies with the current backend (2.714ms)
+✖ SSR does not authenticate from a legacy mirror alone or without configured backend (3.8725ms)
+✖ SSR 401 cannot fall back to another identity authority (3.4688ms)
+✖ SSR 403 cannot fall back to another identity authority (2.808ms)
+✖ SSR 404 cannot fall back to another identity authority (2.4425ms)
+✖ SSR 503 cannot fall back to another identity authority (1.967ms)
+✖ SSR successive request scopes see revocation, with no persistent principal cache (1.9718ms)
+✔ SSR failed or malformed principal responses do not grant a principal (3.912ms)
+✖ proxy role lookup is canonical, uncached, and observes a later revocation (34.0948ms)
+✖ proxy does not retry an alternate /me authority or the unconfigured local catchall (3.6856ms)
+ℹ tests 21
+ℹ suites 0
+ℹ pass 1
+ℹ fail 20
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 40440.1207
+
+✖ failing tests:
+
+test at src\lib\auth-local-route.test.ts:2:1346
+✖ local GET /auth cannot authenticate or mutate legacy identity (3.4503ms)
+  Error: Auth must be unavailable before credentials are inspected
+      at _Headers.request.headers.get (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\lib\auth-local-route.test.ts:22:56)
+      at authTokenFromRequest (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\server\auth-core.ts:102:34)
+      at handle (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\app\api\v1\[...path]\route.ts:749:19)
+      at GET (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\app\api\v1\[...path]\route.ts:2028:12)
+      at async TestContext.<anonymous> (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\lib\auth-local-route.test.ts:24:22)
+      at async Test.run (node:internal/test_runner/test:1208:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3)
+
+test at src\lib\auth-local-route.test.ts:2:1346
+✖ local GET /auth/me cannot authenticate or mutate legacy identity (0.6159ms)
+  Error: Auth must be unavailable before credentials are inspected
+      at _Headers.request.headers.get (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\lib\auth-local-route.test.ts:22:56)
+      at authTokenFromRequest (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\server\auth-core.ts:102:34)
+      at handle (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\app\api\v1\[...path]\route.ts:749:19)
+      at GET (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\app\api\v1\[...path]\route.ts:2028:12)
+      at async TestContext.<anonymous> (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\lib\auth-local-route.test.ts:24:22)
+      at async Test.run (node:internal/test_runner/test:1208:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:831:7)
+
+test at src\lib\auth-local-route.test.ts:2:1346
+✖ local GET /me cannot authenticate or mutate legacy identity (0.4642ms)
+  Error: Auth must be unavailable before credentials are inspected
+      at _Headers.request.headers.get (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\lib\auth-local-route.test.ts:22:56)
+      at authTokenFromRequest (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\server\auth-core.ts:102:34)
+      at handle (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\app\api\v1\[...path]\route.ts:749:19)
+      at GET (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\app\api\v1\[...path]\route.ts:2028:12)
+      at async TestContext.<anonymous> (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\lib\auth-local-route.test.ts:24:22)
+      at async Test.run (node:internal/test_runner/test:1208:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:831:7)
+
+test at src\lib\auth-local-route.test.ts:2:1346
+✖ local POST /auth/register cannot authenticate or mutate legacy identity (3.1651ms)
+  Error: Auth must be unavailable before credentials are inspected
+      at _Headers.request.headers.get (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\lib\auth-local-route.test.ts:22:56)
+      at authTokenFromRequest (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\server\auth-core.ts:102:34)
+      at handle (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\app\api\v1\[...path]\route.ts:749:19)
+      at POST (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\app\api\v1\[...path]\route.ts:2033:12)
+      at async TestContext.<anonymous> (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\lib\auth-local-route.test.ts:24:22)
+      at async Test.run (node:internal/test_runner/test:1208:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:831:7)
+
+test at src\lib\auth-local-route.test.ts:2:1346
+✖ local POST /auth/login cannot authenticate or mutate legacy identity (0.6319ms)
+  Error: Auth must be unavailable before credentials are inspected
+      at _Headers.request.headers.get (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\lib\auth-local-route.test.ts:22:56)
+      at authTokenFromRequest (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\server\auth-core.ts:102:34)
+      at handle (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\app\api\v1\[...path]\route.ts:749:19)
+      at POST (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\app\api\v1\[...path]\route.ts:2033:12)
+      at async TestContext.<anonymous> (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\lib\auth-local-route.test.ts:24:22)
+      at async Test.run (node:internal/test_runner/test:1208:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:831:7)
+
+test at src\lib\auth-local-route.test.ts:2:1346
+✖ local POST /auth/refresh cannot authenticate or mutate legacy identity (0.4406ms)
+  Error: Auth must be unavailable before credentials are inspected
+      at _Headers.request.headers.get (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\lib\auth-local-route.test.ts:22:56)
+      at authTokenFromRequest (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\server\auth-core.ts:102:34)
+      at handle (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\app\api\v1\[...path]\route.ts:749:19)
+      at POST (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\app\api\v1\[...path]\route.ts:2033:12)
+      at async TestContext.<anonymous> (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\lib\auth-local-route.test.ts:24:22)
+      at async Test.run (node:internal/test_runner/test:1208:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:831:7)
+
+test at src\lib\auth-local-route.test.ts:2:1346
+✖ local POST /auth/mfa/verify cannot authenticate or mutate legacy identity (0.38ms)
+  Error: Auth must be unavailable before credentials are inspected
+      at _Headers.request.headers.get (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\lib\auth-local-route.test.ts:22:56)
+      at authTokenFromRequest (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\server\auth-core.ts:102:34)
+      at handle (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\app\api\v1\[...path]\route.ts:749:19)
+      at POST (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\app\api\v1\[...path]\route.ts:2033:12)
+      at async TestContext.<anonymous> (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\lib\auth-local-route.test.ts:24:22)
+      at async Test.run (node:internal/test_runner/test:1208:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:831:7)
+
+test at src\lib\auth-local-route.test.ts:2:1346
+✖ local DELETE /auth/passkeys/synthetic cannot authenticate or mutate legacy identity (0.4227ms)
+  Error: Auth must be unavailable before credentials are inspected
+      at _Headers.request.headers.get (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\lib\auth-local-route.test.ts:22:56)
+      at authTokenFromRequest (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\server\auth-core.ts:102:34)
+      at handle (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\app\api\v1\[...path]\route.ts:749:19)
+      at DELETE (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\app\api\v1\[...path]\route.ts:2043:12)
+      at async TestContext.<anonymous> (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\lib\auth-local-route.test.ts:24:22)
+      at async Test.run (node:internal/test_runner/test:1208:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:831:7)
+
+test at src\lib\auth-local-route.test.ts:2:1346
+✖ local PATCH /auth/profile cannot authenticate or mutate legacy identity (0.4324ms)
+  Error: Auth must be unavailable before credentials are inspected
+      at _Headers.request.headers.get (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\lib\auth-local-route.test.ts:22:56)
+      at authTokenFromRequest (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\server\auth-core.ts:102:34)
+      at handle (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\app\api\v1\[...path]\route.ts:749:19)
+      at PATCH (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\app\api\v1\[...path]\route.ts:2038:12)
+      at async TestContext.<anonymous> (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\lib\auth-local-route.test.ts:24:22)
+      at async Test.run (node:internal/test_runner/test:1208:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:831:7)
+
+test at src\lib\server-auth.test.ts:2:2712
+✖ SSR verifies canonical talky_at cookies with the current backend (29.3186ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+
+  + 'http://localhost/api/v1/auth/me'
+  - 'https://backend.example/api/v1/auth/me'
+         ^
+
+      at TestContext.<anonymous> (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\lib\server-auth.test.ts:39:12)
+      at async Test.run (node:internal/test_runner/test:1208:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'http://localhost/api/v1/auth/me',
+    expected: 'https://backend.example/api/v1/auth/me',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at src\lib\server-auth.test.ts:2:2712
+✖ SSR verifies canonical talky_sid cookies with the current backend (3.3523ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+
+  + 'http://localhost/api/v1/auth/me'
+  - 'https://backend.example/api/v1/auth/me'
+         ^
+
+      at TestContext.<anonymous> (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\lib\server-auth.test.ts:39:12)
+      at async Test.run (node:internal/test_runner/test:1208:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:831:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'http://localhost/api/v1/auth/me',
+    expected: 'https://backend.example/api/v1/auth/me',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at src\lib\server-auth.test.ts:2:2712
+✖ SSR verifies canonical talky_at cookies with the current backend (2.714ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+
+  + 'http://localhost/api/v1/auth/me'
+  - 'https://backend.example/api/v1/auth/me'
+         ^
+
+      at TestContext.<anonymous> (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\lib\server-auth.test.ts:39:12)
+      at async Test.run (node:internal/test_runner/test:1208:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:831:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'http://localhost/api/v1/auth/me',
+    expected: 'https://backend.example/api/v1/auth/me',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at src\lib\server-auth.test.ts:2:3238
+✖ SSR does not authenticate from a legacy mirror alone or without configured backend (3.8725ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+
+  + {
+  +   email: 'person@example.test',
+  +   id: 'synthetic-user',
+  +   role: 'tenant_admin'
+  + }
+  - null
+
+      at TestContext.<anonymous> (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\lib\server-auth.test.ts:46:10)
+      at async Test.run (node:internal/test_runner/test:1208:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:831:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: { id: 'synthetic-user', email: 'person@example.test', role: 'tenant_admin' },
+    expected: null,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at src\lib\server-auth.test.ts:2:3638
+✖ SSR 401 cannot fall back to another identity authority (3.4688ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+
+  + {
+  +   email: 'person@example.test',
+  +   id: 'synthetic-user',
+  +   role: 'tenant_admin'
+  + }
+  - null
+
+      at TestContext.<anonymous> (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\lib\server-auth.test.ts:58:12)
+      at async Test.run (node:internal/test_runner/test:1208:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:831:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: { id: 'synthetic-user', email: 'person@example.test', role: 'tenant_admin' },
+    expected: null,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at src\lib\server-auth.test.ts:2:3638
+✖ SSR 403 cannot fall back to another identity authority (2.808ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+
+  + {
+  +   email: 'person@example.test',
+  +   id: 'synthetic-user',
+  +   role: 'tenant_admin'
+  + }
+  - null
+
+      at TestContext.<anonymous> (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\lib\server-auth.test.ts:58:12)
+      at async Test.run (node:internal/test_runner/test:1208:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:831:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: { id: 'synthetic-user', email: 'person@example.test', role: 'tenant_admin' },
+    expected: null,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at src\lib\server-auth.test.ts:2:3638
+✖ SSR 404 cannot fall back to another identity authority (2.4425ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+
+  + {
+  +   email: 'person@example.test',
+  +   id: 'synthetic-user',
+  +   role: 'tenant_admin'
+  + }
+  - null
+
+      at TestContext.<anonymous> (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\lib\server-auth.test.ts:58:12)
+      at async Test.run (node:internal/test_runner/test:1208:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:831:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: { id: 'synthetic-user', email: 'person@example.test', role: 'tenant_admin' },
+    expected: null,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at src\lib\server-auth.test.ts:2:3638
+✖ SSR 503 cannot fall back to another identity authority (1.967ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+
+  + {
+  +   email: 'person@example.test',
+  +   id: 'synthetic-user',
+  +   role: 'tenant_admin'
+  + }
+  - null
+
+      at TestContext.<anonymous> (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\lib\server-auth.test.ts:58:12)
+      at async Test.run (node:internal/test_runner/test:1208:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:831:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: { id: 'synthetic-user', email: 'person@example.test', role: 'tenant_admin' },
+    expected: null,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at src\lib\server-auth.test.ts:2:4110
+✖ SSR successive request scopes see revocation, with no persistent principal cache (1.9718ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+
+  + null
+  - {
+  -   email: 'person@example.test',
+  -   id: 'synthetic-user',
+  -   role: 'tenant_admin'
+  - }
+
+      at TestContext.<anonymous> (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\lib\server-auth.test.ts:69:10)
+      at async Test.run (node:internal/test_runner/test:1208:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:831:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: null,
+    expected: { id: 'synthetic-user', email: 'person@example.test', role: 'tenant_admin' },
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at src\proxy.auth.test.ts:2:1795
+✖ proxy role lookup is canonical, uncached, and observes a later revocation (34.0948ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+
+  3 !== 2
+
+      at TestContext.<anonymous> (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\proxy.auth.test.ts:29:10)
+      at async Test.run (node:internal/test_runner/test:1208:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 3,
+    expected: 2,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at src\proxy.auth.test.ts:2:2691
+✖ proxy does not retry an alternate /me authority or the unconfigured local catchall (3.6856ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+
+  + null
+  - 'https://frontend.example/403/'
+
+      at TestContext.<anonymous> (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\proxy.auth.test.ts:44:10)
+      at async Test.run (node:internal/test_runner/test:1208:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:831:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: null,
+    expected: 'https://frontend.example/403/',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

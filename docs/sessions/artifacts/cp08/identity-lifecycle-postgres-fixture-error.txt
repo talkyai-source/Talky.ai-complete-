@@ -1,0 +1,32 @@
+.......................................F.....                            [100%]
+================================== FAILURES ===================================
+________ test_login_refresh_insert_failure_does_not_leave_new_session _________
+
+identity_db = namespace(admin=<asyncpg.connection.Connection object at 0x000001D75078E120>, pool=<asyncpg.pool.Pool object at 0x0000...amespace(pool=<asyncpg.pool.Pool object at 0x000001D7505CBCC0>), http=<httpx.AsyncClient object at 0x000001D7506AF830>)
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001D7506A9700>
+
+    async def test_login_refresh_insert_failure_does_not_leave_new_session(identity_db, monkeypatch):
+        db = identity_db
+        await db.admin.execute(
+            "UPDATE user_profiles SET password_hash='synthetic' WHERE id=$1", db.users[0]
+        )
+        monkeypatch.setattr(login_ep, "verify_password", lambda *args: True)
+        monkeypatch.setattr(login_ep, "rehash_if_needed", lambda *args: None)
+        monkeypatch.setattr(login_ep, "create_jwt", lambda *args: "synthetic-access")
+
+        async def failed_refresh(response, conn, **kwargs):
+            assert conn.is_in_transaction()
+            if failure == "http_rejection":
+                from fastapi import HTTPException
+
+                raise HTTPException(status_code=401, detail="synthetic issuance refusal")
+            raise RuntimeError("synthetic refresh failure")
+
+        monkeypatch.setattr(login_ep, "issue_cookie_auth", failed_refresh)
+>       if failure == "http_rejection":
+E       NameError: name 'failure' is not defined
+
+tests\integration\test_cp08_current_identity.py:707: NameError
+=========================== short test summary info ===========================
+FAILED tests/integration/test_cp08_current_identity.py::test_login_refresh_insert_failure_does_not_leave_new_session
+1 failed, 44 passed in 49.49s

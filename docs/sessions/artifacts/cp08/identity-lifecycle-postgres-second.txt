@@ -1,0 +1,31 @@
+.................................F....                                   [100%]
+================================== FAILURES ===================================
+______ test_signup_cookie_persistence_failure_rolls_back_entire_account _______
+
+identity_db = namespace(admin=<asyncpg.connection.Connection object at 0x0000023A5B1E77A0>, pool=<asyncpg.pool.Pool object at 0x0000...amespace(pool=<asyncpg.pool.Pool object at 0x0000023A5C80FE20>), http=<httpx.AsyncClient object at 0x0000023A5C910260>)
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000023A5C9376E0>
+
+    async def test_signup_cookie_persistence_failure_rolls_back_entire_account(identity_db,monkeypatch):
+        import json
+        from app.services.scripts import seed_platform_sip_trunk
+        db=identity_db
+        email=f'{uuid4()}@example.com'
+        pending={'name':'Synthetic Owner','business_name':'Synthetic CP08 Signup','code_hash':signup_ep._hash_signup_code('123456')}
+        redis=SimpleNamespace(get=AsyncMock(return_value=json.dumps(pending)),delete=AsyncMock())
+        monkeypatch.setattr(signup_ep,'_get_redis_or_503',lambda:redis)
+        monkeypatch.setattr(signup_ep,'validate_password_strength',lambda _:None)
+        monkeypatch.setattr(signup_ep,'hash_password',lambda _:'synthetic')
+        monkeypatch.setattr(signup_ep,'create_jwt',lambda *args:'synthetic-access')
+        monkeypatch.setattr(seed_platform_sip_trunk,'seed_for_tenant',AsyncMock())
+        async def failed_refresh(response,conn,**kwargs):
+            assert conn.is_in_transaction()
+            assert await conn.fetchval('SELECT COUNT(*) FROM security_sessions WHERE user_id=$1',kwargs['user_id'])==1
+            raise RuntimeError('synthetic refresh write failure')
+        monkeypatch.setattr(signup_ep,'issue_cookie_auth',failed_refresh)
+>       with pytest.raises(RuntimeError,match='synthetic refresh write failure'):
+E       Failed: DID NOT RAISE <class 'RuntimeError'>
+
+tests\integration\test_cp08_current_identity.py:365: Failed
+=========================== short test summary info ===========================
+FAILED tests/integration/test_cp08_current_identity.py::test_signup_cookie_persistence_failure_rolls_back_entire_account
+1 failed, 37 passed in 44.15s

@@ -1,0 +1,105 @@
+........................................................................ [ 41%]
+........................................................................ [ 83%]
+.......F....................                                             [100%]
+================================== FAILURES ===================================
+_______________ test_open_test_stops_when_membership_is_removed _______________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000019511DBE2A0>
+
+    @pytest.mark.asyncio
+    async def test_open_test_stops_when_membership_is_removed(monkeypatch):
+        monkeypatch.setattr(ep, "_AUTH_RECHECK_SECONDS", 0)
+        with _Harness(tenant_cfg=AIProviderConfig(), campaign_row=_CAMPAIGN) as h:
+            with patch.object(ep, "_has_test_membership", AsyncMock(side_effect=[True, False]), create=True):
+                ws = FakeWebSocket(cookies={"talky_at": "signed"})
+                async def receive():
+                    await asyncio.sleep(1)
+                    return {"type": "websocket.disconnect"}
+                ws.receive = receive
+                await ep.campaign_test_websocket(ws, "camp-1", first_speaker="user")
+        assert ws.closed_code == 1008
+        assert any(f.get("code") == "permission_denied" for f in ws.sent)
+>       h.orchestrator.end_session.assert_awaited_once()
+
+tests\unit\test_campaign_test_hardening.py:277:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <AsyncMock name='mock.end_session' id='1739762197440'>
+
+    def assert_awaited_once(self):
+        """
+        Assert that the mock was awaited exactly once.
+        """
+        if not self.await_count == 1:
+            msg = (f"Expected {self._mock_name or 'mock'} to have been awaited once."
+                   f" Awaited {self.await_count} times.")
+>           raise AssertionError(msg)
+E           AssertionError: Expected end_session to have been awaited once. Awaited 0 times.
+
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:2334: AssertionError
+============================== warnings summary ===============================
+tests/unit/test_assistant_ws.py::test_assistant_chat_creates_conversation_from_single_insert_response
+tests/unit/test_assistant_ws.py::test_assistant_chat_does_not_send_error_when_conversation_update_fails
+tests/unit/test_assistant_ws.py::test_assistant_chat_parses_stringified_history_for_existing_conversation
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\backend\app\api\v1\endpoints\assistant_ws.py:480: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "timestamp": datetime.utcnow().isoformat()
+
+tests/unit/test_assistant_ws.py::test_assistant_chat_creates_conversation_from_single_insert_response
+tests/unit/test_assistant_ws.py::test_assistant_chat_does_not_send_error_when_conversation_update_fails
+tests/unit/test_assistant_ws.py::test_assistant_chat_parses_stringified_history_for_existing_conversation
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\backend\app\api\v1\endpoints\assistant_ws.py:587: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "timestamp": datetime.utcnow().isoformat(),
+
+tests/unit/test_assistant_ws.py::test_assistant_chat_creates_conversation_from_single_insert_response
+tests/unit/test_ag06_dashboard_actions.py::test_actual_websocket_lost_response_recovers_without_redispatch[completed]
+tests/unit/test_ag06_dashboard_actions.py::test_actual_websocket_lost_response_recovers_without_redispatch[running]
+tests/unit/test_ag06_dashboard_actions.py::test_actual_websocket_lost_response_recovers_without_redispatch[unknown]
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\backend\app\api\v1\endpoints\assistant_ws.py:440: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "started_at": datetime.utcnow().isoformat(),
+
+tests/unit/test_assistant_ws.py::test_assistant_chat_creates_conversation_from_single_insert_response
+tests/unit/test_ag06_dashboard_actions.py::test_actual_websocket_lost_response_recovers_without_redispatch[completed]
+tests/unit/test_ag06_dashboard_actions.py::test_actual_websocket_lost_response_recovers_without_redispatch[running]
+tests/unit/test_ag06_dashboard_actions.py::test_actual_websocket_lost_response_recovers_without_redispatch[unknown]
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\backend\app\api\v1\endpoints\assistant_ws.py:441: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "last_message_at": datetime.utcnow().isoformat()
+
+tests/unit/test_assistant_ws.py::test_assistant_chat_does_not_send_error_when_conversation_update_fails
+tests/unit/test_assistant_ws.py::test_assistant_chat_parses_stringified_history_for_existing_conversation
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\backend\app\api\v1\endpoints\assistant_ws.py:428: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "last_message_at": datetime.utcnow().isoformat()
+
+tests/unit/test_ag06_dashboard_actions.py::test_actual_websocket_lost_response_recovers_without_redispatch[completed]
+tests/unit/test_ag06_dashboard_actions.py::test_actual_websocket_lost_response_recovers_without_redispatch[running]
+tests/unit/test_ag06_dashboard_actions.py::test_actual_websocket_lost_response_recovers_without_redispatch[unknown]
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\backend\app\api\v1\endpoints\assistant_ws.py:719: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "timestamp": datetime.utcnow().isoformat(),
+
+tests/unit/test_ag06_dashboard_actions.py::test_voice_websocket_recovers_original_receipt_without_speaking_false_success[completed]
+tests/unit/test_ag06_dashboard_actions.py::test_voice_websocket_recovers_original_receipt_without_speaking_false_success[unknown]
+tests/unit/test_ag06_dashboard_actions.py::test_voice_websocket_recovers_original_receipt_without_speaking_false_success[running]
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\backend\app\api\v1\endpoints\assistant_voice_ws.py:719: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    messages_history.append({"role": "assistant", "content": _VOICE_GREETING, "timestamp": datetime.utcnow().isoformat()})
+
+tests/unit/test_ag06_dashboard_actions.py::test_voice_websocket_recovers_original_receipt_without_speaking_false_success[completed]
+tests/unit/test_ag06_dashboard_actions.py::test_voice_websocket_recovers_original_receipt_without_speaking_false_success[unknown]
+tests/unit/test_ag06_dashboard_actions.py::test_voice_websocket_recovers_original_receipt_without_speaking_false_success[running]
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\backend\app\api\v1\endpoints\assistant_voice_ws.py:638: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    messages_history.append({"role": "assistant", "content": spoken_note, "timestamp": datetime.utcnow().isoformat()})
+
+tests/unit/test_ag06_dashboard_actions.py::test_voice_websocket_recovers_original_receipt_without_speaking_false_success[completed]
+tests/unit/test_ag06_dashboard_actions.py::test_voice_websocket_recovers_original_receipt_without_speaking_false_success[unknown]
+tests/unit/test_ag06_dashboard_actions.py::test_voice_websocket_recovers_original_receipt_without_speaking_false_success[running]
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\backend\app\api\v1\endpoints\assistant_voice_ws.py:341: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "started_at": datetime.utcnow().isoformat(),
+
+tests/unit/test_ag06_dashboard_actions.py::test_voice_websocket_recovers_original_receipt_without_speaking_false_success[completed]
+tests/unit/test_ag06_dashboard_actions.py::test_voice_websocket_recovers_original_receipt_without_speaking_false_success[unknown]
+tests/unit/test_ag06_dashboard_actions.py::test_voice_websocket_recovers_original_receipt_without_speaking_false_success[running]
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\backend\app\api\v1\endpoints\assistant_voice_ws.py:342: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "last_message_at": datetime.utcnow().isoformat(),
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/unit/test_campaign_test_hardening.py::test_open_test_stops_when_membership_is_removed
+1 failed, 171 passed, 31 warnings in 9.09s

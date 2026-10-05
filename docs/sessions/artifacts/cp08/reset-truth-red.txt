@@ -1,0 +1,30 @@
+FFF                                                                      [100%]
+================================== FAILURES ===================================
+_______ test_forgot_password_does_not_claim_email_was_sent[True-False] ________
+tests\security\test_cp08_reset_truth.py:28: in test_forgot_password_does_not_claim_email_was_sent
+    assert 'has been sent' not in result['message']
+E   AssertionError: assert 'has been sent' not in 'If an accou... 15 minutes.'
+E     'has been sent' is contained here:
+E       eset code has been sent. The code expires in 15 minutes.
+E     ?           +++++++++++++
+------------------------------ Captured log call ------------------------------
+WARNING  app.api.v1.endpoints.auth.password_reset:password_reset.py:309 forgot_password_email_send_failed email=synthetic@example.com � code stored in Redis but no email was delivered. Check SMTP_HOST / SMTP_USER / SMTP_PASSWORD env vars.
+________ test_forgot_password_does_not_claim_email_was_sent[True-True] ________
+tests\security\test_cp08_reset_truth.py:28: in test_forgot_password_does_not_claim_email_was_sent
+    assert 'has been sent' not in result['message']
+E   AssertionError: assert 'has been sent' not in 'If an accou... 15 minutes.'
+E     'has been sent' is contained here:
+E       eset code has been sent. The code expires in 15 minutes.
+E     ?           +++++++++++++
+_______ test_forgot_password_does_not_claim_email_was_sent[False-False] _______
+tests\security\test_cp08_reset_truth.py:28: in test_forgot_password_does_not_claim_email_was_sent
+    assert 'has been sent' not in result['message']
+E   AssertionError: assert 'has been sent' not in 'If an accou... 15 minutes.'
+E     'has been sent' is contained here:
+E       eset code has been sent. The code expires in 15 minutes.
+E     ?           +++++++++++++
+=========================== short test summary info ===========================
+FAILED tests/security/test_cp08_reset_truth.py::test_forgot_password_does_not_claim_email_was_sent[True-False]
+FAILED tests/security/test_cp08_reset_truth.py::test_forgot_password_does_not_claim_email_was_sent[True-True]
+FAILED tests/security/test_cp08_reset_truth.py::test_forgot_password_does_not_claim_email_was_sent[False-False]
+3 failed in 1.97s

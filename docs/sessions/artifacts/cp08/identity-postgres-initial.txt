@@ -1,0 +1,444 @@
+EEEEEEEEEE                                                               [100%]
+=================================== ERRORS ====================================
+_ ERROR at setup of test_revoked_session_is_denied_in_both_transports[cookie] _
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000021CEF75C590>
+
+    @pytest_asyncio.fixture
+    async def identity_db(monkeypatch):
+        dsn = os.getenv("TEST_DATABASE_URL")
+        if not dsn:
+            pytest.skip("Explicit disposable TEST_DATABASE_URL required")
+        parsed = urlparse(dsn)
+        assert parsed.hostname in {"localhost", "127.0.0.1"} and parsed.path.endswith("_test")
+        admin = await asyncpg.connect(dsn)
+        role = "cp08_" + uuid4().hex
+        tenants, users, sessions = ([uuid4(), uuid4()] for _ in range(3))
+        pool = None
+        try:
+            await admin.execute(f'CREATE ROLE "{role}" NOLOGIN NOSUPERUSER NOBYPASSRLS')
+            await admin.execute(f'GRANT USAGE ON SCHEMA public TO "{role}"')
+            await admin.execute(f'GRANT SELECT ON tenants,user_profiles,tenant_users,roles,permissions,role_permissions,user_permissions,calls TO "{role}"')
+            await admin.execute(f'GRANT SELECT,UPDATE ON security_sessions TO "{role}"')
+            for tenant, user, session in zip(tenants, users, sessions):
+                await admin.execute("INSERT INTO tenants(id,business_name) VALUES($1,'Synthetic CP08')", tenant)
+>               await admin.execute("""INSERT INTO user_profiles(id,email,tenant_id,role,is_verified,email_verified_at,is_active)
+                    VALUES($1,$2,$3,'tenant_admin',TRUE,NOW(),TRUE)""", user, f"{user}@example.test", tenant)
+
+tests\integration\test_cp08_current_identity.py:45:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:353: in execute
+    _, status, _ = await self._execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1794: in _execute
+    result, _ = await self.__execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1892: in __execute
+    result, stmt = await self._do_execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1925: in _do_execute
+    stmt = await self._get_statement(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:433: in _get_statement
+    statement = await self._protocol.prepare(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+>   ???
+E   asyncpg.exceptions.UndefinedColumnError: column "is_verified" of relation "user_profiles" does not exist
+
+asyncpg\protocol\protocol.pyx:166: UndefinedColumnError
+_ ERROR at setup of test_revoked_session_is_denied_in_both_transports[bearer] _
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000021CEF75F110>
+
+    @pytest_asyncio.fixture
+    async def identity_db(monkeypatch):
+        dsn = os.getenv("TEST_DATABASE_URL")
+        if not dsn:
+            pytest.skip("Explicit disposable TEST_DATABASE_URL required")
+        parsed = urlparse(dsn)
+        assert parsed.hostname in {"localhost", "127.0.0.1"} and parsed.path.endswith("_test")
+        admin = await asyncpg.connect(dsn)
+        role = "cp08_" + uuid4().hex
+        tenants, users, sessions = ([uuid4(), uuid4()] for _ in range(3))
+        pool = None
+        try:
+            await admin.execute(f'CREATE ROLE "{role}" NOLOGIN NOSUPERUSER NOBYPASSRLS')
+            await admin.execute(f'GRANT USAGE ON SCHEMA public TO "{role}"')
+            await admin.execute(f'GRANT SELECT ON tenants,user_profiles,tenant_users,roles,permissions,role_permissions,user_permissions,calls TO "{role}"')
+            await admin.execute(f'GRANT SELECT,UPDATE ON security_sessions TO "{role}"')
+            for tenant, user, session in zip(tenants, users, sessions):
+                await admin.execute("INSERT INTO tenants(id,business_name) VALUES($1,'Synthetic CP08')", tenant)
+>               await admin.execute("""INSERT INTO user_profiles(id,email,tenant_id,role,is_verified,email_verified_at,is_active)
+                    VALUES($1,$2,$3,'tenant_admin',TRUE,NOW(),TRUE)""", user, f"{user}@example.test", tenant)
+
+tests\integration\test_cp08_current_identity.py:45:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:353: in execute
+    _, status, _ = await self._execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1794: in _execute
+    result, _ = await self.__execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1892: in __execute
+    result, stmt = await self._do_execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1925: in _do_execute
+    stmt = await self._get_statement(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:433: in _get_statement
+    statement = await self._protocol.prepare(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+>   ???
+E   asyncpg.exceptions.UndefinedColumnError: column "is_verified" of relation "user_profiles" does not exist
+
+asyncpg\protocol\protocol.pyx:166: UndefinedColumnError
+_ ERROR at setup of test_current_inactive_membership_blocks_profile_admin_and_direct_grant[removed] _
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000021CEF7EFF50>
+
+    @pytest_asyncio.fixture
+    async def identity_db(monkeypatch):
+        dsn = os.getenv("TEST_DATABASE_URL")
+        if not dsn:
+            pytest.skip("Explicit disposable TEST_DATABASE_URL required")
+        parsed = urlparse(dsn)
+        assert parsed.hostname in {"localhost", "127.0.0.1"} and parsed.path.endswith("_test")
+        admin = await asyncpg.connect(dsn)
+        role = "cp08_" + uuid4().hex
+        tenants, users, sessions = ([uuid4(), uuid4()] for _ in range(3))
+        pool = None
+        try:
+            await admin.execute(f'CREATE ROLE "{role}" NOLOGIN NOSUPERUSER NOBYPASSRLS')
+            await admin.execute(f'GRANT USAGE ON SCHEMA public TO "{role}"')
+            await admin.execute(f'GRANT SELECT ON tenants,user_profiles,tenant_users,roles,permissions,role_permissions,user_permissions,calls TO "{role}"')
+            await admin.execute(f'GRANT SELECT,UPDATE ON security_sessions TO "{role}"')
+            for tenant, user, session in zip(tenants, users, sessions):
+                await admin.execute("INSERT INTO tenants(id,business_name) VALUES($1,'Synthetic CP08')", tenant)
+>               await admin.execute("""INSERT INTO user_profiles(id,email,tenant_id,role,is_verified,email_verified_at,is_active)
+                    VALUES($1,$2,$3,'tenant_admin',TRUE,NOW(),TRUE)""", user, f"{user}@example.test", tenant)
+
+tests\integration\test_cp08_current_identity.py:45:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:353: in execute
+    _, status, _ = await self._execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1794: in _execute
+    result, _ = await self.__execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1892: in __execute
+    result, stmt = await self._do_execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1925: in _do_execute
+    stmt = await self._get_statement(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:433: in _get_statement
+    statement = await self._protocol.prepare(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+>   ???
+E   asyncpg.exceptions.UndefinedColumnError: column "is_verified" of relation "user_profiles" does not exist
+
+asyncpg\protocol\protocol.pyx:166: UndefinedColumnError
+_ ERROR at setup of test_current_inactive_membership_blocks_profile_admin_and_direct_grant[suspended] _
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000021CEF7EDCD0>
+
+    @pytest_asyncio.fixture
+    async def identity_db(monkeypatch):
+        dsn = os.getenv("TEST_DATABASE_URL")
+        if not dsn:
+            pytest.skip("Explicit disposable TEST_DATABASE_URL required")
+        parsed = urlparse(dsn)
+        assert parsed.hostname in {"localhost", "127.0.0.1"} and parsed.path.endswith("_test")
+        admin = await asyncpg.connect(dsn)
+        role = "cp08_" + uuid4().hex
+        tenants, users, sessions = ([uuid4(), uuid4()] for _ in range(3))
+        pool = None
+        try:
+            await admin.execute(f'CREATE ROLE "{role}" NOLOGIN NOSUPERUSER NOBYPASSRLS')
+            await admin.execute(f'GRANT USAGE ON SCHEMA public TO "{role}"')
+            await admin.execute(f'GRANT SELECT ON tenants,user_profiles,tenant_users,roles,permissions,role_permissions,user_permissions,calls TO "{role}"')
+            await admin.execute(f'GRANT SELECT,UPDATE ON security_sessions TO "{role}"')
+            for tenant, user, session in zip(tenants, users, sessions):
+                await admin.execute("INSERT INTO tenants(id,business_name) VALUES($1,'Synthetic CP08')", tenant)
+>               await admin.execute("""INSERT INTO user_profiles(id,email,tenant_id,role,is_verified,email_verified_at,is_active)
+                    VALUES($1,$2,$3,'tenant_admin',TRUE,NOW(),TRUE)""", user, f"{user}@example.test", tenant)
+
+tests\integration\test_cp08_current_identity.py:45:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:353: in execute
+    _, status, _ = await self._execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1794: in _execute
+    result, _ = await self.__execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1892: in __execute
+    result, stmt = await self._do_execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1925: in _do_execute
+    stmt = await self._get_statement(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:433: in _get_statement
+    statement = await self._protocol.prepare(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+>   ???
+E   asyncpg.exceptions.UndefinedColumnError: column "is_verified" of relation "user_profiles" does not exist
+
+asyncpg\protocol\protocol.pyx:166: UndefinedColumnError
+_ ERROR at setup of test_current_inactive_membership_blocks_profile_admin_and_direct_grant[pending] _
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000021CEF7EFE30>
+
+    @pytest_asyncio.fixture
+    async def identity_db(monkeypatch):
+        dsn = os.getenv("TEST_DATABASE_URL")
+        if not dsn:
+            pytest.skip("Explicit disposable TEST_DATABASE_URL required")
+        parsed = urlparse(dsn)
+        assert parsed.hostname in {"localhost", "127.0.0.1"} and parsed.path.endswith("_test")
+        admin = await asyncpg.connect(dsn)
+        role = "cp08_" + uuid4().hex
+        tenants, users, sessions = ([uuid4(), uuid4()] for _ in range(3))
+        pool = None
+        try:
+            await admin.execute(f'CREATE ROLE "{role}" NOLOGIN NOSUPERUSER NOBYPASSRLS')
+            await admin.execute(f'GRANT USAGE ON SCHEMA public TO "{role}"')
+            await admin.execute(f'GRANT SELECT ON tenants,user_profiles,tenant_users,roles,permissions,role_permissions,user_permissions,calls TO "{role}"')
+            await admin.execute(f'GRANT SELECT,UPDATE ON security_sessions TO "{role}"')
+            for tenant, user, session in zip(tenants, users, sessions):
+                await admin.execute("INSERT INTO tenants(id,business_name) VALUES($1,'Synthetic CP08')", tenant)
+>               await admin.execute("""INSERT INTO user_profiles(id,email,tenant_id,role,is_verified,email_verified_at,is_active)
+                    VALUES($1,$2,$3,'tenant_admin',TRUE,NOW(),TRUE)""", user, f"{user}@example.test", tenant)
+
+tests\integration\test_cp08_current_identity.py:45:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:353: in execute
+    _, status, _ = await self._execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1794: in _execute
+    result, _ = await self.__execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1892: in __execute
+    result, stmt = await self._do_execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1925: in _do_execute
+    stmt = await self._get_statement(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:433: in _get_statement
+    statement = await self._protocol.prepare(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+>   ???
+E   asyncpg.exceptions.UndefinedColumnError: column "is_verified" of relation "user_profiles" does not exist
+
+asyncpg\protocol\protocol.pyx:166: UndefinedColumnError
+___ ERROR at setup of test_membership_demotion_overrides_stale_profile_role ___
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000021CEF80D790>
+
+    @pytest_asyncio.fixture
+    async def identity_db(monkeypatch):
+        dsn = os.getenv("TEST_DATABASE_URL")
+        if not dsn:
+            pytest.skip("Explicit disposable TEST_DATABASE_URL required")
+        parsed = urlparse(dsn)
+        assert parsed.hostname in {"localhost", "127.0.0.1"} and parsed.path.endswith("_test")
+        admin = await asyncpg.connect(dsn)
+        role = "cp08_" + uuid4().hex
+        tenants, users, sessions = ([uuid4(), uuid4()] for _ in range(3))
+        pool = None
+        try:
+            await admin.execute(f'CREATE ROLE "{role}" NOLOGIN NOSUPERUSER NOBYPASSRLS')
+            await admin.execute(f'GRANT USAGE ON SCHEMA public TO "{role}"')
+            await admin.execute(f'GRANT SELECT ON tenants,user_profiles,tenant_users,roles,permissions,role_permissions,user_permissions,calls TO "{role}"')
+            await admin.execute(f'GRANT SELECT,UPDATE ON security_sessions TO "{role}"')
+            for tenant, user, session in zip(tenants, users, sessions):
+                await admin.execute("INSERT INTO tenants(id,business_name) VALUES($1,'Synthetic CP08')", tenant)
+>               await admin.execute("""INSERT INTO user_profiles(id,email,tenant_id,role,is_verified,email_verified_at,is_active)
+                    VALUES($1,$2,$3,'tenant_admin',TRUE,NOW(),TRUE)""", user, f"{user}@example.test", tenant)
+
+tests\integration\test_cp08_current_identity.py:45:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:353: in execute
+    _, status, _ = await self._execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1794: in _execute
+    result, _ = await self.__execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1892: in __execute
+    result, stmt = await self._do_execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1925: in _do_execute
+    stmt = await self._get_statement(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:433: in _get_statement
+    statement = await self._protocol.prepare(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+>   ???
+E   asyncpg.exceptions.UndefinedColumnError: column "is_verified" of relation "user_profiles" does not exist
+
+asyncpg\protocol\protocol.pyx:166: UndefinedColumnError
+___ ERROR at setup of test_current_profile_admission_is_rechecked[inactive] ___
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000021CEF7EC5C0>
+
+    @pytest_asyncio.fixture
+    async def identity_db(monkeypatch):
+        dsn = os.getenv("TEST_DATABASE_URL")
+        if not dsn:
+            pytest.skip("Explicit disposable TEST_DATABASE_URL required")
+        parsed = urlparse(dsn)
+        assert parsed.hostname in {"localhost", "127.0.0.1"} and parsed.path.endswith("_test")
+        admin = await asyncpg.connect(dsn)
+        role = "cp08_" + uuid4().hex
+        tenants, users, sessions = ([uuid4(), uuid4()] for _ in range(3))
+        pool = None
+        try:
+            await admin.execute(f'CREATE ROLE "{role}" NOLOGIN NOSUPERUSER NOBYPASSRLS')
+            await admin.execute(f'GRANT USAGE ON SCHEMA public TO "{role}"')
+            await admin.execute(f'GRANT SELECT ON tenants,user_profiles,tenant_users,roles,permissions,role_permissions,user_permissions,calls TO "{role}"')
+            await admin.execute(f'GRANT SELECT,UPDATE ON security_sessions TO "{role}"')
+            for tenant, user, session in zip(tenants, users, sessions):
+                await admin.execute("INSERT INTO tenants(id,business_name) VALUES($1,'Synthetic CP08')", tenant)
+>               await admin.execute("""INSERT INTO user_profiles(id,email,tenant_id,role,is_verified,email_verified_at,is_active)
+                    VALUES($1,$2,$3,'tenant_admin',TRUE,NOW(),TRUE)""", user, f"{user}@example.test", tenant)
+
+tests\integration\test_cp08_current_identity.py:45:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:353: in execute
+    _, status, _ = await self._execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1794: in _execute
+    result, _ = await self.__execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1892: in __execute
+    result, stmt = await self._do_execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1925: in _do_execute
+    stmt = await self._get_statement(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:433: in _get_statement
+    statement = await self._protocol.prepare(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+>   ???
+E   asyncpg.exceptions.UndefinedColumnError: column "is_verified" of relation "user_profiles" does not exist
+
+asyncpg\protocol\protocol.pyx:166: UndefinedColumnError
+__ ERROR at setup of test_current_profile_admission_is_rechecked[unverified] __
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000021CEF7ED3D0>
+
+    @pytest_asyncio.fixture
+    async def identity_db(monkeypatch):
+        dsn = os.getenv("TEST_DATABASE_URL")
+        if not dsn:
+            pytest.skip("Explicit disposable TEST_DATABASE_URL required")
+        parsed = urlparse(dsn)
+        assert parsed.hostname in {"localhost", "127.0.0.1"} and parsed.path.endswith("_test")
+        admin = await asyncpg.connect(dsn)
+        role = "cp08_" + uuid4().hex
+        tenants, users, sessions = ([uuid4(), uuid4()] for _ in range(3))
+        pool = None
+        try:
+            await admin.execute(f'CREATE ROLE "{role}" NOLOGIN NOSUPERUSER NOBYPASSRLS')
+            await admin.execute(f'GRANT USAGE ON SCHEMA public TO "{role}"')
+            await admin.execute(f'GRANT SELECT ON tenants,user_profiles,tenant_users,roles,permissions,role_permissions,user_permissions,calls TO "{role}"')
+            await admin.execute(f'GRANT SELECT,UPDATE ON security_sessions TO "{role}"')
+            for tenant, user, session in zip(tenants, users, sessions):
+                await admin.execute("INSERT INTO tenants(id,business_name) VALUES($1,'Synthetic CP08')", tenant)
+>               await admin.execute("""INSERT INTO user_profiles(id,email,tenant_id,role,is_verified,email_verified_at,is_active)
+                    VALUES($1,$2,$3,'tenant_admin',TRUE,NOW(),TRUE)""", user, f"{user}@example.test", tenant)
+
+tests\integration\test_cp08_current_identity.py:45:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:353: in execute
+    _, status, _ = await self._execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1794: in _execute
+    result, _ = await self.__execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1892: in __execute
+    result, stmt = await self._do_execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1925: in _do_execute
+    stmt = await self._get_statement(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:433: in _get_statement
+    statement = await self._protocol.prepare(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+>   ???
+E   asyncpg.exceptions.UndefinedColumnError: column "is_verified" of relation "user_profiles" does not exist
+
+asyncpg\protocol\protocol.pyx:166: UndefinedColumnError
+______ ERROR at setup of test_member_list_checks_exact_requested_tenant _______
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000021CEF75F7D0>
+
+    @pytest_asyncio.fixture
+    async def identity_db(monkeypatch):
+        dsn = os.getenv("TEST_DATABASE_URL")
+        if not dsn:
+            pytest.skip("Explicit disposable TEST_DATABASE_URL required")
+        parsed = urlparse(dsn)
+        assert parsed.hostname in {"localhost", "127.0.0.1"} and parsed.path.endswith("_test")
+        admin = await asyncpg.connect(dsn)
+        role = "cp08_" + uuid4().hex
+        tenants, users, sessions = ([uuid4(), uuid4()] for _ in range(3))
+        pool = None
+        try:
+            await admin.execute(f'CREATE ROLE "{role}" NOLOGIN NOSUPERUSER NOBYPASSRLS')
+            await admin.execute(f'GRANT USAGE ON SCHEMA public TO "{role}"')
+            await admin.execute(f'GRANT SELECT ON tenants,user_profiles,tenant_users,roles,permissions,role_permissions,user_permissions,calls TO "{role}"')
+            await admin.execute(f'GRANT SELECT,UPDATE ON security_sessions TO "{role}"')
+            for tenant, user, session in zip(tenants, users, sessions):
+                await admin.execute("INSERT INTO tenants(id,business_name) VALUES($1,'Synthetic CP08')", tenant)
+>               await admin.execute("""INSERT INTO user_profiles(id,email,tenant_id,role,is_verified,email_verified_at,is_active)
+                    VALUES($1,$2,$3,'tenant_admin',TRUE,NOW(),TRUE)""", user, f"{user}@example.test", tenant)
+
+tests\integration\test_cp08_current_identity.py:45:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:353: in execute
+    _, status, _ = await self._execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1794: in _execute
+    result, _ = await self.__execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1892: in __execute
+    result, stmt = await self._do_execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1925: in _do_execute
+    stmt = await self._get_statement(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:433: in _get_statement
+    statement = await self._protocol.prepare(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+>   ???
+E   asyncpg.exceptions.UndefinedColumnError: column "is_verified" of relation "user_profiles" does not exist
+
+asyncpg\protocol\protocol.pyx:166: UndefinedColumnError
+__ ERROR at setup of test_explicit_active_verified_platform_admin_preserved ___
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000021CEF80ECF0>
+
+    @pytest_asyncio.fixture
+    async def identity_db(monkeypatch):
+        dsn = os.getenv("TEST_DATABASE_URL")
+        if not dsn:
+            pytest.skip("Explicit disposable TEST_DATABASE_URL required")
+        parsed = urlparse(dsn)
+        assert parsed.hostname in {"localhost", "127.0.0.1"} and parsed.path.endswith("_test")
+        admin = await asyncpg.connect(dsn)
+        role = "cp08_" + uuid4().hex
+        tenants, users, sessions = ([uuid4(), uuid4()] for _ in range(3))
+        pool = None
+        try:
+            await admin.execute(f'CREATE ROLE "{role}" NOLOGIN NOSUPERUSER NOBYPASSRLS')
+            await admin.execute(f'GRANT USAGE ON SCHEMA public TO "{role}"')
+            await admin.execute(f'GRANT SELECT ON tenants,user_profiles,tenant_users,roles,permissions,role_permissions,user_permissions,calls TO "{role}"')
+            await admin.execute(f'GRANT SELECT,UPDATE ON security_sessions TO "{role}"')
+            for tenant, user, session in zip(tenants, users, sessions):
+                await admin.execute("INSERT INTO tenants(id,business_name) VALUES($1,'Synthetic CP08')", tenant)
+>               await admin.execute("""INSERT INTO user_profiles(id,email,tenant_id,role,is_verified,email_verified_at,is_active)
+                    VALUES($1,$2,$3,'tenant_admin',TRUE,NOW(),TRUE)""", user, f"{user}@example.test", tenant)
+
+tests\integration\test_cp08_current_identity.py:45:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:353: in execute
+    _, status, _ = await self._execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1794: in _execute
+    result, _ = await self.__execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1892: in __execute
+    result, stmt = await self._do_execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1925: in _do_execute
+    stmt = await self._get_statement(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:433: in _get_statement
+    statement = await self._protocol.prepare(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+>   ???
+E   asyncpg.exceptions.UndefinedColumnError: column "is_verified" of relation "user_profiles" does not exist
+
+asyncpg\protocol\protocol.pyx:166: UndefinedColumnError
+=========================== short test summary info ===========================
+ERROR tests/integration/test_cp08_current_identity.py::test_revoked_session_is_denied_in_both_transports[cookie]
+ERROR tests/integration/test_cp08_current_identity.py::test_revoked_session_is_denied_in_both_transports[bearer]
+ERROR tests/integration/test_cp08_current_identity.py::test_current_inactive_membership_blocks_profile_admin_and_direct_grant[removed]
+ERROR tests/integration/test_cp08_current_identity.py::test_current_inactive_membership_blocks_profile_admin_and_direct_grant[suspended]
+ERROR tests/integration/test_cp08_current_identity.py::test_current_inactive_membership_blocks_profile_admin_and_direct_grant[pending]
+ERROR tests/integration/test_cp08_current_identity.py::test_membership_demotion_overrides_stale_profile_role
+ERROR tests/integration/test_cp08_current_identity.py::test_current_profile_admission_is_rechecked[inactive]
+ERROR tests/integration/test_cp08_current_identity.py::test_current_profile_admission_is_rechecked[unverified]
+ERROR tests/integration/test_cp08_current_identity.py::test_member_list_checks_exact_requested_tenant
+ERROR tests/integration/test_cp08_current_identity.py::test_explicit_active_verified_platform_admin_preserved
+10 errors in 6.75s

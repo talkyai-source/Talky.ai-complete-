@@ -36,7 +36,8 @@
     "ag03_implementation_commit": "27c04347b2f0d5d0eccf83b3c31663eb3cfbd145",
     "ag04_implementation_commit": "c93a05e3561b5feaf7da467b30c2aa37be0e41bd",
     "ag05_implementation_commit": "71cdeefa59a0f786f236d3a3d25ba592470ddf05",
-    "ag06_implementation_commit": "1a0bf93d880d441e9702dae9c161b48048b5c81a"
+    "ag06_implementation_commit": "1a0bf93d880d441e9702dae9c161b48048b5c81a",
+    "cp08_implementation_commit": "2d90bf492654c05cda4de9ca58f72e5c04f35c97"
   },
   "status_rules": {
     "execution": [
@@ -302,9 +303,9 @@
       "id": "CP08",
       "title": "One canonical identity path and a usable first-value journey",
       "owner_role": "Identity engineering and customer onboarding lead",
-      "assigned_person": null,
-      "reviewer": null,
-      "status": "planned",
+      "assigned_person": "Codex implementation team",
+      "reviewer": "Independent current-authority, credential and Next/logout reviews; root integrated backend, database and frontend verification",
+      "status": "in_progress",
       "start_after_milestone": "RG01 baseline recorded",
       "dependencies_and_tests": "See package text; coordination and final acceptance dependencies are distinct from entry milestones.",
       "finding_ids": [
@@ -322,9 +323,25 @@
       ],
       "architecture_ids": [],
       "plan_anchor": "cp08-one-canonical-identity-path-and-a-usable-first-value-journey",
-      "evidence": [],
-      "blocker": null,
-      "next_action": "Assign owner and confirm the baseline reproduction or evidence gap.",
+      "evidence": [
+        {
+          "path": "docs/sessions/2026-10-05-cp08-implementation.md",
+          "kind": "local_implementation_and_verification",
+          "candidate": "2d90bf492654c05cda4de9ca58f72e5c04f35c97",
+          "status": "partial_acceptance"
+        },
+        {
+          "path": "docs/sessions/artifacts/cp08/verification.json",
+          "kind": "source_bound_verification_manifest",
+          "candidate": "2d90bf492654c05cda4de9ca58f72e5c04f35c97"
+        },
+        {
+          "path": "docs/production-readiness/first-call-setup.md",
+          "kind": "existing_journey_guide_not_customer_acceptance"
+        }
+      ],
+      "blocker": "Designated inbox/device/browser recovery, cross-tab cookie behavior, deployed compatibility, first authorized call and operator reconciliation remain unverified. The advertised staff invitation/acceptance journey is absent; assisted setup does not close F05.",
+      "next_action": "Complete designated recovery/first-call acceptance and obtain explicit disposition of absent invitation journey. Preserve the freeze, uncertainty warnings and legacy-route containment; continue eligible AG07 and operating repairs without reopening CP05/CP06/CP09.",
       "target_date": null
     },
     {
@@ -567,7 +584,7 @@
       "owner_role": "Backend technical lead",
       "assigned_person": null,
       "reviewer": null,
-      "status": "planned",
+      "status": "in_progress",
       "start_after_milestone": "RG01 baseline recorded",
       "dependencies_and_tests": "See package text; coordination and final acceptance dependencies are distinct from entry milestones.",
       "finding_ids": [
@@ -586,7 +603,7 @@
       "plan_anchor": "ag07-use-small-structural-repairs-only-where-they-support-paid-readiness",
       "evidence": [],
       "blocker": null,
-      "next_action": "Assign owner and confirm the baseline reproduction or evidence gap.",
+      "next_action": "Verified mechanical cleanup and denied-customer follow-up are committed in the isolated AG07 branch, pending integration after CP08. No restartable-call or blanket architecture claim.",
       "target_date": null
     },
     {
@@ -595,7 +612,7 @@
       "owner_role": "Billing and dialer engineering lead",
       "assigned_person": null,
       "reviewer": null,
-      "status": "planned",
+      "status": "in_progress",
       "start_after_milestone": "RG01 baseline recorded",
       "dependencies_and_tests": "See package text; coordination and final acceptance dependencies are distinct from entry milestones.",
       "finding_ids": [
@@ -609,7 +626,7 @@
       "plan_anchor": "op01-make-minute-admission-and-the-displayed-allowance-agree",
       "evidence": [],
       "blocker": null,
-      "next_action": "Assign owner and confirm the baseline reproduction or evidence gap.",
+      "next_action": "Policy-independent minute-state failure reproduction and repair started in isolated OP01 checkout. Paid cycle, rounding and active-call exhaustion policy are not inferred.",
       "target_date": null
     },
     {
@@ -618,7 +635,7 @@
       "owner_role": "Platform capacity and speech lead",
       "assigned_person": null,
       "reviewer": null,
-      "status": "planned",
+      "status": "in_progress",
       "start_after_milestone": "RG01 baseline recorded",
       "dependencies_and_tests": "See package text; coordination and final acceptance dependencies are distinct from entry milestones.",
       "finding_ids": [
@@ -633,7 +650,7 @@
       "plan_anchor": "op02-enforce-provider-and-shared-call-limits-at-their-actual-boundary",
       "evidence": [],
       "blocker": null,
-      "next_action": "Assign owner and confirm the baseline reproduction or evidence gap.",
+      "next_action": "Read-only boundary inventory and synthetic Flux/global-lease reproduction started in isolated checkout. Operator topology/provider limits remain unconfirmed.",
       "target_date": null
     },
     {

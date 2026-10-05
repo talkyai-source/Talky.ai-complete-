@@ -1,0 +1,11 @@
+✔ passkey login preserves the backend RP, allowed key, timeout and required verification (234.479ms)
+✔ request-option decoder passes credential IDs as bytes without mutating the server record (1.5958ms)
+✔ registration decodes excluded existing keys and preserves server requirements (1.6793ms)
+ℹ tests 3
+ℹ suites 0
+ℹ pass 3
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 4946.8196

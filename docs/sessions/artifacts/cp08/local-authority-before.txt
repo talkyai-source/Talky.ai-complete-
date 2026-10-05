@@ -1,0 +1,76 @@
+✖ production local GET /partners cannot use a historical legacy session (11.1799ms)
+✖ production local POST /tenants/synthetic/users cannot use a historical legacy session (6.9484ms)
+✖ production local POST /email/send cannot use a historical legacy session (1.2863ms)
+✖ production local POST /calls cannot use a historical legacy session (1.5115ms)
+✖ explicit development keeps existing unauthenticated template compatibility (16.9161ms)
+ℹ tests 5
+ℹ suites 0
+ℹ pass 0
+ℹ fail 5
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 14925.6028
+
+✖ failing tests:
+
+test at src\lib\canonical-backend-route.test.ts:2:1266
+✖ production local GET /partners cannot use a historical legacy session (11.1799ms)
+  Error: Legacy auth admission must not run in production
+      at _Headers.request.headers.get (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\lib\canonical-backend-route.test.ts:19:50)
+      at authTokenFromRequest (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\server\auth-core.ts:102:34)
+      at handle (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\app\api\v1\[...path]\route.ts:754:19)
+      at GET (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\app\api\v1\[...path]\route.ts:2033:12)
+      at async TestContext.<anonymous> (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\lib\canonical-backend-route.test.ts:21:22)
+      at async Test.run (node:internal/test_runner/test:1208:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3)
+
+test at src\lib\canonical-backend-route.test.ts:2:1266
+✖ production local POST /tenants/synthetic/users cannot use a historical legacy session (6.9484ms)
+  Error: Legacy auth admission must not run in production
+      at _Headers.request.headers.get (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\lib\canonical-backend-route.test.ts:19:50)
+      at authTokenFromRequest (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\server\auth-core.ts:102:34)
+      at handle (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\app\api\v1\[...path]\route.ts:754:19)
+      at POST (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\app\api\v1\[...path]\route.ts:2038:12)
+      at async TestContext.<anonymous> (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\lib\canonical-backend-route.test.ts:21:22)
+      at async Test.run (node:internal/test_runner/test:1208:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:831:7)
+
+test at src\lib\canonical-backend-route.test.ts:2:1266
+✖ production local POST /email/send cannot use a historical legacy session (1.2863ms)
+  Error: Legacy auth admission must not run in production
+      at _Headers.request.headers.get (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\lib\canonical-backend-route.test.ts:19:50)
+      at authTokenFromRequest (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\server\auth-core.ts:102:34)
+      at handle (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\app\api\v1\[...path]\route.ts:754:19)
+      at POST (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\app\api\v1\[...path]\route.ts:2038:12)
+      at async TestContext.<anonymous> (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\lib\canonical-backend-route.test.ts:21:22)
+      at async Test.run (node:internal/test_runner/test:1208:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:831:7)
+
+test at src\lib\canonical-backend-route.test.ts:2:1266
+✖ production local POST /calls cannot use a historical legacy session (1.5115ms)
+  Error: Legacy auth admission must not run in production
+      at _Headers.request.headers.get (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\lib\canonical-backend-route.test.ts:19:50)
+      at authTokenFromRequest (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\server\auth-core.ts:102:34)
+      at handle (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\app\api\v1\[...path]\route.ts:754:19)
+      at POST (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\app\api\v1\[...path]\route.ts:2038:12)
+      at async TestContext.<anonymous> (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\lib\canonical-backend-route.test.ts:21:22)
+      at async Test.run (node:internal/test_runner/test:1208:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:831:7)
+
+test at src\lib\canonical-backend-route.test.ts:2:2356
+✖ explicit development keeps existing unauthenticated template compatibility (16.9161ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+
+  401 !== 200
+
+      at TestContext.<anonymous> (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\lib\canonical-backend-route.test.ts:34:10)
+      at async Test.run (node:internal/test_runner/test:1208:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:831:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 401,
+    expected: 200,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

@@ -1,0 +1,65 @@
+[auth] retried pending logout, server confirmed
+✖ AuthProvider pins verified cookie-only tenant on writes and blocks them during account verification (60.5129ms)
+✖ a failed logout marker never submits an unbound logout for the next browser session (16.3026ms)
+✔ confirmed B scope loads and creates normally without importing legacy A history or destination (17.3001ms)
+✔ logout clears notifications before server response and stale bootstrap cannot reactivate them (10.812ms)
+✔ late A profile refresh cannot overwrite a newly verified B login (31.4164ms)
+✔ same verified identity refresh (silent=true) preserves notifications, settings and bound callback (15.2419ms)
+✔ same verified identity refresh (silent=false) preserves notifications, settings and bound callback (15.3437ms)
+✔ foreground refresh preserves scope and latest read (silent=true) settles loading and identity (16.1551ms)
+✔ foreground refresh preserves scope and latest read (silent=false) settles loading and identity (14.7847ms)
+✔ cross-tab non-null token change masks A immediately and verifies B before enabling notifications (28.5682ms)
+✔ unverified same-account token rotation aborts old work but restores saved history after verification (18.0427ms)
+✔ cookie-only logout broadcasts an identity boundary even with no stored bearer token (13.3095ms)
+✔ cross-tab cookie logout fences an outstanding profile response without a bearer-key event (15.4053ms)
+✔ a verified user without tenant identity remains unscoped and cannot create notifications (13.4301ms)
+✔ logout then login as A creates a new generation that rejects pre-logout A work (32.2785ms)
+✔ a profile refresh started by an old timer after logout begins cannot restore the logged-out account (16.2303ms)
+✔ blocked storage still receives cookie logout over BroadcastChannel and fences delayed profile reads (17.2528ms)
+✔ blocked-storage account change uses verified B scope and duplicate channel/storage marker verifies only once (16.206ms)
+✔ local cookie logout and login publish secret-free BroadcastChannel markers when storage writes fail (27.3977ms)
+✔ notifications remain unscoped when neither storage nor BroadcastChannel can synchronize cookie identity (4.3224ms)
+ℹ tests 20
+ℹ suites 0
+ℹ pass 18
+ℹ fail 2
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2986.0433
+
+✖ failing tests:
+
+test at src\lib\notifications-isolation.test.tsx:2:5363
+✖ AuthProvider pins verified cookie-only tenant on writes and blocks them during account verification (60.5129ms)
+  Error [ApiClientError]: Please wait while your sign-in is checked, then try again.
+      at raw (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\lib\http-client.ts:411:19)
+      at Object.request (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\lib\http-client.ts:510:25)
+      at TestContext.<anonymous> (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\lib\notifications-isolation.test.tsx:79:18)
+      at async Test.run (node:internal/test_runner/test:1208:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    status: undefined,
+    code: 'identity_unverified',
+    details: undefined,
+    retryAfterMs: undefined,
+    requestId: undefined,
+    url: 'http://example.test/campaigns',
+    method: 'POST'
+  }
+
+test at src\lib\notifications-isolation.test.tsx:2:6765
+✖ a failed logout marker never submits an unbound logout for the next browser session (16.3026ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+
+  1 !== 0
+
+      at TestContext.<anonymous> (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\lib\notifications-isolation.test.tsx:101:12)
+      at async Test.run (node:internal/test_runner/test:1208:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:831:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 1,
+    expected: 0,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

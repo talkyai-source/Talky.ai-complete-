@@ -1,0 +1,198 @@
+FFFFFFFFF.                                                               [100%]
+================================== FAILURES ===================================
+__________ test_revoked_session_is_denied_in_both_transports[cookie] __________
+
+identity_db = namespace(admin=<asyncpg.connection.Connection object at 0x000002A3C2963E30>, pool=<asyncpg.pool.Pool object at 0x0000...amespace(pool=<asyncpg.pool.Pool object at 0x000002A3C1D833D0>), http=<httpx.AsyncClient object at 0x000002A3C299A720>)
+kind = 'cookie'
+
+    @pytest.mark.parametrize("kind",["cookie","bearer"])
+    async def test_revoked_session_is_denied_in_both_transports(identity_db,kind):
+        db=identity_db
+        assert (await db.http.get('/admin',headers=auth(kind))).status_code==200
+>       await db.admin.execute("UPDATE security_sessions SET revoked=TRUE WHERE id=$1",db.sessions[0])
+
+tests\integration\test_cp08_current_identity.py:98:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:353: in execute
+    _, status, _ = await self._execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1794: in _execute
+    result, _ = await self.__execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1892: in __execute
+    result, stmt = await self._do_execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1945: in _do_execute
+    result = await executor(stmt, None)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+>   ???
+E   asyncpg.exceptions.CheckViolationError: new row for relation "security_sessions" violates check constraint "chk_revoked_at_consistency"
+E   DETAIL:  Failing row contains (de52428f-4fa6-4885-8fbc-f2dcc282ad5b, fa421d09-a74d-4fe7-9566-b0ec4e0c9552, 3c56339f-497c-4449-a233-6e13b73cce5c, null, null, null, null, null, null, null, null, f, f, f, null, null, f, null, null, f, 2026-10-05 05:57:43.486421+05, 2026-10-05 05:57:43.486421+05, 2026-10-05 06:57:43.485316+05, t, null, null).
+
+asyncpg\protocol\protocol.pyx:207: CheckViolationError
+------------------------------ Captured log call ------------------------------
+WARNING  app.services.scripts.tenant_minutes:tenant_minutes.py:103 compute_tenant_minutes_used failed tenant=41ee3285 err=permission denied for table call_legs
+__________ test_revoked_session_is_denied_in_both_transports[bearer] __________
+
+identity_db = namespace(admin=<asyncpg.connection.Connection object at 0x000002A3C29ADC70>, pool=<asyncpg.pool.Pool object at 0x0000...amespace(pool=<asyncpg.pool.Pool object at 0x000002A3C2FD0BF0>), http=<httpx.AsyncClient object at 0x000002A3C29BBEC0>)
+kind = 'bearer'
+
+    @pytest.mark.parametrize("kind",["cookie","bearer"])
+    async def test_revoked_session_is_denied_in_both_transports(identity_db,kind):
+        db=identity_db
+        assert (await db.http.get('/admin',headers=auth(kind))).status_code==200
+>       await db.admin.execute("UPDATE security_sessions SET revoked=TRUE WHERE id=$1",db.sessions[0])
+
+tests\integration\test_cp08_current_identity.py:98:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:353: in execute
+    _, status, _ = await self._execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1794: in _execute
+    result, _ = await self.__execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1892: in __execute
+    result, stmt = await self._do_execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1945: in _do_execute
+    result = await executor(stmt, None)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+>   ???
+E   asyncpg.exceptions.CheckViolationError: new row for relation "security_sessions" violates check constraint "chk_revoked_at_consistency"
+E   DETAIL:  Failing row contains (9561aa78-c2c0-4457-a5b6-ff431763eeb5, 6e2c1f8f-97e7-43e2-8517-b38c7e9b6a0b, 6b9614cc-dcb0-4ef0-a55e-ebc6bdf120f8, null, null, null, null, null, null, null, null, f, f, f, null, null, f, null, null, f, 2026-10-05 05:57:44.960842+05, 2026-10-05 05:57:44.960842+05, 2026-10-05 06:57:44.959442+05, t, null, null).
+
+asyncpg\protocol\protocol.pyx:207: CheckViolationError
+------------------------------ Captured log call ------------------------------
+WARNING  app.services.scripts.tenant_minutes:tenant_minutes.py:103 compute_tenant_minutes_used failed tenant=d16f409a err=permission denied for table call_legs
+_ test_current_inactive_membership_blocks_profile_admin_and_direct_grant[removed] _
+
+identity_db = namespace(admin=<asyncpg.connection.Connection object at 0x000002A3C2F66120>, pool=<asyncpg.pool.Pool object at 0x0000...amespace(pool=<asyncpg.pool.Pool object at 0x000002A3C2FD10C0>), http=<httpx.AsyncClient object at 0x000002A3C30AE240>)
+status = 'removed'
+
+    @pytest.mark.parametrize("status",["removed","suspended","pending"])
+    async def test_current_inactive_membership_blocks_profile_admin_and_direct_grant(identity_db,status):
+        db=identity_db
+        await db.admin.execute("""INSERT INTO user_permissions(user_id,tenant_id,permission_id)
+            SELECT $1,$2,id FROM permissions WHERE name='calls:create'""",db.users[0],db.tenants[0])
+        await db.admin.execute("UPDATE tenant_users SET status=$1 WHERE user_id=$2",status,db.users[0])
+        for path in ('/identity','/admin','/permission'):
+>           assert (await db.http.get(path,headers=auth())).status_code in {401,403}
+E           assert 200 in {401, 403}
+E            +  where 200 = <Response [200 OK]>.status_code
+
+tests\integration\test_cp08_current_identity.py:109: AssertionError
+------------------------------ Captured log call ------------------------------
+WARNING  app.services.scripts.tenant_minutes:tenant_minutes.py:103 compute_tenant_minutes_used failed tenant=138f9655 err=permission denied for table call_legs
+_ test_current_inactive_membership_blocks_profile_admin_and_direct_grant[suspended] _
+
+identity_db = namespace(admin=<asyncpg.connection.Connection object at 0x000002A3C30A26C0>, pool=<asyncpg.pool.Pool object at 0x0000...amespace(pool=<asyncpg.pool.Pool object at 0x000002A3C2FD1010>), http=<httpx.AsyncClient object at 0x000002A3C30ACD10>)
+status = 'suspended'
+
+    @pytest.mark.parametrize("status",["removed","suspended","pending"])
+    async def test_current_inactive_membership_blocks_profile_admin_and_direct_grant(identity_db,status):
+        db=identity_db
+        await db.admin.execute("""INSERT INTO user_permissions(user_id,tenant_id,permission_id)
+            SELECT $1,$2,id FROM permissions WHERE name='calls:create'""",db.users[0],db.tenants[0])
+        await db.admin.execute("UPDATE tenant_users SET status=$1 WHERE user_id=$2",status,db.users[0])
+        for path in ('/identity','/admin','/permission'):
+>           assert (await db.http.get(path,headers=auth())).status_code in {401,403}
+E           assert 200 in {401, 403}
+E            +  where 200 = <Response [200 OK]>.status_code
+
+tests\integration\test_cp08_current_identity.py:109: AssertionError
+------------------------------ Captured log call ------------------------------
+WARNING  app.services.scripts.tenant_minutes:tenant_minutes.py:103 compute_tenant_minutes_used failed tenant=ef26ed16 err=permission denied for table call_legs
+_ test_current_inactive_membership_blocks_profile_admin_and_direct_grant[pending] _
+
+identity_db = namespace(admin=<asyncpg.connection.Connection object at 0x000002A3C3061A90>, pool=<asyncpg.pool.Pool object at 0x0000...amespace(pool=<asyncpg.pool.Pool object at 0x000002A3C2FD0E00>), http=<httpx.AsyncClient object at 0x000002A3C2FF6CF0>)
+status = 'pending'
+
+    @pytest.mark.parametrize("status",["removed","suspended","pending"])
+    async def test_current_inactive_membership_blocks_profile_admin_and_direct_grant(identity_db,status):
+        db=identity_db
+        await db.admin.execute("""INSERT INTO user_permissions(user_id,tenant_id,permission_id)
+            SELECT $1,$2,id FROM permissions WHERE name='calls:create'""",db.users[0],db.tenants[0])
+        await db.admin.execute("UPDATE tenant_users SET status=$1 WHERE user_id=$2",status,db.users[0])
+        for path in ('/identity','/admin','/permission'):
+>           assert (await db.http.get(path,headers=auth())).status_code in {401,403}
+E           assert 200 in {401, 403}
+E            +  where 200 = <Response [200 OK]>.status_code
+
+tests\integration\test_cp08_current_identity.py:109: AssertionError
+------------------------------ Captured log call ------------------------------
+WARNING  app.services.scripts.tenant_minutes:tenant_minutes.py:103 compute_tenant_minutes_used failed tenant=fae0d806 err=permission denied for table call_legs
+____________ test_membership_demotion_overrides_stale_profile_role ____________
+
+identity_db = namespace(admin=<asyncpg.connection.Connection object at 0x000002A3C2FF2E40>, pool=<asyncpg.pool.Pool object at 0x0000...amespace(pool=<asyncpg.pool.Pool object at 0x000002A3C2FD24B0>), http=<httpx.AsyncClient object at 0x000002A3C3258A10>)
+
+    async def test_membership_demotion_overrides_stale_profile_role(identity_db):
+        db=identity_db
+        await db.admin.execute("""UPDATE tenant_users SET role_id=(SELECT id FROM roles WHERE name='readonly')
+            WHERE user_id=$1""",db.users[0])
+        result=await db.http.get('/identity',headers=auth())
+>       assert result.status_code==200 and result.json()['role']=='readonly'
+E       AssertionError: assert (200 == 200 and 'tenant_admin' == 'readonly'
+E        +  where 200 = <Response [200 OK]>.status_code
+E         - readonly
+E         + tenant_admin)
+
+tests\integration\test_cp08_current_identity.py:117: AssertionError
+------------------------------ Captured log call ------------------------------
+WARNING  app.services.scripts.tenant_minutes:tenant_minutes.py:103 compute_tenant_minutes_used failed tenant=751e7148 err=permission denied for table call_legs
+____________ test_current_profile_admission_is_rechecked[inactive] ____________
+
+identity_db = namespace(admin=<asyncpg.connection.Connection object at 0x000002A3C31BF020>, pool=<asyncpg.pool.Pool object at 0x0000...amespace(pool=<asyncpg.pool.Pool object at 0x000002A3C2FD2820>), http=<httpx.AsyncClient object at 0x000002A3C31B20F0>)
+state = 'inactive'
+
+    @pytest.mark.parametrize("state",["inactive","unverified"])
+    async def test_current_profile_admission_is_rechecked(identity_db,state):
+        db=identity_db
+        sql="UPDATE user_profiles SET is_active=FALSE WHERE id=$1" if state=='inactive' else "UPDATE user_profiles SET is_verified=FALSE,email_verified_at=NULL WHERE id=$1"
+        await db.admin.execute(sql,db.users[0])
+>       assert (await db.http.get('/identity',headers=auth())).status_code==401
+E       assert 200 == 401
+E        +  where 200 = <Response [200 OK]>.status_code
+
+tests\integration\test_cp08_current_identity.py:126: AssertionError
+------------------------------ Captured log call ------------------------------
+WARNING  app.services.scripts.tenant_minutes:tenant_minutes.py:103 compute_tenant_minutes_used failed tenant=175f8175 err=permission denied for table call_legs
+___________ test_current_profile_admission_is_rechecked[unverified] ___________
+
+identity_db = namespace(admin=<asyncpg.connection.Connection object at 0x000002A3C31BE210>, pool=<asyncpg.pool.Pool object at 0x0000...amespace(pool=<asyncpg.pool.Pool object at 0x000002A3C2FD09E0>), http=<httpx.AsyncClient object at 0x000002A3C325A6C0>)
+state = 'unverified'
+
+    @pytest.mark.parametrize("state",["inactive","unverified"])
+    async def test_current_profile_admission_is_rechecked(identity_db,state):
+        db=identity_db
+        sql="UPDATE user_profiles SET is_active=FALSE WHERE id=$1" if state=='inactive' else "UPDATE user_profiles SET is_verified=FALSE,email_verified_at=NULL WHERE id=$1"
+        await db.admin.execute(sql,db.users[0])
+>       assert (await db.http.get('/identity',headers=auth())).status_code==401
+E       assert 200 == 401
+E        +  where 200 = <Response [200 OK]>.status_code
+
+tests\integration\test_cp08_current_identity.py:126: AssertionError
+------------------------------ Captured log call ------------------------------
+WARNING  app.services.scripts.tenant_minutes:tenant_minutes.py:103 compute_tenant_minutes_used failed tenant=9b6f2c74 err=permission denied for table call_legs
+_______________ test_member_list_checks_exact_requested_tenant ________________
+
+identity_db = namespace(admin=<asyncpg.connection.Connection object at 0x000002A3C2FF1310>, pool=<asyncpg.pool.Pool object at 0x0000...amespace(pool=<asyncpg.pool.Pool object at 0x000002A3C2FD1D20>), http=<httpx.AsyncClient object at 0x000002A3C2FF6AE0>)
+
+    async def test_member_list_checks_exact_requested_tenant(identity_db):
+        db=identity_db
+        assert (await db.http.get('/rbac/tenant-users',headers=auth())).status_code==200
+        result=await db.http.get('/rbac/tenant-users',headers=auth(),params={'tenant_id':str(db.tenants[1])})
+>       assert result.status_code==403
+E       assert 200 == 403
+E        +  where 200 = <Response [200 OK]>.status_code
+
+tests\integration\test_cp08_current_identity.py:133: AssertionError
+------------------------------ Captured log call ------------------------------
+WARNING  app.services.scripts.tenant_minutes:tenant_minutes.py:103 compute_tenant_minutes_used failed tenant=846966c3 err=permission denied for table call_legs
+WARNING  app.services.scripts.tenant_minutes:tenant_minutes.py:103 compute_tenant_minutes_used failed tenant=846966c3 err=permission denied for table call_legs
+=========================== short test summary info ===========================
+FAILED tests/integration/test_cp08_current_identity.py::test_revoked_session_is_denied_in_both_transports[cookie]
+FAILED tests/integration/test_cp08_current_identity.py::test_revoked_session_is_denied_in_both_transports[bearer]
+FAILED tests/integration/test_cp08_current_identity.py::test_current_inactive_membership_blocks_profile_admin_and_direct_grant[removed]
+FAILED tests/integration/test_cp08_current_identity.py::test_current_inactive_membership_blocks_profile_admin_and_direct_grant[suspended]
+FAILED tests/integration/test_cp08_current_identity.py::test_current_inactive_membership_blocks_profile_admin_and_direct_grant[pending]
+FAILED tests/integration/test_cp08_current_identity.py::test_membership_demotion_overrides_stale_profile_role
+FAILED tests/integration/test_cp08_current_identity.py::test_current_profile_admission_is_rechecked[inactive]
+FAILED tests/integration/test_cp08_current_identity.py::test_current_profile_admission_is_rechecked[unverified]
+FAILED tests/integration/test_cp08_current_identity.py::test_member_list_checks_exact_requested_tenant
+9 failed, 1 passed in 10.87s
