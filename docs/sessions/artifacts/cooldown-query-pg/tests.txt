@@ -1,0 +1,9 @@
+........                                                                 [100%]
+============================== warnings summary ===============================
+tests/unit/test_dialer_cooldown_query_real_db.py: 16 warnings
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\backend\.venv\Lib\site-packages\pydantic\main.py:250: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+- generated xml file: C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\cooldown-query-pg-20261005\docs\sessions\artifacts\cooldown-query-pg\results.xml -
+8 passed, 16 warnings in 7.69s

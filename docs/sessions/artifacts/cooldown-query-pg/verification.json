@@ -1,0 +1,146 @@
+{
+  "source_revision": "a42f270046a21121b60e108fce3926b39b31c5a4",
+  "test_module": "tests/unit/test_dialer_cooldown_query_real_db.py",
+  "test_module_sha256": "3907837d98fed8fff315c85e887affb65a3d1df00f6b0d2a73bab3a597d35d89",
+  "schema": "cooldown_sql_f2bdcb6af29e40cc879c5027bf21a1b0",
+  "role": "cooldown_sql_f2bdcb6af29e40cc879c5027bf21a1b0",
+  "role_bypassrls": false,
+  "scope": "Unmodified eight SQL tests, canonical0061 LIKE INCLUDING ALL shape; not foreign-key, trigger or RLS-policy acceptance.",
+  "public_before": {
+    "head": "0061_dnc_runtime_contract",
+    "rows": {
+      "audit_logs": {
+        "n": 0,
+        "digest": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "billing_ledger": {
+        "n": 761,
+        "digest": "c6e769e88e78d84cfba6effe8c17f321"
+      },
+      "calls": {
+        "n": 0,
+        "digest": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "dialer_jobs": {
+        "n": 0,
+        "digest": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "inbound_audit_events": {
+        "n": 0,
+        "digest": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "review_reward_ledger": {
+        "n": 0,
+        "digest": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "tenant_policy_audit_log": {
+        "n": 142,
+        "digest": "dbd92fe761753b9734a5e12b602c72a9"
+      }
+    },
+    "relations": [
+      {
+        "relname": "calls",
+        "relrowsecurity": true,
+        "relforcerowsecurity": true,
+        "relacl": "{talky=arwdDxt/talky}"
+      },
+      {
+        "relname": "dialer_jobs",
+        "relrowsecurity": true,
+        "relforcerowsecurity": true,
+        "relacl": "{talky=arwdDxt/talky}"
+      }
+    ]
+  },
+  "connection": {
+    "role": "cooldown_sql_f2bdcb6af29e40cc879c5027bf21a1b0",
+    "schema": "cooldown_sql_f2bdcb6af29e40cc879c5027bf21a1b0",
+    "calls_oid": 72387,
+    "jobs_oid": 72441
+  },
+  "private_relation_flags": [
+    {
+      "relname": "calls",
+      "relrowsecurity": false,
+      "relforcerowsecurity": false
+    },
+    {
+      "relname": "dialer_jobs",
+      "relrowsecurity": false,
+      "relforcerowsecurity": false
+    }
+  ],
+  "command": [
+    "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\backend\\.venv\\Scripts\\python.exe",
+    "-m",
+    "pytest",
+    "tests/unit/test_dialer_cooldown_query_real_db.py",
+    "-q",
+    "--tb=short",
+    "--junitxml=C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\cooldown-query-pg-20261005\\docs\\sessions\\artifacts\\cooldown-query-pg\\results.xml"
+  ],
+  "working_directory": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\cooldown-query-pg-20261005\\backend",
+  "environment": {
+    "ENVIRONMENT": "test",
+    "PYTHONPATH": "C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/tmp/postgres-matrix-20261005/tmp/exact-requirements-20261005/packages;C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/tmp/production-ready-ag07-20261005/tmp/op02-testdeps",
+    "TALKY_DIALER_COOLDOWN_TEST_DATABASE_URL": "restricted local role; search_path=cooldown_sql_f2bdcb6af29e40cc879c5027bf21a1b0"
+  },
+  "pytest_exit_code": 0,
+  "results": {
+    "tests": 8,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "public_after": {
+    "head": "0061_dnc_runtime_contract",
+    "rows": {
+      "audit_logs": {
+        "n": 0,
+        "digest": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "billing_ledger": {
+        "n": 761,
+        "digest": "c6e769e88e78d84cfba6effe8c17f321"
+      },
+      "calls": {
+        "n": 0,
+        "digest": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "dialer_jobs": {
+        "n": 0,
+        "digest": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "inbound_audit_events": {
+        "n": 0,
+        "digest": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "review_reward_ledger": {
+        "n": 0,
+        "digest": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "tenant_policy_audit_log": {
+        "n": 142,
+        "digest": "dbd92fe761753b9734a5e12b602c72a9"
+      }
+    },
+    "relations": [
+      {
+        "relname": "calls",
+        "relrowsecurity": true,
+        "relforcerowsecurity": true,
+        "relacl": "{talky=arwdDxt/talky}"
+      },
+      {
+        "relname": "dialer_jobs",
+        "relrowsecurity": true,
+        "relforcerowsecurity": true,
+        "relacl": "{talky=arwdDxt/talky}"
+      }
+    ]
+  },
+  "public_unchanged": true,
+  "owned_schema_removed": true,
+  "owned_role_removed": true
+}

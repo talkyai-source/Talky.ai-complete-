@@ -1,0 +1,12 @@
+{
+  "source_revision": "a42f270046a21121b60e108fce3926b39b31c5a4",
+  "results": {
+    "tests": 8,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "public_unchanged": true,
+  "owned_schema_removed": true,
+  "owned_role_removed": true
+}
