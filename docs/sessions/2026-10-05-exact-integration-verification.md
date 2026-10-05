@@ -340,3 +340,20 @@ read pin neither resolves held external actions nor binds a later independent
 message lookup to an original delivery receipt. No provider, customer mailbox,
 PostgreSQL application operation, deployment or push occurred in this patch.
 Package and release-gate states remain unchanged.
+
+## Atomic inbox health follow-up (6 October local date)
+
+Source `7babac65`, integrated as `d43deab8`, replaces broad, separate expiry writes
+with an atomic check of the rejected authorization row and credential generation.
+The [full verification report](2026-10-06-inbox-atomic-health-verification.md)
+records **241 owner tests and 13 separate actual-helper PostgreSQL checks**, all
+passing. Application hashes match the frozen PG-tested source. Parent/all-account
+locks, fresh active-account selection and both status acknowledgements share one
+transaction; cancellation and timeout retain honest uncertainty.
+
+The PG checks used private table copies and a restricted role, observed real lock
+waits, and verified rollback/pool reuse. Public connector/account data and schema
+metadata stayed unchanged; private objects were removed. This is not a new full
+backend, production RLS or provider run. Original-action-account receipt inspection
+and operator resolution remain open; all package/final/scenario states remain as
+previously recorded.
