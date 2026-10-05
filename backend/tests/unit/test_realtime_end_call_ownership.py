@@ -154,7 +154,11 @@ async def test_only_actual_caller_dnc_sets_shared_lifecycle_flag(text, dnc):
 
 
 @pytest.mark.asyncio
-async def test_dnc_survives_canceled_close_and_later_goodbye_can_rearm():
+async def test_dnc_survives_canceled_close_and_later_goodbye_can_rearm(monkeypatch):
+    # This control tests close ownership after an acknowledged write. Failed
+    # persistence now deliberately requires a verified safe speech replacement.
+    monkeypatch.setattr("app.domain.services.dialer.opt_out.purge_opt_out_before_farewell",
+                        AsyncMock(return_value=True))
     bridge, provider, _, ended, session = _fixture()
     await _events(bridge, provider,
         RealtimeEvent(kind="caller_transcript", text="Please stop calling me.", is_final=True),

@@ -105,6 +105,9 @@ class XAIRealtimeSession(OpenAIRealtimeSession):
         await session.close()
     """
 
+    # Per-response instructions are documented; metadata echo is not verified.
+    supports_response_metadata = False
+
     def __init__(
         self,
         *,

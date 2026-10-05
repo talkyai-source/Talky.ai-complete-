@@ -221,6 +221,10 @@ class OpenAIRealtimeSession:
     return instead of raising, so a realtime hiccup can't crash the call.
     """
 
+    # Documented response.create metadata is echoed on response events. This
+    # capability is deliberately disabled by adapters without that contract.
+    supports_response_metadata = True
+
     def __init__(
         self,
         *,
@@ -237,6 +241,7 @@ class OpenAIRealtimeSession:
         self._api_key = api_key
         from app.realtime.playout_buffer import RealtimePlayoutBuffer
         self._playout = RealtimePlayoutBuffer()
+        self._dnc_repair_owner = None
         self._model = model or "gpt-realtime-2"
         self._voice = voice or "marin"
         self._instructions = instructions or ""
@@ -679,13 +684,24 @@ class OpenAIRealtimeSession:
             logger.debug("realtime response.create send failed call=%s err=%s",
                          self._call_id, exc)
 
-    async def repair_unspoken_response(self, response: dict) -> None:
+    async def repair_unspoken_response(self, response: dict, *, required_text=None, repair_id=None) -> None:
+        epoch = self._response_epoch
+        config = {"instructions": self._instructions + "\nREPAIR THIS TURN: Your previous reply was withheld and was not heard. Give one short honest reply. Keep required contact readbacks and source qualifications. Reuse completed tool results; do not repeat actions. Do not claim an email, booking, submission or transfer succeeded unless a matching successful tool result permits confirmation."}
+        if required_text is not None:
+            config["instructions"] += (
+                "\nThe do-not-call write is not acknowledged. Say exactly the following text, "
+                "with no additions and no tool calls: " + required_text)
+        if repair_id is not None:
+            if not self.supports_response_metadata or required_text is None:
+                raise ValueError("Correlated exact repair is unavailable")
+            self._dnc_repair_owner = {"id": repair_id, "epoch": epoch, "response_id": None}
+            config["metadata"] = {"talky_dnc_repair_id": repair_id}
         for item in response.get("output") or []:
             if item.get("type") == "message" and item.get("id"):
                 await self._ws.send(json.dumps({"type": "conversation.item.delete", "item_id": item["id"]}))
-        await self._ws.send(json.dumps({"type": "response.create", "response": {
-            "instructions": self._instructions + "\nREPAIR THIS TURN: Your previous reply was withheld and was not heard. Give one short honest reply. Keep required contact readbacks and source qualifications. Reuse completed tool results; do not repeat actions. Do not claim an email, booking, submission or transfer succeeded unless a matching successful tool result permits confirmation."
-        }}))
+        if required_text is not None and epoch != self._response_epoch:
+            return  # Caller interrupted while the withheld history was removed.
+        await self._ws.send(json.dumps({"type": "response.create", "response": config}))
 
     async def truncate_response(self, raw: dict, played_ms: int = 0) -> None:
         """Remove unheard audio from provider history. Unknown position is zero.
@@ -920,6 +936,14 @@ class OpenAIRealtimeSession:
 
         # ---- A new model response begins -----------------------------------
         if etype == "response.created":
+            response = data.get("response") or {}
+            repair_id = (response.get("metadata") or {}).get("talky_dnc_repair_id")
+            if repair_id:
+                owner = self._dnc_repair_owner
+                if (not owner or owner["id"] != repair_id or owner["epoch"] != self._response_epoch
+                        or not response.get("id") or owner["response_id"] is not None):
+                    return  # A delayed old repair must not take a fresh epoch/buffer.
+                owner["response_id"] = response["id"]
             self._playout.reset((data.get("response") or {}).get("id"))
             self._last_response_id = self._playout.response_id
             self._last_audio_parts = {}
@@ -946,6 +970,15 @@ class OpenAIRealtimeSession:
             resp = data.get("response") or {}
             if resp.get("id") != self._playout.response_id:
                 return  # late terminal event from an interrupted response
+            repair_id = (resp.get("metadata") or {}).get("talky_dnc_repair_id")
+            owner = self._dnc_repair_owner
+            if repair_id or (owner and owner["response_id"] == resp.get("id")):
+                if (not owner or repair_id != owner["id"] or owner["epoch"] != self._response_epoch
+                        or owner["response_id"] != resp.get("id")):
+                    self._playout.reset()
+                    self._response_active = False
+                    self._offer_event(RealtimeEvent(kind="response_unplayable", text="Uncorrelated exact repair", raw=data))
+                    return
             candidate = self._playout.finish(resp)
             data = {**data, "audio_parts": list(self._last_audio_parts.values())}
             if candidate:

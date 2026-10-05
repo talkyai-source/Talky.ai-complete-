@@ -60,6 +60,7 @@ from app.domain.services.voice_pipeline.live_structured_state import (
 logger = logging.getLogger(__name__)
 
 _WIRE_RATE = 8000  # OpenAI Realtime audio/pcmu is μ-law @ 8 kHz
+_OPT_OUT_RECEIPT_TIMEOUT_S = 3.0
 
 # Per-node char budget for the realtime knowledge function-result. The
 # source-first render (full node content) can be large; cap each node on a
@@ -152,6 +153,8 @@ class RealtimeBridge:
         self._transcript_flush_task = None
         self._transcript_flush_pending = False
         self._opt_out_task: Optional[asyncio.Task] = None
+        self._opt_out_acknowledged = False
+        self._opt_out_repair = None
         self._pre_current_relationship_state = self._live_state
         self._call_direction = str(call_direction or "outbound").strip().lower()
         # Shared CallSession for deterministic voice-action results. Optional so
@@ -516,6 +519,8 @@ class RealtimeBridge:
                 kind = getattr(ev, "kind", None)
 
                 if kind == "response_candidate":
+                    if self._stale_opt_out_response(ev):
+                        continue
                     from app.domain.services.llm_guardrails import get_guardrails
                     from app.domain.services.voice_pipeline.action_tools import action_results_for_session
                     from app.domain.services.voice_pipeline.action_execution import enabled_voice_actions
@@ -652,6 +657,9 @@ class RealtimeBridge:
                         self._revoke_pending_end_call()
                         self._repair_attempted = False
                         self._latest_caller_text = text
+                        # One idempotent retry on a newly admitted final turn,
+                        # never per delta, duplicate or model response.
+                        self._start_opt_out_persistence(retry=True)
                         self._live_user_turn_seq += 1
                         self._action_session._voice_action_user_turn = self._live_user_turn_seq
                         # The caller owns close/DNC intent even when the model
@@ -748,7 +756,108 @@ class RealtimeBridge:
     def _owns_unfinished_playback(self, utterance) -> bool:
         return (self._utterance is utterance
                 and utterance.get("status") not in {"completed", "interrupted"}
+                and ("opt_out_revision" not in utterance or (
+                    utterance["opt_out_revision"] == self._caller_activity_revision
+                    and not self._caller_transcript_pending))
                 and not self._stop.is_set())
+
+    def _stale_opt_out_response(self, event) -> bool:
+        """Reject obsolete repairs before they can cancel a newer playback."""
+        response = (event.raw or {}).get("response") or {}
+        token = (response.get("metadata") or {}).get("talky_dnc_repair_id")
+        repair = self._opt_out_repair
+        correlated = getattr(self._rt, "supports_response_metadata", False) is True
+        # A retired repair never becomes normal speech when persistence later
+        # recovers. Untagged xAI repairs have no verified cross-turn ownership.
+        if token and (not repair or token != repair.get("id")
+                      or repair["revision"] != self._caller_activity_revision or repair["consumed"]):
+            return True
+        if (repair and not correlated and not repair["consumed"]
+                and repair["revision"] != self._caller_activity_revision):
+            self._failure_reason = "Interrupted do-not-call repair ownership is unavailable"
+            return True
+        if repair and repair["consumed"] and response.get("id") == repair.get("response_id"):
+            return True
+        return False
+
+    async def _admit_opt_out_playback(self, event, utterance) -> bool:
+        """Contain unacknowledged DNC speech before any text/audio submission."""
+        if utterance.get("opt_out_admitted"):
+            if self._owns_unfinished_playback(utterance):
+                return True
+            if self._utterance is utterance and utterance.get("submission_started"):
+                await self._cancel_playback()
+            return False
+        if self._stale_opt_out_response(event):
+            return False
+        response = (event.raw or {}).get("response") or {}
+        token = (response.get("metadata") or {}).get("talky_dnc_repair_id")
+        repair = self._opt_out_repair
+        correlated = getattr(self._rt, "supports_response_metadata", False) is True
+        if not getattr(self._action_session, "_caller_opted_out", False):
+            return not token
+        if not self._owns_unfinished_playback(utterance):
+            if self._utterance is utterance and utterance.get("submission_started"):
+                await self._cancel_playback()
+            return False
+        if "opt_out_revision" not in utterance and utterance.get("submission_started"):
+            # Final ASR can arrive after provider generation. Some bytes may
+            # already be queued/played: stop the tail and preserve partial
+            # evidence, never delete/replay it as an unheard whole response.
+            await self._cancel_playback()
+            self._failure_reason = "Late do-not-call evidence interrupted submitted speech"
+            return False
+        utterance["opt_out_revision"] = self._caller_activity_revision
+        task = self._opt_out_task
+        if task is not None and not self._opt_out_acknowledged:
+            try:
+                # The persistence helper has its own deadline. This also bounds
+                # unexpected adapters without cancelling the durable task.
+                await asyncio.wait_for(asyncio.shield(task), timeout=_OPT_OUT_RECEIPT_TIMEOUT_S)
+            except asyncio.CancelledError:
+                if not task.cancelled():
+                    raise  # Cancellation of this playback must stay cancellation.
+            except Exception:
+                logger.warning("realtime_opt_out_receipt_unavailable call=%s", self._call_id)
+        if not self._owns_unfinished_playback(utterance):
+            return False
+        if repair and repair["revision"] == self._caller_activity_revision:
+            if (not repair["consumed"] and response.get("id")
+                    and (not correlated or token == repair["id"])
+                    and " ".join((event.text or "").split()) == " ".join(repair["text"].split())):
+                repair["consumed"] = True
+                repair["response_id"] = response["id"]
+                utterance["opt_out_admitted"] = True
+                return True
+            self._failure_reason = "Do-not-call acknowledgement repair was not verified"
+            return False
+        if self._opt_out_acknowledged and not token:
+            utterance["opt_out_admitted"] = True
+            return True
+        if self._repair_attempted:
+            self._failure_reason = "Do-not-call acknowledgement repair budget exhausted"
+            return False
+        from app.domain.services.dialer.opt_out import OPT_OUT_UNCONFIRMED_FAREWELL
+        from app.domain.services.end_session_action import caller_signaled_end
+        from uuid import uuid4
+        text = (OPT_OUT_UNCONFIRMED_FAREWELL if caller_signaled_end(
+            self._latest_caller_text, previous_assistant_text=self._previous_assistant_text)
+            else "I cannot confirm that your do-not-call request was saved.")
+        self._repair_attempted = True
+        self._opt_out_repair = {"id": str(uuid4()) if correlated else None,
+            "revision": self._caller_activity_revision, "text": text,
+            "response_id": None, "consumed": False}
+        logger.warning("realtime_opt_out_speech_withheld call=%s", self._call_id)
+        kwargs = {"required_text": text}
+        if correlated:
+            kwargs["repair_id"] = self._opt_out_repair["id"]
+        if utterance.get("transport_started"):
+            await self._cancel_playback()
+            if (self._utterance is not utterance or self._stop.is_set()
+                    or utterance["opt_out_revision"] != self._caller_activity_revision):
+                return False
+        await self._rt.repair_unspoken_response(response, **kwargs)
+        return False
 
     async def _cancel_playback(self, raw=None) -> None:
         """Invalidate exactly the old utterance before a replacement can speak."""
@@ -797,20 +906,23 @@ class RealtimeBridge:
         receipt = {"utterance_id": utterance["id"], "status": "unknown", "evidence": "unknown", "played_ms": 0}
         started = time.monotonic()
         try:
+            if not await self._admit_opt_out_playback(event, utterance):
+                return
             if await self._invalidate_contradicted_playback(utterance):
                 return
             self._action_session._voice_action_delivered_text = ""
             await self._send_control_event({"type": "llm_response", "text": event.text})
-            if not self._owns_unfinished_playback(utterance):
+            if not await self._admit_opt_out_playback(event, utterance) or not self._owns_unfinished_playback(utterance):
                 return
             begin = getattr(self._gw, "begin_playback", None)
+            utterance["transport_started"] = True
             if callable(begin):
                 await begin(self._call_id, utterance["id"])
             else:
                 start = getattr(self._gw, "start_playback_tracking", None)
                 if callable(start):
                     start(self._call_id)
-            if not self._owns_unfinished_playback(utterance):
+            if not await self._admit_opt_out_playback(event, utterance) or not self._owns_unfinished_playback(utterance):
                 return
             utterance["status"] = "playing"
             audio = event.audio or b""
@@ -821,13 +933,15 @@ class RealtimeBridge:
                 # while begin_playback/send_audio is awaiting the gateway.
                 if await self._invalidate_contradicted_playback(utterance):
                     return
+                if not await self._admit_opt_out_playback(event, utterance):
+                    return
                 pcm = ulaw_to_pcm(audio[offset:offset + 320])
                 if self._internal_rate != _WIRE_RATE:
                     pcm = resample_audio(pcm, from_rate=_WIRE_RATE, to_rate=self._internal_rate,
                                          channels=1, bit_depth=16, res_type="soxr_mq")
                 utterance["submission_started"] = True
                 await self._gw.send_audio(self._call_id, pcm)
-                if not self._owns_unfinished_playback(utterance):
+                if not await self._admit_opt_out_playback(event, utterance) or not self._owns_unfinished_playback(utterance):
                     return
                 if offset == 0:
                     logger.info("realtime_playout call=%s utterance=%s validation_to_first_submission_ms=%d",
@@ -835,20 +949,20 @@ class RealtimeBridge:
             flush = getattr(self._gw, "flush_audio_buffer", None) or getattr(self._gw, "flush_tts_buffer", None)
             if callable(flush):
                 await flush(self._call_id)
-            if not self._owns_unfinished_playback(utterance):
+            if not await self._admit_opt_out_playback(event, utterance) or not self._owns_unfinished_playback(utterance):
                 return
             finish = getattr(self._gw, "finish_playback", None)
             if callable(finish):
                 receipt = await finish(self._call_id, utterance["id"])
             else:
                 await self._send_control_event({"type": "tts_audio_complete"})
-                if not self._owns_unfinished_playback(utterance):
+                if not await self._admit_opt_out_playback(event, utterance) or not self._owns_unfinished_playback(utterance):
                     return
                 # Legacy transports cannot prove which utterance they completed.
                 wait = getattr(self._gw, "wait_for_playback_complete", None)
                 if callable(wait):
                     await wait(self._call_id)
-            if not self._owns_unfinished_playback(utterance):
+            if not await self._admit_opt_out_playback(event, utterance) or not self._owns_unfinished_playback(utterance):
                 return
             utterance["receipt"] = receipt
             self._record_turn("assistant", event.text, metadata={"delivery": receipt})
@@ -1457,10 +1571,15 @@ class RealtimeBridge:
             # DNC removes future calling permission independently of whether
             # the caller wants this conversation to continue. Coalesce writes;
             # never block the sole model/audio event pump on database I/O.
-            if self._opt_out_task is None or self._opt_out_task.done():
-                self._opt_out_task = asyncio.create_task(self._persist_caller_opt_out(),
-                    name=f"rt-opt-out-{self._call_id}")
+            self._start_opt_out_persistence()
         return opted_out
+
+    def _start_opt_out_persistence(self, *, retry=False):
+        if (getattr(self._action_session, "_caller_opted_out", False)
+                and not self._opt_out_acknowledged
+                and (self._opt_out_task is None or (retry and self._opt_out_task.done()))):
+            self._opt_out_task = asyncio.create_task(self._persist_caller_opt_out(),
+                name=f"rt-opt-out-{self._call_id}")
 
     async def _persist_caller_opt_out(self):
         from app.domain.services.dialer.opt_out import purge_opt_out_before_farewell
@@ -1469,7 +1588,10 @@ class RealtimeBridge:
         from types import SimpleNamespace
         session = (self._action_session if getattr(self._action_session, "call_id", None)
                    else SimpleNamespace(call_id=self._call_id))
-        return await purge_opt_out_before_farewell(session)
+        acknowledged = await purge_opt_out_before_farewell(session)
+        if acknowledged is True:
+            self._opt_out_acknowledged = True
+        return acknowledged
 
     def _arm_caller_end_call(self, *, require_explicit=False):
         from app.domain.services.end_session_action import caller_signaled_end
