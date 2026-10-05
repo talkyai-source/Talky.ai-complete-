@@ -426,3 +426,45 @@ required provider/human acceptance. Aggregate mapping stays 43/50 and all seven
 unmapped conditions remain open. All package, scenario, final-gate and deferred
 statuses remain unchanged. No provider, real call, database, push or deployment
 was involved in this repair.
+
+
+## Reviewed email/calendar authorization integration (6 October)
+
+Source `ac104e2f`, integrated as `5d8ddba3`, repairs canonical Gmail, Google
+Calendar and Outlook Calendar connections being rejected because their actual
+OAuth callbacks can save no external provider account ID. New reviewed actions
+carry an explicit versioned tenant/connector/provider/authorization-row proof;
+a genuine external identity, when present, remains an additional constraint.
+Creation-time selection, same-row refresh and final current-account admission
+prevent an older refreshed authorization from silently replacing the reviewed
+connection. Ordinary reads and standalone availability retain their contracts.
+
+Email acknowledges a pending-to-running claim with the original proof before
+sending. Cleanup compares the phase this invocation acknowledged. Calendar
+finalization compares running status. A competing cancellation/completion is
+preserved; uncertainty after dispatch remains unknown rather than successful.
+Legacy records without original account proof are not rebound to a new account.
+
+The [owner verification](artifacts/reviewed-account-identity/verification.md)
+preserves **396 passing affected tests, zero failures and zero skips**, including
+97 new canonical controls. The original owner reported fourteen modules, but
+the exact historical pytest/lint argv was not recoverable after the interruption.
+The logs and frozen source identity are retained with that explicit provenance
+limit; this is not a post-restart test execution or a new whole-backend result.
+Root and independent source reviews cleared the final six application and five
+test files. Integrated canonical LF hashes and Git bytes match all eleven files.
+
+The separate [PostgreSQL evidence](artifacts/email-bind-actual-pg/verification.md)
+records **15 passing actual email create/bind/status SQL controls** in private
+table copies under a restricted role. It covers tenant isolation, committed
+proof before one synthetic send, competing-phase preservation, rollback and
+honest uncertainty after receipt-write failures. All four imported source hashes
+match the integrated candidate. Public data/schema metadata stayed unchanged
+and private objects were removed. This does not prove the reviewed selector's
+SQL/current-account transaction, calendar SQL, full production schema/policies,
+live delivery, HTTP authorization or cross-invocation no-resend behavior.
+
+Original-account receipt inspection, an approved durable operator-resolution
+workflow and designated provider/browser acceptance remain unfinished. No
+package, scenario, final gate or deferred status was promoted. No live provider,
+customer message/calendar, deployment or push occurred in this repair.

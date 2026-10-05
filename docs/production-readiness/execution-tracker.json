@@ -710,10 +710,21 @@
         },
         "docs/sessions/2026-10-05-inbox-health-lock-design.md",
         "docs/sessions/artifacts/ag06-inbox-account/verification-row-pin.md",
-        "docs/sessions/2026-10-06-inbox-atomic-health-verification.md"
+        "docs/sessions/2026-10-06-inbox-atomic-health-verification.md",
+        {
+          "path": "docs/sessions/artifacts/reviewed-account-identity/verification.md",
+          "kind": "canonical_authorization_and_owned_action_phase_scoped_verification",
+          "candidate": "5d8ddba3",
+          "historical_invocation_limit": "Preserved owner final 396-test log and frozen source hashes; exact historical pytest/lint argv not recovered after restart."
+        },
+        {
+          "path": "docs/sessions/artifacts/email-bind-actual-pg/verification.md",
+          "kind": "fifteen_actual_email_intent_binding_and_status_sql_controls_private_postgresql",
+          "candidate": "5d8ddba3"
+        }
       ],
-      "blocker": "Canonical Gmail read/refresh identity and atomic authorization-generation health expiry are locally verified with synthetic runtime and isolated PostgreSQL evidence. Supported original-action-account receipt inspection, approved durable operator resolution and designated provider/browser acceptance remain open.",
-      "next_action": "Complete original-action-account evidence inspection and approved durable operator resolution. Per-invocation reads and stale-auth health writes are repaired; separately requested message IDs are not receipt-bound inspection. Missing IDs, timeouts and empty searches do not authorize resend.",
+      "blocker": "Canonical Gmail/Google Calendar/Outlook Calendar reviewed authorization, reconnect/refresh selection and owned email/calendar status writes are repaired with scoped synthetic runtime evidence; actual email binding/status SQL has separate isolated PostgreSQL proof. The new reviewed selector SQL, live providers/browser, supported original-action-account receipt inspection and approved durable operator resolution remain unverified or unfinished. Earlier read/refresh identity and atomic authorization-generation health expiry evidence remains valid within its recorded scope.",
+      "next_action": "Complete original-action-account evidence inspection on the existing Admin support surface, then approved durable operator resolution and designated end-to-end acceptance. The local authorization row is an explicit versioned proof, never a fabricated provider account ID. Separately requested message IDs are not receipt-bound inspection; missing IDs, timeouts and empty searches do not authorize resend.",
       "target_date": null
     },
     {

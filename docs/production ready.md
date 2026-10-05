@@ -12,6 +12,8 @@ This is the execution plan for making the existing product worth paying for. It 
 
 ## 1 Fixed scope and baseline
 
+**Local repair checkpoint — 6 October 2026:** Subsequent scoped work repaired inbound lease-loss inventory handling, Realtime caller activity bookkeeping, inbox authorization health writes and canonical email/calendar action authorization. The [integration record](sessions/2026-10-05-exact-integration-verification.md) links source-bound results and their limits. Offline conversation mapping is now 43/50; seven conditions and the preserved Groq semantic failure remain open. There are 27 eligible unfinished packages, AG03 separately candidate verified, and three deferred packages. All 15 final gates and 22 scenario gates remain not run. These local repairs do not establish production readiness or replace the earlier whole-backend checkpoint.
+
 The baseline is frozen to the findings already reported. Confirmed defects require repairs. Design risks require a bounded reproduction or proof before deciding whether code must change. Unknown quality requires measurement. Candidate repairs require preservation, integration and deployment verification, not automatic reimplementation.
 
 | Baseline fact | Recorded evidence and meaning |
