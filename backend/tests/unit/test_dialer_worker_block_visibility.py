@@ -165,9 +165,10 @@ async def test_day_block_sleeps_until_the_next_window_not_five_minutes(monkeypat
 
     await w.process_job(_job())
 
-    w.queue_service.schedule_retry.assert_awaited_once()
-    _, kwargs = w.queue_service.schedule_retry.call_args
+    w.queue_service._redefer_inflight.assert_awaited_once()
+    _, kwargs = w.queue_service._redefer_inflight.call_args
     assert kwargs["delay_seconds"] == 66_000  # the next-window delay, not 300
+    w.queue_service.schedule_retry.assert_not_awaited()
     w.rules_engine.get_delay_until_next_window.assert_called_once()
 
 

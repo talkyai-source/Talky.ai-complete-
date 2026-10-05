@@ -70,6 +70,7 @@ def _cooldown_worker() -> DialerWorker:
     worker._clear_lead_last_called = AsyncMock()
     worker._publish_reason = AsyncMock()
     worker._update_job_status = AsyncMock()
+    worker._update_lead_status = AsyncMock()
     # The DB check the fix adds: does a call for this lead in the cooldown
     # window exist that was answered or is still live? Mocked at the DB
     # boundary exactly like every other `_get_*`/`_clear_*` helper above —
@@ -99,7 +100,8 @@ async def test_genuine_cooldown_is_respected_not_cleared():
 
     worker._clear_lead_last_called.assert_not_called()
     worker.queue_service.enqueue_job.assert_not_called()
-    worker.queue_service.schedule_retry.assert_awaited_once()
+    worker.queue_service._redefer_inflight.assert_awaited_once()
+    worker.queue_service.schedule_retry.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -139,8 +141,9 @@ async def test_genuine_cooldown_retries_once_when_it_actually_clears():
 
     await worker.process_job(_job())
 
-    worker.queue_service.schedule_retry.assert_awaited_once()
-    assert worker.queue_service.schedule_retry.call_args.kwargs["delay_seconds"] == 1200
+    worker.queue_service._redefer_inflight.assert_awaited_once()
+    worker.queue_service.schedule_retry.assert_not_awaited()
+    assert worker.queue_service._redefer_inflight.call_args.kwargs["delay_seconds"] == 1200
 
 
 @pytest.mark.asyncio
@@ -156,7 +159,7 @@ async def test_genuine_cooldown_retry_delay_has_a_floor_and_a_fallback():
 
     await worker.process_job(_job())
 
-    assert worker.queue_service.schedule_retry.call_args.kwargs["delay_seconds"] == 300
+    assert worker.queue_service._redefer_inflight.call_args.kwargs["delay_seconds"] == 300
 
     worker2 = _cooldown_worker()
     worker2._lead_has_live_or_answered_call = AsyncMock(return_value=True)
@@ -165,4 +168,4 @@ async def test_genuine_cooldown_retry_delay_has_a_floor_and_a_fallback():
     await worker2.process_job(_job())
 
     # CallingRules(min_hours_between_calls=2) -> fallback is the full 2h window.
-    assert worker2.queue_service.schedule_retry.call_args.kwargs["delay_seconds"] == 7200
+    assert worker2.queue_service._redefer_inflight.call_args.kwargs["delay_seconds"] == 7200

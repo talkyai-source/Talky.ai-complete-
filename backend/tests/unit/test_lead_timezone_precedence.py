@@ -291,7 +291,8 @@ async def test_window_decision_differs_per_lead_at_the_call_site(
         "California lead was dialled at 08:30 their local time — the window "
         "is still being evaluated in the campaign's timezone"
     )
-    w_la.queue_service.schedule_retry.assert_awaited()
+    w_la.queue_service._redefer_inflight.assert_awaited()
+    w_la.queue_service.schedule_retry.assert_not_awaited()
 
 
 @pytest.mark.asyncio

@@ -378,6 +378,7 @@ async def test_cancellation_before_intent_redefers_same_payload_before_propagati
         job,
         JobStatus.RETRY_SCHEDULED,
         error="worker_cancelled_before_origination",
+        reason="worker_cancelled_before_origination",
     )
     assert job.attempt_number == 2
     assert job.call_id is None

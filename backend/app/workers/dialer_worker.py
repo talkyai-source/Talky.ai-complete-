@@ -597,8 +597,11 @@ class DialerWorker:
                 # eligible moment is only known here.
                 blocked = classify(reason, rules=rules, retry_after_seconds=delay)
                 await self._publish_reason(job, blocked)
-                await self.queue_service.schedule_retry(job, delay_seconds=delay)
-                await self._update_job_status(job, JobStatus.SKIPPED, reason=reason)
+                # No attempt occurred. Keep the original crash-safe payload
+                # and active per-lead ownership through the selected window.
+                await self._redefer_before_intent_resolution(
+                    job, reason=reason, delay_seconds=delay,
+                )
                 return
 
             # 4. Concurrency is now tracked authoritatively by the telephony
@@ -2456,14 +2459,16 @@ class DialerWorker:
         job: DialerJob,
         *,
         reason: str,
+        delay_seconds: int | None = None,
     ) -> None:
-        """Re-stage the same payload when attempt ownership is not yet known."""
+        """Re-stage the same payload before a new attempt can be admitted."""
         same_attempt_redeferred = False
         try:
             same_attempt_redeferred = bool(
                 await self.queue_service._redefer_inflight(
                     str(job.job_id),
                     reason,
+                    **({"delay_seconds": delay_seconds} if delay_seconds is not None else {}),
                 )
             )
         except asyncio.CancelledError:
@@ -2480,12 +2485,22 @@ class DialerWorker:
             # be moved. Its existing inflight copy remains the reaper's evidence.
             return
         job.status = JobStatus.RETRY_SCHEDULED
-        await self._update_lead_status(job, "pending")
-        await self._update_job_status(
-            job,
-            JobStatus.RETRY_SCHEDULED,
-            error=reason,
-        )
+        try:
+            await self._update_lead_status(job, "pending")
+            await self._update_job_status(
+                job,
+                JobStatus.RETRY_SCHEDULED,
+                error=reason,
+                reason=reason,
+            )
+        except Exception as exc:
+            # Redis already owns the original attempt. A lagging DB projection
+            # must not fall into the attempted-call retry path and mint N+1.
+            # The existing active DB row retains ownership until resume.
+            logger.warning(
+                "dialer_redefer_projection_failed job=%s attempt=%s error_type=%s",
+                job.job_id, job.attempt_number, type(exc).__name__,
+            )
         logger.info(
             "dialer_pre_intent_redeferred job=%s attempt=%s reason=%s",
             job.job_id,

@@ -670,11 +670,13 @@ class DialerQueueService:
         except Exception as exc:  # noqa: BLE001
             logger.debug("untrack_inflight failed job=%s err=%s", job_id, exc)
 
-    async def _redefer_inflight(self, job_id: str, reason: str) -> bool:
-        """Non-destructively re-schedule a paused/quota-blocked job.
+    async def _redefer_inflight(
+        self, job_id: str, reason: str, *, delay_seconds: int | None = None,
+    ) -> bool:
+        """Non-destructively re-schedule a held job without a new attempt.
 
         Reads the ORIGINAL payload from the inflight index, re-schedules it into
-        the scheduled ZSET after a short delay (WITHOUT bumping attempt_number —
+        the scheduled ZSET after the selected delay (WITHOUT bumping attempt_number —
         this is a defer, not a retry, so it never burns the retry budget), and
         clears the inflight tracking. Returns True if the job was re-deferred,
         False if there was no inflight copy to recover.
@@ -685,7 +687,8 @@ class DialerQueueService:
                 return False
             job = DialerJob.from_redis_dict(json.loads(payload))
             job.status = JobStatus.PENDING
-            delay = self._pause_redefer_seconds()
+            delay = (self._pause_redefer_seconds() if delay_seconds is None
+                     else max(1, int(delay_seconds)))
             execute_at = datetime.now(timezone.utc).timestamp() + delay
             new_payload = json.dumps(job.to_redis_dict())
             await self._redis.zadd(self.SCHEDULED_ZSET, {new_payload: execute_at})
