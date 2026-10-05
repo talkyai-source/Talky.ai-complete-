@@ -18,6 +18,7 @@ import json
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, List, Optional, Tuple
+from uuid import UUID
 
 import httpx
 
@@ -132,13 +133,16 @@ def _reviewed_account_row(db_client, tenant_id, connector_id, provider, account_
             dates.append(parsed.astimezone(timezone.utc))
         if len(dates) > 1 and dates[0] <= dates[1]:
             raise ValueError("ambiguous creation order")
-        if not isinstance(rows[0]["id"], str) or not rows[0]["id"]:
+        row_id = rows[0]["id"]
+        if isinstance(row_id, UUID):
+            row_id = str(row_id)
+        if not isinstance(row_id, str) or not row_id.strip():
             raise ValueError("missing authorization row")
     except (KeyError, TypeError, ValueError, OverflowError) as exc:
         raise ReviewedConnectorChanged("The current authorization cannot be established. Reconnect and review.") from exc
-    if account_id is not None and str(rows[0]["id"]) != str(account_id):
+    if account_id is not None and row_id != str(account_id):
         raise ReviewedConnectorChanged("The connected authorization changed after review.")
-    return rows[0]
+    return {**rows[0], "id": row_id}
 
 
 def check_reviewed_authorization_current(db_client, tenant_id, connector, connector_id, provider, proof):
