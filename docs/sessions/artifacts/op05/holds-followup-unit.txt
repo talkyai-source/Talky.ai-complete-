@@ -1,0 +1,18 @@
+........................................................................ [ 48%]
+........................................................................ [ 97%]
+....                                                                     [100%]
+============================== warnings summary ===============================
+tests/unit/test_op05_pre_attempt_holds.py: 22 warnings
+tests/unit/test_dialer_worker_block_visibility.py: 40 warnings
+tests/unit/test_dialer_origination_durability.py: 48 warnings
+tests/unit/test_dialer_redis_reliability.py: 26 warnings
+tests/unit/test_op01_metering_unavailable.py: 8 warnings
+tests/unit/test_dialer_lead_cooldown_gate.py: 10 warnings
+tests/unit/test_lead_timezone_precedence.py: 22 warnings
+tests/unit/test_dialer_worker_guard_ordering.py: 10 warnings
+tests/unit/test_queue_retry_idempotency.py: 4 warnings
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\backend\.venv\Lib\site-packages\pydantic\main.py:250: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+148 passed, 190 warnings in 30.05s

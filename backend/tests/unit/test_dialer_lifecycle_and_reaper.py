@@ -49,7 +49,7 @@ class _FakeConn:
 
 
 @pytest.mark.asyncio
-async def test_reaper_marks_in_flight_and_returns_count():
+async def test_reaper_flags_in_flight_without_releasing_owner():
     conn = _FakeConn(returned_ids=["a", "b", "c"])
     n = await reap_stuck_jobs(conn, timeout_seconds=90)
     assert n == 3
@@ -58,7 +58,8 @@ async def test_reaper_marks_in_flight_and_returns_count():
     assert args[0] == list(st.IN_FLIGHT_STATUSES)
     assert args[1] == STUCK_REASON
     assert args[2] == 90
-    assert "UPDATE dialer_jobs" in sql and "failed" in sql
+    assert "UPDATE dialer_jobs" in sql and "SET status" not in sql
+    assert "failure_reason IS DISTINCT FROM" in sql
 
 
 @pytest.mark.asyncio

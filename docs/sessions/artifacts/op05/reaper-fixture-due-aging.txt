@@ -1,0 +1,18 @@
+.....F..............                                                     [100%]
+================================== FAILURES ===================================
+___ test_actual_projection_denial_does_not_let_reaper_release_queued_owner ____
+tests\integration\test_op05_pre_attempt_holds.py:178: in test_actual_projection_denial_does_not_let_reaper_release_queued_owner
+    assert await reap_stuck_jobs(conn) == 1
+E   assert 0 == 1
+------------------------------ Captured log call ------------------------------
+ERROR    app.workers.dialer_worker:dialer_worker.py:2735 Failed to update job status: permission denied for table dialer_jobs
+WARNING  app.workers.dialer_worker:dialer_worker.py:2472 dialer_redefer_persist_failed job=f9b65c4b-6ced-4974-b5ef-88e82697e7bb attempt=1 error_type=InsufficientPrivilegeError
+============================== warnings summary ===============================
+tests/integration/test_op05_pre_attempt_holds.py: 22 warnings
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\backend\.venv\Lib\site-packages\pydantic\main.py:250: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/integration/test_op05_pre_attempt_holds.py::test_actual_projection_denial_does_not_let_reaper_release_queued_owner
+1 failed, 19 passed, 22 warnings in 12.17s

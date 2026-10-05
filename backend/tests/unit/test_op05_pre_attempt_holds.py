@@ -83,7 +83,7 @@ async def test_failed_or_lost_schedule_ack_keeps_original_evidence_and_recovers_
         assert job.attempt_number == 1
         assert await redis.hget(queue.INFLIGHT_HASH, job.job_id) == original
         assert await redis.lrange(queue.INFLIGHT_LIST, 0, -1) == [original]
-        worker._update_job_status.assert_not_awaited()
+        assert worker._update_job_status.await_args.args[1] == JobStatus.RETRY_SCHEDULED
         worker._make_call.assert_not_awaited()
         assert await redis.zcard(queue.SCHEDULED_ZSET) == int(published)
         await worker.process_job(DialerJob.from_redis_dict(json.loads(original)))
@@ -104,20 +104,26 @@ async def test_missing_original_payload_does_not_invent_a_retry(monkeypatch):
         assert await queue._redis.zcard(queue.SCHEDULED_ZSET) == 0
         assert await queue._redis.llen(queue.INFLIGHT_LIST) == 1
         assert job.attempt_number == 1
-        worker._update_job_status.assert_not_awaited()
+        assert worker._update_job_status.await_args.args[1] == JobStatus.RETRY_SCHEDULED
         worker._make_call.assert_not_awaited()
     finally:
         await queue._redis.aclose()
 
 
 @pytest.mark.parametrize("write", ["_update_lead_status", "_update_job_status"])
-async def test_post_handoff_bookkeeping_failure_cannot_create_new_attempt(monkeypatch, write):
+async def test_deferral_bookkeeping_failure_cannot_create_new_attempt(monkeypatch, write):
     worker, job, queue = await held_worker(monkeypatch)
     callback = getattr(worker, write)
     callback.side_effect = [ConnectionError("synthetic bookkeeping outage"), None]
     try:
         await worker.process_job(job)
         scheduled = await queue._redis.zrange(queue.SCHEDULED_ZSET, 0, -1)
+        if write == "_update_job_status":
+            assert scheduled == []
+            assert await queue._redis.hget(queue.INFLIGHT_HASH, job.job_id)
+            callback.side_effect = None
+            await worker.process_job(job)
+            scheduled = await queue._redis.zrange(queue.SCHEDULED_ZSET, 0, -1)
         assert len(scheduled) == 1
         assert json.loads(scheduled[0])["attempt_number"] == job.attempt_number == 1
         worker._make_call.assert_not_awaited()

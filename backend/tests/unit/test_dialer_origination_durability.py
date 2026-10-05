@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import asynccontextmanager
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import ANY, AsyncMock, MagicMock
 
 import pytest
 
@@ -257,7 +257,7 @@ async def test_campaign_status_outage_redefers_same_payload_without_terminal_ski
 
     worker.queue_service._redefer_inflight.assert_awaited_once_with(
         JOB_ID,
-        "campaign_status_unavailable",
+        "campaign_status_unavailable", delay_seconds=120, scheduled_at=ANY,
     )
     worker.queue_service.mark_skipped.assert_not_awaited()
     worker.queue_service.schedule_retry.assert_not_awaited()
@@ -370,7 +370,7 @@ async def test_cancellation_before_intent_redefers_same_payload_before_propagati
 
     worker.queue_service._redefer_inflight.assert_awaited_once_with(
         JOB_ID,
-        "worker_cancelled_before_origination",
+        "worker_cancelled_before_origination", delay_seconds=120, scheduled_at=ANY,
     )
     worker.queue_service.schedule_retry.assert_not_awaited()
     worker._make_call.assert_not_awaited()
@@ -379,6 +379,7 @@ async def test_cancellation_before_intent_redefers_same_payload_before_propagati
         JobStatus.RETRY_SCHEDULED,
         error="worker_cancelled_before_origination",
         reason="worker_cancelled_before_origination",
+        scheduled_at=ANY,
     )
     assert job.attempt_number == 2
     assert job.call_id is None
@@ -398,7 +399,7 @@ async def test_real_task_cancellation_after_intent_waits_for_same_attempt_redefe
         entered_bridge.set()
         await asyncio.Event().wait()
 
-    async def redefer(*_args):
+    async def redefer(*_args, **_kwargs):
         await asyncio.sleep(0)
         redefer_finished.set()
         return True
@@ -490,7 +491,7 @@ async def test_real_task_cancellation_before_intent_resolution_redefers_same_pay
         entered_lookup.set()
         await asyncio.Event().wait()
 
-    async def redefer(*_args):
+    async def redefer(*_args, **_kwargs):
         await asyncio.sleep(0)
         redefer_finished.set()
         return True
@@ -508,7 +509,7 @@ async def test_real_task_cancellation_before_intent_resolution_redefers_same_pay
     assert redefer_finished.is_set()
     worker.queue_service._redefer_inflight.assert_awaited_once_with(
         JOB_ID,
-        "worker_cancelled_before_origination",
+        "worker_cancelled_before_origination", delay_seconds=120, scheduled_at=ANY,
     )
     worker.queue_service.schedule_retry.assert_not_awaited()
     assert job.attempt_number == 2

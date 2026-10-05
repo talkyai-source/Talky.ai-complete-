@@ -1,0 +1,25 @@
+.F                                                                       [100%]
+================================== FAILURES ===================================
+_______________ test_weekend_hold_remains_owned_after_48_hours ________________
+tests\integration\test_op05_pre_attempt_holds.py:186: in test_weekend_hold_remains_owned_after_48_hours
+    assert due.timestamp() > datetime.now(timezone.utc).timestamp() + 71 * 3600
+E   assert 1791170552.333716 > (1791170552.443926 + (71 * 3600))
+E    +  where 1791170552.333716 = <built-in method timestamp of datetime.datetime object at 0x0000022EC481B1B0>()
+E    +    where <built-in method timestamp of datetime.datetime object at 0x0000022EC481B1B0> = datetime.datetime(2026, 10, 5, 3, 22, 32, 333716, tzinfo=datetime.timezone.utc).timestamp
+E    +  and   1791170552.443926 = <built-in method timestamp of datetime.datetime object at 0x0000022EC43FB900>()
+E    +    where <built-in method timestamp of datetime.datetime object at 0x0000022EC43FB900> = datetime.datetime(2026, 10, 5, 3, 22, 32, 443926, tzinfo=datetime.timezone.utc).timestamp
+E    +      where datetime.datetime(2026, 10, 5, 3, 22, 32, 443926, tzinfo=datetime.timezone.utc) = <built-in method now of type object at 0x00007FFFB4494F00>(datetime.timezone.utc)
+E    +        where <built-in method now of type object at 0x00007FFFB4494F00> = datetime.now
+E    +        and   datetime.timezone.utc = timezone.utc
+============================== warnings summary ===============================
+tests/integration/test_op05_pre_attempt_holds.py::test_actual_projection_denial_does_not_let_reaper_release_queued_owner
+tests/integration/test_op05_pre_attempt_holds.py::test_actual_projection_denial_does_not_let_reaper_release_queued_owner
+tests/integration/test_op05_pre_attempt_holds.py::test_weekend_hold_remains_owned_after_48_hours
+tests/integration/test_op05_pre_attempt_holds.py::test_weekend_hold_remains_owned_after_48_hours
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\backend\.venv\Lib\site-packages\pydantic\main.py:250: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/integration/test_op05_pre_attempt_holds.py::test_weekend_hold_remains_owned_after_48_hours
+1 failed, 1 passed, 5 deselected, 4 warnings in 2.26s

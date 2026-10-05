@@ -1,7 +1,7 @@
 """Selective meter failure must not grant calls or invent an allowance."""
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import ANY, AsyncMock
 
 import pytest
 
@@ -91,7 +91,7 @@ async def test_worker_defers_same_job_on_selective_meter_failure_then_recovers()
     original_attempt = job.attempt_number
     await worker.process_job(job)
     worker._make_call.assert_not_awaited()
-    worker.queue_service._redefer_inflight.assert_awaited_once_with(job.job_id, 'metering_unavailable')
+    worker.queue_service._redefer_inflight.assert_awaited_once_with(job.job_id, 'metering_unavailable', delay_seconds=120, scheduled_at=ANY)
     worker.queue_service.schedule_retry.assert_not_awaited()
     assert job.attempt_number == original_attempt
     meter.fail = False
@@ -174,7 +174,7 @@ async def test_bridge_meter_failure_preserves_attempt_through_actual_http_adapte
     worker._mark_call_intent_not_originated.assert_not_awaited()
     worker._bind_call_intent.assert_not_awaited()
     worker.queue_service.schedule_retry.assert_not_awaited()
-    worker.queue_service._redefer_inflight.assert_awaited_once_with(job.job_id, 'metering_unavailable')
+    worker.queue_service._redefer_inflight.assert_awaited_once_with(job.job_id, 'metering_unavailable', delay_seconds=120, scheduled_at=ANY)
     worker._load_existing_call_intent.return_value = intent
     response_status = 200
     await worker.process_job(job)

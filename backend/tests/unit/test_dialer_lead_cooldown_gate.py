@@ -105,12 +105,8 @@ async def test_genuine_cooldown_is_respected_not_cleared():
 
 
 @pytest.mark.asyncio
-async def test_genuinely_stale_cooldown_clears_and_persists_attempt_number():
-    """No answered/live call backs the cooldown timestamp -> the original
-    'set at origination, not at answer' workaround still applies, but the
-    bumped attempt_number must reach `dialer_jobs`, not just the in-memory
-    job copy (the desync that left dialer_jobs.call_id NULL on 09-23).
-    """
+async def test_genuinely_stale_cooldown_clears_without_inventing_attempt():
+    """Stale timestamp cleanup resumes the original unattempted job."""
     worker = _cooldown_worker()
     worker._lead_has_live_or_answered_call = AsyncMock(return_value=False)
 
@@ -118,9 +114,11 @@ async def test_genuinely_stale_cooldown_clears_and_persists_attempt_number():
     await worker.process_job(job)
 
     worker._clear_lead_last_called.assert_awaited_once()
-    worker.queue_service.enqueue_job.assert_awaited_once()
-    assert job.attempt_number == 2
-    worker._persist_job_attempt_number.assert_awaited_once_with(job)
+    worker.queue_service.enqueue_job.assert_not_awaited()
+    worker.queue_service._redefer_inflight.assert_awaited_once()
+    assert worker.queue_service._redefer_inflight.await_args.kwargs["delay_seconds"] == 1
+    assert job.attempt_number == 1
+    worker._persist_job_attempt_number.assert_not_awaited()
 
 
 @pytest.mark.asyncio

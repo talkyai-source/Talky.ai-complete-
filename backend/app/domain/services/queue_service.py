@@ -672,6 +672,7 @@ class DialerQueueService:
 
     async def _redefer_inflight(
         self, job_id: str, reason: str, *, delay_seconds: int | None = None,
+        scheduled_at: datetime | None = None,
     ) -> bool:
         """Non-destructively re-schedule a held job without a new attempt.
 
@@ -689,7 +690,8 @@ class DialerQueueService:
             job.status = JobStatus.PENDING
             delay = (self._pause_redefer_seconds() if delay_seconds is None
                      else max(1, int(delay_seconds)))
-            execute_at = datetime.now(timezone.utc).timestamp() + delay
+            execute_at = (scheduled_at.timestamp() if scheduled_at is not None
+                          else datetime.now(timezone.utc).timestamp() + delay)
             new_payload = json.dumps(job.to_redis_dict())
             await self._redis.zadd(self.SCHEDULED_ZSET, {new_payload: execute_at})
             # Only now drop the inflight copy — the lead is safely staged in the

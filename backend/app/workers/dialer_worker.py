@@ -539,13 +539,12 @@ class DialerWorker:
                             f"(was set at origination, not at answer)"
                         )
                         await self._clear_lead_last_called(job)
-                        # Re-enqueue directly into the tenant queue for immediate pickup
-                        job.attempt_number += 1
-                        # Persist the bump BEFORE re-enqueuing — see the desync above.
-                        await self._persist_job_attempt_number(job)
-                        await self.queue_service.enqueue_job(job)
+                        # Cleanup did not attempt a call. Re-evaluate promptly
+                        # with the original payload and active job ownership.
                         await self._publish_reason(job, blocked)
-                        await self._update_job_status(job, JobStatus.SKIPPED, reason=reason)
+                        await self._redefer_before_intent_resolution(
+                            job, reason=reason, delay_seconds=1,
+                        )
                         return
                     # Genuine cooldown: a real call for this lead was answered, or is
                     # still live, inside the window. Respect it like any other
@@ -1507,16 +1506,13 @@ class DialerWorker:
             yield conn
 
     async def _reap_stuck_jobs_tick(self) -> None:
-        """Reap zombies each tick, best-effort:
-        * stuck dialer JOBS (hung originate) → marked failed, lead freed;
-        * stale CALL rows → moved to proof-aware termination_pending using
-          separate pre-answer and four-hour-safe connected thresholds (a
-          phantom pre-ARI claim must heal without killing a live call);
-        * ORPHANED retry_scheduled jobs (past any legitimate retry delay) →
-          marked failed, freeing the lead's active-job slot. Without this a
-          job whose Redis schedule entry was lost holds that slot forever and
-          the lead can never be dialled again — found in production wedged
-          for 21 days. Logic lives in dialer.stuck_job_reaper."""
+        """Diagnose uncertain jobs and request proof-aware call termination.
+
+        Stale job/retry owners stay active with a reconciliation-required
+        diagnostic. Only authoritative finalization/cancellation releases them;
+        age cannot prove the original queued payload is unable to resume.
+        Existing Redis inflight recovery remains independent and best-effort.
+        """
         try:
             from app.domain.services.dialer.stuck_job_reaper import (
                 reap_orphaned_scheduled_jobs,
@@ -2462,41 +2458,40 @@ class DialerWorker:
         delay_seconds: int | None = None,
     ) -> None:
         """Re-stage the same payload before a new attempt can be admitted."""
-        same_attempt_redeferred = False
+        delay = (DialerQueueService._pause_redefer_seconds() if delay_seconds is None
+                 else max(1, int(delay_seconds)))
+        due = datetime.now(timezone.utc) + timedelta(seconds=delay)
         try:
-            same_attempt_redeferred = bool(
-                await self.queue_service._redefer_inflight(
-                    str(job.job_id),
-                    reason,
-                    **({"delay_seconds": delay_seconds} if delay_seconds is not None else {}),
-                )
+            # Commit the selected due time before publishing future work. This
+            # guarded UPDATE cannot revive a terminal/newer-attempt owner.
+            await self._update_job_status(
+                job, JobStatus.RETRY_SCHEDULED, error=reason, reason=reason,
+                scheduled_at=due,
             )
-        except asyncio.CancelledError:
-            raise
         except Exception as exc:
-            logger.error(
-                "dialer_pre_intent_redefer_failed job=%s reason=%s err=%s",
-                job.job_id,
-                reason,
-                exc,
+            logger.warning(
+                "dialer_redefer_persist_failed job=%s attempt=%s error_type=%s",
+                job.job_id, job.attempt_number, type(exc).__name__,
             )
-        if not same_attempt_redeferred:
-            # Never manufacture attempt N+1 when the crash-safe payload cannot
-            # be moved. Its existing inflight copy remains the reaper's evidence.
-            return
+            return  # The original inflight payload remains recoverable.
         job.status = JobStatus.RETRY_SCHEDULED
         try:
-            await self._update_lead_status(job, "pending")
-            await self._update_job_status(
-                job,
-                JobStatus.RETRY_SCHEDULED,
-                error=reason,
-                reason=reason,
+            moved = await self.queue_service._redefer_inflight(
+                str(job.job_id), reason, delay_seconds=delay, scheduled_at=due,
             )
         except Exception as exc:
-            # Redis already owns the original attempt. A lagging DB projection
-            # must not fall into the attempted-call retry path and mint N+1.
-            # The existing active DB row retains ownership until resume.
+            logger.warning(
+                "dialer_pre_intent_redefer_failed job=%s error_type=%s",
+                job.job_id, type(exc).__name__,
+            )
+            return
+        if not moved:
+            return
+        try:
+            await self._update_lead_status(job, "pending")
+        except Exception as exc:
+            # Future work already has its durable owner. An ancillary lead
+            # projection failure must not manufacture attempted-call retry N+1.
             logger.warning(
                 "dialer_redefer_projection_failed job=%s attempt=%s error_type=%s",
                 job.job_id, job.attempt_number, type(exc).__name__,
@@ -2681,8 +2676,9 @@ class DialerWorker:
         call_id: Optional[str] = None,
         error: Optional[str] = None,
         reason: Optional[str] = None,
+        scheduled_at: Optional[datetime] = None,
     ) -> None:
-        """Update job status in database."""
+        """Update job status; scheduled deferrals require a current active owner."""
         try:
             # Build update query dynamically or use simple execution
             status_val = status.value if hasattr(status, "value") else status
@@ -2690,6 +2686,8 @@ class DialerWorker:
             async with self._acquire_db() as conn:
                 db = Database(conn)
                 data = {"status": status_val, "updated_at": datetime.now(timezone.utc)}
+                if scheduled_at is not None:
+                    data["scheduled_at"] = scheduled_at
                 if call_id:
                     data["call_id"] = call_id
                     data["processed_at"] = datetime.now(timezone.utc)
@@ -2717,12 +2715,15 @@ class DialerWorker:
                     (
                         "id = $1::uuid AND tenant_id = $2::uuid "
                         "AND campaign_id = $3::uuid AND lead_id = $4::uuid"
+                        + (" AND status IN ('pending','queued','retry_scheduled','processing','calling')"
+                           " AND attempt_number <= $5" if scheduled_at is not None else "")
                     ),
                     [
                         str(job.job_id),
                         str(job.tenant_id),
                         str(job.campaign_id),
                         str(job.lead_id),
+                        *([int(job.attempt_number)] if scheduled_at is not None else []),
                     ],
                 )
                 if len(rows) != 1:
