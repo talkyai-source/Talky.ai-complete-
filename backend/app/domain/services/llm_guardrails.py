@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 
 from app.domain.models.conversation_state import ConversationState
 from app.domain.models.agent_config import ConversationRule
+from app.domain.services.caller_assertions import assertion_matches
 
 logger = logging.getLogger(__name__)
 
@@ -116,6 +117,76 @@ _EMAIL_MODAL_FAILURE = re.compile(
     re.IGNORECASE,
 )
 
+_UNCERTAIN_COMPLETION_PREFIX = re.compile(
+    r"\b(?:i|we)\s+(?:can't|cannot|couldn't|can not|could not)\s+"
+    r"confirm\s+(?:(?:that|whether)\s+)?(?:(?:the|a|your)\s+)?$",
+    re.IGNORECASE,
+)
+_ACTION_CLAUSE_BOUNDARY = re.compile(r",|\b(?:but|however|instead|so|and)\b", re.IGNORECASE)
+
+
+def _action_clause_text(response: str) -> str:
+    # Preserve offsets and entire quoted spans for assertion_matches. A report
+    # or uncertainty in one clause cannot qualify a later independent claim.
+    return _ACTION_CLAUSE_BOUNDARY.sub(
+        lambda match: ";" + " " * (len(match[0]) - 1), response.replace("’", "'"),
+    )
+
+# Only named actions are covered: a session's old unknown receipt must not
+# prohibit unrelated advice such as retrying a password or an ordinary question.
+_UNRESOLVED_ACTION_LANGUAGE = {
+    "send_email": (
+        r"e-?mail|information|details|quote|estimate", r"resend|re-send",
+        r"send|email", r"sending|emailing",
+    ),
+    "submit_form": (
+        r"form|application|request", r"resubmit|re-submit|refile",
+        r"submit|file", r"submitting|filing",
+    ),
+    "schedule_callback": (
+        r"callback|call\s*back|follow[- ]?up call", r"rebook|re-book|reschedule",
+        r"book|schedule", r"booking|scheduling",
+    ),
+    "transfer_call": (r"transfer", r"restart", r"start", r"starting"),
+}
+_UNRESOLVED_ACTION_PATTERNS = {
+    action: re.compile(
+        rf"\b(?:{subject})\s+(?:has\s+)?failed\b|"
+        rf"\b(?:{repeat}|retry|repeat)\s+(?:(?:{gerund})\s+)?"
+        rf"(?:(?:the|your|this|that|an?)\s+)?(?:{subject})\b|"
+        rf"\b(?:{verb})\s+(?:(?:the|your|this|that|an?)\s+)?(?:{subject})\s+again\b",
+        re.IGNORECASE,
+    )
+    for action, (subject, repeat, verb, gerund) in _UNRESOLVED_ACTION_LANGUAGE.items()
+}
+
+
+def _unresolved_action_claim(response: str, results: Mapping) -> Optional[str]:
+    """Unknown proves neither success nor failure, and does not permit a resend.
+
+    Reuse the existing assertion filter for quoted/reported/hypothetical and
+    negated mentions; this is a bounded phrase check, not general NLP proof.
+    """
+    response = _action_clause_text(response)
+    for action, result in results.items():
+        if not isinstance(result, Mapping) or result.get("status") not in {
+            "unknown", "in_progress",
+        }:
+            continue
+        patterns = [
+            _ACTION_NEGATED_COMPLETION_PATTERNS.get(action),
+            _UNRESOLVED_ACTION_PATTERNS.get(action),
+        ]
+        if action == "send_email":
+            patterns.append(_EMAIL_MODAL_FAILURE)
+        for pattern in patterns:
+            if pattern is None:
+                continue
+            for match in assertion_matches(response, pattern):
+                if not _UNCERTAIN_COMPLETION_PREFIX.search(response[:match.start()]):
+                    return action
+    return None
+
 _TRANSFER_OFFER = re.compile(
     r"\b(?:(?:i|we)(?:\s+(?:can|could|will)|'ll)|would\s+you\s+like\s+me\s+to|"
     r"shall\s+i|let\s+me)\s+(?:transfer\s+(?:you|this\s+call|the\s+call)|"
@@ -126,7 +197,7 @@ _TRANSFER_OFFER = re.compile(
 
 def _completed_action_claims(response: str) -> list[str]:
     """Return action names claimed as completed, excluding explicit failures."""
-    response = response.replace("’", "'")
+    response = _action_clause_text(response)
     clauses = re.split(r"(?<=[.!?;])\s+", response)
     claims: list[str] = []
     for action, pattern in _ACTION_COMPLETION_PATTERNS.items():
@@ -138,11 +209,7 @@ def _completed_action_claims(response: str) -> list[str]:
             for match in pattern.finditer(clause):
                 # Limit each search to one sentence. A greedy match must not
                 # swallow a later positive claim into an earlier limitation.
-                if re.search(
-                    r"\b(?:i|we)\s+(?:can't|cannot|couldn't|can not|could not)\s+"
-                    r"confirm\s+(?:that\s+)?(?:(?:the|a|your)\s+)?$",
-                    clause[:match.start()], re.IGNORECASE,
-                ):
+                if _UNCERTAIN_COMPLETION_PREFIX.search(clause[:match.start()]):
                     continue
                 # Only the negation of this predicate can exempt it.
                 if any(
@@ -378,6 +445,9 @@ class LLMGuardrails:
         # This runs before the historical ``if not rules`` fast-path because an
         # absent tenant rule must never mean "imaginary side effects are allowed".
         results = action_results or {}
+        unresolved = _unresolved_action_claim(response, results)
+        if unresolved:
+            return False, f"action_failed:{unresolved}:{results[unresolved]['status']}"
         for action in _completed_action_claims(response):
             result = results.get(action)
             if not isinstance(result, Mapping):
