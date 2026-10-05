@@ -1,0 +1,26 @@
+........................................................................ [ 16%]
+........................................................................ [ 33%]
+........................................................................ [ 49%]
+........................................................................ [ 66%]
+........................................................................ [ 82%]
+........................................................................ [ 99%]
+...                                                                      [100%]
+============================== warnings summary ===============================
+app\api\v1\endpoints\admin\health\_shared.py:16
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\backend\app\api\v1\endpoints\admin\health\_shared.py:16: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    _server_start_time = datetime.utcnow()
+
+tests/integration/test_call_redial.py: 5 warnings
+tests/integration/test_action_execution_receipts.py: 3 warnings
+tests/integration/test_ag06_action_cancellation.py: 3 warnings
+tests/integration/test_op05_pre_attempt_holds.py: 22 warnings
+tests/integration/test_op05_pacing_holds.py: 20 warnings
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\backend\.venv\Lib\site-packages\pydantic\main.py:250: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+
+tests/integration/test_ag05_lead_evidence.py: 23 warnings
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\backend\app\domain\services\transcript_service.py:372: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    timestamp=datetime.utcnow().isoformat(),
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+435 passed, 77 warnings in 452.45s (0:07:32)

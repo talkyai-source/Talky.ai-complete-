@@ -371,6 +371,11 @@
         {
           "path": "docs/sessions/2026-10-05-api-auth-availability-repair.md",
           "kind": "bounded_local_followup_not_release_acceptance"
+        },
+        {
+          "path": "docs/sessions/2026-10-05-exact-integration-verification.md",
+          "kind": "integrated_local_regression_not_release_acceptance",
+          "candidate": "44dcc2367446cbe85c9c2757838b8695cf15bf1f"
         }
       ],
       "blocker": "Designated inbox/device/browser recovery, cross-tab cookie behavior, deployed compatibility, first authorized call and operator reconciliation remain unverified. The advertised staff invitation/acceptance journey is absent; assisted setup does not close F05.",
@@ -535,10 +540,20 @@
         {
           "path": "docs/production-readiness/ag04-conversation-matrix.json",
           "kind": "proposed_unratified_acceptance_matrix"
+        },
+        {
+          "path": "docs/sessions/2026-10-05-exact-integration-verification.md",
+          "kind": "integrated_local_regression_not_release_acceptance",
+          "candidate": "44dcc2367446cbe85c9c2757838b8695cf15bf1f"
+        },
+        {
+          "path": "docs/sessions/2026-10-05-ag04-contact-and-historical-dnc-controls.md",
+          "kind": "offline_native_contact_and_historical_dnc_controls",
+          "candidate": "1c7dce70"
         }
       ],
       "blocker": "Captured Groq semantic failure retained. Proposed matrix37/50mapped by offline replay; intended profile roster/rubric/cohort unratified; live/human/audio/effect acceptance not run. AG02 retrieval gate remains failed.",
-      "next_action": "Correct the native replay persistence prerequisite, then address meaningful missing common-runner boundaries and authorized per-profile/human/telephone acceptance. Preserve the captured semantic failure.",
+      "next_action": "Extend the remaining 11 unmapped canonical conditions through meaningful existing runtime boundaries; preserve failed Groq semantics and perform approved per-profile human/live qualification. 39/50 union and 190 replay rows are not approval.",
       "target_date": null,
       "execution_note": "1797 tests passed0skip;170offline rows1120controlchecks0failed;1retained semantic failure/169unreviewed. Local source commit only; no provider call/push/deploy."
     },
@@ -573,6 +588,11 @@
         {
           "path": "docs/sessions/artifacts/ag05/api-state-examples-final.json",
           "kind": "annotated_synthetic_database_api_states"
+        },
+        {
+          "path": "docs/sessions/2026-10-05-exact-integration-verification.md",
+          "kind": "integrated_local_regression_not_release_acceptance",
+          "candidate": "44dcc2367446cbe85c9c2757838b8695cf15bf1f"
         }
       ],
       "blocker": "Local source, persistence and display repairs pass. Exact contact cohort accuracy, qualification precision/recall and correction burden, real Sales Hub browser acceptance, connector frozen-payload handling and release acceptance remain unverified. Same-process retry cannot recover evidence that was never committed before process death.",
@@ -614,6 +634,11 @@
         {
           "path": "docs/sessions/2026-10-05-ag06-admin-actions.md",
           "kind": "reproduced_cancellation_and_false_retry_boundaries"
+        },
+        {
+          "path": "docs/sessions/2026-10-05-exact-integration-verification.md",
+          "kind": "integrated_local_regression_not_release_acceptance",
+          "candidate": "44dcc2367446cbe85c9c2757838b8695cf15bf1f"
         }
       ],
       "blocker": null,
@@ -847,6 +872,11 @@
         {
           "path": "docs/sessions/2026-10-05-dnc-schema-verification.md",
           "kind": "bounded_local_followup_not_release_acceptance"
+        },
+        {
+          "path": "docs/sessions/2026-10-05-exact-integration-verification.md",
+          "kind": "integrated_local_regression_not_release_acceptance",
+          "candidate": "44dcc2367446cbe85c9c2757838b8695cf15bf1f"
         }
       ],
       "blocker": "All five remaining pre-intent pacing branches now preserve attempts; native DNC schema/persistence and speech are repaired locally. Lead finalization/retry suppression follow-up, ambiguous-owner reconciliation and actual queue/process/PBX acceptance remain open.",
@@ -929,6 +959,11 @@
         {
           "path": "docs/sessions/2026-10-05-op07-data-lifecycle-inventory.md",
           "kind": "bounded_local_followup_not_release_acceptance"
+        },
+        {
+          "path": "docs/sessions/2026-10-05-exact-integration-verification.md",
+          "kind": "integrated_local_regression_not_release_acceptance",
+          "candidate": "44dcc2367446cbe85c9c2757838b8695cf15bf1f"
         }
       ],
       "blocker": "Native DNC persistence/speech and recording creation boundaries are repaired locally. DNC lead/retry settlement follow-up and approved retention/export/delete rules with per-store execution remain open.",
@@ -1152,10 +1187,15 @@
         {
           "path": "docs/sessions/2026-10-05-repository-regression-checkpoint.md",
           "kind": "bounded_local_followup_not_release_acceptance"
+        },
+        {
+          "path": "docs/sessions/2026-10-05-exact-integration-verification.md",
+          "kind": "integrated_local_regression_not_release_acceptance",
+          "candidate": "44dcc2367446cbe85c9c2757838b8695cf15bf1f"
         }
       ],
       "blocker": null,
-      "next_action": "Complete remaining integrated regressions with exact declared dependency versions and current candidate/main/deployment reconciliation; retain original user work and evidence. No deployment proof is inferred from local checks.",
+      "next_action": "Retain exact-dependency full backend and migrated database results; reconcile subsequent bounded changes and current main/deployment before controlled acceptance. Preserve original user work; no deployed proof is inferred.",
       "target_date": null
     },
     {

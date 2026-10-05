@@ -8,6 +8,8 @@ This is the execution plan for making the existing product worth paying for. It 
 
 **Repository follow-up — 5 October 2026:** The [regression checkpoint](sessions/2026-10-05-repository-regression-checkpoint.md) records native DNC schema/persistence/speech, pacing, authentication and recording-privacy repairs; 774 dashboard checks passed, while the latest whole-backend run retains one replay-contract failure (11,749 passed, 20 skipped). Four PostgreSQL fixture failures have focused corrections; combined exact-dependency verification and DNC finalization remain in progress. No final gate or package is closed.
 
+**Exact dependency verification — 5 October 2026:** Candidate `44dcc236` passed 11,775 backend unit/security tests with 19 explicit skips and all 435 migrated PostgreSQL tests across 35 modules. [Evidence and boundaries](sessions/2026-10-05-exact-integration-verification.md) retain the earlier failures, unchanged-source manifests and dependency limits. Later test-only contact/history replay covers 39/50 proposed conditions; the Groq semantic failure remains. No package or release gate is closed by these results.
+
 ## 1 Fixed scope and baseline
 
 The baseline is frozen to the findings already reported. Confirmed defects require repairs. Design risks require a bounded reproduction or proof before deciding whether code must change. Unknown quality requires measurement. Candidate repairs require preservation, integration and deployment verification, not automatic reimplementation.
