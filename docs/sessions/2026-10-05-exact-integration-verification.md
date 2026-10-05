@@ -98,3 +98,14 @@ displayed honestly; supported operator resolution and external acceptance remain
 open. The [architecture disposition](2026-10-05-ag07-architecture-dispositions.md)
 closes only the proved-unused A05 duplication finding, with independent review;
 AG07 and every package/gate status remain unchanged.
+
+## Fresh remote-main comparison
+
+A noninteractive read of remote `main` on 5 October 2026 found revision
+`0a64828c23a17a8ab84c566d9739487606f26b64`, unchanged from the stored remote ref.
+At candidate `a07d9163`, that revision is the merge base: **111 candidate-only
+commits and zero main-only commits**, with no new upstream files to reconcile.
+The local branch, candidate and tracked working tree were unchanged by the fetch.
+[Exact metadata](artifacts/remote-baseline/read-only-main.json) records the check.
+This establishes source ancestry at that time, not the deployed revision, remote
+CI success or release approval. No push, merge or deployment occurred.
