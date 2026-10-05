@@ -1,0 +1,87 @@
+{
+  "base_commit": "731759b1c5b53c29f45f56ef16d760341acf5d6f",
+  "executable": "C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/backend/.venv/Scripts/python.exe",
+  "cwd": "C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/tmp/ag02-enrichment-routing-20261006/backend",
+  "explicit_environment": {
+    "PYTHONUTF8": "1",
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "PYTHONPATH": "C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/tmp/postgres-matrix-20261005/tmp/exact-requirements-20261005/packages;C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/tmp/production-ready-ag07-20261005/tmp/op02-testdeps",
+    "ENVIRONMENT": "test",
+    "DATABASE_URL": "postgresql://test:test@127.0.0.1:1/unavailable_test"
+  },
+  "commands": [
+    {
+      "argv": [
+        "-m",
+        "pytest",
+        "tests/unit/test_knowledge_enrichment_routing.py",
+        "-q",
+        "--no-cov",
+        "--tb=short"
+      ],
+      "artifact": "baseline.txt",
+      "exit_code": 1,
+      "result": {
+        "failed": 36,
+        "passed": 12,
+        "seconds": 2.58
+      },
+      "source": "Original application, same final48-control test module"
+    },
+    {
+      "argv": [
+        "-m",
+        "pytest",
+        "tests/unit/test_knowledge_enrichment_routing.py",
+        "tests/unit/test_knowledge_enricher_model.py",
+        "tests/unit/test_knowledge_ingest_staging.py",
+        "tests/unit/test_reenrich_campaign_knowledge_script.py",
+        "tests/unit/test_knowledge_relevance.py",
+        "tests/unit/test_knowledge_budget.py",
+        "tests/unit/test_ag02_gold_matrix.py",
+        "-q",
+        "--no-cov",
+        "--tb=short"
+      ],
+      "artifact": "final.txt",
+      "exit_code": 0,
+      "result": {
+        "passed": 111,
+        "failed": 0,
+        "skipped": 0,
+        "warnings": 0,
+        "modules": 7,
+        "new_controls": 48,
+        "seconds": 3.74
+      }
+    },
+    {
+      "argv": [
+        "-m",
+        "ruff",
+        "check",
+        "app/services/scripts/knowledge/enricher.py",
+        "tests/unit/test_knowledge_enrichment_routing.py",
+        "--select",
+        "F"
+      ],
+      "artifact": "lint.txt",
+      "exit_code": 0
+    },
+    {
+      "executable": "git",
+      "argv": [
+        "diff",
+        "--check"
+      ],
+      "exit_code": 0
+    }
+  ],
+  "limits": [
+    "All displayed child exit codes were captured in PowerShell; counts overlap and are not additive.",
+    "Synthetic AsyncGroq completion method boundary only; no actual provider or database request.",
+    "The new async controls block socket connect/connect_ex/getaddrinfo during tests and restore before Windows loop teardown; no global network-attempt count claimed.",
+    "The gold integrity module executes its existing standalone pinned evaluator subprocess and verifies that the unchanged quality gate still fails. No new gold-score improvement is claimed.",
+    "Explicit environment only; unrelated inherited variables were not serialized. Existing overlays reused, no dependency install/change."
+  ]
+}
