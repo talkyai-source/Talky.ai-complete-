@@ -1,0 +1,72 @@
+{
+  "date": "2026-10-06",
+  "source_commit": "e7add564b3b73b2f2ac73805b128ca630a55a7cf",
+  "source_hashes_lf": {
+    "backend/app/services/crm_sync_service.py": "443e157411d0d48a9098f8d52a3cdbacb74c31b2c0f87e3f8ed7ec6d77711ff1",
+    "backend/tests/unit/test_crm_sync_service.py": "f47477ad8c05a5ca4f31f035905931afd72c53a7fa2b006c3fbf5513dc2faa08",
+    "backend/tests/unit/test_ag06_crm_evidence.py": "d0b1e35a8cc63d75a604fcf89b620d572a98dc035c7558f0efccaade27b710db",
+    "backend/tests/unit/test_crm_sync_hooks.py": "b1fdccd586cedb23cb2c8291e52181d6fb3eb24ed1345a0e6d7c81c930ef0bec"
+  },
+  "source_matches_committed_git": true,
+  "result": {
+    "passed": 79,
+    "failed": 0,
+    "skipped": 0,
+    "modules": 3,
+    "new_or_replaced_controls_included": 4,
+    "baseline_valid_failures": 4
+  },
+  "network_attempts": 0,
+  "allowed_windows_internal_socketpairs": 104,
+  "production_gate_promoted": false,
+  "artifacts": {
+    "baseline.json": {
+      "sha256_raw": "42eb8cddd166f160621c723c109c8a745d5dfdaa88e520876c8bcecca18683b4",
+      "sha256_lf": "d7efad222ae9508c1174ddba7f5d1eeeb3a2c02a7bb17f54a8dba8f3b882e783"
+    },
+    "baseline.txt": {
+      "sha256_raw": "489d7362e8513eec370b49c19bad88abc56a42f46375a9b7644f1e97da64e670",
+      "sha256_lf": "e22382650e5c24051a80e6ca780bb614cafb03c7d602fa8a4f7d4ec637506cb1"
+    },
+    "before.json": {
+      "sha256_raw": "c919fb15bf88568ee370cc9536660b91ba9d46aa752616580721fc8256f68054",
+      "sha256_lf": "26d9257f44d77bce4f449ed9c47886d923a0b7f0df5e370280a7017917c8a6d3"
+    },
+    "before.txt": {
+      "sha256_raw": "54d409ff42666ad8d37422d4b8547dcb25783273116af141a64eac16e234286e",
+      "sha256_lf": "5c160fedbad8da851d4eec8e9940ed4f9d9cf2c99e36ba32de3c990ab74ce105"
+    },
+    "command.json": {
+      "sha256_raw": "2c09b0a030ae1094dc9b517d79d7d1d9a8b7ab82401944039f07b1442e331f54",
+      "sha256_lf": "0cc5b888a4d6569e043a6b2f6cdf1be986fdf06a5bc3b237ba48b3be468c9561"
+    },
+    "final.json": {
+      "sha256_raw": "f33b8380e961ca0237bd9d1d655f06803bf2a34073dfd57898cbd9444f228c28",
+      "sha256_lf": "10e67e3c70241221b53632eac216af4c42d5500ded53f221036b27b1a0bbe271"
+    },
+    "final.txt": {
+      "sha256_raw": "e53950bc143d5b5d543a28fc5729b3483fcd8637cfb4abc4b2d13adfbaed1197",
+      "sha256_lf": "63766cdd3213dfc2542f9acb2639bacf630139d974f7c1f400ca240a660e83b4"
+    },
+    "initial-harness.json": {
+      "sha256_raw": "f3ac99523a95828e5cecb0abe1f2625b38a13aad2d5e167a17a33e6e531d0406",
+      "sha256_lf": "6a3274b13687aad409ba618b6a91aba15b5ef917af200ca88351c82468d10f39"
+    },
+    "initial-harness.txt": {
+      "sha256_raw": "d7f2fdf9a97d27d70505f6743d835971ce8c4c1ba67508d5ac074a0913ea3964",
+      "sha256_lf": "70629375f7fe249e9a5c844fb89b865422e46a1ecb0e61b61d7d5979f56a6c60"
+    },
+    "lint-final.txt": {
+      "sha256_raw": "a4443afdcfb6d7363adb285762515ccf7cf50473b1a05c20c1a50f6bed4d26b0",
+      "sha256_lf": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18"
+    },
+    "runner.py": {
+      "sha256_raw": "538c6fc4b2111efc8f6100e05d36ff515ea08d1e45660dcaf2bcfc918312b50d",
+      "sha256_lf": "538c6fc4b2111efc8f6100e05d36ff515ea08d1e45660dcaf2bcfc918312b50d"
+    },
+    "verification.md": {
+      "sha256_raw": "c7f8bf3524344f8f663a384729295997be4d8451c005a33c2de593dcb141e4d5",
+      "sha256_lf": "c7f8bf3524344f8f663a384729295997be4d8451c005a33c2de593dcb141e4d5"
+    }
+  }
+}
