@@ -7,7 +7,9 @@ campaign/lead job-lifecycle all import from here so their notions of
 zombie-"dialing" bugs crept in.
 
 Keep this list in lockstep with the partial unique index predicate in the
-migration ``20260612_dialer_job_dedup.sql``.
+canonical Alembic revision ``0060_dialer_active_job_owner`` and the matching
+``complete_schema.sql`` bootstrap guard. The older standalone SQL is historical
+and must not be used to reconcile duplicate jobs automatically.
 """
 from __future__ import annotations
 

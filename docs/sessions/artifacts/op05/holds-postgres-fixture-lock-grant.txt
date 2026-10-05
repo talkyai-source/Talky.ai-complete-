@@ -1,0 +1,171 @@
+FFFFF                                                                    [100%]
+================================== FAILURES ===================================
+_ test_hold_and_resume_keep_one_actual_database_job[outside_time_window_14:00_17:00] _
+app\workers\dialer_worker.py:602: in process_job
+    await self._redefer_before_intent_resolution(
+app\workers\dialer_worker.py:2488: in _redefer_before_intent_resolution
+    await self._update_lead_status(job, "pending")
+app\workers\dialer_worker.py:2510: in _update_lead_status
+    updated = await conn.execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:353: in execute
+    _, status, _ = await self._execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1794: in _execute
+    result, _ = await self.__execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1892: in __execute
+    result, stmt = await self._do_execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1948: in _do_execute
+    result = await executor(stmt, timeout)
+asyncpg\protocol\protocol.pyx:207: in bind_execute
+    ???
+E   asyncpg.exceptions.InsufficientPrivilegeError: permission denied for table campaigns
+
+During handling of the above exception, another exception occurred:
+tests\integration\test_op05_pre_attempt_holds.py:109: in test_hold_and_resume_keep_one_actual_database_job
+    await worker.process_job(job)
+app\workers\dialer_worker.py:1145: in process_job
+    await self._update_lead_status(job, "pending")
+app\workers\dialer_worker.py:2510: in _update_lead_status
+    updated = await conn.execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:353: in execute
+    _, status, _ = await self._execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1794: in _execute
+    result, _ = await self.__execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1892: in __execute
+    result, stmt = await self._do_execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1948: in _do_execute
+    result = await executor(stmt, timeout)
+asyncpg\protocol\protocol.pyx:207: in bind_execute
+    ???
+E   asyncpg.exceptions.InsufficientPrivilegeError: permission denied for table campaigns
+------------------------------ Captured log call ------------------------------
+ERROR    app.workers.dialer_worker:dialer_worker.py:1120 dial_failed category=internal reason=no_response attempt=1 next_retry_in=60s job=2208dbe9-d91c-4de4-b3c2-cede3f1be4a5 lead=ab6d9d67-6570-4bbd-baac-f9b8df834c73 dest=+15550001001 err=permission denied for table campaigns
+WARNING  app.workers.dialer_worker:dialer_worker.py:2767 could not write failure_category/reason for job=2208dbe9-d91c-4de4-b3c2-cede3f1be4a5 (missing columns? not yet migrated?): permission denied for table campaigns
+_ test_hold_and_resume_keep_one_actual_database_job[daily_lead_cap_reached_3/3] _
+app\workers\dialer_worker.py:602: in process_job
+    await self._redefer_before_intent_resolution(
+app\workers\dialer_worker.py:2488: in _redefer_before_intent_resolution
+    await self._update_lead_status(job, "pending")
+app\workers\dialer_worker.py:2510: in _update_lead_status
+    updated = await conn.execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:353: in execute
+    _, status, _ = await self._execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1794: in _execute
+    result, _ = await self.__execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1892: in __execute
+    result, stmt = await self._do_execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1948: in _do_execute
+    result = await executor(stmt, timeout)
+asyncpg\protocol\protocol.pyx:207: in bind_execute
+    ???
+E   asyncpg.exceptions.InsufficientPrivilegeError: permission denied for table campaigns
+
+During handling of the above exception, another exception occurred:
+tests\integration\test_op05_pre_attempt_holds.py:109: in test_hold_and_resume_keep_one_actual_database_job
+    await worker.process_job(job)
+app\workers\dialer_worker.py:1145: in process_job
+    await self._update_lead_status(job, "pending")
+app\workers\dialer_worker.py:2510: in _update_lead_status
+    updated = await conn.execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:353: in execute
+    _, status, _ = await self._execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1794: in _execute
+    result, _ = await self.__execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1892: in __execute
+    result, stmt = await self._do_execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1948: in _do_execute
+    result = await executor(stmt, timeout)
+asyncpg\protocol\protocol.pyx:207: in bind_execute
+    ???
+E   asyncpg.exceptions.InsufficientPrivilegeError: permission denied for table campaigns
+------------------------------ Captured log call ------------------------------
+ERROR    app.workers.dialer_worker:dialer_worker.py:1120 dial_failed category=internal reason=no_response attempt=1 next_retry_in=60s job=1e809ee9-5d1f-400d-8c82-dbebe7012563 lead=b114d15b-0875-4305-a68b-9edf4f677a00 dest=+15550001001 err=permission denied for table campaigns
+WARNING  app.workers.dialer_worker:dialer_worker.py:2767 could not write failure_category/reason for job=1e809ee9-5d1f-400d-8c82-dbebe7012563 (missing columns? not yet migrated?): permission denied for table campaigns
+_ test_hold_and_resume_keep_one_actual_database_job[max_concurrent_calls_reached_10/10] _
+app\workers\dialer_worker.py:602: in process_job
+    await self._redefer_before_intent_resolution(
+app\workers\dialer_worker.py:2488: in _redefer_before_intent_resolution
+    await self._update_lead_status(job, "pending")
+app\workers\dialer_worker.py:2510: in _update_lead_status
+    updated = await conn.execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:353: in execute
+    _, status, _ = await self._execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1794: in _execute
+    result, _ = await self.__execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1892: in __execute
+    result, stmt = await self._do_execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1948: in _do_execute
+    result = await executor(stmt, timeout)
+asyncpg\protocol\protocol.pyx:207: in bind_execute
+    ???
+E   asyncpg.exceptions.InsufficientPrivilegeError: permission denied for table campaigns
+
+During handling of the above exception, another exception occurred:
+tests\integration\test_op05_pre_attempt_holds.py:109: in test_hold_and_resume_keep_one_actual_database_job
+    await worker.process_job(job)
+app\workers\dialer_worker.py:1145: in process_job
+    await self._update_lead_status(job, "pending")
+app\workers\dialer_worker.py:2510: in _update_lead_status
+    updated = await conn.execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:353: in execute
+    _, status, _ = await self._execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1794: in _execute
+    result, _ = await self.__execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1892: in __execute
+    result, stmt = await self._do_execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1948: in _do_execute
+    result = await executor(stmt, timeout)
+asyncpg\protocol\protocol.pyx:207: in bind_execute
+    ???
+E   asyncpg.exceptions.InsufficientPrivilegeError: permission denied for table campaigns
+------------------------------ Captured log call ------------------------------
+ERROR    app.workers.dialer_worker:dialer_worker.py:1120 dial_failed category=internal reason=no_response attempt=1 next_retry_in=60s job=e7f1db48-fd33-4ae7-be52-50ef8b393648 lead=fc891f58-8b63-4205-99fe-6b3f25e5966a dest=+15550001001 err=permission denied for table campaigns
+WARNING  app.workers.dialer_worker:dialer_worker.py:2767 could not write failure_category/reason for job=e7f1db48-fd33-4ae7-be52-50ef8b393648 (missing columns? not yet migrated?): permission denied for table campaigns
+_________ test_schedule_outage_never_terminalizes_actual_owner[False] _________
+tests\integration\test_op05_pre_attempt_holds.py:142: in test_schedule_outage_never_terminalizes_actual_owner
+    await assert_one_owner(db, "processing")
+tests\integration\test_op05_pre_attempt_holds.py:95: in assert_one_owner
+    await conn.execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:353: in execute
+    _, status, _ = await self._execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1794: in _execute
+    result, _ = await self.__execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1892: in __execute
+    result, stmt = await self._do_execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1948: in _do_execute
+    result = await executor(stmt, timeout)
+asyncpg\protocol\protocol.pyx:207: in bind_execute
+    ???
+E   asyncpg.exceptions.InsufficientPrivilegeError: permission denied for table campaigns
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.queue_service:queue_service.py:706 redefer_inflight failed job=5d5ae162-f827-4b78-af34-073e7c07f27b err=synthetic schedule handoff failure
+_________ test_schedule_outage_never_terminalizes_actual_owner[True] __________
+tests\integration\test_op05_pre_attempt_holds.py:142: in test_schedule_outage_never_terminalizes_actual_owner
+    await assert_one_owner(db, "processing")
+tests\integration\test_op05_pre_attempt_holds.py:95: in assert_one_owner
+    await conn.execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:353: in execute
+    _, status, _ = await self._execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1794: in _execute
+    result, _ = await self.__execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1892: in __execute
+    result, stmt = await self._do_execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1948: in _do_execute
+    result = await executor(stmt, timeout)
+asyncpg\protocol\protocol.pyx:207: in bind_execute
+    ???
+E   asyncpg.exceptions.InsufficientPrivilegeError: permission denied for table campaigns
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.queue_service:queue_service.py:706 redefer_inflight failed job=e34ef21d-0088-47e1-809e-7861b3962941 err=synthetic schedule handoff failure
+============================== warnings summary ===============================
+tests/integration/test_op05_pre_attempt_holds.py: 10 warnings
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\backend\.venv\Lib\site-packages\pydantic\main.py:250: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/integration/test_op05_pre_attempt_holds.py::test_hold_and_resume_keep_one_actual_database_job[outside_time_window_14:00_17:00]
+FAILED tests/integration/test_op05_pre_attempt_holds.py::test_hold_and_resume_keep_one_actual_database_job[daily_lead_cap_reached_3/3]
+FAILED tests/integration/test_op05_pre_attempt_holds.py::test_hold_and_resume_keep_one_actual_database_job[max_concurrent_calls_reached_10/10]
+FAILED tests/integration/test_op05_pre_attempt_holds.py::test_schedule_outage_never_terminalizes_actual_owner[False]
+FAILED tests/integration/test_op05_pre_attempt_holds.py::test_schedule_outage_never_terminalizes_actual_owner[True]
+5 failed, 10 warnings in 5.90s

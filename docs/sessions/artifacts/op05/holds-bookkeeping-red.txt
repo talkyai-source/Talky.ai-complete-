@@ -1,0 +1,31 @@
+FF                                                                       [100%]
+================================== FAILURES ===================================
+_ test_post_handoff_bookkeeping_failure_cannot_create_new_attempt[_update_lead_status] _
+tests\unit\test_op05_pre_attempt_holds.py:121: in test_post_handoff_bookkeeping_failure_cannot_create_new_attempt
+    assert len(scheduled) == 1
+E   assert 2 == 1
+E    +  where 2 = len(['{"job_id": "job-abc", "campaign_id": "35c79aeb-0000-0000-0000-000000000000", "lead_id": "lead-abc", "tenant_id": "te... "first_speaker": "agent", "agent_name": null, "lead_first_name": null, "lead_last_name": null, "lead_company": null}'])
+------------------------------ Captured log call ------------------------------
+ERROR    app.workers.dialer_worker:dialer_worker.py:1120 dial_failed category=internal reason=no_response attempt=1 next_retry_in=60s job=job-abc lead=lead-abc dest=+447700900123 err=synthetic bookkeeping outage
+WARNING  app.workers.dialer_worker:dialer_worker.py:2767 could not write failure_category/reason for job=job-abc (missing columns? not yet migrated?): 'NoneType' object has no attribute 'acquire'
+_ test_post_handoff_bookkeeping_failure_cannot_create_new_attempt[_update_job_status] _
+tests\unit\test_op05_pre_attempt_holds.py:121: in test_post_handoff_bookkeeping_failure_cannot_create_new_attempt
+    assert len(scheduled) == 1
+E   assert 2 == 1
+E    +  where 2 = len(['{"job_id": "job-abc", "campaign_id": "35c79aeb-0000-0000-0000-000000000000", "lead_id": "lead-abc", "tenant_id": "te... "first_speaker": "agent", "agent_name": null, "lead_first_name": null, "lead_last_name": null, "lead_company": null}'])
+------------------------------ Captured log call ------------------------------
+ERROR    app.workers.dialer_worker:dialer_worker.py:1120 dial_failed category=internal reason=no_response attempt=1 next_retry_in=60s job=job-abc lead=lead-abc dest=+447700900123 err=synthetic bookkeeping outage
+WARNING  app.workers.dialer_worker:dialer_worker.py:2767 could not write failure_category/reason for job=job-abc (missing columns? not yet migrated?): 'NoneType' object has no attribute 'acquire'
+============================== warnings summary ===============================
+tests/unit/test_op05_pre_attempt_holds.py::test_post_handoff_bookkeeping_failure_cannot_create_new_attempt[_update_lead_status]
+tests/unit/test_op05_pre_attempt_holds.py::test_post_handoff_bookkeeping_failure_cannot_create_new_attempt[_update_lead_status]
+tests/unit/test_op05_pre_attempt_holds.py::test_post_handoff_bookkeeping_failure_cannot_create_new_attempt[_update_job_status]
+tests/unit/test_op05_pre_attempt_holds.py::test_post_handoff_bookkeeping_failure_cannot_create_new_attempt[_update_job_status]
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\backend\.venv\Lib\site-packages\pydantic\main.py:250: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/unit/test_op05_pre_attempt_holds.py::test_post_handoff_bookkeeping_failure_cannot_create_new_attempt[_update_lead_status]
+FAILED tests/unit/test_op05_pre_attempt_holds.py::test_post_handoff_bookkeeping_failure_cannot_create_new_attempt[_update_job_status]
+2 failed, 9 deselected, 4 warnings in 1.49s

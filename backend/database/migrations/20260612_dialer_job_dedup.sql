@@ -1,3 +1,6 @@
+-- HISTORICAL ONLY. Use canonical Alembic 0060_dialer_active_job_owner.
+-- This old script cancels siblings without provider reconciliation; DO NOT run
+-- it for current upgrades. Canonical 0060 preserves rows and fails for review.
 -- 20260612_dialer_job_dedup.sql
 --
 -- Enforce: AT MOST ONE active dialer job per lead.

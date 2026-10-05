@@ -1,0 +1,62 @@
+FFFFFFFF.                                                                [100%]
+================================== FAILURES ===================================
+_ test_pre_attempt_hold_retains_active_owner_and_original_attempt[outside_time_window_14:00_17:00] _
+tests\unit\test_op05_pre_attempt_holds.py:45: in test_pre_attempt_hold_retains_active_owner_and_original_attempt
+    assert payload["attempt_number"] == job.attempt_number == 1
+E   assert 2 == 1
+E    +  where 2 = DialerJob(id=job-abc..., phone=+447700900123, priority=5, status=JobStatus.RETRY_SCHEDULED, attempt=2).attempt_number
+_ test_pre_attempt_hold_retains_active_owner_and_original_attempt[calling_not_allowed_on_Tue] _
+tests\unit\test_op05_pre_attempt_holds.py:45: in test_pre_attempt_hold_retains_active_owner_and_original_attempt
+    assert payload["attempt_number"] == job.attempt_number == 1
+E   assert 2 == 1
+E    +  where 2 = DialerJob(id=job-abc..., phone=+447700900123, priority=5, status=JobStatus.RETRY_SCHEDULED, attempt=2).attempt_number
+_ test_pre_attempt_hold_retains_active_owner_and_original_attempt[daily_lead_cap_reached_3/3] _
+tests\unit\test_op05_pre_attempt_holds.py:45: in test_pre_attempt_hold_retains_active_owner_and_original_attempt
+    assert payload["attempt_number"] == job.attempt_number == 1
+E   assert 2 == 1
+E    +  where 2 = DialerJob(id=job-abc..., phone=+447700900123, priority=5, status=JobStatus.RETRY_SCHEDULED, attempt=2).attempt_number
+_ test_pre_attempt_hold_retains_active_owner_and_original_attempt[max_concurrent_calls_reached_10/10] _
+tests\unit\test_op05_pre_attempt_holds.py:45: in test_pre_attempt_hold_retains_active_owner_and_original_attempt
+    assert payload["attempt_number"] == job.attempt_number == 1
+E   assert 2 == 1
+E    +  where 2 = DialerJob(id=job-abc..., phone=+447700900123, priority=5, status=JobStatus.RETRY_SCHEDULED, attempt=2).attempt_number
+_ test_failed_or_lost_schedule_ack_keeps_original_evidence_and_recovers_once[False] _
+tests\unit\test_op05_pre_attempt_holds.py:83: in test_failed_or_lost_schedule_ack_keeps_original_evidence_and_recovers_once
+    assert job.attempt_number == 1
+E   assert 2 == 1
+E    +  where 2 = DialerJob(id=job-abc..., phone=+447700900123, priority=5, status=JobStatus.RETRY_SCHEDULED, attempt=2).attempt_number
+------------------------------ Captured log call ------------------------------
+ERROR    app.domain.services.queue_service:queue_service.py:413 Failed to schedule retry for job job-abc: synthetic schedule acknowledgement unavailable
+_ test_failed_or_lost_schedule_ack_keeps_original_evidence_and_recovers_once[True] _
+tests\unit\test_op05_pre_attempt_holds.py:83: in test_failed_or_lost_schedule_ack_keeps_original_evidence_and_recovers_once
+    assert job.attempt_number == 1
+E   assert 2 == 1
+E    +  where 2 = DialerJob(id=job-abc..., phone=+447700900123, priority=5, status=JobStatus.RETRY_SCHEDULED, attempt=2).attempt_number
+------------------------------ Captured log call ------------------------------
+ERROR    app.domain.services.queue_service:queue_service.py:413 Failed to schedule retry for job job-abc: synthetic schedule acknowledgement unavailable
+____________ test_missing_original_payload_does_not_invent_a_retry ____________
+tests\unit\test_op05_pre_attempt_holds.py:104: in test_missing_original_payload_does_not_invent_a_retry
+    assert await queue._redis.zcard(queue.SCHEDULED_ZSET) == 0
+E   assert 1 == 0
+________ test_due_hold_resumes_same_attempt_and_one_provider_boundary _________
+tests\unit\test_op05_pre_attempt_holds.py:121: in test_due_hold_resumes_same_attempt_and_one_provider_boundary
+    assert resumed.job_id == job.job_id and resumed.attempt_number == 1
+E   AssertionError: assert ('job-abc' == 'job-abc'
+E       job-abc and 2 == 1)
+E    +  where 2 = DialerJob(id=job-abc..., phone=+447700900123, priority=5, status=pending, attempt=2).attempt_number
+============================== warnings summary ===============================
+tests/unit/test_op05_pre_attempt_holds.py: 18 warnings
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\backend\.venv\Lib\site-packages\pydantic\main.py:250: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/unit/test_op05_pre_attempt_holds.py::test_pre_attempt_hold_retains_active_owner_and_original_attempt[outside_time_window_14:00_17:00]
+FAILED tests/unit/test_op05_pre_attempt_holds.py::test_pre_attempt_hold_retains_active_owner_and_original_attempt[calling_not_allowed_on_Tue]
+FAILED tests/unit/test_op05_pre_attempt_holds.py::test_pre_attempt_hold_retains_active_owner_and_original_attempt[daily_lead_cap_reached_3/3]
+FAILED tests/unit/test_op05_pre_attempt_holds.py::test_pre_attempt_hold_retains_active_owner_and_original_attempt[max_concurrent_calls_reached_10/10]
+FAILED tests/unit/test_op05_pre_attempt_holds.py::test_failed_or_lost_schedule_ack_keeps_original_evidence_and_recovers_once[False]
+FAILED tests/unit/test_op05_pre_attempt_holds.py::test_failed_or_lost_schedule_ack_keeps_original_evidence_and_recovers_once[True]
+FAILED tests/unit/test_op05_pre_attempt_holds.py::test_missing_original_payload_does_not_invent_a_retry
+FAILED tests/unit/test_op05_pre_attempt_holds.py::test_due_hold_resumes_same_attempt_and_one_provider_boundary
+8 failed, 1 passed, 18 warnings in 12.46s

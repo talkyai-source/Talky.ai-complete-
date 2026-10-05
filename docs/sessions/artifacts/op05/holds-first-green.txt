@@ -1,0 +1,29 @@
+............................................................FF.......... [ 88%]
+.........                                                                [100%]
+================================== FAILURES ===================================
+_____________ test_missing_lease_recreated_and_reconcile_keeps_it _____________
+tests\unit\test_dialer_redis_reliability.py:274: in test_missing_lease_recreated_and_reconcile_keeps_it
+    assert await gc.current_count(r) == 1
+E   assert 0 == 1
+------------------------------ Captured log call ------------------------------
+ERROR    app.domain.services.global_concurrency:global_concurrency.py:207 global_concurrency_acquire_failed call=live err=unknown command 'eval', with args beginning with:  fail_closed=False
+____________ test_without_refresh_a_lost_lease_is_reconciled_away _____________
+tests\unit\test_dialer_redis_reliability.py:298: in test_without_refresh_a_lost_lease_is_reconciled_away
+    assert removed == 1
+E   assert 0 == 1
+------------------------------ Captured log call ------------------------------
+ERROR    app.domain.services.global_concurrency:global_concurrency.py:207 global_concurrency_acquire_failed call=ghost err=unknown command 'eval', with args beginning with:  fail_closed=False
+============================== warnings summary ===============================
+tests/unit/test_op05_pre_attempt_holds.py: 18 warnings
+tests/unit/test_dialer_worker_block_visibility.py: 40 warnings
+tests/unit/test_dialer_origination_durability.py: 48 warnings
+tests/unit/test_dialer_redis_reliability.py: 26 warnings
+tests/unit/test_op01_metering_unavailable.py: 8 warnings
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\backend\.venv\Lib\site-packages\pydantic\main.py:250: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/unit/test_dialer_redis_reliability.py::test_missing_lease_recreated_and_reconcile_keeps_it
+FAILED tests/unit/test_dialer_redis_reliability.py::test_without_refresh_a_lost_lease_is_reconciled_away
+2 failed, 79 passed, 140 warnings in 42.31s
