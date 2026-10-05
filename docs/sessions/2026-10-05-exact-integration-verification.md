@@ -73,3 +73,28 @@ All 15 final gates and 22 scenario gates remain `not_run`. Current work includes
 truthful Admin action receipts, remaining conversation qualification, reviewed
 architecture dispositions and designated live/provider/operational acceptance.
 The feature freeze remains; local green checks alone do not close the plan.
+
+## Later bounded verification
+
+The [eight opt-in cooldown SQL tests](2026-10-05-cooldown-query-postgres-verification.md)
+passed unchanged in a restricted private schema. The original unit run still has
+19 skips; this separate run supplies evidence for eight of them without changing
+that history. The clone checks do not establish canonical trigger/RLS/FK parity.
+Public rows, ACLs, RLS flags and migration head remained unchanged.
+
+The full dashboard `npm run lint` command passed at `33360ddf` with **zero errors
+and three warnings**. Earlier commit `fec31d4b` already excluded ignored local
+scratch probes; the historical AG01 missing-plugin result is retained. No new
+lint configuration, rule suppression or application edit was needed. Warnings
+remain for preview-ref cleanup, an unused import and contact-draft hydration.
+[Command/environment](artifacts/frontend-lint-scope/verification.json) and
+[output](artifacts/frontend-lint-scope/recheck.txt) record this local recheck.
+
+The [Admin receipt repair](2026-10-05-ag06-admin-receipts.md) was integrated later
+as `0cda5660`; its **75 backend and 34 Admin checks** passed again at `b0cb7689`.
+These overlap owner checks and are not part of the earlier whole-backend count.
+Unknown outcomes, original account evidence and selection ownership are now
+displayed honestly; supported operator resolution and external acceptance remain
+open. The [architecture disposition](2026-10-05-ag07-architecture-dispositions.md)
+closes only the proved-unused A05 duplication finding, with independent review;
+AG07 and every package/gate status remain unchanged.

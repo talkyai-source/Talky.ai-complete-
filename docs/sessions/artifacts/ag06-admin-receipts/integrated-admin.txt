@@ -1,0 +1,46 @@
+
+> frontend@0.0.0 test
+> node --test tests/*.test.mjs
+
+✔ table preserves unknown and offers its actual filter (279.655ms)
+✔ table preserves scheduled and offers its actual filter (25.1553ms)
+✔ drawer shows sanitized unconfirmed receipt without raw result or current-account substitution (52.2549ms)
+✔ late A detail cannot replace selected B receipt (26.4053ms)
+✔ receipt missing retains the actual proof boundary (23.4073ms)
+✔ receipt mismatched retains the actual proof boundary (16.8683ms)
+✔ receipt explicit-proof retains the actual proof boundary (21.5496ms)
+✔ late A cancellation refresh cannot replace B or refresh the old action (40.5131ms)
+✔ a foreign detail response cannot populate the current selection (9.9553ms)
+✔ cancel rejection remains an error, without a success refresh (15.5978ms)
+✔ a cancellation confirmation belongs only to its selected action (40.2962ms)
+✔ formats an authoritative ISO currency without assuming dollars (7.5665ms)
+✔ labels a ledger amount whose currency was not recorded (1.0421ms)
+✔ renders a reversed monetary state as zero in its ledger currency (0.7103ms)
+✔ does not render absent or non-finite costs (0.8969ms)
+✔ formats aggregate USD estimates without a hardcoded dollar symbol (1.1353ms)
+✔ requested is pending even when a status-looking field says ended (13.9355ms)
+✔ confirmed requires the provider-confirmed contract (1.5723ms)
+✔ already-terminal is safe to remove from the live list (1.1394ms)
+✔ failed provider response preserves the useful error for retry (1.2772ms)
+✔ a requested response produces a pending-only live-row patch (6.9073ms)
+✔ poll reconciliation preserves a raced pending marker (2.1979ms)
+✔ poll reconciliation accepts failed and missing terminal rows (1.4757ms)
+✔ a confirmed live-row marker is terminal, never actionable pending (0.7967ms)
+✔ late old-period success cannot replace the current rows (31.7269ms)
+✔ late old-period success cannot replace the current failure (8.64ms)
+✔ late old-period failure cannot replace the current rows (8.307ms)
+✔ actual endpoint example renders recorded usage, unavailable attribution and explicit estimate coverage (164.4005ms)
+✔ failed usage read renders an error and unavailable counts, never invented zero (6.5013ms)
+✔ loading usage is not a zero observation (6.5573ms)
+✔ an actually recorded zero count is displayed while supplier cost stays unavailable (4.6644ms)
+✔ known legacy zero is distinct from missing and invalid money (2.0951ms)
+✔ unknown legacy cost does not become USD zero in the actual summary view (13.558ms)
+✔ recorded totals do not turn a missing row measurement into zero (1.2011ms)
+ℹ tests 34
+ℹ suites 0
+ℹ pass 34
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1967.5124

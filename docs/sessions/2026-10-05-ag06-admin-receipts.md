@@ -29,3 +29,13 @@ The frontend controls execute actual component/effect code with the existing syn
 - There is no provider inspection endpoint, automatic retry, resolution mutation, new audit primitive or new permission. Missing legacy original account/reference cannot be inferred from today's connected account.
 - An interrupted in-flight cancellation may already have reached the backend. The selection fence prevents misattributed UI updates; it cannot undo that request or its effect.
 - Resolving an unknown external effect still requires the original account and authoritative evidence, designated operator authority and an approved durable audit/decision contract. Empty search, timeout or missing local receipt is not proof of nonexecution. This correction does not close AG06 or lift the feature freeze.
+
+## Root integration follow-up
+
+Source integrated as `0cda5660`. At combined candidate `b0cb7689`, the same
+network-disabled backend modules passed **75/75**, zero skips, and the full Admin
+suite passed **34/34**, zero skips. All ten changed source/test files match the
+owner's recorded normalized hashes; the tracked working tree was clean after
+both runs. [Integrated verification](artifacts/ag06-admin-receipts/integrated-verification.json)
+retains commands and output references. The scoped owner build, TypeScript and
+lint evidence remains separately attributed; no new browser/provider claim is made.
