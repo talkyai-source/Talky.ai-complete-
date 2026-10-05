@@ -1,0 +1,6 @@
+.......................                                                  [100%]
+23 passed in 5.28s
+Task was destroyed but it is pending!
+task: <Task pending name='Task-37' coro=<_release_ended_marker_later.<locals>._drop() running at C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-op07-20261005\backend\app\domain\services\telephony\lifecycle.py:4670> wait_for=<Future pending cb=[Task.task_wakeup()]> cb=[_track_task.<locals>._done() at C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-op07-20261005\backend\app\domain\services\telephony\lifecycle.py:112]>
+Task was destroyed but it is pending!
+task: <Task pending name='Task-39' coro=<_release_ended_marker_later.<locals>._drop() running at C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-op07-20261005\backend\app\domain\services\telephony\lifecycle.py:4670> wait_for=<Future pending cb=[Task.task_wakeup()]> cb=[_track_task.<locals>._done() at C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-op07-20261005\backend\app\domain\services\telephony\lifecycle.py:112]>

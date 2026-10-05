@@ -1,0 +1,133 @@
+FF....FFFFFF...F.                                                        [100%]
+================================== FAILURES ===================================
+_________ test_native_continued_question_persists_dnc_without_hangup __________
+tests\unit\test_op07_native_dnc_durability.py:88: in test_native_continued_question_persists_dnc_without_hangup
+    await drain_opt_out(bridge)
+tests\unit\test_op07_native_dnc_durability.py:79: in drain_opt_out
+    assert task is not None, "native final must start durable DNC before teardown"
+E   AssertionError: native final must start durable DNC before teardown
+E   assert None is not None
+______ test_native_opt_out_does_not_block_pump_and_coalesces_duplicates _______
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\tasks.py:520: in wait_for
+    return await fut
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\locks.py:212: in wait
+    await fut
+E   asyncio.exceptions.CancelledError
+
+The above exception was the direct cause of the following exception:
+tests\unit\test_op07_native_dnc_durability.py:110: in test_native_opt_out_does_not_block_pump_and_coalesces_duplicates
+    await asyncio.wait_for(started.wait(), .5)
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\tasks.py:519: in wait_for
+    async with timeouts.timeout(timeout):
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\timeouts.py:115: in __aexit__
+    raise TimeoutError from exc_val
+E   TimeoutError
+_______ test_native_close_waits_for_started_dnc_and_rechecks_new_caller _______
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\tasks.py:520: in wait_for
+    return await fut
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\locks.py:212: in wait
+    await fut
+E   asyncio.exceptions.CancelledError
+
+The above exception was the direct cause of the following exception:
+tests\unit\test_op07_native_dnc_durability.py:151: in test_native_close_waits_for_started_dnc_and_rechecks_new_caller
+    await asyncio.wait_for(started.wait(), .5)
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\tasks.py:519: in wait_for
+    async with timeouts.timeout(timeout):
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\timeouts.py:115: in __aexit__
+    raise TimeoutError from exc_val
+E   TimeoutError
+________ test_native_stop_drains_opt_out_instead_of_canceling_success _________
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\tasks.py:520: in wait_for
+    return await fut
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\locks.py:212: in wait
+    await fut
+E   asyncio.exceptions.CancelledError
+
+The above exception was the direct cause of the following exception:
+tests\unit\test_op07_native_dnc_durability.py:179: in test_native_stop_drains_opt_out_instead_of_canceling_success
+    await asyncio.wait_for(started.wait(), .5)
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\tasks.py:519: in wait_for
+    async with timeouts.timeout(timeout):
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\timeouts.py:115: in __aexit__
+    raise TimeoutError from exc_val
+E   TimeoutError
+_ test_partial_cleanup_remains_retryable_but_dnc_ack_is_distinct[jobs_error] __
+tests\unit\test_op07_native_dnc_durability.py:193: in test_partial_cleanup_remains_retryable_but_dnc_ack_is_distinct
+    assert await opt_out.purge_opt_out_before_farewell(session) is True
+app\domain\services\dialer\opt_out.py:154: in purge_opt_out_before_farewell
+    result = await asyncio.wait_for(
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\tasks.py:520: in wait_for
+    return await fut
+app\domain\services\dialer\opt_out.py:75: in purge_lead_on_opt_out
+    result["jobs_cancelled"] = cancel_active_jobs_for_lead(
+app\domain\services\dialer\job_lifecycle.py:82: in cancel_active_jobs_for_lead
+    db_client.table("dialer_jobs")
+tests\unit\test_op07_native_dnc_durability.py:59: in <lambda>
+    client = SimpleNamespace(table=lambda _: pytest.fail("sync cleanup adapter used"))
+E   Failed: sync cleanup adapter used
+_ test_partial_cleanup_remains_retryable_but_dnc_ack_is_distinct[lead_error] __
+tests\unit\test_op07_native_dnc_durability.py:193: in test_partial_cleanup_remains_retryable_but_dnc_ack_is_distinct
+    assert await opt_out.purge_opt_out_before_farewell(session) is True
+app\domain\services\dialer\opt_out.py:154: in purge_opt_out_before_farewell
+    result = await asyncio.wait_for(
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\tasks.py:520: in wait_for
+    return await fut
+app\domain\services\dialer\opt_out.py:75: in purge_lead_on_opt_out
+    result["jobs_cancelled"] = cancel_active_jobs_for_lead(
+app\domain\services\dialer\job_lifecycle.py:82: in cancel_active_jobs_for_lead
+    db_client.table("dialer_jobs")
+tests\unit\test_op07_native_dnc_durability.py:59: in <lambda>
+    client = SimpleNamespace(table=lambda _: pytest.fail("sync cleanup adapter used"))
+E   Failed: sync cleanup adapter used
+_ test_partial_cleanup_remains_retryable_but_dnc_ack_is_distinct[lead_exists] _
+tests\unit\test_op07_native_dnc_durability.py:193: in test_partial_cleanup_remains_retryable_but_dnc_ack_is_distinct
+    assert await opt_out.purge_opt_out_before_farewell(session) is True
+app\domain\services\dialer\opt_out.py:154: in purge_opt_out_before_farewell
+    result = await asyncio.wait_for(
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\tasks.py:520: in wait_for
+    return await fut
+app\domain\services\dialer\opt_out.py:75: in purge_lead_on_opt_out
+    result["jobs_cancelled"] = cancel_active_jobs_for_lead(
+app\domain\services\dialer\job_lifecycle.py:82: in cancel_active_jobs_for_lead
+    db_client.table("dialer_jobs")
+tests\unit\test_op07_native_dnc_durability.py:59: in <lambda>
+    client = SimpleNamespace(table=lambda _: pytest.fail("sync cleanup adapter used"))
+E   Failed: sync cleanup adapter used
+__________ test_cleanup_is_tenant_scoped_and_never_releases_live_job __________
+tests\unit\test_op07_native_dnc_durability.py:208: in test_cleanup_is_tenant_scoped_and_never_releases_live_job
+    result = await opt_out.purge_lead_on_opt_out(db_pool=ports.pool, db_client=ports.client,
+app\domain\services\dialer\opt_out.py:75: in purge_lead_on_opt_out
+    result["jobs_cancelled"] = cancel_active_jobs_for_lead(
+app\domain\services\dialer\job_lifecycle.py:82: in cancel_active_jobs_for_lead
+    db_client.table("dialer_jobs")
+tests\unit\test_op07_native_dnc_durability.py:59: in <lambda>
+    client = SimpleNamespace(table=lambda _: pytest.fail("sync cleanup adapter used"))
+E   Failed: sync cleanup adapter used
+__________ test_no_acknowledgement_on_failed_or_cancelled_dnc[error] __________
+tests\unit\test_op07_native_dnc_durability.py:250: in test_no_acknowledgement_on_failed_or_cancelled_dnc
+    assert await task is False
+app\domain\services\dialer\opt_out.py:154: in purge_opt_out_before_farewell
+    result = await asyncio.wait_for(
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\tasks.py:520: in wait_for
+    return await fut
+app\domain\services\dialer\opt_out.py:75: in purge_lead_on_opt_out
+    result["jobs_cancelled"] = cancel_active_jobs_for_lead(
+app\domain\services\dialer\job_lifecycle.py:82: in cancel_active_jobs_for_lead
+    db_client.table("dialer_jobs")
+tests\unit\test_op07_native_dnc_durability.py:59: in <lambda>
+    client = SimpleNamespace(table=lambda _: pytest.fail("sync cleanup adapter used"))
+E   Failed: sync cleanup adapter used
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.dialer.opt_out:opt_out.py:67 opt_out_purge: DNC add failed tenant=20000000-[redacted digits=12 ..00]-[redacted digits=12 ..17] number=[redacted digits=11 ..07] err=synthetic DB unavailable
+=========================== short test summary info ===========================
+FAILED tests/unit/test_op07_native_dnc_durability.py::test_native_continued_question_persists_dnc_without_hangup
+FAILED tests/unit/test_op07_native_dnc_durability.py::test_native_opt_out_does_not_block_pump_and_coalesces_duplicates
+FAILED tests/unit/test_op07_native_dnc_durability.py::test_native_close_waits_for_started_dnc_and_rechecks_new_caller
+FAILED tests/unit/test_op07_native_dnc_durability.py::test_native_stop_drains_opt_out_instead_of_canceling_success
+FAILED tests/unit/test_op07_native_dnc_durability.py::test_partial_cleanup_remains_retryable_but_dnc_ack_is_distinct[jobs_error]
+FAILED tests/unit/test_op07_native_dnc_durability.py::test_partial_cleanup_remains_retryable_but_dnc_ack_is_distinct[lead_error]
+FAILED tests/unit/test_op07_native_dnc_durability.py::test_partial_cleanup_remains_retryable_but_dnc_ack_is_distinct[lead_exists]
+FAILED tests/unit/test_op07_native_dnc_durability.py::test_cleanup_is_tenant_scoped_and_never_releases_live_job
+FAILED tests/unit/test_op07_native_dnc_durability.py::test_no_acknowledgement_on_failed_or_cancelled_dnc[error]
+9 failed, 8 passed in 7.28s
