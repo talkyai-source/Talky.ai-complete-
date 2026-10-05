@@ -74,6 +74,10 @@ def _get_orchestrator():
 # for deployments that never enabled it.
 
 def _bridge_enabled() -> bool:
+    # A signed outbound callee is not canonical tenant/campaign ownership.
+    # Keep this legacy bridge available only for explicit nonproduction proof.
+    if os.getenv("ENVIRONMENT", "development").strip().lower() == "production":
+        return False
     return os.getenv("VONAGE_BRIDGE_ENABLED", "false").strip().lower() in {
         "1", "true", "yes", "on",
     }
@@ -293,13 +297,13 @@ async def _build_vonage_session_config(to_number: Optional[str] = None):
 @router.post("/answer")
 async def vonage_answer(request: Request):
     """
-    Called by Vonage when an inbound call arrives or an outbound call is answered.
+    Legacy nonproduction handler for an outbound answer; inbound is refused.
 
     Returns an NCCO that connects the call audio to our WebSocket endpoint.
     This is the official pattern per Vonage Voice API documentation.
     """
     if not _bridge_enabled():
-        logger.warning("vonage_answer rejected: VONAGE_BRIDGE_ENABLED is not set")
+        logger.warning("vonage_answer rejected: bridge disabled or unavailable in production")
         return JSONResponse(content={"error": "not_found"}, status_code=404)
     # Minting an audio-socket token off an UNVERIFIED webhook would hand the
     # credential to anyone who can POST here, so require the signature secret.
@@ -438,7 +442,7 @@ async def vonage_ws_audio(
     socket, a session, or a concurrency slot.
     """
     if not _bridge_enabled():
-        logger.warning("vonage ws-audio rejected: VONAGE_BRIDGE_ENABLED is not set")
+        logger.warning("vonage ws-audio rejected: bridge disabled or unavailable in production")
         await websocket.close(code=1008, reason="Vonage bridge disabled")
         return
 

@@ -73,11 +73,13 @@ def _get_orchestrator():
 # ---------------------------------------------------------------------------
 # Feature gate — DEFAULT DENY
 # ---------------------------------------------------------------------------
-# Production runs active_telephony_provider="sip"; Twilio is not in live use.
-# An unset env var therefore means CLOSED, so this bridge is not attack surface
-# for deployments that never enabled it.
+# These legacy callbacks do not carry the canonical tenant/campaign admission
+# used by supported SIP origination. Explicit opt-in is for nonproduction
+# qualification only; a signed callee number is not outbound tenant ownership.
 
 def _bridge_enabled() -> bool:
+    if os.getenv("ENVIRONMENT", "development").strip().lower() == "production":
+        return False
     return os.getenv("TWILIO_BRIDGE_ENABLED", "false").strip().lower() in {
         "1", "true", "yes", "on",
     }
@@ -330,7 +332,7 @@ async def twilio_answer(request: Request):
     """Twilio fetches TwiML here on call connect. We return a
     ``<Connect><Stream>`` that opens a bidirectional Media Streams WebSocket."""
     if not _bridge_enabled():
-        logger.warning("twilio_answer rejected: TWILIO_BRIDGE_ENABLED is not set")
+        logger.warning("twilio_answer rejected: bridge disabled or unavailable in production")
         return Response(status_code=404)
     # Minting a media-stream token off an UNVERIFIED webhook would hand the
     # credential to anyone who can POST here, so require the signature secret.
@@ -429,7 +431,7 @@ async def twilio_media_stream(
     """
     if not _bridge_enabled():
         logger.warning(
-            "twilio media-stream rejected: TWILIO_BRIDGE_ENABLED is not set"
+            "twilio media-stream rejected: bridge disabled or unavailable in production"
         )
         await websocket.close(code=1008, reason="Twilio bridge disabled")
         return

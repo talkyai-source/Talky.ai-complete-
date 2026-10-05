@@ -159,6 +159,18 @@ def _check_staging_only_flags() -> list[GateViolation]:
     """Refuse proof-only controls when a process identifies as production."""
 
     violations: list[GateViolation] = []
+    for name in ("TWILIO_BRIDGE_ENABLED", "VONAGE_BRIDGE_ENABLED"):
+        if os.getenv(name, "").strip().lower() in {"1", "true", "yes", "on"}:
+            violations.append(
+                GateViolation(
+                    rule="legacy_cloud_bridge_in_prod",
+                    detail=(
+                        f"{name} is for nonproduction qualification only: legacy "
+                        "cloud callbacks lack canonical outbound tenant/campaign "
+                        "ownership. Unset it or set it to false in production."
+                    ),
+                )
+            )
     raw = (os.getenv("INBOUND_TRANSFER_STAGING_PROOF_ENABLED", "") or "").strip().lower()
     if raw and raw not in {"0", "false", "no", "off", "disabled"}:
         violations.append(
