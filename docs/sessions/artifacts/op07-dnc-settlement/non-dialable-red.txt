@@ -1,0 +1,86 @@
+FF...                                                                    [100%]
+================================== FAILURES ===================================
+_ test_non_dialable_inbound_and_browser_records_can_settle_without_dnc_claim[inbound-False-anonymous] _
+
+direction = 'inbound', is_test = False, phone = 'anonymous'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("direction,is_test,phone", [("inbound", False, "anonymous"),
+                                                        ("outbound", True, "browser-test")])
+    async def test_non_dialable_inbound_and_browser_records_can_settle_without_dnc_claim(direction, is_test, phone):
+        conn = SuppressionConn(suppression=AssertionError("DNC lookup is inapplicable"), phone=phone)
+        conn.calls_row.update(direction=direction, is_test=is_test, lead_id=None, dialer_job_id=None)
+>       execution = await _service(conn)._handle_call_status_pooled("call-1", CallOutcome.ANSWERED, "answered", 42)
+
+tests\unit\test_dnc_settlement_truth.py:135:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+app\domain\services\call_service.py:562: in _handle_call_status_pooled
+    caller_opted_out = await self._active_caller_opt_out_pooled(conn, row)
+app\domain\services\call_service.py:913: in _active_caller_opt_out_pooled
+    number = normalize_e164_for_storage(call_row["phone_number"])
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+raw = 'anonymous'
+
+    def normalize_e164_for_storage(raw: str) -> str:
+        """Normalise and REJECT anything that is not strict E.164.
+
+        The gate every ``dnc_entries`` writer shares. Raises ``ValueError`` with
+        a message safe to surface to an API caller.
+        """
+        normalized = normalize_e164(raw)
+        if not normalized:
+            raise ValueError("DNC entry requires a valid phone number")
+        if not is_strict_e164(normalized):
+>           raise ValueError(
+                f"DNC entry requires a valid E.164 phone number "
+                f"(got {raw!r} -> {normalized!r}); include the country code, "
+                f"e.g. +14155551234"
+            )
+E           ValueError: DNC entry requires a valid E.164 phone number (got 'anonymous' -> '+'); include the country code, e.g. +14155551234
+
+app\domain\services\dnc_service.py:105: ValueError
+_ test_non_dialable_inbound_and_browser_records_can_settle_without_dnc_claim[outbound-True-browser-test] _
+
+direction = 'outbound', is_test = True, phone = 'browser-test'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("direction,is_test,phone", [("inbound", False, "anonymous"),
+                                                        ("outbound", True, "browser-test")])
+    async def test_non_dialable_inbound_and_browser_records_can_settle_without_dnc_claim(direction, is_test, phone):
+        conn = SuppressionConn(suppression=AssertionError("DNC lookup is inapplicable"), phone=phone)
+        conn.calls_row.update(direction=direction, is_test=is_test, lead_id=None, dialer_job_id=None)
+>       execution = await _service(conn)._handle_call_status_pooled("call-1", CallOutcome.ANSWERED, "answered", 42)
+
+tests\unit\test_dnc_settlement_truth.py:135:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+app\domain\services\call_service.py:562: in _handle_call_status_pooled
+    caller_opted_out = await self._active_caller_opt_out_pooled(conn, row)
+app\domain\services\call_service.py:913: in _active_caller_opt_out_pooled
+    number = normalize_e164_for_storage(call_row["phone_number"])
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+raw = 'browser-test'
+
+    def normalize_e164_for_storage(raw: str) -> str:
+        """Normalise and REJECT anything that is not strict E.164.
+
+        The gate every ``dnc_entries`` writer shares. Raises ``ValueError`` with
+        a message safe to surface to an API caller.
+        """
+        normalized = normalize_e164(raw)
+        if not normalized:
+            raise ValueError("DNC entry requires a valid phone number")
+        if not is_strict_e164(normalized):
+>           raise ValueError(
+                f"DNC entry requires a valid E.164 phone number "
+                f"(got {raw!r} -> {normalized!r}); include the country code, "
+                f"e.g. +14155551234"
+            )
+E           ValueError: DNC entry requires a valid E.164 phone number (got 'browser-test' -> '+'); include the country code, e.g. +14155551234
+
+app\domain\services\dnc_service.py:105: ValueError
+=========================== short test summary info ===========================
+FAILED tests/unit/test_dnc_settlement_truth.py::test_non_dialable_inbound_and_browser_records_can_settle_without_dnc_claim[inbound-False-anonymous]
+FAILED tests/unit/test_dnc_settlement_truth.py::test_non_dialable_inbound_and_browser_records_can_settle_without_dnc_claim[outbound-True-browser-test]
+2 failed, 3 passed, 9 deselected in 2.43s

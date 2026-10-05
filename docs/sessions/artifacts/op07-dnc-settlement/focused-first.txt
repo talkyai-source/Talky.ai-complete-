@@ -1,0 +1,17 @@
+........................................................................ [ 96%]
+...                                                                      [100%]
+============================== warnings summary ===============================
+tests/unit/test_dnc_bulk_acknowledgement.py: 8 warnings
+tests/unit/test_dnc_service.py: 14 warnings
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-dnc-settlement-20261005\backend\tests\unit\test_dnc_service.py:87: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    created_at=datetime.utcnow(),
+
+tests/unit/test_call_service_pooled_teardown.py::test_retry_outbox_replays_fail_once_enqueue_and_acks_exactly_one_job
+tests/unit/test_call_service_pooled_teardown.py::test_retry_outbox_replays_fail_once_enqueue_and_acks_exactly_one_job
+tests/unit/test_call_service_pooled_teardown.py::test_retry_outbox_replays_fail_once_enqueue_and_acks_exactly_one_job
+tests/unit/test_call_service_pooled_teardown.py::test_retry_outbox_replays_fail_once_enqueue_and_acks_exactly_one_job
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\backend\.venv\Lib\site-packages\pydantic\main.py:250: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+75 passed, 26 warnings in 8.30s

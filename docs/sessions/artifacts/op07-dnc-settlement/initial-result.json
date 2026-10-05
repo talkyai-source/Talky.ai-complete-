@@ -1,0 +1,121 @@
+{
+  "scope": "Actual methods and bulk endpoint handlers with synthetic in-memory SQL ports; no full lifecycle/real SQL/HTTP authorization proof",
+  "lead_projection": [
+    {
+      "goal_achieved": false,
+      "purge_complete": true,
+      "before": {
+        "id": "30000000-0000-4000-8000-000000000017",
+        "status": "dnc",
+        "last_call_result": "caller_opt_out",
+        "do_not_call": false,
+        "call_attempts": 0
+      },
+      "outcome": "answered",
+      "after": {
+        "id": "30000000-0000-4000-8000-000000000017",
+        "status": "contacted",
+        "last_call_result": "answered",
+        "do_not_call": false,
+        "call_attempts": 1
+      },
+      "lifecycle_purge_skip_condition": true,
+      "phone_guard_passed": false,
+      "phone_guard_reason": "number_on_dnc_list: caller_opt_out"
+    },
+    {
+      "goal_achieved": true,
+      "purge_complete": true,
+      "before": {
+        "id": "30000000-0000-4000-8000-000000000017",
+        "status": "dnc",
+        "last_call_result": "caller_opt_out",
+        "do_not_call": false,
+        "call_attempts": 0
+      },
+      "outcome": "goal_achieved",
+      "after": {
+        "id": "30000000-0000-4000-8000-000000000017",
+        "status": "completed",
+        "last_call_result": "goal_achieved",
+        "do_not_call": false,
+        "call_attempts": 1
+      },
+      "lifecycle_purge_skip_condition": true,
+      "phone_guard_passed": false,
+      "phone_guard_reason": "number_on_dnc_list: caller_opt_out"
+    }
+  ],
+  "expired_bulk": [
+    {
+      "source": "caller_opt_out",
+      "accepted_count": 1,
+      "skipped_count": 0,
+      "on_dnc_after": false,
+      "expiry_still_in_past": true
+    },
+    {
+      "source": "bulk_import",
+      "accepted_count": 1,
+      "skipped_count": 0,
+      "on_dnc_after": false,
+      "expiry_still_in_past": true
+    }
+  ],
+  "full_pooled_settlement": [
+    {
+      "case": "answered",
+      "resolved_outcome": "answered",
+      "lead_after": {
+        "id": "30000000-0000-4000-8000-000000000017",
+        "call_attempts": 1,
+        "status": "contacted",
+        "last_call_result": "answered",
+        "do_not_call": false
+      },
+      "job_status_after": "completed",
+      "retry_booked": false,
+      "terminal_retry_payload": null
+    },
+    {
+      "case": "goal_achieved",
+      "resolved_outcome": "goal_achieved",
+      "lead_after": {
+        "id": "30000000-0000-4000-8000-000000000017",
+        "call_attempts": 1,
+        "status": "completed",
+        "last_call_result": "goal_achieved",
+        "do_not_call": false
+      },
+      "job_status_after": "goal_achieved",
+      "retry_booked": false,
+      "terminal_retry_payload": null
+    },
+    {
+      "case": "pipeline_failed",
+      "resolved_outcome": "failed",
+      "lead_after": {
+        "id": "30000000-0000-4000-8000-000000000017",
+        "call_attempts": 1,
+        "status": "called",
+        "last_call_result": "failed",
+        "do_not_call": false
+      },
+      "job_status_after": "retry_scheduled",
+      "retry_booked": true,
+      "terminal_retry_payload": {
+        "job_id": "job-1",
+        "job_data": {
+          "priority": 5,
+          "phone_number": "+15555550107"
+        },
+        "outcome": "failed",
+        "campaign_id": "camp-1",
+        "lead_id": "30000000-0000-4000-8000-000000000017",
+        "tenant_id": "20000000-0000-4000-8000-000000000017",
+        "attempt_number": 1,
+        "delay_seconds": 30
+      }
+    }
+  ]
+}

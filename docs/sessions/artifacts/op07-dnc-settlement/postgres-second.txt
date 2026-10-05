@@ -1,0 +1,38 @@
+............F.....                                                       [100%]
+================================== FAILURES ===================================
+______ test_matching_suppression_delete_serializes_after_settlement_read ______
+
+settlement = namespace(db=namespace(admin=<asyncpg.connection.Connection object at 0x000001E872410D70>, pool=<asyncpg.pool.Pool obj...bf8-8265-4be5-b7b1-d547116c9dc3'), service=<app.domain.services.call_service.CallService object at 0x000001E87243E0F0>)
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001E87240F980>
+
+    async def test_matching_suppression_delete_serializes_after_settlement_read(settlement, monkeypatch):
+        f, db = settlement, settlement.db
+        row = await DNCService(db.pool).add_caller_opt_out(tenant_id=str(db.tenants[0]), e164=PHONE)
+        entered, release = asyncio.Event(), asyncio.Event()
+        original = f.service._update_lead_status_pooled
+
+        async def paused(*args, **kwargs):
+            entered.set()
+            await release.wait()
+            return await original(*args, **kwargs)
+
+        monkeypatch.setattr(f.service, "_update_lead_status_pooled", paused)
+        task = asyncio.create_task(settle(f))
+        try:
+            await asyncio.wait_for(entered.wait(), 2)
+            with pytest.raises(asyncio.TimeoutError):
+                await asyncio.wait_for(db.admin.execute("DELETE FROM dnc_entries WHERE id=$1", row.id), .1)
+        finally:
+            release.set()
+            await asyncio.wait_for(task, 2)
+>       assert await db.admin.execute("DELETE FROM dnc_entries WHERE id=$1", row.id) == "DELETE 1"
+E       AssertionError: assert 'DELETE 0' == 'DELETE 1'
+E         - DELETE 1
+E         ?        ^
+E         + DELETE 0
+E         ?        ^
+
+tests\integration\test_dnc_settlement_truth.py:166: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/integration/test_dnc_settlement_truth.py::test_matching_suppression_delete_serializes_after_settlement_read
+1 failed, 17 passed in 28.51s

@@ -1,0 +1,157 @@
+F                                                                        [100%]
+================================== FAILURES ===================================
+__ test_opt_out_committed_while_settlement_waits_for_lead_is_not_overwritten __
+
+fut = <coroutine object Event.wait at 0x000001B3D13B6CE0>, timeout = 2
+
+    async def wait_for(fut, timeout):
+        """Wait for the single Future or coroutine to complete, with timeout.
+
+        Coroutine will be wrapped in Task.
+
+        Returns result of the Future or coroutine.  When a timeout occurs,
+        it cancels the task and raises TimeoutError.  To avoid the task
+        cancellation, wrap it in shield().
+
+        If the wait is cancelled, the task is also cancelled.
+
+        If the task suppresses the cancellation and returns a value instead,
+        that value is returned.
+
+        This function is a coroutine.
+        """
+        # The special case for timeout <= 0 is for the following case:
+        #
+        # async def test_waitfor():
+        #     func_started = False
+        #
+        #     async def func():
+        #         nonlocal func_started
+        #         func_started = True
+        #
+        #     try:
+        #         await asyncio.wait_for(func(), 0)
+        #     except asyncio.TimeoutError:
+        #         assert not func_started
+        #     else:
+        #         assert False
+        #
+        # asyncio.run(test_waitfor())
+
+
+        if timeout is not None and timeout <= 0:
+            fut = ensure_future(fut)
+
+            if fut.done():
+                return fut.result()
+
+            await _cancel_and_wait(fut)
+            try:
+                return fut.result()
+            except exceptions.CancelledError as exc:
+                raise TimeoutError from exc
+
+        async with timeouts.timeout(timeout):
+>           return await fut
+
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\tasks.py:520:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <asyncio.locks.Event object at 0x000001B3D128F3B0 [unset]>
+
+    async def wait(self):
+        """Block until the internal flag is true.
+
+        If the internal flag is true on entry, return True
+        immediately.  Otherwise, block until another coroutine calls
+        set() to set the flag to true, then return True.
+        """
+        if self._value:
+            return True
+
+        fut = self._get_loop().create_future()
+        self._waiters.append(fut)
+        try:
+>           await fut
+E           asyncio.exceptions.CancelledError
+
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\locks.py:212: CancelledError
+
+The above exception was the direct cause of the following exception:
+
+settlement = namespace(db=namespace(admin=<asyncpg.connection.Connection object at 0x000001B3D1340F50>, pool=<asyncpg.pool.Pool obj...db3-1c35-402d-b17d-f1afd55d30d1'), service=<app.domain.services.call_service.CallService object at 0x000001B3E0F63A40>)
+
+    async def test_opt_out_committed_while_settlement_waits_for_lead_is_not_overwritten(settlement):
+        f, db = settlement, settlement.db
+        lead_read = asyncio.Event()
+
+        class LeadBarrier:
+            def __init__(self, conn):
+                self.conn = conn
+
+            def __getattr__(self, name):
+                return getattr(self.conn, name)
+
+            async def fetchval(self, sql, *args):
+                if "FROM leads" in sql:
+                    lead_read.set()
+                return await self.conn.fetchval(sql, *args)
+
+        class WrappedPool:
+            @asynccontextmanager
+            async def acquire(self, **kwargs):
+                async with db.pool.acquire(**kwargs) as conn:
+                    yield LeadBarrier(conn)
+
+        f.service._db_pool = WrappedPool()
+        task = None
+        try:
+            async with db.admin.transaction():
+                await db.admin.fetchval("SELECT id FROM leads WHERE id=$1 FOR UPDATE", db.leads[0])
+                task = asyncio.create_task(settle(f))
+>               await asyncio.wait_for(lead_read.wait(), 2)
+
+tests\integration\test_dnc_settlement_truth.py:176:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\tasks.py:519: in wait_for
+    async with timeouts.timeout(timeout):
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <Timeout [expired]>
+exc_type = <class 'asyncio.exceptions.CancelledError'>
+exc_val = CancelledError(), exc_tb = <traceback object at 0x000001B3E0FDD680>
+
+    async def __aexit__(
+        self,
+        exc_type: Optional[Type[BaseException]],
+        exc_val: Optional[BaseException],
+        exc_tb: Optional[TracebackType],
+    ) -> Optional[bool]:
+        assert self._state in (_State.ENTERED, _State.EXPIRING)
+
+        if self._timeout_handler is not None:
+            self._timeout_handler.cancel()
+            self._timeout_handler = None
+
+        if self._state is _State.EXPIRING:
+            self._state = _State.EXPIRED
+
+            if self._task.uncancel() <= self._cancelling and exc_type is exceptions.CancelledError:
+                # Since there are no new cancel requests, we're
+                # handling this.
+>               raise TimeoutError from exc_val
+E               TimeoutError
+
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\timeouts.py:115: TimeoutError
+=========================== short test summary info ===========================
+FAILED tests/integration/test_dnc_settlement_truth.py::test_opt_out_committed_while_settlement_waits_for_lead_is_not_overwritten
+1 failed, 17 deselected in 15.59s
+Task exception was never retrieved
+future: <Task finished name='Task-5' coro=<settle() done, defined at C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-dnc-settlement-20261005\backend\tests\integration\test_dnc_settlement_truth.py:43> exception=RuntimeError('handle_call_status: no bypass_rls and no tenant context set � refusing to guess an RLS scope for call 25200db3-1c35-402d-b17d-f1afd55d30d1')>
+Traceback (most recent call last):
+  File "C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-dnc-settlement-20261005\backend\tests\integration\test_dnc_settlement_truth.py", line 44, in settle
+    return await fixture.service._handle_call_status_pooled(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-dnc-settlement-20261005\backend\app\domain\services\call_service.py", line 501, in _handle_call_status_pooled
+    raise RuntimeError(
+RuntimeError: handle_call_status: no bypass_rls and no tenant context set � refusing to guess an RLS scope for call 25200db3-1c35-402d-b17d-f1afd55d30d1
