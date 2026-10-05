@@ -600,6 +600,12 @@
           "kind": "offline_grounded_answer_controls_not_semantic_acceptance",
           "candidate": "daf092b43ef84783888ff42d6396f57cbc9596e6",
           "integrated_candidate": "b7c1c6a0"
+        },
+        {
+          "path": "docs/sessions/artifacts/native-activity/verification.md",
+          "kind": "native_caller_activity_and_expiry_classifier_not_acoustic_acceptance",
+          "candidate": "12175fbde91cf57ceef7e7405aeb14dae5fb4621",
+          "integrated_candidate": "1c3a2ec7"
         }
       ],
       "blocker": "Captured Groq semantic failure retained. Proposed matrix 43/50 mapped by offline replay; intended profile roster/rubric/cohort unratified; live/human/audio/effect acceptance not run. AG02 retrieval gate remains failed. Seven canonical conditions remain unmapped.",
@@ -1021,6 +1027,12 @@
           "kind": "synthetic_inventory_callback_and_local_marker_ownership_regression",
           "candidate": "7e1b31fcf28e9201587008eba00674a9504f0b52",
           "integrated_candidate": "18b9781d"
+        },
+        {
+          "path": "docs/sessions/artifacts/native-activity/verification.md",
+          "kind": "native_caller_activity_and_expiry_classifier_not_acoustic_acceptance",
+          "candidate": "12175fbde91cf57ceef7e7405aeb14dae5fb4621",
+          "integrated_candidate": "1c3a2ec7"
         }
       ],
       "blocker": "Local pacing, DNC settlement, selected warmup, cloud-selection, saved-provider termination and inbound context-outage callback fences pass. Unknown-provider/ambiguous-owner resolution, original PBX host/account proof and actual queue/process/PBX recovery acceptance remain open.",

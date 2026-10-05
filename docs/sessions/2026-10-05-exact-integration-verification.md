@@ -399,3 +399,30 @@ There remain 27 eligible unfinished packages, AG03 separately candidate-verified
 and three deferred packages. All fifteen final gates and twenty-two scenario
 gates retain their previous not-run states. No deferred work, live call, provider
 request, deployment, push or production approval occurred in these integrations.
+
+
+## Native caller activity integration (6 October)
+
+Source `12175fbd`, integrated as `1c3a2ec7`, fixes an accepted Realtime caller
+turn leaving the real session activity timestamp unchanged. Seven bridge lines
+call the existing activity method after admission of a new, nonempty current
+caller final, before awaited processing. Corrections, historical or duplicate
+transcripts, raw audio, VAD alone and the agent's own output do not renew activity.
+No inactivity or absolute/soft-duration limits changed.
+
+The [verification](artifacts/native-activity/verification.md) records **270
+passing tests, zero failures and zero skips** across nine modules, including
+32 actual-parser controls with a real CallSession and the actual expiry classifier.
+The timestamp is seeded to isolate the existing 300-second inactivity rule; this
+is not an elapsed telephone call or actual watchdog hangup. The hard-duration
+positive control still expires a call despite a fresh admitted caller turn.
+Root and RT reviewed the final source; both owned source files and all nine
+regression inputs match the owner's committed source and canonical hashes.
+This is source integration verification, not a second root execution.
+
+The [remaining-condition inventory](artifacts/native-activity/unmapped-inventory.md)
+distinguishes existing deterministic controls from absent acoustic attribution and
+required provider/human acceptance. Aggregate mapping stays 43/50 and all seven
+unmapped conditions remain open. All package, scenario, final-gate and deferred
+statuses remain unchanged. No provider, real call, database, push or deployment
+was involved in this repair.
