@@ -1,0 +1,134 @@
+{
+  "schema_version": 1,
+  "scope": "Existing Admin Gmail saved-acknowledgement recovery and authentication lifecycle",
+  "base_commit": "db99f652fa2f921d5c0f24f8d25c002f228f12b2",
+  "source_commit": "e5a5b0e89c1ed33ff2def2b95bb4bb2ac2a83b2b",
+  "worktree": "C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/tmp/ag06-react-dom-20261006",
+  "execution_fixture": "C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/tmp/ag06-admin-dom-validation-online-20261006",
+  "findings": [
+    {
+      "symptom": "Initial verification can restore old-admin after logout.",
+      "root_cause": "Async authentication completions publish state without checking whether a later operation superseded them.",
+      "baseline": "Actual old-admin, expected signed out."
+    },
+    {
+      "symptom": "Old failed verification can clear a newer successful login token.",
+      "baseline": "Actual null, expected new-login-token."
+    },
+    {
+      "symptom": "Delayed logout completion can erase a newer login.",
+      "baseline": "Actual null, expected new-login-token."
+    }
+  ],
+  "fix": "One AuthProvider operation counter and the existing ApiClient authentication generation guard post-await/catch state and token writes. Unmount cleanup invalidates older operations. No backend/API contract/recovery outcome/authentication policy change.",
+  "dependencies": {
+    "direct_dev_dependency": "jsdom 25.0.1",
+    "reason": "Admin CI installs Admin/frontend independently; explicit dependency avoids relying on sibling Talk-Leee node_modules. Same jsdom major/version already used by the repository.",
+    "lock_delta": "Root dev dependency plus 57 new dev-only package entries; existing dependency entries unchanged.",
+    "test_runtime": "Actual React/react-dom 19.2.3, StrictMode, createRoot, React.act, native DOM event dispatch. No hook replacements or testing-framework addition.",
+    "public_registry_access": "Root authorized bounded npm package fetches for exact locked test dependencies after missing offline cache. Install scripts disabled; no application/provider/customer requests."
+  },
+  "checks": [
+    {
+      "command": "npm ci --ignore-scripts --no-audit --no-fund",
+      "cwd": "execution_fixture",
+      "exit_code": 0,
+      "artifact": "clean-install.txt",
+      "added_packages": 239
+    },
+    {
+      "command": "node --test tests/action-recovery-react-dom.test.mjs",
+      "cwd": "execution_fixture",
+      "phase": "baseline",
+      "exit_code": 1,
+      "passed": 9,
+      "failed": 3,
+      "skipped": 0,
+      "artifact": "baseline.txt",
+      "duration_ms": 41356.6236
+    },
+    {
+      "command": "node --test tests/action-recovery-react-dom.test.mjs",
+      "cwd": "execution_fixture",
+      "phase": "after semantic fix",
+      "exit_code": 0,
+      "passed": 12,
+      "failed": 0,
+      "skipped": 0,
+      "artifact": "react-dom-final.txt",
+      "duration_ms": 7015.3399
+    },
+    {
+      "command": "npm test",
+      "cwd": "execution_fixture",
+      "exit_code": 0,
+      "passed": 171,
+      "failed": 0,
+      "skipped": 0,
+      "artifact": "admin-tests-final.txt",
+      "duration_ms": 8054.6193,
+      "note": "Includes the same 12 real DOM controls; totals must not be added."
+    },
+    {
+      "command": "npm run build",
+      "cwd": "execution_fixture",
+      "exit_code": 0,
+      "artifact": "admin-build-final.txt",
+      "note": "tsc -b and Vite both passed; 1768 modules transformed."
+    },
+    {
+      "command": "node node_modules/eslint/bin/eslint.js src/lib/auth.tsx",
+      "cwd": "execution_fixture",
+      "phase": "after documented comment-only exemption",
+      "exit_code": 0,
+      "errors": 0,
+      "warnings": 0,
+      "artifact": "auth-lint-final.txt"
+    },
+    {
+      "command": "git diff --check",
+      "cwd": "worktree",
+      "exit_code": 0
+    }
+  ],
+  "source_binding": {
+    "baseline": {
+      "artifact": "baseline-source-parity.json",
+      "matched_files": 61,
+      "note": "Original application source, declared dependencies and exact 12-case test module matched clean fixture before baseline."
+    },
+    "tested": {
+      "artifact": "tested-source-parity.json",
+      "matched_files": 67,
+      "auth_sha256": "ced0d006cf3ef911be9c06cd5ecc0a2fe4f0c8e6b433399281bc730c2934d4e2"
+    },
+    "final": {
+      "artifact": "final-source-parity.json",
+      "matched_files": 67,
+      "auth_sha256": "13e01bf1054a395a242eec1bbc0e7e8f8a0aa595947a701e1a68ac3c130412fb"
+    },
+    "post_validation_delta": "One explanatory eslint-disable-next-line comment documents intentional mount-only verification. Root approved this comment-only change and scoped lint rerun only; tests/build ran on the semantic fix before this comment. Original one-warning lint output preserved separately. Node byte-hash control in comment-only-proof.json confirms removing exactly that one comment reproduces the tested auth hash; an initial Python-only utility attempt could not launch the local Python alias and did not run any check.",
+    "source_sha256": {
+      "Admin/frontend/package.json": "07385e37fb2f39cb38be8d34a21e7fab9c5b1ffc97edd034e27642b461b06541",
+      "Admin/frontend/package-lock.json": "3127da2910e4f01f2a9eb6b1e3659500203db7e0e00be00bc15ba6c17ff824f7",
+      "Admin/frontend/tests/action-recovery-react-dom.test.mjs": "5896cf7208ae421541ee256472edb650ab7c2b46ce4c461f438fd15ec19406f7",
+      "Admin/frontend/src/lib/auth.tsx": "13e01bf1054a395a242eec1bbc0e7e8f8a0aa595947a701e1a68ac3c130412fb"
+    }
+  },
+  "setup_failures": [
+    "Offline package-lock generation lacked cached cssstyle metadata. Retried only the permitted public package metadata operation, not any blocked filesystem operation.",
+    "First fresh offline npm ci failed ENOTCACHED for nwsapi-2.2.28.tgz and emitted Windows EPERM cleanup warnings. Full npm debug output is offline-install-failure.txt; no lifecycle tests were run in this failed fixture.",
+    "Automatic approval review rejected removal of the task-created Admin node_modules junction. Junction was left unchanged; no deletion/unlink retry. A second fresh task-owned fixture was used for the successful clean install and validation."
+  ],
+  "reviews": {
+    "root": "Cleared semantic fix, dependency/test scope and documented lint comment; authorized exact source and separate evidence commits.",
+    "independent": "account_finalize reviewed all 12 controls, 9/3 baseline, 12 and 171 passing results, dependency delta and source hashes; no execution by reviewer."
+  },
+  "limitations": [
+    "JSDOM is an emulated DOM, not a launched browser; no layout, cookie, real HTTP server, provider or customer acceptance claim.",
+    "Actual React lifecycle/effect batching and parent refresh are exercised, but fetch responses are synthetic and Socket.connect is blocked during tests.",
+    "Only the bounded twelve lifecycle cases were added. Existing broader production acceptance gates remain open.",
+    "No browser/preview/server was launched, no backend source changed, and no provider/recipient/production database actions were performed.",
+    "Protected dependency junction and failed first installation fixture remain untouched; no cleanup was retried."
+  ]
+}

@@ -1,0 +1,20 @@
+✔ real StrictMode lifecycle waits for coherent parent detail after accepted POST (601.7104ms)
+✔ real DOM close and reopen preserves uncertain request without automatic replay (282.8009ms)
+✔ actual unmount remount keeps same pending review within authentication generation (262.2521ms)
+✔ real selection change discards late successful A response and leaves B untouched (245.8454ms)
+✔ real batched drawer refresh retires another validated review without claiming this request (251.6019ms)
+✔ real error reload remains disabled until explicit fresh receipt and reuses the exact request (190.6668ms)
+✔ real successful POST with failed detail refresh remains unknown and replays exact body (159.6134ms)
+✔ mounted old-session DOM reload button cannot adopt a newer API session before rerender (150.5755ms)
+✔ actual AuthProvider DOM logout/login discards old review and old in-flight response (220.5301ms)
+✔ actual AuthProvider cannot restore an old identity when initial verification finishes after logout (18.406ms)
+✔ old failed verification cannot clear a newer successful actual AuthProvider login (88.1955ms)
+✔ late actual AuthProvider logout completion cannot erase a newer login (222.6021ms)
+ℹ tests 12
+ℹ suites 0
+ℹ pass 12
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 7015.3399
