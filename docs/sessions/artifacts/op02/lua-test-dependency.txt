@@ -1,0 +1,6 @@
+Collecting lupa==2.6
+  Downloading lupa-2.6-cp312-cp312-win_amd64.whl.metadata (60 kB)
+Downloading lupa-2.6-cp312-cp312-win_amd64.whl (1.7 MB)
+   ---------------------------------------- 1.7/1.7 MB 4.6 MB/s  0:00:00
+Installing collected packages: lupa
+Successfully installed lupa-2.6

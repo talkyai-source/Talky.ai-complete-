@@ -1,0 +1,70 @@
+FFF.FFF.FFFF.                                                            [100%]
+================================== FAILURES ===================================
+__________ test_flux_prewarm_obeys_shared_deepgram_one_socket_limit ___________
+tests\unit\test_op02_provider_boundary_inventory.py:88: in test_flux_prewarm_obeys_shared_deepgram_one_socket_limit
+    assert sum(not s.closed for s in sockets) <= 1
+E   assert 2 <= 1
+E    +  where 2 = sum(<generator object test_flux_prewarm_obeys_shared_deepgram_one_socket_limit.<locals>.<genexpr> at 0x0000024336809480>)
+________________ test_flux_prewarm_owns_one_slot_until_cleanup ________________
+tests\unit\test_op02_provider_boundary_inventory.py:101: in test_flux_prewarm_owns_one_slot_until_cleanup
+    assert guard.in_flight == 1
+E   assert 0 == 1
+E    +  where 0 = <app.infrastructure.providers.provider_concurrency.ProviderConcurrencyGuard object at 0x00000243368C6660>.in_flight
+___________ test_flux_cold_stream_owns_one_slot_until_cancellation ____________
+tests\unit\test_op02_provider_boundary_inventory.py:120: in test_flux_cold_stream_owns_one_slot_until_cancellation
+    assert guard.in_flight == 1
+E   assert 0 == 1
+E    +  where 0 = <app.infrastructure.providers.provider_concurrency.ProviderConcurrencyGuard object at 0x00000243368C7470>.in_flight
+_____________ test_repeated_prewarm_does_not_orphan_first_socket ______________
+tests\unit\test_op02_provider_boundary_inventory.py:152: in test_repeated_prewarm_does_not_orphan_first_socket
+    assert all(s.closed for s in sockets), "replaced prewarm connection was never closed"
+E   AssertionError: replaced prewarm connection was never closed
+E   assert False
+E    +  where False = all(<generator object test_repeated_prewarm_does_not_orphan_first_socket.<locals>.<genexpr> at 0x00000243369896C0>)
+_____ test_cleanup_during_handshake_does_not_adopt_socket_after_shutdown ______
+tests\unit\test_op02_provider_boundary_inventory.py:174: in test_cleanup_during_handshake_does_not_adopt_socket_after_shutdown
+    assert not primary._pre_connections, "late handshake repopulated closed provider"
+E   AssertionError: late handshake repopulated closed provider
+E   assert not {'a': <tests.unit.test_op02_provider_boundary_inventory.Socket object at 0x0000024336945A90>}
+E    +  where {'a': <tests.unit.test_op02_provider_boundary_inventory.Socket object at 0x0000024336945A90>} = DeepgramFluxSTTProvider(model=flux-general-en, sample_rate=16000)._pre_connections
+_________ test_handshake_failure_is_visible_to_strict_prewarm_caller __________
+tests\unit\test_op02_provider_boundary_inventory.py:188: in test_handshake_failure_is_visible_to_strict_prewarm_caller
+    with pytest.raises(ConnectionError):
+E   Failed: DID NOT RAISE <class 'ConnectionError'>
+------------------------------ Captured log call ------------------------------
+WARNING  app.infrastructure.stt.deepgram_flux:deepgram_flux.py:498 Deepgram Flux pre_connect failed for a — stream_transcribe() will connect normally: synthetic refusal
+_ test_actual_outbound_postanswer_admission_rejects_without_global_proof[None] _
+tests\unit\test_op02_provider_boundary_inventory.py:245: in test_actual_outbound_postanswer_admission_rejects_without_global_proof
+    assert not reached, "actual outbound admission continued without shared capacity proof"
+E   AssertionError: actual outbound admission continued without shared capacity proof
+E   assert not [True]
+_ test_actual_outbound_postanswer_admission_rejects_without_global_proof[redis1] _
+tests\unit\test_op02_provider_boundary_inventory.py:245: in test_actual_outbound_postanswer_admission_rejects_without_global_proof
+    assert not reached, "actual outbound admission continued without shared capacity proof"
+E   AssertionError: actual outbound admission continued without shared capacity proof
+E   assert not [True]
+------------------------------ Captured log call ------------------------------
+ERROR    app.domain.services.global_concurrency:global_concurrency.py:180 global_concurrency_acquire_failed call=synthetic-ou err=synthetic Redis outage fail_closed=False
+_________ test_reconcile_cannot_remove_an_in_progress_capacity_claim __________
+tests\unit\test_op02_provider_boundary_inventory.py:270: in test_reconcile_cannot_remove_an_in_progress_capacity_claim
+    assert not (first_result.acquired and second.acquired), "cap=1 admitted two distinct calls around reconciliation"
+E   AssertionError: cap=1 admitted two distinct calls around reconciliation
+E   assert not (True and True)
+E    +  where True = LeaseResult(acquired=True, reason='acquired', current=1).acquired
+E    +  and   True = LeaseResult(acquired=True, reason='acquired', current=1).acquired
+______ test_reconcile_rechecks_expiry_before_removing_a_refreshed_lease _______
+tests\unit\test_op02_provider_boundary_inventory.py:295: in test_reconcile_rechecks_expiry_before_removing_a_refreshed_lease
+    await global_slots.refresh_lease(redis, call_id="live", pod_id="p")
+E   TypeError: refresh_lease() got an unexpected keyword argument 'pod_id'
+=========================== short test summary info ===========================
+FAILED tests/unit/test_op02_provider_boundary_inventory.py::test_flux_prewarm_obeys_shared_deepgram_one_socket_limit
+FAILED tests/unit/test_op02_provider_boundary_inventory.py::test_flux_prewarm_owns_one_slot_until_cleanup
+FAILED tests/unit/test_op02_provider_boundary_inventory.py::test_flux_cold_stream_owns_one_slot_until_cancellation
+FAILED tests/unit/test_op02_provider_boundary_inventory.py::test_repeated_prewarm_does_not_orphan_first_socket
+FAILED tests/unit/test_op02_provider_boundary_inventory.py::test_cleanup_during_handshake_does_not_adopt_socket_after_shutdown
+FAILED tests/unit/test_op02_provider_boundary_inventory.py::test_handshake_failure_is_visible_to_strict_prewarm_caller
+FAILED tests/unit/test_op02_provider_boundary_inventory.py::test_actual_outbound_postanswer_admission_rejects_without_global_proof[None]
+FAILED tests/unit/test_op02_provider_boundary_inventory.py::test_actual_outbound_postanswer_admission_rejects_without_global_proof[redis1]
+FAILED tests/unit/test_op02_provider_boundary_inventory.py::test_reconcile_cannot_remove_an_in_progress_capacity_claim
+FAILED tests/unit/test_op02_provider_boundary_inventory.py::test_reconcile_rechecks_expiry_before_removing_a_refreshed_lease
+10 failed, 3 passed in 2.17s
