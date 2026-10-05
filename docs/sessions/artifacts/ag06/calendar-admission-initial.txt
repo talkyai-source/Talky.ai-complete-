@@ -1,0 +1,398 @@
+FFFFFFFF..                                                               [100%]
+================================== FAILURES ===================================
+_ test_calendar_rechecks_reviewed_meeting_after_connector_resolution[external_event_id-update] _
+
+operation = 'update', change = 'external_event_id'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("operation", ["update", "cancel"])
+    @pytest.mark.parametrize("change", ["external_event_id", "attendees", "account", "deleted", None])
+    async def test_calendar_rechecks_reviewed_meeting_after_connector_resolution(operation, change):
+        import asyncio
+        import copy
+        from tests.unit.test_calendar_delivery_contract import DB, service as calendar_service
+        from app.services.connector_resolver import ReviewedConnectorChanged
+
+        db = DB()
+        subject, connector = calendar_service(db)
+        reviewed = subject.meeting_identity(db.meeting)
+        pin = {"connector_id": "pinned-calendar", "provider": "google_calendar",
+               "external_account_id": "calendar-account"}
+
+        async def read_meeting(*_):
+            return copy.deepcopy(db.meeting)
+
+        async def resolve(*_, **__):
+            await asyncio.sleep(0)
+            if change == "external_event_id":
+                db.meeting["external_event_id"] = "different-event"
+            elif change == "attendees":
+                db.meeting["attendees"] = [{"email": "changed@example.test"}]
+            elif change == "account":
+                db.meeting["metadata"]["external_account_id"] = "different-account"
+            elif change == "deleted":
+                db.meeting = None
+            return connector, "pinned-calendar", "google_calendar"
+
+        subject.get_meeting = AsyncMock(side_effect=read_meeting)
+        subject._get_active_calendar_connector = AsyncMock(side_effect=resolve)
+        arguments = {"reviewed_connector": pin, "reviewed_meeting": reviewed}
+        method = subject.update_meeting if operation == "update" else subject.cancel_meeting
+        if operation == "update":
+            arguments["new_title"] = "Reviewed change"
+        if change is None:
+            result = await method("tenant", "meeting", **arguments)
+            assert result["success"] and result["confirmation_allowed"]
+        else:
+>           with pytest.raises(ReviewedConnectorChanged):
+E           Failed: DID NOT RAISE <class 'app.services.connector_resolver.ReviewedConnectorChanged'>
+
+tests\unit\test_ag06_dashboard_actions.py:857: Failed
+------------------------------ Captured log call ------------------------------
+WARNING  app.infrastructure.connectors.encryption:encryption.py:72 CONNECTOR_ENCRYPTION_KEY not set � using temporary key. This is acceptable for local development only.
+_ test_calendar_rechecks_reviewed_meeting_after_connector_resolution[external_event_id-cancel] _
+
+operation = 'cancel', change = 'external_event_id'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("operation", ["update", "cancel"])
+    @pytest.mark.parametrize("change", ["external_event_id", "attendees", "account", "deleted", None])
+    async def test_calendar_rechecks_reviewed_meeting_after_connector_resolution(operation, change):
+        import asyncio
+        import copy
+        from tests.unit.test_calendar_delivery_contract import DB, service as calendar_service
+        from app.services.connector_resolver import ReviewedConnectorChanged
+
+        db = DB()
+        subject, connector = calendar_service(db)
+        reviewed = subject.meeting_identity(db.meeting)
+        pin = {"connector_id": "pinned-calendar", "provider": "google_calendar",
+               "external_account_id": "calendar-account"}
+
+        async def read_meeting(*_):
+            return copy.deepcopy(db.meeting)
+
+        async def resolve(*_, **__):
+            await asyncio.sleep(0)
+            if change == "external_event_id":
+                db.meeting["external_event_id"] = "different-event"
+            elif change == "attendees":
+                db.meeting["attendees"] = [{"email": "changed@example.test"}]
+            elif change == "account":
+                db.meeting["metadata"]["external_account_id"] = "different-account"
+            elif change == "deleted":
+                db.meeting = None
+            return connector, "pinned-calendar", "google_calendar"
+
+        subject.get_meeting = AsyncMock(side_effect=read_meeting)
+        subject._get_active_calendar_connector = AsyncMock(side_effect=resolve)
+        arguments = {"reviewed_connector": pin, "reviewed_meeting": reviewed}
+        method = subject.update_meeting if operation == "update" else subject.cancel_meeting
+        if operation == "update":
+            arguments["new_title"] = "Reviewed change"
+        if change is None:
+            result = await method("tenant", "meeting", **arguments)
+            assert result["success"] and result["confirmation_allowed"]
+        else:
+>           with pytest.raises(ReviewedConnectorChanged):
+E           Failed: DID NOT RAISE <class 'app.services.connector_resolver.ReviewedConnectorChanged'>
+
+tests\unit\test_ag06_dashboard_actions.py:857: Failed
+_ test_calendar_rechecks_reviewed_meeting_after_connector_resolution[attendees-update] _
+
+operation = 'update', change = 'attendees'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("operation", ["update", "cancel"])
+    @pytest.mark.parametrize("change", ["external_event_id", "attendees", "account", "deleted", None])
+    async def test_calendar_rechecks_reviewed_meeting_after_connector_resolution(operation, change):
+        import asyncio
+        import copy
+        from tests.unit.test_calendar_delivery_contract import DB, service as calendar_service
+        from app.services.connector_resolver import ReviewedConnectorChanged
+
+        db = DB()
+        subject, connector = calendar_service(db)
+        reviewed = subject.meeting_identity(db.meeting)
+        pin = {"connector_id": "pinned-calendar", "provider": "google_calendar",
+               "external_account_id": "calendar-account"}
+
+        async def read_meeting(*_):
+            return copy.deepcopy(db.meeting)
+
+        async def resolve(*_, **__):
+            await asyncio.sleep(0)
+            if change == "external_event_id":
+                db.meeting["external_event_id"] = "different-event"
+            elif change == "attendees":
+                db.meeting["attendees"] = [{"email": "changed@example.test"}]
+            elif change == "account":
+                db.meeting["metadata"]["external_account_id"] = "different-account"
+            elif change == "deleted":
+                db.meeting = None
+            return connector, "pinned-calendar", "google_calendar"
+
+        subject.get_meeting = AsyncMock(side_effect=read_meeting)
+        subject._get_active_calendar_connector = AsyncMock(side_effect=resolve)
+        arguments = {"reviewed_connector": pin, "reviewed_meeting": reviewed}
+        method = subject.update_meeting if operation == "update" else subject.cancel_meeting
+        if operation == "update":
+            arguments["new_title"] = "Reviewed change"
+        if change is None:
+            result = await method("tenant", "meeting", **arguments)
+            assert result["success"] and result["confirmation_allowed"]
+        else:
+>           with pytest.raises(ReviewedConnectorChanged):
+E           Failed: DID NOT RAISE <class 'app.services.connector_resolver.ReviewedConnectorChanged'>
+
+tests\unit\test_ag06_dashboard_actions.py:857: Failed
+_ test_calendar_rechecks_reviewed_meeting_after_connector_resolution[attendees-cancel] _
+
+operation = 'cancel', change = 'attendees'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("operation", ["update", "cancel"])
+    @pytest.mark.parametrize("change", ["external_event_id", "attendees", "account", "deleted", None])
+    async def test_calendar_rechecks_reviewed_meeting_after_connector_resolution(operation, change):
+        import asyncio
+        import copy
+        from tests.unit.test_calendar_delivery_contract import DB, service as calendar_service
+        from app.services.connector_resolver import ReviewedConnectorChanged
+
+        db = DB()
+        subject, connector = calendar_service(db)
+        reviewed = subject.meeting_identity(db.meeting)
+        pin = {"connector_id": "pinned-calendar", "provider": "google_calendar",
+               "external_account_id": "calendar-account"}
+
+        async def read_meeting(*_):
+            return copy.deepcopy(db.meeting)
+
+        async def resolve(*_, **__):
+            await asyncio.sleep(0)
+            if change == "external_event_id":
+                db.meeting["external_event_id"] = "different-event"
+            elif change == "attendees":
+                db.meeting["attendees"] = [{"email": "changed@example.test"}]
+            elif change == "account":
+                db.meeting["metadata"]["external_account_id"] = "different-account"
+            elif change == "deleted":
+                db.meeting = None
+            return connector, "pinned-calendar", "google_calendar"
+
+        subject.get_meeting = AsyncMock(side_effect=read_meeting)
+        subject._get_active_calendar_connector = AsyncMock(side_effect=resolve)
+        arguments = {"reviewed_connector": pin, "reviewed_meeting": reviewed}
+        method = subject.update_meeting if operation == "update" else subject.cancel_meeting
+        if operation == "update":
+            arguments["new_title"] = "Reviewed change"
+        if change is None:
+            result = await method("tenant", "meeting", **arguments)
+            assert result["success"] and result["confirmation_allowed"]
+        else:
+>           with pytest.raises(ReviewedConnectorChanged):
+E           Failed: DID NOT RAISE <class 'app.services.connector_resolver.ReviewedConnectorChanged'>
+
+tests\unit\test_ag06_dashboard_actions.py:857: Failed
+_ test_calendar_rechecks_reviewed_meeting_after_connector_resolution[account-update] _
+
+operation = 'update', change = 'account'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("operation", ["update", "cancel"])
+    @pytest.mark.parametrize("change", ["external_event_id", "attendees", "account", "deleted", None])
+    async def test_calendar_rechecks_reviewed_meeting_after_connector_resolution(operation, change):
+        import asyncio
+        import copy
+        from tests.unit.test_calendar_delivery_contract import DB, service as calendar_service
+        from app.services.connector_resolver import ReviewedConnectorChanged
+
+        db = DB()
+        subject, connector = calendar_service(db)
+        reviewed = subject.meeting_identity(db.meeting)
+        pin = {"connector_id": "pinned-calendar", "provider": "google_calendar",
+               "external_account_id": "calendar-account"}
+
+        async def read_meeting(*_):
+            return copy.deepcopy(db.meeting)
+
+        async def resolve(*_, **__):
+            await asyncio.sleep(0)
+            if change == "external_event_id":
+                db.meeting["external_event_id"] = "different-event"
+            elif change == "attendees":
+                db.meeting["attendees"] = [{"email": "changed@example.test"}]
+            elif change == "account":
+                db.meeting["metadata"]["external_account_id"] = "different-account"
+            elif change == "deleted":
+                db.meeting = None
+            return connector, "pinned-calendar", "google_calendar"
+
+        subject.get_meeting = AsyncMock(side_effect=read_meeting)
+        subject._get_active_calendar_connector = AsyncMock(side_effect=resolve)
+        arguments = {"reviewed_connector": pin, "reviewed_meeting": reviewed}
+        method = subject.update_meeting if operation == "update" else subject.cancel_meeting
+        if operation == "update":
+            arguments["new_title"] = "Reviewed change"
+        if change is None:
+            result = await method("tenant", "meeting", **arguments)
+            assert result["success"] and result["confirmation_allowed"]
+        else:
+>           with pytest.raises(ReviewedConnectorChanged):
+E           Failed: DID NOT RAISE <class 'app.services.connector_resolver.ReviewedConnectorChanged'>
+
+tests\unit\test_ag06_dashboard_actions.py:857: Failed
+_ test_calendar_rechecks_reviewed_meeting_after_connector_resolution[account-cancel] _
+
+operation = 'cancel', change = 'account'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("operation", ["update", "cancel"])
+    @pytest.mark.parametrize("change", ["external_event_id", "attendees", "account", "deleted", None])
+    async def test_calendar_rechecks_reviewed_meeting_after_connector_resolution(operation, change):
+        import asyncio
+        import copy
+        from tests.unit.test_calendar_delivery_contract import DB, service as calendar_service
+        from app.services.connector_resolver import ReviewedConnectorChanged
+
+        db = DB()
+        subject, connector = calendar_service(db)
+        reviewed = subject.meeting_identity(db.meeting)
+        pin = {"connector_id": "pinned-calendar", "provider": "google_calendar",
+               "external_account_id": "calendar-account"}
+
+        async def read_meeting(*_):
+            return copy.deepcopy(db.meeting)
+
+        async def resolve(*_, **__):
+            await asyncio.sleep(0)
+            if change == "external_event_id":
+                db.meeting["external_event_id"] = "different-event"
+            elif change == "attendees":
+                db.meeting["attendees"] = [{"email": "changed@example.test"}]
+            elif change == "account":
+                db.meeting["metadata"]["external_account_id"] = "different-account"
+            elif change == "deleted":
+                db.meeting = None
+            return connector, "pinned-calendar", "google_calendar"
+
+        subject.get_meeting = AsyncMock(side_effect=read_meeting)
+        subject._get_active_calendar_connector = AsyncMock(side_effect=resolve)
+        arguments = {"reviewed_connector": pin, "reviewed_meeting": reviewed}
+        method = subject.update_meeting if operation == "update" else subject.cancel_meeting
+        if operation == "update":
+            arguments["new_title"] = "Reviewed change"
+        if change is None:
+            result = await method("tenant", "meeting", **arguments)
+            assert result["success"] and result["confirmation_allowed"]
+        else:
+>           with pytest.raises(ReviewedConnectorChanged):
+E           Failed: DID NOT RAISE <class 'app.services.connector_resolver.ReviewedConnectorChanged'>
+
+tests\unit\test_ag06_dashboard_actions.py:857: Failed
+_ test_calendar_rechecks_reviewed_meeting_after_connector_resolution[deleted-update] _
+
+operation = 'update', change = 'deleted'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("operation", ["update", "cancel"])
+    @pytest.mark.parametrize("change", ["external_event_id", "attendees", "account", "deleted", None])
+    async def test_calendar_rechecks_reviewed_meeting_after_connector_resolution(operation, change):
+        import asyncio
+        import copy
+        from tests.unit.test_calendar_delivery_contract import DB, service as calendar_service
+        from app.services.connector_resolver import ReviewedConnectorChanged
+
+        db = DB()
+        subject, connector = calendar_service(db)
+        reviewed = subject.meeting_identity(db.meeting)
+        pin = {"connector_id": "pinned-calendar", "provider": "google_calendar",
+               "external_account_id": "calendar-account"}
+
+        async def read_meeting(*_):
+            return copy.deepcopy(db.meeting)
+
+        async def resolve(*_, **__):
+            await asyncio.sleep(0)
+            if change == "external_event_id":
+                db.meeting["external_event_id"] = "different-event"
+            elif change == "attendees":
+                db.meeting["attendees"] = [{"email": "changed@example.test"}]
+            elif change == "account":
+                db.meeting["metadata"]["external_account_id"] = "different-account"
+            elif change == "deleted":
+                db.meeting = None
+            return connector, "pinned-calendar", "google_calendar"
+
+        subject.get_meeting = AsyncMock(side_effect=read_meeting)
+        subject._get_active_calendar_connector = AsyncMock(side_effect=resolve)
+        arguments = {"reviewed_connector": pin, "reviewed_meeting": reviewed}
+        method = subject.update_meeting if operation == "update" else subject.cancel_meeting
+        if operation == "update":
+            arguments["new_title"] = "Reviewed change"
+        if change is None:
+            result = await method("tenant", "meeting", **arguments)
+            assert result["success"] and result["confirmation_allowed"]
+        else:
+>           with pytest.raises(ReviewedConnectorChanged):
+E           Failed: DID NOT RAISE <class 'app.services.connector_resolver.ReviewedConnectorChanged'>
+
+tests\unit\test_ag06_dashboard_actions.py:857: Failed
+_ test_calendar_rechecks_reviewed_meeting_after_connector_resolution[deleted-cancel] _
+
+operation = 'cancel', change = 'deleted'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("operation", ["update", "cancel"])
+    @pytest.mark.parametrize("change", ["external_event_id", "attendees", "account", "deleted", None])
+    async def test_calendar_rechecks_reviewed_meeting_after_connector_resolution(operation, change):
+        import asyncio
+        import copy
+        from tests.unit.test_calendar_delivery_contract import DB, service as calendar_service
+        from app.services.connector_resolver import ReviewedConnectorChanged
+
+        db = DB()
+        subject, connector = calendar_service(db)
+        reviewed = subject.meeting_identity(db.meeting)
+        pin = {"connector_id": "pinned-calendar", "provider": "google_calendar",
+               "external_account_id": "calendar-account"}
+
+        async def read_meeting(*_):
+            return copy.deepcopy(db.meeting)
+
+        async def resolve(*_, **__):
+            await asyncio.sleep(0)
+            if change == "external_event_id":
+                db.meeting["external_event_id"] = "different-event"
+            elif change == "attendees":
+                db.meeting["attendees"] = [{"email": "changed@example.test"}]
+            elif change == "account":
+                db.meeting["metadata"]["external_account_id"] = "different-account"
+            elif change == "deleted":
+                db.meeting = None
+            return connector, "pinned-calendar", "google_calendar"
+
+        subject.get_meeting = AsyncMock(side_effect=read_meeting)
+        subject._get_active_calendar_connector = AsyncMock(side_effect=resolve)
+        arguments = {"reviewed_connector": pin, "reviewed_meeting": reviewed}
+        method = subject.update_meeting if operation == "update" else subject.cancel_meeting
+        if operation == "update":
+            arguments["new_title"] = "Reviewed change"
+        if change is None:
+            result = await method("tenant", "meeting", **arguments)
+            assert result["success"] and result["confirmation_allowed"]
+        else:
+>           with pytest.raises(ReviewedConnectorChanged):
+E           Failed: DID NOT RAISE <class 'app.services.connector_resolver.ReviewedConnectorChanged'>
+
+tests\unit\test_ag06_dashboard_actions.py:857: Failed
+=========================== short test summary info ===========================
+FAILED tests/unit/test_ag06_dashboard_actions.py::test_calendar_rechecks_reviewed_meeting_after_connector_resolution[external_event_id-update]
+FAILED tests/unit/test_ag06_dashboard_actions.py::test_calendar_rechecks_reviewed_meeting_after_connector_resolution[external_event_id-cancel]
+FAILED tests/unit/test_ag06_dashboard_actions.py::test_calendar_rechecks_reviewed_meeting_after_connector_resolution[attendees-update]
+FAILED tests/unit/test_ag06_dashboard_actions.py::test_calendar_rechecks_reviewed_meeting_after_connector_resolution[attendees-cancel]
+FAILED tests/unit/test_ag06_dashboard_actions.py::test_calendar_rechecks_reviewed_meeting_after_connector_resolution[account-update]
+FAILED tests/unit/test_ag06_dashboard_actions.py::test_calendar_rechecks_reviewed_meeting_after_connector_resolution[account-cancel]
+FAILED tests/unit/test_ag06_dashboard_actions.py::test_calendar_rechecks_reviewed_meeting_after_connector_resolution[deleted-update]
+FAILED tests/unit/test_ag06_dashboard_actions.py::test_calendar_rechecks_reviewed_meeting_after_connector_resolution[deleted-cancel]
+8 failed, 2 passed, 45 deselected in 3.76s

@@ -1,0 +1,334 @@
+✖ saved unknown actions expose their reference and preserve status filters without a resend control (253.929ms)
+✔ an unavailable history does not imply failed execution or an empty successful result (59.7019ms)
+✖ pagination follows the server total and does not claim a whole-history export (1040.8663ms)
+✔ all actual durable action states remain distinct in the frontend (5.5726ms)
+✔ an unknown provider result stays unresolved without an Apply or retry button (134.3238ms)
+✔ provider-accepted email is not presented as delivered (38.4807ms)
+✔ scheduled callback is not presented as a completed call (14.3573ms)
+✔ unknown receipt state takes precedence over an optimistic applied flag (3.2551ms)
+✔ status lookup uses the same proposal and cannot invoke Apply (217.4468ms)
+✔ a missing receipt after a lost response stays uncertain without inviting another submission (1.1083ms)
+✔ lead notes preserve negation and show review evidence separately from confirmed contacts (260.78ms)
+✔ failed or historical analysis is not presented as a conversation with no captured facts (18.5276ms)
+✔ CRM success and uncertain delivery remain separate for each provider (31.5559ms)
+✔ uncertain CRM delivery retains the original account and provider references for review (176.3092ms)
+✔ an empty awaiting_confirmation contact does not invent a caller refusal (41.3321ms)
+✔ an empty needs_clarification contact does not invent a caller refusal (48.414ms)
+✔ an empty invalid contact does not invent a caller refusal (32.19ms)
+✔ an empty cancelled contact does not invent a caller refusal (30.6171ms)
+✔ an empty legacy contact does not invent a caller refusal (40.0896ms)
+✔ a parsed contact is visible without being labeled confirmed (34.9603ms)
+✔ manual removal is not labeled a verified contact (33.0106ms)
+✔ completed analysis does not hide partial transcript evidence (39.2011ms)
+✔ completed analysis does not hide failed transcript evidence (17.8078ms)
+✔ completed analysis does not hide unknown transcript evidence (10.2467ms)
+✔ the source revision and confirmation turn are separate evidence (40.3467ms)
+✔ a contact with no calls does not show a transcript warning (5.9981ms)
+✔ incomplete legacy source metadata cannot hide the saved field or fabricate a revision (31.9865ms)
+✔ withdrawal evidence does not present the old confirmation as current (42.8516ms)
+✔ a failed manual save keeps the original evidence visible and shows the error (363.951ms)
+✔ action history reads the actual actions envelope and retains an unknown result (659.2822ms)
+✔ an invalid history envelope fails visibly instead of appearing as an empty success (19.765ms)
+✔ unsupported generic plan, execution and blind retry clients are not exposed (27.8231ms)
+ℹ tests 32
+ℹ suites 0
+ℹ pass 30
+ℹ fail 2
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 16847.9636
+
+✖ failing tests:
+
+test at src\components\assistant\action-history.test.tsx:2:1757
+✖ saved unknown actions expose their reference and preserve status filters without a resend control (253.929ms)
+  Error [TestingLibraryElementError]: Unable to find an accessible element with the role "button" and name "View record"
+
+  Here are the accessible roles:
+
+    paragraph:
+
+    Name "":
+    [36m<p[39m
+      [33mclass[39m=[32m"text-sm text-muted-foreground"[39m
+    [36m/>[39m
+
+    --------------------------------------------------
+    combobox:
+
+    Name "Action status":
+    [36m<select[39m
+      [33maria-label[39m=[32m"Action status"[39m
+      [33mclass[39m=[32m"block w-full rounded-md border border-input bg-background p-2"[39m
+    [36m/>[39m
+
+    Name "Date order":
+    [36m<select[39m
+      [33maria-label[39m=[32m"Date order"[39m
+      [33mclass[39m=[32m"rounded-md border border-input bg-background p-2"[39m
+    [36m/>[39m
+
+    --------------------------------------------------
+    option:
+
+    Name "All statuses":
+    [36m<option[39m
+      [33mvalue[39m=[32m""[39m
+    [36m/>[39m
+
+    Name "Pending":
+    [36m<option[39m
+      [33mvalue[39m=[32m"pending"[39m
+    [36m/>[39m
+
+    Name "In progress":
+    [36m<option[39m
+      [33mvalue[39m=[32m"running"[39m
+    [36m/>[39m
+
+    Name "Scheduled":
+    [36m<option[39m
+      [33mvalue[39m=[32m"scheduled"[39m
+    [36m/>[39m
+
+    Name "Completed":
+    [36m<option[39m
+      [33mvalue[39m=[32m"completed"[39m
+    [36m/>[39m
+
+    Name "Failed":
+    [36m<option[39m
+      [33mvalue[39m=[32m"failed"[39m
+    [36m/>[39m
+
+    Name "Outcome unknown":
+    [36m<option[39m
+      [33mvalue[39m=[32m"unknown"[39m
+    [36m/>[39m
+
+    Name "Cancelled":
+    [36m<option[39m
+      [33mvalue[39m=[32m"cancelled"[39m
+    [36m/>[39m
+
+    Name "Newest first":
+    [36m<option[39m
+      [33mvalue[39m=[32m"desc"[39m
+    [36m/>[39m
+
+    Name "Oldest first":
+    [36m<option[39m
+      [33mvalue[39m=[32m"asc"[39m
+    [36m/>[39m
+
+    --------------------------------------------------
+    textbox:
+
+    Name "Action type":
+    [36m<input[39m
+      [33maria-label[39m=[32m"Action type"[39m
+      [33mclass[39m=[32m"flex h-10 w-full rounded-md border border-input dark:border-foreground/20 bg-background dark:bg-accent/20 px-3 py-2 text-sm text-foreground ring-offset-background transition-[background-color,border-color,box-shadow] duration-150 ease-out hover:bg-accent/20 dark:hover:bg-accent/30 hover:border-foreground/20 file:border-0 file:bg-transparent file:text-sm file:font-medium file:text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"[39m
+      [33mplaceholder[39m=[32m"All types"[39m
+      [33mvalue[39m=[32m""[39m
+    [36m/>[39m
+
+    --------------------------------------------------
+    button:
+
+    Name "Refresh":
+    [36m<button[39m
+      [33mclass[39m=[32m"inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg text-sm font-medium transition-[color,background-color,border-color,box-shadow,transform] duration-150 ease-out motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50 hover:scale-[1.01] active:scale-[0.99] [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 border border-input bg-background shadow-sm hover:bg-accent hover:text-accent-foreground h-10 px-4 py-2"[39m
+      [33mdisabled[39m=[32m""[39m
+    [36m/>[39m
+
+    Name "Table":
+    [36m<button[39m
+      [33maria-pressed[39m=[32m"true"[39m
+      [33mclass[39m=[32m"inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg text-sm font-medium transition-[color,background-color,border-color,box-shadow,transform] duration-150 ease-out motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50 hover:scale-[1.01] active:scale-[0.99] [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 border border-input bg-background shadow-sm hover:bg-accent hover:text-accent-foreground h-10 px-4 py-2"[39m
+    [36m/>[39m
+
+    Name "Timeline":
+    [36m<button[39m
+      [33maria-pressed[39m=[32m"false"[39m
+      [33mclass[39m=[32m"inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg text-sm font-medium transition-[color,background-color,border-color,box-shadow,transform] duration-150 ease-out motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50 hover:scale-[1.01] active:scale-[0.99] [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 border border-input bg-background shadow-sm hover:bg-accent hover:text-accent-foreground h-10 px-4 py-2"[39m
+    [36m/>[39m
+
+    Name "Export page CSV":
+    [36m<button[39m
+      [33mclass[39m=[32m"inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg text-sm font-medium transition-[color,background-color,border-color,box-shadow,transform] duration-150 ease-out motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50 hover:scale-[1.01] active:scale-[0.99] [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 border border-input bg-background shadow-sm hover:bg-accent hover:text-accent-foreground h-10 px-4 py-2"[39m
+      [33mdisabled[39m=[32m""[39m
+    [36m/>[39m
+
+    Name "Export page JSON":
+    [36m<button[39m
+      [33mclass[39m=[32m"inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg text-sm font-medium transition-[color,background-color,border-color,box-shadow,transform] duration-150 ease-out motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50 hover:scale-[1.01] active:scale-[0.99] [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 border border-input bg-background shadow-sm hover:bg-accent hover:text-accent-foreground h-10 px-4 py-2"[39m
+      [33mdisabled[39m=[32m""[39m
+    [36m/>[39m
+
+    Name "Previous":
+    [36m<button[39m
+      [33mclass[39m=[32m"inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg text-sm font-medium transition-[color,background-color,border-color,box-shadow,transform] duration-150 ease-out motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50 hover:scale-[1.01] active:scale-[0.99] [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 border border-input bg-background shadow-sm hover:bg-accent hover:text-accent-foreground h-10 px-4 py-2"[39m
+      [33mdisabled[39m=[32m""[39m
+    [36m/>[39m
+
+    Name "Next":
+    [36m<button[39m
+      [33mclass[39m=[32m"inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg text-sm font-medium transition-[color,background-color,border-color,box-shadow,transform] duration-150 ease-out motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50 hover:scale-[1.01] active:scale-[0.99] [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 border border-input bg-background shadow-sm hover:bg-accent hover:text-accent-foreground h-10 px-4 py-2"[39m
+      [33mdisabled[39m=[32m""[39m
+    [36m/>[39m
+
+    --------------------------------------------------
+    status:
+
+    Name "":
+    [36m<p[39m
+      [33mrole[39m=[32m"status"[39m
+    [36m/>[39m
+
+    --------------------------------------------------
+
+  Ignored nodes: comments, script, style
+  [36m<body>[39m
+    [36m<div>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"space-y-5"[39m
+      [36m>[39m
+        [36m<p[39m
+          [33mclass[39m=[32m"text-sm text-muted-foreground"[39m
+        [36m>[39m
+          [0mReview saved assistant actions and their provider references. To request a new action, open the Assistant and review its proposal before applying it.[0m
+        [36m</p>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"rounded-xl border border-border bg-background p-4"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"grid gap-3 sm:grid-cols-2 lg:grid-cols-4"[39m
+          [36m>[39m
+            [36m<label[39m
+              [33mclass[39m=[32m"space-y-1 text-sm"[39m
+            [36m>[39m
+              [0mStatus[0m
+              [36m<select[39m
+                [33maria-label[39m=[32m"Action status"[39m
+                [33mclass[39m=[32m"block w-full rounded-md border border-input bg-background p-2"[39m
+              [36m>[39m
+                [36m<option[39m
+                  [33mvalue[39m=[32m""[39m
+                [36m>[39m
+                  [0mAll statuses[0m
+                [36m</option>[39m
+                [36m<option[39m
+                  [33mvalue[39m=[32m"pending"[39m
+                [36m>[39m
+                  [0mPending[0m
+                [36m</option>[39m
+                [36m<option[39m
+                  [33mvalue[39m=[32m"running"[39m
+                [36m>[39m
+                  [0mIn progress[0m
+                [36m</option>[39m
+                [36m<option[39m
+                  [33mvalue[39m=[32m"scheduled"[39m
+                [36m>[39m
+                  [0mScheduled[0m
+                [36m</option>[39m
+                [36m<option[39m
+                  [33mvalue[39m=[32m"completed"[39m
+                [36m>[39m
+                  [0mCompleted[0m
+                [36m</option>[39m
+                [36m<option[39m
+                  [33mvalue[39m=[32m"failed"[39m
+                [36m>[39m
+                  [0mFailed[0m
+                [36m</option>[39m
+                [36m<option[39m
+                  [33mvalue[39m=[32m"unknown"[39m
+                [36m>[39m
+                  [0mOutcome unknown[0m
+                [36m</option>[39m
+                [36m<option[39m
+                  [33mvalue[39m=[32m"cancelled"[39m
+                [36m>[39m
+                  [0mCancelled[0m
+                [36m</option>[39m
+              [36m</select>[39m
+            [36m</label>[39m
+            [36m<label[39m
+              [33mclass[39m=[32m"space-y-1 text-sm"[39m
+            [36m>[39m
+              [0mAction type[0m
+              [36m<input[39m
+                [33maria-label[39m=[32m"Action type"[39m
+                [33mclass[39m=[32m"flex h-10 w-full rounded-md border border-input dark:border-foreground/20 bg-background dark:bg-accent/20 px-3 py-2 text-sm text-foreground ring-offset-background transition-[background-color,border-color,box-shadow] duration-150 ease-out hover:bg-accent/20 dark:hover:bg-accent/30 hover:border-foreground/20 file:border-0 file:bg-transparent file:text-sm file:font-medium file:text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"[39m
+                [33mplaceholder[39m=[32m"All types"[39m
+                [33mvalue[39m=[32m""[39m
+              [36m/>[39m
+            [36m</label>[39m
+            [36m<label[39m
+              [33mclass[39m=[32m"space-y-1 text-sm"[39m
+            [36m>[39m
+              [0mFrom date (UTC)[0m
+              [36m<input[39m
+                [33maria-label[39m=[32m"From date"[39m
+                [33mclass[39m=[32m"flex h-10 w-full rounded-md border border-input dark:border-foreground/20 bg-background dark:bg-accent/20 px-3 py-2 text-sm text-foreground ring-offset-background transition-[background-color,border-color,box-shadow] duration-150 ease-out hover:bg-accent/20 dark:hover:bg-accent/30 hover:border-foreground/20 file:border-0 file:bg-transparent file:text-sm file:font-medium file:text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"[39m
+                [33mtype[39m=[32m"date"[39m
+                [33mvalue[39m=[32m""[39m
+              [36m/>[39m
+            [36m</label>[39m
+            [36m<label[39m
+              [33mclass[39m=[32m"space-y-1 text-sm"[39m
+            [36m>[39m
+              [0mTo date (UTC)[0m
+              [36m<input[39m
+                [33maria-label[39m=[32m"To date"[39m
+                [33mclass[39m=[32m"flex h-10 w-full rounded-md border border-input dark:border-foreground/20 bg-background dark:bg-accent/20 px-3 py-2 text-sm text-foreground ring-offset-background transition-[background-color,border-color,box-shadow] duration-150 ease-out hover:bg-accent/20 dark:hover:bg-accent/30 hover:border-foreground/20 file:border-0 file:bg-transparent file:text-sm file:font-medium file:text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"[39m
+                [33mtype[39m=[32m"date"[39m
+                [33mvalue[39m=[32m""[39m
+              [36m/>[39m
+            [36m</label>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"flex flex-wrap items-center gap-2"[39m
+        [36m>[39m
+          [36m<button[39m
+            [33mclass[39m=[32m"inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg text-sm font-medium transition-[color,background-color,border-color,box-shadow,transform] duration-150 ease-out motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50 hover:scale-[1.01] active:scale-[0.99] [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 border border-input bg-background shadow-sm hover:bg-accent hover:text-accent-foreground h-10 px-4 py-2"[39m
+            [33mdisabled[39m=[32m""[39m
+          [36m>[39m
+            [0mRefresh[0m
+          [36m</button>[39m
+          [36m<button[39m
+            [33maria-pressed[39m=[32m"true"[39m
+            [33mclass[39m=[32m"inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg text-sm font-medium transition-[color,background-color,border-color,box-shadow,transform] duration-150 ease-out motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50 hover:scale-[1.01] active:scale-[0.99] [&_svg]:pointer-events-none [&_svg]:si...
+      at Object.getElementError (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\node_modules\@testing-library\dom\dist\config.js:37:19)
+      at C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\node_modules\@testing-library\dom\dist\query-helpers.js:76:38
+      at C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\node_modules\@testing-library\dom\dist\query-helpers.js:52:17
+      at C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\node_modules\@testing-library\dom\dist\query-helpers.js:95:19
+      at TestContext.<anonymous> (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\components\assistant\action-history.test.tsx:27:28)
+      at runNextTicks (node:internal/process/task_queues:65:5)
+      at listOnTimeout (node:internal/timers:567:9)
+      at process.processTimers (node:internal/timers:541:7)
+      at async Test.run (node:internal/test_runner/test:1208:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3)
+
+test at src\components\assistant\action-history.test.tsx:2:3755
+✖ pagination follows the server total and does not claim a whole-history export (1040.8663ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+
+  1 !== 2
+
+      at <anonymous> (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\components\assistant\action-history.test.tsx:57:32)
+      at runWithExpensiveErrorDiagnosticsDisabled (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\node_modules\@testing-library\dom\dist\config.js:47:12)
+      at checkCallback (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\node_modules\@testing-library\dom\dist\wait-for.js:124:77)
+      at Timeout.checkRealTimersCallback [as _onTimeout] (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\node_modules\@testing-library\dom\dist\wait-for.js:118:16)
+      at listOnTimeout (node:internal/timers:605:17)
+      at process.processTimers (node:internal/timers:541:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 1,
+    expected: 2,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

@@ -35,7 +35,8 @@
     "ag02_implementation_commit": "69d09fe575831c42a14b28c0a7417ca1b388c492",
     "ag03_implementation_commit": "27c04347b2f0d5d0eccf83b3c31663eb3cfbd145",
     "ag04_implementation_commit": "c93a05e3561b5feaf7da467b30c2aa37be0e41bd",
-    "ag05_implementation_commit": "71cdeefa59a0f786f236d3a3d25ba592470ddf05"
+    "ag05_implementation_commit": "71cdeefa59a0f786f236d3a3d25ba592470ddf05",
+    "ag06_implementation_commit": "1a0bf93d880d441e9702dae9c161b48048b5c81a"
   },
   "status_rules": {
     "execution": [
@@ -524,7 +525,7 @@
       "title": "Finish supported action workflows and reconcile unknown external results",
       "owner_role": "Action execution and connector lead",
       "assigned_person": "Codex implementation team",
-      "reviewer": "Independent runtime/action/CRM source audit; reproduced repairs and database acceptance underway",
+      "reviewer": "Independent dashboard/voice/account, CRM admission and Admin/callback reviews; root integrated local regression and database verification",
       "status": "in_progress",
       "start_after_milestone": "RG01 baseline recorded",
       "dependencies_and_tests": "See package text; coordination and final acceptance dependencies are distinct from entry milestones.",
@@ -539,9 +540,25 @@
       ],
       "architecture_ids": [],
       "plan_anchor": "ag06-finish-supported-action-workflows-and-reconcile-unknown-external-results",
-      "evidence": [],
+      "evidence": [
+        {
+          "path": "docs/sessions/2026-10-05-ag06-implementation.md",
+          "kind": "local_implementation_and_verification",
+          "candidate": "1a0bf93d880d441e9702dae9c161b48048b5c81a",
+          "status": "partial_acceptance"
+        },
+        {
+          "path": "docs/sessions/artifacts/ag06/verification.json",
+          "kind": "source_bound_verification_manifest",
+          "candidate": "1a0bf93d880d441e9702dae9c161b48048b5c81a"
+        },
+        {
+          "path": "docs/sessions/2026-10-05-ag06-admin-actions.md",
+          "kind": "reproduced_cancellation_and_false_retry_boundaries"
+        }
+      ],
       "blocker": null,
-      "next_action": "Reproduce and repair Admin cancellation/dispatch races, false retry admission, Actions UI/backend contract mismatch, dashboard reviewed-account and durable-receipt gaps, and stale/uncertain CRM recipient evidence within existing services. Preserve no-blind-resend; real provider acceptance remains pending designated accounts.",
+      "next_action": "Complete designated provider/recipient and browser acceptance plus supported audited operator resolution. Unknown contact creation remains held; unsupported Admin retry is contained, not completed. Continue eligible AG07 and CP08/operating repairs without reopening deferred CP05/CP06/CP09.",
       "target_date": null
     },
     {

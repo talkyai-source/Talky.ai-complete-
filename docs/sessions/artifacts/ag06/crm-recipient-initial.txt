@@ -1,0 +1,34 @@
+..FFFFF                                                                  [100%]
+================================== FAILURES ===================================
+_ test_primary_manual_withdrawal_or_unconfirmed_caller_never_falls_back_to_import[cancelled] _
+tests\unit\test_ag06_crm_evidence.py:62: in test_primary_manual_withdrawal_or_unconfirmed_caller_never_falls_back_to_import
+    assert not result.success
+E   AssertionError: assert not True
+E    +  where True = CRMSyncResult(success=True, call_id='77777777-7777-7777-7777-777777777777', providers=['salesforce'], crm_contact_id='...all_id='00Ttask', skipped=False, skipped_reason=None, error_message=None, warning_message=None, updated_existing=False).success
+_ test_primary_manual_withdrawal_or_unconfirmed_caller_never_falls_back_to_import[needs_clarification] _
+tests\unit\test_ag06_crm_evidence.py:62: in test_primary_manual_withdrawal_or_unconfirmed_caller_never_falls_back_to_import
+    assert not result.success
+E   AssertionError: assert not True
+E    +  where True = CRMSyncResult(success=True, call_id='77777777-7777-7777-7777-777777777777', providers=['salesforce'], crm_contact_id='...all_id='00Ttask', skipped=False, skipped_reason=None, error_message=None, warning_message=None, updated_existing=False).success
+_ test_primary_manual_withdrawal_or_unconfirmed_caller_never_falls_back_to_import[awaiting_confirmation] _
+tests\unit\test_ag06_crm_evidence.py:62: in test_primary_manual_withdrawal_or_unconfirmed_caller_never_falls_back_to_import
+    assert not result.success
+E   AssertionError: assert not True
+E    +  where True = CRMSyncResult(success=True, call_id='77777777-7777-7777-7777-777777777777', providers=['salesforce'], crm_contact_id='...all_id='00Ttask', skipped=False, skipped_reason=None, error_message=None, warning_message=None, updated_existing=False).success
+_____ test_manual_primary_correction_replaces_import_before_first_effect ______
+tests\unit\test_ag06_crm_evidence.py:77: in test_manual_primary_correction_replaces_import_before_first_effect
+    assert ("search", "manual@example.com", harness["lead"]["phone_number"]) in connector.calls
+E   AssertionError: assert ('search', 'manual@example.com', '+15550100100') in [('search', 'pat@acme.com', '+15550100100'), ('log', 'manual-contact', 'Talky.ai outbound call - Answered\nCampaign: S...cerpt:\nAgent: hi\nUser: hello\n\nTalky.ai call id: 77777777-7777-7777-7777-777777777777', 95, 'Answered', 'OUTBOUND')]
+E    +  where [('search', 'pat@acme.com', '+15550100100'), ('log', 'manual-contact', 'Talky.ai outbound call - Answered\nCampaign: S...cerpt:\nAgent: hi\nUser: hello\n\nTalky.ai call id: 77777777-7777-7777-7777-777777777777', 95, 'Answered', 'OUTBOUND')] = <tests.unit.test_crm_sync_service.FakeConnector object at 0x0000028630DD95E0>.calls
+_ test_manual_change_after_remote_association_holds_instead_of_updating_wrong_contact _
+tests\unit\test_ag06_crm_evidence.py:91: in test_manual_change_after_remote_association_holds_instead_of_updating_wrong_contact
+    assert not result.success
+E   AssertionError: assert not True
+E    +  where True = CRMSyncResult(success=True, call_id='77777777-7777-7777-7777-777777777777', providers=['salesforce'], crm_contact_id='...call_id='00Ttask', skipped=False, skipped_reason=None, error_message=None, warning_message=None, updated_existing=True).success
+=========================== short test summary info ===========================
+FAILED tests/unit/test_ag06_crm_evidence.py::test_primary_manual_withdrawal_or_unconfirmed_caller_never_falls_back_to_import[cancelled]
+FAILED tests/unit/test_ag06_crm_evidence.py::test_primary_manual_withdrawal_or_unconfirmed_caller_never_falls_back_to_import[needs_clarification]
+FAILED tests/unit/test_ag06_crm_evidence.py::test_primary_manual_withdrawal_or_unconfirmed_caller_never_falls_back_to_import[awaiting_confirmation]
+FAILED tests/unit/test_ag06_crm_evidence.py::test_manual_primary_correction_replaces_import_before_first_effect
+FAILED tests/unit/test_ag06_crm_evidence.py::test_manual_change_after_remote_association_holds_instead_of_updating_wrong_contact
+5 failed, 2 passed in 0.99s

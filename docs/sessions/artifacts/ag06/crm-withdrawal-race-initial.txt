@@ -1,0 +1,10 @@
+F                                                                        [100%]
+================================== FAILURES ===================================
+__________ test_withdrawal_during_contact_search_blocks_later_create __________
+tests\unit\test_ag06_crm_evidence.py:213: in test_withdrawal_during_contact_search_blocks_later_create
+    assert not result.success
+E   AssertionError: assert not True
+E    +  where True = CRMSyncResult(success=True, call_id='77777777-7777-7777-7777-777777777777', providers=['salesforce'], crm_contact_id='...all_id='00Ttask', skipped=False, skipped_reason=None, error_message=None, warning_message=None, updated_existing=False).success
+=========================== short test summary info ===========================
+FAILED tests/unit/test_ag06_crm_evidence.py::test_withdrawal_during_contact_search_blocks_later_create
+1 failed in 2.25s

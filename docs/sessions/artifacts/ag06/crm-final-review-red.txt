@@ -1,0 +1,25 @@
+FFF                                                                      [100%]
+================================== FAILURES ===================================
+_______ test_withdrawal_during_connector_resolution_blocks_write[False] _______
+tests\unit\test_ag06_crm_evidence.py:269: in test_withdrawal_during_connector_resolution_blocks_write
+    assert not result.success
+E   AssertionError: assert not True
+E    +  where True = CRMSyncResult(success=True, call_id='77777777-7777-7777-7777-777777777777', providers=['salesforce'], crm_contact_id='...all_id='00Ttask', skipped=False, skipped_reason=None, error_message=None, warning_message=None, updated_existing=False).success
+_______ test_withdrawal_during_connector_resolution_blocks_write[True] ________
+tests\unit\test_ag06_crm_evidence.py:269: in test_withdrawal_during_connector_resolution_blocks_write
+    assert not result.success
+E   AssertionError: assert not True
+E    +  where True = CRMSyncResult(success=True, call_id='77777777-7777-7777-7777-777777777777', providers=['salesforce'], crm_contact_id='...all_id='00Ttask', skipped=False, skipped_reason=None, error_message=None, warning_message=None, updated_existing=False).success
+_ test_harmless_call_metadata_update_does_not_strand_identical_rejected_create _
+tests\unit\test_ag06_crm_evidence.py:285: in test_harmless_call_metadata_update_does_not_strand_identical_rejected_create
+    assert result.success
+E   AssertionError: assert False
+E    +  where False = CRMSyncResult(success=False, call_id='77777777-7777-7777-7777-777777777777', providers=[], crm_contact_id=None, crm_ca...ne, error_message='salesforce: CRMDestinationMismatch: delivery unknown', warning_message=None, updated_existing=False).success
+------------------------------ Captured log call ------------------------------
+WARNING  app.services.crm_sync_service:crm_sync_service.py:314 crm_sync provider=salesforce call=77777777-7777-7777-7777-777777777777 phase=creating_contact status=pending
+WARNING  app.services.crm_sync_service:crm_sync_service.py:314 crm_sync provider=salesforce call=77777777-7777-7777-7777-777777777777 phase=creating_contact status=unknown
+=========================== short test summary info ===========================
+FAILED tests/unit/test_ag06_crm_evidence.py::test_withdrawal_during_connector_resolution_blocks_write[False]
+FAILED tests/unit/test_ag06_crm_evidence.py::test_withdrawal_during_connector_resolution_blocks_write[True]
+FAILED tests/unit/test_ag06_crm_evidence.py::test_harmless_call_metadata_update_does_not_strand_identical_rejected_create
+3 failed, 19 deselected in 0.96s

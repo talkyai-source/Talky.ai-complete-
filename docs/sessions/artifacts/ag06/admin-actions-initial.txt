@@ -1,0 +1,78 @@
+FFFFF                                                                    [100%]
+================================== FAILURES ===================================
+________ test_claim_after_old_status_read_cannot_be_reported_cancelled ________
+
+    async def test_claim_after_old_status_read_cannot_be_reported_cancelled():
+        db = ActionDB(claimed_during_read=True)
+>       with pytest.raises(HTTPException) as caught:
+E       Failed: DID NOT RAISE <class 'fastapi.exceptions.HTTPException'>
+
+tests\unit\test_ag06_admin_actions.py:85: Failed
+_____ test_pending_legacy_send_audit_is_not_a_cancellable_execution_claim _____
+
+    async def test_pending_legacy_send_audit_is_not_a_cancellable_execution_claim():
+        db = ActionDB(owned=False)
+>       with pytest.raises(HTTPException) as caught:
+E       Failed: DID NOT RAISE <class 'fastapi.exceptions.HTTPException'>
+
+tests\unit\test_ag06_admin_actions.py:93: Failed
+_ test_unsupported_retry_never_creates_an_unconsumed_pending_row[send_email] __
+
+kind = 'send_email'
+
+    @pytest.mark.parametrize("kind", ["send_email", "send_sms", "set_reminder"])
+    async def test_unsupported_retry_never_creates_an_unconsumed_pending_row(kind):
+        db = ActionDB(status="failed")
+        db.row["type"] = kind
+>       with pytest.raises(HTTPException) as caught:
+E       Failed: DID NOT RAISE <class 'fastapi.exceptions.HTTPException'>
+
+tests\unit\test_ag06_admin_actions.py:103: Failed
+__ test_unsupported_retry_never_creates_an_unconsumed_pending_row[send_sms] ___
+
+kind = 'send_sms'
+
+    @pytest.mark.parametrize("kind", ["send_email", "send_sms", "set_reminder"])
+    async def test_unsupported_retry_never_creates_an_unconsumed_pending_row(kind):
+        db = ActionDB(status="failed")
+        db.row["type"] = kind
+>       with pytest.raises(HTTPException) as caught:
+E       Failed: DID NOT RAISE <class 'fastapi.exceptions.HTTPException'>
+
+tests\unit\test_ag06_admin_actions.py:103: Failed
+_ test_unsupported_retry_never_creates_an_unconsumed_pending_row[set_reminder] _
+
+kind = 'set_reminder'
+
+    @pytest.mark.parametrize("kind", ["send_email", "send_sms", "set_reminder"])
+    async def test_unsupported_retry_never_creates_an_unconsumed_pending_row(kind):
+        db = ActionDB(status="failed")
+        db.row["type"] = kind
+>       with pytest.raises(HTTPException) as caught:
+E       Failed: DID NOT RAISE <class 'fastapi.exceptions.HTTPException'>
+
+tests\unit\test_ag06_admin_actions.py:103: Failed
+============================== warnings summary ===============================
+app\api\v1\endpoints\admin\health\_shared.py:16
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\backend\app\api\v1\endpoints\admin\health\_shared.py:16: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    _server_start_time = datetime.utcnow()
+
+tests/unit/test_ag06_admin_actions.py::test_claim_after_old_status_read_cannot_be_reported_cancelled
+tests/unit/test_ag06_admin_actions.py::test_pending_legacy_send_audit_is_not_a_cancellable_execution_claim
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\backend\app\api\v1\endpoints\admin\actions.py:362: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    now = datetime.utcnow().isoformat()
+
+tests/unit/test_ag06_admin_actions.py::test_unsupported_retry_never_creates_an_unconsumed_pending_row[send_email]
+tests/unit/test_ag06_admin_actions.py::test_unsupported_retry_never_creates_an_unconsumed_pending_row[send_sms]
+tests/unit/test_ag06_admin_actions.py::test_unsupported_retry_never_creates_an_unconsumed_pending_row[set_reminder]
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\backend\app\api\v1\endpoints\admin\actions.py:297: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    now = datetime.utcnow().isoformat()
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/unit/test_ag06_admin_actions.py::test_claim_after_old_status_read_cannot_be_reported_cancelled
+FAILED tests/unit/test_ag06_admin_actions.py::test_pending_legacy_send_audit_is_not_a_cancellable_execution_claim
+FAILED tests/unit/test_ag06_admin_actions.py::test_unsupported_retry_never_creates_an_unconsumed_pending_row[send_email]
+FAILED tests/unit/test_ag06_admin_actions.py::test_unsupported_retry_never_creates_an_unconsumed_pending_row[send_sms]
+FAILED tests/unit/test_ag06_admin_actions.py::test_unsupported_retry_never_creates_an_unconsumed_pending_row[set_reminder]
+5 failed, 6 warnings in 2.01s

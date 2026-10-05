@@ -1,0 +1,11 @@
+backend\tests\integration\test_ag06_dashboard_receipts.py:25:22: F811 Redefinition of unused `lead_db` from line 19
+   |
+24 | @pytest_asyncio.fixture
+25 | async def receipt_db(lead_db):
+   |                      ^^^^^^^ F811
+26 |     db = lead_db
+27 |     await db.admin.execute(f'GRANT SELECT,INSERT,UPDATE,DELETE ON assistant_actions TO "{db.role}"')
+   |
+   = help: Remove definition: `lead_db`
+
+Found 1 error.

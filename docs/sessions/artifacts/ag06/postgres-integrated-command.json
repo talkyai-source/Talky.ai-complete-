@@ -1,0 +1,19 @@
+{
+  "command": [
+    "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\backend\\.venv\\Scripts\\python.exe",
+    "-m",
+    "pytest",
+    "tests/integration/test_action_execution_receipts.py",
+    "tests/integration/test_ag05_lead_evidence.py",
+    "tests/integration/test_ag06_action_cancellation.py",
+    "tests/integration/test_ag06_crm_admission.py",
+    "tests/integration/test_ag06_dashboard_receipts.py",
+    "tests/integration/test_crm_deliveries.py",
+    "tests/integration/test_reminder_recipients.py",
+    "-q",
+    "--tb=short"
+  ],
+  "cwd": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\production-ready-20261004\\backend",
+  "module_count": 7,
+  "exit_code": 0
+}

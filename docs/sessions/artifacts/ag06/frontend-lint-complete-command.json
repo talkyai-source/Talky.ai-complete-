@@ -1,0 +1,18 @@
+[
+  "src/app/assistant/actions/page.tsx",
+  "src/app/assistant/page.tsx",
+  "src/components/assistant/action-history.test.tsx",
+  "src/components/assistant/action-history.tsx",
+  "src/components/assistant/action-receipts.test.tsx",
+  "src/components/assistant/edit-proposal-card.tsx",
+  "src/components/assistant/floating-assistant.tsx",
+  "src/components/assistant/voice-mode.tsx",
+  "src/components/calls/lead-details-panel.test.tsx",
+  "src/components/calls/lead-details-panel.tsx",
+  "src/lib/api-hooks.ts",
+  "src/lib/backend-api.assistant.test.ts",
+  "src/lib/backend-api.ts",
+  "src/lib/backend-endpoints.ts",
+  "src/lib/lead-details-api.ts",
+  "src/lib/models.ts"
+]

@@ -1,0 +1,41 @@
+✔ saved unknown actions expose their reference and preserve status filters without a resend control (1204.0057ms)
+✔ an unavailable history does not imply failed execution or an empty successful result (100.4309ms)
+✔ pagination follows the server total and does not claim a whole-history export (291.0482ms)
+✔ a completed callback receipt only proves queue handoff and a legacy completion never gains proof (2.7666ms)
+✔ all actual durable action states remain distinct in the frontend (18.1004ms)
+✔ an unknown provider result stays unresolved without an Apply or retry button (344.2867ms)
+✔ provider-accepted email is not presented as delivered (76.4121ms)
+✔ scheduled callback is not presented as a completed call (41.3771ms)
+✔ unknown receipt state takes precedence over an optimistic applied flag (8.3037ms)
+✔ status lookup uses the same proposal and cannot invoke Apply (423.0423ms)
+✔ a missing receipt after a lost response stays uncertain without inviting another submission (2.0573ms)
+✔ lead notes preserve negation and show review evidence separately from confirmed contacts (479.8501ms)
+✔ failed or historical analysis is not presented as a conversation with no captured facts (39.556ms)
+✔ CRM success and uncertain delivery remain separate for each provider (64.7746ms)
+✔ uncertain CRM delivery retains the original account and provider references for review (385.5372ms)
+✔ an empty awaiting_confirmation contact does not invent a caller refusal (96.2838ms)
+✔ an empty needs_clarification contact does not invent a caller refusal (73.5353ms)
+✔ an empty invalid contact does not invent a caller refusal (70.23ms)
+✔ an empty cancelled contact does not invent a caller refusal (62.0256ms)
+✔ an empty legacy contact does not invent a caller refusal (57.0584ms)
+✔ a parsed contact is visible without being labeled confirmed (50.2759ms)
+✔ manual removal is not labeled a verified contact (93.2603ms)
+✔ completed analysis does not hide partial transcript evidence (88.4765ms)
+✔ completed analysis does not hide failed transcript evidence (24.4931ms)
+✔ completed analysis does not hide unknown transcript evidence (23.0164ms)
+✔ the source revision and confirmation turn are separate evidence (103.925ms)
+✔ a contact with no calls does not show a transcript warning (12.6683ms)
+✔ incomplete legacy source metadata cannot hide the saved field or fabricate a revision (58.6749ms)
+✔ withdrawal evidence does not present the old confirmation as current (61.422ms)
+✔ a failed manual save keeps the original evidence visible and shows the error (459.036ms)
+✔ action history reads the actual actions envelope and retains an unknown result (1641.9089ms)
+✔ an invalid history envelope fails visibly instead of appearing as an empty success (15.3149ms)
+✔ unsupported generic plan, execution and blind retry clients are not exposed (22.3788ms)
+ℹ tests 33
+ℹ suites 0
+ℹ pass 33
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 30791.8305

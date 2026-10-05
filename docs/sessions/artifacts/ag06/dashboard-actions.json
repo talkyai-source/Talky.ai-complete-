@@ -1,0 +1,100 @@
+{
+  "scope": "AG06 dashboard assistant action account binding and durable outcome recovery",
+  "source_base": "71cdeefa",
+  "recorded_at": "2026-10-05T00:42:38.901158+00:00",
+  "source_state": "Owned AG06 sources frozen after 208 focused tests; parent owns final combined PostgreSQL acceptance and commit.",
+  "root_causes": [
+    "Email and calendar previews froze content but not stable external account identity; reconnecting the same connector row could change the effect destination.",
+    "Text and voice WebSocket Apply consumed the proposal and omitted the saved receipt/status; a lost response could only produce an expired/ask-again error.",
+    "Readonly historical completion status alone did not establish current confirmation evidence.",
+    "EmailService401 refresh on direct callers did not compare the refreshed external account with the initial account.",
+    "Reminder and workflow success did not explicitly distinguish acknowledged local scheduling/per-step proof from an inferred historical completion.",
+    "Calendar update/cancel validated the reviewed event before awaited connector resolution, allowing a concurrent local event/account edit to retain stale approval."
+  ],
+  "changes": [
+    "Server-only reviewed connector metadata is frozen by preview, stripped recursively from model arguments, and checked in existing services. Calendar event identity additionally includes recipients, state and reviewed content.",
+    "Support report sender is selected during review: pinned tenant provider or configured SMTP host/port/sender. Apply cannot change sender through fallback.",
+    "Current action permissions are rechecked after the durable claim and before invoking the effect service.",
+    "Both dashboard text and voice sockets support read-only proposal_status and recover consumed proposal receipts with the original actor/tenant/idempotency key.",
+    "Action list and actor-owned receipt GET expose allowlisted metadata/references only, with real filters/counts and no raw input/provider payload.",
+    "Durable row status remains separate from explicit saved success/confirmation; absent proof does not become confirmed completion. Provider acceptance is not delivery.",
+    "Shared executor preserves child_action_id when assigning the outer durable action ID.",
+    "Reminder confirmation now requires an acknowledged INSERT with a receipt ID. Workflow confirmation requires explicit proof for every executed step and a complete step-result inventory; skipped steps do not fabricate executed effects.",
+    "Safe action receipt references include reminder_id and plan_id. Scheduling acknowledgement is not reminder delivery.",
+    "Calendar update/cancel rereads the tenant-owned event after connector resolution and compares reviewed identity plus original account metadata before any effect."
+  ],
+  "verification": {
+    "initial_owned_tests": {
+      "failed": 4,
+      "passed": 0,
+      "meaning": "Missing reviewed identity input/preview data and receipt projection reproduced before implementation; no provider calls."
+    },
+    "focused": {
+      "passed": 208,
+      "failed": 0,
+      "log": "docs/sessions/artifacts/ag06/dashboard-actions-final.txt",
+      "command": "python -m pytest tests/unit/test_ag06_dashboard_actions.py tests/unit/test_calendar_delivery_contract.py tests/unit/test_communication_delivery_contract.py tests/unit/assistant/test_execution_repairs.py tests/unit/assistant/test_dispatch_authorization.py tests/unit/test_assistant_ws.py tests/unit/test_assistant_agent_service.py tests/unit/test_email_service.py tests/unit/test_meeting_service.py tests/unit/test_report_issue_tool.py tests/unit/assistant/test_proposal_atomic.py -q --disable-warnings tests/unit/test_reminder_recipient_resolution.py"
+    },
+    "postgres_initial": {
+      "passed": 5,
+      "failed": 0,
+      "schema": "Actual public migrated schema at0058_crm_contact_effect",
+      "role": "Synthetic per-test NOSUPERUSER NOBYPASSRLS",
+      "module": "backend/tests/integration/test_ag06_dashboard_receipts.py",
+      "evidence": "Direct tool stdout:5passed in7.01s; parent final aggregate must rerun after later proof-projection tightening. No original log file was captured."
+    },
+    "static": {
+      "ruff": "E9,F63,F7,F82 passed on owned app/tests",
+      "diff_check": "passed",
+      "log": "docs/sessions/artifacts/ag06/dashboard-actions-lint.txt"
+    },
+    "provider_calls": 0,
+    "customer_effects": 0,
+    "production_mutations": 0,
+    "calendar_race_before": {
+      "failed": 8,
+      "passed": 2,
+      "log": "docs/sessions/artifacts/ag06/calendar-admission-initial.txt",
+      "meaning": "Changed event/attendees/account or deleted meeting during awaited resolution wrongly admitted update/cancel; unchanged positive controls passed. Synthetic connectors only."
+    }
+  },
+  "acceptance_controls": [
+    "Account switch after review and during definite401 refresh blocks sends; original same-account send returns actual mocked provider acknowledgement.",
+    "Changed or unproved calendar account/event/attendees/state cannot use an old approval.",
+    "Forged direct or nested review markers are stripped; permission revocation after claim prevents entry to effect tool.",
+    "Text and voice socket response loss then repeat Apply/Check status causes one dispatch for completed/running/unknown outcomes.",
+    "Actor and tenant isolation on recovery; missing record never suggests another effect; pending/running/unknown remain fenced.",
+    "Concurrent real PostgreSQL claims admit one synthetic effect; worker-object restart does not resend; post-effect local receipt loss retains running/unknown fences.",
+    "Scoped real HTTP activity filters/counts and receipt lookup do not expose body/token or another actor-owned detail.",
+    "Missing/empty/error reminder INSERT acknowledgement cannot confirm scheduling; valid local receipt exposes reminder_id without claiming delivery.",
+    "Workflow proof requires every executed result to explicitly authorize confirmation; missing/false proof, no executed steps, and incomplete inventories cannot confirm completion.",
+    "Calendar edit/delete/original-account change during awaited connector resolution blocks update/cancel before action creation and provider effect; unchanged targets remain usable."
+  ],
+  "limitations": [
+    "No live connected account/provider/PSTN/browser delivery validation was performed in these backend tests.",
+    "Calendar records without stored stable original account identity remain unavailable for assistant update/cancel; reconnecting alone is not proof of historical event ownership.",
+    "Historical completed records without explicit confirmation evidence remain unverified.",
+    "Pending proposal previews are still process-local. A preview lost before any durable claim cannot be reconstructed as an approved effect.",
+    "No automatic retry or operator declaration of remote nonexecution was added. Unknown outcomes require original-account receipt inspection; code rollback does not undo remote effects.",
+    "Permission/account/source checks have an explicit admission boundary; subsequent external changes cannot be made atomic with a remote provider write."
+  ],
+  "owned_files": [
+    "backend/app/services/action_execution.py",
+    "backend/app/services/connector_resolver.py",
+    "backend/app/services/email_service.py",
+    "backend/app/services/meeting_service.py",
+    "backend/app/services/assistant_plan_steps.py",
+    "backend/app/infrastructure/assistant/tools/comms.py",
+    "backend/app/infrastructure/assistant/tools/meetings.py",
+    "backend/app/infrastructure/assistant/tools/dispatch.py",
+    "backend/app/api/v1/endpoints/assistant_ws.py",
+    "backend/app/api/v1/endpoints/assistant_voice_ws.py",
+    "backend/tests/unit/test_ag06_dashboard_actions.py",
+    "backend/tests/integration/test_ag06_dashboard_receipts.py",
+    "backend/tests/unit/test_calendar_delivery_contract.py",
+    "backend/tests/unit/test_communication_delivery_contract.py",
+    "backend/tests/unit/assistant/test_execution_repairs.py",
+    "backend/tests/unit/test_report_issue_tool.py",
+    "backend/app/infrastructure/assistant/tools/workflow.py"
+  ]
+}

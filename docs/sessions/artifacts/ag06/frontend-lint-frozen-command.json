@@ -1,0 +1,5 @@
+[
+  "src/components/assistant/action-history.test.tsx",
+  "src/components/assistant/action-history.tsx",
+  "src/components/assistant/action-receipts.test.tsx"
+]

@@ -1,0 +1,60 @@
+{"baseline_commit": "71cdeefa59a0f786f236d3a3d25ba592470ddf05", "cancel_reply": "cancelled", "receipt_status": "cancelled", "job_status": "queued", "synthetic_queue_submissions": 1}
+F
+================================== FAILURES ===================================
+__________ test_baseline_callback_cancellation_during_queue_handoff ___________
+
+cancel_db = namespace(admin=<asyncpg.connection.Connection object at 0x000001D420857980>, pool=<asyncpg.pool.Pool object at 0x0000...ace(pool=<asyncpg.pool.Pool object at 0x000001D41DF7E090>), actor=namespace(id='790803d7-3470-42e3-818e-ab4716be44bf'))
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001D4209CC230>
+
+    async def test_baseline_callback_cancellation_during_queue_handoff(cancel_db, monkeypatch):
+        db = cancel_db
+        callbacks = original("backend/app/services/voice_callback_service.py", "app.services.ag06_baseline_callback")
+        admin = original("backend/app/api/v1/endpoints/admin/actions.py", "app.api.v1.endpoints.admin.ag06_baseline_actions")
+        monkeypatch.setattr(postgres_adapter, "_DATABASE_URL", os.environ["TEST_DATABASE_URL"])
+        action, _ = await seed_action(db, callback=True)
+        entered, release = asyncio.Event(), asyncio.Event()
+        jobs = []
+
+        async def publish(job, **_kwargs):
+            jobs.append(job.job_id)
+            entered.set()
+            await release.wait()
+            return True
+
+        queue = SimpleNamespace(schedule_job_once=publish, confirm_retry_once=AsyncMock())
+        worker = asyncio.create_task(callbacks.drain_voice_callbacks(db.pool, queue))
+        try:
+            await asyncio.wait_for(entered.wait(), timeout=5)
+            set_bypass_rls(True)  # Existing platform-admin adapter context; local test DB only.
+            result = await admin.cancel_action(str(action), db.actor, postgres_adapter.Client(db.pool))
+        finally:
+            set_bypass_rls(False)
+            release.set()
+            await asyncio.wait_for(worker, timeout=5)
+        receipt = await db.admin.fetchval("SELECT status FROM assistant_actions WHERE id=$1", action)
+        job_status = await db.admin.fetchval("SELECT status FROM dialer_jobs WHERE id=$1::uuid", jobs[0])
+        print(json.dumps({"baseline_commit": BASELINE, "cancel_reply": result["new_status"],
+                          "receipt_status": receipt, "job_status": job_status, "synthetic_queue_submissions": len(jobs)}))
+>       assert not (result["new_status"] == "cancelled" and job_status == "queued"), "Cancellation was falsely reported after dispatch reservation"
+E       AssertionError: Cancellation was falsely reported after dispatch reservation
+E       assert not ('cancelled' == 'cancelled'
+E           cancelled and 'queued' == 'queued'
+E           queued)
+
+..\docs\sessions\artifacts\ag06\callback-race-baseline.py:60: AssertionError
+============================== warnings summary ===============================
+app\api\v1\endpoints\admin\health\_shared.py:16
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\backend\app\api\v1\endpoints\admin\health\_shared.py:16: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    _server_start_time = datetime.utcnow()
+
+::test_baseline_callback_cancellation_during_queue_handoff
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\backend\.venv\Lib\site-packages\pydantic\main.py:250: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+
+::test_baseline_callback_cancellation_during_queue_handoff
+  backend/app/api/v1/endpoints/admin/actions.py:362: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED ::test_baseline_callback_cancellation_during_queue_handoff - Assertion...
+1 failed, 3 warnings in 3.10s

@@ -1,0 +1,10 @@
+..............F.                                                         [100%]
+================================== FAILURES ===================================
+_ test_lead_crm_projection_uses_requested_call_or_latest_lead_call_and_tenant _
+tests\integration\test_crm_deliveries.py:340: in test_lead_crm_projection_uses_requested_call_or_latest_lead_call_and_tenant
+    assert all(set(row) == {'provider', 'status', 'attempts', 'updated_at'} and row['updated_at'] for row in latest)
+E   assert False
+E    +  where False = all(<generator object test_lead_crm_projection_uses_requested_call_or_latest_lead_call_and_tenant.<locals>.<genexpr> at 0x00000174C567F920>)
+=========================== short test summary info ===========================
+FAILED tests/integration/test_crm_deliveries.py::test_lead_crm_projection_uses_requested_call_or_latest_lead_call_and_tenant
+1 failed, 15 passed in 6.65s
