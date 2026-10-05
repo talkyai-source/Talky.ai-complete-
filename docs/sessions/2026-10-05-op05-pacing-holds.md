@@ -10,7 +10,7 @@ Validation:
 
 - **150 unit checks passed** across 12 modules, with 210 existing datetime warnings, using the actual queue implementation over FakeRedis. Existing positive call admission, guard ordering, genuine retry and original-payload recovery controls remain included.
 - **10 actual PostgreSQL checks passed**, zero skips, with 20 existing warnings, on disposable public migration head 0061. For each of the five branches, they prove the exact database/Redis due time and original attempt, plus real UPDATE-denial retention followed by successful permission-restored retry. Unique NOBYPASSRLS fixture roles and only their synthetic rows were cleaned. No provider effect occurred.
-- Scoped CI Ruff F rules and whitespace checks passed. Independent read review found no material defect; it did not run the tests.
+- Final scoped CI Ruff F rules and whitespace checks passed. The first lint invocation found a fixture-import shadowing warning; its log is retained in `ruff.txt`. The fixture now uses its module export, preserving the actual fixture behavior. Independent read review found no material defect; it did not run the tests.
 
 The first regression invocation named a nonexistent test module and ran no tests; `regression.txt` retains the invocation error. The next run found three old guard-ordering assertions expecting `schedule_retry`; `regression-final.txt` retains that result. The corrected fixtures assert the same no-guard-before-pacing rule and the new same-attempt helper, while also asserting no attempted-call retry. Final output is [regression-corrected.txt](artifacts/op05-pacing/regression-corrected.txt), database output is [postgres.txt](artifacts/op05-pacing/postgres.txt).
 

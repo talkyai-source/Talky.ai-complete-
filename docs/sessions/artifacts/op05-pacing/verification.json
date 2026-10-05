@@ -1,0 +1,31 @@
+{
+  "source_commit": "9b69d34433edd1cf4a2e456fc864126e8d7495ae",
+  "fixture_followup_commit": "aabd22f83a7c648499a34e8abad72c850dac5cb8",
+  "source_sha256_lf": {
+    "backend/app/workers/dialer_worker.py": "5197c66cae7a057e96bced594fe968b87d6e46dea1d80fa4ff2a04b19bf2299e",
+    "backend/tests/unit/test_op05_pacing_holds.py": "f069ad7884ed19dfde01c13d3a725dbd0e2d0d9b95d69b849be8578d457d7816",
+    "backend/tests/unit/test_dialer_worker_guard_ordering.py": "5e2347465ed7a10f79457851ca226bd26b23e88e936801e07c3801eaf33af92f",
+    "backend/tests/integration/test_op05_pacing_holds.py": "83f3f6292ff97a42f7e84ce891cff6b8392e97628c9c9b9137ed8ecdfd32f234"
+  },
+  "unit": {
+    "passed": 150,
+    "skipped": 0,
+    "modules": 12,
+    "warnings": 210
+  },
+  "postgres": {
+    "passed": 10,
+    "skipped": 0,
+    "warnings": 20,
+    "migration_head": "0061_dnc_runtime_contract",
+    "environment": "Disposable loopback cp04_acceptance_test; actual PostgreSQL, FakeRedis, provider spies"
+  },
+  "review": "Independent audio audit read review; no material defect or independent execution claim.",
+  "limits": [
+    "No standalone Redis recovery proof",
+    "No provider/PBX/audio acceptance",
+    "No post-intent retry policy change",
+    "Uncertain-owner reconciliation remains open",
+    "No package closure or push"
+  ]
+}
