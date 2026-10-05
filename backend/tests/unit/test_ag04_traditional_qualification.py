@@ -25,9 +25,28 @@ async def offline_only():
 
 def test_inventory_is_input_declared_and_not_inferred_from_successful_runs():
     rows = case_inventory(ROOT)
-    assert len(rows) == 124
-    assert len({(r["scenario_id"], r["profile"]["provider"]) for r in rows}) == 124
-    assert len({r["scenario_id"] for r in rows}) == 31  # repetitions are not new human scenarios
+    assert len(rows) == 128
+    assert len({(r["scenario_id"], r["profile"]["provider"]) for r in rows}) == 128
+    assert len({r["scenario_id"] for r in rows}) == 32  # repetitions are not new human scenarios
+
+
+@pytest.mark.parametrize("provider", ["groq", "cerebras", "openai", "gemini"])
+async def test_accepted_email_is_not_delivered_and_followup_does_not_resend(provider):
+    data = _load(ROOT)
+    case = next(c for c in data["cases"] if c["id"] == "ag04.accepted_not_delivered")
+    spec = next(p for p in data["profiles"] if p["provider"] == provider)
+    row = await _run_case(ROOT, data, case, spec)
+    assert all(c["pass"] for c in row["findings"]["control"]), row["findings"]["control"]
+    assert row["raw_output"][0] == "The email was delivered to your inbox."
+    assert row["turns"][0]["submitted_speech"] == [
+        "The provider accepted it for sending, but I can't confirm delivery."]
+    assert row["turns"][1]["submitted_speech"] == [case["turns"][1]["chunks"][0]]
+    assert len(row["effects"]["attempts"]) == row["effects"]["accepted"] == 1
+    receipt = row["effects"]["attempts"][0]["receipt"]
+    assert receipt["message_id"] == "synthetic-remote-accepted-1"
+    assert receipt["provider"] == "synthetic-email" and receipt["status"] == "provider_accepted"
+    assert row["effects"]["recorded_results"]["send_email"] == receipt
+    assert row["findings"]["semantic"][0]["status"] == "unreviewed"
 
 
 @pytest.mark.parametrize("provider", ["groq", "cerebras", "openai", "gemini"])

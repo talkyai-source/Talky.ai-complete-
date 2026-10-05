@@ -27,7 +27,7 @@ async def test_declared_corpus_runs_actual_native_boundaries_without_network(mon
     inventory = native.case_inventory(ROOT)
     keys = lambda items: {(r["scenario_id"], r["profile"]["provider"]) for r in items}
     assert keys(rows) == keys(inventory)
-    assert len(rows) == len(inventory) == 66  # 33 controls, two parser implementations.
+    assert len(rows) == len(inventory) == 78  # 39 controls, two parser implementations.
     failed = [(row["scenario_id"], row["profile"]["provider"], finding)
         for row in rows for finding in row["findings"]["control"] if finding["pass"] is not True]
     assert not failed, json.dumps(failed, indent=2)
@@ -215,3 +215,97 @@ async def test_historical_dnc_recollection_has_no_current_optout_or_close_author
     assert row["end"]["dnc_flag"] is False and row["end"]["shutdown_count"] == 0
     assert row["effects"]["tool_results"][0]["status"] == "caller_intent_unconfirmed"
     assert row["submitted_speech"] == ["What would you like to know about our opening hours?"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("provider", ["openai", "xai"])
+async def test_accepted_email_receipt_blocks_delivery_claim_and_repairs_without_resend(provider):
+    corpus = native._corpus(ROOT)
+    case = next(c for c in corpus["scenarios"] if c["id"] == "native.accepted_not_delivered")
+    row = await native.NativeReplay(case, provider, corpus).run()
+    assert all(c["pass"] for c in row["findings"]["control"]), row["findings"]["control"]
+    assert row["raw_output"][0]["text"] == "The email was delivered to your inbox."
+    honest = "The provider accepted the email for sending, but I can't confirm delivery."
+    assert row["submitted_speech"] == [honest]
+    assert len(row["media"]["submissions"]) == 1
+    assert all(turn["content"] != row["raw_output"][0]["text"] for turn in row["history"])
+    attempts = row["effects"]["executor_attempts"]
+    assert len(attempts) == row["effects"]["accepted"] == 1
+    receipt = attempts[0]["receipt"]
+    assert receipt["message_id"] == "synthetic-remote-accepted-1"
+    assert receipt["provider"] == "synthetic-email" and receipt["status"] == "provider_accepted"
+    assert row["effects"]["recorded_results"]["send_email"] == receipt
+    assert row["effects"]["tool_results"] == [receipt]
+    assert "send_email" in row["requests"][0]["tool_names"]
+    assert row["observed"]["repair_requests"] == 1
+    assert row["provenance"]["provider_calls"] == 0
+    assert all(f["status"] == "unreviewed" for f in row["findings"]["semantic"])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("provider", ["openai", "xai"])
+@pytest.mark.parametrize("receipt", ["completed", "stale", "unknown", "transmitted", "interrupted"])
+async def test_phone_suffix_correction_requires_new_owned_readback_and_confirmation(provider, receipt):
+    import hashlib
+
+    corpus = native._corpus(ROOT)
+    case = next(c for c in corpus["scenarios"] if c["id"] == "native.phone_digit_correction_" + receipt)
+    row = await native.NativeReplay(case, provider, corpus).run()
+    assert all(c["pass"] for c in row["findings"]["control"]), row["findings"]["control"]
+    checkpoints = {c["id"]: c["contacts"]["phone"] for c in row["contact_checkpoints"]}
+    old = checkpoints["old-confirmed"]
+    assert old["value"] == "+14155552671" and old["confirmed"] is True
+    assert old["value_source"]["provider_item_id"] == "phone-source"
+    assert old["confirmation_source"]["provider_item_id"] == "old-confirmation"
+    assert old["readback"]["utterance_id"] == "rt-1"
+    expected_source = {"provider_item_id": "phone-correction", "caller_turn_order": 3,
+        "revision_sha256": hashlib.sha256(b"Actually, the last four digits should be 1234.").hexdigest()}
+    for name in ("corrected", "old-final-ignored", "bare-yes-without-new-readback"):
+        contact = checkpoints[name]
+        assert contact["value"] == "+14155551234" and contact["confirmed"] is False
+        assert contact["value_source"] == expected_source
+        assert contact["confirmation_source"] is None and contact["readback"] is None
+    final = row["contacts"]["phone"]
+    assert final == checkpoints["final"] and final["value_source"] == expected_source
+    assert row["media"]["receipts"][0]["utterance_id"] == "rt-1"
+    assert row["media"]["receipts"][0]["evidence"] == "transport_played"
+    if receipt == "completed":
+        assert final["confirmed"] is True and final["capture_status"] == "confirmed"
+        assert final["confirmation_source"] == {"provider_item_id": "new-confirmation", "caller_turn_order": 5,
+            "revision_sha256": hashlib.sha256(b"Yes.").hexdigest()}
+        assert final["readback"] == {"utterance_id": "rt-2", "status": "completed", "evidence": "transport_played"}
+    else:
+        assert final["confirmed"] is False and final["capture_status"] == "awaiting_confirmation"
+        assert final["confirmation_source"] is None and final["readback"] is None
+        # The earlier completed old-number readback remains historical only.
+        assert row["submitted_speech"] == ["Your phone number is +1 415 555 2671, correct?"]
+        if receipt == "interrupted":
+            assert len(row["media"]["receipts"]) == 1
+            assert row["media"]["truncate_events"]
+            assert any(turn.get("metadata", {}).get("delivery", {}).get("status") == "interrupted"
+                       for turn in row["history"])
+        elif receipt == "stale":
+            assert row["media"]["receipts"][1]["utterance_id"] != "rt-2"
+        else:
+            assert row["media"]["receipts"][1]["evidence"] == receipt
+    assert row["effects"]["executor_attempts"] == []
+    assert row["provenance"]["provider_calls"] == 0
+    assert all(f["status"] == "unreviewed" for f in row["findings"]["semantic"])
+
+
+@pytest.mark.asyncio
+async def test_missing_phone_checkpoint_fails_common_control_even_when_final_value_is_correct():
+    from copy import deepcopy
+
+    corpus = native._corpus(ROOT)
+    case = deepcopy(next(c for c in corpus["scenarios"]
+                         if c["id"] == "native.phone_digit_correction_completed"))
+    for step in case["steps"]:
+        if step.get("checkpoint") == "old-final-ignored":
+            del step["checkpoint"]
+    row = await native.NativeReplay(case, "openai", corpus).run()
+    assert row["contacts"]["phone"]["value"] == "+14155551234"
+    assert row["contacts"]["phone"]["confirmed"] is True
+    checks = [check for check in row["findings"]["control"]
+              if check["id"].startswith("contact:old-final-ignored:")]
+    assert checks and all(check["pass"] is False for check in checks)

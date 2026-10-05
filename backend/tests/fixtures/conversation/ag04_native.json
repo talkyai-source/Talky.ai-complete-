@@ -340,11 +340,19 @@
     },
     {
       "id": "native.dnc_failed_receipt",
-      "semantic_ids": ["ag04.explicit_dnc_close"],
+      "semantic_ids": [
+        "ag04.explicit_dnc_close"
+      ],
       "dnc_acknowledgement": false,
       "steps": [
-        {"kind": "caller", "text": "Please stop calling me."},
-        {"kind": "response", "text": "Your do-not-call request was saved. Goodbye."}
+        {
+          "kind": "caller",
+          "text": "Please stop calling me."
+        },
+        {
+          "kind": "response",
+          "text": "Your do-not-call request was saved. Goodbye."
+        }
       ],
       "expect": {
         "dnc": true,
@@ -359,11 +367,19 @@
     },
     {
       "id": "native.dnc_unknown_receipt",
-      "semantic_ids": ["ag04.dnc_with_question"],
+      "semantic_ids": [
+        "ag04.dnc_with_question"
+      ],
       "dnc_acknowledgement": null,
       "steps": [
-        {"kind": "caller", "text": "Do not call me again, but first I need help with my account."},
-        {"kind": "response", "text": "You have been removed from our calling list. How can I help?"}
+        {
+          "kind": "caller",
+          "text": "Do not call me again, but first I need help with my account."
+        },
+        {
+          "kind": "response",
+          "text": "You have been removed from our calling list. How can I help?"
+        }
       ],
       "expect": {
         "dnc": true,
@@ -1001,6 +1017,605 @@
           "caller_intent_unconfirmed"
         ],
         "submissions": 1
+      }
+    },
+    {
+      "id": "native.accepted_not_delivered",
+      "semantic_ids": [
+        "ag04.accepted_not_delivered"
+      ],
+      "synthetic_action_results": {
+        "send_email": {
+          "success": true,
+          "status": "provider_accepted",
+          "confirmation_allowed": true,
+          "message": "The provider accepted the email for sending. Recipient delivery is unconfirmed.",
+          "provider": "synthetic-email",
+          "message_id": "synthetic-remote-accepted-1"
+        }
+      },
+      "steps": [
+        {
+          "kind": "caller",
+          "item": "email-request",
+          "text": "Please send the email to me."
+        },
+        {
+          "kind": "tool",
+          "name": "send_email",
+          "arguments": {}
+        },
+        {
+          "kind": "response",
+          "text": "The email was delivered to your inbox."
+        },
+        {
+          "kind": "response",
+          "text": "The provider accepted the email for sending, but I can't confirm delivery."
+        }
+      ],
+      "expect": {
+        "submissions": 1,
+        "repair_requests": 1,
+        "shutdowns": 0,
+        "effect_attempts": 1,
+        "accepted_actions": 1,
+        "tool_statuses": [
+          "provider_accepted"
+        ],
+        "llm_controls": [
+          "The provider accepted the email for sending, but I can't confirm delivery."
+        ],
+        "action_message_ids": {
+          "send_email": "synthetic-remote-accepted-1"
+        }
+      }
+    },
+    {
+      "id": "native.phone_digit_correction_completed",
+      "semantic_ids": [
+        "ag04.phone_digit_correction"
+      ],
+      "steps": [
+        {
+          "kind": "caller",
+          "item": "phone-source",
+          "text": "My phone number is +1 415 555 2671."
+        },
+        {
+          "kind": "response",
+          "text": "Your phone number is +1 415 555 2671, correct?"
+        },
+        {
+          "kind": "caller",
+          "item": "old-confirmation",
+          "text": "Yes.",
+          "checkpoint": "old-confirmed"
+        },
+        {
+          "kind": "caller",
+          "item": "phone-correction",
+          "text": "Actually, the last four digits should be 1234.",
+          "checkpoint": "corrected"
+        },
+        {
+          "kind": "caller",
+          "item": "old-confirmation",
+          "revision": true,
+          "text": "Yes, that is correct.",
+          "checkpoint": "old-final-ignored"
+        },
+        {
+          "kind": "caller",
+          "item": "stale-yes",
+          "text": "Yes.",
+          "checkpoint": "bare-yes-without-new-readback"
+        },
+        {
+          "kind": "response",
+          "text": "Your phone number is +1 415 555 1234, correct?",
+          "receipt": "completed"
+        },
+        {
+          "kind": "caller",
+          "item": "new-confirmation",
+          "text": "Yes.",
+          "checkpoint": "final"
+        }
+      ],
+      "expect": {
+        "phone": "+14155551234",
+        "phone_confirmed": true,
+        "shutdowns": 0,
+        "effect_attempts": 0,
+        "accepted_actions": 0
+      },
+      "contact_checkpoint_expectations": {
+        "old-confirmed": {
+          "phone": {
+            "value": "+14155552671",
+            "confirmed": true
+          }
+        },
+        "corrected": {
+          "phone": {
+            "value": "+14155551234",
+            "confirmed": false,
+            "value_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "confirmation_source": null,
+            "readback": null
+          }
+        },
+        "old-final-ignored": {
+          "phone": {
+            "value": "+14155551234",
+            "confirmed": false,
+            "value_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "confirmation_source": null,
+            "readback": null
+          }
+        },
+        "bare-yes-without-new-readback": {
+          "phone": {
+            "value": "+14155551234",
+            "confirmed": false,
+            "value_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "confirmation_source": null,
+            "readback": null
+          }
+        }
+      }
+    },
+    {
+      "id": "native.phone_digit_correction_stale",
+      "semantic_ids": [
+        "ag04.phone_digit_correction"
+      ],
+      "steps": [
+        {
+          "kind": "caller",
+          "item": "phone-source",
+          "text": "My phone number is +1 415 555 2671."
+        },
+        {
+          "kind": "response",
+          "text": "Your phone number is +1 415 555 2671, correct?"
+        },
+        {
+          "kind": "caller",
+          "item": "old-confirmation",
+          "text": "Yes.",
+          "checkpoint": "old-confirmed"
+        },
+        {
+          "kind": "caller",
+          "item": "phone-correction",
+          "text": "Actually, the last four digits should be 1234.",
+          "checkpoint": "corrected"
+        },
+        {
+          "kind": "caller",
+          "item": "old-confirmation",
+          "revision": true,
+          "text": "Yes, that is correct.",
+          "checkpoint": "old-final-ignored"
+        },
+        {
+          "kind": "caller",
+          "item": "stale-yes",
+          "text": "Yes.",
+          "checkpoint": "bare-yes-without-new-readback"
+        },
+        {
+          "kind": "response",
+          "text": "Your phone number is +1 415 555 1234, correct?",
+          "receipt": "stale"
+        },
+        {
+          "kind": "caller",
+          "item": "new-confirmation",
+          "text": "Yes.",
+          "checkpoint": "final"
+        }
+      ],
+      "expect": {
+        "phone": "+14155551234",
+        "phone_confirmed": false,
+        "shutdowns": 0,
+        "effect_attempts": 0,
+        "accepted_actions": 0
+      },
+      "contact_checkpoint_expectations": {
+        "old-confirmed": {
+          "phone": {
+            "value": "+14155552671",
+            "confirmed": true
+          }
+        },
+        "corrected": {
+          "phone": {
+            "value": "+14155551234",
+            "confirmed": false,
+            "value_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "confirmation_source": null,
+            "readback": null
+          }
+        },
+        "old-final-ignored": {
+          "phone": {
+            "value": "+14155551234",
+            "confirmed": false,
+            "value_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "confirmation_source": null,
+            "readback": null
+          }
+        },
+        "bare-yes-without-new-readback": {
+          "phone": {
+            "value": "+14155551234",
+            "confirmed": false,
+            "value_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "confirmation_source": null,
+            "readback": null
+          }
+        }
+      }
+    },
+    {
+      "id": "native.phone_digit_correction_unknown",
+      "semantic_ids": [
+        "ag04.phone_digit_correction"
+      ],
+      "steps": [
+        {
+          "kind": "caller",
+          "item": "phone-source",
+          "text": "My phone number is +1 415 555 2671."
+        },
+        {
+          "kind": "response",
+          "text": "Your phone number is +1 415 555 2671, correct?"
+        },
+        {
+          "kind": "caller",
+          "item": "old-confirmation",
+          "text": "Yes.",
+          "checkpoint": "old-confirmed"
+        },
+        {
+          "kind": "caller",
+          "item": "phone-correction",
+          "text": "Actually, the last four digits should be 1234.",
+          "checkpoint": "corrected"
+        },
+        {
+          "kind": "caller",
+          "item": "old-confirmation",
+          "revision": true,
+          "text": "Yes, that is correct.",
+          "checkpoint": "old-final-ignored"
+        },
+        {
+          "kind": "caller",
+          "item": "stale-yes",
+          "text": "Yes.",
+          "checkpoint": "bare-yes-without-new-readback"
+        },
+        {
+          "kind": "response",
+          "text": "Your phone number is +1 415 555 1234, correct?",
+          "receipt": "unknown"
+        },
+        {
+          "kind": "caller",
+          "item": "new-confirmation",
+          "text": "Yes.",
+          "checkpoint": "final"
+        }
+      ],
+      "expect": {
+        "phone": "+14155551234",
+        "phone_confirmed": false,
+        "shutdowns": 0,
+        "effect_attempts": 0,
+        "accepted_actions": 0
+      },
+      "contact_checkpoint_expectations": {
+        "old-confirmed": {
+          "phone": {
+            "value": "+14155552671",
+            "confirmed": true
+          }
+        },
+        "corrected": {
+          "phone": {
+            "value": "+14155551234",
+            "confirmed": false,
+            "value_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "confirmation_source": null,
+            "readback": null
+          }
+        },
+        "old-final-ignored": {
+          "phone": {
+            "value": "+14155551234",
+            "confirmed": false,
+            "value_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "confirmation_source": null,
+            "readback": null
+          }
+        },
+        "bare-yes-without-new-readback": {
+          "phone": {
+            "value": "+14155551234",
+            "confirmed": false,
+            "value_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "confirmation_source": null,
+            "readback": null
+          }
+        }
+      }
+    },
+    {
+      "id": "native.phone_digit_correction_transmitted",
+      "semantic_ids": [
+        "ag04.phone_digit_correction"
+      ],
+      "steps": [
+        {
+          "kind": "caller",
+          "item": "phone-source",
+          "text": "My phone number is +1 415 555 2671."
+        },
+        {
+          "kind": "response",
+          "text": "Your phone number is +1 415 555 2671, correct?"
+        },
+        {
+          "kind": "caller",
+          "item": "old-confirmation",
+          "text": "Yes.",
+          "checkpoint": "old-confirmed"
+        },
+        {
+          "kind": "caller",
+          "item": "phone-correction",
+          "text": "Actually, the last four digits should be 1234.",
+          "checkpoint": "corrected"
+        },
+        {
+          "kind": "caller",
+          "item": "old-confirmation",
+          "revision": true,
+          "text": "Yes, that is correct.",
+          "checkpoint": "old-final-ignored"
+        },
+        {
+          "kind": "caller",
+          "item": "stale-yes",
+          "text": "Yes.",
+          "checkpoint": "bare-yes-without-new-readback"
+        },
+        {
+          "kind": "response",
+          "text": "Your phone number is +1 415 555 1234, correct?",
+          "receipt": "transmitted"
+        },
+        {
+          "kind": "caller",
+          "item": "new-confirmation",
+          "text": "Yes.",
+          "checkpoint": "final"
+        }
+      ],
+      "expect": {
+        "phone": "+14155551234",
+        "phone_confirmed": false,
+        "shutdowns": 0,
+        "effect_attempts": 0,
+        "accepted_actions": 0
+      },
+      "contact_checkpoint_expectations": {
+        "old-confirmed": {
+          "phone": {
+            "value": "+14155552671",
+            "confirmed": true
+          }
+        },
+        "corrected": {
+          "phone": {
+            "value": "+14155551234",
+            "confirmed": false,
+            "value_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "confirmation_source": null,
+            "readback": null
+          }
+        },
+        "old-final-ignored": {
+          "phone": {
+            "value": "+14155551234",
+            "confirmed": false,
+            "value_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "confirmation_source": null,
+            "readback": null
+          }
+        },
+        "bare-yes-without-new-readback": {
+          "phone": {
+            "value": "+14155551234",
+            "confirmed": false,
+            "value_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "confirmation_source": null,
+            "readback": null
+          }
+        }
+      }
+    },
+    {
+      "id": "native.phone_digit_correction_interrupted",
+      "semantic_ids": [
+        "ag04.phone_digit_correction"
+      ],
+      "steps": [
+        {
+          "kind": "caller",
+          "item": "phone-source",
+          "text": "My phone number is +1 415 555 2671."
+        },
+        {
+          "kind": "response",
+          "text": "Your phone number is +1 415 555 2671, correct?"
+        },
+        {
+          "kind": "caller",
+          "item": "old-confirmation",
+          "text": "Yes.",
+          "checkpoint": "old-confirmed"
+        },
+        {
+          "kind": "caller",
+          "item": "phone-correction",
+          "text": "Actually, the last four digits should be 1234.",
+          "checkpoint": "corrected"
+        },
+        {
+          "kind": "caller",
+          "item": "old-confirmation",
+          "revision": true,
+          "text": "Yes, that is correct.",
+          "checkpoint": "old-final-ignored"
+        },
+        {
+          "kind": "caller",
+          "item": "stale-yes",
+          "text": "Yes.",
+          "checkpoint": "bare-yes-without-new-readback"
+        },
+        {
+          "kind": "response",
+          "text": "Your phone number is +1 415 555 1234, correct?",
+          "block": "send",
+          "wait": false
+        },
+        {
+          "kind": "wait_gateway"
+        },
+        {
+          "kind": "start",
+          "item": "new-confirmation"
+        },
+        {
+          "kind": "release"
+        },
+        {
+          "kind": "caller",
+          "item": "new-confirmation",
+          "revision": true,
+          "text": "Yes.",
+          "checkpoint": "final"
+        }
+      ],
+      "expect": {
+        "phone": "+14155551234",
+        "phone_confirmed": false,
+        "shutdowns": 0,
+        "effect_attempts": 0,
+        "accepted_actions": 0
+      },
+      "contact_checkpoint_expectations": {
+        "old-confirmed": {
+          "phone": {
+            "value": "+14155552671",
+            "confirmed": true
+          }
+        },
+        "corrected": {
+          "phone": {
+            "value": "+14155551234",
+            "confirmed": false,
+            "value_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "confirmation_source": null,
+            "readback": null
+          }
+        },
+        "old-final-ignored": {
+          "phone": {
+            "value": "+14155551234",
+            "confirmed": false,
+            "value_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "confirmation_source": null,
+            "readback": null
+          }
+        },
+        "bare-yes-without-new-readback": {
+          "phone": {
+            "value": "+14155551234",
+            "confirmed": false,
+            "value_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "confirmation_source": null,
+            "readback": null
+          }
+        }
       }
     }
   ],

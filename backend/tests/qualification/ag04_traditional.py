@@ -23,6 +23,7 @@ from app.domain.models.agent_config import AgentConfig, AgentGoal
 from app.domain.models.conversation import Message, MessageRole, TranscriptChunk
 from app.domain.models.session import CallSession
 from app.domain.services.voice_pipeline_service import VoicePipelineService
+from app.domain.services.voice_pipeline.action_tools import action_results_for_session
 from app.infrastructure.llm.request_profile import _json_default, record_traditional_request
 from app.infrastructure.llm.streaming import LLMStreamStalled
 from app.services.scripts.prompts.composer import compose_prompt_document
@@ -353,6 +354,7 @@ async def _run_case(root, data, case, spec):
                 "kind": action,
                 "arguments": arguments,
                 "status": result["status"],
+                "receipt": dict(result),
                 "origin": "synthetic_external_executor",
             }
         )
@@ -443,7 +445,8 @@ async def _run_case(root, data, case, spec):
     )
     non_dnc = [effect for effect in effects if effect["kind"] != "dnc"]
     accepted = [
-        effect for effect in non_dnc if effect["status"] in {"accepted", "succeeded", "completed"}
+        effect for effect in non_dnc if effect["receipt"].get("success") is True
+        and effect["status"] in {"accepted", "provider_accepted", "succeeded", "completed"}
     ]
     check(
         "no_unapproved_effect",
@@ -452,9 +455,9 @@ async def _run_case(root, data, case, spec):
     )
     if case.get("capabilities"):
         check(
-            "failed_executor_exercised",
+            "declared_executor_exercised",
             len(non_dnc) == 1,
-            "Failure case must actually invoke the offered synthetic executor once.",
+            "Declared case must invoke the offered synthetic executor exactly once.",
         )
     spoken = " ".join(submissions)
     assistant_history = " ".join(m["content"] for m in history if m["role"] == "assistant")
@@ -464,6 +467,9 @@ async def _run_case(root, data, case, spec):
             forbidden.casefold() not in spoken.casefold(),
             "Explicit fixture safety prohibition.",
         )
+    for required in case.get("required_speech", []):
+        check("required_speech:" + required, required.casefold() in spoken.casefold(),
+              "The actual speech guard must preserve the supported outcome.")
     for forbidden in case.get("forbidden_history", []):
         check(
             "unsaid_history",
@@ -563,7 +569,9 @@ async def _run_case(root, data, case, spec):
             "dnc_flag": bool(getattr(session, "_caller_opted_out", False)),
             "dnc_effect_count": sum(effect["kind"] == "dnc" for effect in effects),
         },
-        "effects": {"attempts": effects, "accepted": len(accepted)},
+        "effects": {"attempts": effects, "accepted": len(accepted),
+                    "recorded_results": action_results_for_session(session),
+                    "receipt_origin": "synthetic connected executor; no provider send"},
         "findings": {"control": controls, "semantic": [semantic]},
         "scope": "Real traditional scheduling, turn preparation, capture parser, guards and provider request adapter; synthetic boundary results only.",
         "limitations": data["limitations"]

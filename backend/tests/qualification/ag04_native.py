@@ -13,11 +13,12 @@ import json
 from dataclasses import asdict
 from pathlib import Path
 from types import SimpleNamespace
+from contextlib import ExitStack
 from unittest.mock import patch
 from uuid import uuid4
 
 from app.domain.services.transcript_service import TranscriptService
-from app.domain.services.voice_pipeline.action_tools import action_tool_system_addendum
+from app.domain.services.voice_pipeline.action_tools import action_results_for_session, action_tool_system_addendum
 from app.realtime.bridge import RealtimeBridge
 from app.realtime.openai import OpenAIRealtimeSession, knowledge_lookup_tool
 from app.realtime.prompt_config import prepare_realtime_prompt
@@ -46,11 +47,8 @@ class FixtureGateway:
     playback_evidence = "transport_played"
 
     def __init__(self, config):
-        self.config = config
-        if config.get("receipt", "completed") not in {"completed", "stale", "unknown", "transmitted"}:
-            raise ValueError("Unknown synthetic playback receipt")
-        if config.get("receipt") == "transmitted":
-            self.playback_evidence = "transmitted"
+        self.config = dict(config)
+        self.set_receipt(config.get("receipt", "completed"))
         self.submissions = []
         self.receipts = []
         self.controls = []
@@ -61,6 +59,20 @@ class FixtureGateway:
         self.release = asyncio.Event()
         self.queue = asyncio.Queue()
         self.blocked = False
+
+    def set_receipt(self, kind):
+        if kind not in {"completed", "stale", "unknown", "transmitted"}:
+            raise ValueError("Unknown synthetic playback receipt")
+        self.config["receipt"] = kind
+        self.playback_evidence = "transmitted" if kind == "transmitted" else "transport_played"
+
+    def block_next(self, phase):
+        if phase not in {"send", "finish"}:
+            raise ValueError("Unknown synthetic playback block")
+        self.config["block"] = phase
+        self.blocked = False
+        self.entered.clear()
+        self.release.clear()
 
     def set_realtime_output(self, *args):
         pass
@@ -90,8 +102,7 @@ class FixtureGateway:
     async def send_audio(self, call_id, audio):
         self.submissions.append({"utterance_id": self.current, "candidate_text": self.current_text,
             "pcm_bytes": len(audio), "sha256": hashlib.sha256(audio).hexdigest()})
-        if len(self.submissions) == 1:
-            await self._block("send")
+        await self._block("send")
 
     async def finish_playback(self, call_id, utterance_id):
         await self._block("finish")
@@ -119,9 +130,13 @@ class NativeReplay:
         self.socket = FixtureSocket()
         self.gateway = FixtureGateway(scenario.get("gateway", {}))
         self.transcripts = TranscriptService()
-        # Missing business identities deliberately make external actions
-        # unavailable before any database access; all offered tools are real.
-        self.session = SimpleNamespace(_voice_action_capabilities={}, _voice_action_context_loaded=True,
+        # Explicit fixture receipts replace only the connected executor port.
+        # Without one, missing business identities keep external actions unavailable.
+        self.action_attempts = []
+        self.contact_checkpoints = []
+        self.fixture_actions = scenario.get("synthetic_action_results", {})
+        self.session = SimpleNamespace(_voice_action_capabilities={
+            name: "Synthetic accepted-result port" for name in self.fixture_actions}, _voice_action_context_loaded=True,
             _voice_action_pool=object(), call_id=self.call_id, captured_slots=None)
         self.config = SimpleNamespace(direction="inbound", agent_config=SimpleNamespace(
             agent_name="Ava", company_name="Northwind Systems"), realtime_prompt={
@@ -129,7 +144,7 @@ class NativeReplay:
                 "instructions": corpus["campaign_guidance"]}, realtime_opening_greeting="",
             realtime_message_intake=False)
         self.instructions = prepare_realtime_prompt(self.config,
-            capability_instructions=action_tool_system_addendum({"end_call"}))
+            capability_instructions=action_tool_system_addendum({"end_call", *self.fixture_actions}))
         self.tools = [knowledge_lookup_tool(), *realtime_voice_action_tools(self.session)]
         if provider_name == "openai":
             self.provider = OpenAIRealtimeSession(api_key="offline-unused", model=self.profile["model"], voice=self.profile["voice"],
@@ -159,6 +174,15 @@ class NativeReplay:
 
     async def on_end(self):
         self.shutdown_count += 1
+
+    async def execute_fixture_action(self, session, action, arguments, caller):
+        assert session is self.session
+        if action not in self.fixture_actions:
+            raise AssertionError("Undeclared synthetic connected action")
+        result = {"version": 1, "action": action, **self.fixture_actions[action]}
+        self.action_attempts.append({"action": action, "arguments": dict(arguments),
+            "receipt": dict(result), "origin": "synthetic connected executor; no provider send"})
+        return result
 
     async def persist_dnc(self, session):
         """Replay the existing persistence port, never perform a database write."""
@@ -203,6 +227,10 @@ class NativeReplay:
             rid = f"response-{self.response_counter}"
             await self.wire({"type": "response.created", "response": {"id": rid}})
             if kind == "response":
+                if "receipt" in step:
+                    self.gateway.set_receipt(step["receipt"])
+                if "block" in step:
+                    self.gateway.block_next(step["block"])
                 text = step.get("text")
                 self.raw.append({"response_id": rid, "text": text, "status": step.get("status", "completed")})
                 audio = b"\xff" * step.get("audio_bytes", 320)
@@ -247,16 +275,10 @@ class NativeReplay:
         else:
             await self.emit(step)
             await self.drain(playback=step.get("wait", True))
+        if "checkpoint" in step:
+            self.contact_checkpoints.append({"id": step["checkpoint"], "contacts": self._contacts()})
 
-    def result(self):
-        history = self.transcripts.get_transcript_json(self.call_id)
-        function_results = [json.loads(message["item"]["output"]) for message in self.socket.sent
-            if message.get("type") == "conversation.item.create"
-            and message.get("item", {}).get("type") == "function_call_output"]
-        repairs = [message for message in self.socket.sent if message.get("type") == "response.create"
-            and "REPAIR THIS TURN" in message.get("response", {}).get("instructions", "")]
-        normal_continuations = [message for message in self.socket.sent
-            if message == {"type": "response.create"}]
+    def _contacts(self):
         slots = self.session.captured_slots
         contacts = {}
         for kind in ("email", "phone"):
@@ -269,6 +291,22 @@ class NativeReplay:
                 **{field: asdict(value) if (value := getattr(capture, field, None)) else None
                     for field in ("value_source", "confirmation_source", "status_source", "readback")},
             }
+        return contacts
+
+    def result(self):
+        history = self.transcripts.get_transcript_json(self.call_id)
+        function_results = [json.loads(message["item"]["output"]) for message in self.socket.sent
+            if message.get("type") == "conversation.item.create"
+            and message.get("item", {}).get("type") == "function_call_output"]
+        repairs = [message for message in self.socket.sent if message.get("type") == "response.create"
+            and "REPAIR THIS TURN" in message.get("response", {}).get("instructions", "")]
+        normal_continuations = [message for message in self.socket.sent
+            if message == {"type": "response.create"}]
+        slots = self.session.captured_slots
+        contacts = self._contacts()
+        accepted = sum(attempt["receipt"].get("success") is True and
+            attempt["receipt"].get("status") in {"accepted", "provider_accepted", "succeeded", "completed"}
+            for attempt in self.action_attempts)
         observed = {
             "submissions": len(self.gateway.submissions), "clears": self.gateway.clears,
             "shutdowns": self.shutdown_count, "end_requested": bool(getattr(self.session, "_end_call_requested", False)),
@@ -288,6 +326,10 @@ class NativeReplay:
             "email_value_source": contacts["email"]["value_source"],
             "email_confirmation_source": contacts["email"]["confirmation_source"],
             "email_readback": contacts["email"]["readback"],
+            "phone": contacts["phone"]["value"], "phone_confirmed": contacts["phone"]["confirmed"],
+            "effect_attempts": len(self.action_attempts), "accepted_actions": accepted,
+            "action_message_ids": {name: result.get("message_id") for name, result
+                in action_results_for_session(self.session).items() if name != "end_call"},
             "repair_requests": len(repairs), "normal_continuations": len(normal_continuations),
             "failure": bool(self.bridge._failure_reason), "connection_lost": self.bridge._connection_lost,
             "tool_statuses": [item.get("status") for item in function_results],
@@ -297,6 +339,15 @@ class NativeReplay:
         controls = [{"id": key, "pass": observed[key] == expected,
             "detail": {"expected": expected, "observed": observed[key]}}
             for key, expected in self.scenario["expect"].items()]
+        checkpoints = {item["id"]: item["contacts"] for item in self.contact_checkpoints}
+        for name, contacts_expected in self.scenario.get("contact_checkpoint_expectations", {}).items():
+            for kind, fields in contacts_expected.items():
+                actual = checkpoints.get(name, {}).get(kind, {})
+                for field, expected in fields.items():
+                    controls.append({"id": f"contact:{name}:{kind}:{field}",
+                        "pass": field in actual and actual[field] == expected,
+                        "detail": {"expected": expected, "observed": actual.get(field),
+                                   "checkpoint_present": name in checkpoints}})
         wire = self.initial_wire
         submitted_ids = {row["utterance_id"] for row in self.gateway.submissions}
         submitted_speech = [row["content"] for row in history if row["role"] == "assistant"
@@ -323,11 +374,14 @@ class NativeReplay:
             "submitted_speech_evidence": "Full utterances from correlated synthetic completion receipts only; not human hearing.",
             "history": history,
             "contacts": contacts,
+            "contact_checkpoints": self.contact_checkpoints,
             "end": {"requested": observed["end_requested"], "shutdown_count": self.shutdown_count,
                 "dnc_flag": observed["dnc"], "dnc_effect_count": None},
             "effects": {"attempts": [event["name"] for event in self.raw_events
-                if event.get("type") == "response.function_call_arguments.done"], "accepted": 0,
-                "external_execution": "not_run; no business action capability or database configured",
+                if event.get("type") == "response.function_call_arguments.done"], "accepted": accepted,
+                "executor_attempts": self.action_attempts,
+                "recorded_results": action_results_for_session(self.session),
+                "external_execution": "not_run; any declared action receipt is a synthetic executor result",
                 "tool_results": function_results,
                 "dnc_persistence_receipts": self.dnc_receipts,
                 "dnc_database_writes": 0},
@@ -353,7 +407,12 @@ class NativeReplay:
         # Keep the real bridge's task, acknowledgement and speech gates. Only
         # replace the external persistence port, including its bounded stop
         # drain. A scripted acknowledgement is not durable DNC evidence.
-        with patch("app.domain.services.dialer.opt_out.purge_opt_out_before_farewell", self.persist_dnc):
+        with ExitStack() as patches:
+            patches.enter_context(patch("app.domain.services.dialer.opt_out.purge_opt_out_before_farewell", self.persist_dnc))
+            if self.fixture_actions:
+                patches.enter_context(patch(
+                    "app.domain.services.voice_pipeline.action_execution.execute_connected_voice_action",
+                    self.execute_fixture_action))
             try:
                 for step in self.scenario["steps"]:
                     await self.step(step)
