@@ -1,0 +1,247 @@
+{
+  "source_ref": "working_tree",
+  "source_path": "backend/app/domain/services/llm_guardrails.py",
+  "source_sha256": "dd08e673b01d9f902b5b456193c1dd64887c535e11d1b50f89cab860d64d9af9",
+  "execution": "Actual validator class; baseline source loaded verbatim from local git when --source-ref is set.",
+  "effects": {
+    "provider_calls": 0,
+    "database_calls": 0,
+    "model_calls": 0
+  },
+  "rows": [
+    {
+      "receipt_status": "unknown",
+      "text": "The email was sent to you.",
+      "valid": false,
+      "reason": "action_failed:send_email:unknown"
+    },
+    {
+      "receipt_status": "unknown",
+      "text": "The email was not sent.",
+      "valid": false,
+      "reason": "action_failed:send_email:unknown"
+    },
+    {
+      "receipt_status": "unknown",
+      "text": "The email could not be sent.",
+      "valid": false,
+      "reason": "action_failed:send_email:unknown"
+    },
+    {
+      "receipt_status": "unknown",
+      "text": "I haven't sent the email.",
+      "valid": false,
+      "reason": "action_failed:send_email:unknown"
+    },
+    {
+      "receipt_status": "unknown",
+      "text": "The email failed.",
+      "valid": false,
+      "reason": "action_failed:send_email:unknown"
+    },
+    {
+      "receipt_status": "unknown",
+      "text": "I can't confirm whether the email was sent.",
+      "valid": true,
+      "reason": null
+    },
+    {
+      "receipt_status": "unknown",
+      "text": "The sending outcome is unknown. It needs checking before another attempt.",
+      "valid": true,
+      "reason": null
+    },
+    {
+      "receipt_status": "unknown",
+      "text": "The email was not sent. Please ask me to send it again.",
+      "valid": false,
+      "reason": "action_failed:send_email:unknown"
+    },
+    {
+      "receipt_status": "unknown",
+      "text": "Please try again now.",
+      "valid": true,
+      "reason": null
+    },
+    {
+      "receipt_status": "unknown",
+      "text": "I will resend the email now.",
+      "valid": false,
+      "reason": "action_failed:send_email:unknown"
+    },
+    {
+      "receipt_status": "unknown",
+      "text": "Please send the email again.",
+      "valid": false,
+      "reason": "action_failed:send_email:unknown"
+    },
+    {
+      "receipt_status": "unknown",
+      "text": "Please check the existing request before trying again.",
+      "valid": true,
+      "reason": null
+    },
+    {
+      "receipt_status": "unknown",
+      "text": "I couldn't confirm the outcome of that request. It needs to be checked before trying again.",
+      "valid": true,
+      "reason": null
+    },
+    {
+      "receipt_status": "in_progress",
+      "text": "The email was sent to you.",
+      "valid": false,
+      "reason": "action_failed:send_email:in_progress"
+    },
+    {
+      "receipt_status": "in_progress",
+      "text": "The email was not sent.",
+      "valid": false,
+      "reason": "action_failed:send_email:in_progress"
+    },
+    {
+      "receipt_status": "in_progress",
+      "text": "The email could not be sent.",
+      "valid": false,
+      "reason": "action_failed:send_email:in_progress"
+    },
+    {
+      "receipt_status": "in_progress",
+      "text": "I haven't sent the email.",
+      "valid": false,
+      "reason": "action_failed:send_email:in_progress"
+    },
+    {
+      "receipt_status": "in_progress",
+      "text": "The email failed.",
+      "valid": false,
+      "reason": "action_failed:send_email:in_progress"
+    },
+    {
+      "receipt_status": "in_progress",
+      "text": "I can't confirm whether the email was sent.",
+      "valid": true,
+      "reason": null
+    },
+    {
+      "receipt_status": "in_progress",
+      "text": "The sending outcome is unknown. It needs checking before another attempt.",
+      "valid": true,
+      "reason": null
+    },
+    {
+      "receipt_status": "in_progress",
+      "text": "The email was not sent. Please ask me to send it again.",
+      "valid": false,
+      "reason": "action_failed:send_email:in_progress"
+    },
+    {
+      "receipt_status": "in_progress",
+      "text": "Please try again now.",
+      "valid": true,
+      "reason": null
+    },
+    {
+      "receipt_status": "in_progress",
+      "text": "I will resend the email now.",
+      "valid": false,
+      "reason": "action_failed:send_email:in_progress"
+    },
+    {
+      "receipt_status": "in_progress",
+      "text": "Please send the email again.",
+      "valid": false,
+      "reason": "action_failed:send_email:in_progress"
+    },
+    {
+      "receipt_status": "in_progress",
+      "text": "Please check the existing request before trying again.",
+      "valid": true,
+      "reason": null
+    },
+    {
+      "receipt_status": "in_progress",
+      "text": "I couldn't confirm the outcome of that request. It needs to be checked before trying again.",
+      "valid": true,
+      "reason": null
+    },
+    {
+      "receipt_status": "failed",
+      "text": "The email was sent to you.",
+      "valid": false,
+      "reason": "action_failed:send_email:failed"
+    },
+    {
+      "receipt_status": "failed",
+      "text": "The email was not sent.",
+      "valid": true,
+      "reason": null
+    },
+    {
+      "receipt_status": "failed",
+      "text": "The email could not be sent.",
+      "valid": true,
+      "reason": null
+    },
+    {
+      "receipt_status": "failed",
+      "text": "I haven't sent the email.",
+      "valid": true,
+      "reason": null
+    },
+    {
+      "receipt_status": "failed",
+      "text": "The email failed.",
+      "valid": true,
+      "reason": null
+    },
+    {
+      "receipt_status": "failed",
+      "text": "I can't confirm whether the email was sent.",
+      "valid": true,
+      "reason": null
+    },
+    {
+      "receipt_status": "failed",
+      "text": "The sending outcome is unknown. It needs checking before another attempt.",
+      "valid": true,
+      "reason": null
+    },
+    {
+      "receipt_status": "failed",
+      "text": "The email was not sent. Please ask me to send it again.",
+      "valid": true,
+      "reason": null
+    },
+    {
+      "receipt_status": "failed",
+      "text": "Please try again now.",
+      "valid": true,
+      "reason": null
+    },
+    {
+      "receipt_status": "failed",
+      "text": "I will resend the email now.",
+      "valid": true,
+      "reason": null
+    },
+    {
+      "receipt_status": "failed",
+      "text": "Please send the email again.",
+      "valid": true,
+      "reason": null
+    },
+    {
+      "receipt_status": "failed",
+      "text": "Please check the existing request before trying again.",
+      "valid": true,
+      "reason": null
+    },
+    {
+      "receipt_status": "failed",
+      "text": "I can't confirm that the email was sent.",
+      "valid": true,
+      "reason": null
+    }
+  ]
+}

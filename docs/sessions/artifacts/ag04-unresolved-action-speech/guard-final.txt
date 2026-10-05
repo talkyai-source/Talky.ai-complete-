@@ -1,0 +1,17 @@
+........................................................................ [ 35%]
+........................................................................ [ 71%]
+..........................................................               [100%]
+============================== warnings summary ===============================
+tests/unit/test_passive_email_failure_guard.py::test_actual_native_failed_action_recovers_with_exact_passive_failure[openai]
+tests/unit/test_passive_email_failure_guard.py::test_actual_native_failed_action_recovers_with_exact_passive_failure[openai]
+tests/unit/test_passive_email_failure_guard.py::test_actual_native_failed_action_recovers_with_exact_passive_failure[xai]
+tests/unit/test_passive_email_failure_guard.py::test_actual_native_failed_action_recovers_with_exact_passive_failure[xai]
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\unresolved-action-speech-20261005\backend\app\domain\services\transcript_service.py:372: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    timestamp=datetime.utcnow().isoformat(),
+
+tests/unit/test_voice_action_contract.py: 24 warnings
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\backend\.venv\Lib\site-packages\pydantic\main.py:250: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+202 passed, 28 warnings in 2.19s

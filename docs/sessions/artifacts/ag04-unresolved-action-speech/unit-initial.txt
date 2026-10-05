@@ -1,0 +1,1119 @@
+FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF.................................. [ 91%]
+.....FF                                                                  [100%]
+================================== FAILURES ===================================
+_ test_unknown_email_cannot_be_described_as_failed_or_safe_to_repeat[The email was not sent.-unknown] _
+
+status = 'unknown', text = 'The email was not sent.'
+
+    @pytest.mark.parametrize("status", ["unknown", "in_progress"])
+    @pytest.mark.parametrize("text", [
+        "The email was not sent.",
+        "The email could not be sent.",
+        "The email cannot be delivered.",
+        "I haven't sent the email.",
+        "The email failed.",
+        "The email has failed.",
+        "The email was not sent. Please ask me to send it again.",
+        "Please send the email again.",
+        "I will resend the email now.",
+        "Please retry sending the email.",
+        "Please retry the email.",
+    ])
+    def test_unknown_email_cannot_be_described_as_failed_or_safe_to_repeat(status, text):
+        result = receipt(status=status)
+        before = dict(result)
+>       assert LLMGuardrails().validate_response(text, action_results={"send_email": result}) == (
+            False, f"action_failed:send_email:{status}",
+        )
+E       AssertionError: assert (True, None) == (False, 'acti...mail:unknown')
+E         At index 0 diff: True != False
+E         Use -v to get more diff
+
+tests\unit\test_unresolved_action_speech.py:39: AssertionError
+_ test_unknown_email_cannot_be_described_as_failed_or_safe_to_repeat[The email was not sent.-in_progress] _
+
+status = 'in_progress', text = 'The email was not sent.'
+
+    @pytest.mark.parametrize("status", ["unknown", "in_progress"])
+    @pytest.mark.parametrize("text", [
+        "The email was not sent.",
+        "The email could not be sent.",
+        "The email cannot be delivered.",
+        "I haven't sent the email.",
+        "The email failed.",
+        "The email has failed.",
+        "The email was not sent. Please ask me to send it again.",
+        "Please send the email again.",
+        "I will resend the email now.",
+        "Please retry sending the email.",
+        "Please retry the email.",
+    ])
+    def test_unknown_email_cannot_be_described_as_failed_or_safe_to_repeat(status, text):
+        result = receipt(status=status)
+        before = dict(result)
+>       assert LLMGuardrails().validate_response(text, action_results={"send_email": result}) == (
+            False, f"action_failed:send_email:{status}",
+        )
+E       AssertionError: assert (True, None) == (False, 'acti...:in_progress')
+E         At index 0 diff: True != False
+E         Use -v to get more diff
+
+tests\unit\test_unresolved_action_speech.py:39: AssertionError
+_ test_unknown_email_cannot_be_described_as_failed_or_safe_to_repeat[The email could not be sent.-unknown] _
+
+status = 'unknown', text = 'The email could not be sent.'
+
+    @pytest.mark.parametrize("status", ["unknown", "in_progress"])
+    @pytest.mark.parametrize("text", [
+        "The email was not sent.",
+        "The email could not be sent.",
+        "The email cannot be delivered.",
+        "I haven't sent the email.",
+        "The email failed.",
+        "The email has failed.",
+        "The email was not sent. Please ask me to send it again.",
+        "Please send the email again.",
+        "I will resend the email now.",
+        "Please retry sending the email.",
+        "Please retry the email.",
+    ])
+    def test_unknown_email_cannot_be_described_as_failed_or_safe_to_repeat(status, text):
+        result = receipt(status=status)
+        before = dict(result)
+>       assert LLMGuardrails().validate_response(text, action_results={"send_email": result}) == (
+            False, f"action_failed:send_email:{status}",
+        )
+E       AssertionError: assert (True, None) == (False, 'acti...mail:unknown')
+E         At index 0 diff: True != False
+E         Use -v to get more diff
+
+tests\unit\test_unresolved_action_speech.py:39: AssertionError
+_ test_unknown_email_cannot_be_described_as_failed_or_safe_to_repeat[The email could not be sent.-in_progress] _
+
+status = 'in_progress', text = 'The email could not be sent.'
+
+    @pytest.mark.parametrize("status", ["unknown", "in_progress"])
+    @pytest.mark.parametrize("text", [
+        "The email was not sent.",
+        "The email could not be sent.",
+        "The email cannot be delivered.",
+        "I haven't sent the email.",
+        "The email failed.",
+        "The email has failed.",
+        "The email was not sent. Please ask me to send it again.",
+        "Please send the email again.",
+        "I will resend the email now.",
+        "Please retry sending the email.",
+        "Please retry the email.",
+    ])
+    def test_unknown_email_cannot_be_described_as_failed_or_safe_to_repeat(status, text):
+        result = receipt(status=status)
+        before = dict(result)
+>       assert LLMGuardrails().validate_response(text, action_results={"send_email": result}) == (
+            False, f"action_failed:send_email:{status}",
+        )
+E       AssertionError: assert (True, None) == (False, 'acti...:in_progress')
+E         At index 0 diff: True != False
+E         Use -v to get more diff
+
+tests\unit\test_unresolved_action_speech.py:39: AssertionError
+_ test_unknown_email_cannot_be_described_as_failed_or_safe_to_repeat[The email cannot be delivered.-unknown] _
+
+status = 'unknown', text = 'The email cannot be delivered.'
+
+    @pytest.mark.parametrize("status", ["unknown", "in_progress"])
+    @pytest.mark.parametrize("text", [
+        "The email was not sent.",
+        "The email could not be sent.",
+        "The email cannot be delivered.",
+        "I haven't sent the email.",
+        "The email failed.",
+        "The email has failed.",
+        "The email was not sent. Please ask me to send it again.",
+        "Please send the email again.",
+        "I will resend the email now.",
+        "Please retry sending the email.",
+        "Please retry the email.",
+    ])
+    def test_unknown_email_cannot_be_described_as_failed_or_safe_to_repeat(status, text):
+        result = receipt(status=status)
+        before = dict(result)
+>       assert LLMGuardrails().validate_response(text, action_results={"send_email": result}) == (
+            False, f"action_failed:send_email:{status}",
+        )
+E       AssertionError: assert (True, None) == (False, 'acti...mail:unknown')
+E         At index 0 diff: True != False
+E         Use -v to get more diff
+
+tests\unit\test_unresolved_action_speech.py:39: AssertionError
+_ test_unknown_email_cannot_be_described_as_failed_or_safe_to_repeat[The email cannot be delivered.-in_progress] _
+
+status = 'in_progress', text = 'The email cannot be delivered.'
+
+    @pytest.mark.parametrize("status", ["unknown", "in_progress"])
+    @pytest.mark.parametrize("text", [
+        "The email was not sent.",
+        "The email could not be sent.",
+        "The email cannot be delivered.",
+        "I haven't sent the email.",
+        "The email failed.",
+        "The email has failed.",
+        "The email was not sent. Please ask me to send it again.",
+        "Please send the email again.",
+        "I will resend the email now.",
+        "Please retry sending the email.",
+        "Please retry the email.",
+    ])
+    def test_unknown_email_cannot_be_described_as_failed_or_safe_to_repeat(status, text):
+        result = receipt(status=status)
+        before = dict(result)
+>       assert LLMGuardrails().validate_response(text, action_results={"send_email": result}) == (
+            False, f"action_failed:send_email:{status}",
+        )
+E       AssertionError: assert (True, None) == (False, 'acti...:in_progress')
+E         At index 0 diff: True != False
+E         Use -v to get more diff
+
+tests\unit\test_unresolved_action_speech.py:39: AssertionError
+_ test_unknown_email_cannot_be_described_as_failed_or_safe_to_repeat[I haven't sent the email.-unknown] _
+
+status = 'unknown', text = "I haven't sent the email."
+
+    @pytest.mark.parametrize("status", ["unknown", "in_progress"])
+    @pytest.mark.parametrize("text", [
+        "The email was not sent.",
+        "The email could not be sent.",
+        "The email cannot be delivered.",
+        "I haven't sent the email.",
+        "The email failed.",
+        "The email has failed.",
+        "The email was not sent. Please ask me to send it again.",
+        "Please send the email again.",
+        "I will resend the email now.",
+        "Please retry sending the email.",
+        "Please retry the email.",
+    ])
+    def test_unknown_email_cannot_be_described_as_failed_or_safe_to_repeat(status, text):
+        result = receipt(status=status)
+        before = dict(result)
+>       assert LLMGuardrails().validate_response(text, action_results={"send_email": result}) == (
+            False, f"action_failed:send_email:{status}",
+        )
+E       AssertionError: assert (True, None) == (False, 'acti...mail:unknown')
+E         At index 0 diff: True != False
+E         Use -v to get more diff
+
+tests\unit\test_unresolved_action_speech.py:39: AssertionError
+_ test_unknown_email_cannot_be_described_as_failed_or_safe_to_repeat[I haven't sent the email.-in_progress] _
+
+status = 'in_progress', text = "I haven't sent the email."
+
+    @pytest.mark.parametrize("status", ["unknown", "in_progress"])
+    @pytest.mark.parametrize("text", [
+        "The email was not sent.",
+        "The email could not be sent.",
+        "The email cannot be delivered.",
+        "I haven't sent the email.",
+        "The email failed.",
+        "The email has failed.",
+        "The email was not sent. Please ask me to send it again.",
+        "Please send the email again.",
+        "I will resend the email now.",
+        "Please retry sending the email.",
+        "Please retry the email.",
+    ])
+    def test_unknown_email_cannot_be_described_as_failed_or_safe_to_repeat(status, text):
+        result = receipt(status=status)
+        before = dict(result)
+>       assert LLMGuardrails().validate_response(text, action_results={"send_email": result}) == (
+            False, f"action_failed:send_email:{status}",
+        )
+E       AssertionError: assert (True, None) == (False, 'acti...:in_progress')
+E         At index 0 diff: True != False
+E         Use -v to get more diff
+
+tests\unit\test_unresolved_action_speech.py:39: AssertionError
+_ test_unknown_email_cannot_be_described_as_failed_or_safe_to_repeat[The email failed.-unknown] _
+
+status = 'unknown', text = 'The email failed.'
+
+    @pytest.mark.parametrize("status", ["unknown", "in_progress"])
+    @pytest.mark.parametrize("text", [
+        "The email was not sent.",
+        "The email could not be sent.",
+        "The email cannot be delivered.",
+        "I haven't sent the email.",
+        "The email failed.",
+        "The email has failed.",
+        "The email was not sent. Please ask me to send it again.",
+        "Please send the email again.",
+        "I will resend the email now.",
+        "Please retry sending the email.",
+        "Please retry the email.",
+    ])
+    def test_unknown_email_cannot_be_described_as_failed_or_safe_to_repeat(status, text):
+        result = receipt(status=status)
+        before = dict(result)
+>       assert LLMGuardrails().validate_response(text, action_results={"send_email": result}) == (
+            False, f"action_failed:send_email:{status}",
+        )
+E       AssertionError: assert (True, None) == (False, 'acti...mail:unknown')
+E         At index 0 diff: True != False
+E         Use -v to get more diff
+
+tests\unit\test_unresolved_action_speech.py:39: AssertionError
+_ test_unknown_email_cannot_be_described_as_failed_or_safe_to_repeat[The email failed.-in_progress] _
+
+status = 'in_progress', text = 'The email failed.'
+
+    @pytest.mark.parametrize("status", ["unknown", "in_progress"])
+    @pytest.mark.parametrize("text", [
+        "The email was not sent.",
+        "The email could not be sent.",
+        "The email cannot be delivered.",
+        "I haven't sent the email.",
+        "The email failed.",
+        "The email has failed.",
+        "The email was not sent. Please ask me to send it again.",
+        "Please send the email again.",
+        "I will resend the email now.",
+        "Please retry sending the email.",
+        "Please retry the email.",
+    ])
+    def test_unknown_email_cannot_be_described_as_failed_or_safe_to_repeat(status, text):
+        result = receipt(status=status)
+        before = dict(result)
+>       assert LLMGuardrails().validate_response(text, action_results={"send_email": result}) == (
+            False, f"action_failed:send_email:{status}",
+        )
+E       AssertionError: assert (True, None) == (False, 'acti...:in_progress')
+E         At index 0 diff: True != False
+E         Use -v to get more diff
+
+tests\unit\test_unresolved_action_speech.py:39: AssertionError
+_ test_unknown_email_cannot_be_described_as_failed_or_safe_to_repeat[The email has failed.-unknown] _
+
+status = 'unknown', text = 'The email has failed.'
+
+    @pytest.mark.parametrize("status", ["unknown", "in_progress"])
+    @pytest.mark.parametrize("text", [
+        "The email was not sent.",
+        "The email could not be sent.",
+        "The email cannot be delivered.",
+        "I haven't sent the email.",
+        "The email failed.",
+        "The email has failed.",
+        "The email was not sent. Please ask me to send it again.",
+        "Please send the email again.",
+        "I will resend the email now.",
+        "Please retry sending the email.",
+        "Please retry the email.",
+    ])
+    def test_unknown_email_cannot_be_described_as_failed_or_safe_to_repeat(status, text):
+        result = receipt(status=status)
+        before = dict(result)
+>       assert LLMGuardrails().validate_response(text, action_results={"send_email": result}) == (
+            False, f"action_failed:send_email:{status}",
+        )
+E       AssertionError: assert (True, None) == (False, 'acti...mail:unknown')
+E         At index 0 diff: True != False
+E         Use -v to get more diff
+
+tests\unit\test_unresolved_action_speech.py:39: AssertionError
+_ test_unknown_email_cannot_be_described_as_failed_or_safe_to_repeat[The email has failed.-in_progress] _
+
+status = 'in_progress', text = 'The email has failed.'
+
+    @pytest.mark.parametrize("status", ["unknown", "in_progress"])
+    @pytest.mark.parametrize("text", [
+        "The email was not sent.",
+        "The email could not be sent.",
+        "The email cannot be delivered.",
+        "I haven't sent the email.",
+        "The email failed.",
+        "The email has failed.",
+        "The email was not sent. Please ask me to send it again.",
+        "Please send the email again.",
+        "I will resend the email now.",
+        "Please retry sending the email.",
+        "Please retry the email.",
+    ])
+    def test_unknown_email_cannot_be_described_as_failed_or_safe_to_repeat(status, text):
+        result = receipt(status=status)
+        before = dict(result)
+>       assert LLMGuardrails().validate_response(text, action_results={"send_email": result}) == (
+            False, f"action_failed:send_email:{status}",
+        )
+E       AssertionError: assert (True, None) == (False, 'acti...:in_progress')
+E         At index 0 diff: True != False
+E         Use -v to get more diff
+
+tests\unit\test_unresolved_action_speech.py:39: AssertionError
+_ test_unknown_email_cannot_be_described_as_failed_or_safe_to_repeat[The email was not sent. Please ask me to send it again.-unknown] _
+
+status = 'unknown'
+text = 'The email was not sent. Please ask me to send it again.'
+
+    @pytest.mark.parametrize("status", ["unknown", "in_progress"])
+    @pytest.mark.parametrize("text", [
+        "The email was not sent.",
+        "The email could not be sent.",
+        "The email cannot be delivered.",
+        "I haven't sent the email.",
+        "The email failed.",
+        "The email has failed.",
+        "The email was not sent. Please ask me to send it again.",
+        "Please send the email again.",
+        "I will resend the email now.",
+        "Please retry sending the email.",
+        "Please retry the email.",
+    ])
+    def test_unknown_email_cannot_be_described_as_failed_or_safe_to_repeat(status, text):
+        result = receipt(status=status)
+        before = dict(result)
+>       assert LLMGuardrails().validate_response(text, action_results={"send_email": result}) == (
+            False, f"action_failed:send_email:{status}",
+        )
+E       AssertionError: assert (True, None) == (False, 'acti...mail:unknown')
+E         At index 0 diff: True != False
+E         Use -v to get more diff
+
+tests\unit\test_unresolved_action_speech.py:39: AssertionError
+_ test_unknown_email_cannot_be_described_as_failed_or_safe_to_repeat[The email was not sent. Please ask me to send it again.-in_progress] _
+
+status = 'in_progress'
+text = 'The email was not sent. Please ask me to send it again.'
+
+    @pytest.mark.parametrize("status", ["unknown", "in_progress"])
+    @pytest.mark.parametrize("text", [
+        "The email was not sent.",
+        "The email could not be sent.",
+        "The email cannot be delivered.",
+        "I haven't sent the email.",
+        "The email failed.",
+        "The email has failed.",
+        "The email was not sent. Please ask me to send it again.",
+        "Please send the email again.",
+        "I will resend the email now.",
+        "Please retry sending the email.",
+        "Please retry the email.",
+    ])
+    def test_unknown_email_cannot_be_described_as_failed_or_safe_to_repeat(status, text):
+        result = receipt(status=status)
+        before = dict(result)
+>       assert LLMGuardrails().validate_response(text, action_results={"send_email": result}) == (
+            False, f"action_failed:send_email:{status}",
+        )
+E       AssertionError: assert (True, None) == (False, 'acti...:in_progress')
+E         At index 0 diff: True != False
+E         Use -v to get more diff
+
+tests\unit\test_unresolved_action_speech.py:39: AssertionError
+_ test_unknown_email_cannot_be_described_as_failed_or_safe_to_repeat[Please send the email again.-unknown] _
+
+status = 'unknown', text = 'Please send the email again.'
+
+    @pytest.mark.parametrize("status", ["unknown", "in_progress"])
+    @pytest.mark.parametrize("text", [
+        "The email was not sent.",
+        "The email could not be sent.",
+        "The email cannot be delivered.",
+        "I haven't sent the email.",
+        "The email failed.",
+        "The email has failed.",
+        "The email was not sent. Please ask me to send it again.",
+        "Please send the email again.",
+        "I will resend the email now.",
+        "Please retry sending the email.",
+        "Please retry the email.",
+    ])
+    def test_unknown_email_cannot_be_described_as_failed_or_safe_to_repeat(status, text):
+        result = receipt(status=status)
+        before = dict(result)
+>       assert LLMGuardrails().validate_response(text, action_results={"send_email": result}) == (
+            False, f"action_failed:send_email:{status}",
+        )
+E       AssertionError: assert (True, None) == (False, 'acti...mail:unknown')
+E         At index 0 diff: True != False
+E         Use -v to get more diff
+
+tests\unit\test_unresolved_action_speech.py:39: AssertionError
+_ test_unknown_email_cannot_be_described_as_failed_or_safe_to_repeat[Please send the email again.-in_progress] _
+
+status = 'in_progress', text = 'Please send the email again.'
+
+    @pytest.mark.parametrize("status", ["unknown", "in_progress"])
+    @pytest.mark.parametrize("text", [
+        "The email was not sent.",
+        "The email could not be sent.",
+        "The email cannot be delivered.",
+        "I haven't sent the email.",
+        "The email failed.",
+        "The email has failed.",
+        "The email was not sent. Please ask me to send it again.",
+        "Please send the email again.",
+        "I will resend the email now.",
+        "Please retry sending the email.",
+        "Please retry the email.",
+    ])
+    def test_unknown_email_cannot_be_described_as_failed_or_safe_to_repeat(status, text):
+        result = receipt(status=status)
+        before = dict(result)
+>       assert LLMGuardrails().validate_response(text, action_results={"send_email": result}) == (
+            False, f"action_failed:send_email:{status}",
+        )
+E       AssertionError: assert (True, None) == (False, 'acti...:in_progress')
+E         At index 0 diff: True != False
+E         Use -v to get more diff
+
+tests\unit\test_unresolved_action_speech.py:39: AssertionError
+_ test_unknown_email_cannot_be_described_as_failed_or_safe_to_repeat[I will resend the email now.-unknown] _
+
+status = 'unknown', text = 'I will resend the email now.'
+
+    @pytest.mark.parametrize("status", ["unknown", "in_progress"])
+    @pytest.mark.parametrize("text", [
+        "The email was not sent.",
+        "The email could not be sent.",
+        "The email cannot be delivered.",
+        "I haven't sent the email.",
+        "The email failed.",
+        "The email has failed.",
+        "The email was not sent. Please ask me to send it again.",
+        "Please send the email again.",
+        "I will resend the email now.",
+        "Please retry sending the email.",
+        "Please retry the email.",
+    ])
+    def test_unknown_email_cannot_be_described_as_failed_or_safe_to_repeat(status, text):
+        result = receipt(status=status)
+        before = dict(result)
+>       assert LLMGuardrails().validate_response(text, action_results={"send_email": result}) == (
+            False, f"action_failed:send_email:{status}",
+        )
+E       AssertionError: assert (True, None) == (False, 'acti...mail:unknown')
+E         At index 0 diff: True != False
+E         Use -v to get more diff
+
+tests\unit\test_unresolved_action_speech.py:39: AssertionError
+_ test_unknown_email_cannot_be_described_as_failed_or_safe_to_repeat[I will resend the email now.-in_progress] _
+
+status = 'in_progress', text = 'I will resend the email now.'
+
+    @pytest.mark.parametrize("status", ["unknown", "in_progress"])
+    @pytest.mark.parametrize("text", [
+        "The email was not sent.",
+        "The email could not be sent.",
+        "The email cannot be delivered.",
+        "I haven't sent the email.",
+        "The email failed.",
+        "The email has failed.",
+        "The email was not sent. Please ask me to send it again.",
+        "Please send the email again.",
+        "I will resend the email now.",
+        "Please retry sending the email.",
+        "Please retry the email.",
+    ])
+    def test_unknown_email_cannot_be_described_as_failed_or_safe_to_repeat(status, text):
+        result = receipt(status=status)
+        before = dict(result)
+>       assert LLMGuardrails().validate_response(text, action_results={"send_email": result}) == (
+            False, f"action_failed:send_email:{status}",
+        )
+E       AssertionError: assert (True, None) == (False, 'acti...:in_progress')
+E         At index 0 diff: True != False
+E         Use -v to get more diff
+
+tests\unit\test_unresolved_action_speech.py:39: AssertionError
+_ test_unknown_email_cannot_be_described_as_failed_or_safe_to_repeat[Please retry sending the email.-unknown] _
+
+status = 'unknown', text = 'Please retry sending the email.'
+
+    @pytest.mark.parametrize("status", ["unknown", "in_progress"])
+    @pytest.mark.parametrize("text", [
+        "The email was not sent.",
+        "The email could not be sent.",
+        "The email cannot be delivered.",
+        "I haven't sent the email.",
+        "The email failed.",
+        "The email has failed.",
+        "The email was not sent. Please ask me to send it again.",
+        "Please send the email again.",
+        "I will resend the email now.",
+        "Please retry sending the email.",
+        "Please retry the email.",
+    ])
+    def test_unknown_email_cannot_be_described_as_failed_or_safe_to_repeat(status, text):
+        result = receipt(status=status)
+        before = dict(result)
+>       assert LLMGuardrails().validate_response(text, action_results={"send_email": result}) == (
+            False, f"action_failed:send_email:{status}",
+        )
+E       AssertionError: assert (True, None) == (False, 'acti...mail:unknown')
+E         At index 0 diff: True != False
+E         Use -v to get more diff
+
+tests\unit\test_unresolved_action_speech.py:39: AssertionError
+_ test_unknown_email_cannot_be_described_as_failed_or_safe_to_repeat[Please retry sending the email.-in_progress] _
+
+status = 'in_progress', text = 'Please retry sending the email.'
+
+    @pytest.mark.parametrize("status", ["unknown", "in_progress"])
+    @pytest.mark.parametrize("text", [
+        "The email was not sent.",
+        "The email could not be sent.",
+        "The email cannot be delivered.",
+        "I haven't sent the email.",
+        "The email failed.",
+        "The email has failed.",
+        "The email was not sent. Please ask me to send it again.",
+        "Please send the email again.",
+        "I will resend the email now.",
+        "Please retry sending the email.",
+        "Please retry the email.",
+    ])
+    def test_unknown_email_cannot_be_described_as_failed_or_safe_to_repeat(status, text):
+        result = receipt(status=status)
+        before = dict(result)
+>       assert LLMGuardrails().validate_response(text, action_results={"send_email": result}) == (
+            False, f"action_failed:send_email:{status}",
+        )
+E       AssertionError: assert (True, None) == (False, 'acti...:in_progress')
+E         At index 0 diff: True != False
+E         Use -v to get more diff
+
+tests\unit\test_unresolved_action_speech.py:39: AssertionError
+_ test_unknown_email_cannot_be_described_as_failed_or_safe_to_repeat[Please retry the email.-unknown] _
+
+status = 'unknown', text = 'Please retry the email.'
+
+    @pytest.mark.parametrize("status", ["unknown", "in_progress"])
+    @pytest.mark.parametrize("text", [
+        "The email was not sent.",
+        "The email could not be sent.",
+        "The email cannot be delivered.",
+        "I haven't sent the email.",
+        "The email failed.",
+        "The email has failed.",
+        "The email was not sent. Please ask me to send it again.",
+        "Please send the email again.",
+        "I will resend the email now.",
+        "Please retry sending the email.",
+        "Please retry the email.",
+    ])
+    def test_unknown_email_cannot_be_described_as_failed_or_safe_to_repeat(status, text):
+        result = receipt(status=status)
+        before = dict(result)
+>       assert LLMGuardrails().validate_response(text, action_results={"send_email": result}) == (
+            False, f"action_failed:send_email:{status}",
+        )
+E       AssertionError: assert (True, None) == (False, 'acti...mail:unknown')
+E         At index 0 diff: True != False
+E         Use -v to get more diff
+
+tests\unit\test_unresolved_action_speech.py:39: AssertionError
+_ test_unknown_email_cannot_be_described_as_failed_or_safe_to_repeat[Please retry the email.-in_progress] _
+
+status = 'in_progress', text = 'Please retry the email.'
+
+    @pytest.mark.parametrize("status", ["unknown", "in_progress"])
+    @pytest.mark.parametrize("text", [
+        "The email was not sent.",
+        "The email could not be sent.",
+        "The email cannot be delivered.",
+        "I haven't sent the email.",
+        "The email failed.",
+        "The email has failed.",
+        "The email was not sent. Please ask me to send it again.",
+        "Please send the email again.",
+        "I will resend the email now.",
+        "Please retry sending the email.",
+        "Please retry the email.",
+    ])
+    def test_unknown_email_cannot_be_described_as_failed_or_safe_to_repeat(status, text):
+        result = receipt(status=status)
+        before = dict(result)
+>       assert LLMGuardrails().validate_response(text, action_results={"send_email": result}) == (
+            False, f"action_failed:send_email:{status}",
+        )
+E       AssertionError: assert (True, None) == (False, 'acti...:in_progress')
+E         At index 0 diff: True != False
+E         Use -v to get more diff
+
+tests\unit\test_unresolved_action_speech.py:39: AssertionError
+_ test_other_named_unresolved_actions_keep_the_same_truth_boundary[submit_form-The form was not submitted.-unknown] _
+
+status = 'unknown', action = 'submit_form', text = 'The form was not submitted.'
+
+    @pytest.mark.parametrize("status", ["unknown", "in_progress"])
+    @pytest.mark.parametrize("action,text", [
+        ("submit_form", "The form was not submitted."),
+        ("submit_form", "Please resubmit the form."),
+        ("schedule_callback", "The callback was not scheduled."),
+        ("schedule_callback", "Please book the callback again."),
+        ("transfer_call", "The transfer was not started."),
+        ("transfer_call", "Please retry the transfer."),
+    ])
+    def test_other_named_unresolved_actions_keep_the_same_truth_boundary(status, action, text):
+>       assert LLMGuardrails().validate_response(text, action_results={action: receipt(action, status)}) == (
+            False, f"action_failed:{action}:{status}",
+        )
+E       AssertionError: assert (True, None) == (False, 'acti...form:unknown')
+E         At index 0 diff: True != False
+E         Use -v to get more diff
+
+tests\unit\test_unresolved_action_speech.py:55: AssertionError
+_ test_other_named_unresolved_actions_keep_the_same_truth_boundary[submit_form-The form was not submitted.-in_progress] _
+
+status = 'in_progress', action = 'submit_form'
+text = 'The form was not submitted.'
+
+    @pytest.mark.parametrize("status", ["unknown", "in_progress"])
+    @pytest.mark.parametrize("action,text", [
+        ("submit_form", "The form was not submitted."),
+        ("submit_form", "Please resubmit the form."),
+        ("schedule_callback", "The callback was not scheduled."),
+        ("schedule_callback", "Please book the callback again."),
+        ("transfer_call", "The transfer was not started."),
+        ("transfer_call", "Please retry the transfer."),
+    ])
+    def test_other_named_unresolved_actions_keep_the_same_truth_boundary(status, action, text):
+>       assert LLMGuardrails().validate_response(text, action_results={action: receipt(action, status)}) == (
+            False, f"action_failed:{action}:{status}",
+        )
+E       AssertionError: assert (True, None) == (False, 'acti...:in_progress')
+E         At index 0 diff: True != False
+E         Use -v to get more diff
+
+tests\unit\test_unresolved_action_speech.py:55: AssertionError
+_ test_other_named_unresolved_actions_keep_the_same_truth_boundary[submit_form-Please resubmit the form.-unknown] _
+
+status = 'unknown', action = 'submit_form', text = 'Please resubmit the form.'
+
+    @pytest.mark.parametrize("status", ["unknown", "in_progress"])
+    @pytest.mark.parametrize("action,text", [
+        ("submit_form", "The form was not submitted."),
+        ("submit_form", "Please resubmit the form."),
+        ("schedule_callback", "The callback was not scheduled."),
+        ("schedule_callback", "Please book the callback again."),
+        ("transfer_call", "The transfer was not started."),
+        ("transfer_call", "Please retry the transfer."),
+    ])
+    def test_other_named_unresolved_actions_keep_the_same_truth_boundary(status, action, text):
+>       assert LLMGuardrails().validate_response(text, action_results={action: receipt(action, status)}) == (
+            False, f"action_failed:{action}:{status}",
+        )
+E       AssertionError: assert (True, None) == (False, 'acti...form:unknown')
+E         At index 0 diff: True != False
+E         Use -v to get more diff
+
+tests\unit\test_unresolved_action_speech.py:55: AssertionError
+_ test_other_named_unresolved_actions_keep_the_same_truth_boundary[submit_form-Please resubmit the form.-in_progress] _
+
+status = 'in_progress', action = 'submit_form'
+text = 'Please resubmit the form.'
+
+    @pytest.mark.parametrize("status", ["unknown", "in_progress"])
+    @pytest.mark.parametrize("action,text", [
+        ("submit_form", "The form was not submitted."),
+        ("submit_form", "Please resubmit the form."),
+        ("schedule_callback", "The callback was not scheduled."),
+        ("schedule_callback", "Please book the callback again."),
+        ("transfer_call", "The transfer was not started."),
+        ("transfer_call", "Please retry the transfer."),
+    ])
+    def test_other_named_unresolved_actions_keep_the_same_truth_boundary(status, action, text):
+>       assert LLMGuardrails().validate_response(text, action_results={action: receipt(action, status)}) == (
+            False, f"action_failed:{action}:{status}",
+        )
+E       AssertionError: assert (True, None) == (False, 'acti...:in_progress')
+E         At index 0 diff: True != False
+E         Use -v to get more diff
+
+tests\unit\test_unresolved_action_speech.py:55: AssertionError
+_ test_other_named_unresolved_actions_keep_the_same_truth_boundary[schedule_callback-The callback was not scheduled.-unknown] _
+
+status = 'unknown', action = 'schedule_callback'
+text = 'The callback was not scheduled.'
+
+    @pytest.mark.parametrize("status", ["unknown", "in_progress"])
+    @pytest.mark.parametrize("action,text", [
+        ("submit_form", "The form was not submitted."),
+        ("submit_form", "Please resubmit the form."),
+        ("schedule_callback", "The callback was not scheduled."),
+        ("schedule_callback", "Please book the callback again."),
+        ("transfer_call", "The transfer was not started."),
+        ("transfer_call", "Please retry the transfer."),
+    ])
+    def test_other_named_unresolved_actions_keep_the_same_truth_boundary(status, action, text):
+>       assert LLMGuardrails().validate_response(text, action_results={action: receipt(action, status)}) == (
+            False, f"action_failed:{action}:{status}",
+        )
+E       AssertionError: assert (True, None) == (False, 'acti...back:unknown')
+E         At index 0 diff: True != False
+E         Use -v to get more diff
+
+tests\unit\test_unresolved_action_speech.py:55: AssertionError
+_ test_other_named_unresolved_actions_keep_the_same_truth_boundary[schedule_callback-The callback was not scheduled.-in_progress] _
+
+status = 'in_progress', action = 'schedule_callback'
+text = 'The callback was not scheduled.'
+
+    @pytest.mark.parametrize("status", ["unknown", "in_progress"])
+    @pytest.mark.parametrize("action,text", [
+        ("submit_form", "The form was not submitted."),
+        ("submit_form", "Please resubmit the form."),
+        ("schedule_callback", "The callback was not scheduled."),
+        ("schedule_callback", "Please book the callback again."),
+        ("transfer_call", "The transfer was not started."),
+        ("transfer_call", "Please retry the transfer."),
+    ])
+    def test_other_named_unresolved_actions_keep_the_same_truth_boundary(status, action, text):
+>       assert LLMGuardrails().validate_response(text, action_results={action: receipt(action, status)}) == (
+            False, f"action_failed:{action}:{status}",
+        )
+E       AssertionError: assert (True, None) == (False, 'acti...:in_progress')
+E         At index 0 diff: True != False
+E         Use -v to get more diff
+
+tests\unit\test_unresolved_action_speech.py:55: AssertionError
+_ test_other_named_unresolved_actions_keep_the_same_truth_boundary[schedule_callback-Please book the callback again.-unknown] _
+
+status = 'unknown', action = 'schedule_callback'
+text = 'Please book the callback again.'
+
+    @pytest.mark.parametrize("status", ["unknown", "in_progress"])
+    @pytest.mark.parametrize("action,text", [
+        ("submit_form", "The form was not submitted."),
+        ("submit_form", "Please resubmit the form."),
+        ("schedule_callback", "The callback was not scheduled."),
+        ("schedule_callback", "Please book the callback again."),
+        ("transfer_call", "The transfer was not started."),
+        ("transfer_call", "Please retry the transfer."),
+    ])
+    def test_other_named_unresolved_actions_keep_the_same_truth_boundary(status, action, text):
+>       assert LLMGuardrails().validate_response(text, action_results={action: receipt(action, status)}) == (
+            False, f"action_failed:{action}:{status}",
+        )
+E       AssertionError: assert (True, None) == (False, 'acti...back:unknown')
+E         At index 0 diff: True != False
+E         Use -v to get more diff
+
+tests\unit\test_unresolved_action_speech.py:55: AssertionError
+_ test_other_named_unresolved_actions_keep_the_same_truth_boundary[schedule_callback-Please book the callback again.-in_progress] _
+
+status = 'in_progress', action = 'schedule_callback'
+text = 'Please book the callback again.'
+
+    @pytest.mark.parametrize("status", ["unknown", "in_progress"])
+    @pytest.mark.parametrize("action,text", [
+        ("submit_form", "The form was not submitted."),
+        ("submit_form", "Please resubmit the form."),
+        ("schedule_callback", "The callback was not scheduled."),
+        ("schedule_callback", "Please book the callback again."),
+        ("transfer_call", "The transfer was not started."),
+        ("transfer_call", "Please retry the transfer."),
+    ])
+    def test_other_named_unresolved_actions_keep_the_same_truth_boundary(status, action, text):
+>       assert LLMGuardrails().validate_response(text, action_results={action: receipt(action, status)}) == (
+            False, f"action_failed:{action}:{status}",
+        )
+E       AssertionError: assert (True, None) == (False, 'acti...:in_progress')
+E         At index 0 diff: True != False
+E         Use -v to get more diff
+
+tests\unit\test_unresolved_action_speech.py:55: AssertionError
+_ test_other_named_unresolved_actions_keep_the_same_truth_boundary[transfer_call-The transfer was not started.-unknown] _
+
+status = 'unknown', action = 'transfer_call'
+text = 'The transfer was not started.'
+
+    @pytest.mark.parametrize("status", ["unknown", "in_progress"])
+    @pytest.mark.parametrize("action,text", [
+        ("submit_form", "The form was not submitted."),
+        ("submit_form", "Please resubmit the form."),
+        ("schedule_callback", "The callback was not scheduled."),
+        ("schedule_callback", "Please book the callback again."),
+        ("transfer_call", "The transfer was not started."),
+        ("transfer_call", "Please retry the transfer."),
+    ])
+    def test_other_named_unresolved_actions_keep_the_same_truth_boundary(status, action, text):
+>       assert LLMGuardrails().validate_response(text, action_results={action: receipt(action, status)}) == (
+            False, f"action_failed:{action}:{status}",
+        )
+E       AssertionError: assert (True, None) == (False, 'acti...call:unknown')
+E         At index 0 diff: True != False
+E         Use -v to get more diff
+
+tests\unit\test_unresolved_action_speech.py:55: AssertionError
+_ test_other_named_unresolved_actions_keep_the_same_truth_boundary[transfer_call-The transfer was not started.-in_progress] _
+
+status = 'in_progress', action = 'transfer_call'
+text = 'The transfer was not started.'
+
+    @pytest.mark.parametrize("status", ["unknown", "in_progress"])
+    @pytest.mark.parametrize("action,text", [
+        ("submit_form", "The form was not submitted."),
+        ("submit_form", "Please resubmit the form."),
+        ("schedule_callback", "The callback was not scheduled."),
+        ("schedule_callback", "Please book the callback again."),
+        ("transfer_call", "The transfer was not started."),
+        ("transfer_call", "Please retry the transfer."),
+    ])
+    def test_other_named_unresolved_actions_keep_the_same_truth_boundary(status, action, text):
+>       assert LLMGuardrails().validate_response(text, action_results={action: receipt(action, status)}) == (
+            False, f"action_failed:{action}:{status}",
+        )
+E       AssertionError: assert (True, None) == (False, 'acti...:in_progress')
+E         At index 0 diff: True != False
+E         Use -v to get more diff
+
+tests\unit\test_unresolved_action_speech.py:55: AssertionError
+_ test_other_named_unresolved_actions_keep_the_same_truth_boundary[transfer_call-Please retry the transfer.-unknown] _
+
+status = 'unknown', action = 'transfer_call'
+text = 'Please retry the transfer.'
+
+    @pytest.mark.parametrize("status", ["unknown", "in_progress"])
+    @pytest.mark.parametrize("action,text", [
+        ("submit_form", "The form was not submitted."),
+        ("submit_form", "Please resubmit the form."),
+        ("schedule_callback", "The callback was not scheduled."),
+        ("schedule_callback", "Please book the callback again."),
+        ("transfer_call", "The transfer was not started."),
+        ("transfer_call", "Please retry the transfer."),
+    ])
+    def test_other_named_unresolved_actions_keep_the_same_truth_boundary(status, action, text):
+>       assert LLMGuardrails().validate_response(text, action_results={action: receipt(action, status)}) == (
+            False, f"action_failed:{action}:{status}",
+        )
+E       AssertionError: assert (True, None) == (False, 'acti...call:unknown')
+E         At index 0 diff: True != False
+E         Use -v to get more diff
+
+tests\unit\test_unresolved_action_speech.py:55: AssertionError
+_ test_other_named_unresolved_actions_keep_the_same_truth_boundary[transfer_call-Please retry the transfer.-in_progress] _
+
+status = 'in_progress', action = 'transfer_call'
+text = 'Please retry the transfer.'
+
+    @pytest.mark.parametrize("status", ["unknown", "in_progress"])
+    @pytest.mark.parametrize("action,text", [
+        ("submit_form", "The form was not submitted."),
+        ("submit_form", "Please resubmit the form."),
+        ("schedule_callback", "The callback was not scheduled."),
+        ("schedule_callback", "Please book the callback again."),
+        ("transfer_call", "The transfer was not started."),
+        ("transfer_call", "Please retry the transfer."),
+    ])
+    def test_other_named_unresolved_actions_keep_the_same_truth_boundary(status, action, text):
+>       assert LLMGuardrails().validate_response(text, action_results={action: receipt(action, status)}) == (
+            False, f"action_failed:{action}:{status}",
+        )
+E       AssertionError: assert (True, None) == (False, 'acti...:in_progress')
+E         At index 0 diff: True != False
+E         Use -v to get more diff
+
+tests\unit\test_unresolved_action_speech.py:55: AssertionError
+_ test_uncertainty_reconciliation_and_unrelated_speech_are_preserved[I can't confirm whether the email was sent.-unknown] _
+
+status = 'unknown', text = "I can't confirm whether the email was sent."
+
+    @pytest.mark.parametrize("status", ["unknown", "in_progress"])
+    @pytest.mark.parametrize("text", [
+        "I can't confirm whether the email was sent.",
+        "I cannot confirm whether the email was sent.",
+        "I can't confirm that the email was sent.",
+        "The sending outcome is unknown. It needs checking before another attempt.",
+        "Please check the existing request before trying again.",
+        "Do not resend the email until the existing request has been checked.",
+        "Please do not send the email again.",
+        "The phrase 'resend the email' is an instruction, not an outcome.",
+        "If the email failed, its saved receipt would need review.",
+        "The form was not submitted.",
+        "Your opening hours are nine to five.",
+        "Please try again now.",
+        "Please retry your password.",
+    ])
+    def test_uncertainty_reconciliation_and_unrelated_speech_are_preserved(status, text):
+>       assert LLMGuardrails().validate_response(text, action_results={"send_email": receipt(status=status)}) == (True, None)
+E       AssertionError: assert (False, 'acti...mail:unknown') == (True, None)
+E         At index 0 diff: False != True
+E         Use -v to get more diff
+
+tests\unit\test_unresolved_action_speech.py:77: AssertionError
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.llm_guardrails:llm_guardrails.py:395 Blocked failed/unconfirmed voice action claim: send_email status=unknown
+_ test_uncertainty_reconciliation_and_unrelated_speech_are_preserved[I can't confirm whether the email was sent.-in_progress] _
+
+status = 'in_progress', text = "I can't confirm whether the email was sent."
+
+    @pytest.mark.parametrize("status", ["unknown", "in_progress"])
+    @pytest.mark.parametrize("text", [
+        "I can't confirm whether the email was sent.",
+        "I cannot confirm whether the email was sent.",
+        "I can't confirm that the email was sent.",
+        "The sending outcome is unknown. It needs checking before another attempt.",
+        "Please check the existing request before trying again.",
+        "Do not resend the email until the existing request has been checked.",
+        "Please do not send the email again.",
+        "The phrase 'resend the email' is an instruction, not an outcome.",
+        "If the email failed, its saved receipt would need review.",
+        "The form was not submitted.",
+        "Your opening hours are nine to five.",
+        "Please try again now.",
+        "Please retry your password.",
+    ])
+    def test_uncertainty_reconciliation_and_unrelated_speech_are_preserved(status, text):
+>       assert LLMGuardrails().validate_response(text, action_results={"send_email": receipt(status=status)}) == (True, None)
+E       AssertionError: assert (False, 'acti...:in_progress') == (True, None)
+E         At index 0 diff: False != True
+E         Use -v to get more diff
+
+tests\unit\test_unresolved_action_speech.py:77: AssertionError
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.llm_guardrails:llm_guardrails.py:395 Blocked failed/unconfirmed voice action claim: send_email status=in_progress
+_ test_uncertainty_reconciliation_and_unrelated_speech_are_preserved[I cannot confirm whether the email was sent.-unknown] _
+
+status = 'unknown', text = 'I cannot confirm whether the email was sent.'
+
+    @pytest.mark.parametrize("status", ["unknown", "in_progress"])
+    @pytest.mark.parametrize("text", [
+        "I can't confirm whether the email was sent.",
+        "I cannot confirm whether the email was sent.",
+        "I can't confirm that the email was sent.",
+        "The sending outcome is unknown. It needs checking before another attempt.",
+        "Please check the existing request before trying again.",
+        "Do not resend the email until the existing request has been checked.",
+        "Please do not send the email again.",
+        "The phrase 'resend the email' is an instruction, not an outcome.",
+        "If the email failed, its saved receipt would need review.",
+        "The form was not submitted.",
+        "Your opening hours are nine to five.",
+        "Please try again now.",
+        "Please retry your password.",
+    ])
+    def test_uncertainty_reconciliation_and_unrelated_speech_are_preserved(status, text):
+>       assert LLMGuardrails().validate_response(text, action_results={"send_email": receipt(status=status)}) == (True, None)
+E       AssertionError: assert (False, 'acti...mail:unknown') == (True, None)
+E         At index 0 diff: False != True
+E         Use -v to get more diff
+
+tests\unit\test_unresolved_action_speech.py:77: AssertionError
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.llm_guardrails:llm_guardrails.py:395 Blocked failed/unconfirmed voice action claim: send_email status=unknown
+_ test_uncertainty_reconciliation_and_unrelated_speech_are_preserved[I cannot confirm whether the email was sent.-in_progress] _
+
+status = 'in_progress', text = 'I cannot confirm whether the email was sent.'
+
+    @pytest.mark.parametrize("status", ["unknown", "in_progress"])
+    @pytest.mark.parametrize("text", [
+        "I can't confirm whether the email was sent.",
+        "I cannot confirm whether the email was sent.",
+        "I can't confirm that the email was sent.",
+        "The sending outcome is unknown. It needs checking before another attempt.",
+        "Please check the existing request before trying again.",
+        "Do not resend the email until the existing request has been checked.",
+        "Please do not send the email again.",
+        "The phrase 'resend the email' is an instruction, not an outcome.",
+        "If the email failed, its saved receipt would need review.",
+        "The form was not submitted.",
+        "Your opening hours are nine to five.",
+        "Please try again now.",
+        "Please retry your password.",
+    ])
+    def test_uncertainty_reconciliation_and_unrelated_speech_are_preserved(status, text):
+>       assert LLMGuardrails().validate_response(text, action_results={"send_email": receipt(status=status)}) == (True, None)
+E       AssertionError: assert (False, 'acti...:in_progress') == (True, None)
+E         At index 0 diff: False != True
+E         Use -v to get more diff
+
+tests\unit\test_unresolved_action_speech.py:77: AssertionError
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.llm_guardrails:llm_guardrails.py:395 Blocked failed/unconfirmed voice action claim: send_email status=in_progress
+_ test_uncertainty_or_negation_cannot_license_a_separate_claim_or_repeat[Do not resend the email, but please send the email again.] _
+
+text = 'Do not resend the email, but please send the email again.'
+
+    @pytest.mark.parametrize("text", [
+        "The email was sent to you.",
+        "I can't confirm whether the email was sent. The email was sent now.",
+        "The email could not be sent, but the email was sent now.",
+        "The old error said 'the email could not be sent'; the email was sent now.",
+        "If the email could not be sent, the details were sent to you instead.",
+        "Do not resend the email, but please send the email again.",
+        "The sending outcome is unknown. Please resend the email.",
+    ])
+    def test_uncertainty_or_negation_cannot_license_a_separate_claim_or_repeat(text):
+>       assert LLMGuardrails().validate_response(text, action_results={"send_email": receipt()}) == (
+            False, "action_failed:send_email:unknown",
+        )
+E       AssertionError: assert (True, None) == (False, 'acti...mail:unknown')
+E         At index 0 diff: True != False
+E         Use -v to get more diff
+
+tests\unit\test_unresolved_action_speech.py:110: AssertionError
+_ test_uncertainty_or_negation_cannot_license_a_separate_claim_or_repeat[The sending outcome is unknown. Please resend the email.] _
+
+text = 'The sending outcome is unknown. Please resend the email.'
+
+    @pytest.mark.parametrize("text", [
+        "The email was sent to you.",
+        "I can't confirm whether the email was sent. The email was sent now.",
+        "The email could not be sent, but the email was sent now.",
+        "The old error said 'the email could not be sent'; the email was sent now.",
+        "If the email could not be sent, the details were sent to you instead.",
+        "Do not resend the email, but please send the email again.",
+        "The sending outcome is unknown. Please resend the email.",
+    ])
+    def test_uncertainty_or_negation_cannot_license_a_separate_claim_or_repeat(text):
+>       assert LLMGuardrails().validate_response(text, action_results={"send_email": receipt()}) == (
+            False, "action_failed:send_email:unknown",
+        )
+E       AssertionError: assert (True, None) == (False, 'acti...mail:unknown')
+E         At index 0 diff: True != False
+E         Use -v to get more diff
+
+tests\unit\test_unresolved_action_speech.py:110: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/unit/test_unresolved_action_speech.py::test_unknown_email_cannot_be_described_as_failed_or_safe_to_repeat[The email was not sent.-unknown]
+FAILED tests/unit/test_unresolved_action_speech.py::test_unknown_email_cannot_be_described_as_failed_or_safe_to_repeat[The email was not sent.-in_progress]
+FAILED tests/unit/test_unresolved_action_speech.py::test_unknown_email_cannot_be_described_as_failed_or_safe_to_repeat[The email could not be sent.-unknown]
+FAILED tests/unit/test_unresolved_action_speech.py::test_unknown_email_cannot_be_described_as_failed_or_safe_to_repeat[The email could not be sent.-in_progress]
+FAILED tests/unit/test_unresolved_action_speech.py::test_unknown_email_cannot_be_described_as_failed_or_safe_to_repeat[The email cannot be delivered.-unknown]
+FAILED tests/unit/test_unresolved_action_speech.py::test_unknown_email_cannot_be_described_as_failed_or_safe_to_repeat[The email cannot be delivered.-in_progress]
+FAILED tests/unit/test_unresolved_action_speech.py::test_unknown_email_cannot_be_described_as_failed_or_safe_to_repeat[I haven't sent the email.-unknown]
+FAILED tests/unit/test_unresolved_action_speech.py::test_unknown_email_cannot_be_described_as_failed_or_safe_to_repeat[I haven't sent the email.-in_progress]
+FAILED tests/unit/test_unresolved_action_speech.py::test_unknown_email_cannot_be_described_as_failed_or_safe_to_repeat[The email failed.-unknown]
+FAILED tests/unit/test_unresolved_action_speech.py::test_unknown_email_cannot_be_described_as_failed_or_safe_to_repeat[The email failed.-in_progress]
+FAILED tests/unit/test_unresolved_action_speech.py::test_unknown_email_cannot_be_described_as_failed_or_safe_to_repeat[The email has failed.-unknown]
+FAILED tests/unit/test_unresolved_action_speech.py::test_unknown_email_cannot_be_described_as_failed_or_safe_to_repeat[The email has failed.-in_progress]
+FAILED tests/unit/test_unresolved_action_speech.py::test_unknown_email_cannot_be_described_as_failed_or_safe_to_repeat[The email was not sent. Please ask me to send it again.-unknown]
+FAILED tests/unit/test_unresolved_action_speech.py::test_unknown_email_cannot_be_described_as_failed_or_safe_to_repeat[The email was not sent. Please ask me to send it again.-in_progress]
+FAILED tests/unit/test_unresolved_action_speech.py::test_unknown_email_cannot_be_described_as_failed_or_safe_to_repeat[Please send the email again.-unknown]
+FAILED tests/unit/test_unresolved_action_speech.py::test_unknown_email_cannot_be_described_as_failed_or_safe_to_repeat[Please send the email again.-in_progress]
+FAILED tests/unit/test_unresolved_action_speech.py::test_unknown_email_cannot_be_described_as_failed_or_safe_to_repeat[I will resend the email now.-unknown]
+FAILED tests/unit/test_unresolved_action_speech.py::test_unknown_email_cannot_be_described_as_failed_or_safe_to_repeat[I will resend the email now.-in_progress]
+FAILED tests/unit/test_unresolved_action_speech.py::test_unknown_email_cannot_be_described_as_failed_or_safe_to_repeat[Please retry sending the email.-unknown]
+FAILED tests/unit/test_unresolved_action_speech.py::test_unknown_email_cannot_be_described_as_failed_or_safe_to_repeat[Please retry sending the email.-in_progress]
+FAILED tests/unit/test_unresolved_action_speech.py::test_unknown_email_cannot_be_described_as_failed_or_safe_to_repeat[Please retry the email.-unknown]
+FAILED tests/unit/test_unresolved_action_speech.py::test_unknown_email_cannot_be_described_as_failed_or_safe_to_repeat[Please retry the email.-in_progress]
+FAILED tests/unit/test_unresolved_action_speech.py::test_other_named_unresolved_actions_keep_the_same_truth_boundary[submit_form-The form was not submitted.-unknown]
+FAILED tests/unit/test_unresolved_action_speech.py::test_other_named_unresolved_actions_keep_the_same_truth_boundary[submit_form-The form was not submitted.-in_progress]
+FAILED tests/unit/test_unresolved_action_speech.py::test_other_named_unresolved_actions_keep_the_same_truth_boundary[submit_form-Please resubmit the form.-unknown]
+FAILED tests/unit/test_unresolved_action_speech.py::test_other_named_unresolved_actions_keep_the_same_truth_boundary[submit_form-Please resubmit the form.-in_progress]
+FAILED tests/unit/test_unresolved_action_speech.py::test_other_named_unresolved_actions_keep_the_same_truth_boundary[schedule_callback-The callback was not scheduled.-unknown]
+FAILED tests/unit/test_unresolved_action_speech.py::test_other_named_unresolved_actions_keep_the_same_truth_boundary[schedule_callback-The callback was not scheduled.-in_progress]
+FAILED tests/unit/test_unresolved_action_speech.py::test_other_named_unresolved_actions_keep_the_same_truth_boundary[schedule_callback-Please book the callback again.-unknown]
+FAILED tests/unit/test_unresolved_action_speech.py::test_other_named_unresolved_actions_keep_the_same_truth_boundary[schedule_callback-Please book the callback again.-in_progress]
+FAILED tests/unit/test_unresolved_action_speech.py::test_other_named_unresolved_actions_keep_the_same_truth_boundary[transfer_call-The transfer was not started.-unknown]
+FAILED tests/unit/test_unresolved_action_speech.py::test_other_named_unresolved_actions_keep_the_same_truth_boundary[transfer_call-The transfer was not started.-in_progress]
+FAILED tests/unit/test_unresolved_action_speech.py::test_other_named_unresolved_actions_keep_the_same_truth_boundary[transfer_call-Please retry the transfer.-unknown]
+FAILED tests/unit/test_unresolved_action_speech.py::test_other_named_unresolved_actions_keep_the_same_truth_boundary[transfer_call-Please retry the transfer.-in_progress]
+FAILED tests/unit/test_unresolved_action_speech.py::test_uncertainty_reconciliation_and_unrelated_speech_are_preserved[I can't confirm whether the email was sent.-unknown]
+FAILED tests/unit/test_unresolved_action_speech.py::test_uncertainty_reconciliation_and_unrelated_speech_are_preserved[I can't confirm whether the email was sent.-in_progress]
+FAILED tests/unit/test_unresolved_action_speech.py::test_uncertainty_reconciliation_and_unrelated_speech_are_preserved[I cannot confirm whether the email was sent.-unknown]
+FAILED tests/unit/test_unresolved_action_speech.py::test_uncertainty_reconciliation_and_unrelated_speech_are_preserved[I cannot confirm whether the email was sent.-in_progress]
+FAILED tests/unit/test_unresolved_action_speech.py::test_uncertainty_or_negation_cannot_license_a_separate_claim_or_repeat[Do not resend the email, but please send the email again.]
+FAILED tests/unit/test_unresolved_action_speech.py::test_uncertainty_or_negation_cannot_license_a_separate_claim_or_repeat[The sending outcome is unknown. Please resend the email.]
+40 failed, 39 passed in 1.68s
