@@ -1,0 +1,176 @@
+{
+  "scope": "Actual shared validator, synthetic receipts only; no model/network/database calls.",
+  "rows": [
+    {
+      "text": "The callback, as requested, was scheduled.",
+      "status": null,
+      "expected_valid": false,
+      "actual": [
+        false,
+        "unconfirmed_action:schedule_callback"
+      ]
+    },
+    {
+      "text": "The callback, as requested, was scheduled.",
+      "status": "unknown",
+      "expected_valid": false,
+      "actual": [
+        false,
+        "action_failed:schedule_callback:unknown"
+      ]
+    },
+    {
+      "text": "The callback, as requested, was scheduled.",
+      "status": "failed",
+      "expected_valid": false,
+      "actual": [
+        false,
+        "action_failed:schedule_callback:failed"
+      ]
+    },
+    {
+      "text": "The email, as requested, was sent.",
+      "status": null,
+      "expected_valid": false,
+      "actual": [
+        false,
+        "unconfirmed_action:send_email"
+      ]
+    },
+    {
+      "text": "The email, as requested, was sent.",
+      "status": "unknown",
+      "expected_valid": false,
+      "actual": [
+        false,
+        "action_failed:send_email:unknown"
+      ]
+    },
+    {
+      "text": "The email, as requested, was sent.",
+      "status": "failed",
+      "expected_valid": false,
+      "actual": [
+        false,
+        "action_failed:send_email:failed"
+      ]
+    },
+    {
+      "text": "The form, as requested, was submitted.",
+      "status": null,
+      "expected_valid": false,
+      "actual": [
+        false,
+        "unconfirmed_action:submit_form"
+      ]
+    },
+    {
+      "text": "The form, as requested, was submitted.",
+      "status": "unknown",
+      "expected_valid": false,
+      "actual": [
+        false,
+        "action_failed:submit_form:unknown"
+      ]
+    },
+    {
+      "text": "The form, as requested, was submitted.",
+      "status": "failed",
+      "expected_valid": false,
+      "actual": [
+        false,
+        "action_failed:submit_form:failed"
+      ]
+    },
+    {
+      "text": "I have sent the price and payment information.",
+      "status": null,
+      "expected_valid": false,
+      "actual": [
+        false,
+        "unconfirmed_action:send_email"
+      ]
+    },
+    {
+      "text": "I have sent the price and payment information.",
+      "status": "unknown",
+      "expected_valid": false,
+      "actual": [
+        false,
+        "action_failed:send_email:unknown"
+      ]
+    },
+    {
+      "text": "I have sent the price and payment information.",
+      "status": "failed",
+      "expected_valid": false,
+      "actual": [
+        false,
+        "action_failed:send_email:failed"
+      ]
+    },
+    {
+      "text": "I cannot confirm whether the email, as requested, was sent.",
+      "status": "unknown",
+      "expected_valid": true,
+      "actual": [
+        true,
+        null
+      ]
+    },
+    {
+      "text": "I cannot confirm whether the email was sent, but the email was sent now.",
+      "status": "unknown",
+      "expected_valid": false,
+      "actual": [
+        false,
+        "action_failed:send_email:unknown"
+      ]
+    },
+    {
+      "text": "I cannot confirm whether the email failed, so resend the email.",
+      "status": "unknown",
+      "expected_valid": false,
+      "actual": [
+        false,
+        "action_failed:send_email:unknown"
+      ]
+    },
+    {
+      "text": "The caller said 'resend the email', and I will resend the email now.",
+      "status": "unknown",
+      "expected_valid": false,
+      "actual": [
+        false,
+        "action_failed:send_email:unknown"
+      ]
+    },
+    {
+      "text": "The caller said 'resend the email and retry the email'.",
+      "status": "unknown",
+      "expected_valid": true,
+      "actual": [
+        true,
+        null
+      ]
+    },
+    {
+      "text": "Do not resend the email, and do not retry the email.",
+      "status": "unknown",
+      "expected_valid": true,
+      "actual": [
+        true,
+        null
+      ]
+    },
+    {
+      "text": "I could not confirm the outcome of that request. It needs to be checked before trying again.",
+      "status": "unknown",
+      "expected_valid": true,
+      "actual": [
+        true,
+        null
+      ]
+    }
+  ]
+}
