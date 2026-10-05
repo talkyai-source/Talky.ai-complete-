@@ -38,3 +38,25 @@ No actual provider, database, telephone or customer action was performed. Tests 
 Unknown/unroutable DID and route-lookup failure still take the legacy unresolved-tenant path. This slice repairs profile lookup after known ownership; it does not claim to repair all legacy route admission.
 
 The outbound callback's missing-warmup default branch in `telephony/lifecycle.py` is unchanged. Read-only tracing confirms ordinary Asterisk origination waits for successful prewarm and stores it before calling the adapter. Non-Asterisk callback-before-return ordering and aged/lost local warmup state are separate candidates for reproduction; this evidence does not prove that a normal failed Asterisk prewarm bypasses its 503 gate. No lifecycle change was made without a separate demonstrated boundary.
+
+## Root integration follow-up
+
+Source integrated as `5c26f311`. At combined candidate `427022cd`, the owner
+regression plus every named direct resolver/prewarm test caller and the adjacent
+Admin receipt/AG04 replay modules passed: **620 passed, zero failures or skips**,
+1,083 warnings, 12.68 seconds across **20 modules**. The source snapshot remained
+unchanged. [Integrated command](artifacts/tenant-config-admission/integrated-command.json)
+and [output](artifacts/tenant-config-admission/integrated-tests.txt) preserve the
+test inventory and exact source identity. Counts overlap the earlier focused and
+full suites; the 11,775-test full run remains attributed to its earlier candidate.
+
+Root integrated the owner's initial evidence commit `e2d67de2` as `427022cd`
+before the final owner notification. Final owner evidence `cae1b890` differs only
+by removing trailing whitespace on two otherwise empty lines in a retained
+fixture-teardown log. That exact corrected artifact was applied in a follow-up;
+there was no redaction, source change or result change.
+
+The README now describes strict known-tenant setup and distinguishes current
+SIP campaign origination from separately enabled legacy cloud callbacks. The
+missing/lost warmup and unresolved cloud ownership paths remain separate
+investigations, without a live/deployed acceptance claim.

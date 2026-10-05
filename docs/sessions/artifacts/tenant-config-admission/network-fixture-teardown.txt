@@ -216,7 +216,7 @@ tests/unit/test_tenant_profile_admission.py::test_resolved_did_rejects_unavailab
 tests/unit/test_tenant_profile_admission.py::test_actual_origination_boundary_returns_503_without_opening_provider[exception-ai]
 tests/unit/test_tenant_profile_admission.py::test_actual_origination_boundary_returns_503_without_opening_provider[exception-tuning]
   C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\backend\.venv\Lib\site-packages\_pytest\unraisableexception.py:78: PytestUnraisableExceptionWarning: Exception ignored in: <function BaseEventLoop.__del__ at 0x0000015852222F20>
-  
+
   Traceback (most recent call last):
     File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\base_events.py", line 732, in __del__
       self.close()
@@ -226,7 +226,7 @@ tests/unit/test_tenant_profile_admission.py::test_actual_origination_boundary_re
       self._ssock.close()
       ^^^^^^^^^^^
   AttributeError: 'ProactorEventLoop' object has no attribute '_ssock'
-  
+
     warnings.warn(pytest.PytestUnraisableExceptionWarning(msg))
 
 -- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html

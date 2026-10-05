@@ -436,10 +436,15 @@
         {
           "path": "docs/sessions/2026-10-05-branding-inventory-regressions.md",
           "kind": "bounded_local_followup_not_release_acceptance"
+        },
+        {
+          "path": "docs/sessions/2026-10-05-known-tenant-profile-admission.md",
+          "kind": "strict_known_tenant_profile_admission_and_integrated_regression",
+          "candidate": "5c26f311"
         }
       ],
       "blocker": null,
-      "next_action": "Verify the coordinated release and designated live profiles; finish exact-dependency combined verification while preserving the shared HTTP identity boundary. No readiness closure.",
+      "next_action": "Known-tenant unavailable profile/tuning admission is repaired and verified. Finish separate lost-warmup/legacy ownership investigation and coordinated designated-profile live acceptance; preserve source-bound full and scoped integration evidence.",
       "target_date": null,
       "execution_note": "Local candidate 4f47123f: 818 backend passes/1 skip, 38 focused frontend passes, typecheck/build/CI-rule Ruff/scoped ESLint pass. Broader frontend 673 passes/1 baseline failure/2 skips; full lint has baseline configuration error. No real provider calls, migration, push or deployment."
     },
@@ -552,7 +557,7 @@
           "candidate": "1c7dce70"
         }
       ],
-      "blocker": "Captured Groq semantic failure retained. Proposed matrix37/50mapped by offline replay; intended profile roster/rubric/cohort unratified; live/human/audio/effect acceptance not run. AG02 retrieval gate remains failed.",
+      "blocker": "Captured Groq semantic failure retained. Proposed matrix39/50mapped by offline replay; intended profile roster/rubric/cohort unratified; live/human/audio/effect acceptance not run. AG02 retrieval gate remains failed.",
       "next_action": "Extend the remaining 11 unmapped canonical conditions through meaningful existing runtime boundaries; preserve failed Groq semantics and perform approved per-profile human/live qualification. 39/50 union and 190 replay rows are not approval.",
       "target_date": null,
       "execution_note": "1797 tests passed0skip;170offline rows1120controlchecks0failed;1retained semantic failure/169unreviewed. Local source commit only; no provider call/push/deploy."
@@ -693,6 +698,11 @@
           "path": "docs/sessions/2026-10-05-ag07-architecture-dispositions.md",
           "kind": "independently_reviewed_architecture_dispositions",
           "candidate": "e4f76f8733cceeb67da53cc14a00e7ba5f892bf9"
+        },
+        {
+          "path": "docs/sessions/2026-10-05-known-tenant-profile-admission.md",
+          "kind": "strict_known_tenant_profile_admission_and_integrated_regression",
+          "candidate": "5c26f311"
         }
       ],
       "blocker": "A05 cleanup and documented crash contract are locally verified; remaining architecture dispositions follow lifecycle/provider/configuration owning repairs. No full architecture or live/release claim.",
@@ -892,6 +902,11 @@
           "path": "docs/sessions/2026-10-05-cooldown-query-postgres-verification.md",
           "kind": "eight_opt_in_actual_sql_checks_in_restricted_private_schema",
           "candidate": "a42f2700"
+        },
+        {
+          "path": "docs/sessions/2026-10-05-known-tenant-profile-admission.md",
+          "kind": "strict_known_tenant_profile_admission_and_integrated_regression",
+          "candidate": "5c26f311"
         }
       ],
       "blocker": "All five remaining pre-intent pacing branches now preserve attempts; native DNC schema/persistence and speech are repaired locally. Lead finalization/retry suppression follow-up, ambiguous-owner reconciliation and actual queue/process/PBX acceptance remain open.",
@@ -981,8 +996,8 @@
           "candidate": "44dcc2367446cbe85c9c2757838b8695cf15bf1f"
         }
       ],
-      "blocker": "Native DNC persistence/speech and recording creation boundaries are repaired locally. DNC lead/retry settlement follow-up and approved retention/export/delete rules with per-store execution remain open.",
-      "next_action": "Integrate verified DNC settlement/bulk acknowledgement repair; complete approved recording/data lifecycle and reconcile deployed supplier/retention promises.",
+      "blocker": "Native DNC persistence/speech, durable lead/retry settlement, truthful bulk suppression and recording creation are repaired locally. Approved retention/export/delete rules, per-store execution and deployed supplier/storage evidence remain open.",
+      "next_action": "Complete the approved recording/data lifecycle, per-store request execution and deployed supplier/retention reconciliation; retain verified DNC settlement and bulk acknowledgement evidence.",
       "target_date": null
     },
     {
@@ -1212,6 +1227,11 @@
           "path": "docs/sessions/artifacts/frontend-lint-scope/verification.json",
           "kind": "local_full_frontend_lint_recheck",
           "candidate": "33360ddf"
+        },
+        {
+          "path": "docs/sessions/2026-10-05-known-tenant-profile-admission.md",
+          "kind": "strict_known_tenant_profile_admission_and_integrated_regression",
+          "candidate": "5c26f311"
         }
       ],
       "blocker": null,

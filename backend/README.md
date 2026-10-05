@@ -78,12 +78,20 @@ sole authority for a tenant's live call:
 | `config/providers.yaml` | Supplies configuration to the consumers that read it, including cached Flux base/capture keyterms. Its `active` labels do not override all session builders. |
 | Credentials | Resolve separately through the credential resolver using the owning tenant. A selected model, available credential and successfully opened provider connection are different checks. |
 
-Configuration availability behavior still differs between entry paths. At the
-5 October 2026 integration checkpoint, campaign browser tests request strict
-tenant lookups, while outbound prewarm and the legacy Twilio/Vonage DID helper
-retain permissive resolver calls. The outbound lifecycle also has a process-default
-slow path when warmup is absent. These paths need their own admission and failure
-review; this table does not certify that every failure preserves the saved profile.
+Known-tenant outbound prewarm and campaign browser tests require available AI and
+tuning lookups. The legacy Twilio/Vonage helper also requires the AI lookup once
+ownership resolves. Failed or unwired lookups stop these setup paths; a successful
+lookup showing no saved row still permits defaults. This admission correction is
+recorded in the [known-tenant profile report](../docs/sessions/2026-10-05-known-tenant-profile-admission.md).
+
+Separate legacy behavior remains under review: the cloud DID helper can still
+return tenantless defaults when ownership cannot resolve, and the outbound
+lifecycle has a default slow path when warmup is absent. Twilio/Vonage cloud
+callbacks are separately enabled legacy paths; the current campaign worker calls
+the SIP route, whose production durable origination requires Asterisk and a
+planned call identity. A signed cloud callback's destination alone does not
+establish the owning outbound tenant. These paths are not qualified as additional
+campaign integrations by the profile correction.
 
 Select an existing supported profile through AI Options, save and reload it, then
 assign the intended engine/voice/prompt to the campaign. Confirm the effective
