@@ -588,6 +588,16 @@ async def prepare_prewarmed_session(
         # so this synth is fast even on the very first call of the process.
         await prepare_pre_originate_greeting(pre_warm_session, effective_first_speaker)
 
+    except asyncio.CancelledError:
+        # The endpoint has not received this session yet. If another warmup
+        # is cancelled after STT opened, only this scope can return its socket
+        # and provider permit; the endpoint's later cleanup cannot see it.
+        if pre_warm_session is not None:
+            try:
+                await asyncio.shield(_get_orchestrator().end_session(pre_warm_session))
+            except Exception as cleanup_exc:
+                logger.error("pre_originate_cancel_cleanup_failed: %s", cleanup_exc)
+        raise
     except Exception as warm_exc:
         warmup_failure_reason = repr(warm_exc)
         logger.error(

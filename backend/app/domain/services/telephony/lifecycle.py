@@ -57,6 +57,36 @@ from app.infrastructure.metrics.gateway_metrics import record_gateway_media_reco
 
 logger = logging.getLogger(__name__)
 
+_global_lease_maintenance: Optional[tuple[Any, asyncio.Lock]] = None
+
+
+def _global_lease_maintenance_lock() -> asyncio.Lock:
+    """Serialize this event loop's refresh/release, without a call registry."""
+    global _global_lease_maintenance
+    loop = asyncio.get_running_loop()
+    if _global_lease_maintenance is None or _global_lease_maintenance[0] is not loop:
+        _global_lease_maintenance = (loop, asyncio.Lock())
+    return _global_lease_maintenance[1]
+
+
+async def _refresh_current_global_lease(redis_client, call_id, session, state) -> None:
+    from app.domain.services.global_concurrency import refresh_lease
+
+    async with _global_lease_maintenance_lock():
+        if call_id in _ended_calls_in_flight or state.get_voice_session(call_id) is not session:
+            return
+        # A stale copied watchdog list must not resurrect an ended call. The
+        # release path joins this lock after an already-started refresh.
+        # Timeout is uncertain remote execution, not proof of a free slot.
+        await asyncio.wait_for(refresh_lease(redis_client, call_id=call_id), timeout=1.0)
+
+
+async def _serialized_global_release(release_callback, redis_client, call_id) -> None:
+    # Callers retain their existing one-second deadline and strict/fail-soft
+    # result handling. This is local ordering, not cross-process fencing.
+    async with _global_lease_maintenance_lock():
+        await release_callback(redis_client, call_id=call_id)
+
 
 class InboundTerminalProofMissing(RuntimeError):
     """A confirmed Answer has no authoritative PBX-absence timestamp."""
@@ -996,15 +1026,14 @@ async def _session_watchdog() -> None:
             try:
                 from app.domain.services.global_concurrency import (
                     reconcile_orphans,
-                    refresh_lease,
                 )
                 from app.core.container import get_container as _gc
 
                 _c = _gc()
                 _redis = getattr(_c, "redis", None) if _c.is_initialized else None
                 if _redis is not None:
-                    for live_id, _ in _sb.iter_voice_session_items():
-                        await refresh_lease(_redis, call_id=live_id)
+                    for live_id, live_session in _sb.iter_voice_session_items():
+                        await _refresh_current_global_lease(_redis, live_id, live_session, _sb)
                     await reconcile_orphans(_redis)
             except Exception as exc:
                 logger.debug("global_concurrency_watchdog_step_failed err=%s", exc)
@@ -2291,7 +2320,7 @@ async def _release_global_inbound_slot(
 
     try:
         await asyncio.wait_for(
-            release_callback(redis_client, call_id=pbx_call_id),
+            _serialized_global_release(release_callback, redis_client, pbx_call_id),
             timeout=1.0,
         )
     except asyncio.TimeoutError:
@@ -3610,9 +3639,8 @@ async def _on_new_call(call_id: str, inbound_admission: Any = None) -> None:
     # T1.2 — cluster-wide concurrency cap. Redis-backed lease keyed on
     # call_id. Idempotent — safe to call on every _on_new_call for the
     # same id.  Refuses when the cluster SCARD exceeds the global cap.
-    # Falls through to allow when Redis is unavailable so a degraded
-    # Redis doesn't kill origination — the per-pod cap above is the
-    # backstop.
+    # Missing shared capacity proof refuses voice admission. The per-pod
+    # memory limit above remains a separate backstop, not a global allowance.
     from app.domain.services.global_concurrency import (
         acquire_lease,
         resolve_global_cap,
@@ -3628,12 +3656,14 @@ async def _on_new_call(call_id: str, inbound_admission: Any = None) -> None:
             call_id=call_id,
             pod_id=os.getenv("POD_ID") or os.uname().nodename,
             cap=resolve_global_cap(),
+            fail_closed=True,
         )
     if not lease:
         logger.error(
-            "telephony_at_global_capacity call_id=%s current=%s — rejecting",
+            "telephony_global_admission_refused call_id=%s current=%s reason=%s",
             call_id[:12],
             lease.current,
+            lease.reason,
         )
         await _reject_overcap_call(call_id)
         return
@@ -4926,9 +4956,10 @@ async def _on_call_ended(
 
             _c = _gc()
             await asyncio.wait_for(
-                release_lease(
+                _serialized_global_release(
+                    release_lease,
                     getattr(_c, "redis", None) if _c.is_initialized else None,
-                    call_id=call_id,
+                    call_id,
                 ),
                 timeout=1.0,
             )
@@ -5523,9 +5554,10 @@ async def _on_call_ended(
 
         recovery_container = _recovery_gc()
         await asyncio.wait_for(
-            release_lease_strict(
+            _serialized_global_release(
+                release_lease_strict,
                 getattr(recovery_container, "redis", None),
-                call_id=call_id,
+                call_id,
             ),
             timeout=1.0,
         )

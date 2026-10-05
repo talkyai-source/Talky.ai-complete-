@@ -22,6 +22,9 @@ from typing import Any
 import pytest
 
 from app.domain.services.global_concurrency import (
+    _ACQUIRE_SCRIPT,
+    _ACQUIRE_CLEANUP_SCRIPT,
+    _RECONCILE_SCRIPT,
     acquire_lease,
     current_count,
     reconcile_orphans,
@@ -107,6 +110,35 @@ class _FakeRedis:
                 self.expires.pop(key, None)
                 n += 1
         return n
+
+    async def eval(self, script, numkeys, active_key, lease_key, *args):
+        """Atomic command model only; actual Lua/Redis is a separate test."""
+        assert numkeys == 2
+        call_id = args[0]
+        self._expired(lease_key)
+        members = self.sets.setdefault(active_key, set())
+        if script == _ACQUIRE_SCRIPT:
+            _, pod_id, cap, ttl = args
+            present, lease_present = call_id in members, lease_key in self.strings
+            if not present and not lease_present and len(members) >= int(cap):
+                return [0, len(members)]
+            members.add(call_id)
+            if not lease_present:
+                self.strings[lease_key] = "refreshed" if present else pod_id
+            self.expires[lease_key] = self.clock + int(ttl)
+            return [1, len(members)]
+        if script == _ACQUIRE_CLEANUP_SCRIPT:
+            if self.strings.get(lease_key) == args[1]:
+                members.discard(call_id)
+                self.strings.pop(lease_key, None)
+                self.expires.pop(lease_key, None)
+                return 1
+            return 0
+        assert script == _RECONCILE_SCRIPT
+        if lease_key not in self.strings and call_id in members:
+            members.remove(call_id)
+            return 1
+        return 0
 
     # Pipeline is simple — queue operations then execute sequentially.
     def pipeline(self, transaction: bool = True) -> "_FakePipeline":
@@ -252,11 +284,12 @@ async def test_cancelled_strict_acquire_removes_partial_set_membership():
             self.lease_write_started = asyncio.Event()
             self.never = asyncio.Event()
 
-        async def set(self, key, value, *, ex=None, xx=False):
-            if key == "telephony:lease:inbound-1":
+        async def eval(self, script, numkeys, active_key, lease_key, *args):
+            result = await super().eval(script, numkeys, active_key, lease_key, *args)
+            if script == _ACQUIRE_SCRIPT and lease_key == "telephony:lease:inbound-1":
                 self.lease_write_started.set()
                 await self.never.wait()
-            return await super().set(key, value, ex=ex, xx=xx)
+            return result
 
     redis = BlockingLeaseRedis()
     task = asyncio.create_task(
@@ -285,11 +318,14 @@ async def test_cancelled_strict_acquire_cleanup_is_bounded_when_redis_stalls():
             self.lease_write_started = asyncio.Event()
             self.never = asyncio.Event()
 
-        async def set(self, key, value, *, ex=None, xx=False):
-            if key == "telephony:lease:inbound-stalled":
+        async def eval(self, script, numkeys, active_key, lease_key, *args):
+            if script == _ACQUIRE_CLEANUP_SCRIPT:
+                await self.never.wait()
+            result = await super().eval(script, numkeys, active_key, lease_key, *args)
+            if script == _ACQUIRE_SCRIPT and lease_key == "telephony:lease:inbound-stalled":
                 self.lease_write_started.set()
                 await self.never.wait()
-            return await super().set(key, value, ex=ex, xx=xx)
+            return result
 
         async def srem(self, key: str, *values: str) -> int:
             # Simulate the same Redis partition persisting into rollback.

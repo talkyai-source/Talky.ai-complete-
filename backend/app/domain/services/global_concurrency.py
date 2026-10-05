@@ -13,9 +13,9 @@ is reclaimed automatically instead of leaking forever.
 
 Design
 ------
-- **Lease key:** `telephony:lease:{call_id}` — value is the origin pod
-  id, TTL is `_LEASE_TTL_SECONDS` (renewed by a heartbeat if the call
-  lasts longer).
+- **Lease key:** `telephony:lease:{call_id}` — value starts with the origin
+  pod id and an acquisition cleanup token. Legacy pod-only values remain
+  valid. TTL is `_LEASE_TTL_SECONDS`, renewed by the live-call heartbeat.
 - **Active set:** `telephony:active_call_ids` — a Redis SET that
   contains every live `call_id`. Source of truth for the global count
   (`SCARD`). Membership sweeps reconcile this set against live leases
@@ -27,9 +27,12 @@ Design
     - Per-pod `MAX_TELEPHONY_SESSIONS` still honoured as a secondary
       guard — useful for capping memory on any one box.
 
-The bridge calls `acquire_lease()` just before `originate_call`, and
-`release_lease()` on `_on_call_ended`. `refresh_lease()` is called
-from the existing session watchdog every minute.
+Inbound admission acquires before Answer; the existing outbound lifecycle
+acquires after Answer, before voice setup. This does not cap ringing outbound
+legs. `release_lease()` runs on call end; the session watchdog refreshes leases.
+The atomic scripts use the existing two keys on standalone Redis (including a
+Sentinel-managed primary). These keys are not co-slotted for Redis Cluster;
+script failure must refuse strict admission, never fall back to a local cap.
 """
 from __future__ import annotations
 
@@ -37,6 +40,7 @@ import asyncio
 import logging
 import os
 from typing import Any, Optional
+from uuid import uuid4
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +58,45 @@ _LEASE_TTL_SECONDS = 600
 # Value stamped on a lease key by refresh_lease. Only its existence matters for
 # counting; the value is a human-readable marker for `redis-cli` inspection.
 _LEASE_REFRESHED_VALUE = "refreshed"
+
+# Capacity and its expiry proof commit together. No reconciler may observe a
+# new set member before the corresponding lease exists.
+_ACQUIRE_SCRIPT = """
+local present = redis.call('SISMEMBER', KEYS[1], ARGV[1])
+local lease_present = redis.call('EXISTS', KEYS[2])
+local current = redis.call('SCARD', KEYS[1])
+if present == 0 and lease_present == 0 and current >= tonumber(ARGV[3]) then
+    return {0, current}
+end
+redis.call('SADD', KEYS[1], ARGV[1])
+if lease_present == 1 then
+    redis.call('EXPIRE', KEYS[2], ARGV[4])
+elseif present == 1 then
+    redis.call('SET', KEYS[2], 'refreshed', 'EX', ARGV[4])
+else
+    redis.call('SET', KEYS[2], ARGV[2], 'EX', ARGV[4])
+end
+return {1, redis.call('SCARD', KEYS[1])}
+"""
+
+# A retry/timeout may not clear another acquisition's already-live lease.
+# Heartbeat changes the value too, revoking an old attempt's cleanup authority.
+_ACQUIRE_CLEANUP_SCRIPT = """
+if redis.call('GET', KEYS[2]) == ARGV[2] then
+    redis.call('SREM', KEYS[1], ARGV[1])
+    redis.call('DEL', KEYS[2])
+    return 1
+end
+return 0
+"""
+
+# Recheck at removal time: another worker can refresh after the earlier scan.
+_RECONCILE_SCRIPT = """
+if redis.call('EXISTS', KEYS[2]) == 0 then
+    return redis.call('SREM', KEYS[1], ARGV[1])
+end
+return 0
+"""
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -113,12 +156,10 @@ async def acquire_lease(
 
     Returns `LeaseResult(acquired=True, ...)` on success. On a full
     cluster returns `LeaseResult(acquired=False, reason="cap_reached")`.
-    When Redis is unavailable the legacy/default behaviour returns
-    `LeaseResult(acquired=True, reason="redis_unavailable_fallback")` so
-    outbound origination keeps its per-pod cap as a backstop.  True inbound
-    admission passes ``fail_closed=True`` because the channel has not been
-    answered yet and accepting without a cluster lease could exceed the
-    platform cap during a Redis partition.
+    When Redis is unavailable the explicit legacy/default behaviour returns
+    `LeaseResult(acquired=True, reason="redis_unavailable_fallback")`, relying
+    on a per-pod backstop. Both actual inbound and outbound lifecycle
+    admission pass ``fail_closed=True``: a local cap is not shared proof.
 
     Idempotent-ish: re-acquiring the same `call_id` does not double
     the count (SADD is a set). The lease TTL is refreshed.
@@ -133,42 +174,28 @@ async def acquire_lease(
             ),
         )
 
+    attempt_value = f"{pod_id}:{uuid4().hex}"
     try:
-        # Pipeline two commands atomically-ish so SCARD reflects the
-        # would-be post-insert size.
-        async with redis_client.pipeline(transaction=True) as pipe:
-            pipe.sadd(_ACTIVE_SET_KEY, call_id)
-            pipe.scard(_ACTIVE_SET_KEY)
-            added, size = await pipe.execute()
-
-        # `added` is 1 if newly inserted, 0 if already in the set. If
-        # the set size after insert exceeds the cap AND we were the
-        # one who inserted, roll back and refuse.
-        if size > cap and added:
-            await redis_client.srem(_ACTIVE_SET_KEY, call_id)
+        acquired, size = await redis_client.eval(
+            _ACQUIRE_SCRIPT, 2, _ACTIVE_SET_KEY, _lease_key(call_id),
+            call_id, attempt_value, cap, _LEASE_TTL_SECONDS,
+        )
+        if not acquired:
             return LeaseResult(
                 acquired=False,
                 reason="cap_reached",
-                current=size - 1,
+                current=size,
             )
-
-        # Stamp a TTL-decorated key so an orphaned call_id expires on
-        # its own even if the pod crashes before release.
-        await redis_client.set(
-            _lease_key(call_id),
-            pod_id,
-            ex=_LEASE_TTL_SECONDS,
-        )
         return LeaseResult(acquired=True, reason="acquired", current=size)
     except asyncio.CancelledError:
         # The inbound adapter enforces a short admission timeout with
-        # ``wait_for``. Cancellation can land after SADD but before SET/return,
-        # so strict callers must undo both keys before propagating it. This is
-        # safe for strict inbound because one PBX channel id owns one attempt.
+        # ``wait_for``. Cancellation can land after Redis commits but before reply,
+        # so strict callers compare-delete only this attempt's own claim. A
+        # same-ID retry must never delete the existing live reservation.
         if fail_closed:
             try:
                 await asyncio.wait_for(
-                    release_lease(redis_client, call_id=call_id), timeout=1.0,
+                    _cleanup_acquire(redis_client, call_id, attempt_value), timeout=1.0,
                 )
             except asyncio.TimeoutError:
                 logger.error(
@@ -185,7 +212,7 @@ async def acquire_lease(
         if fail_closed:
             try:
                 await asyncio.wait_for(
-                    release_lease(redis_client, call_id=call_id), timeout=1.0,
+                    _cleanup_acquire(redis_client, call_id, attempt_value), timeout=1.0,
                 )
             except asyncio.TimeoutError:
                 logger.error(
@@ -196,6 +223,18 @@ async def acquire_lease(
             acquired=not fail_closed,
             reason="redis_error" if fail_closed else "redis_error_fallback",
         )
+
+
+async def _cleanup_acquire(redis_client: Any, call_id: str, attempt_value: str) -> None:
+    try:
+        await redis_client.eval(
+            _ACQUIRE_CLEANUP_SCRIPT, 2, _ACTIVE_SET_KEY, _lease_key(call_id),
+            call_id, attempt_value,
+        )
+    except Exception as exc:
+        # An uncertain cleanup keeps capacity reserved until owner cleanup or
+        # expiry/reconciliation; it must not be converted into new capacity.
+        logger.warning("global_concurrency_attempt_cleanup_failed call=%s err=%s", call_id[:12], exc)
 
 
 async def release_lease(
@@ -273,12 +312,8 @@ async def refresh_lease(
         # refreshed — this SET can't resurrect a slot that was legitimately
         # freed.
         #
-        # Ordering vs. reconcile: because the key now genuinely exists after
-        # refresh, as long as the watchdog refreshes live calls before it
-        # reconciles (its normal order) reconcile sees the key and keeps the
-        # membership. Even in the reverse order the worst case is a one-tick
-        # undercount that the next refresh self-heals — never a persistent
-        # undercount, and never an overcount.
+        # Reconciliation rechecks existence atomically at removal, so an older
+        # scan cannot delete the membership restored by this transaction.
         async with redis_client.pipeline(transaction=True) as pipe:
             pipe.sadd(_ACTIVE_SET_KEY, call_id)
             pipe.set(_lease_key(call_id), _LEASE_REFRESHED_VALUE, ex=_LEASE_TTL_SECONDS)
@@ -327,8 +362,9 @@ async def reconcile_orphans(redis_client: Any) -> int:
             existences = await pipe.execute()
         for call_id, exists in zip(member_list, existences):
             if not exists:
-                await redis_client.srem(_ACTIVE_SET_KEY, call_id)
-                removed += 1
+                removed += int(await redis_client.eval(
+                    _RECONCILE_SCRIPT, 2, _ACTIVE_SET_KEY, _lease_key(call_id), call_id,
+                ))
         if removed:
             logger.info(
                 "global_concurrency_reconciled orphans=%d remaining=%d",

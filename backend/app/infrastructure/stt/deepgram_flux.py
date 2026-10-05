@@ -31,13 +31,39 @@ import asyncio
 import time
 import websockets
 import logging
+from dataclasses import dataclass
 from urllib.parse import quote
 from typing import AsyncIterator, Optional, Callable, Any
-from dataclasses import dataclass
 
 from app.domain.interfaces.stt_provider import STTProvider
 from app.domain.models.conversation import TranscriptChunk, AudioChunk, BargeInSignal
+from app.infrastructure.providers.provider_concurrency import get_provider_guard
 from app.utils.audio_utils import validate_pcm_format
+
+
+@dataclass(eq=False)
+class _FluxConnection:
+    """One socket owns one provider permit, including its prewarm lifetime."""
+
+    ws: object
+    slot: object
+    closed: bool = False
+    adopted: bool = False
+    _close_task: Optional[asyncio.Task] = None
+
+    async def close(self) -> None:
+        if self._close_task is None:
+            self.closed = True
+            self._close_task = asyncio.create_task(self._close_once())
+        # Cleanup and stream teardown can overlap. Both join the same bounded
+        # WebSocket close; cancelling one waiter must not abandon its permit.
+        await asyncio.shield(self._close_task)
+
+    async def _close_once(self) -> None:
+        try:
+            await self.ws.close()
+        finally:
+            await self.slot.__aexit__(None, None, None)
 
 logger = logging.getLogger(__name__)
 
@@ -211,7 +237,11 @@ class DeepgramFluxSTTProvider(STTProvider):
         # Pre-established WebSocket connections keyed by call_id.
         # pre_connect() stores a ws here; stream_transcribe() pops and reuses it,
         # eliminating the ~2s handshake from the hot path.
-        self._pre_connections: dict = {}
+        self._pre_connections: dict[str, _FluxConnection] = {}
+        self._preconnect_tasks: dict[str, asyncio.Task] = {}
+        self._connections: set[_FluxConnection] = set()
+        self._connection_generation = 0
+        self._guard = get_provider_guard("deepgram")
 
     def _validate_turn_config(self) -> None:
         """Validate Flux turn-detection parameter ranges."""
@@ -470,12 +500,33 @@ class DeepgramFluxSTTProvider(STTProvider):
         stream_transcribe() will pop the stored connection and reuse it,
         skipping the ~2s WebSocket handshake from the hot path entirely.
 
-        Non-fatal: if the pre-connect fails, stream_transcribe() falls back to
-        its normal connect path automatically.
+        Failures propagate to the caller's existing warmup policy. In
+        particular, the strict pre-originate gate must not report readiness
+        after an exhausted provider allowance or failed handshake.
         """
         if not self._api_key:
-            logger.warning("pre_connect called before initialize() — skipping")
+            raise RuntimeError("Deepgram API key not set. Call initialize() first.")
+
+        if call_id in self._pre_connections:
             return
+        generation = self._connection_generation
+        task = self._preconnect_tasks.get(call_id)
+        if task is None:
+            task = asyncio.create_task(self._open_connection(call_id))
+            self._preconnect_tasks[call_id] = task
+        try:
+            connection = await task
+            if generation != self._connection_generation or connection.closed:
+                await self._close_connection(connection)
+                raise RuntimeError("Flux provider closed during prewarm")
+            if not connection.adopted:
+                self._pre_connections[call_id] = connection
+        finally:
+            if self._preconnect_tasks.get(call_id) is task:
+                self._preconnect_tasks.pop(call_id, None)
+
+    async def _open_connection(self, call_id: Optional[str]) -> _FluxConnection:
+        generation = self._connection_generation
 
         params = self._build_connection_params(call_id)
         query = "&".join(f"{k}={v}" for k, v in params)
@@ -485,21 +536,30 @@ class DeepgramFluxSTTProvider(STTProvider):
             "User-Agent": "TalkyAI-VoiceAgent/1.0",
         }
 
+        slot = self._guard.acquire()
+        await slot.__aenter__()
         try:
             ws = await websockets.connect(url, additional_headers=headers)
-            self._pre_connections[call_id] = ws
-            logger.info(
-                "Deepgram Flux pre-connected for call %s "
-                "(eager=%s eot=%s timeout_ms=%s)",
-                call_id, self._eager_eot_threshold,
-                self._eot_threshold, self._eot_timeout_ms,
-            )
-        except Exception as exc:
-            logger.warning(
-                "Deepgram Flux pre_connect failed for %s — "
-                "stream_transcribe() will connect normally: %s",
-                call_id, exc,
-            )
+        except BaseException:
+            await slot.__aexit__(None, None, None)
+            raise
+        connection = _FluxConnection(ws, slot)
+        self._connections.add(connection)
+        if generation != self._connection_generation or not self._api_key:
+            await self._close_connection(connection)
+            raise RuntimeError("Flux provider closed during handshake")
+        return connection
+
+    async def _close_connection(self, connection: _FluxConnection) -> None:
+        try:
+            await connection.close()
+        finally:
+            if connection._close_task is not None and not connection._close_task.done():
+                connection._close_task.add_done_callback(
+                    lambda _task: self._connections.discard(connection)
+                )
+            else:
+                self._connections.discard(connection)
 
     async def stream_transcribe(
         self,
@@ -539,17 +599,6 @@ class DeepgramFluxSTTProvider(STTProvider):
         stop_reason = "running"
         stream_error: Optional[Exception] = None
         input_exhausted_at: Optional[float] = None
-        
-        # Build WebSocket URL with Flux turn-detection parameters.
-        # eager_eot_threshold is optional and only added when explicitly configured.
-        params = self._build_connection_params(call_id)
-        query = "&".join(f"{k}={v}" for k, v in params)
-        url = f"wss://api.deepgram.com/v2/listen?{query}"
-        
-        headers = {
-            "Authorization": f"Token {self._api_key}",
-            "User-Agent": "TalkyAI-VoiceAgent/1.0"
-        }
         
         # Bounded queue — prevents unbounded memory growth on slow consumers
         transcript_queue: asyncio.Queue = asyncio.Queue(maxsize=50)
@@ -974,13 +1023,20 @@ class DeepgramFluxSTTProvider(STTProvider):
         # One connection per adapter stream. The wrapper owns recovery, and
         # unexpected completion must reach it as an error rather than EOF.
         ws = None
+        connection = None
         tasks = []
         try:
             connect_started = time.monotonic()
-            ws = self._pre_connections.pop(call_id, None) if call_id else None
-            preconnected = ws is not None
-            if ws is None:
-                ws = await websockets.connect(url, additional_headers=headers)
+            preconnected = bool(call_id and (
+                call_id in self._pre_connections or call_id in self._preconnect_tasks
+            ))
+            if call_id:
+                await self.pre_connect(call_id)
+                connection = self._pre_connections.pop(call_id)
+            else:
+                connection = await self._open_connection(call_id)
+            connection.adopted = True
+            ws = connection.ws
             logger.info(
                 "stt_ws_open call_id=%s provider=deepgram-flux preconnected=%s connect_ms=%.1f",
                 call_id, preconnected, (time.monotonic() - connect_started) * 1000,
@@ -1011,9 +1067,9 @@ class DeepgramFluxSTTProvider(STTProvider):
                     task.cancel()
             if tasks:
                 await asyncio.gather(*tasks, return_exceptions=True)
-            if ws is not None:
+            if connection is not None:
                 try:
-                    await ws.close()
+                    await self._close_connection(connection)
                 except Exception:
                     pass
             if stream_stats:
@@ -1042,14 +1098,22 @@ class DeepgramFluxSTTProvider(STTProvider):
     async def cleanup(self) -> None:
         """Release resources"""
         self._api_key = None
+        self._connection_generation += 1
         self._eager_states.clear()
         self._stream_stats.clear()
-        for _ws in list(self._pre_connections.values()):
-            try:
-                await _ws.close()
-            except Exception:
-                pass
+        tasks = list(self._preconnect_tasks.values())
+        self._preconnect_tasks.clear()
         self._pre_connections.clear()
+        for task in tasks:
+            task.cancel()
+        try:
+            if tasks:
+                await asyncio.gather(*tasks, return_exceptions=True)
+        finally:
+            await asyncio.gather(
+                *(self._close_connection(connection) for connection in list(self._connections)),
+                return_exceptions=True,
+            )
         logger.info("DeepgramFlux cleaned up")
     
     @property

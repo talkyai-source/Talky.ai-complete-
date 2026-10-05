@@ -60,7 +60,7 @@ def test_all_direct_websocket_connections_use_the_v15_header_name() -> None:
     assert "extra_headers=" not in realtime
     assert "extra_headers=" not in flux
     assert realtime.count("additional_headers=headers") == 1
-    assert flux.count("additional_headers=headers") == 2
+    assert flux.count("additional_headers=headers") == 1  # shared cold/prewarm socket owner
 
 
 class _HandshakeSocket:
@@ -130,8 +130,9 @@ async def test_flux_preconnect_uses_websockets_15_header_contract(monkeypatch) -
 
     await provider.pre_connect("call-1")
 
-    assert provider._pre_connections["call-1"] is socket
+    assert provider._pre_connections["call-1"].ws is socket
     assert captured["additional_headers"] == {
         "Authorization": "Token test-key",
         "User-Agent": "TalkyAI-VoiceAgent/1.0",
     }
+    await provider.cleanup()
