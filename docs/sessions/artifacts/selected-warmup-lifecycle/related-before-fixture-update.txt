@@ -1,0 +1,47 @@
+........................................................................ [ 28%]
+........................................................................ [ 56%]
+........................................................................ [ 84%]
+..........FF.............................                                [100%]
+================================== FAILURES ===================================
+_ test_actual_outbound_postanswer_admission_rejects_without_global_proof[None] _
+tests\unit\test_op02_provider_boundary_inventory.py:380: in test_actual_outbound_postanswer_admission_rejects_without_global_proof
+    await lifecycle._on_new_call("synthetic-outbound")
+app\domain\services\telephony\lifecycle.py:3539: in _on_new_call
+    if outbound_terminal_seen() or state_backend.get_voice_session(call_id) is not None:
+E   AttributeError: 'types.SimpleNamespace' object has no attribute 'get_voice_session'
+_ test_actual_outbound_postanswer_admission_rejects_without_global_proof[redis1] _
+tests\unit\test_op02_provider_boundary_inventory.py:380: in test_actual_outbound_postanswer_admission_rejects_without_global_proof
+    await lifecycle._on_new_call("synthetic-outbound")
+app\domain\services\telephony\lifecycle.py:3539: in _on_new_call
+    if outbound_terminal_seen() or state_backend.get_voice_session(call_id) is not None:
+E   AttributeError: 'types.SimpleNamespace' object has no attribute 'get_voice_session'
+============================== warnings summary ===============================
+tests/unit/test_telephony_lifecycle_watchdog_hangup.py: 12 warnings
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\selected-warmup-lifecycle-20261005\backend\tests\unit\test_telephony_lifecycle_watchdog_hangup.py:34: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    started_at = datetime.utcnow() - timedelta(seconds=age_s)
+
+tests/unit/test_telephony_lifecycle_watchdog_hangup.py: 12 warnings
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\selected-warmup-lifecycle-20261005\backend\tests\unit\test_telephony_lifecycle_watchdog_hangup.py:35: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    last_activity_at = datetime.utcnow() - timedelta(seconds=last_activity_ago_s)
+
+tests/unit/test_telephony_lifecycle_watchdog_hangup.py: 12 warnings
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\selected-warmup-lifecycle-20261005\backend\tests\unit\test_telephony_lifecycle_watchdog_hangup.py:39: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    return (datetime.utcnow() - last_activity_at).total_seconds() > timeout_seconds
+
+tests/unit/test_telephony_lifecycle_watchdog_hangup.py::TestCollectExpiredSessions::test_fresh_active_session_is_neither_stale_nor_overlong
+tests/unit/test_telephony_lifecycle_watchdog_hangup.py::TestCollectExpiredSessions::test_active_but_overlong_session_is_reported_via_max_duration
+tests/unit/test_telephony_lifecycle_watchdog_hangup.py::TestCollectExpiredSessions::test_mixed_batch_classifies_each_independently
+tests/unit/test_telephony_lifecycle_watchdog_hangup.py::TestCollectExpiredSessions::test_mixed_batch_classifies_each_independently
+tests/unit/test_telephony_lifecycle_watchdog_hangup.py::TestSoftCap::test_over_soft_cap_not_closing_is_overlong
+tests/unit/test_telephony_lifecycle_watchdog_hangup.py::TestSoftCap::test_over_soft_cap_but_closing_survives
+tests/unit/test_telephony_lifecycle_watchdog_hangup.py::TestSoftCap::test_deal_closing_flag_grants_extension
+tests/unit/test_telephony_lifecycle_watchdog_hangup.py::TestSoftCap::test_closing_call_still_ends_at_hard_ceiling
+tests/unit/test_telephony_lifecycle_watchdog_hangup.py::TestSoftCap::test_soft_cap_zero_disables_soft_cap
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\selected-warmup-lifecycle-20261005\backend\tests\unit\test_telephony_lifecycle_watchdog_hangup.py:42: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    return (datetime.utcnow() - started_at).total_seconds()
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/unit/test_op02_provider_boundary_inventory.py::test_actual_outbound_postanswer_admission_rejects_without_global_proof[None]
+FAILED tests/unit/test_op02_provider_boundary_inventory.py::test_actual_outbound_postanswer_admission_rejects_without_global_proof[redis1]
+2 failed, 255 passed, 45 warnings in 9.19s

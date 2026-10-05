@@ -1,0 +1,48 @@
+FFFF..F.F                                                                [100%]
+================================== FAILURES ===================================
+_____ test_long_ringing_keeps_selected_session_until_absence_proven[live] _____
+tests\unit\test_selected_warmup_lifecycle.py:72: in test_long_ringing_keeps_selected_session_until_absence_proven
+    assert warmup.state.get_ringing_warmup("call")[0] is warmup.saved
+E   TypeError: 'NoneType' object is not subscriptable
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.telephony.lifecycle:lifecycle.py:917 telephony_watchdog: orphaned ringing_warmup call (age >180s) � releasing STT/TTS sockets
+___ test_long_ringing_keeps_selected_session_until_absence_proven[unknown] ____
+tests\unit\test_selected_warmup_lifecycle.py:72: in test_long_ringing_keeps_selected_session_until_absence_proven
+    assert warmup.state.get_ringing_warmup("call")[0] is warmup.saved
+E   TypeError: 'NoneType' object is not subscriptable
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.telephony.lifecycle:lifecycle.py:917 telephony_watchdog: orphaned ringing_warmup call (age >180s) � releasing STT/TTS sockets
+__ test_long_ringing_keeps_selected_session_until_absence_proven[exception] ___
+tests\unit\test_selected_warmup_lifecycle.py:72: in test_long_ringing_keeps_selected_session_until_absence_proven
+    assert warmup.state.get_ringing_warmup("call")[0] is warmup.saved
+E   TypeError: 'NoneType' object is not subscriptable
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.telephony.lifecycle:lifecycle.py:917 telephony_watchdog: orphaned ringing_warmup call (age >180s) � releasing STT/TTS sockets
+___ test_long_ringing_keeps_selected_session_until_absence_proven[timeout] ____
+tests\unit\test_selected_warmup_lifecycle.py:72: in test_long_ringing_keeps_selected_session_until_absence_proven
+    assert warmup.state.get_ringing_warmup("call")[0] is warmup.saved
+E   TypeError: 'NoneType' object is not subscriptable
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.telephony.lifecycle:lifecycle.py:917 telephony_watchdog: orphaned ringing_warmup call (age >180s) � releasing STT/TTS sockets
+____ test_absence_probe_cannot_end_a_different_or_consumed_owner[replaced] ____
+tests\unit\test_selected_warmup_lifecycle.py:108: in test_absence_probe_cannot_end_a_different_or_consumed_owner
+    warmup.end.assert_not_awaited()
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:2429: in assert_not_awaited
+    raise AssertionError(msg)
+E   AssertionError: Expected mock to not have been awaited. Awaited 1 times.
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.telephony.lifecycle:lifecycle.py:917 telephony_watchdog: orphaned ringing_warmup call (age >180s) � releasing STT/TTS sockets
+_________ test_failed_latest_probe_does_not_reuse_prior_empty_result __________
+tests\unit\test_selected_warmup_lifecycle.py:130: in test_failed_latest_probe_does_not_reuse_prior_empty_result
+    assert warmup.state.get_ringing_warmup("call")[0] is warmup.saved
+E   TypeError: 'NoneType' object is not subscriptable
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.telephony.lifecycle:lifecycle.py:917 telephony_watchdog: orphaned ringing_warmup call (age >180s) � releasing STT/TTS sockets
+=========================== short test summary info ===========================
+FAILED tests/unit/test_selected_warmup_lifecycle.py::test_long_ringing_keeps_selected_session_until_absence_proven[live]
+FAILED tests/unit/test_selected_warmup_lifecycle.py::test_long_ringing_keeps_selected_session_until_absence_proven[unknown]
+FAILED tests/unit/test_selected_warmup_lifecycle.py::test_long_ringing_keeps_selected_session_until_absence_proven[exception]
+FAILED tests/unit/test_selected_warmup_lifecycle.py::test_long_ringing_keeps_selected_session_until_absence_proven[timeout]
+FAILED tests/unit/test_selected_warmup_lifecycle.py::test_absence_probe_cannot_end_a_different_or_consumed_owner[replaced]
+FAILED tests/unit/test_selected_warmup_lifecycle.py::test_failed_latest_probe_does_not_reuse_prior_empty_result
+6 failed, 3 passed in 4.50s

@@ -1,0 +1,31 @@
+..FFF.                                                                   [100%]
+================================== FAILURES ===================================
+_ test_ringing_factory_await_cannot_publish_after_ownership_changes[terminal] _
+tests\unit\test_selected_warmup_lifecycle.py:343: in test_ringing_factory_await_cannot_publish_after_ownership_changes
+    answered.end.assert_awaited_once_with(created)
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:2362: in assert_awaited_once_with
+    raise AssertionError(msg)
+E   AssertionError: Expected mock to have been awaited once. Awaited 0 times.
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.telephony_session_config:telephony_session_config.py:83 company_name_fallback tenant=- campaign=- source=script_config.company_name � no company name is configured, so the agent will say 'our office' on this call instead of a real brand; set the campaign's company_name
+_ test_ringing_factory_await_cannot_publish_after_ownership_changes[selected_session] _
+tests\unit\test_selected_warmup_lifecycle.py:343: in test_ringing_factory_await_cannot_publish_after_ownership_changes
+    answered.end.assert_awaited_once_with(created)
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:2362: in assert_awaited_once_with
+    raise AssertionError(msg)
+E   AssertionError: Expected mock to have been awaited once. Awaited 0 times.
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.telephony_session_config:telephony_session_config.py:83 company_name_fallback tenant=- campaign=- source=script_config.company_name � no company name is configured, so the agent will say 'our office' on this call instead of a real brand; set the campaign's company_name
+_ test_ringing_factory_await_cannot_publish_after_ownership_changes[lost_reservation] _
+tests\unit\test_selected_warmup_lifecycle.py:343: in test_ringing_factory_await_cannot_publish_after_ownership_changes
+    answered.end.assert_awaited_once_with(created)
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:2362: in assert_awaited_once_with
+    raise AssertionError(msg)
+E   AssertionError: Expected mock to have been awaited once. Awaited 0 times.
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.telephony_session_config:telephony_session_config.py:83 company_name_fallback tenant=- campaign=- source=script_config.company_name � no company name is configured, so the agent will say 'our office' on this call instead of a real brand; set the campaign's company_name
+=========================== short test summary info ===========================
+FAILED tests/unit/test_selected_warmup_lifecycle.py::test_ringing_factory_await_cannot_publish_after_ownership_changes[terminal]
+FAILED tests/unit/test_selected_warmup_lifecycle.py::test_ringing_factory_await_cannot_publish_after_ownership_changes[selected_session]
+FAILED tests/unit/test_selected_warmup_lifecycle.py::test_ringing_factory_await_cannot_publish_after_ownership_changes[lost_reservation]
+3 failed, 3 passed, 20 deselected in 3.92s

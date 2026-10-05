@@ -1,0 +1,5 @@
+Independent read-only review by /root/llm_audit, 5 October 2026. No independent test, provider or PostgreSQL operation.
+
+Final watchdog/answer review: same warmup tuple and timestamp are checked after the ARI await; live, unknown and failed probes retain selected sessions. Terminal dispatch checks precede capacity/status and follow status, lease and ringing waits. Duplicate callbacks preserve registration/lease ownership. Late acquisition release is terminal-only through the existing serializer, without replaying outcome or settlement.
+
+Final ringing review: shared predicates preserve prior Answer/new-call contract. Before/after status checks refuse owned missing or terminal state. After factory completion, the exact event reservation plus warmup/session/ownership is checked; only the unused created object is ended. The exception path removes cached state only when its current session is that created object, so failed cleanup cannot pop a replacement. Positive unowned prepare-to-answer reuse remains tested. No additional material defect found.

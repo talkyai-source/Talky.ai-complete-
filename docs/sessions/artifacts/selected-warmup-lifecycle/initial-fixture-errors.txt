@@ -1,0 +1,49 @@
+EEEEEEEEE                                                                [100%]
+=================================== ERRORS ====================================
+_ ERROR at setup of test_long_ringing_keeps_selected_session_until_absence_proven[live] _
+tests\unit\test_selected_warmup_lifecycle.py:45: in warmup
+    state.set_ringing_started_at("call", asyncio.get_running_loop().time() - 181)
+E   RuntimeError: no running event loop
+_ ERROR at setup of test_long_ringing_keeps_selected_session_until_absence_proven[unknown] _
+tests\unit\test_selected_warmup_lifecycle.py:45: in warmup
+    state.set_ringing_started_at("call", asyncio.get_running_loop().time() - 181)
+E   RuntimeError: no running event loop
+_ ERROR at setup of test_long_ringing_keeps_selected_session_until_absence_proven[exception] _
+tests\unit\test_selected_warmup_lifecycle.py:45: in warmup
+    state.set_ringing_started_at("call", asyncio.get_running_loop().time() - 181)
+E   RuntimeError: no running event loop
+_ ERROR at setup of test_long_ringing_keeps_selected_session_until_absence_proven[timeout] _
+tests\unit\test_selected_warmup_lifecycle.py:45: in warmup
+    state.set_ringing_started_at("call", asyncio.get_running_loop().time() - 181)
+E   RuntimeError: no running event loop
+_ ERROR at setup of test_expired_absent_warmup_closes_once_without_inventing_call_settlement _
+tests\unit\test_selected_warmup_lifecycle.py:45: in warmup
+    state.set_ringing_started_at("call", asyncio.get_running_loop().time() - 181)
+E   RuntimeError: no running event loop
+_ ERROR at setup of test_normal_thirty_second_ring_window_keeps_selected_session _
+tests\unit\test_selected_warmup_lifecycle.py:45: in warmup
+    state.set_ringing_started_at("call", asyncio.get_running_loop().time() - 181)
+E   RuntimeError: no running event loop
+_ ERROR at setup of test_absence_probe_cannot_end_a_different_or_consumed_owner[replaced] _
+tests\unit\test_selected_warmup_lifecycle.py:45: in warmup
+    state.set_ringing_started_at("call", asyncio.get_running_loop().time() - 181)
+E   RuntimeError: no running event loop
+_ ERROR at setup of test_absence_probe_cannot_end_a_different_or_consumed_owner[consumed] _
+tests\unit\test_selected_warmup_lifecycle.py:45: in warmup
+    state.set_ringing_started_at("call", asyncio.get_running_loop().time() - 181)
+E   RuntimeError: no running event loop
+_ ERROR at setup of test_failed_latest_probe_does_not_reuse_prior_empty_result _
+tests\unit\test_selected_warmup_lifecycle.py:45: in warmup
+    state.set_ringing_started_at("call", asyncio.get_running_loop().time() - 181)
+E   RuntimeError: no running event loop
+=========================== short test summary info ===========================
+ERROR tests/unit/test_selected_warmup_lifecycle.py::test_long_ringing_keeps_selected_session_until_absence_proven[live]
+ERROR tests/unit/test_selected_warmup_lifecycle.py::test_long_ringing_keeps_selected_session_until_absence_proven[unknown]
+ERROR tests/unit/test_selected_warmup_lifecycle.py::test_long_ringing_keeps_selected_session_until_absence_proven[exception]
+ERROR tests/unit/test_selected_warmup_lifecycle.py::test_long_ringing_keeps_selected_session_until_absence_proven[timeout]
+ERROR tests/unit/test_selected_warmup_lifecycle.py::test_expired_absent_warmup_closes_once_without_inventing_call_settlement
+ERROR tests/unit/test_selected_warmup_lifecycle.py::test_normal_thirty_second_ring_window_keeps_selected_session
+ERROR tests/unit/test_selected_warmup_lifecycle.py::test_absence_probe_cannot_end_a_different_or_consumed_owner[replaced]
+ERROR tests/unit/test_selected_warmup_lifecycle.py::test_absence_probe_cannot_end_a_different_or_consumed_owner[consumed]
+ERROR tests/unit/test_selected_warmup_lifecycle.py::test_failed_latest_probe_does_not_reuse_prior_empty_result
+9 errors in 19.38s

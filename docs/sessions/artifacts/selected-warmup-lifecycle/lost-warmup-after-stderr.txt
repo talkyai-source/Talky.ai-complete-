@@ -1,0 +1,2 @@
+AsteriskAdapter: ARI password is a known default � set ASTERISK_ARI_PASSWORD env var in production
+AsteriskAdapter: ARI password is a known default � set ASTERISK_ARI_PASSWORD env var in production
