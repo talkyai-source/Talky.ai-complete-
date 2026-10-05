@@ -24,7 +24,7 @@ import {
     statusBadgeClass,
 } from "@/lib/campaign-performance";
 import { cn } from "@/lib/utils";
-import { ChevronDown, ChevronRight, Copy, Ellipsis, Pause, Play, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronRight, Pause, Play, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { createPortal } from "react-dom";
 
@@ -40,8 +40,23 @@ const COLUMNS: ColumnDef[] = [
     { key: "failed", label: "Failed", numeric: true },
 ];
 
+// One grid at every size: the full 8-column layout. The name track is floored
+// at 10rem so it can never be crushed to zero; everything else is fixed-width.
+// Phones get the same columns as tablets and scroll sideways inside the card.
 const TABLE_GRID_COLS =
-    "grid-cols-[36px_minmax(0,1.5fr)_minmax(0,1fr)] sm:grid-cols-[36px_minmax(0,1.6fr)_110px_170px_120px_90px_90px_90px_44px]";
+    "grid-cols-[36px_minmax(10rem,1.6fr)_110px_170px_120px_90px_90px_90px]";
+// Floor for the grid so narrow viewports scroll it inside the card instead
+// of clipping columns (same pattern as DESKTOP_CALL_MIN_WIDTH on the calls
+// page). Column tracks (36px = 2.25rem) + name floor (10rem) + 110px
+// (6.875rem) + 170px (10.625rem) + 120px (7.5rem) + 3 × 90px (16.875rem)
+// = 54.125rem, + 7 gap-2 gutters (3.5rem) + the row's px-3 inset (1.5rem)
+// = 59.125rem (946px) exactly. At 1280px with the sidebar expanded the card's
+// inner scroll area is ~951px, so the tightest supported desktop still
+// renders the full grid with zero internal scroll; anything narrower — down
+// to the smallest phones — scrolls horizontally inside the card. Applied to
+// the sticky header row and to each row's bordered wrapper so the border and
+// grid span the full scroll width.
+const TABLE_MIN_WIDTH = "min-w-[59.125rem]";
 
 const ALL_STATUSES: CampaignStatus[] = ["Active", "Paused", "Completed", "Draft", "Failed"];
 
@@ -307,7 +322,7 @@ export function CampaignPerformanceTable({
     const [statusOpen, setStatusOpen] = useState(false);
     const [statusPanelStyle, setStatusPanelStyle] = useState<CSSProperties | null>(null);
     const [suggestOpen, setSuggestOpen] = useState(false);
-    const [menuOpenFor, setMenuOpenFor] = useState<string | null>(null);
+    const [suggestPlacement, setSuggestPlacement] = useState<{ openUp: boolean; maxHeight: number } | null>(null);
     const [selected, setSelected] = useState<Set<string>>(new Set());
     const [expanded, setExpanded] = useState<Set<string>>(new Set());
     const [detailsId, setDetailsId] = useState<string | null>(null);
@@ -323,7 +338,6 @@ export function CampaignPerformanceTable({
     const statusButtonRef = useRef<HTMLButtonElement | null>(null);
     const statusPanelRef = useRef<HTMLDivElement | null>(null);
     const suggestRef = useRef<HTMLDivElement | null>(null);
-    const menuRefs = useRef<Record<string, HTMLDivElement | null>>({});
     const tableScrollRef = useRef<HTMLDivElement | null>(null);
     const headerRef = useRef<HTMLDivElement | null>(null);
 
@@ -349,16 +363,28 @@ export function CampaignPerformanceTable({
             left = Math.max(margin, Math.min(left, window.innerWidth - width - margin));
 
             let top = rect.bottom + margin;
+            let maxHeight: number | undefined;
 
             const panel = statusPanelRef.current;
             if (panel) {
                 const h = panel.offsetHeight;
-                if (top + h > window.innerHeight - margin) {
-                    top = Math.max(margin, window.innerHeight - h - margin);
+                const spaceBelow = window.innerHeight - rect.bottom - margin * 2;
+                const spaceAbove = rect.top - margin * 2;
+                if (h > spaceBelow) {
+                    // Flip above the trigger instead of sliding down over it;
+                    // whichever side is used, cap the height so the panel
+                    // never leaves the screen or covers its own button.
+                    if (spaceAbove > spaceBelow) {
+                        const capped = Math.min(h, Math.max(margin, spaceAbove));
+                        top = rect.top - margin - capped;
+                        if (capped < h) maxHeight = capped;
+                    } else {
+                        maxHeight = Math.max(margin, spaceBelow);
+                    }
                 }
             }
 
-            setStatusPanelStyle({ left, top, width });
+            setStatusPanelStyle({ left, top, width, maxHeight });
         };
 
         update();
@@ -431,15 +457,10 @@ export function CampaignPerformanceTable({
                 if (box && box.contains(t)) return;
                 setSuggestOpen(false);
             }
-            if (menuOpenFor) {
-                const menu = menuRefs.current[menuOpenFor];
-                if (menu && menu.contains(t)) return;
-                setMenuOpenFor(null);
-            }
         };
         window.addEventListener("click", onClick);
         return () => window.removeEventListener("click", onClick);
-    }, [menuOpenFor, statusOpen, suggestOpen]);
+    }, [statusOpen, suggestOpen]);
 
     useEffect(() => {
         const raf = window.requestAnimationFrame(() => {
@@ -608,7 +629,8 @@ export function CampaignPerformanceTable({
             role="row"
             className={cn(
                 "sticky top-0 z-20 grid gap-2 border-b border-border bg-background px-3 py-2 text-xs font-semibold text-muted-foreground",
-                TABLE_GRID_COLS
+                TABLE_GRID_COLS,
+                TABLE_MIN_WIDTH
             )}
         >
             <div className="flex items-center justify-center">
@@ -630,22 +652,13 @@ export function CampaignPerformanceTable({
                 <span className="truncate">Campaign</span>
                 <span className="text-muted-foreground">{sortIndicator(sort, "name")}</span>
             </button>
-            <button
-                type="button"
-                onClick={(e) => onHeaderClick("progress", e)}
-                className="flex items-center justify-end gap-2 rounded-md px-2 py-1 text-left transition-colors duration-150 ease-out hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:hidden"
-                aria-label="Sort by Metrics"
-            >
-                <span className="truncate">Metrics</span>
-                <span className="text-muted-foreground">{sortIndicator(sort, "progress")}</span>
-            </button>
             {COLUMNS.filter((c) => c.key !== "name").map((c) => (
                 <button
                     key={c.key}
                     type="button"
                     onClick={(e) => onHeaderClick(c.key, e)}
                     className={cn(
-                        "hidden items-center gap-2 rounded-md px-2 py-1 text-left transition-colors duration-150 ease-out hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:flex",
+                        "flex items-center gap-2 rounded-md px-2 py-1 text-left transition-colors duration-150 ease-out hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                         c.numeric ? "justify-end" : "justify-start"
                     )}
                     aria-label={`Sort by ${c.label}`}
@@ -654,9 +667,37 @@ export function CampaignPerformanceTable({
                     <span className="text-muted-foreground">{sortIndicator(sort, c.key)}</span>
                 </button>
             ))}
-            <div className="hidden sm:block" />
         </div>
     );
+
+    // Suggestion list placement: open upward when the space under the filter
+    // is too short, and never let the panel run past a screen edge.
+    useLayoutEffect(() => {
+        if (!suggestOpen || nameSuggestions.length === 0) {
+            // eslint-disable-next-line react-hooks/set-state-in-effect -- clearing stale DOM-measured placement on close, not derivable during render
+            setSuggestPlacement(null);
+            return;
+        }
+        const update = () => {
+            const el = suggestRef.current;
+            if (!el) return;
+            const rect = el.getBoundingClientRect();
+            const margin = 8;
+            const gap = 8; // the panel's mt-2 / mb-2
+            const below = window.innerHeight - rect.bottom - gap - margin;
+            const above = rect.top - gap - margin;
+            const openUp = below < 108 && above > below;
+            const maxHeight = Math.max(36, Math.min(256, openUp ? above : below));
+            setSuggestPlacement({ openUp, maxHeight });
+        };
+        update();
+        window.addEventListener("resize", update);
+        window.addEventListener("scroll", update, true);
+        return () => {
+            window.removeEventListener("resize", update);
+            window.removeEventListener("scroll", update, true);
+        };
+    }, [suggestOpen, nameSuggestions.length]);
 
     return (
         <div className="space-y-4">
@@ -683,7 +724,11 @@ export function CampaignPerformanceTable({
                                 {suggestOpen && nameSuggestions.length > 0 ? (
                                     <div
                                         role="listbox"
-                                        className="absolute left-0 top-full z-50 mt-2 w-full max-h-64 origin-top overflow-auto rounded-xl border border-border bg-popover shadow-xl animate-in fade-in-0 zoom-in-95"
+                                        className={cn(
+                                            "absolute left-0 z-50 w-full overflow-auto rounded-xl border border-border bg-popover shadow-xl animate-in fade-in-0 zoom-in-95",
+                                            suggestPlacement?.openUp ? "bottom-full mb-2 origin-bottom" : "top-full mt-2 origin-top"
+                                        )}
+                                        style={{ maxHeight: suggestPlacement?.maxHeight ?? 256 }}
                                     >
                                         {nameSuggestions.map((n) => (
                                             <button
@@ -744,7 +789,7 @@ export function CampaignPerformanceTable({
                                               <div
                                                   ref={statusPanelRef}
                                                   role="listbox"
-                                                  className="absolute overflow-hidden rounded-xl border border-border bg-popover p-2 shadow-xl animate-in fade-in-0 zoom-in-95"
+                                                  className="absolute overflow-y-auto rounded-xl border border-border bg-popover p-2 shadow-xl animate-in fade-in-0 zoom-in-95"
                                                   style={statusPanelStyle ?? undefined}
                                               >
                                                   <div className="max-h-[108px] overflow-y-auto overscroll-contain pr-1 scrollbar-gutter-stable">
@@ -942,7 +987,7 @@ export function CampaignPerformanceTable({
                     <div
                         ref={tableScrollRef}
                         data-testid="campaigns-performance-table"
-                        className={cn("scrollbar-gutter-stable relative max-h-[520px] overflow-y-auto overflow-x-hidden overscroll-contain", useVirtual ? "pb-2" : "")}
+                        className={cn("scrollbar-gutter-stable relative max-h-[520px] overflow-y-auto overflow-x-auto overscroll-contain", useVirtual ? "pb-2" : "")}
                         role="rowgroup"
                     >
                         {TableHeader}
@@ -954,11 +999,9 @@ export function CampaignPerformanceTable({
                                     const success = campaignSuccessRatePct(campaign);
                                     const isSelected = selected.has(campaign.id);
                                     const isExpanded = expanded.has(campaign.id);
-                                    const canPause = st === "Active";
-                                    const canResume = st === "Paused" || st === "Draft" || st === "Failed";
 
                                     return (
-                                        <div key={campaign.id} className="border-b border-border">
+                                        <div key={campaign.id} className={cn("border-b border-border", TABLE_MIN_WIDTH)}>
                                             <div role="row" className={cn("grid items-center gap-2 px-3 py-2 text-sm text-foreground", TABLE_GRID_COLS)}>
                                                 <div className="flex items-center justify-center">
                                                     <input
@@ -983,44 +1026,16 @@ export function CampaignPerformanceTable({
                                                         className="min-w-0 flex-1 rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                                                         onClick={() => setDetailsId(campaign.id)}
                                                     >
-                                                        <div className="min-w-0 flex items-center gap-2">
-                                                            <div className="min-w-0 truncate font-semibold hover:underline">{campaign.name}</div>
-                                                            <span
-                                                                className={cn(
-                                                                    "sm:hidden inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold",
-                                                                    statusBadgeClass(st)
-                                                                )}
-                                                            >
-                                                                {st}
-                                                            </span>
-                                                        </div>
-                                                        <div className="truncate text-xs text-muted-foreground">{campaign.description || "—"}</div>
+                                                        <div className="min-w-0 truncate font-semibold hover:underline">{campaign.name}</div>
+                                                        <div className="min-w-0 truncate text-xs text-muted-foreground">{campaign.description || "—"}</div>
                                                     </button>
                                                 </div>
-                                                <div className="px-2 sm:hidden">
-                                                    <div className="flex items-center gap-2">
-                                                        <div className="h-2 flex-1 overflow-hidden rounded-full bg-muted">
-                                                            <div className={cn("h-full", progressColorClass(progress))} style={{ width: `${progress.toFixed(1)}%` }} />
-                                                        </div>
-                                                        <div className="w-12 text-right text-xs font-semibold tabular-nums text-foreground">
-                                                            {formatPct(progress)}
-                                                        </div>
-                                                    </div>
-                                                    <div className="mt-1 overflow-x-auto">
-                                                        <div className="flex min-w-max items-center gap-3 text-[11px] tabular-nums text-muted-foreground whitespace-nowrap">
-                                                            <span className="text-foreground font-semibold">SR {formatPct(success)}</span>
-                                                            <span>L {Number(campaign.total_leads || 0).toLocaleString()}</span>
-                                                            <span>C {Number(campaign.calls_completed || 0).toLocaleString()}</span>
-                                                            <span>F {Number(campaign.calls_failed || 0).toLocaleString()}</span>
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                                <div className="hidden px-2 sm:block">
+                                                <div className="px-2">
                                                     <span className={cn("inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold", statusBadgeClass(st))}>
                                                         {st}
                                                     </span>
                                                 </div>
-                                                <div className="hidden px-2 sm:block">
+                                                <div className="px-2">
                                                     <div className="flex items-center justify-end gap-2">
                                                         <div className="h-2 w-20 overflow-hidden rounded-full bg-muted">
                                                             <div className={cn("h-full", progressColorClass(progress))} style={{ width: `${progress.toFixed(1)}%` }} />
@@ -1030,115 +1045,10 @@ export function CampaignPerformanceTable({
                                                         </div>
                                                     </div>
                                                 </div>
-                                                <div className="hidden px-2 text-right text-sm font-semibold tabular-nums text-foreground sm:block">{formatPct(success)}</div>
-                                                <div className="hidden px-2 text-right tabular-nums text-foreground sm:block">{Number(campaign.total_leads || 0).toLocaleString()}</div>
-                                                <div className="hidden px-2 text-right tabular-nums text-foreground sm:block">{Number(campaign.calls_completed || 0).toLocaleString()}</div>
-                                                <div className="hidden px-2 text-right tabular-nums text-foreground sm:block">{Number(campaign.calls_failed || 0).toLocaleString()}</div>
-                                                <div className="relative hidden items-center justify-end sm:flex">
-                                                    <button
-                                                        type="button"
-                                                        aria-label="Row actions"
-                                                        className="rounded-md p-2 text-muted-foreground transition-colors duration-150 ease-out hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                                                        onClick={() => setMenuOpenFor((v) => (v === campaign.id ? null : campaign.id))}
-                                                    >
-                                                        <Ellipsis className="h-4 w-4" />
-                                                    </button>
-                                                    {menuOpenFor === campaign.id ? (
-                                                        <div
-                                                            ref={(node) => {
-                                                                menuRefs.current[campaign.id] = node;
-                                                            }}
-                                                            role="menu"
-                                                            className="absolute right-0 top-10 z-50 w-56 origin-top-right overflow-hidden rounded-xl border border-border bg-popover shadow-xl animate-in fade-in-0 zoom-in-95"
-                                                        >
-                                                            <button
-                                                                type="button"
-                                                                role="menuitem"
-                                                                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-foreground transition-colors duration-150 ease-out hover:bg-accent hover:text-accent-foreground"
-                                                                onClick={() => {
-                                                                    setMenuOpenFor(null);
-                                                                    setDetailsId(campaign.id);
-                                                                }}
-                                                            >
-                                                                View Details
-                                                            </button>
-                                                            <button
-                                                                type="button"
-                                                                role="menuitem"
-                                                                className={cn(
-                                                                    "flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-foreground transition-colors duration-150 ease-out hover:bg-accent hover:text-accent-foreground",
-                                                                    !(canPause || canResume) ? "opacity-50" : ""
-                                                                )}
-                                                                disabled={!(canPause || canResume)}
-                                                                onClick={async () => {
-                                                                    setMenuOpenFor(null);
-                                                                    if (canPause) await onPause(campaign.id);
-                                                                    else if (canResume) await onResume(campaign.id);
-                                                                }}
-                                                            >
-                                                                {canPause ? (
-                                                                    <>
-                                                                        <Pause className="h-4 w-4" /> Pause Campaign
-                                                                    </>
-                                                                ) : (
-                                                                    <>
-                                                                        <Play className="h-4 w-4" /> Resume Campaign
-                                                                    </>
-                                                                )}
-                                                            </button>
-                                                            <button
-                                                                type="button"
-                                                                role="menuitem"
-                                                                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-foreground transition-colors duration-150 ease-out hover:bg-accent hover:text-accent-foreground"
-                                                                onClick={() => {
-                                                                    setMenuOpenFor(null);
-                                                                    // Route to the full edit page — the partial in-row
-                                                                    // modal can't satisfy CampaignUpdateRequest's
-                                                                    // required persona_type / agent_names /
-                                                                    // company_name / campaign_slots fields.
-                                                                    router.push(`/campaigns/${campaign.id}/edit`);
-                                                                }}
-                                                            >
-                                                                Edit Campaign
-                                                            </button>
-                                                            <button
-                                                                type="button"
-                                                                role="menuitem"
-                                                                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-foreground transition-colors duration-150 ease-out hover:bg-muted"
-                                                                onClick={() => {
-                                                                    setMenuOpenFor(null);
-                                                                    router.push(`/analytics?campaign=${encodeURIComponent(campaign.id)}`);
-                                                                }}
-                                                            >
-                                                                View Analytics
-                                                            </button>
-                                                            <button
-                                                                type="button"
-                                                                role="menuitem"
-                                                                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-foreground transition-colors duration-150 ease-out hover:bg-accent hover:text-accent-foreground"
-                                                                onClick={async () => {
-                                                                    setMenuOpenFor(null);
-                                                                    await onDuplicate(campaign.id);
-                                                                }}
-                                                            >
-                                                                <Copy className="h-4 w-4" />
-                                                                Duplicate
-                                                            </button>
-                                                            <button
-                                                                type="button"
-                                                                role="menuitem"
-                                                                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-destructive transition-colors duration-150 ease-out hover:bg-destructive/10"
-                                                                onClick={() => {
-                                                                    setMenuOpenFor(null);
-                                                                    setConfirmDeleteId(campaign.id);
-                                                                }}
-                                                            >
-                                                                <Trash2 className="h-4 w-4" />
-                                                                Delete
-                                                            </button>
-                                                        </div>
-                                                    ) : null}
-                                                </div>
+                                                <div className="px-2 text-right text-sm font-semibold tabular-nums text-foreground">{formatPct(success)}</div>
+                                                <div className="px-2 text-right tabular-nums text-foreground">{Number(campaign.total_leads || 0).toLocaleString()}</div>
+                                                <div className="px-2 text-right tabular-nums text-foreground">{Number(campaign.calls_completed || 0).toLocaleString()}</div>
+                                                <div className="px-2 text-right tabular-nums text-foreground">{Number(campaign.calls_failed || 0).toLocaleString()}</div>
                                             </div>
 
                                             {isExpanded ? (

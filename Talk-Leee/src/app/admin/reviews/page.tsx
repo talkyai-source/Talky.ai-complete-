@@ -30,6 +30,7 @@ import { AlertCircle, ChevronRight, Loader2, MessageSquare, Star } from "lucide-
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { Button } from "@/components/ui/button";
+import { Select } from "@/components/ui/select";
 import { extendedApi } from "@/lib/extended-api";
 
 const TAG_LABELS: Record<string, string> = {
@@ -137,10 +138,11 @@ export default function ReviewsPage() {
 
                     {/* the Safe Improvement Loop's two questions */}
                     <div className="grid gap-4 lg:grid-cols-2">
-                        <Card title="By prompt version" hint="Which revision is doing worse">
+                        <Card title="By prompt version" hint="Which revision is doing worse" className="min-w-0">
                             {(summary.data?.by_prompt_version ?? []).length === 0 ? (
                                 <Empty>No reviews yet.</Empty>
                             ) : (
+                                <div className="overflow-x-auto">
                                 <table className="w-full text-sm">
                                     <thead>
                                         <tr className="border-b border-border text-left text-xs text-muted-foreground">
@@ -162,7 +164,7 @@ export default function ReviewsPage() {
                                                             );
                                                             setPage(1);
                                                         }}
-                                                        className="font-mono text-xs underline-offset-2 hover:underline"
+                                                        className="break-all text-left font-mono text-xs underline-offset-2 hover:underline"
                                                     >
                                                         {r.prompt_version}
                                                     </button>
@@ -176,10 +178,11 @@ export default function ReviewsPage() {
                                         ))}
                                     </tbody>
                                 </table>
+                                </div>
                             )}
                         </Card>
 
-                        <Card title="By failure category" hint="What actually goes wrong">
+                        <Card title="By failure category" hint="What actually goes wrong" className="min-w-0">
                             {(summary.data?.by_tag ?? []).length === 0 ? (
                                 <Empty>No tagged reviews yet.</Empty>
                             ) : (
@@ -215,30 +218,37 @@ export default function ReviewsPage() {
                                     className="h-9 w-44 rounded-lg border border-border bg-background px-3 text-sm"
                                 />
                             </Field>
+                            {/* Shared Select instead of native <select>: the browser-drawn
+                                native popup cannot be contained on small screens. Options,
+                                values and the onChange behaviour are unchanged. */}
                             <Field label="Failure category">
-                                <select
+                                <Select
                                     value={tag}
-                                    onChange={(e) => { setTag(e.target.value); setPage(1); }}
-                                    className="h-9 w-52 rounded-lg border border-border bg-background px-2 text-sm"
+                                    onChange={(next) => { setTag(next); setPage(1); }}
+                                    ariaLabel="Failure category"
+                                    className="w-52"
+                                    selectClassName="h-9 rounded-lg border-border px-2"
                                 >
                                     <option value="">Any</option>
                                     {(options.data?.tags ?? []).map((x) => (
                                         <option key={x} value={x}>{TAG_LABELS[x] ?? x}</option>
                                     ))}
-                                </select>
+                                </Select>
                             </Field>
                             <Field label="Rating at most">
-                                <select
-                                    value={ratingMax}
-                                    onChange={(e) => {
-                                        setRatingMax(e.target.value === "" ? "" : Number(e.target.value));
+                                <Select
+                                    value={ratingMax === "" ? "" : String(ratingMax)}
+                                    onChange={(next) => {
+                                        setRatingMax(next === "" ? "" : Number(next));
                                         setPage(1);
                                     }}
-                                    className="h-9 w-28 rounded-lg border border-border bg-background px-2 text-sm"
+                                    ariaLabel="Rating at most"
+                                    className="w-28"
+                                    selectClassName="h-9 rounded-lg border-border px-2"
                                 >
                                     <option value="">Any</option>
                                     {[1, 2, 3, 4, 5].map((n) => <option key={n} value={n}>{n}</option>)}
-                                </select>
+                                </Select>
                             </Field>
                             <Button size="sm" variant="ghost" onClick={reset}>Clear</Button>
                             <span className="ml-auto text-xs text-muted-foreground">
@@ -291,7 +301,7 @@ export default function ReviewsPage() {
                                                 <p className="mt-1 text-xs text-muted-foreground">
                                                     {new Date(r.created_at).toLocaleString()}
                                                     {r.prompt_version && (
-                                                        <span className="ml-2 font-mono">{r.prompt_version}</span>
+                                                        <span className="ml-2 break-all font-mono">{r.prompt_version}</span>
                                                     )}
                                                 </p>
                                             </div>
@@ -355,9 +365,9 @@ function Stat({
     );
 }
 
-function Card({ title, hint, children }: { title: string; hint?: string; children: React.ReactNode }) {
+function Card({ title, hint, className, children }: { title: string; hint?: string; className?: string; children: React.ReactNode }) {
     return (
-        <div className="content-card">
+        <div className={className ? `content-card ${className}` : "content-card"}>
             <h2 className="flex items-center gap-2 text-sm font-semibold text-foreground">
                 <MessageSquare className="h-4 w-4 text-muted-foreground" aria-hidden />
                 {title}

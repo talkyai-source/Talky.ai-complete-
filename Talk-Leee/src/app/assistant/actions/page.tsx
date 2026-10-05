@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -250,6 +250,8 @@ function LeadTypeahead({
     const [query, setQuery] = useState(value);
     const [activeIndex, setActiveIndex] = useState(0);
     const listRef = useRef<HTMLDivElement | null>(null);
+    const rootRef = useRef<HTMLDivElement | null>(null);
+    const [placement, setPlacement] = useState<{ openUp: boolean; maxHeight: number } | null>(null);
 
     useEffect(() => {
         // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs the editable local query text when the controlled `value` prop changes
@@ -280,8 +282,37 @@ function LeadTypeahead({
         cur?.scrollIntoView({ block: "nearest" });
     }, [activeIndex, open]);
 
+    // Open the list upward when the space under the input is too short, and
+    // cap its height so it never runs past a screen edge.
+    useLayoutEffect(() => {
+        if (!open || filtered.length === 0) {
+            // eslint-disable-next-line react-hooks/set-state-in-effect -- clearing stale DOM-measured placement on close, not derivable during render
+            setPlacement(null);
+            return;
+        }
+        const update = () => {
+            const el = rootRef.current;
+            if (!el) return;
+            const rect = el.getBoundingClientRect();
+            const MARGIN = 8;
+            const GAP = 8; // the panel's mt-2 / mb-2
+            const below = window.innerHeight - rect.bottom - GAP - MARGIN;
+            const above = rect.top - GAP - MARGIN;
+            const openUp = below < 108 && above > below;
+            const maxHeight = Math.max(36, Math.min(240, openUp ? above : below));
+            setPlacement({ openUp, maxHeight });
+        };
+        update();
+        window.addEventListener("resize", update);
+        window.addEventListener("scroll", update, true);
+        return () => {
+            window.removeEventListener("resize", update);
+            window.removeEventListener("scroll", update, true);
+        };
+    }, [open, filtered.length]);
+
     return (
-        <div className="relative">
+        <div className="relative" ref={rootRef}>
             <div className="relative">
                 <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
                 <Input
@@ -327,7 +358,15 @@ function LeadTypeahead({
             </div>
             {error ? <div className="mt-2 text-xs text-red-600">{error}</div> : null}
             {open && filtered.length > 0 ? (
-                <div ref={listRef} role="listbox" className="absolute z-20 mt-2 w-full overflow-hidden rounded-xl border border-gray-200 bg-white shadow-xl">
+                <div
+                    ref={listRef}
+                    role="listbox"
+                    className={cn(
+                        "absolute z-20 w-full overflow-y-auto rounded-xl border border-gray-200 bg-white shadow-xl",
+                        placement?.openUp ? "bottom-full mb-2" : "top-full mt-2"
+                    )}
+                    style={{ maxHeight: placement?.maxHeight ?? 240 }}
+                >
                     {filtered.map((opt, idx) => {
                         const active = idx === activeIndex;
                         return (
