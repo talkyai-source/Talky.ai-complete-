@@ -1,0 +1,437 @@
+.F.F.F.F.F.F.F.F.F...............................F.F.F.F.F.F.F.F.F.F.F.. [ 87%]
+..........                                                               [100%]
+================================== FAILURES ===================================
+_ test_actual_original_account_reference_read_is_observation_only[salesforce] _
+
+boundaries = (<function boundaries.<locals>.install at 0x000001D32F7F07C0>, [], <AsyncMock id='2006546375760'>)
+provider = 'salesforce'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("provider", ["hubspot", "salesforce"])
+    async def test_actual_original_account_reference_read_is_observation_only(boundaries, provider):
+        install, requests, refresh = boundaries
+        install(provider)
+        db = ReadDB(provider)
+        observed = await inspect(db, provider)
+>       assert observed.outcome == "observed_reference"
+E       AssertionError: assert 'unavailable' == 'observed_reference'
+E         - observed_reference
+E         + unavailable
+
+tests\unit\test_admin_crm_inspection.py:156: AssertionError
+_ test_provider_search_outcomes_do_not_adjudicate_receipt[empty-no_match-absence_is_inconclusive-salesforce] _
+
+boundaries = (<function boundaries.<locals>.install at 0x000001D32C63EDE0>, [], <AsyncMock id='2006546375904'>)
+provider = 'salesforce', shape = 'empty', outcome = 'no_match'
+reason = 'absence_is_inconclusive'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("provider", ["hubspot", "salesforce"])
+    @pytest.mark.parametrize("shape,outcome,reason", [
+        ("empty", "no_match", "absence_is_inconclusive"),
+        ("duplicate", "ambiguous", "multiple_references"),
+        ("malformed", "unavailable", "provider_read_unavailable"),
+    ])
+    async def test_provider_search_outcomes_do_not_adjudicate_receipt(boundaries, provider, shape, outcome, reason):
+        install, requests, _ = boundaries
+        key, id_key = ("results", "id") if provider == "hubspot" else ("records", "Id")
+        rows = [] if shape == "empty" else [{id_key: "one"}, {id_key: "two"}] if shape == "duplicate" else [{}]
+        install(provider, body={key: rows})
+        observed = await inspect(ReadDB(provider), provider)
+>       assert (observed.outcome, observed.reason) == (outcome, reason)
+E       AssertionError: assert ('unavailable..._unavailable') == ('no_match', ...inconclusive')
+E         At index 0 diff: 'unavailable' != 'no_match'
+E         Use -v to get more diff
+
+tests\unit\test_admin_crm_inspection.py:180: AssertionError
+_ test_provider_search_outcomes_do_not_adjudicate_receipt[duplicate-ambiguous-multiple_references-salesforce] _
+
+boundaries = (<function boundaries.<locals>.install at 0x000001D32F7A3D80>, [], <AsyncMock id='2006546468016'>)
+provider = 'salesforce', shape = 'duplicate', outcome = 'ambiguous'
+reason = 'multiple_references'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("provider", ["hubspot", "salesforce"])
+    @pytest.mark.parametrize("shape,outcome,reason", [
+        ("empty", "no_match", "absence_is_inconclusive"),
+        ("duplicate", "ambiguous", "multiple_references"),
+        ("malformed", "unavailable", "provider_read_unavailable"),
+    ])
+    async def test_provider_search_outcomes_do_not_adjudicate_receipt(boundaries, provider, shape, outcome, reason):
+        install, requests, _ = boundaries
+        key, id_key = ("results", "id") if provider == "hubspot" else ("records", "Id")
+        rows = [] if shape == "empty" else [{id_key: "one"}, {id_key: "two"}] if shape == "duplicate" else [{}]
+        install(provider, body={key: rows})
+        observed = await inspect(ReadDB(provider), provider)
+>       assert (observed.outcome, observed.reason) == (outcome, reason)
+E       AssertionError: assert ('unavailable..._unavailable') == ('ambiguous',...e_references')
+E         At index 0 diff: 'unavailable' != 'ambiguous'
+E         Use -v to get more diff
+
+tests\unit\test_admin_crm_inspection.py:180: AssertionError
+_ test_provider_search_outcomes_do_not_adjudicate_receipt[malformed-unavailable-provider_read_unavailable-salesforce] _
+
+boundaries = (<function boundaries.<locals>.install at 0x000001D32F87B600>, [], <AsyncMock id='2006546374176'>)
+provider = 'salesforce', shape = 'malformed', outcome = 'unavailable'
+reason = 'provider_read_unavailable'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("provider", ["hubspot", "salesforce"])
+    @pytest.mark.parametrize("shape,outcome,reason", [
+        ("empty", "no_match", "absence_is_inconclusive"),
+        ("duplicate", "ambiguous", "multiple_references"),
+        ("malformed", "unavailable", "provider_read_unavailable"),
+    ])
+    async def test_provider_search_outcomes_do_not_adjudicate_receipt(boundaries, provider, shape, outcome, reason):
+        install, requests, _ = boundaries
+        key, id_key = ("results", "id") if provider == "hubspot" else ("records", "Id")
+        rows = [] if shape == "empty" else [{id_key: "one"}, {id_key: "two"}] if shape == "duplicate" else [{}]
+        install(provider, body={key: rows})
+        observed = await inspect(ReadDB(provider), provider)
+>       assert (observed.outcome, observed.reason) == (outcome, reason)
+E       AssertionError: assert ('unavailable..._unavailable') == ('unavailable..._unavailable')
+E         At index 1 diff: 'original_authorization_unavailable' != 'provider_read_unavailable'
+E         Use -v to get more diff
+
+tests\unit\test_admin_crm_inspection.py:180: AssertionError
+_ test_provider_rejection_is_unavailable_without_refresh_retry_or_health_write[401-salesforce] _
+
+boundaries = (<function boundaries.<locals>.install at 0x000001D32F87B4C0>, [], <AsyncMock id='2006546648576'>)
+provider = 'salesforce', status = 401
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("provider", ["hubspot", "salesforce"])
+    @pytest.mark.parametrize("status", [401, 403, 408, 429, 500])
+    async def test_provider_rejection_is_unavailable_without_refresh_retry_or_health_write(boundaries, provider, status):
+        install, requests, refresh = boundaries
+        install(provider, status=status, body={"error": "private synthetic provider response"})
+        observed = await inspect(ReadDB(provider), provider)
+>       assert observed.outcome == "unavailable" and observed.reason == "provider_read_unavailable"
+E       AssertionError: assert ('unavailable' == 'unavailable'
+E           unavailable and 'original_aut...n_unavailable' == 'provider_read_unavailable'
+E         - provider_read_unavailable
+E         + original_authorization_unavailable)
+
+tests\unit\test_admin_crm_inspection.py:191: AssertionError
+_ test_provider_rejection_is_unavailable_without_refresh_retry_or_health_write[403-salesforce] _
+
+boundaries = (<function boundaries.<locals>.install at 0x000001D32F8844A0>, [], <AsyncMock id='2006546381664'>)
+provider = 'salesforce', status = 403
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("provider", ["hubspot", "salesforce"])
+    @pytest.mark.parametrize("status", [401, 403, 408, 429, 500])
+    async def test_provider_rejection_is_unavailable_without_refresh_retry_or_health_write(boundaries, provider, status):
+        install, requests, refresh = boundaries
+        install(provider, status=status, body={"error": "private synthetic provider response"})
+        observed = await inspect(ReadDB(provider), provider)
+>       assert observed.outcome == "unavailable" and observed.reason == "provider_read_unavailable"
+E       AssertionError: assert ('unavailable' == 'unavailable'
+E           unavailable and 'original_aut...n_unavailable' == 'provider_read_unavailable'
+E         - provider_read_unavailable
+E         + original_authorization_unavailable)
+
+tests\unit\test_admin_crm_inspection.py:191: AssertionError
+_ test_provider_rejection_is_unavailable_without_refresh_retry_or_health_write[408-salesforce] _
+
+boundaries = (<function boundaries.<locals>.install at 0x000001D32F884AE0>, [], <AsyncMock id='2006547257568'>)
+provider = 'salesforce', status = 408
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("provider", ["hubspot", "salesforce"])
+    @pytest.mark.parametrize("status", [401, 403, 408, 429, 500])
+    async def test_provider_rejection_is_unavailable_without_refresh_retry_or_health_write(boundaries, provider, status):
+        install, requests, refresh = boundaries
+        install(provider, status=status, body={"error": "private synthetic provider response"})
+        observed = await inspect(ReadDB(provider), provider)
+>       assert observed.outcome == "unavailable" and observed.reason == "provider_read_unavailable"
+E       AssertionError: assert ('unavailable' == 'unavailable'
+E           unavailable and 'original_aut...n_unavailable' == 'provider_read_unavailable'
+E         - provider_read_unavailable
+E         + original_authorization_unavailable)
+
+tests\unit\test_admin_crm_inspection.py:191: AssertionError
+_ test_provider_rejection_is_unavailable_without_refresh_retry_or_health_write[429-salesforce] _
+
+boundaries = (<function boundaries.<locals>.install at 0x000001D32F7A0220>, [], <AsyncMock id='2006547263952'>)
+provider = 'salesforce', status = 429
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("provider", ["hubspot", "salesforce"])
+    @pytest.mark.parametrize("status", [401, 403, 408, 429, 500])
+    async def test_provider_rejection_is_unavailable_without_refresh_retry_or_health_write(boundaries, provider, status):
+        install, requests, refresh = boundaries
+        install(provider, status=status, body={"error": "private synthetic provider response"})
+        observed = await inspect(ReadDB(provider), provider)
+>       assert observed.outcome == "unavailable" and observed.reason == "provider_read_unavailable"
+E       AssertionError: assert ('unavailable' == 'unavailable'
+E           unavailable and 'original_aut...n_unavailable' == 'provider_read_unavailable'
+E         - provider_read_unavailable
+E         + original_authorization_unavailable)
+
+tests\unit\test_admin_crm_inspection.py:191: AssertionError
+_ test_provider_rejection_is_unavailable_without_refresh_retry_or_health_write[500-salesforce] _
+
+boundaries = (<function boundaries.<locals>.install at 0x000001D32F7076A0>, [], <AsyncMock id='2006547259824'>)
+provider = 'salesforce', status = 500
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("provider", ["hubspot", "salesforce"])
+    @pytest.mark.parametrize("status", [401, 403, 408, 429, 500])
+    async def test_provider_rejection_is_unavailable_without_refresh_retry_or_health_write(boundaries, provider, status):
+        install, requests, refresh = boundaries
+        install(provider, status=status, body={"error": "private synthetic provider response"})
+        observed = await inspect(ReadDB(provider), provider)
+>       assert observed.outcome == "unavailable" and observed.reason == "provider_read_unavailable"
+E       AssertionError: assert ('unavailable' == 'unavailable'
+E           unavailable and 'original_aut...n_unavailable' == 'provider_read_unavailable'
+E         - provider_read_unavailable
+E         + original_authorization_unavailable)
+
+tests\unit\test_admin_crm_inspection.py:191: AssertionError
+_ test_malformed_provider_id_never_becomes_an_observed_reference[None-salesforce] _
+
+boundaries = (<function boundaries.<locals>.install at 0x000001D32F884360>, [], <AsyncMock id='2006546374608'>)
+provider = 'salesforce', invalid_id = None
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("provider", ["hubspot", "salesforce"])
+    @pytest.mark.parametrize("invalid_id", [None, True, False, 17, "", "   ", "bad\nidentifier", "x" * 257])
+    async def test_malformed_provider_id_never_becomes_an_observed_reference(boundaries, provider, invalid_id):
+        install, requests, _ = boundaries
+        key, id_key = ("results", "id") if provider == "hubspot" else ("records", "Id")
+        install(provider, body={key: [{id_key: invalid_id}]})
+        observed = await inspect(ReadDB(provider), provider)
+>       assert observed.outcome == "unavailable" and observed.reason == "provider_read_unavailable"
+E       AssertionError: assert ('unavailable' == 'unavailable'
+E           unavailable and 'original_aut...n_unavailable' == 'provider_read_unavailable'
+E         - provider_read_unavailable
+E         + original_authorization_unavailable)
+
+tests\unit\test_admin_crm_inspection.py:286: AssertionError
+_ test_malformed_provider_id_never_becomes_an_observed_reference[True-salesforce] _
+
+boundaries = (<function boundaries.<locals>.install at 0x000001D32F91C860>, [], <AsyncMock id='2006546468976'>)
+provider = 'salesforce', invalid_id = True
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("provider", ["hubspot", "salesforce"])
+    @pytest.mark.parametrize("invalid_id", [None, True, False, 17, "", "   ", "bad\nidentifier", "x" * 257])
+    async def test_malformed_provider_id_never_becomes_an_observed_reference(boundaries, provider, invalid_id):
+        install, requests, _ = boundaries
+        key, id_key = ("results", "id") if provider == "hubspot" else ("records", "Id")
+        install(provider, body={key: [{id_key: invalid_id}]})
+        observed = await inspect(ReadDB(provider), provider)
+>       assert observed.outcome == "unavailable" and observed.reason == "provider_read_unavailable"
+E       AssertionError: assert ('unavailable' == 'unavailable'
+E           unavailable and 'original_aut...n_unavailable' == 'provider_read_unavailable'
+E         - provider_read_unavailable
+E         + original_authorization_unavailable)
+
+tests\unit\test_admin_crm_inspection.py:286: AssertionError
+_ test_malformed_provider_id_never_becomes_an_observed_reference[False-salesforce] _
+
+boundaries = (<function boundaries.<locals>.install at 0x000001D32F91C5E0>, [], <AsyncMock id='2006546660816'>)
+provider = 'salesforce', invalid_id = False
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("provider", ["hubspot", "salesforce"])
+    @pytest.mark.parametrize("invalid_id", [None, True, False, 17, "", "   ", "bad\nidentifier", "x" * 257])
+    async def test_malformed_provider_id_never_becomes_an_observed_reference(boundaries, provider, invalid_id):
+        install, requests, _ = boundaries
+        key, id_key = ("results", "id") if provider == "hubspot" else ("records", "Id")
+        install(provider, body={key: [{id_key: invalid_id}]})
+        observed = await inspect(ReadDB(provider), provider)
+>       assert observed.outcome == "unavailable" and observed.reason == "provider_read_unavailable"
+E       AssertionError: assert ('unavailable' == 'unavailable'
+E           unavailable and 'original_aut...n_unavailable' == 'provider_read_unavailable'
+E         - provider_read_unavailable
+E         + original_authorization_unavailable)
+
+tests\unit\test_admin_crm_inspection.py:286: AssertionError
+_ test_malformed_provider_id_never_becomes_an_observed_reference[17-salesforce] _
+
+boundaries = (<function boundaries.<locals>.install at 0x000001D32F91CE00>, [], <AsyncMock id='2006547462720'>)
+provider = 'salesforce', invalid_id = 17
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("provider", ["hubspot", "salesforce"])
+    @pytest.mark.parametrize("invalid_id", [None, True, False, 17, "", "   ", "bad\nidentifier", "x" * 257])
+    async def test_malformed_provider_id_never_becomes_an_observed_reference(boundaries, provider, invalid_id):
+        install, requests, _ = boundaries
+        key, id_key = ("results", "id") if provider == "hubspot" else ("records", "Id")
+        install(provider, body={key: [{id_key: invalid_id}]})
+        observed = await inspect(ReadDB(provider), provider)
+>       assert observed.outcome == "unavailable" and observed.reason == "provider_read_unavailable"
+E       AssertionError: assert ('unavailable' == 'unavailable'
+E           unavailable and 'original_aut...n_unavailable' == 'provider_read_unavailable'
+E         - provider_read_unavailable
+E         + original_authorization_unavailable)
+
+tests\unit\test_admin_crm_inspection.py:286: AssertionError
+_ test_malformed_provider_id_never_becomes_an_observed_reference[-salesforce] _
+
+boundaries = (<function boundaries.<locals>.install at 0x000001D32F91C900>, [], <AsyncMock id='2006547451776'>)
+provider = 'salesforce', invalid_id = ''
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("provider", ["hubspot", "salesforce"])
+    @pytest.mark.parametrize("invalid_id", [None, True, False, 17, "", "   ", "bad\nidentifier", "x" * 257])
+    async def test_malformed_provider_id_never_becomes_an_observed_reference(boundaries, provider, invalid_id):
+        install, requests, _ = boundaries
+        key, id_key = ("results", "id") if provider == "hubspot" else ("records", "Id")
+        install(provider, body={key: [{id_key: invalid_id}]})
+        observed = await inspect(ReadDB(provider), provider)
+>       assert observed.outcome == "unavailable" and observed.reason == "provider_read_unavailable"
+E       AssertionError: assert ('unavailable' == 'unavailable'
+E           unavailable and 'original_aut...n_unavailable' == 'provider_read_unavailable'
+E         - provider_read_unavailable
+E         + original_authorization_unavailable)
+
+tests\unit\test_admin_crm_inspection.py:286: AssertionError
+_ test_malformed_provider_id_never_becomes_an_observed_reference[   -salesforce] _
+
+boundaries = (<function boundaries.<locals>.install at 0x000001D32F91DA80>, [], <AsyncMock id='2006547371104'>)
+provider = 'salesforce', invalid_id = '   '
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("provider", ["hubspot", "salesforce"])
+    @pytest.mark.parametrize("invalid_id", [None, True, False, 17, "", "   ", "bad\nidentifier", "x" * 257])
+    async def test_malformed_provider_id_never_becomes_an_observed_reference(boundaries, provider, invalid_id):
+        install, requests, _ = boundaries
+        key, id_key = ("results", "id") if provider == "hubspot" else ("records", "Id")
+        install(provider, body={key: [{id_key: invalid_id}]})
+        observed = await inspect(ReadDB(provider), provider)
+>       assert observed.outcome == "unavailable" and observed.reason == "provider_read_unavailable"
+E       AssertionError: assert ('unavailable' == 'unavailable'
+E           unavailable and 'original_aut...n_unavailable' == 'provider_read_unavailable'
+E         - provider_read_unavailable
+E         + original_authorization_unavailable)
+
+tests\unit\test_admin_crm_inspection.py:286: AssertionError
+_ test_malformed_provider_id_never_becomes_an_observed_reference[bad\nidentifier-salesforce] _
+
+boundaries = (<function boundaries.<locals>.install at 0x000001D32F91C220>, [], <AsyncMock id='2006547379600'>)
+provider = 'salesforce', invalid_id = 'bad\nidentifier'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("provider", ["hubspot", "salesforce"])
+    @pytest.mark.parametrize("invalid_id", [None, True, False, 17, "", "   ", "bad\nidentifier", "x" * 257])
+    async def test_malformed_provider_id_never_becomes_an_observed_reference(boundaries, provider, invalid_id):
+        install, requests, _ = boundaries
+        key, id_key = ("results", "id") if provider == "hubspot" else ("records", "Id")
+        install(provider, body={key: [{id_key: invalid_id}]})
+        observed = await inspect(ReadDB(provider), provider)
+>       assert observed.outcome == "unavailable" and observed.reason == "provider_read_unavailable"
+E       AssertionError: assert ('unavailable' == 'unavailable'
+E           unavailable and 'original_aut...n_unavailable' == 'provider_read_unavailable'
+E         - provider_read_unavailable
+E         + original_authorization_unavailable)
+
+tests\unit\test_admin_crm_inspection.py:286: AssertionError
+_ test_malformed_provider_id_never_becomes_an_observed_reference[xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx-salesforce] _
+
+boundaries = (<function boundaries.<locals>.install at 0x000001D32F91E660>, [], <AsyncMock id='2006546465904'>)
+provider = 'salesforce'
+invalid_id = 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx...xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("provider", ["hubspot", "salesforce"])
+    @pytest.mark.parametrize("invalid_id", [None, True, False, 17, "", "   ", "bad\nidentifier", "x" * 257])
+    async def test_malformed_provider_id_never_becomes_an_observed_reference(boundaries, provider, invalid_id):
+        install, requests, _ = boundaries
+        key, id_key = ("results", "id") if provider == "hubspot" else ("records", "Id")
+        install(provider, body={key: [{id_key: invalid_id}]})
+        observed = await inspect(ReadDB(provider), provider)
+>       assert observed.outcome == "unavailable" and observed.reason == "provider_read_unavailable"
+E       AssertionError: assert ('unavailable' == 'unavailable'
+E           unavailable and 'original_aut...n_unavailable' == 'provider_read_unavailable'
+E         - provider_read_unavailable
+E         + original_authorization_unavailable)
+
+tests\unit\test_admin_crm_inspection.py:286: AssertionError
+_ test_malformed_multirow_response_is_not_duplicate_reference_ambiguity[rows0-salesforce] _
+
+boundaries = (<function boundaries.<locals>.install at 0x000001D32F91ECA0>, [], <AsyncMock id='2006546657312'>)
+provider = 'salesforce', rows = [{}, {}]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("provider", ["hubspot", "salesforce"])
+    @pytest.mark.parametrize("rows", [[{}, {}], [None, None], ["one", "two"]])
+    async def test_malformed_multirow_response_is_not_duplicate_reference_ambiguity(boundaries, provider, rows):
+        install, requests, _ = boundaries
+        install(provider, body={"results" if provider == "hubspot" else "records": rows})
+        observed = await inspect(ReadDB(provider), provider)
+>       assert observed.outcome == "unavailable" and observed.reason == "provider_read_unavailable"
+E       AssertionError: assert ('unavailable' == 'unavailable'
+E           unavailable and 'original_aut...n_unavailable' == 'provider_read_unavailable'
+E         - provider_read_unavailable
+E         + original_authorization_unavailable)
+
+tests\unit\test_admin_crm_inspection.py:297: AssertionError
+_ test_malformed_multirow_response_is_not_duplicate_reference_ambiguity[rows1-salesforce] _
+
+boundaries = (<function boundaries.<locals>.install at 0x000001D32F91F380>, [], <AsyncMock id='2006546646560'>)
+provider = 'salesforce', rows = [None, None]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("provider", ["hubspot", "salesforce"])
+    @pytest.mark.parametrize("rows", [[{}, {}], [None, None], ["one", "two"]])
+    async def test_malformed_multirow_response_is_not_duplicate_reference_ambiguity(boundaries, provider, rows):
+        install, requests, _ = boundaries
+        install(provider, body={"results" if provider == "hubspot" else "records": rows})
+        observed = await inspect(ReadDB(provider), provider)
+>       assert observed.outcome == "unavailable" and observed.reason == "provider_read_unavailable"
+E       AssertionError: assert ('unavailable' == 'unavailable'
+E           unavailable and 'original_aut...n_unavailable' == 'provider_read_unavailable'
+E         - provider_read_unavailable
+E         + original_authorization_unavailable)
+
+tests\unit\test_admin_crm_inspection.py:297: AssertionError
+_ test_malformed_multirow_response_is_not_duplicate_reference_ambiguity[rows2-salesforce] _
+
+boundaries = (<function boundaries.<locals>.install at 0x000001D32F91C400>, [], <AsyncMock id='2006547922816'>)
+provider = 'salesforce', rows = ['one', 'two']
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("provider", ["hubspot", "salesforce"])
+    @pytest.mark.parametrize("rows", [[{}, {}], [None, None], ["one", "two"]])
+    async def test_malformed_multirow_response_is_not_duplicate_reference_ambiguity(boundaries, provider, rows):
+        install, requests, _ = boundaries
+        install(provider, body={"results" if provider == "hubspot" else "records": rows})
+        observed = await inspect(ReadDB(provider), provider)
+>       assert observed.outcome == "unavailable" and observed.reason == "provider_read_unavailable"
+E       AssertionError: assert ('unavailable' == 'unavailable'
+E           unavailable and 'original_aut...n_unavailable' == 'provider_read_unavailable'
+E         - provider_read_unavailable
+E         + original_authorization_unavailable)
+
+tests\unit\test_admin_crm_inspection.py:297: AssertionError
+============================== warnings summary ===============================
+app\api\v1\endpoints\admin\health\_shared.py:16
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\crm-receipt-inspection-20261006\backend\app\api\v1\endpoints\admin\health\_shared.py:16: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    _server_start_time = datetime.utcnow()
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/unit/test_admin_crm_inspection.py::test_actual_original_account_reference_read_is_observation_only[salesforce]
+FAILED tests/unit/test_admin_crm_inspection.py::test_provider_search_outcomes_do_not_adjudicate_receipt[empty-no_match-absence_is_inconclusive-salesforce]
+FAILED tests/unit/test_admin_crm_inspection.py::test_provider_search_outcomes_do_not_adjudicate_receipt[duplicate-ambiguous-multiple_references-salesforce]
+FAILED tests/unit/test_admin_crm_inspection.py::test_provider_search_outcomes_do_not_adjudicate_receipt[malformed-unavailable-provider_read_unavailable-salesforce]
+FAILED tests/unit/test_admin_crm_inspection.py::test_provider_rejection_is_unavailable_without_refresh_retry_or_health_write[401-salesforce]
+FAILED tests/unit/test_admin_crm_inspection.py::test_provider_rejection_is_unavailable_without_refresh_retry_or_health_write[403-salesforce]
+FAILED tests/unit/test_admin_crm_inspection.py::test_provider_rejection_is_unavailable_without_refresh_retry_or_health_write[408-salesforce]
+FAILED tests/unit/test_admin_crm_inspection.py::test_provider_rejection_is_unavailable_without_refresh_retry_or_health_write[429-salesforce]
+FAILED tests/unit/test_admin_crm_inspection.py::test_provider_rejection_is_unavailable_without_refresh_retry_or_health_write[500-salesforce]
+FAILED tests/unit/test_admin_crm_inspection.py::test_malformed_provider_id_never_becomes_an_observed_reference[None-salesforce]
+FAILED tests/unit/test_admin_crm_inspection.py::test_malformed_provider_id_never_becomes_an_observed_reference[True-salesforce]
+FAILED tests/unit/test_admin_crm_inspection.py::test_malformed_provider_id_never_becomes_an_observed_reference[False-salesforce]
+FAILED tests/unit/test_admin_crm_inspection.py::test_malformed_provider_id_never_becomes_an_observed_reference[17-salesforce]
+FAILED tests/unit/test_admin_crm_inspection.py::test_malformed_provider_id_never_becomes_an_observed_reference[-salesforce]
+FAILED tests/unit/test_admin_crm_inspection.py::test_malformed_provider_id_never_becomes_an_observed_reference[   -salesforce]
+FAILED tests/unit/test_admin_crm_inspection.py::test_malformed_provider_id_never_becomes_an_observed_reference[bad\nidentifier-salesforce]
+FAILED tests/unit/test_admin_crm_inspection.py::test_malformed_provider_id_never_becomes_an_observed_reference[xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx-salesforce]
+FAILED tests/unit/test_admin_crm_inspection.py::test_malformed_multirow_response_is_not_duplicate_reference_ambiguity[rows0-salesforce]
+FAILED tests/unit/test_admin_crm_inspection.py::test_malformed_multirow_response_is_not_duplicate_reference_ambiguity[rows1-salesforce]
+FAILED tests/unit/test_admin_crm_inspection.py::test_malformed_multirow_response_is_not_duplicate_reference_ambiguity[rows2-salesforce]
+20 failed, 62 passed, 1 warning in 10.72s

@@ -1,0 +1,64 @@
+
+> frontend@0.0.0 test
+> node --test tests/*.test.mjs
+
+✔ table preserves unknown and offers its actual filter (180.4397ms)
+✔ table preserves scheduled and offers its actual filter (25.0173ms)
+✔ drawer shows sanitized unconfirmed receipt without raw result or current-account substitution (53.3537ms)
+✔ late A detail cannot replace selected B receipt (30.6113ms)
+✔ receipt missing retains the actual proof boundary (10.5576ms)
+✔ receipt mismatched retains the actual proof boundary (9.5157ms)
+✔ receipt explicit-proof retains the actual proof boundary (23.7932ms)
+✔ late A cancellation refresh cannot replace B or refresh the old action (41.6845ms)
+✔ a foreign detail response cannot populate the current selection (10.851ms)
+✔ cancel rejection remains an error, without a success refresh (16.7275ms)
+✔ a cancellation confirmation belongs only to its selected action (54.8868ms)
+✔ formats an authoritative ISO currency without assuming dollars (13.8214ms)
+✔ labels a ledger amount whose currency was not recorded (0.878ms)
+✔ renders a reversed monetary state as zero in its ledger currency (0.8143ms)
+✔ does not render absent or non-finite costs (0.7769ms)
+✔ formats aggregate USD estimates without a hardcoded dollar symbol (0.9791ms)
+✔ requested is pending even when a status-looking field says ended (10.7985ms)
+✔ confirmed requires the provider-confirmed contract (1.116ms)
+✔ already-terminal is safe to remove from the live list (0.8631ms)
+✔ failed provider response preserves the useful error for retry (0.8661ms)
+✔ a requested response produces a pending-only live-row patch (13.1751ms)
+✔ poll reconciliation preserves a raced pending marker (1.6385ms)
+✔ poll reconciliation accepts failed and missing terminal rows (1.221ms)
+✔ a confirmed live-row marker is terminal, never actionable pending (0.8104ms)
+✔ saved CRM evidence does not inspect until explicit click and never changes saved status (290.0678ms)
+✔ no_match/absence_is_inconclusive is truthful and leaves status unresolved (11.7315ms)
+✔ ambiguous/multiple_references is truthful and leaves status unresolved (9.4592ms)
+✔ unavailable/original_receipt_unavailable is truthful and leaves status unresolved (8.7409ms)
+✔ unavailable/original_authorization_unavailable is truthful and leaves status unresolved (11.0947ms)
+✔ unavailable/provider_read_unavailable is truthful and leaves status unresolved (5.5563ms)
+✔ double click sends one read, with no implicit retry (12.1526ms)
+✔ late A observation cannot replace B and cannot clear its pending read (18.3163ms)
+✔ foreign_call response never populates current evidence (9.5318ms)
+✔ foreign_provider response never populates current evidence (6.9596ms)
+✔ bad_outcome response never populates current evidence (5.162ms)
+✔ bad_reason response never populates current evidence (2.3746ms)
+✔ inherited_outcome response never populates current evidence (4.7974ms)
+✔ inherited_reason response never populates current evidence (7.3578ms)
+✔ throw response never populates current evidence (10.9118ms)
+✔ missing proof offers no inspect button or current-account substitution (3.3138ms)
+✔ actual API request is one GET with only call and provider in its URL (152.7633ms)
+✔ late detail A cannot supply CRM receipt props to selected B (11.5087ms)
+✔ late old-period success cannot replace the current rows (40.1775ms)
+✔ late old-period success cannot replace the current failure (4.8465ms)
+✔ late old-period failure cannot replace the current rows (7.5784ms)
+✔ actual endpoint example renders recorded usage, unavailable attribution and explicit estimate coverage (202.4228ms)
+✔ failed usage read renders an error and unavailable counts, never invented zero (5.872ms)
+✔ loading usage is not a zero observation (6.0783ms)
+✔ an actually recorded zero count is displayed while supplier cost stays unavailable (4.7695ms)
+✔ known legacy zero is distinct from missing and invalid money (1.5728ms)
+✔ unknown legacy cost does not become USD zero in the actual summary view (12.4133ms)
+✔ recorded totals do not turn a missing row measurement into zero (0.5254ms)
+ℹ tests 52
+ℹ suites 0
+ℹ pass 52
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2044.0918

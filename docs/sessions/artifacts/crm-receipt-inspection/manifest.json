@@ -1,0 +1,96 @@
+{
+  "recorded_at": "2026-10-05T20:37:55.071234+00:00",
+  "base_commit": "5d8ddba3037903b197e6890a3a0bdaf38c59ce56",
+  "source_commit": "24d86b72a2105f76248c9c20e553558ca247eeb1",
+  "hash_scheme": "SHA-256 of raw file bytes after CRLF-to-LF normalization only",
+  "source_files": {
+    "Admin/frontend/src/components/CallDetailDrawer.tsx": "cc2e9d0d012d2d12c04899504d6504b2673bb894e73dfc2e9bc3d362460dbc03",
+    "Admin/frontend/src/lib/api.ts": "3ab31e444f85a1d64595ea2cab7a9c58d15e6f7921e5992af4474c09988224d8",
+    "Admin/frontend/tests/crm-inspection.test.mjs": "f58548af3fb3f860f3971d0444ec1c3758db35ef0840b9ad693d9ac3aed59455",
+    "backend/app/api/v1/endpoints/admin/calls.py": "4ee2b9cc6ba31f131ce57b01a8184d44b622f64b48756f7284856bf2b03e4cad",
+    "backend/app/services/connector_resolver.py": "36f3f0f5a31575ddf896d37f999d8b346eeb7dcb6b35194985d3a50fa68162c0",
+    "backend/app/infrastructure/connectors/crm/base.py": "e18c16b5055e77e0d1062da46aae6f0b12e18797e95acac97bb089b3b828c430",
+    "backend/app/infrastructure/connectors/crm/hubspot.py": "da902d16118d0df30e2b83adf88efc50551634c05945d2f2a7e39920a3756b22",
+    "backend/app/infrastructure/connectors/crm/salesforce.py": "38282ec10b2ead2fa82fb857bcd2048d5a7472601991c98bb94f24436c1870d9",
+    "backend/tests/unit/test_admin_crm_inspection.py": "310c22aab9b872001b8edcf56801269dad28fde15b826eeb72a8686633ee142a"
+  },
+  "artifacts": {
+    "admin-build.txt": "3725a1a6528e6143bce64e7b59f096257ef95ca627be371eb0da53509ae164ef",
+    "admin-focused.txt": "9496caba8f8b2db445da3f34fc4dd99f604c836642315414c5ccefb865908b03",
+    "admin-initial-harness.txt": "4ae483147e9a81c24683d1edac1f37a39e515bbbe3da7418c7e7308dbb36bd97",
+    "admin-lint.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "admin-regression.txt": "dc11d72a58a46f5496807c20fabdf9688c92f96475a17f2fdc4b8766078724c2",
+    "admin-typecheck.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "backend-focused.txt": "0cfd5b7eaa731b7419f0c470ac79459f8f90b6c05d0b4e878286eec14b3a8e2f",
+    "backend-initial-fixture.txt": "fc76729e9f544e7900a2c4a6084d254179483d41a8d52b2ff865001c27adc05d",
+    "backend-regression.txt": "a9b8052dc50f88f41aa18773c8b1b23518d429a571306bb391038bd61de89da4",
+    "backend-ruff.txt": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18",
+    "verification.md": "ac4792d84e0a9211eefc137d8457546a9889a016e63214b0083a2d1978245d5d"
+  },
+  "backend": {
+    "command": "python -m pytest tests/unit/test_admin_crm_inspection.py tests/unit/test_admin_call_currency.py tests/unit/test_admin_cross_tenant_scoping.py tests/unit/test_hubspot_call_receipts.py tests/unit/test_salesforce_connector.py tests/unit/test_crm_sync_service.py tests/unit/test_crm_sync_hooks.py tests/unit/test_inbox_original_account.py tests/unit/test_reviewed_account_identity.py tests/unit/test_calendar_delivery_contract.py tests/unit/test_communication_delivery_contract.py tests/unit/test_connector_health.py tests/unit/test_meeting_service.py tests/unit/assistant/test_calendar_and_drive_errors.py -q --no-cov",
+    "cwd": "backend",
+    "exit_code": 0,
+    "passed": 393,
+    "failed": 0,
+    "skipped": 0,
+    "warnings": 8,
+    "modules": 14,
+    "new_inspection_controls_included": 86,
+    "python_executable": "C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/backend/.venv/Scripts/python.exe",
+    "environment": {
+      "PYTHONUTF8": "1",
+      "PYTHONDONTWRITEBYTECODE": "1",
+      "PYTHONPATH": [
+        "C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/tmp/postgres-matrix-20261005/tmp/exact-requirements-20261005/packages",
+        "C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/tmp/production-ready-ag07-20261005/tmp/op02-testdeps"
+      ]
+    },
+    "limits": "Synthetic DB and HTTP boundaries; not actual PostgreSQL, live provider or clean transitive dependency resolution acceptance."
+  },
+  "admin": {
+    "command": "npm test",
+    "cwd": "Admin/frontend",
+    "exit_code": 0,
+    "passed": 52,
+    "failed": 0,
+    "skipped": 0,
+    "new_controls_included": 18,
+    "focused_command": "node --test tests/crm-inspection.test.mjs",
+    "limits": "Actual component/API source with minimal synthetic hook scheduler. No real browser or React-concurrency qualification.",
+    "dependencies": "Existing production-ready-20261004/Admin/frontend/node_modules via ignored local junction; no manifest/lock changes."
+  },
+  "checks": [
+    {
+      "command": "npx tsc -b --pretty false",
+      "cwd": "Admin/frontend",
+      "exit_code": 0
+    },
+    {
+      "command": "npx eslint src/components/CallDetailDrawer.tsx src/lib/api.ts tests/crm-inspection.test.mjs",
+      "cwd": "Admin/frontend",
+      "exit_code": 0
+    },
+    {
+      "command": "npx vite build",
+      "cwd": "Admin/frontend",
+      "exit_code": 0
+    },
+    {
+      "command": "python -m ruff check app/api/v1/endpoints/admin/calls.py app/services/connector_resolver.py app/infrastructure/connectors/crm/base.py app/infrastructure/connectors/crm/hubspot.py app/infrastructure/connectors/crm/salesforce.py tests/unit/test_admin_crm_inspection.py --select F",
+      "cwd": "backend",
+      "exit_code": 0
+    },
+    {
+      "command": "git diff --check",
+      "cwd": ".",
+      "exit_code": 0
+    }
+  ],
+  "reviews": {
+    "root": "Final source read clear; authorized source/evidence commits",
+    "account_review": "Independent read-only seven-production-file review clear; no tests executed or edits made"
+  },
+  "separate_integration_fix": "Integration branch e7add564 holds unknown CRM creating_call before title-only auto-adoption. This owner run predates that separate repair.",
+  "release_status": "AG06 remains in progress; no scenario/final gate promoted; no push/deploy/live provider/customer DB work."
+}
