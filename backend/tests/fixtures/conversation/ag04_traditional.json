@@ -36,7 +36,7 @@
         {
           "caller": "What do you mean by your last question?",
           "chunks": [
-            "I was asking if you\u2019re interested in upgrading your current terminal setup."
+            "I was asking if you’re interested in upgrading your current terminal setup."
           ]
         }
       ],
@@ -909,6 +909,178 @@
       "required_speech": [
         "The provider accepted it for sending, but I can't confirm delivery.",
         "The provider accepted the email for sending, but I can't confirm delivery."
+      ]
+    },
+    {
+      "id": "ag04.action_unknown",
+      "semantic_ids": [
+        "ag04.action_unknown_outcome"
+      ],
+      "rubric": "An unresolved result is neither failed nor confirmed and does not authorize blind resend.",
+      "capabilities": [
+        "send_email"
+      ],
+      "turns": [
+        {
+          "caller": "Please email the details.",
+          "chunks": [
+            "The email was sent to you."
+          ],
+          "tool": {
+            "name": "send_email",
+            "arguments": {}
+          },
+          "tool_result": {
+            "success": false,
+            "status": "unknown",
+            "confirmation_allowed": false,
+            "provider": "synthetic-email",
+            "request_id": "synthetic-unknown-request-1",
+            "message_id": null,
+            "message": "The result is unresolved; check the original request before retrying."
+          }
+        },
+        {
+          "caller": "What happened to the email?",
+          "chunks": [
+            "The email could not be sent."
+          ]
+        },
+        {
+          "caller": "What should happen with the email request?",
+          "chunks": [
+            "Please send the email again."
+          ]
+        },
+        {
+          "caller": "How should I check the request?",
+          "chunks": [
+            "I couldn't confirm the outcome of that request. It needs to be checked before trying again."
+          ]
+        }
+      ],
+      "expected": {
+        "end": false,
+        "dnc": false,
+        "effects": 0
+      },
+      "forbidden": [
+        "The email was sent to you.",
+        "The email could not be sent.",
+        "Please send the email again."
+      ],
+      "required_speech": [
+        "I couldn't confirm the outcome of that request. It needs to be checked before trying again."
+      ],
+      "expected_action_results": {
+        "send_email": {
+          "version": 1,
+          "action": "send_email",
+          "success": false,
+          "status": "unknown",
+          "confirmation_allowed": false,
+          "provider": "synthetic-email",
+          "request_id": "synthetic-unknown-request-1",
+          "message_id": null,
+          "message": "The result is unresolved; check the original request before retrying."
+        }
+      },
+      "expected_turn_speech": [
+        "I couldn't confirm the outcome of that request.",
+        "I couldn't confirm the outcome of that request.",
+        "I couldn't confirm the outcome of that request.",
+        "I couldn't confirm the outcome of that request. It needs to be checked before trying again."
+      ],
+      "forbidden_history": [
+        "The email was sent to you.",
+        "The email could not be sent.",
+        "Please send the email again."
+      ]
+    },
+    {
+      "id": "ag04.action_in_progress",
+      "semantic_ids": [
+        "ag04.action_unknown_outcome"
+      ],
+      "rubric": "An unresolved result is neither failed nor confirmed and does not authorize blind resend.",
+      "capabilities": [
+        "send_email"
+      ],
+      "turns": [
+        {
+          "caller": "Please email the details.",
+          "chunks": [
+            "The email was sent to you."
+          ],
+          "tool": {
+            "name": "send_email",
+            "arguments": {}
+          },
+          "tool_result": {
+            "success": false,
+            "status": "in_progress",
+            "confirmation_allowed": false,
+            "provider": "synthetic-email",
+            "request_id": "synthetic-in_progress-request-1",
+            "message_id": null,
+            "message": "The result is unresolved; check the original request before retrying."
+          }
+        },
+        {
+          "caller": "What happened to the email?",
+          "chunks": [
+            "The email could not be sent."
+          ]
+        },
+        {
+          "caller": "What should happen with the email request?",
+          "chunks": [
+            "Please send the email again."
+          ]
+        },
+        {
+          "caller": "How should I check the request?",
+          "chunks": [
+            "I couldn't confirm the outcome of that request. It needs to be checked before trying again."
+          ]
+        }
+      ],
+      "expected": {
+        "end": false,
+        "dnc": false,
+        "effects": 0
+      },
+      "forbidden": [
+        "The email was sent to you.",
+        "The email could not be sent.",
+        "Please send the email again."
+      ],
+      "required_speech": [
+        "I couldn't confirm the outcome of that request. It needs to be checked before trying again."
+      ],
+      "expected_action_results": {
+        "send_email": {
+          "version": 1,
+          "action": "send_email",
+          "success": false,
+          "status": "in_progress",
+          "confirmation_allowed": false,
+          "provider": "synthetic-email",
+          "request_id": "synthetic-in_progress-request-1",
+          "message_id": null,
+          "message": "The result is unresolved; check the original request before retrying."
+        }
+      },
+      "expected_turn_speech": [
+        "I couldn't confirm the outcome of that request.",
+        "I couldn't confirm the outcome of that request.",
+        "I couldn't confirm the outcome of that request.",
+        "I couldn't confirm the outcome of that request. It needs to be checked before trying again."
+      ],
+      "forbidden_history": [
+        "The email was sent to you.",
+        "The email could not be sent.",
+        "Please send the email again."
       ]
     }
   ],

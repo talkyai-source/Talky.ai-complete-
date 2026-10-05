@@ -25,9 +25,9 @@ async def offline_only():
 
 def test_inventory_is_input_declared_and_not_inferred_from_successful_runs():
     rows = case_inventory(ROOT)
-    assert len(rows) == 128
-    assert len({(r["scenario_id"], r["profile"]["provider"]) for r in rows}) == 128
-    assert len({r["scenario_id"] for r in rows}) == 32  # repetitions are not new human scenarios
+    assert len(rows) == 136
+    assert len({(r["scenario_id"], r["profile"]["provider"]) for r in rows}) == 136
+    assert len({r["scenario_id"] for r in rows}) == 34  # repetitions are not new human scenarios
 
 
 @pytest.mark.parametrize("provider", ["groq", "cerebras", "openai", "gemini"])
@@ -185,4 +185,24 @@ async def test_historical_dnc_recollection_does_not_authorize_current_optout_or_
     assert row["requests"] and row["submitted_speech"]
     assert "[[END_CALL]]" in row["raw_output"][0]
     assert all("END_CALL" not in text for text in row["submitted_speech"])
+    assert all(f["status"] == "unreviewed" for f in row["findings"]["semantic"])
+
+
+@pytest.mark.parametrize("provider", ["groq", "cerebras", "openai", "gemini"])
+@pytest.mark.parametrize("status", ["unknown", "in_progress"])
+async def test_unresolved_action_preserves_receipt_and_never_speaks_false_failure_or_resend(provider, status):
+    data = _load(ROOT)
+    case = next(c for c in data["cases"] if c["id"] == "ag04.action_" + status)
+    spec = next(p for p in data["profiles"] if p["provider"] == provider)
+    row = await _run_case(ROOT, data, case, spec)
+    assert all(c["pass"] for c in row["findings"]["control"]), row["findings"]["control"]
+    assert [" ".join(turn["submitted_speech"]) for turn in row["turns"]] == case["expected_turn_speech"]
+    original = {"version": 1, "action": "send_email", **case["turns"][0]["tool_result"]}
+    attempts = row["effects"]["attempts"]
+    assert len(attempts) == 1 and attempts[0]["receipt"] == original
+    assert row["effects"]["recorded_results"]["send_email"] == original
+    assert original["request_id"] == "synthetic-" + status + "-request-1"
+    assert original["status"] == status and original["message_id"] is None
+    assert row["effects"]["accepted"] == 0
+    assert row["semantic_ids"] == ["ag04.action_unknown_outcome"]
     assert all(f["status"] == "unreviewed" for f in row["findings"]["semantic"])

@@ -27,7 +27,7 @@ async def test_declared_corpus_runs_actual_native_boundaries_without_network(mon
     inventory = native.case_inventory(ROOT)
     keys = lambda items: {(r["scenario_id"], r["profile"]["provider"]) for r in items}
     assert keys(rows) == keys(inventory)
-    assert len(rows) == len(inventory) == 88  # 44 controls, two parser implementations.
+    assert len(rows) == len(inventory) == 92  # 46 controls, two parser implementations.
     failed = [(row["scenario_id"], row["profile"]["provider"], finding)
         for row in rows for finding in row["findings"]["control"] if finding["pass"] is not True]
     assert not failed, json.dumps(failed, indent=2)
@@ -370,4 +370,29 @@ async def test_unusable_contact_and_bare_yes_cannot_replace_owned_self_confirmat
     assert other["value"] is None and other["confirmed"] is False
     assert row["effects"]["executor_attempts"] == [] and row["effects"]["accepted"] == 0
     assert row["end"]["requested"] is False and row["end"]["dnc_flag"] is False
+    assert all(f["status"] == "unreviewed" for f in row["findings"]["semantic"])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("provider", ["openai", "xai"])
+@pytest.mark.parametrize("status", ["unknown", "in_progress"])
+async def test_unresolved_action_blocks_false_success_failure_and_resend_with_original_receipt(provider, status):
+    corpus = native._corpus(ROOT)
+    case = next(c for c in corpus["scenarios"] if c["id"] == "native.action_" + status)
+    row = await native.NativeReplay(case, provider, corpus).run()
+    assert all(c["pass"] for c in row["findings"]["control"]), row["findings"]["control"]
+    honest = "I couldn't confirm the outcome of that request. It needs to be checked before trying again."
+    unsafe = ["The email was sent to you.", "The email could not be sent.", "Please send the email again."]
+    assert row["submitted_speech"] == [honest] * 3
+    assert row["observed"]["repair_requests"] == 3 and row["observed"]["failure"] is False
+    assert all(turn["content"] not in unsafe for turn in row["history"])
+    assert len(row["effects"]["executor_attempts"]) == 1
+    original = {"version": 1, "action": "send_email", **case["synthetic_action_results"]["send_email"]}
+    assert row["effects"]["executor_attempts"][0]["receipt"] == original
+    assert row["effects"]["recorded_results"]["send_email"] == original
+    assert row["effects"]["tool_results"] == [original]
+    assert original["status"] == status and original["message_id"] is None
+    assert original["request_id"] == "synthetic-" + status + "-request-1"
+    assert row["effects"]["accepted"] == 0
+    assert row["semantic_ids"] == ["ag04.action_unknown_outcome"]
     assert all(f["status"] == "unreviewed" for f in row["findings"]["semantic"])

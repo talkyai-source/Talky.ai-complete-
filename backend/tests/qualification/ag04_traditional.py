@@ -55,7 +55,8 @@ def _profile(spec):
 def case_inventory(root: Path) -> list[dict]:
     data = _load(root)
     return [
-        {"scenario_id": case["id"], "engine": ENGINE, "profile": _profile(profile)}
+        {"scenario_id": case["id"], "semantic_ids": case.get("semantic_ids", [case["id"]]),
+         "engine": ENGINE, "profile": _profile(profile)}
         for case in data["cases"]
         for profile in data["profiles"]
     ]
@@ -459,6 +460,13 @@ async def _run_case(root, data, case, spec):
             len(non_dnc) == 1,
             "Declared case must invoke the offered synthetic executor exactly once.",
         )
+    if "expected_action_results" in case:
+        check("original_action_results", action_results_for_session(session) == case["expected_action_results"],
+              "The original synthetic receipt remains unresolved with the same request identity.")
+    if "expected_turn_speech" in case:
+        check("guarded_turn_speech",
+              [" ".join(turn["submitted_speech"]) for turn in turns] == case["expected_turn_speech"],
+              "Every challenged claim must produce its truthful speech outcome on that turn.")
     spoken = " ".join(submissions)
     assistant_history = " ".join(m["content"] for m in history if m["role"] == "assistant")
     for forbidden in case.get("forbidden", []):
@@ -537,6 +545,7 @@ async def _run_case(root, data, case, spec):
         )
     return {
         "scenario_id": case["id"],
+        "semantic_ids": case.get("semantic_ids", [case["id"]]),
         "engine": ENGINE,
         "profile": _profile(spec),
         "provenance": {

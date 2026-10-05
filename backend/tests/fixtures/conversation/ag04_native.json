@@ -2215,6 +2215,198 @@
           }
         }
       }
+    },
+    {
+      "id": "native.action_unknown",
+      "semantic_ids": [
+        "ag04.action_unknown_outcome"
+      ],
+      "expect": {
+        "submissions": 3,
+        "repair_requests": 3,
+        "effect_attempts": 1,
+        "accepted_actions": 0,
+        "action_results": {
+          "send_email": {
+            "version": 1,
+            "action": "send_email",
+            "success": false,
+            "status": "unknown",
+            "confirmation_allowed": false,
+            "provider": "synthetic-email",
+            "request_id": "synthetic-unknown-request-1",
+            "message_id": null,
+            "message": "The result is unresolved; check the original request before retrying."
+          }
+        },
+        "llm_controls": [
+          "I couldn't confirm the outcome of that request. It needs to be checked before trying again.",
+          "I couldn't confirm the outcome of that request. It needs to be checked before trying again.",
+          "I couldn't confirm the outcome of that request. It needs to be checked before trying again."
+        ],
+        "delivered_text": "I couldn't confirm the outcome of that request. It needs to be checked before trying again.",
+        "tool_statuses": [
+          "unknown"
+        ],
+        "last_tool_success": false,
+        "failure": false,
+        "shutdowns": 0,
+        "end_requested": false,
+        "dnc": false
+      },
+      "synthetic_action_results": {
+        "send_email": {
+          "success": false,
+          "status": "unknown",
+          "confirmation_allowed": false,
+          "provider": "synthetic-email",
+          "request_id": "synthetic-unknown-request-1",
+          "message_id": null,
+          "message": "The result is unresolved; check the original request before retrying."
+        }
+      },
+      "steps": [
+        {
+          "kind": "caller",
+          "item": "caller-0",
+          "text": "Please email the details."
+        },
+        {
+          "kind": "tool",
+          "name": "send_email",
+          "arguments": {}
+        },
+        {
+          "kind": "response",
+          "text": "The email was sent to you."
+        },
+        {
+          "kind": "response",
+          "text": "I couldn't confirm the outcome of that request. It needs to be checked before trying again."
+        },
+        {
+          "kind": "caller",
+          "item": "caller-1",
+          "text": "What happened to the email?"
+        },
+        {
+          "kind": "response",
+          "text": "The email could not be sent."
+        },
+        {
+          "kind": "response",
+          "text": "I couldn't confirm the outcome of that request. It needs to be checked before trying again."
+        },
+        {
+          "kind": "caller",
+          "item": "caller-2",
+          "text": "What should happen with the email request?"
+        },
+        {
+          "kind": "response",
+          "text": "Please send the email again."
+        },
+        {
+          "kind": "response",
+          "text": "I couldn't confirm the outcome of that request. It needs to be checked before trying again."
+        }
+      ]
+    },
+    {
+      "id": "native.action_in_progress",
+      "semantic_ids": [
+        "ag04.action_unknown_outcome"
+      ],
+      "expect": {
+        "submissions": 3,
+        "repair_requests": 3,
+        "effect_attempts": 1,
+        "accepted_actions": 0,
+        "action_results": {
+          "send_email": {
+            "version": 1,
+            "action": "send_email",
+            "success": false,
+            "status": "in_progress",
+            "confirmation_allowed": false,
+            "provider": "synthetic-email",
+            "request_id": "synthetic-in_progress-request-1",
+            "message_id": null,
+            "message": "The result is unresolved; check the original request before retrying."
+          }
+        },
+        "llm_controls": [
+          "I couldn't confirm the outcome of that request. It needs to be checked before trying again.",
+          "I couldn't confirm the outcome of that request. It needs to be checked before trying again.",
+          "I couldn't confirm the outcome of that request. It needs to be checked before trying again."
+        ],
+        "delivered_text": "I couldn't confirm the outcome of that request. It needs to be checked before trying again.",
+        "tool_statuses": [
+          "in_progress"
+        ],
+        "last_tool_success": false,
+        "failure": false,
+        "shutdowns": 0,
+        "end_requested": false,
+        "dnc": false
+      },
+      "synthetic_action_results": {
+        "send_email": {
+          "success": false,
+          "status": "in_progress",
+          "confirmation_allowed": false,
+          "provider": "synthetic-email",
+          "request_id": "synthetic-in_progress-request-1",
+          "message_id": null,
+          "message": "The result is unresolved; check the original request before retrying."
+        }
+      },
+      "steps": [
+        {
+          "kind": "caller",
+          "item": "caller-0",
+          "text": "Please email the details."
+        },
+        {
+          "kind": "tool",
+          "name": "send_email",
+          "arguments": {}
+        },
+        {
+          "kind": "response",
+          "text": "The email was sent to you."
+        },
+        {
+          "kind": "response",
+          "text": "I couldn't confirm the outcome of that request. It needs to be checked before trying again."
+        },
+        {
+          "kind": "caller",
+          "item": "caller-1",
+          "text": "What happened to the email?"
+        },
+        {
+          "kind": "response",
+          "text": "The email could not be sent."
+        },
+        {
+          "kind": "response",
+          "text": "I couldn't confirm the outcome of that request. It needs to be checked before trying again."
+        },
+        {
+          "kind": "caller",
+          "item": "caller-2",
+          "text": "What should happen with the email request?"
+        },
+        {
+          "kind": "response",
+          "text": "Please send the email again."
+        },
+        {
+          "kind": "response",
+          "text": "I couldn't confirm the outcome of that request. It needs to be checked before trying again."
+        }
+      ]
     }
   ],
   "profiles": {
