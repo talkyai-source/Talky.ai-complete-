@@ -650,7 +650,7 @@
       "title": "Use small structural repairs only where they support paid readiness",
       "owner_role": "Backend technical lead",
       "assigned_person": "Codex implementation team",
-      "reviewer": "Independent live-path/mechanical AST review and root integrated backend verification",
+      "reviewer": "audio_audit independent source/link/disposition review; root source tracing and integrated regression evidence",
       "status": "in_progress",
       "start_after_milestone": "RG01 baseline recorded",
       "dependencies_and_tests": "See package text; coordination and final acceptance dependencies are distinct from entry milestones.",
@@ -683,10 +683,15 @@
           "path": "docs/sessions/artifacts/ag07/verification.json",
           "kind": "source_bound_verification_manifest",
           "candidate": "7f9ec58f3657e8a5fd7bcd3a3e3d882fb1f5a341"
+        },
+        {
+          "path": "docs/sessions/2026-10-05-ag07-architecture-dispositions.md",
+          "kind": "independently_reviewed_architecture_dispositions",
+          "candidate": "e4f76f8733cceeb67da53cc14a00e7ba5f892bf9"
         }
       ],
       "blocker": "A05 cleanup and documented crash contract are locally verified; remaining architecture dispositions follow lifecycle/provider/configuration owning repairs. No full architecture or live/release claim.",
-      "next_action": "Complete reviewed architecture dispositions alongside OP02/OP05/OP12; preserve separate native protocol and durable evidence, without unrelated cosmetic restructuring.",
+      "next_action": "Resolve confirmed saved-profile failure paths with AG01; retain current shared session/provider contracts unless an owning repair requires extraction. Complete lifecycle/deployed-configuration acceptance with OP02/OP05/OP12. A05 bounded local duplication resolved; package remains in progress.",
       "target_date": null
     },
     {
@@ -1540,9 +1545,11 @@
       "work_packages": [
         "AG07"
       ],
-      "status": "planned",
-      "evidence": [],
-      "disposition": null
+      "status": "in_progress",
+      "evidence": [
+        "docs/sessions/2026-10-05-ag07-architecture-dispositions.md"
+      ],
+      "disposition": "Reviewed current-source disposition and owning repair/acceptance recorded in architecture report. No broad rewrite, complete layer independence or seamless call-resume claim. Saved-configuration failure and deployed lifecycle acceptance remain open."
     },
     {
       "id": "A02",
@@ -1553,9 +1560,11 @@
         "AG07",
         "OP05"
       ],
-      "status": "planned",
-      "evidence": [],
-      "disposition": null
+      "status": "in_progress",
+      "evidence": [
+        "docs/sessions/2026-10-05-ag07-architecture-dispositions.md"
+      ],
+      "disposition": "Reviewed current-source disposition and owning repair/acceptance recorded in architecture report. No broad rewrite, complete layer independence or seamless call-resume claim. Saved-configuration failure and deployed lifecycle acceptance remain open."
     },
     {
       "id": "A03",
@@ -1565,9 +1574,11 @@
       "work_packages": [
         "AG07"
       ],
-      "status": "planned",
-      "evidence": [],
-      "disposition": null
+      "status": "in_progress",
+      "evidence": [
+        "docs/sessions/2026-10-05-ag07-architecture-dispositions.md"
+      ],
+      "disposition": "Reviewed current-source disposition and owning repair/acceptance recorded in architecture report. No broad rewrite, complete layer independence or seamless call-resume claim. Saved-configuration failure and deployed lifecycle acceptance remain open."
     },
     {
       "id": "A04",
@@ -1577,9 +1588,11 @@
       "work_packages": [
         "AG07"
       ],
-      "status": "planned",
-      "evidence": [],
-      "disposition": null
+      "status": "in_progress",
+      "evidence": [
+        "docs/sessions/2026-10-05-ag07-architecture-dispositions.md"
+      ],
+      "disposition": "Reviewed current-source disposition and owning repair/acceptance recorded in architecture report. No broad rewrite, complete layer independence or seamless call-resume claim. Saved-configuration failure and deployed lifecycle acceptance remain open."
     },
     {
       "id": "A05",
@@ -1589,9 +1602,11 @@
       "work_packages": [
         "AG07"
       ],
-      "status": "planned",
-      "evidence": [],
-      "disposition": null
+      "status": "closed",
+      "evidence": [
+        "docs/sessions/2026-10-05-ag07-architecture-dispositions.md"
+      ],
+      "disposition": "Proved-unused parallel generation and KB trimming removed in09bcd50f; remaining function ASTs preserved, independent review and2750integrated checks plus44dcc236full suite support bounded local duplication closure. Separate customer-denial repair retained. No live/profile or whole AG07 closure."
     },
     {
       "id": "A06",
@@ -1603,9 +1618,11 @@
         "AG05",
         "AG07"
       ],
-      "status": "planned",
-      "evidence": [],
-      "disposition": null
+      "status": "in_progress",
+      "evidence": [
+        "docs/sessions/2026-10-05-ag07-architecture-dispositions.md"
+      ],
+      "disposition": "Reviewed current-source disposition and owning repair/acceptance recorded in architecture report. No broad rewrite, complete layer independence or seamless call-resume claim. Saved-configuration failure and deployed lifecycle acceptance remain open."
     },
     {
       "id": "A07",
@@ -1632,9 +1649,11 @@
         "AG07",
         "OP12"
       ],
-      "status": "planned",
-      "evidence": [],
-      "disposition": null
+      "status": "in_progress",
+      "evidence": [
+        "docs/sessions/2026-10-05-ag07-architecture-dispositions.md"
+      ],
+      "disposition": "Reviewed current-source disposition and owning repair/acceptance recorded in architecture report. No broad rewrite, complete layer independence or seamless call-resume claim. Saved-configuration failure and deployed lifecycle acceptance remain open."
     }
   ],
   "features": [

@@ -39,3 +39,13 @@ The native parser/bridge denies a generated `end_call` tool request through actu
 Exact commands, environment and caveats are in [verification.json](artifacts/ag04-contact-controls/verification.json). [replay-summary.json](artifacts/ag04-contact-controls/replay-summary.json) records the gates, per-profile coverage and archive hashes. [replay.json.gz](artifacts/ag04-contact-controls/replay.json.gz) preserves the complete CLI JSON byte-for-byte after decompression, including raw/submitted text, prompts, history, requests and the original failed Groq observation. [new-case-observations.json](artifacts/ag04-contact-controls/new-case-observations.json) extracts the 16 new rows without changing their observations.
 
 The remaining 11 unmapped canonical conditions and live/human/account approvals remain outstanding. In particular, action-unknown-outcome evidence is deferred until the existing actual executor port can be exercised meaningfully; a canned result is not a substitute for its receipt/idempotency behavior.
+
+## Root integration follow-up
+
+Source was integrated as `1c7dce70`. The same three focused modules passed on
+the combined root candidate `e4f76f87`: **97 passed, zero skips**, 1,049 warnings,
+8.00 seconds. The source snapshot remained unchanged. See
+[integrated command](artifacts/ag04-contact-controls/integrated-command.json) and
+[output](artifacts/ag04-contact-controls/integrated-tests.txt). This confirms the
+test-only extension with the later DNC/authentication repairs; it does not change
+the preserved semantic failure or any live/human gate.

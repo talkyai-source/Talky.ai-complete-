@@ -26,13 +26,41 @@ and session protocol remain separate. TTS submission alone does not prove playba
 completion or that a caller heard the words.
 
 Live sockets, provider objects, tasks and transient contact state are not a
-restartable call snapshot. On process loss, only successfully committed transcript,
-Lead and action evidence survives; transcript save state can remain partial or
+restartable call snapshot. On process loss, successfully committed durable records,
+including transcript, Lead, DNC and action evidence, survive; transcript save state can remain partial or
 unknown. Neither this diagram nor retained in-memory retry buffers promises
 seamless call resume. Lifecycle failure/recovery qualification remains in OP05.
 
 The transport diagrams below are earlier illustrative examples, not evidence of
 current provider wire formats or deployed topology.
+
+## Session composition and configuration ownership (2026-10-05)
+
+```mermaid
+flowchart TD
+    T[Tenant AI profile and voice tuning] --> O[Outbound prewarm]
+    C[Campaign engine, identity and prompt settings] --> O
+    A[Admitted inbound configuration snapshot] --> B[Telephony session builder]
+    O --> B
+    B --> V[VoiceOrchestrator entry point]
+    V --> D[Traditional provider assembly and pipeline]
+    V --> N[Native runtime and RealtimeBridge]
+    N --> R[Native provider session protocol]
+    D --> G[Owned media gateway]
+    N --> G
+    D --> E[Existing knowledge, Lead and action services]
+    N --> E
+```
+
+This diagram describes the intended configured outbound path and the pinned
+inbound path, not every fallback or provider webhook. Native runtime still imports
+the shared session/config classes from the orchestrator. Traditional orchestration
+constructs concrete providers, and some knowledge/action dependencies use container
+lookups. These are current coupling points, not separate dependency frameworks.
+The [backend README](../../README.md#runtime-and-configuration-ownership) records
+the source precedence and remaining permissive entry paths. A template hash does
+not identify all assembled instructions; use the existing effective-request and
+knowledge-version diagnostics, without logging caller content or credentials.
 
 ## 1. Successful Call Flow
 
