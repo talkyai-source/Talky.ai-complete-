@@ -1,0 +1,234 @@
+{
+  "source_commit": "12175fbde91cf57ceef7e7405aeb14dae5fb4621",
+  "base_commit": "1f3370292428aa8472ccc1ab5c2d712a203cb335",
+  "cwd": "backend",
+  "environment": {
+    "python": "C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/backend/.venv/Scripts/python.exe",
+    "ENVIRONMENT": "test",
+    "DATABASE_URL": "postgresql://test:test@127.0.0.1:1/unavailable_test",
+    "PYTHONPATH": [
+      "C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/tmp/postgres-matrix-20261005/tmp/exact-requirements-20261005/packages",
+      "C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/tmp/production-ready-ag07-20261005/tmp/op02-testdeps"
+    ]
+  },
+  "checks": [
+    {
+      "command": [
+        "C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/backend/.venv/Scripts/python.exe",
+        "-m",
+        "pytest",
+        "tests/unit/test_native_caller_activity.py",
+        "tests/unit/test_realtime_relationship_ownership.py",
+        "tests/unit/test_realtime_end_call_ownership.py",
+        "tests/unit/test_ag05_native_contact_revision.py",
+        "tests/unit/test_realtime_inbound_opening.py",
+        "tests/unit/test_realtime_lifecycle_repairs.py",
+        "tests/unit/test_telephony_lifecycle_watchdog_hangup.py",
+        "tests/unit/test_ag04_native_qualification.py",
+        "tests/unit/test_ag03_relationship_acceptance.py",
+        "-q",
+        "--tb=short"
+      ],
+      "log": "final-regression.txt",
+      "exit_code": 0,
+      "result": {
+        "passed": 270,
+        "failed": 0,
+        "skipped": 0,
+        "warnings": 740,
+        "seconds": 16.4
+      },
+      "new_cases_included": 32
+    },
+    {
+      "command": [
+        "C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/backend/.venv/Scripts/python.exe",
+        "-m",
+        "ruff",
+        "check",
+        "app/realtime/bridge.py",
+        "tests/unit/test_native_caller_activity.py",
+        "--select",
+        "F",
+        "--extend-ignore",
+        "F401,F841"
+      ],
+      "log": "ruff.txt",
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "git",
+        "diff",
+        "--cached",
+        "--check"
+      ],
+      "cwd": ".",
+      "log": "diff-check.txt",
+      "exit_code": 0,
+      "scope": "Staged evidence whitespace check, with exact empty output saved."
+    },
+    {
+      "command": [
+        "git",
+        "diff",
+        "--cached",
+        "--check"
+      ],
+      "cwd": ".",
+      "exit_code": 0,
+      "scope": "Two source/test files before source commit."
+    }
+  ],
+  "baseline": {
+    "command": [
+      "C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/backend/.venv/Scripts/python.exe",
+      "-m",
+      "pytest",
+      "tests/unit/test_native_caller_activity.py",
+      "-q",
+      "--tb=short"
+    ],
+    "final_policy": {
+      "log": "admission-contract-before.txt",
+      "failed": 6,
+      "passed": 26,
+      "warnings": 80,
+      "seconds": 5.96,
+      "source": "1f3370292428aa8472ccc1ab5c2d712a203cb335"
+    },
+    "superseded_draft": {
+      "log": "initial.txt",
+      "failed": 8,
+      "passed": 24,
+      "warnings": 78,
+      "seconds": 21.88,
+      "source": "1f3370292428aa8472ccc1ab5c2d712a203cb335",
+      "note": "Two initial replacement-refresh expectations were rejected on review. The retained replacement control requires unchanged activity. No app changes occurred between baseline runs."
+    }
+  },
+  "reviews": {
+    "root": "Final source and full new-test read clear before source commit; no independent execution attributed.",
+    "realtime_audit": "Final bounded source/test read clear; no independent test, provider or database execution."
+  },
+  "hash_algorithm": "SHA256; canonical_lf_sha256 hashes read_bytes().replace(b\"\\r\\n\", b\"\\n\"); raw_sha256 hashes read_bytes(). No text decoding.",
+  "source_files": {
+    "backend/app/realtime/bridge.py": {
+      "canonical_lf_sha256": "43b69c1a2713568ea59721dba0e853ae4910df6db70acebeb715ce9231a30ffb",
+      "raw_sha256": "43b69c1a2713568ea59721dba0e853ae4910df6db70acebeb715ce9231a30ffb"
+    },
+    "backend/tests/unit/test_native_caller_activity.py": {
+      "canonical_lf_sha256": "a8fd972f0ab465d581eb6170a1019bb34a1803a5bf65d9a49a6cefa0dad89f68",
+      "raw_sha256": "a8fd972f0ab465d581eb6170a1019bb34a1803a5bf65d9a49a6cefa0dad89f68"
+    }
+  },
+  "regression_input_files": {
+    "backend/tests/unit/test_native_caller_activity.py": {
+      "canonical_lf_sha256": "a8fd972f0ab465d581eb6170a1019bb34a1803a5bf65d9a49a6cefa0dad89f68",
+      "raw_sha256": "a8fd972f0ab465d581eb6170a1019bb34a1803a5bf65d9a49a6cefa0dad89f68"
+    },
+    "backend/tests/unit/test_realtime_relationship_ownership.py": {
+      "canonical_lf_sha256": "91ff7de83b19a0a57b967b068efd67ee7de5eb88d9a8e0b3d7086f4382b0d371",
+      "raw_sha256": "91ff7de83b19a0a57b967b068efd67ee7de5eb88d9a8e0b3d7086f4382b0d371"
+    },
+    "backend/tests/unit/test_realtime_end_call_ownership.py": {
+      "canonical_lf_sha256": "af3eee4080a91f0978ca5c700f3da4c6bf5e47e478a503acf1cddbf458efbfd0",
+      "raw_sha256": "af3eee4080a91f0978ca5c700f3da4c6bf5e47e478a503acf1cddbf458efbfd0"
+    },
+    "backend/tests/unit/test_ag05_native_contact_revision.py": {
+      "canonical_lf_sha256": "837977505d609573a912c38793f15624e35f1fa67428161f69bed50df6010fb4",
+      "raw_sha256": "837977505d609573a912c38793f15624e35f1fa67428161f69bed50df6010fb4"
+    },
+    "backend/tests/unit/test_realtime_inbound_opening.py": {
+      "canonical_lf_sha256": "8d8ea4eeb322fa3565cd825ed1ba120dc6f1c71d163c8a8a5fc542842e8784ae",
+      "raw_sha256": "8d8ea4eeb322fa3565cd825ed1ba120dc6f1c71d163c8a8a5fc542842e8784ae"
+    },
+    "backend/tests/unit/test_realtime_lifecycle_repairs.py": {
+      "canonical_lf_sha256": "1e553a5effbc97afaa2ba230cfe1631e8cea6866d417651e08bd39e9cb5a81f8",
+      "raw_sha256": "1e553a5effbc97afaa2ba230cfe1631e8cea6866d417651e08bd39e9cb5a81f8"
+    },
+    "backend/tests/unit/test_telephony_lifecycle_watchdog_hangup.py": {
+      "canonical_lf_sha256": "a098d7ce89d0d99c37fb0f38c2aa6f36776fd99432d97b03f12a0a3d1143af34",
+      "raw_sha256": "a098d7ce89d0d99c37fb0f38c2aa6f36776fd99432d97b03f12a0a3d1143af34"
+    },
+    "backend/tests/unit/test_ag04_native_qualification.py": {
+      "canonical_lf_sha256": "fa6c3b471db651bf3e274d446dd8870ed940991c56296bf6b05428b6154e9d96",
+      "raw_sha256": "fa6c3b471db651bf3e274d446dd8870ed940991c56296bf6b05428b6154e9d96"
+    },
+    "backend/tests/unit/test_ag03_relationship_acceptance.py": {
+      "canonical_lf_sha256": "f984d9b200425143081899f3725fcdbddd59a1efc8b349162ff13393c976bafd",
+      "raw_sha256": "f984d9b200425143081899f3725fcdbddd59a1efc8b349162ff13393c976bafd"
+    }
+  },
+  "unchanged_qualification_inputs": {
+    "docs/production-readiness/ag04-conversation-matrix.json": {
+      "canonical_lf_sha256": "92dbfb912a6aa4add27fc8690c6a8369a87d61338291fa108e94baf3e105a3a0",
+      "raw_sha256": "92dbfb912a6aa4add27fc8690c6a8369a87d61338291fa108e94baf3e105a3a0"
+    },
+    "backend/tests/qualification/ag04_native.py": {
+      "canonical_lf_sha256": "50b96bc1db8eaa952df7faaa28f8070d85efdf0c05c1590f8e7a8c1865a90feb",
+      "raw_sha256": "50b96bc1db8eaa952df7faaa28f8070d85efdf0c05c1590f8e7a8c1865a90feb"
+    },
+    "backend/tests/qualification/ag04_traditional.py": {
+      "canonical_lf_sha256": "425bcb3eab50a135ed4fceed5667d5dc7929f7077fd50ef9fe1fe330fd1fd309",
+      "raw_sha256": "425bcb3eab50a135ed4fceed5667d5dc7929f7077fd50ef9fe1fe330fd1fd309"
+    },
+    "backend/tests/fixtures/conversation/ag04_native.json": {
+      "canonical_lf_sha256": "8848b88c59de1232d725079a8ae23a96373dde90195aba723300747dead31c06",
+      "raw_sha256": "8848b88c59de1232d725079a8ae23a96373dde90195aba723300747dead31c06"
+    },
+    "backend/tests/fixtures/conversation/ag04_traditional.json": {
+      "canonical_lf_sha256": "f8841f411a797f1464d419f4d5ed35552ee0e43d51db715164617844ccd91d58",
+      "raw_sha256": "f8841f411a797f1464d419f4d5ed35552ee0e43d51db715164617844ccd91d58"
+    },
+    "backend/scripts/evaluate_ag04_conversations.py": {
+      "canonical_lf_sha256": "b4876e7d5d771775ee34def686c51fad4c8b6f2b4143ebab512af0f25a14a0bd",
+      "raw_sha256": "b4876e7d5d771775ee34def686c51fad4c8b6f2b4143ebab512af0f25a14a0bd"
+    }
+  },
+  "evidence_files": {
+    "admission-contract-before.txt": {
+      "canonical_lf_sha256": "b212bf2b81ca1682d620c5df1282e147a2c7d572012703bf5651e9c74938e145",
+      "raw_sha256": "7dcb69499258fb3d2eb7ca821ceccf9f7779614f079dd79745d508d8c172a8e8"
+    },
+    "final-regression.txt": {
+      "canonical_lf_sha256": "4cbc9ba298f45c597a4bf651a9b2e0821bc23aac4b457343599323f1c376c257",
+      "raw_sha256": "cb6277ec2b6b758cb2d954bc46fe3be0bceddf623cf55b43ed1f8ce4e4e53911"
+    },
+    "initial.txt": {
+      "canonical_lf_sha256": "fc6378fec5da515ddcbcb0da86b65ea982ed3dbf5d9dabf3fbc501fccc48ec9c",
+      "raw_sha256": "1d646c21943e78e8557ffbf99b7a457c5da0809b867d06334c010ecbc5ccacdc"
+    },
+    "ruff.txt": {
+      "canonical_lf_sha256": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18",
+      "raw_sha256": "a4443afdcfb6d7363adb285762515ccf7cf50473b1a05c20c1a50f6bed4d26b0"
+    },
+    "unmapped-inventory.md": {
+      "canonical_lf_sha256": "5e2e664478a268983391c001932c3b1c332237946c577f070c22845371ec89e5",
+      "raw_sha256": "5e2e664478a268983391c001932c3b1c332237946c577f070c22845371ec89e5"
+    },
+    "verification.md": {
+      "canonical_lf_sha256": "96f1bbce1c89d6a7bd45438f53184b637d8f38dbe999ad46bdfa12c84b984145",
+      "raw_sha256": "96f1bbce1c89d6a7bd45438f53184b637d8f38dbe999ad46bdfa12c84b984145"
+    },
+    "diff-check.txt": {
+      "canonical_lf_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  },
+  "scope": {
+    "actual_methods": "OpenAI/xAI event parsing, RealtimeBridge caller admission, real CallSession activity/staleness and lifecycle expiry classifier.",
+    "synthetic_ports": [
+      "SDK/socket",
+      "media/receipts",
+      "aged initial timestamps"
+    ],
+    "owned_network_attempts": 0,
+    "actual_watchdog_hangup": "not_run",
+    "real_database": "not_run",
+    "provider_calls": "not_run",
+    "acoustic_human_acceptance": "not_run",
+    "ag04_matrix_mapping_changes": 0,
+    "canonical_union_unchanged": "43/50; seven conditions remain unmapped"
+  }
+}
