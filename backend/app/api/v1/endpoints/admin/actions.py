@@ -2,19 +2,21 @@
 Admin Actions Endpoints
 Assistant action log: list, detail, retry, cancel
 """
-from fastapi import APIRouter, HTTPException, Depends, Query, Response
-from pydantic import BaseModel
+from fastapi import APIRouter, HTTPException, Depends, Query, Response, Request
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from typing import List, Literal, Optional
 import asyncio
 import json
 import re
 from datetime import datetime, timezone
-from uuid import UUID
+from uuid import UUID, uuid4
 from app.core.postgres_adapter import Client
 from app.core.db_utils import acquire_with_tenant
 from app.core.security.rbac import UserRole, normalize_role
 from app.services.voice_callback_service import callback_job_id
 from app.services.action_execution import public_action_receipt
+from app.services.saved_acknowledgement import gmail_acknowledgement
+from app.core.security.principal import PrincipalUnavailable, load_session_principal
 from app.services.connector_resolver import resolve_active_connector, verify_reviewed_authorization
 from app.infrastructure.connectors.base import ConnectorProviderError
 
@@ -63,6 +65,65 @@ def _calendar_inspection_bundle(row):
     return _saved_inspection_bundle(row, action_types=("book_meeting", "update_meeting", "cancel_meeting"),
                                     providers=("google_calendar", "outlook_calendar"),
                                     reference_key="external_event_id", reference_pattern=r"(?!\.{1,2}$)[!-~]{1,512}")
+
+
+def _gmail_recovery_candidate(row):
+    return gmail_acknowledgement(row, _gmail_inspection_bundle(row))
+
+
+async def _recovery_owned(conn, row):
+    if row.get("triggered_by") != "voice":
+        return True
+    # Verify only the already-recorded call relationship. This is not child
+    # discovery, current campaign approval, or proof of the email's content.
+    return await conn.fetchval("""
+        SELECT EXISTS(SELECT 1 FROM calls c JOIN campaigns p
+          ON p.id=c.campaign_id AND p.tenant_id=c.tenant_id
+          WHERE c.id=$1::uuid AND c.tenant_id=$2::uuid AND c.campaign_id=$3::uuid
+            AND ($4::uuid IS NULL OR c.lead_id=$4::uuid))
+    """, str(row["call_id"]), str(row["tenant_id"]), str(row["campaign_id"]),
+        str(row["lead_id"]) if row.get("lead_id") else None)
+
+
+async def _recorded_recovery(conn, actor_id, action_id, body):
+    previous = await conn.fetchrow(
+        "SELECT * FROM assistant_action_resolutions WHERE actor_id=$1::uuid AND request_id=$2::uuid",
+        actor_id, str(body.request_id),
+    )
+    if previous and (str(previous["action_id"]) != action_id
+            or previous["source_digest"] != body.expected_source_digest or previous["reason"] != body.reason):
+        raise HTTPException(status_code=409, detail="Recovery request ID belongs to different review details")
+    return previous
+
+
+def _recovery_summary(row):
+    return {key: str(row[key]) for key in (
+        "id", "action_id", "actor_id", "actor_role", "request_id", "source_digest", "reason",
+        "original_status", "recovered_status", "provider_status", "recorded_at")}
+
+
+def _saved_recovery_id(value):
+    if not isinstance(value, str):
+        return None
+    try:
+        return value if str(UUID(value)) == value else None
+    except ValueError:
+        return None
+
+
+class RecoverAcknowledgement(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    request_id: UUID
+    expected_source_digest: str = Field(pattern=r"^[0-9a-f]{64}$", strict=True)
+    reason: str = Field(min_length=1, max_length=500, strict=True)
+
+    @field_validator("reason")
+    @classmethod
+    def meaningful_reason(cls, value):
+        value = value.strip()
+        if not value or any(ord(char) < 32 or ord(char) == 127 for char in value):
+            raise ValueError("Provide a bounded review reason without control characters")
+        return value
 
 
 def _saved_inspection_bundle(row, *, action_types, providers, reference_key, reference_pattern):
@@ -224,6 +285,8 @@ class ActionDetail(AdminResponseModel):
     saved_receipt: Optional[dict] = None
     email_inspection_available: bool = False
     calendar_inspection_available: bool = False
+    acknowledgement_recovery: Optional[dict] = None
+    acknowledgement_recovery_record: Optional[dict] = None
     error: Optional[str] = None
     
     # Audit
@@ -381,6 +444,23 @@ async def get_admin_action_detail(
         if is_cancellable and _is_callback(action):
             async with acquire_with_tenant(db_client.pool, str(action["tenant_id"])) as conn:
                 is_cancellable = not await _callback_reserved(conn, action)
+
+        candidate, recovered = None, None
+        if normalize_role(admin_user.role) == UserRole.PLATFORM_ADMIN:
+            candidate = _gmail_recovery_candidate(action)
+            recovery_id = _saved_recovery_id(_object(action.get("output_data")).get("receipt_recovery_id"))
+            if recovery_id or (candidate and action.get("triggered_by") == "voice"):
+                async with acquire_with_tenant(db_client.pool, None, user_id=str(admin_user.id)) as conn:
+                    if candidate and not await _recovery_owned(conn, action):
+                        candidate = None
+                    if recovery_id:
+                        history = await conn.fetchrow(
+                            "SELECT * FROM assistant_action_resolutions WHERE id=$1::uuid "
+                            "AND action_id=$2::uuid AND tenant_id=$3::uuid",
+                            recovery_id, str(action["id"]), str(action["tenant_id"]),
+                        )
+                        if history:
+                            recovered = _recovery_summary(history)
         
         return ActionDetail(
             id=action["id"],
@@ -406,6 +486,9 @@ async def get_admin_action_detail(
                                         and _gmail_inspection_bundle(action) is not None),
             calendar_inspection_available=(normalize_role(admin_user.role) == UserRole.PLATFORM_ADMIN
                                            and _calendar_inspection_bundle(action) is not None),
+            acknowledgement_recovery=({key: candidate[key] for key in ("source_digest", "provider_status")}
+                                      if candidate else None),
+            acknowledgement_recovery_record=recovered,
             error=action.get("error"),
             ip_address=str(action["ip_address"]) if action.get("ip_address") else None,
             user_agent=action.get("user_agent"),
@@ -543,6 +626,81 @@ async def inspect_admin_calendar_action(
         return observation("unavailable", "provider_read_unavailable")
     except Exception:
         return observation("unavailable", "provider_read_unavailable")
+
+
+@router.post("/actions/{action_id}/recover-acknowledgement")
+async def recover_saved_acknowledgement(
+    action_id: str,
+    body: RecoverAcknowledgement,
+    request: Request,
+    admin_user: CurrentUser = Depends(require_platform_admin),
+    db_client: Client = Depends(get_db_client),
+):
+    """Recover an explicit historical Gmail acknowledgement without execution."""
+    try:
+        action_id = str(UUID(action_id))
+        actor_id = str(UUID(str(admin_user.id)))
+        session_id = getattr(request.state, "authenticated_session_id", None)
+        if getattr(request.state, "authenticated_user_id", None) != actor_id or not session_id:
+            raise HTTPException(status_code=401, detail="Current authenticated session required")
+        async with asyncio.timeout(5):
+            async with acquire_with_tenant(db_client.pool, None, user_id=actor_id,
+                                           request_id=str(body.request_id)) as conn:
+                principal = await load_session_principal(conn, {
+                    "sub": actor_id, "sid": session_id, "tenant_id": admin_user.tenant_id,
+                })
+                if principal["role"] != "platform_admin":
+                    raise HTTPException(status_code=403, detail="Current platform admin authority required")
+                previous = await _recorded_recovery(conn, actor_id, action_id, body)
+                if previous:
+                    return _recovery_summary(previous)
+                row = await conn.fetchrow("SELECT * FROM assistant_actions WHERE id=$1::uuid FOR UPDATE", action_id)
+                if row is None:
+                    raise HTTPException(status_code=404, detail="Action not found")
+                # Row-lock waits must not extend a revoked browser session.
+                principal = await load_session_principal(conn, {
+                    "sub": actor_id, "sid": session_id, "tenant_id": admin_user.tenant_id,
+                })
+                if principal["role"] != "platform_admin":
+                    raise HTTPException(status_code=403, detail="Current platform admin authority required")
+                # A simultaneous identical request may have committed while we
+                # waited for the action lock. It must replay the same event.
+                previous = await _recorded_recovery(conn, actor_id, action_id, body)
+                if previous:
+                    return _recovery_summary(previous)
+                candidate = _gmail_recovery_candidate(dict(row))
+                if (candidate is None or candidate["source_digest"] != body.expected_source_digest
+                        or not await _recovery_owned(conn, row)):
+                    raise HTTPException(status_code=409, detail="Saved acknowledgement is unavailable or changed; reload the receipt")
+                recovery_id = str(uuid4())
+                event = await conn.fetchrow("""
+                    INSERT INTO assistant_action_resolutions
+                        (id,tenant_id,action_id,actor_id,actor_role,request_id,source_digest,reason,
+                         original_status,original_output,original_timestamps,recovered_status,provider_status)
+                    VALUES ($1::uuid,$2::uuid,$3::uuid,$4::uuid,'platform_admin',$5::uuid,$6,$7,
+                            'unknown',$8::jsonb,$9::jsonb,'completed',$10)
+                    ON CONFLICT (actor_id,request_id) DO NOTHING RETURNING *
+                """, recovery_id, str(row["tenant_id"]), action_id, actor_id, str(body.request_id),
+                    body.expected_source_digest, body.reason, json.dumps(candidate["original_output"]),
+                    json.dumps(candidate["original_timestamps"]), candidate["provider_status"])
+                if event is None:
+                    raise HTTPException(status_code=409, detail="Recovery request already recorded; reload the receipt")
+                restored = {**candidate["result"], "receipt_recovery_id": recovery_id}
+                changed = await conn.fetchval("""
+                    UPDATE assistant_actions SET status='completed',output_data=$3::jsonb
+                    WHERE id=$1::uuid AND tenant_id=$2::uuid AND status='unknown' RETURNING id
+                """, action_id, str(row["tenant_id"]), json.dumps(restored))
+                if changed is None:
+                    raise RuntimeError("Saved acknowledgement update was not committed")
+                return _recovery_summary(event)
+    except HTTPException:
+        raise
+    except PrincipalUnavailable as exc:
+        raise HTTPException(status_code=401, detail="Current account or session is unavailable") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="Invalid recovery identity") from exc
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Recovery is unconfirmed. Reload the saved receipt before another request.") from exc
 
 
 @router.post("/actions/{action_id}/retry")
