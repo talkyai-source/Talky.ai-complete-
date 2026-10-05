@@ -1,0 +1,119 @@
+FF.                                                                      [100%]
+================================== FAILURES ===================================
+____ test_teardown_stub_preserves_authoritative_tenant[conflicting-config] ____
+
+fixture = namespace(service=<app.domain.services.recording_service.RecordingService object at 0x000001BF9DA333E0>, conn=namespac...ory=WindowsPath('C:/Users/AL AZIZ TECH/AppData/Local/Temp/pytest-of-UZAIR/pytest-771/test_teardown_stub_preserves_a0'))
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001BF9D9EA150>
+case = 'conflicting-config'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("case", ["conflicting-config", "foreign-campaign", "same-owner"])
+    async def test_teardown_stub_preserves_authoritative_tenant(fixture, monkeypatch, case):
+        from app.domain.services.telephony.recording import _save_call_recording
+        other_tenant = "20000000-0000-4000-8000-000000000008"
+        conn = SimpleNamespace(fetchrow=AsyncMock(), execute=AsyncMock(return_value="INSERT 0 1"))
+        async def fetch(query, *args):
+            if "FROM campaigns" in query:
+                return None if case == "foreign-campaign" else {"id": UUID(CAMPAIGN)}
+            return None  # No previous calls row, exercising actual standalone stub path.
+        conn.fetchrow.side_effect = fetch
+        @asynccontextmanager
+        async def acquire(*args, **kwargs):
+            yield conn
+        conn.transaction = acquire
+        pool = SimpleNamespace(acquire=acquire)
+        monkeypatch.setattr("app.core.db.get_db", acquire)
+        monkeypatch.setattr("app.core.container.get_container", lambda: SimpleNamespace(
+            is_initialized=True, db_pool=pool, db_client=SimpleNamespace(pool=pool)))
+        monkeypatch.setattr(recording, "RecordingService", lambda _: fixture.service)
+        gateway = SimpleNamespace(get_recording_buffer=lambda _: [b"\x01\x00" * 9600],
+                                  get_tts_recording_buffer=lambda _: [],
+                                  clear_recording_buffer=MagicMock(), _sample_rate=16000)
+        voice = SimpleNamespace(call_id=CALL, media_gateway=gateway, _dialer_tenant_id=TENANT,
+                                config=SimpleNamespace(tenant_id=other_tenant if case == "conflicting-config" else TENANT,
+                                                       campaign_id=CAMPAIGN))
+        await _save_call_recording(voice, "synthetic-pbx")
+        inserts = [call for call in conn.execute.await_args_list if "INSERT INTO calls" in call.args[0]]
+        if case == "same-owner":
+            assert len(inserts) == 1
+            assert inserts[0].args[2] == UUID(TENANT)
+            fixture.s3.upload.assert_called_once()
+        else:
+>           assert inserts == []
+E           AssertionError: assert [call('\n    ... 'completed')] == []
+E             Left contains one more item: call('\n                        INSERT INTO calls (\n                            id, tenant_id, campaign_id, phone_num...-4000-8000-000000000008'), UUID('30000000-0000-4000-8000-000000000007'), 'synthetic-pbx', 'synthetic-pbx', 'completed')
+E             Use -v to get more diff
+
+backend\tests\unit\test_op07_recording_retention.py:222: AssertionError
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.recording_service:recording_service.py:559 recording_retention_admission_unavailable call=10000000-0000-4000-8000-000000000007
+WARNING  app.domain.services.telephony.recording:recording.py:409 Recording save_and_link returned None for synthetic-pb
+_____ test_teardown_stub_preserves_authoritative_tenant[foreign-campaign] _____
+
+fixture = namespace(service=<app.domain.services.recording_service.RecordingService object at 0x000001BF9DB71550>, conn=namespac...ory=WindowsPath('C:/Users/AL AZIZ TECH/AppData/Local/Temp/pytest-of-UZAIR/pytest-771/test_teardown_stub_preserves_a1'))
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001BF9D9E8590>
+case = 'foreign-campaign'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("case", ["conflicting-config", "foreign-campaign", "same-owner"])
+    async def test_teardown_stub_preserves_authoritative_tenant(fixture, monkeypatch, case):
+        from app.domain.services.telephony.recording import _save_call_recording
+        other_tenant = "20000000-0000-4000-8000-000000000008"
+        conn = SimpleNamespace(fetchrow=AsyncMock(), execute=AsyncMock(return_value="INSERT 0 1"))
+        async def fetch(query, *args):
+            if "FROM campaigns" in query:
+                return None if case == "foreign-campaign" else {"id": UUID(CAMPAIGN)}
+            return None  # No previous calls row, exercising actual standalone stub path.
+        conn.fetchrow.side_effect = fetch
+        @asynccontextmanager
+        async def acquire(*args, **kwargs):
+            yield conn
+        conn.transaction = acquire
+        pool = SimpleNamespace(acquire=acquire)
+        monkeypatch.setattr("app.core.db.get_db", acquire)
+        monkeypatch.setattr("app.core.container.get_container", lambda: SimpleNamespace(
+            is_initialized=True, db_pool=pool, db_client=SimpleNamespace(pool=pool)))
+        monkeypatch.setattr(recording, "RecordingService", lambda _: fixture.service)
+        gateway = SimpleNamespace(get_recording_buffer=lambda _: [b"\x01\x00" * 9600],
+                                  get_tts_recording_buffer=lambda _: [],
+                                  clear_recording_buffer=MagicMock(), _sample_rate=16000)
+        voice = SimpleNamespace(call_id=CALL, media_gateway=gateway, _dialer_tenant_id=TENANT,
+                                config=SimpleNamespace(tenant_id=other_tenant if case == "conflicting-config" else TENANT,
+                                                       campaign_id=CAMPAIGN))
+        await _save_call_recording(voice, "synthetic-pbx")
+        inserts = [call for call in conn.execute.await_args_list if "INSERT INTO calls" in call.args[0]]
+        if case == "same-owner":
+            assert len(inserts) == 1
+            assert inserts[0].args[2] == UUID(TENANT)
+            fixture.s3.upload.assert_called_once()
+        else:
+>           assert inserts == []
+E           AssertionError: assert [call('\n    ... 'completed')] == []
+E             Left contains one more item: call('\n                        INSERT INTO calls (\n                            id, tenant_id, campaign_id, phone_num...-4000-8000-000000000007'), UUID('30000000-0000-4000-8000-000000000007'), 'synthetic-pbx', 'synthetic-pbx', 'completed')
+E             Use -v to get more diff
+
+backend\tests\unit\test_op07_recording_retention.py:222: AssertionError
+============================== warnings summary ===============================
+tests/unit/test_op07_recording_retention.py::test_teardown_stub_preserves_authoritative_tenant[conflicting-config]
+tests/unit/test_op07_recording_retention.py::test_teardown_stub_preserves_authoritative_tenant[conflicting-config]
+tests/unit/test_op07_recording_retention.py::test_teardown_stub_preserves_authoritative_tenant[foreign-campaign]
+tests/unit/test_op07_recording_retention.py::test_teardown_stub_preserves_authoritative_tenant[foreign-campaign]
+tests/unit/test_op07_recording_retention.py::test_teardown_stub_preserves_authoritative_tenant[same-owner]
+tests/unit/test_op07_recording_retention.py::test_teardown_stub_preserves_authoritative_tenant[same-owner]
+  <string>:9: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+
+tests/unit/test_op07_recording_retention.py::test_teardown_stub_preserves_authoritative_tenant[foreign-campaign]
+tests/unit/test_op07_recording_retention.py::test_teardown_stub_preserves_authoritative_tenant[same-owner]
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-op07-20261005\backend\app\domain\services\recording_service.py:625: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    upload_started = datetime.utcnow()
+
+tests/unit/test_op07_recording_retention.py::test_teardown_stub_preserves_authoritative_tenant[foreign-campaign]
+tests/unit/test_op07_recording_retention.py::test_teardown_stub_preserves_authoritative_tenant[same-owner]
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-op07-20261005\backend\app\domain\services\recording_service.py:643: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    upload_finished = datetime.utcnow()
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED backend\tests\unit\test_op07_recording_retention.py::test_teardown_stub_preserves_authoritative_tenant[conflicting-config]
+FAILED backend\tests\unit\test_op07_recording_retention.py::test_teardown_stub_preserves_authoritative_tenant[foreign-campaign]
+2 failed, 1 passed, 35 deselected, 10 warnings in 2.84s

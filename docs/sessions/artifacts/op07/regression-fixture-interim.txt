@@ -1,0 +1,126 @@
+........................................................................ [ 45%]
+.............................s.............................F............ [ 90%]
+................                                                         [100%]
+================================== FAILURES ===================================
+_________ TestRecordingService.test_save_recording_uploads_to_storage _________
+
+self = <tests.unit.test_day10.TestRecordingService object at 0x000001E654E6C200>
+
+    @pytest.mark.asyncio
+    async def test_save_recording_uploads_to_storage(self):
+        """Test recording upload to storage."""
+        mock_supabase = MagicMock()
+        mock_storage = MagicMock()
+        mock_bucket = MagicMock()
+        mock_supabase.storage.from_.return_value = mock_bucket
+
+        service = RecordingService(mock_supabase)
+
+        buffer = RecordingBuffer(call_id="test")
+        buffer.add_chunk(b'\x00' * 1000)
+
+        result = await service.save_recording(
+            call_id="test",
+            buffer=buffer,
+            tenant_id="tenant",
+            campaign_id="campaign"
+        )
+
+        # Verify upload was called
+>       mock_bucket.upload.assert_called_once()
+
+tests\unit\test_day10.py:250:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <MagicMock name='mock.storage.from_().upload' id='2088780319776'>
+
+    def assert_called_once(self):
+        """assert that the mock was called only once.
+        """
+        if not self.call_count == 1:
+            msg = ("Expected '%s' to have been called once. Called %s times.%s"
+                   % (self._mock_name or 'mock',
+                      self.call_count,
+                      self._calls_repr()))
+>           raise AssertionError(msg)
+E           AssertionError: Expected 'upload' to have been called once. Called 0 times.
+
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:928: AssertionError
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.recording_service:recording_service.py:559 recording_retention_admission_unavailable call=test
+============================== warnings summary ===============================
+tests/unit/test_op07_disclosure_receipts.py::test_actual_asterisk_gateway_transmission_is_supported_without_hearing_claim
+tests/unit/test_recording_gate_timing.py::test_callee_first_outbound_purges_pre_notice_audio_when_notice_starts
+tests/unit/test_recording_gate_timing.py::test_agent_first_outbound_notice_start_is_not_lost_by_the_gate_reset
+tests/unit/test_recording_gate_timing.py::test_agent_first_outbound_notice_start_is_not_lost_by_the_gate_reset
+tests/unit/test_recording_gate_timing.py::test_one_party_outbound_never_touches_the_gate
+tests/unit/test_recording_gate_timing.py::test_true_inbound_session_is_not_double_driven_by_the_new_gate_reset
+  <string>:8: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+
+tests/unit/test_op07_recording_retention.py: 36 warnings
+tests/unit/test_recording_disclosure.py: 7 warnings
+tests/unit/test_recording_offload.py: 4 warnings
+tests/unit/test_recording_encoding.py: 1 warning
+tests/unit/test_day10.py: 10 warnings
+  <string>:9: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+
+tests/unit/test_op07_recording_retention.py::test_explicit_policy_and_owned_call_allow_existing_storage[cloud]
+tests/unit/test_op07_recording_retention.py::test_required_notice_supported_transport_evidence_allows_storage[spoken-cloud]
+tests/unit/test_op07_recording_retention.py::test_required_notice_supported_transport_evidence_allows_storage[transmitted-cloud]
+tests/unit/test_recording_disclosure.py::test_recording_retained_when_notice_was_spoken
+tests/unit/test_recording_disclosure.py::test_recording_retained_when_no_notice_required
+tests/unit/test_recording_disclosure.py::test_two_party_default_still_announces_and_records
+tests/unit/test_recording_offload.py::test_s3_upload_offloaded_to_thread
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-op07-20261005\backend\app\domain\services\recording_service.py:625: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    upload_started = datetime.utcnow()
+
+tests/unit/test_op07_recording_retention.py::test_explicit_policy_and_owned_call_allow_existing_storage[cloud]
+tests/unit/test_op07_recording_retention.py::test_required_notice_supported_transport_evidence_allows_storage[spoken-cloud]
+tests/unit/test_op07_recording_retention.py::test_required_notice_supported_transport_evidence_allows_storage[transmitted-cloud]
+tests/unit/test_recording_disclosure.py::test_recording_retained_when_notice_was_spoken
+tests/unit/test_recording_disclosure.py::test_recording_retained_when_no_notice_required
+tests/unit/test_recording_disclosure.py::test_two_party_default_still_announces_and_records
+tests/unit/test_recording_offload.py::test_s3_upload_offloaded_to_thread
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-op07-20261005\backend\app\domain\services\recording_service.py:643: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    upload_finished = datetime.utcnow()
+
+tests/unit/test_op07_recording_retention.py::test_explicit_policy_and_owned_call_allow_existing_storage[local]
+tests/unit/test_op07_recording_retention.py::test_explicit_policy_and_owned_call_allow_existing_storage[configured-local]
+tests/unit/test_op07_recording_retention.py::test_required_notice_supported_transport_evidence_allows_storage[spoken-local]
+tests/unit/test_op07_recording_retention.py::test_required_notice_supported_transport_evidence_allows_storage[transmitted-local]
+tests/unit/test_recording_offload.py::test_local_save_offloaded_and_byte_identical
+tests/unit/test_recording_encoding.py::test_local_save_stores_the_encoded_file_with_its_mime
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-op07-20261005\backend\app\domain\services\recording_service.py:739: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    now = datetime.utcnow()
+
+tests/unit/test_day10.py: 8 warnings
+tests/unit/test_agent_first_transcript_persistence.py: 5 warnings
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-op07-20261005\backend\app\domain\services\transcript_service.py:372: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    timestamp=datetime.utcnow().isoformat(),
+
+tests/unit/test_agent_first_nonturn_audio_latency_not_tracked.py::test_recording_disclosure_passes_track_latency_false
+tests/unit/test_agent_first_nonturn_audio_latency_not_tracked.py::test_recording_disclosure_passes_track_latency_false
+tests/unit/test_agent_first_nonturn_audio_latency_not_tracked.py::test_slow_path_greeting_passes_track_latency_false
+tests/unit/test_agent_first_nonturn_audio_latency_not_tracked.py::test_slow_path_greeting_passes_track_latency_false
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\backend\.venv\Lib\site-packages\pydantic\main.py:250: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+
+tests/unit/test_tts_playback_waits_for_real_playback.py::test_unmute_waits_for_the_browsers_real_playback_complete_signal
+  <string>:5: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+
+tests/unit/test_tts_playback_waits_for_real_playback.py::test_unmute_waits_for_the_browsers_real_playback_complete_signal
+tests/unit/test_tts_playback_waits_for_real_playback.py::test_unmute_waits_for_the_browsers_real_playback_complete_signal
+tests/unit/test_tts_playback_waits_for_real_playback.py::test_unmute_waits_for_the_browsers_real_playback_complete_signal
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-op07-20261005\backend\app\infrastructure\telephony\browser_media_gateway.py:749: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    started = datetime.utcnow()
+
+tests/unit/test_tts_playback_waits_for_real_playback.py::test_unmute_waits_for_the_browsers_real_playback_complete_signal
+tests/unit/test_tts_playback_waits_for_real_playback.py::test_unmute_waits_for_the_browsers_real_playback_complete_signal
+tests/unit/test_tts_playback_waits_for_real_playback.py::test_unmute_waits_for_the_browsers_real_playback_complete_signal
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-op07-20261005\backend\app\infrastructure\telephony\browser_media_gateway.py:755: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    elapsed_ms = (datetime.utcnow() - started).total_seconds() * 1000
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/unit/test_day10.py::TestRecordingService::test_save_recording_uploads_to_storage
+1 failed, 158 passed, 1 skipped, 108 warnings in 11.91s

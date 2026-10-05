@@ -1,0 +1,159 @@
+{
+  "package": "OP07",
+  "date": "2026-10-05",
+  "recorded_at_utc": "2026-10-05T03:20:56.115127+00:00",
+  "base_sha": "ba0c0eb8d4716392303263fc211d1b36a722f056",
+  "source_sha": "a6af866894827c0c36a322b9de21ad8995e82b48",
+  "branch": "codex/production-ready-op07-20261005",
+  "status": "bounded_technical_repairs_verified_package_not_closed",
+  "scope": "Configured recording retention and tenant/call ownership at existing storage paths; truthful correlated disclosure delivery proof. No legal policy or provider/default change.",
+  "source_files": [
+    "backend/app/domain/services/recording_policy_service.py",
+    "backend/app/domain/services/recording_service.py",
+    "backend/app/domain/services/telephony/modes/agent_first.py",
+    "backend/app/domain/services/telephony/modes/caller_first.py",
+    "backend/app/domain/services/telephony/recording.py",
+    "backend/app/domain/services/voice_pipeline/tts_playback.py",
+    "backend/tests/unit/test_agent_first_transcript_persistence.py",
+    "backend/tests/unit/test_day10.py",
+    "backend/tests/unit/test_op07_disclosure_receipts.py",
+    "backend/tests/unit/test_op07_recording_retention.py",
+    "backend/tests/unit/test_recording_disclosure.py",
+    "backend/tests/unit/test_recording_encoding.py",
+    "backend/tests/unit/test_recording_offload.py"
+  ],
+  "source_sha256_lf": {
+    "backend/app/domain/services/recording_policy_service.py": "1e884ed62b70b88cac8955125e778f762b955aa4c75e19235e68bb62f77d2033",
+    "backend/app/domain/services/recording_service.py": "daba6fbe34a396c149caf9a96c4c05ca81d96b3d3837736ec3b62ba6a1ff4a06",
+    "backend/app/domain/services/telephony/modes/agent_first.py": "322213691b4338553913db93a449b9bce0c0d86d43120553693f3422089b3f2b",
+    "backend/app/domain/services/telephony/modes/caller_first.py": "c2c82d5956ca388b3b96c90485dadd072c44568db8487a7e7098599a29c639d6",
+    "backend/app/domain/services/telephony/recording.py": "771ce5e8b305f7538264b28096e81c31afe4a7fa07698d85b1b1007820d4b44e",
+    "backend/app/domain/services/voice_pipeline/tts_playback.py": "b09d4dc6144bec588c1bb262f98db1f1e2f44c472e41b3663da88141240a64e2",
+    "backend/tests/unit/test_agent_first_transcript_persistence.py": "b7880711bbcb7acc2b6a63866895df052917d7980a7f927eb9db67c84e9f6cc2",
+    "backend/tests/unit/test_day10.py": "6041b3b3ad90c619a7a6540c1eb719628e08bdecaf7f44ec712c5986f47b19fb",
+    "backend/tests/unit/test_op07_disclosure_receipts.py": "f4ec368aed5e2f1355ca4324cea534dec282b017321cfa95614f911417d5a226",
+    "backend/tests/unit/test_op07_recording_retention.py": "c784ebbf70f0656ec38f561fc6f197943257144cbff561eb026ffa8ae558447f",
+    "backend/tests/unit/test_recording_disclosure.py": "352b1eb2529a96b9e6e2f7f294ab3abce36a70b2b05591d43db794d23ca9226c",
+    "backend/tests/unit/test_recording_encoding.py": "02e02fe951f8ee0434d2894d00e57b458cb6bcc075bd72bd4f3eaf7df88aac20",
+    "backend/tests/unit/test_recording_offload.py": "3ea444ff8c7a23912dd4bd1ef2260713762613a68790679d77933fe1ca8b239f"
+  },
+  "test_files": [
+    "tests/unit/test_op07_disclosure_receipts.py",
+    "tests/unit/test_op07_recording_retention.py",
+    "tests/unit/test_recording_disclosure.py",
+    "tests/unit/test_recording_policy.py",
+    "tests/unit/test_disclosure_retry.py",
+    "tests/unit/test_recording_gate_timing.py",
+    "tests/unit/test_recording_offload.py",
+    "tests/unit/test_recording_encoding.py",
+    "tests/unit/test_recording_call_id_resolution.py",
+    "tests/unit/test_day10.py",
+    "tests/unit/test_agent_first_nonturn_audio_latency_not_tracked.py",
+    "tests/unit/test_agent_first_transcript_persistence.py",
+    "tests/unit/test_tts_playback_waits_for_real_playback.py",
+    "tests/unit/test_tts_playback_mute_wiring.py",
+    "tests/unit/test_tts_delivery_error_stops_turn.py",
+    "tests/unit/test_tts_empty_stream.py",
+    "tests/unit/test_tenant_phone_number_verification_security.py",
+    "tests/unit/test_asterisk_preanswer_admission.py"
+  ],
+  "commands": {
+    "working_directory": "backend",
+    "interpreter": "3.12.12",
+    "final_regression": "python -m pytest tests/unit/test_op07_disclosure_receipts.py tests/unit/test_op07_recording_retention.py tests/unit/test_recording_disclosure.py tests/unit/test_recording_policy.py tests/unit/test_disclosure_retry.py tests/unit/test_recording_gate_timing.py tests/unit/test_recording_offload.py tests/unit/test_recording_encoding.py tests/unit/test_recording_call_id_resolution.py tests/unit/test_day10.py tests/unit/test_agent_first_nonturn_audio_latency_not_tracked.py tests/unit/test_agent_first_transcript_persistence.py tests/unit/test_tts_playback_waits_for_real_playback.py tests/unit/test_tts_playback_mute_wiring.py tests/unit/test_tts_delivery_error_stops_turn.py tests/unit/test_tts_empty_stream.py tests/unit/test_tenant_phone_number_verification_security.py tests/unit/test_asterisk_preanswer_admission.py -q --no-cov",
+    "owned": "python -m pytest tests/unit/test_op07_disclosure_receipts.py tests/unit/test_op07_recording_retention.py -q --no-cov",
+    "lint": "python -m ruff check --select F --extend-ignore F401,F841 app/domain/services/recording_policy_service.py app/domain/services/recording_service.py app/domain/services/telephony/modes/agent_first.py app/domain/services/telephony/modes/caller_first.py app/domain/services/telephony/recording.py app/domain/services/voice_pipeline/tts_playback.py tests/unit/test_agent_first_transcript_persistence.py tests/unit/test_day10.py tests/unit/test_op07_disclosure_receipts.py tests/unit/test_op07_recording_retention.py tests/unit/test_recording_disclosure.py tests/unit/test_recording_encoding.py tests/unit/test_recording_offload.py",
+    "hygiene": "git diff --cached --check"
+  },
+  "observations": [
+    {
+      "phase": "initial storage gate",
+      "passed": 7,
+      "failed": 21,
+      "artifact": "storage-initial.txt",
+      "note": "28 proposed controls; four positive-case failures require the absent ownership check, not missing upload."
+    },
+    {
+      "phase": "same47 fixtures against base app files",
+      "passed": 13,
+      "failed": 34,
+      "exit_code": 1,
+      "artifact": "combined-baseline-red.txt",
+      "procedure": "Current six changed application files temporarily replaced with git show HEAD:path at base ba0c0eb8 for this isolated subprocess and restored in finally. No external services."
+    },
+    {
+      "phase": "independent stub owner regression",
+      "passed": 1,
+      "failed": 2,
+      "artifact": "stub-binding-red.txt",
+      "note": "Authoritative tenantA could be replaced by config tenantB; foreign campaign accepted before fix."
+    },
+    {
+      "phase": "owned final",
+      "passed": 50,
+      "failed": 0,
+      "skipped": 0,
+      "warnings": 57,
+      "artifact": "owned-final.txt"
+    },
+    {
+      "phase": "final18-module regression",
+      "passed": 215,
+      "failed": 0,
+      "skipped": 1,
+      "warnings": 118,
+      "artifact": "regression-final.txt",
+      "skip": "test_recording_encoding.py::test_real_ffmpeg_produces_a_much_smaller_file; ffmpeg not installed"
+    },
+    {
+      "phase": "CI Ruff selection",
+      "status": "passed",
+      "artifact": "lint-final.txt"
+    }
+  ],
+  "implementation": [
+    "All four existing entry points (cloud, direct local, configured local fallback, legacy storage wrapper) require explicit tenant UUID, tenant-filtered existing call proof and current configured recording policy/disclosure admission.",
+    "Cloud/local admission is rechecked after awaited encoding and immediately before dispatching the write. A policy change after this admission cannot atomically recall external or filesystem writes.",
+    "Teardown refuses missing tenant/failed stub DB context instead of writing disk-only unknown-tenant recordings. Existing standalone stub creation retains the authoritative tenant, rejects conflicting config and verifies supplied campaign ownership without bypass.",
+    "Each TTS invocation clears prior receipt/status evidence. Only its matching utterance receipt is exposed after cleanup. Completed transport_played maps to private spoken ledger, completed transmitted maps to transmitted ledger; neither claims human hearing.",
+    "Both agent-first and caller-first use the same disclosure-delivered contract. Unknown, failed, interrupted, partial, mismatched or unsupported receipt evidence cannot authorize required-notice retention.",
+    "Actual TelephonyMediaGateway + TtsPlayback with synthetic Asterisk adapter receipt is followed by actual configured local RecordingService write; transmitted remains supported and _tts_playout_completed stays false."
+  ],
+  "fixture_changes": "Existing isolated encoding/upload/offload fixtures explicitly stub admission; success disclosure fixtures provide synthetic correlated receipt. Dedicated new tests exercise actual admission and playback methods. Existing assertions retained.",
+  "independent_review": {
+    "reviewer_role": "independent engineering reviewer",
+    "finding": "authoritative tenant replaced by fallback config tenant",
+    "resolution": "same-owner positive and conflicting config/campaign negatives; read-only rereview found no remaining material defect",
+    "limits": "No actual PostgreSQL RLS, live audio, external storage or legal-consent proof.",
+    "method": "Independent actual-method synthetic red probe and final read-only source/test rereview; no separate full50 rerun or claimed independent test count."
+  },
+  "external_effects": {
+    "provider_calls": 0,
+    "postgres_operations": 0,
+    "customer_calls_or_messages": 0,
+    "production_mutations": 0,
+    "local_synthetic_storage": "pytest temporary directories only"
+  },
+  "remaining_acceptance": [
+    "OP07 remains open: approved jurisdiction/customer policy, lawful basis/disclosure/consent wording and named owner are external inputs; engineering proof is not legal certification.",
+    "No live handset/provider/PSTN/audio-hearing validation or actual storage-account/RLS acceptance was performed.",
+    "Configured recording retention_days expiration/physical deletion and local/S3 lifecycle remain unproven; telemetry cleanup dry-run is not recording retention proof. No new retention engine was added.",
+    "Approved deletion/export support procedure, backup retention/restore erasure reconciliation and privacy supplier/hosting facts remain separate plan requirements.",
+    "The ledger remains bounded in-memory; restart/eviction loses notice evidence and suppresses required-notice recording.",
+    "Failure after authorized external/local write but before metadata commit can still require orphan reconciliation; this slice prevents unbound/unapproved writes, not distributed atomic storage.",
+    "Legacy storage callers without a usable tenant-bound DB context now fail closed. Operators must supply canonical context; no automatic tenant inference/backfill is provided.",
+    "CP05/CP06/CP09 deferrals and production feature freeze are unchanged."
+  ],
+  "evidence_files": {
+    "combined-baseline-red.txt": "48cbc94646f52e4fa7e84346771da22c4eefcb678c201bd66bb885075e9824d6",
+    "lint-final.txt": "a4443afdcfb6d7363adb285762515ccf7cf50473b1a05c20c1a50f6bed4d26b0",
+    "owned-final.txt": "382ff842d2d299426d161a5a62a8b9cfaa705aa4de4f3f8a98edf3e8eb290dd0",
+    "owned-fixture-error.txt": "9fbe9e89a962b8f2a727653f5b076462632f09371f66f4fc25fede45d25ae19b",
+    "regression-final.txt": "8df160f0b212d1d9cb14d46c782f8e51bc47c190ef551e245153f74351a9d618",
+    "regression-fixture-interim.txt": "1d5982126b412c0c1f758733980758a468ff76b5973b6da14975ba3b0fa09651",
+    "regression-initial.txt": "d7e05b566e503140d5ffaeed6b6770f7f2a2030e81841b8d1b598075e17628b4",
+    "regression-interim.txt": "0c41466d65c8ee62275e1984e01bb88e76254fe14dfba8b505af7741aa2f11b1",
+    "storage-initial.txt": "f988e6a4801fd485c6fbd1497a524bddd53dc599e163d4c6b7a05ac91fd6d974",
+    "stub-binding-red.txt": "04eefde90d8a0ca78908623da88826b17a8652f93d9f6cf773596606bf13b761"
+  }
+}

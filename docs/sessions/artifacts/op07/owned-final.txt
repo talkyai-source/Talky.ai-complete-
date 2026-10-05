@@ -1,0 +1,33 @@
+..................................................                       [100%]
+============================== warnings summary ===============================
+tests/unit/test_op07_disclosure_receipts.py::test_actual_asterisk_gateway_transmission_is_supported_without_hearing_claim
+  <string>:8: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+
+tests/unit/test_op07_disclosure_receipts.py: 1 warning
+tests/unit/test_op07_recording_retention.py: 42 warnings
+  <string>:9: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+
+tests/unit/test_op07_disclosure_receipts.py::test_actual_asterisk_gateway_transmission_is_supported_without_hearing_claim
+tests/unit/test_op07_recording_retention.py::test_explicit_policy_and_owned_call_allow_existing_storage[local]
+tests/unit/test_op07_recording_retention.py::test_explicit_policy_and_owned_call_allow_existing_storage[configured-local]
+tests/unit/test_op07_recording_retention.py::test_required_notice_supported_transport_evidence_allows_storage[spoken-local]
+tests/unit/test_op07_recording_retention.py::test_required_notice_supported_transport_evidence_allows_storage[transmitted-local]
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-op07-20261005\backend\app\domain\services\recording_service.py:752: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    now = datetime.utcnow()
+
+tests/unit/test_op07_recording_retention.py::test_explicit_policy_and_owned_call_allow_existing_storage[cloud]
+tests/unit/test_op07_recording_retention.py::test_required_notice_supported_transport_evidence_allows_storage[spoken-cloud]
+tests/unit/test_op07_recording_retention.py::test_required_notice_supported_transport_evidence_allows_storage[transmitted-cloud]
+tests/unit/test_op07_recording_retention.py::test_teardown_stub_preserves_authoritative_tenant[same-owner]
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-op07-20261005\backend\app\domain\services\recording_service.py:638: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    upload_started = datetime.utcnow()
+
+tests/unit/test_op07_recording_retention.py::test_explicit_policy_and_owned_call_allow_existing_storage[cloud]
+tests/unit/test_op07_recording_retention.py::test_required_notice_supported_transport_evidence_allows_storage[spoken-cloud]
+tests/unit/test_op07_recording_retention.py::test_required_notice_supported_transport_evidence_allows_storage[transmitted-cloud]
+tests/unit/test_op07_recording_retention.py::test_teardown_stub_preserves_authoritative_tenant[same-owner]
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-op07-20261005\backend\app\domain\services\recording_service.py:656: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    upload_finished = datetime.utcnow()
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+50 passed, 57 warnings in 3.68s
