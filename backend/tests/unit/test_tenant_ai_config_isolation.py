@@ -289,4 +289,4 @@ class TestBridgeProviderDerivation:
             resolver.for_tenant_async = AsyncMock(return_value=_cfg())
             tenant_id, config = await resolve_ai_config_for_did(None)
         assert tenant_id is None
-        resolver.for_tenant_async.assert_awaited_once_with(None)
+        resolver.for_tenant_async.assert_awaited_once_with(None, require_available=False)

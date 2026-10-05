@@ -24,13 +24,13 @@ Resolution priority (highest first):
    Cache-bypassed: every async lookup hits the DB so an AI-Options edit lands
    on the next call without a restart.
 2. **Process/env default** — :func:`global_ai_config.get_global_config`, now an
-   *immutable* code default (``AIProviderConfig()``). Used only for genuinely
-   tenant-less paths (Ask AI, browser tests, campaign-less dev dials) and as a
-   fail-soft fallback.
+   *immutable* code default (``AIProviderConfig()``). Used for genuinely
+   tenant-less paths and a successful lookup that finds no saved row.
 
-The resolver NEVER raises. A missing row, a broken DB lookup, or a ``None``
-tenant all fall back to the process default — a per-tenant lookup must never
-take a call offline.
+Known-tenant call admission uses ``require_available=True``: an unwired or
+failed lookup raises ``TenantAIConfigUnavailable`` before provider creation.
+Successful no-row resolution still permits defaults. Explicit soft-mode callers
+retain the legacy default fallback on lookup failure.
 """
 from __future__ import annotations
 
@@ -58,7 +58,7 @@ class TenantAIConfigResolver:
 
     Mirrors :class:`voice_tuning.VoiceTuningResolver`: an async DB lookup wired
     once at startup, cache-bypassed so UI edits take effect on the next call,
-    and a hard fail-soft fallback to the process default.
+    and caller-selected strict admission or legacy soft fallback.
     """
 
     def __init__(self) -> None:
@@ -87,21 +87,16 @@ class TenantAIConfigResolver:
         return get_global_config()
 
     async def for_tenant_async(self, tenant_id: Optional[str], *, require_available: bool = False) -> AIProviderConfig:
-        """Production resolution path: tenant DB row → process default.
+        """Resolve the tenant row, distinguishing absence from unavailability.
 
         DB results are not cached — an operator editing AI Options expects the
         change to take effect on the very next call, not after a restart. The
         query is one indexed lookup on a small table.
 
-        Falls back gracefully in every failure mode:
-
-        * No DB lookup wired → process default.
-        * ``tenant_id`` is ``None`` → process default (genuinely tenant-less
-          path — Ask AI, browser test, campaign-less dev dial).
-        * Lookup raises → log a warning, process default. A per-tenant lookup
-          must NEVER block a call from going out.
-        * Lookup returns ``None`` (no row) → process default (a tenant that has
-          never saved AI Options still gets sane defaults — backward compatible).
+        With ``require_available=True``, missing tenant/lookup or a lookup
+        exception raises ``TenantAIConfigUnavailable``. Otherwise these paths
+        retain the legacy soft default. A successful ``None`` result means no
+        saved row and permits defaults in either mode.
         """
         lookup = self._db_lookup
         if lookup is None or not tenant_id:
@@ -111,7 +106,7 @@ class TenantAIConfigResolver:
 
         try:
             config = await lookup(str(tenant_id))
-        except Exception as exc:  # noqa: BLE001 — never block a call
+        except Exception as exc:  # noqa: BLE001 — preserve the selected admission mode
             if require_available:
                 raise TenantAIConfigUnavailable("Tenant AI configuration lookup failed") from exc
             logger.warning(
@@ -155,14 +150,15 @@ def reset_tenant_ai_config_resolver() -> None:
 async def resolve_ai_config_for_did(
     did: Optional[str],
 ) -> tuple[Optional[str], AIProviderConfig]:
-    """Best-effort (tenant_id, AIProviderConfig) for an inbound DID.
+    """Resolve DID ownership, then require available config for a known tenant.
 
     Used by the Twilio / Vonage bridges, which don't carry a campaign row: the
     dialed number (DID) identifies the tenant. Resolves the DID → tenant via
     :func:`inbound_router.resolve_inbound_route`, then loads that tenant's
-    persisted config. Entirely fail-soft — an unknown/unroutable DID (or any
-    error) yields ``(None, process_default)`` so the bridge still places the
-    call, just on default provider selection.
+    persisted config. Unknown/unroutable DIDs and route-lookup errors retain
+    the legacy tenant-less default path. Once ownership resolves, an unwired
+    or failed AI lookup raises; successful absence of a saved row permits the
+    process default.
     """
     import os
 
@@ -190,5 +186,7 @@ async def resolve_ai_config_for_did(
                 did, exc,
             )
 
-    config = await get_tenant_ai_config_resolver().for_tenant_async(tenant_id)
+    config = await get_tenant_ai_config_resolver().for_tenant_async(
+        tenant_id, require_available=bool(tenant_id),
+    )
     return tenant_id, config

@@ -367,6 +367,7 @@ async def prepare_prewarmed_session(
             )
         voice_tuning = await get_voice_tuning_resolver().for_tenant_async(
             str(_campaign_tenant_id) if _campaign_tenant_id else None,
+            require_available=bool(_campaign_tenant_id),
         )
 
         # Resolve the tenant's persisted AI provider config (model / provider /
@@ -379,6 +380,7 @@ async def prepare_prewarmed_session(
         )
         ai_config = await get_tenant_ai_config_resolver().for_tenant_async(
             str(_campaign_tenant_id) if _campaign_tenant_id else None,
+            require_available=bool(_campaign_tenant_id),
         )
 
         config = _build_telephony_session_config(

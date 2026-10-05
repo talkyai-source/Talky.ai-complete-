@@ -185,13 +185,11 @@ class VoiceTuningResolver:
         not after a service restart. The DB query is one indexed lookup
         on a small table; the round-trip is a few milliseconds.
 
-        Falls back gracefully:
-
-        * No DB lookup wired → env-only path (matches :meth:`for_tenant`).
-        * Lookup raises → log a warning, env-only fallback. Voice
-          tuning must NEVER block a call from going out.
-        * Lookup returns ``None`` (no row, or the JSONB is empty) →
-          env-only fallback.
+        With ``require_available=True``, an absent tenant/lookup or lookup
+        exception raises ``TenantAIConfigUnavailable`` before call admission.
+        Explicit soft-mode callers retain the env-only fallback for these
+        failures. A successful ``None``/empty result permits env defaults in
+        either mode because no saved tuning override was found.
         """
         defaults, overrides = self._ensure_loaded()
         merged = dict(defaults)
@@ -215,7 +213,7 @@ class VoiceTuningResolver:
         if lookup is not None and tenant_id:
             try:
                 db_partial = await lookup(str(tenant_id))
-            except Exception as exc:  # noqa: BLE001 — never block a call
+            except Exception as exc:  # noqa: BLE001 — preserve the selected admission mode
                 if require_available:
                     from app.domain.services.tenant_ai_config_resolver import TenantAIConfigUnavailable
                     raise TenantAIConfigUnavailable("Voice tuning lookup failed") from exc

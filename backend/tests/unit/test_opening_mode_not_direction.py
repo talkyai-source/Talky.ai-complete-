@@ -219,7 +219,7 @@ async def test_prewarm_callee_first_builds_an_outbound_config(monkeypatch):
     from app.domain.services import voice_tuning, tenant_ai_config_resolver
 
     class _Resolver:
-        async def for_tenant_async(self, _tid):
+        async def for_tenant_async(self, _tid, *, require_available=False):
             return None
 
     monkeypatch.setattr(voice_tuning, "get_voice_tuning_resolver", lambda: _Resolver())
