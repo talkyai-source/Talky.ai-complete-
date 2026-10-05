@@ -481,8 +481,11 @@ def _write_wav_file(recordings_dir: str, filepath: str, wav_data: bytes) -> None
     missing = []
     directory = os.path.dirname(path)
     while not os.path.exists(directory):
+        parent = os.path.dirname(directory)
+        if parent == directory:
+            raise FileNotFoundError("Recording storage root is unavailable")
         missing.append(directory)
-        directory = os.path.dirname(directory)
+        directory = parent
     for directory in reversed(missing):
         try:
             os.mkdir(directory, mode=0o700)

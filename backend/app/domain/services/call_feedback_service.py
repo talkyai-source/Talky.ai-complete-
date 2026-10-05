@@ -121,8 +121,29 @@ def _local_storage_allowed_in_production() -> bool:
 
 
 def _write_local(path: str, data: bytes) -> None:
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "xb") as handle:
+    # Protect each newly created level, not just the leaf directory. Existing
+    # operator-owned modes and the process-wide umask remain unchanged. The
+    # configured storage parent must still be trusted and persistent.
+    missing = []
+    directory = os.path.dirname(os.path.abspath(path))
+    while not os.path.exists(directory):
+        parent = os.path.dirname(directory)
+        if parent == directory:
+            raise FileNotFoundError("Feedback storage root is unavailable")
+        missing.append(directory)
+        directory = parent
+    for directory in reversed(missing):
+        try:
+            os.mkdir(directory, mode=0o700)
+        except FileExistsError:
+            if not os.path.isdir(directory):
+                raise
+
+    # Keep the previous exclusive-create contract: a UUID collision or existing
+    # symlink must never overwrite another note. Creation mode is owner-only.
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0)
+    descriptor = os.open(path, flags, 0o600)
+    with os.fdopen(descriptor, "wb") as handle:
         handle.write(data)
 
 

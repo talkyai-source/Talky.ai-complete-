@@ -85,6 +85,20 @@ def test_parent_file_failure_preserves_existing_bytes(tmp_path):
     assert root.read_bytes() == b"not a directory"
 
 
+def test_unavailable_storage_root_fails_without_looping(tmp_path, monkeypatch):
+    probes = []
+
+    def unavailable(path):
+        probes.append(path)
+        assert len(probes) < 64, "Writer revisited unavailable root without failing"
+        return False
+
+    monkeypatch.setattr(os.path, "exists", unavailable)
+    with pytest.raises(OSError, match="storage root is unavailable"):
+        _write_wav_file(str(tmp_path), str(tmp_path / "note.wav"), b"audio")
+    assert len(probes) == len(set(probes))
+
+
 def test_configured_storage_root_may_itself_be_a_symlink(tmp_path):
     storage = tmp_path / "mounted-storage"
     storage.mkdir()
