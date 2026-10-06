@@ -11,8 +11,8 @@ _find_sentence_end /
 _supports_llm_end_session_action / _barge_in_events) at CALL time. The
 service keeps _stream_llm_and_tts() as a thin delegator (a test mocks it).
 
-The history-truncation + end-session-tool constants moved here too — they
-were only used by this method.
+Context budgeting and end-session-tool instructions live here alongside
+the request assembly that uses them.
 """
 from __future__ import annotations
 

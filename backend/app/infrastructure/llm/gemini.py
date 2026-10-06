@@ -424,7 +424,6 @@ class GeminiLLMProvider(LLMProvider):
         # Retry only before the first token arrives — once the caller has
         # received tokens, retrying would produce garbled / doubled output.
         import random as _rand
-        last_err = None
         tokens_yielded = 0
         for _attempt in range(_LLM_MAX_RETRIES + 1):
             try:
@@ -469,7 +468,6 @@ class GeminiLLMProvider(LLMProvider):
             except LLMStreamStalled:
                 raise
             except Exception as e:  # noqa: BLE001 — broad on purpose, mirrors Groq
-                last_err = e
                 if tokens_yielded > 0:
                     # Mid-stream failure: do not retry, would corrupt output.
                     logger.error(
