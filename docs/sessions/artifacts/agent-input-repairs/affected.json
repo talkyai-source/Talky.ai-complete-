@@ -1,0 +1,58 @@
+{
+  "python": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\backend\\.venv\\Scripts\\python.exe",
+  "version": "3.12.12 (main, Dec  9 2025, 19:02:55) [MSC v.1944 64 bit (AMD64)]",
+  "cwd": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\agent-input-repairs-20261007",
+  "pytest_argv": [
+    "backend/tests/unit/test_agent_input_repairs.py",
+    "backend/tests/unit/test_voice_pipeline_turn_0_floor.py",
+    "backend/tests/unit/test_no_hangup_over_caller.py",
+    "backend/tests/unit/test_backchannel_after_compound_question.py",
+    "backend/tests/unit/test_caller_speaking_cleared_on_end_of_turn.py",
+    "backend/tests/unit/test_caller_authorized_end_call.py",
+    "backend/tests/unit/test_voice_pipeline_service.py",
+    "backend/tests/unit/test_dialogue_cleanup.py",
+    "backend/tests/unit/test_backchannel.py",
+    "backend/tests/unit/test_interrupt_concurrency_and_pre_tts.py",
+    "-q",
+    "--tb=short",
+    "--disable-warnings",
+    "-o",
+    "addopts="
+  ],
+  "source_before": {
+    "backend/app/domain/services/voice_pipeline/turn_ender.py": "b497d02ea52d0dd59bc150e537062313cab230aa5a594a3df3f779f667955676",
+    "backend/app/domain/services/voice_pipeline/turn_helpers.py": "3b20a9025b552559fc9315e32b44c100bfb5266f1f88bf93165daefaabf62c5b",
+    "backend/app/domain/services/end_session_action.py": "5eba642162f9a881081986c5e4abbc3cbd765ad3b4e14589114002f5e4ece88d",
+    "backend/tests/unit/test_agent_input_repairs.py": "00135fed10695651f571582fcdc8079cebad4c20f33240f5e43283c75ae7c320",
+    "backend/tests/unit/test_voice_pipeline_turn_0_floor.py": "6cc564237955bec9ff508a7eba838edb04a89e23499fb1fe0a782636ba61980d",
+    "backend/tests/unit/test_no_hangup_over_caller.py": "b2029395e4632b8173e63e4047291b89aafd98dfc5c2319f9330545737895668",
+    "backend/tests/unit/test_backchannel_after_compound_question.py": "559711672b54ddfa016cb370451f7f70c10df6a60a306cc8ba1511539a32cd58",
+    "backend/tests/unit/test_caller_speaking_cleared_on_end_of_turn.py": "871d7c345d69b690ebc6e84becbe0243199e37bf8f6f02b918cf9d8993b2a10b",
+    "backend/tests/unit/test_caller_authorized_end_call.py": "d15773f1c166e8edf1d1d9c601f38ec1dd45360e6326f4c3cc7063a959f5a073",
+    "backend/tests/unit/test_voice_pipeline_service.py": "5e1b5cfac846a994626a0ae38b5aa9a304b8277774b9eaf2c13776dc8ab18774",
+    "backend/tests/unit/test_dialogue_cleanup.py": "8b742ab24995871e456b9cde7b825f7b8a658046a34e6b46112aac7fdb24f358",
+    "backend/tests/unit/test_backchannel.py": "42065bbf12cd1cd4a59031ed6200ce2c66c90dde49a52ed7da499ad94127228a",
+    "backend/tests/unit/test_interrupt_concurrency_and_pre_tts.py": "cf4da302fba012699326a96348a6077191cfa863326413be5288e43067322920"
+  },
+  "source_after": {
+    "backend/app/domain/services/voice_pipeline/turn_ender.py": "b497d02ea52d0dd59bc150e537062313cab230aa5a594a3df3f779f667955676",
+    "backend/app/domain/services/voice_pipeline/turn_helpers.py": "3b20a9025b552559fc9315e32b44c100bfb5266f1f88bf93165daefaabf62c5b",
+    "backend/app/domain/services/end_session_action.py": "5eba642162f9a881081986c5e4abbc3cbd765ad3b4e14589114002f5e4ece88d",
+    "backend/tests/unit/test_agent_input_repairs.py": "00135fed10695651f571582fcdc8079cebad4c20f33240f5e43283c75ae7c320",
+    "backend/tests/unit/test_voice_pipeline_turn_0_floor.py": "6cc564237955bec9ff508a7eba838edb04a89e23499fb1fe0a782636ba61980d",
+    "backend/tests/unit/test_no_hangup_over_caller.py": "b2029395e4632b8173e63e4047291b89aafd98dfc5c2319f9330545737895668",
+    "backend/tests/unit/test_backchannel_after_compound_question.py": "559711672b54ddfa016cb370451f7f70c10df6a60a306cc8ba1511539a32cd58",
+    "backend/tests/unit/test_caller_speaking_cleared_on_end_of_turn.py": "871d7c345d69b690ebc6e84becbe0243199e37bf8f6f02b918cf9d8993b2a10b",
+    "backend/tests/unit/test_caller_authorized_end_call.py": "d15773f1c166e8edf1d1d9c601f38ec1dd45360e6326f4c3cc7063a959f5a073",
+    "backend/tests/unit/test_voice_pipeline_service.py": "5e1b5cfac846a994626a0ae38b5aa9a304b8277774b9eaf2c13776dc8ab18774",
+    "backend/tests/unit/test_dialogue_cleanup.py": "8b742ab24995871e456b9cde7b825f7b8a658046a34e6b46112aac7fdb24f358",
+    "backend/tests/unit/test_backchannel.py": "42065bbf12cd1cd4a59031ed6200ce2c66c90dde49a52ed7da499ad94127228a",
+    "backend/tests/unit/test_interrupt_concurrency_and_pre_tts.py": "cf4da302fba012699326a96348a6077191cfa863326413be5288e43067322920"
+  },
+  "source_unchanged": true,
+  "network": {
+    "internal_socketpairs": 283,
+    "prohibited_attempts": 0
+  },
+  "pytest_exit_code": 0
+}
