@@ -1,0 +1,25 @@
+F                                                                        [100%]
+================================== FAILURES ===================================
+______ test_live_turn_streamer_wires_navigation_budget_before_exact_read ______
+tests\unit\test_catalog_navigation.py:43: in test_live_turn_streamer_wires_navigation_budget_before_exact_read
+    assert response == "The authored conditions apply."
+E   assert "I'm sorry, I...say it again?" == 'The authored...itions apply.'
+E     - The authored conditions apply.
+E     + I'm sorry, I had trouble processing that. Could you say it again?
+------------------------------ Captured log call ------------------------------
+ERROR    app.domain.services.voice_pipeline.turn_streamer:turn_streamer.py:585 LLM streaming error for call model-driven-test: 'tool_calls_sink'
+Traceback (most recent call last):
+  File "C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\backend\app\domain\services\voice_pipeline\turn_streamer.py", line 439, in stream
+    async for token in _token_iter:
+  File "C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\backend\app\infrastructure\llm\groq.py", line 475, in stream_chat_with_tools
+    async for token in stream:
+  File "C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\backend\app\infrastructure\llm\streaming.py", line 246, in stream_tool_turn
+    async for token in stream:
+  File "C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\backend\tests\unit\test_model_driven_voice_turn.py", line 26, in model
+    kwargs["tool_calls_sink"].append({
+    ~~~~~~^^^^^^^^^^^^^^^^^^^
+KeyError: 'tool_calls_sink'
+=========================== short test summary info ===========================
+FAILED tests/unit/test_catalog_navigation.py::test_live_turn_streamer_wires_navigation_budget_before_exact_read
+1 failed, 2 warnings in 5.57s
+OFFLINE_TRANSPORT_COUNTS {'internal_socketpairs': 3, 'prohibited': 0}

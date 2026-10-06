@@ -1,5 +1,7 @@
 # Agent remnants cleanup — 7 October 2026
 
+**Follow-up:** The later [remaining agent repairs](2026-10-07-agent-residual-repairs.md) reproduce and fix six defects still present after this checkpoint: idle/numeric replies, active-caller closing, earlier-contact targeting, the fixed history cutoff and catalog navigation. The result below is historical cleanup evidence, not a claim that every agent defect or acceptance gap was closed.
+
 Follow-up to the [model-owned conversation revision](2026-10-07-model-owned-conversation.md), at the user's request to clean up its remaining complexity and unused files. Implementation is on `codex/production-ready-20261004` in `tmp/production-ready-20261004`, from baseline `458c6798`. Unrelated changes in the original checkout are preserved. This is local implementation and regression evidence; no push, deployment or production-readiness closure is implied.
 
 ## Resulting behavior

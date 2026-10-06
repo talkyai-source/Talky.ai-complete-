@@ -76,6 +76,13 @@
       "verification": "docs/sessions/artifacts/agent-cleanup/verification.json",
       "provider_run": "not_run",
       "deployment": "not_run"
+    },
+    "agent_residual_repairs_20261007": {
+      "source_candidate": "0e0d249227c4efc2353af3b38e36bd75d95b4361",
+      "report": "docs/sessions/2026-10-07-agent-residual-repairs.md",
+      "verification": "docs/sessions/artifacts/agent-residual-repairs/verification.json",
+      "provider_run": "not_run",
+      "deployment": "not_run"
     }
   },
   "status_rules": {
@@ -556,6 +563,11 @@
         {
           "path": "docs/sessions/2026-10-07-agent-cleanup.md",
           "kind": "remaining_script_and_dead_code_cleanup_local_regression_only"
+        },
+        {
+          "path": "docs/sessions/2026-10-07-agent-residual-repairs.md",
+          "kind": "six_reproduced_residual_agent_repairs_with_1812_offline_checks",
+          "candidate": "0e0d249227c4efc2353af3b38e36bd75d95b4361"
         }
       ],
       "blocker": "Live keyword ranking/query-recovery is superseded by model-selected scoped authored sections. Local source/tool/session integration is tested, but original-question actual-model accuracy, full campaign profile, voice timing and human/customer acceptance remain unqualified. Historical raw scores remain unchanged and do not qualify the new architecture. The old query-based qualification CLI is explicitly retired; no provider credential has been used for this revision.",
@@ -597,6 +609,11 @@
         {
           "path": "docs/sessions/2026-10-07-agent-cleanup.md",
           "kind": "remaining_script_and_dead_code_cleanup_local_regression_only"
+        },
+        {
+          "path": "docs/sessions/2026-10-07-agent-residual-repairs.md",
+          "kind": "six_reproduced_residual_agent_repairs_with_1812_offline_checks",
+          "candidate": "0e0d249227c4efc2353af3b38e36bd75d95b4361"
         }
       ],
       "blocker": "The user-requested model-owned revision removes deterministic relationship interpretation and speech rewrites. Prior candidate_verified evidence is historical; current relationship comprehension/retention needs actual-model and call evaluation.",
@@ -696,6 +713,11 @@
         {
           "path": "docs/sessions/2026-10-07-agent-cleanup.md",
           "kind": "remaining_script_and_dead_code_cleanup_local_regression_only"
+        },
+        {
+          "path": "docs/sessions/2026-10-07-agent-residual-repairs.md",
+          "kind": "six_reproduced_residual_agent_repairs_with_1812_offline_checks",
+          "candidate": "0e0d249227c4efc2353af3b38e36bd75d95b4361"
         }
       ],
       "blocker": "Concise guides and model-owned speech replace the old output semantic judge; deterministic privacy/effect/transport controls remain. Historical replay mappings and preserved Groq semantic failure are retained, but do not qualify this revised prompt/runtime. Actual model, acoustic, interruption, unsupported-fact and premature-success behavior needs new profile acceptance.",
@@ -747,6 +769,11 @@
         {
           "path": "docs/sessions/2026-10-07-agent-cleanup.md",
           "kind": "remaining_script_and_dead_code_cleanup_local_regression_only"
+        },
+        {
+          "path": "docs/sessions/2026-10-07-agent-residual-repairs.md",
+          "kind": "six_reproduced_residual_agent_repairs_with_1812_offline_checks",
+          "candidate": "0e0d249227c4efc2353af3b38e36bd75d95b4361"
         }
       ],
       "blocker": "Model record_contact now interprets email/phone and uses existing validated persistence/source revisions. Local saving and invalidation controls pass; real interpretation accuracy, correction burden, Sales Hub browser and connector acceptance remain unverified. New spoken name/company lead fields were not added. Same-process retry cannot recover evidence never committed before process death.",
@@ -964,6 +991,11 @@
         {
           "path": "docs/sessions/2026-10-07-agent-cleanup.md",
           "kind": "remaining_script_and_dead_code_cleanup_local_regression_only"
+        },
+        {
+          "path": "docs/sessions/2026-10-07-agent-residual-repairs.md",
+          "kind": "six_reproduced_residual_agent_repairs_with_1812_offline_checks",
+          "candidate": "0e0d249227c4efc2353af3b38e36bd75d95b4361"
         }
       ],
       "blocker": "A05 cleanup and documented crash contract are locally verified; remaining architecture dispositions follow lifecycle/provider/configuration owning repairs. No full architecture or live/release claim.",

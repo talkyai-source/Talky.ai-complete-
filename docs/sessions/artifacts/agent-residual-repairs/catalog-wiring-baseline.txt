@@ -1,0 +1,12 @@
+F                                                                        [100%]
+================================== FAILURES ===================================
+______ test_live_turn_streamer_wires_navigation_budget_before_exact_read ______
+tests\unit\test_catalog_navigation.py:52: in test_live_turn_streamer_wires_navigation_budget_before_exact_read
+    assert session._knowledge_evidence["status"] == "available"
+E   AssertionError: assert 'catalog' == 'available'
+E     - available
+E     + catalog
+=========================== short test summary info ===========================
+FAILED tests/unit/test_catalog_navigation.py::test_live_turn_streamer_wires_navigation_budget_before_exact_read
+1 failed, 2 warnings in 3.20s
+OFFLINE_TRANSPORT_COUNTS {'internal_socketpairs': 3, 'prohibited': 0}
