@@ -133,14 +133,6 @@ class AgentConfig(BaseModel):
         description="Personality traits"
     )
     
-    # Constraints
-    max_conversation_turns: int = Field(
-        default=10,
-        ge=3,
-        le=20,
-        description="Maximum conversation turns before ending"
-    )
-    
     # Context (optional, campaign-specific)
     context: Dict[str, str] = Field(
         default_factory=dict,

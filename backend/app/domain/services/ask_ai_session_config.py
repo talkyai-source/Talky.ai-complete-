@@ -117,7 +117,6 @@ def create_ask_ai_agent_config() -> AgentConfig:
                 "Never use markdown, bullet lists, headings, or XML tags in spoken replies",
             ]
         ),
-        max_conversation_turns=20,
     )
 
 

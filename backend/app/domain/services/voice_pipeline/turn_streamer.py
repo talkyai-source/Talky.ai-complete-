@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import re
 import time
 from typing import Optional
@@ -45,6 +44,7 @@ from app.infrastructure.llm.groq import LLMTimeoutError
 from app.services.scripts.prompts.build import build_turn_prompt
 from app.domain.services.voice_pipeline.grounded_links import grounded_url_hosts
 from app.services.scripts.prompts.live_state import build_live_state_block
+from app.services.scripts.knowledge.budget import context_window_for, estimate_tokens
 from app.domain.services.voice_pipeline.knowledge_tool import (
     KB_TOOL_NAME, knowledge_tools_for, knowledge_system_addendum, run_knowledge_lookup,
 )
@@ -67,11 +67,10 @@ from app.domain.services.voice_pipeline.live_structured_state import (
 
 logger = logging.getLogger(__name__)
 
-# Cap conversation history so the Groq context window never overflows (~55
-# turns). 20 pairs ≈ 2,500 tokens worst-case, leaving room for system
-# prompt + reply. Without truncation an overflow returns HTTP 400 and the
-# next turn 400s again → infinite apology loop.
-_MAX_HISTORY_PAIRS = int(os.getenv("VOICE_MAX_HISTORY_PAIRS", "20"))
+_HISTORY_OMISSION_NOTICE = (
+    "Earlier conversation is outside this request's context budget. Do not claim "
+    "to remember omitted details; ask the caller when an earlier detail matters."
+)
 
 _END_SESSION_TOOL_INSTRUCTIONS = build_end_session_tool_instructions()
 
@@ -123,11 +122,45 @@ def _readback_protected_values(session) -> tuple[str, ...]:
     return tuple(out)
 
 
-def _truncate_history(history: list, max_pairs: int = _MAX_HISTORY_PAIRS) -> list:
-    """Return the last max_pairs user/assistant pairs from conversation history."""
-    if len(history) <= max_pairs * 2:
-        return history[:]
-    return history[-(max_pairs * 2):]
+def _history_for_context(history: list, *, model: str | None, system_prompt: str,
+                         tools: list, max_tokens: int) -> tuple[list, int]:
+    """Keep verbatim history while it fits; omit whole oldest exchanges only.
+
+    Use the existing model registry and approximate token estimator. Reserve
+    space for output, protocol/reasoning overhead and bounded tool continuations.
+    This is a context estimate, not an exact provider tokenizer. Never shorten
+    the current caller's words or mutate the canonical stored conversation.
+    """
+    window = context_window_for(model)
+    overhead = estimate_tokens(system_prompt + _HISTORY_OMISSION_NOTICE)
+    overhead += estimate_tokens(json.dumps(tools, ensure_ascii=False)) + 1024
+    # Catalog pages and source reads append results during this same turn.
+    continuation = min(20_000, window // 3) if tools else 0
+    budget = max(0, window - overhead - max_tokens - continuation)
+    costs = [estimate_tokens(message.content) + 8 for message in history]
+    remaining = sum(costs)
+    if remaining <= budget or not history:
+        return list(history), 0
+
+    starts = []
+    for index, message in enumerate(history):
+        if message.role == MessageRole.USER:
+            # A runtime result immediately before the caller belongs to this
+            # exchange (for example, an opt-out persistence acknowledgement).
+            start = index
+            while start > 0 and history[start - 1].role == MessageRole.SYSTEM:
+                start -= 1
+            starts.append(start)
+    start = 0
+    for boundary in starts:
+        if remaining <= budget:
+            break
+        remaining -= sum(costs[start:boundary])
+        start = boundary
+    # The newest complete exchange stays intact even if one huge utterance
+    # exceeds the estimate; corrupting a quote/contact would be worse than the
+    # existing explicit provider-error handling for an oversized request.
+    return list(history[start:]), start
 
 
 class TurnStreamer:
@@ -153,7 +186,7 @@ class TurnStreamer:
         barge_in_event = self._p._barge_in_events.get(call_id)
         guardrails = get_guardrails()
 
-        messages = _truncate_history(session.conversation_history)
+        messages = list(session.conversation_history)
         contact_turn = getattr(session, "_contact_turn", None)
         last_user_text = next(
             (m.content for m in reversed(messages) if m.role == MessageRole.USER),
@@ -214,7 +247,7 @@ class TurnStreamer:
         # a long call. Identity comes off the session's agent_config.
         _agent_cfg = getattr(session, "agent_config", None)
 
-        _structured = reduce_cascaded_session_live_state(session, messages)
+        _structured = reduce_cascaded_session_live_state(session)
         # Callee-local time-of-day so "morning/afternoon/evening" matches the
         # hour where the phone rang (was always "Morning"). Timezone comes from
         # the campaign (calling_config.timezone), stashed on the session; UK
@@ -257,6 +290,23 @@ class TurnStreamer:
             captured_slots=session.captured_slots,
             has_callback_executor="schedule_callback" in enabled_voice_actions(session),
         )
+
+        offered_tools = [*(kb_tools or []), *contact_tools, *action_tools]
+        provider_model = getattr(self._p.llm_provider, "_model", None)
+        model = provider_model if isinstance(provider_model, str) else getattr(session, "llm_model", None)
+        output_tokens = getattr(session, "llm_max_tokens", None)
+        if type(output_tokens) is not int or output_tokens < 1:
+            output_tokens = getattr(self._p.llm_provider, "_max_tokens", 400)
+        if type(output_tokens) is not int or output_tokens < 1:
+            output_tokens = 400
+        llm_messages, omitted = _history_for_context(
+            messages, model=model, system_prompt=system_prompt,
+            tools=offered_tools, max_tokens=output_tokens,
+        )
+        if omitted:
+            system_prompt += "\n\n" + _HISTORY_OMISSION_NOTICE
+            logger.info("voice_history_context_limited call_id=%s omitted_messages=%d retained_messages=%d",
+                        call_id, omitted, len(llm_messages))
 
         from app.domain.services.voice_pipeline.profile import turn_profile
         logger.info("voice_turn_profile %s", json.dumps(
@@ -308,14 +358,11 @@ class TurnStreamer:
                 return False
             return True
 
-        llm_messages = messages
-
         t_llm_start = time.monotonic()
         t_tts_first: Optional[float] = None
         t_tts_end: Optional[float] = None
 
         # One conversational model owns wording and chooses its available tools.
-        offered_tools = [*(kb_tools or []), *contact_tools, *action_tools]
         if offered_tools:
             async def _voice_tool_runner(_name: str, _args: dict) -> str:
                 if _name == KB_TOOL_NAME:

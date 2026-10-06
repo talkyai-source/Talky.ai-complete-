@@ -119,14 +119,10 @@ def reduce_live_state(
 
 def reduce_cascaded_session_live_state(
     session: object,
-    messages: list[object],
-    *,
-    user_text: Optional[str] = None,
 ) -> LiveConversationState:
     """Publish runtime identity, contacts and tool results, without interpreting speech.
 
     Conversation meaning stays in the caller's original history for the model.
-    messages/user_text are retained call-signature inputs, never classified here.
     """
     state = getattr(session, "_live_structured_state", None)
     if not isinstance(state, LiveConversationState):

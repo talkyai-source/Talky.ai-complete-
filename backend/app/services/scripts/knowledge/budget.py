@@ -35,7 +35,7 @@ _DEFAULT_CONTEXT_WINDOW = 8192
 
 # Tokens we must leave free in the window for the rest of the turn.
 _RESERVED_PERSONA = 600
-_RESERVED_HISTORY = 2600     # ~20 user/assistant pairs (matches _MAX_HISTORY_PAIRS)
+_RESERVED_HISTORY = 2600     # Legacy source-preview budget; live history uses the model context window.
 _RESERVED_RESPONSE = 400
 _RESERVED_SAFETY = 200
 # Fraction of the remaining window we'll spend on inlined knowledge.
