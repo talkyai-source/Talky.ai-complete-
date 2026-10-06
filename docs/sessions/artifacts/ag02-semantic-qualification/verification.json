@@ -1,0 +1,205 @@
+{
+  "status": "offline_harness_qualified_provider_execution_pending",
+  "base_commit": "76ba91eabfea5cbf1f6b106202e16a5dbf858b1b",
+  "source_commit": "97fcf5179781648ec3a912b874bf1349146b1439",
+  "worktree": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-semantic-qualification-20261007",
+  "runtime": {
+    "python": "3.12.12 (main, Dec  9 2025, 19:02:55) [MSC v.1944 64 bit (AMD64)]",
+    "executable": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\backend\\.venv\\Scripts\\python.exe",
+    "groq": "0.37.0",
+    "httpx": "0.28.1",
+    "qualification": "Existing environment; no exact-requirements claim"
+  },
+  "environment": {
+    "ENVIRONMENT": "test",
+    "PYTHONPATH": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-semantic-qualification-20261007\\backend",
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "credential_read": false,
+    "provider_requests": 0
+  },
+  "final_checks": [
+    {
+      "cwd": "backend",
+      "command": "python -B -m pytest tests/unit/test_ag02_semantic_qualification.py tests/unit/test_knowledge_tool.py tests/unit/test_llm_tool_continuation.py -q -o addopts=",
+      "exit_code": 0,
+      "result": "83 passed in 4.82s; includes 30 new harness controls",
+      "log": "offline-capture-final.txt"
+    },
+    {
+      "cwd": "backend",
+      "command": "python -m ruff check --select F scripts/qualify_ag02_semantic.py tests/unit/test_ag02_semantic_qualification.py",
+      "exit_code": 0,
+      "result": "All checks passed",
+      "log": "lint.txt"
+    },
+    {
+      "cwd": ".",
+      "command": "git diff --check; git diff --cached --check",
+      "exit_code": 0,
+      "result": "No whitespace errors in the three source/test/fixture files before the source-only commit; raw evidence logs were not part of that check"
+    },
+    {
+      "cwd": "backend",
+      "command": "python -B -m scripts.qualify_ag02_semantic --endpoint https://api.groq.com/openai/v1/chat/completions --model openai/gpt-oss-20b --knowledge-mode retrieve --max-requests 160 --max-total-completion-tokens 204800 --output ../docs/sessions/artifacts/ag02-semantic-qualification/dry-plan-final.json",
+      "exit_code": 0,
+      "result": "Dry plan only; no provider initialization or credential read",
+      "log": "dry-plan-final.txt"
+    }
+  ],
+  "preserved_history_not_quality_results": [
+    {
+      "log": "offline-initial.txt",
+      "result": "3 failed, 21 passed, 2 warnings, 24 teardown errors in 8.28s",
+      "reason": "Windows internal socketpair blocked by overbroad test guard; SDK endpoint assumption also present"
+    },
+    {
+      "log": "offline-second.txt",
+      "result": "3 failed, 27 passed in 8.57s",
+      "reason": "Destination guard exposed SDK base URL composition"
+    },
+    {
+      "log": "transport-diagnostic.txt",
+      "result": "1 failed, 29 deselected in 2.57s",
+      "reason": "Diagnostic exposed destination_or_method denial before dispatch"
+    },
+    {
+      "log": "offline-third.txt",
+      "result": "2 failed, 28 passed in 2.57s",
+      "reason": "Response stream capture incomplete at SDK DONE stop"
+    },
+    {
+      "log": "offline-fourth.txt",
+      "result": "2 failed, 28 passed in 6.22s",
+      "reason": "Mock SSE/aclosing change insufficient; response capture still incomplete"
+    },
+    {
+      "log": "offline-final.txt",
+      "result": "2 failed, 81 passed in 7.56s",
+      "reason": "Misleading historical filename retained; pending response iterator diagnostics. Superseded by offline-capture-final.txt after explicit iterator closure"
+    },
+    {
+      "log": "dry-plan-draft.json",
+      "reason": "Historical dry plan before final harness changes; not current source binding"
+    }
+  ],
+  "source_hashes": {
+    "backend/scripts/qualify_ag02_semantic.py": {
+      "bytes": 21444,
+      "raw_sha256": "c2d052a9d94510fe2807d96cd9bb01f52a5691d1ae85e672111322ed420f7b30",
+      "normalized_lf_sha256": "c2d052a9d94510fe2807d96cd9bb01f52a5691d1ae85e672111322ed420f7b30"
+    },
+    "backend/tests/unit/test_ag02_semantic_qualification.py": {
+      "bytes": 13245,
+      "raw_sha256": "ec251e347b7ae0b636a315f8605f5a7118fd3aa8abef032ecbce10a05348054e",
+      "normalized_lf_sha256": "ec251e347b7ae0b636a315f8605f5a7118fd3aa8abef032ecbce10a05348054e"
+    },
+    "backend/tests/fixtures/knowledge/ag02_semantic_holdouts.json": {
+      "bytes": 8473,
+      "raw_sha256": "91dddbab1cdf4039cdb784633c2178c6c6ff1d95159be7140227175b1095a658",
+      "normalized_lf_sha256": "91dddbab1cdf4039cdb784633c2178c6c6ff1d95159be7140227175b1095a658"
+    }
+  },
+  "application_and_fixture_inputs": {
+    "scripts/qualify_ag02_semantic.py": "c2d052a9d94510fe2807d96cd9bb01f52a5691d1ae85e672111322ed420f7b30",
+    "scripts/evaluate_ag02_knowledge.py": "e548f443f1c22dcff9ed38c0002d4fa65d620cfdcb330c4489fb858e04fb839a",
+    "tests/fixtures/knowledge/ag02_gold.json": "31782fc367ca7bb3f07ba0569b5d1eb0e4cdfbae274b618f3b7c0733db504b52",
+    "tests/fixtures/knowledge/ag02_semantic_holdouts.json": "91dddbab1cdf4039cdb784633c2178c6c6ff1d95159be7140227175b1095a658",
+    "app/infrastructure/llm/groq.py": "2d781583518715adbe69445385cb0deee0e3e494b926d283c748120b92fca6ea",
+    "app/infrastructure/llm/streaming.py": "b52aadb57c97bf3bf93376734d5c099e02252d8789c7faa8c6ebd8a76d6c22ab",
+    "app/infrastructure/llm/request_profile.py": "7f64fd8c9ea5a0543d32b2017a378347481c2ede707531cba5effa04d0a7964e",
+    "app/domain/models/ai_config.py": "46af3764d7df951e7ec3bc2790a7bc629ea86252bc01e2849fff57f4ee99c127",
+    "app/domain/services/voice_pipeline/knowledge_tool.py": "bd312b9323d2f2cebf4d677ba9807288412c56e2bbf5d12d1de40cd69abae3b2",
+    "app/domain/services/voice_pipeline/kb_budget.py": "71c68cc5043661521f94e810fcbacbff71f01f9e580578cdf5f7fc9f54d2458c",
+    "app/services/scripts/knowledge/retrieval.py": "06034c7fbeb5596961401edb803e7c3f4afbf8415c9ceb4394eff5137abf1e1c",
+    "app/services/scripts/knowledge/passages.py": "a6171328ede5df465b61502624137f0b8145f7d76e19000582e7c4251fb54ff7",
+    "app/services/scripts/knowledge/session_inject.py": "312ce3a65913a2875954db2e8fe8f594480ad214432be88ac267c4e6924a379e"
+  },
+  "gold_unchanged": {
+    "base_git_blob": "9ebd8349df7ec96f4142d046da3c3838c9e278f5",
+    "head_git_blob": "9ebd8349df7ec96f4142d046da3c3838c9e278f5"
+  },
+  "report": {
+    "path": "docs/sessions/2026-10-07-ag02-semantic-qualification.md",
+    "bytes": 4912,
+    "raw_sha256": "5d40b35f29b41c8b388b8708f63fc8def7adadaf6682286d911e9d8808e9e213",
+    "normalized_lf_sha256": "5d40b35f29b41c8b388b8708f63fc8def7adadaf6682286d911e9d8808e9e213"
+  },
+  "artifact_hashes": {
+    "dry-plan-draft.json": {
+      "bytes": 3733,
+      "raw_sha256": "53d5baa304377a92133babba9794de1c0e56fa387d4822123f79d8bc0dfce528",
+      "normalized_lf_sha256": "93ecc561db51b0f8192a8e091fdd914b789753d207f89ba01d80b5017d4e3f69"
+    },
+    "dry-plan-draft.txt": {
+      "bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "normalized_lf_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "dry-plan-final.json": {
+      "bytes": 4072,
+      "raw_sha256": "92f74cb871dfaf12c9432e59402541b3b0b6645f55b1f96f4132b30eea5c0561",
+      "normalized_lf_sha256": "487760970e625c3f702f1d3ec6506777b8f4d5589d8a581d91273c93cb794074"
+    },
+    "dry-plan-final.txt": {
+      "bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "normalized_lf_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "lint.txt": {
+      "bytes": 20,
+      "raw_sha256": "a4443afdcfb6d7363adb285762515ccf7cf50473b1a05c20c1a50f6bed4d26b0",
+      "normalized_lf_sha256": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18"
+    },
+    "offline-capture-final.txt": {
+      "bytes": 182,
+      "raw_sha256": "3801f1dff476c2d1a5b1d8a48f6e2eee47f5888a5e04f376858565dbe8e78bac",
+      "normalized_lf_sha256": "c7b35e61d1d0b947bc4c34ccc22b7a1e3d5be6b28e16c88d07af9a0d38652c46"
+    },
+    "offline-final.txt": {
+      "bytes": 5283,
+      "raw_sha256": "7604c48a1cb7105d10a9d7862682a85c3fc1188e4a1fd9e41e72b8a8bd3fae36",
+      "normalized_lf_sha256": "d9eeaad242ba7d55977cea4a9d1613d90ab67290cbe99504343972f12cce79f7"
+    },
+    "offline-fourth.txt": {
+      "bytes": 5202,
+      "raw_sha256": "1854f5a2cfda978f66733ce871c53d1c3cdcc1ee78a502fe30594797eb9336ab",
+      "normalized_lf_sha256": "47ab5de9db5ffca12af47d31daf865241868a615a934c4347153721653c8a01c"
+    },
+    "offline-initial.txt": {
+      "bytes": 33077,
+      "raw_sha256": "58165edb44597965213e0414eae156004782bb0efaad4fc905f94c2b4cde0877",
+      "normalized_lf_sha256": "542a4161001da324af240f447a07c84a00fe2832bf9a6e22a82d371c717107c0"
+    },
+    "offline-second.txt": {
+      "bytes": 5944,
+      "raw_sha256": "4ad173479580ac756593875e6c7f70d3c4e8b316b6e1bfcb920cc1feccd53d54",
+      "normalized_lf_sha256": "42fd6a60bee54db86d4bd497e0f0323af190f7e8c69892aab8273778d8cf7b48"
+    },
+    "offline-third.txt": {
+      "bytes": 5202,
+      "raw_sha256": "72a05dc51b7e92d771720448027ff8b258e7b378ccc35fff0e6041fb2ae0d0e1",
+      "normalized_lf_sha256": "2a7a270a1c59dedf86c664252b4a90dab0f599f6232fc855d9dcc4cb2e38dacc"
+    },
+    "transport-diagnostic.txt": {
+      "bytes": 2562,
+      "raw_sha256": "a3440394f0d33d265d55793f097957378cc27f5b9e750647d94295d6ebfbf867",
+      "normalized_lf_sha256": "b2f6b82f7a60382ee16db6e2526c168dc83516a8b0d2018b440a5eba2d84b34c"
+    }
+  },
+  "review": {
+    "root_source_review": "clear",
+    "independent_source_review": "account_finalize clear; read-only, no execution"
+  },
+  "limitations": [
+    "No provider or customer result exists; synthetic HTTP/SSE only.",
+    "Actual Groq/httpx and Python environment recorded, not exact requirements qualification.",
+    "Owner dry plan uses base 76ba91ea app inputs; regenerate against integrated current prompt/tool candidate before designated provider execution.",
+    "Raw lexical gate is separate and unchanged; rewritten-query source match is not original-question answer fidelity.",
+    "Human review of every actual answer and zero unsupported critical claims remains pending.",
+    "No full voice prompt, STT/TTS, audio, database, telephony or action acceptance claim."
+  ],
+  "evidence_whitespace_check": {
+    "all_artifacts": "Flags six trailing-whitespace lines in preserved offline-initial.txt pytest warning formatting",
+    "resolution": "Raw log bytes retained unchanged; authored report and verification JSON checked separately"
+  }
+}

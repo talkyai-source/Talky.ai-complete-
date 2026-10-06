@@ -1,0 +1,65 @@
+{
+  "status": "dry_run_no_provider_requests",
+  "profile": {
+    "model": "openai/gpt-oss-20b",
+    "knowledge_mode": "retrieve",
+    "endpoint": "https://api.groq.com/openai/v1/chat/completions",
+    "temperature": 0.4,
+    "max_tokens": 256,
+    "max_requests": 160,
+    "max_completion_per_request": 1280,
+    "max_total_completion_tokens": 204800,
+    "max_input_bytes": 65536,
+    "max_total_input_bytes": 10485760,
+    "case_timeout_seconds": 30,
+    "total_timeout_seconds": 2400
+  },
+  "case_count": 80,
+  "gold_count": 60,
+  "holdout_count": 20,
+  "configured_visible_target": 256,
+  "effective_completion_ceiling": 1280,
+  "credential_source": "Explicit process environment variable AG02_GROQ_API_KEY; never .env",
+  "model_inputs": "Original question/prior caller context and current app tool addendum/spec; no knowledge map",
+  "excluded_from_model_input": [
+    "expected source IDs",
+    "required fragments",
+    "human rubrics",
+    "answerability labels"
+  ],
+  "tools": [
+    "lookup_company_knowledge"
+  ],
+  "source_hashes": {
+    "scripts/qualify_ag02_semantic.py": "c784b25dce6733e8a26cff7cc6be6e1662192f431fd9174cd778cf34dc6676be",
+    "scripts/evaluate_ag02_knowledge.py": "e548f443f1c22dcff9ed38c0002d4fa65d620cfdcb330c4489fb858e04fb839a",
+    "tests/fixtures/knowledge/ag02_gold.json": "31782fc367ca7bb3f07ba0569b5d1eb0e4cdfbae274b618f3b7c0733db504b52",
+    "tests/fixtures/knowledge/ag02_semantic_holdouts.json": "91dddbab1cdf4039cdb784633c2178c6c6ff1d95159be7140227175b1095a658",
+    "app/infrastructure/llm/groq.py": "2d781583518715adbe69445385cb0deee0e3e494b926d283c748120b92fca6ea",
+    "app/infrastructure/llm/streaming.py": "b52aadb57c97bf3bf93376734d5c099e02252d8789c7faa8c6ebd8a76d6c22ab",
+    "app/infrastructure/llm/request_profile.py": "7f64fd8c9ea5a0543d32b2017a378347481c2ede707531cba5effa04d0a7964e",
+    "app/domain/models/ai_config.py": "46af3764d7df951e7ec3bc2790a7bc629ea86252bc01e2849fff57f4ee99c127",
+    "app/domain/services/voice_pipeline/knowledge_tool.py": "bd312b9323d2f2cebf4d677ba9807288412c56e2bbf5d12d1de40cd69abae3b2",
+    "app/domain/services/voice_pipeline/kb_budget.py": "71c68cc5043661521f94e810fcbacbff71f01f9e580578cdf5f7fc9f54d2458c",
+    "app/services/scripts/knowledge/retrieval.py": "06034c7fbeb5596961401edb803e7c3f4afbf8415c9ceb4394eff5137abf1e1c",
+    "app/services/scripts/knowledge/passages.py": "a6171328ede5df465b61502624137f0b8145f7d76e19000582e7c4251fb54ff7",
+    "app/services/scripts/knowledge/session_inject.py": "312ce3a65913a2875954db2e8fe8f594480ad214432be88ac267c4e6924a379e"
+  },
+  "targets_predeclared": {
+    "answerable_top3_expected_source_recall_min": 0.9,
+    "answerable_sufficient_passage_rate_min": 0.85,
+    "cross_tenant_evidence_max": 0,
+    "unsupported_critical_price_policy_claims_max": 0,
+    "notes": "Nonzero retrieval targets prevent universal abstention from passing. Critical claim fidelity requires independent human/provider review; automated tests cannot award that gate. No threshold lowering after results."
+  },
+  "human_answer_fidelity": "pending",
+  "semantic_quality_pass": null,
+  "limits": [
+    "Actual HTTP retries consume request/completion/input budgets; exhausted runs remain incomplete.",
+    "Completion ceilings reserve reasoning plus visible tokens, not actual usage or exact spend.",
+    "Input is byte-bounded; no exact input-token or latency guarantee.",
+    "No DB, telephony, action execution, warmup, model listing or alternate provider.",
+    "Exercises the existing tool subsystem/addendum, not the complete voice persona/prompt or native audio path.",
+    "Matched rewritten query is not proof of original-question entailment."
+  ]
+}

@@ -1,0 +1,515 @@
+Exception ignored in: <function BaseEventLoop.__del__ at 0x000002B9342962A0>
+Traceback (most recent call last):
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\base_events.py", line 732, in __del__
+    self.close()
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\proactor_events.py", line 697, in close
+    self._close_self_pipe()
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\proactor_events.py", line 779, in _close_self_pipe
+    self._ssock.close()
+    ^^^^^^^^^^^
+AttributeError: 'ProactorEventLoop' object has no attribute '_ssock'
+Exception ignored in: <function BaseEventLoop.__del__ at 0x000002B9342962A0>
+Traceback (most recent call last):
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\base_events.py", line 732, in __del__
+    self.close()
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\proactor_events.py", line 697, in close
+    self._close_self_pipe()
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\proactor_events.py", line 779, in _close_self_pipe
+    self._ssock.close()
+    ^^^^^^^^^^^
+AttributeError: 'ProactorEventLoop' object has no attribute '_ssock'
+Exception ignored in: <function BaseEventLoop.__del__ at 0x000002B9342962A0>
+Traceback (most recent call last):
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\base_events.py", line 732, in __del__
+    self.close()
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\proactor_events.py", line 697, in close
+    self._close_self_pipe()
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\proactor_events.py", line 779, in _close_self_pipe
+    self._ssock.close()
+    ^^^^^^^^^^^
+AttributeError: 'ProactorEventLoop' object has no attribute '_ssock'
+Exception ignored in: <function BaseEventLoop.__del__ at 0x000002B9342962A0>
+Traceback (most recent call last):
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\base_events.py", line 732, in __del__
+    self.close()
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\proactor_events.py", line 697, in close
+    self._close_self_pipe()
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\proactor_events.py", line 779, in _close_self_pipe
+    self._ssock.close()
+    ^^^^^^^^^^^
+AttributeError: 'ProactorEventLoop' object has no attribute '_ssock'
+Exception ignored in: <function BaseEventLoop.__del__ at 0x000002B9342962A0>
+Traceback (most recent call last):
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\base_events.py", line 732, in __del__
+    self.close()
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\proactor_events.py", line 697, in close
+    self._close_self_pipe()
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\proactor_events.py", line 779, in _close_self_pipe
+    self._ssock.close()
+    ^^^^^^^^^^^
+AttributeError: 'ProactorEventLoop' object has no attribute '_ssock'
+Exception ignored in: <function BaseEventLoop.__del__ at 0x000002B9342962A0>
+Traceback (most recent call last):
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\base_events.py", line 732, in __del__
+    self.close()
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\proactor_events.py", line 697, in close
+    self._close_self_pipe()
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\proactor_events.py", line 779, in _close_self_pipe
+    self._ssock.close()
+    ^^^^^^^^^^^
+AttributeError: 'ProactorEventLoop' object has no attribute '_ssock'
+Exception ignored in: <function BaseEventLoop.__del__ at 0x000002B9342962A0>
+Traceback (most recent call last):
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\base_events.py", line 732, in __del__
+    self.close()
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\proactor_events.py", line 697, in close
+    self._close_self_pipe()
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\proactor_events.py", line 779, in _close_self_pipe
+    self._ssock.close()
+    ^^^^^^^^^^^
+AttributeError: 'ProactorEventLoop' object has no attribute '_ssock'
+Exception ignored in: <function BaseEventLoop.__del__ at 0x000002B9342962A0>
+Traceback (most recent call last):
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\base_events.py", line 732, in __del__
+    self.close()
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\proactor_events.py", line 697, in close
+    self._close_self_pipe()
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\proactor_events.py", line 779, in _close_self_pipe
+    self._ssock.close()
+    ^^^^^^^^^^^
+AttributeError: 'ProactorEventLoop' object has no attribute '_ssock'
+Exception ignored in: <function BaseEventLoop.__del__ at 0x000002B9342962A0>
+Traceback (most recent call last):
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\base_events.py", line 732, in __del__
+    self.close()
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\proactor_events.py", line 697, in close
+    self._close_self_pipe()
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\proactor_events.py", line 779, in _close_self_pipe
+    self._ssock.close()
+    ^^^^^^^^^^^
+AttributeError: 'ProactorEventLoop' object has no attribute '_ssock'
+.E.E.E.E.E.E.E.E.E.E.E.EFEFEFE.E.E.E.E.E.E.E.E.E                         [100%]
+=================================== ERRORS ====================================
+_ ERROR at teardown of test_predeclared_cases_and_labels_never_enter_retrieve_inputs _
+
+_args = (<socket.socket [closed] fd=-1, family=2, type=1, proto=0>, ('127.0.0.1', 52652))
+_kwargs = {}
+
+    def denied(*_args, **_kwargs):
+>       raise AssertionError("This suite cannot contact a provider or database")
+E       AssertionError: This suite cannot contact a provider or database
+
+tests\unit\test_ag02_semantic_qualification.py:18: AssertionError
+____ ERROR at teardown of test_map_uses_existing_all_node_navigation_only _____
+
+_args = (<socket.socket [closed] fd=-1, family=2, type=1, proto=0>, ('127.0.0.1', 52655))
+_kwargs = {}
+
+    def denied(*_args, **_kwargs):
+>       raise AssertionError("This suite cannot contact a provider or database")
+E       AssertionError: This suite cannot contact a provider or database
+
+tests\unit\test_ag02_semantic_qualification.py:18: AssertionError
+_ ERROR at teardown of test_profile_rejects_unreviewed_destinations_settings_or_budget[endpoint-https://example.invalid/chat/completions] _
+
+_args = (<socket.socket [closed] fd=-1, family=2, type=1, proto=0>, ('127.0.0.1', 52658))
+_kwargs = {}
+
+    def denied(*_args, **_kwargs):
+>       raise AssertionError("This suite cannot contact a provider or database")
+E       AssertionError: This suite cannot contact a provider or database
+
+tests\unit\test_ag02_semantic_qualification.py:18: AssertionError
+_ ERROR at teardown of test_profile_rejects_unreviewed_destinations_settings_or_budget[model-unlisted-model] _
+
+_args = (<socket.socket [closed] fd=-1, family=2, type=1, proto=0>, ('127.0.0.1', 52661))
+_kwargs = {}
+
+    def denied(*_args, **_kwargs):
+>       raise AssertionError("This suite cannot contact a provider or database")
+E       AssertionError: This suite cannot contact a provider or database
+
+tests\unit\test_ag02_semantic_qualification.py:18: AssertionError
+_ ERROR at teardown of test_profile_rejects_unreviewed_destinations_settings_or_budget[max_requests-161] _
+
+_args = (<socket.socket [closed] fd=-1, family=2, type=1, proto=0>, ('127.0.0.1', 52664))
+_kwargs = {}
+
+    def denied(*_args, **_kwargs):
+>       raise AssertionError("This suite cannot contact a provider or database")
+E       AssertionError: This suite cannot contact a provider or database
+
+tests\unit\test_ag02_semantic_qualification.py:18: AssertionError
+_ ERROR at teardown of test_profile_rejects_unreviewed_destinations_settings_or_budget[max_requests-0] _
+
+_args = (<socket.socket [closed] fd=-1, family=2, type=1, proto=0>, ('127.0.0.1', 52667))
+_kwargs = {}
+
+    def denied(*_args, **_kwargs):
+>       raise AssertionError("This suite cannot contact a provider or database")
+E       AssertionError: This suite cannot contact a provider or database
+
+tests\unit\test_ag02_semantic_qualification.py:18: AssertionError
+_ ERROR at teardown of test_profile_rejects_unreviewed_destinations_settings_or_budget[max_total_completion_tokens-204801] _
+
+_args = (<socket.socket [closed] fd=-1, family=2, type=1, proto=0>, ('127.0.0.1', 52670))
+_kwargs = {}
+
+    def denied(*_args, **_kwargs):
+>       raise AssertionError("This suite cannot contact a provider or database")
+E       AssertionError: This suite cannot contact a provider or database
+
+tests\unit\test_ag02_semantic_qualification.py:18: AssertionError
+_ ERROR at teardown of test_profile_rejects_unreviewed_destinations_settings_or_budget[temperature-0.8] _
+
+_args = (<socket.socket [closed] fd=-1, family=2, type=1, proto=0>, ('127.0.0.1', 52673))
+_kwargs = {}
+
+    def denied(*_args, **_kwargs):
+>       raise AssertionError("This suite cannot contact a provider or database")
+E       AssertionError: This suite cannot contact a provider or database
+
+tests\unit\test_ag02_semantic_qualification.py:18: AssertionError
+_ ERROR at teardown of test_profile_rejects_unreviewed_destinations_settings_or_budget[max_tokens-512] _
+
+_args = (<socket.socket [closed] fd=-1, family=2, type=1, proto=0>, ('127.0.0.1', 52676))
+_kwargs = {}
+
+    def denied(*_args, **_kwargs):
+>       raise AssertionError("This suite cannot contact a provider or database")
+E       AssertionError: This suite cannot contact a provider or database
+
+tests\unit\test_ag02_semantic_qualification.py:18: AssertionError
+___ ERROR at teardown of test_unexpected_reasoning_reserve_requires_replan ____
+
+_args = (<socket.socket [closed] fd=-1, family=2, type=1, proto=0>, ('127.0.0.1', 52679))
+_kwargs = {}
+
+    def denied(*_args, **_kwargs):
+>       raise AssertionError("This suite cannot contact a provider or database")
+E       AssertionError: This suite cannot contact a provider or database
+
+tests\unit\test_ag02_semantic_qualification.py:18: AssertionError
+_ ERROR at teardown of test_dry_run_does_not_initialize_provider_or_read_key __
+
+_args = (<socket.socket [closed] fd=-1, family=2, type=1, proto=0>, ('127.0.0.1', 52682))
+_kwargs = {}
+
+    def denied(*_args, **_kwargs):
+>       raise AssertionError("This suite cannot contact a provider or database")
+E       AssertionError: This suite cannot contact a provider or database
+
+tests\unit\test_ag02_semantic_qualification.py:18: AssertionError
+_______ ERROR at teardown of test_existing_output_cannot_be_overwritten _______
+
+_args = (<socket.socket [closed] fd=-1, family=2, type=1, proto=0>, ('127.0.0.1', 52685))
+_kwargs = {}
+
+    def denied(*_args, **_kwargs):
+>       raise AssertionError("This suite cannot contact a provider or database")
+E       AssertionError: This suite cannot contact a provider or database
+
+tests\unit\test_ag02_semantic_qualification.py:18: AssertionError
+_ ERROR at teardown of test_real_adapter_two_rounds_capture_original_query_evidence_answer_and_profile _
+
+_args = (<socket.socket [closed] fd=-1, family=2, type=1, proto=0>, ('127.0.0.1', 52688))
+_kwargs = {}
+
+    def denied(*_args, **_kwargs):
+>       raise AssertionError("This suite cannot contact a provider or database")
+E       AssertionError: This suite cannot contact a provider or database
+
+tests\unit\test_ag02_semantic_qualification.py:18: AssertionError
+------------------------------ Captured log call ------------------------------
+WARNING  app.infrastructure.llm.groq:groq.py:846 Groq retry 1/2 after 0.32s — Connection error.
+WARNING  app.infrastructure.llm.groq:groq.py:846 Groq retry 2/2 after 0.33s — Connection error.
+ERROR    app.infrastructure.llm.groq:groq.py:852 Groq LLM streaming failed after retries: Connection error.
+_ ERROR at teardown of test_wrong_final_answer_cannot_be_counted_as_semantic_success _
+
+_args = (<socket.socket [closed] fd=-1, family=2, type=1, proto=0>, ('127.0.0.1', 52691))
+_kwargs = {}
+
+    def denied(*_args, **_kwargs):
+>       raise AssertionError("This suite cannot contact a provider or database")
+E       AssertionError: This suite cannot contact a provider or database
+
+tests\unit\test_ag02_semantic_qualification.py:18: AssertionError
+------------------------------ Captured log call ------------------------------
+WARNING  app.infrastructure.llm.groq:groq.py:846 Groq retry 1/2 after 0.28s — Connection error.
+WARNING  app.infrastructure.llm.groq:groq.py:846 Groq retry 2/2 after 0.69s — Connection error.
+ERROR    app.infrastructure.llm.groq:groq.py:852 Groq LLM streaming failed after retries: Connection error.
+_ ERROR at teardown of test_provider_truncation_stays_failed_with_original_output _
+
+_args = (<socket.socket [closed] fd=-1, family=2, type=1, proto=0>, ('127.0.0.1', 52694))
+_kwargs = {}
+
+    def denied(*_args, **_kwargs):
+>       raise AssertionError("This suite cannot contact a provider or database")
+E       AssertionError: This suite cannot contact a provider or database
+
+tests\unit\test_ag02_semantic_qualification.py:18: AssertionError
+------------------------------ Captured log call ------------------------------
+WARNING  app.infrastructure.llm.groq:groq.py:846 Groq retry 1/2 after 0.36s — Connection error.
+WARNING  app.infrastructure.llm.groq:groq.py:846 Groq retry 2/2 after 0.32s — Connection error.
+ERROR    app.infrastructure.llm.groq:groq.py:852 Groq LLM streaming failed after retries: Connection error.
+_ ERROR at teardown of test_transport_refuses_unreviewed_wire_request_before_dispatch[mutation0-destination_or_method] _
+
+_args = (<socket.socket [closed] fd=-1, family=2, type=1, proto=0>, ('127.0.0.1', 52697))
+_kwargs = {}
+
+    def denied(*_args, **_kwargs):
+>       raise AssertionError("This suite cannot contact a provider or database")
+E       AssertionError: This suite cannot contact a provider or database
+
+tests\unit\test_ag02_semantic_qualification.py:18: AssertionError
+_ ERROR at teardown of test_transport_refuses_unreviewed_wire_request_before_dispatch[mutation1-destination_or_method] _
+
+_args = (<socket.socket [closed] fd=-1, family=2, type=1, proto=0>, ('127.0.0.1', 52700))
+_kwargs = {}
+
+    def denied(*_args, **_kwargs):
+>       raise AssertionError("This suite cannot contact a provider or database")
+E       AssertionError: This suite cannot contact a provider or database
+
+tests\unit\test_ag02_semantic_qualification.py:18: AssertionError
+_ ERROR at teardown of test_transport_refuses_unreviewed_wire_request_before_dispatch[mutation2-completion_per_request] _
+
+_args = (<socket.socket [closed] fd=-1, family=2, type=1, proto=0>, ('127.0.0.1', 52703))
+_kwargs = {}
+
+    def denied(*_args, **_kwargs):
+>       raise AssertionError("This suite cannot contact a provider or database")
+E       AssertionError: This suite cannot contact a provider or database
+
+tests\unit\test_ag02_semantic_qualification.py:18: AssertionError
+_ ERROR at teardown of test_transport_refuses_unreviewed_wire_request_before_dispatch[mutation3-model_or_stream] _
+
+_args = (<socket.socket [closed] fd=-1, family=2, type=1, proto=0>, ('127.0.0.1', 52706))
+_kwargs = {}
+
+    def denied(*_args, **_kwargs):
+>       raise AssertionError("This suite cannot contact a provider or database")
+E       AssertionError: This suite cannot contact a provider or database
+
+tests\unit\test_ag02_semantic_qualification.py:18: AssertionError
+_ ERROR at teardown of test_transport_refuses_unreviewed_wire_request_before_dispatch[mutation4-original_question_missing] _
+
+_args = (<socket.socket [closed] fd=-1, family=2, type=1, proto=0>, ('127.0.0.1', 52709))
+_kwargs = {}
+
+    def denied(*_args, **_kwargs):
+>       raise AssertionError("This suite cannot contact a provider or database")
+E       AssertionError: This suite cannot contact a provider or database
+
+tests\unit\test_ag02_semantic_qualification.py:18: AssertionError
+_ ERROR at teardown of test_transport_refuses_unreviewed_wire_request_before_dispatch[mutation5-unoffered_action_tool] _
+
+_args = (<socket.socket [closed] fd=-1, family=2, type=1, proto=0>, ('127.0.0.1', 52712))
+_kwargs = {}
+
+    def denied(*_args, **_kwargs):
+>       raise AssertionError("This suite cannot contact a provider or database")
+E       AssertionError: This suite cannot contact a provider or database
+
+tests\unit\test_ag02_semantic_qualification.py:18: AssertionError
+_ ERROR at teardown of test_retry_and_wire_input_budgets_apply_before_dispatch[max_requests] _
+
+_args = (<socket.socket [closed] fd=-1, family=2, type=1, proto=0>, ('127.0.0.1', 52715))
+_kwargs = {}
+
+    def denied(*_args, **_kwargs):
+>       raise AssertionError("This suite cannot contact a provider or database")
+E       AssertionError: This suite cannot contact a provider or database
+
+tests\unit\test_ag02_semantic_qualification.py:18: AssertionError
+_ ERROR at teardown of test_retry_and_wire_input_budgets_apply_before_dispatch[max_total_completion_tokens] _
+
+_args = (<socket.socket [closed] fd=-1, family=2, type=1, proto=0>, ('127.0.0.1', 52718))
+_kwargs = {}
+
+    def denied(*_args, **_kwargs):
+>       raise AssertionError("This suite cannot contact a provider or database")
+E       AssertionError: This suite cannot contact a provider or database
+
+tests\unit\test_ag02_semantic_qualification.py:18: AssertionError
+_ ERROR at teardown of test_retry_and_wire_input_budgets_apply_before_dispatch[max_input_bytes] _
+
+_args = (<socket.socket [closed] fd=-1, family=2, type=1, proto=0>, ('127.0.0.1', 52721))
+_kwargs = {}
+
+    def denied(*_args, **_kwargs):
+>       raise AssertionError("This suite cannot contact a provider or database")
+E       AssertionError: This suite cannot contact a provider or database
+
+tests\unit\test_ag02_semantic_qualification.py:18: AssertionError
+================================== FAILURES ===================================
+_ test_real_adapter_two_rounds_capture_original_query_evidence_answer_and_profile _
+
+profile = Profile(model='openai/gpt-oss-20b', knowledge_mode='retrieve', endpoint='https://api.groq.com/openai/v1/chat/completio...ens=204800, max_input_bytes=65536, max_total_input_bytes=10485760, case_timeout_seconds=30, total_timeout_seconds=2400)
+rt = namespace(models={'openai/gpt-oss-20b'}, Message=<class 'app.domain.models.conversation.Message'>, MessageRole=<enum '... Use the current source facts provided for the caller's question to answer; do not quote these summaries as evidence.")
+
+    async def test_real_adapter_two_rounds_capture_original_query_evidence_answer_and_profile(profile, rt):
+        calls = []
+        def handler(request):
+            payload = json.loads(request.content)
+            calls.append(payload)
+            return sse(tool=True) if len(calls) == 1 else sse(text="An approved refund takes five working days.")
+        transport = q.BoundedTransport(httpx.MockTransport(handler), profile)
+        provider = await q.build_provider(rt, profile, transport, "synthetic-not-a-real-key")
+        try:
+            result = await q.run_case(provider, transport, profile, rt, case())
+        finally:
+            await provider.cleanup()
+>       assert result["completed"] and len(calls) == 2
+E       assert (False)
+
+tests\unit\test_ag02_semantic_qualification.py:131: AssertionError
+------------------------------ Captured log call ------------------------------
+WARNING  app.infrastructure.llm.groq:groq.py:846 Groq retry 1/2 after 0.32s — Connection error.
+WARNING  app.infrastructure.llm.groq:groq.py:846 Groq retry 2/2 after 0.33s — Connection error.
+ERROR    app.infrastructure.llm.groq:groq.py:852 Groq LLM streaming failed after retries: Connection error.
+________ test_wrong_final_answer_cannot_be_counted_as_semantic_success ________
+
+profile = Profile(model='openai/gpt-oss-20b', knowledge_mode='retrieve', endpoint='https://api.groq.com/openai/v1/chat/completio...ens=204800, max_input_bytes=65536, max_total_input_bytes=10485760, case_timeout_seconds=30, total_timeout_seconds=2400)
+rt = namespace(models={'openai/gpt-oss-20b'}, Message=<class 'app.domain.models.conversation.Message'>, MessageRole=<enum '... Use the current source facts provided for the caller's question to answer; do not quote these summaries as evidence.")
+
+    async def test_wrong_final_answer_cannot_be_counted_as_semantic_success(profile, rt):
+        calls = []
+        def handler(request):
+            calls.append(request)
+            return sse(tool=True) if len(calls) == 1 else sse(text="Refunds arrive instantly without approval.")
+        transport = q.BoundedTransport(httpx.MockTransport(handler), profile)
+        provider = await q.build_provider(rt, profile, transport, "synthetic-not-a-real-key")
+        try:
+            result = await q.run_case(provider, transport, profile, rt, case())
+        finally:
+            await provider.cleanup()
+>       assert result["mechanical"]["matched_expected_passage"] is True
+E       assert False is True
+
+tests\unit\test_ag02_semantic_qualification.py:157: AssertionError
+------------------------------ Captured log call ------------------------------
+WARNING  app.infrastructure.llm.groq:groq.py:846 Groq retry 1/2 after 0.28s — Connection error.
+WARNING  app.infrastructure.llm.groq:groq.py:846 Groq retry 2/2 after 0.69s — Connection error.
+ERROR    app.infrastructure.llm.groq:groq.py:852 Groq LLM streaming failed after retries: Connection error.
+_________ test_provider_truncation_stays_failed_with_original_output __________
+
+profile = Profile(model='openai/gpt-oss-20b', knowledge_mode='retrieve', endpoint='https://api.groq.com/openai/v1/chat/completio...ens=204800, max_input_bytes=65536, max_total_input_bytes=10485760, case_timeout_seconds=30, total_timeout_seconds=2400)
+rt = namespace(models={'openai/gpt-oss-20b'}, Message=<class 'app.domain.models.conversation.Message'>, MessageRole=<enum '... Use the current source facts provided for the caller's question to answer; do not quote these summaries as evidence.")
+
+    async def test_provider_truncation_stays_failed_with_original_output(profile, rt):
+        transport = q.BoundedTransport(httpx.MockTransport(lambda _request: sse(text="Partial", finish="length")), profile)
+        provider = await q.build_provider(rt, profile, transport, "synthetic-not-a-real-key")
+        try:
+            result = await q.run_case(provider, transport, profile, rt, case())
+        finally:
+            await provider.cleanup()
+>       assert not result["completed"] and result["error_type"] == "LLMStreamStalled"
+E       AssertionError: assert (not False and 'RuntimeError' == 'LLMStreamStalled'
+E         - LLMStreamStalled
+E         + RuntimeError)
+
+tests\unit\test_ag02_semantic_qualification.py:169: AssertionError
+------------------------------ Captured log call ------------------------------
+WARNING  app.infrastructure.llm.groq:groq.py:846 Groq retry 1/2 after 0.36s — Connection error.
+WARNING  app.infrastructure.llm.groq:groq.py:846 Groq retry 2/2 after 0.32s — Connection error.
+ERROR    app.infrastructure.llm.groq:groq.py:852 Groq LLM streaming failed after retries: Connection error.
+============================== warnings summary ===============================
+tests/unit/test_ag02_semantic_qualification.py::test_dry_run_does_not_initialize_provider_or_read_key
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\backend\.venv\Lib\site-packages\_pytest\unraisableexception.py:78: PytestUnraisableExceptionWarning: Exception ignored in: <function BaseEventLoop.__del__ at 0x000002B9342962A0>
+  
+  Traceback (most recent call last):
+    File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\copy.py", line 242, in _keep_alive
+      memo[id(memo)].append(x)
+      ~~~~^^^^^^^^^^
+  KeyError: 2994546728448
+  
+  During handling of the above exception, another exception occurred:
+  
+  Traceback (most recent call last):
+    File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\base_events.py", line 732, in __del__
+      self.close()
+    File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\proactor_events.py", line 697, in close
+      self._close_self_pipe()
+    File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\proactor_events.py", line 779, in _close_self_pipe
+      self._ssock.close()
+      ^^^^^^^^^^^
+  AttributeError: 'ProactorEventLoop' object has no attribute '_ssock'
+  
+    warnings.warn(pytest.PytestUnraisableExceptionWarning(msg))
+
+tests/unit/test_ag02_semantic_qualification.py::test_real_adapter_two_rounds_capture_original_query_evidence_answer_and_profile
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\backend\.venv\Lib\site-packages\_pytest\unraisableexception.py:78: PytestUnraisableExceptionWarning: Exception ignored in: <function BaseEventLoop.__del__ at 0x000002B9342962A0>
+  
+  Traceback (most recent call last):
+    File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\base_events.py", line 732, in __del__
+      self.close()
+    File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\proactor_events.py", line 697, in close
+      self._close_self_pipe()
+    File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\proactor_events.py", line 779, in _close_self_pipe
+      self._ssock.close()
+      ^^^^^^^^^^^
+  AttributeError: 'ProactorEventLoop' object has no attribute '_ssock'
+  
+    warnings.warn(pytest.PytestUnraisableExceptionWarning(msg))
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/unit/test_ag02_semantic_qualification.py::test_real_adapter_two_rounds_capture_original_query_evidence_answer_and_profile
+FAILED tests/unit/test_ag02_semantic_qualification.py::test_wrong_final_answer_cannot_be_counted_as_semantic_success
+FAILED tests/unit/test_ag02_semantic_qualification.py::test_provider_truncation_stays_failed_with_original_output
+ERROR tests/unit/test_ag02_semantic_qualification.py::test_predeclared_cases_and_labels_never_enter_retrieve_inputs
+ERROR tests/unit/test_ag02_semantic_qualification.py::test_map_uses_existing_all_node_navigation_only
+ERROR tests/unit/test_ag02_semantic_qualification.py::test_profile_rejects_unreviewed_destinations_settings_or_budget[endpoint-https://example.invalid/chat/completions]
+ERROR tests/unit/test_ag02_semantic_qualification.py::test_profile_rejects_unreviewed_destinations_settings_or_budget[model-unlisted-model]
+ERROR tests/unit/test_ag02_semantic_qualification.py::test_profile_rejects_unreviewed_destinations_settings_or_budget[max_requests-161]
+ERROR tests/unit/test_ag02_semantic_qualification.py::test_profile_rejects_unreviewed_destinations_settings_or_budget[max_requests-0]
+ERROR tests/unit/test_ag02_semantic_qualification.py::test_profile_rejects_unreviewed_destinations_settings_or_budget[max_total_completion_tokens-204801]
+ERROR tests/unit/test_ag02_semantic_qualification.py::test_profile_rejects_unreviewed_destinations_settings_or_budget[temperature-0.8]
+ERROR tests/unit/test_ag02_semantic_qualification.py::test_profile_rejects_unreviewed_destinations_settings_or_budget[max_tokens-512]
+ERROR tests/unit/test_ag02_semantic_qualification.py::test_unexpected_reasoning_reserve_requires_replan
+ERROR tests/unit/test_ag02_semantic_qualification.py::test_dry_run_does_not_initialize_provider_or_read_key
+ERROR tests/unit/test_ag02_semantic_qualification.py::test_existing_output_cannot_be_overwritten
+ERROR tests/unit/test_ag02_semantic_qualification.py::test_real_adapter_two_rounds_capture_original_query_evidence_answer_and_profile
+ERROR tests/unit/test_ag02_semantic_qualification.py::test_wrong_final_answer_cannot_be_counted_as_semantic_success
+ERROR tests/unit/test_ag02_semantic_qualification.py::test_provider_truncation_stays_failed_with_original_output
+ERROR tests/unit/test_ag02_semantic_qualification.py::test_transport_refuses_unreviewed_wire_request_before_dispatch[mutation0-destination_or_method]
+ERROR tests/unit/test_ag02_semantic_qualification.py::test_transport_refuses_unreviewed_wire_request_before_dispatch[mutation1-destination_or_method]
+ERROR tests/unit/test_ag02_semantic_qualification.py::test_transport_refuses_unreviewed_wire_request_before_dispatch[mutation2-completion_per_request]
+ERROR tests/unit/test_ag02_semantic_qualification.py::test_transport_refuses_unreviewed_wire_request_before_dispatch[mutation3-model_or_stream]
+ERROR tests/unit/test_ag02_semantic_qualification.py::test_transport_refuses_unreviewed_wire_request_before_dispatch[mutation4-original_question_missing]
+ERROR tests/unit/test_ag02_semantic_qualification.py::test_transport_refuses_unreviewed_wire_request_before_dispatch[mutation5-unoffered_action_tool]
+ERROR tests/unit/test_ag02_semantic_qualification.py::test_retry_and_wire_input_budgets_apply_before_dispatch[max_requests]
+ERROR tests/unit/test_ag02_semantic_qualification.py::test_retry_and_wire_input_budgets_apply_before_dispatch[max_total_completion_tokens]
+ERROR tests/unit/test_ag02_semantic_qualification.py::test_retry_and_wire_input_budgets_apply_before_dispatch[max_input_bytes]
+3 failed, 21 passed, 2 warnings, 24 errors in 8.28s
+Exception ignored in: <function BaseEventLoop.__del__ at 0x000002B9342962A0>
+Traceback (most recent call last):
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\base_events.py", line 732, in __del__
+    self.close()
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\proactor_events.py", line 697, in close
+    self._close_self_pipe()
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\proactor_events.py", line 779, in _close_self_pipe
+    self._ssock.close()
+    ^^^^^^^^^^^
+AttributeError: 'ProactorEventLoop' object has no attribute '_ssock'
+Exception ignored in: <function BaseEventLoop.__del__ at 0x000002B9342962A0>
+Traceback (most recent call last):
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\base_events.py", line 732, in __del__
+    self.close()
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\proactor_events.py", line 697, in close
+    self._close_self_pipe()
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\proactor_events.py", line 779, in _close_self_pipe
+    self._ssock.close()
+    ^^^^^^^^^^^
+AttributeError: 'ProactorEventLoop' object has no attribute '_ssock'
+Exception ignored in: <function BaseEventLoop.__del__ at 0x000002B9342962A0>
+Traceback (most recent call last):
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\base_events.py", line 732, in __del__
+    self.close()
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\proactor_events.py", line 697, in close
+    self._close_self_pipe()
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\proactor_events.py", line 779, in _close_self_pipe
+    self._ssock.close()
+    ^^^^^^^^^^^
+AttributeError: 'ProactorEventLoop' object has no attribute '_ssock'
