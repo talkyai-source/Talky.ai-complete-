@@ -7,6 +7,14 @@ from app.domain.services.voice_pipeline.contact_capture import (
 )
 
 
+def contact_entries(state, kind: CaptureKind) -> dict[str, Optional[ContactCaptureState]]:
+    """Stable existing lead keys; withdrawn entries retain their position."""
+    captures = (*(getattr(state, f"earlier_{kind}_captures", ()) or ()),
+                getattr(state, f"{kind}_capture", None))
+    return {kind if index == 0 else f"{kind}_{index + 1}": capture
+            for index, capture in enumerate(captures)}
+
+
 @dataclass(frozen=True)
 class CallState:
     """Immutable contact slots, retaining historical storage fields."""

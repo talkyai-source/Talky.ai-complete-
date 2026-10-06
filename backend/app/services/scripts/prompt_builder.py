@@ -1,27 +1,30 @@
 """Compose neutral contact facts for the conversational model."""
 import json
 
-from app.services.scripts.call_state_tracker import CallState
+from app.services.scripts.call_state_tracker import CallState, contact_entries
 
 
 def compose_system_prompt(base_prompt: str, state: CallState, *, has_callback_executor: bool = False) -> str:
     """Render known contact values/statuses without prescribing a dialogue."""
     facts = {}
     for kind in ("email", "phone"):
-        capture = getattr(state, f"{kind}_capture", None)
+        entries = contact_entries(state, kind)
+        current_key = next(reversed(entries))
+        capture = entries[current_key]
         value = getattr(capture, "normalized_value", None) if capture is not None else getattr(state, kind, None)
         status = getattr(capture, "status", None)
         status = getattr(status, "value", status)
         if status is None and value:
             status = "confirmed" if getattr(state, f"{kind}_confirmed", False) else "pending"
         if value or status:
-            facts[kind] = {"value": value, "status": status or "unknown"}
+            facts[kind] = {"field_key": current_key, "value": value, "status": status or "unknown"}
             if not value and getattr(capture, "raw_value", None):
                 facts[kind]["caller_quote"] = capture.raw_value
-        earlier = [item.normalized_value for item in getattr(state, f"earlier_{kind}_captures", ()) or ()
-                   if getattr(item, "normalized_value", None)]
+        earlier = [{"field_key": key, "value": item.normalized_value, "status": item.validation_status,
+                    **({"caller_quote": item.raw_value} if not item.normalized_value and item.raw_value else {})}
+                   for key, item in entries.items() if key != current_key and item is not None]
         if earlier:
-            facts[f"earlier_confirmed_{kind}"] = earlier
+            facts[f"earlier_{kind}"] = earlier
     line = getattr(state, "line_phone", None)
     if line:
         facts["call_line_number_unconfirmed"] = line

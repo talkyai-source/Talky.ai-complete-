@@ -10,22 +10,13 @@ empty state on every call, permanently. This module is the missing writer.
 
 WHAT COUNTS AS AN ESTABLISHED FACT
 ----------------------------------
-``CallState`` (app.services.scripts.call_state_tracker) is the per-call sticky
-slot store the turn loop already maintains. Every one of its slots is derived
-by parsing THE CALLER'S OWN WORDS — a spoken email, a spoken number, a spoken
-day, a yes/no on an open question. Nothing in it is a model inference. So the
-provenance for everything written here is ``caller_stated``, never
-``agent_inferred``; writing a guess under a caller's name is precisely what §7
-forbids.
-
-``email`` and ``phone`` additionally carry the read-back confirmation state and
-audit values from the confirm-before-commit machine.  Since 2026-09-28 (owner
-decision) a value the machine parsed out of the caller's words and is reading
-back (``awaiting_confirmation``) is written too, as ``confirmed=FALSE``, so a
-number the caller gave is not lost when the read-back never completes.
-Caller-owned clarification, invalid and cancelled transitions are recorded as
-NULL values with explicit status/source evidence. Default or agent-seeded
-modes never create those rows. Only email and phone are captured live.
+The shared record_contact tool stores the model's interpretation of caller
+words with server-owned source/revision evidence. That attribution is not
+proof that the interpretation is correct. Pending caller-owned email/phone
+values are visible with confirmed=FALSE; later caller confirmation is separate.
+Clarification, invalid and cancelled transitions retain NULL values and status
+rather than disappearing. Current and earlier contacts use the same rules.
+Other lead fields remain handled by post-call extraction.
 
 WHAT MUST NOT HAPPEN
 --------------------
@@ -60,6 +51,8 @@ import json
 from dataclasses import asdict
 from typing import Any, Optional
 from uuid import UUID
+
+from app.services.scripts.call_state_tracker import contact_entries
 
 logger = logging.getLogger(__name__)
 
@@ -198,19 +191,6 @@ def contact_field_key(captured_slots: Any, kind: str) -> str:
     return kind if not earlier else f"{kind}_{len(earlier) + 1}"
 
 
-def _confirmed_row(capture: Any, field_type: str) -> dict:
-    return {
-        "value": capture.normalized_value,
-        "field_type": field_type,
-        "confirmed": True,
-        "raw_value": capture.raw_value,
-        "normalized_value": capture.normalized_value,
-        "validation_status": capture.validation_status,
-        "confirmed_at": capture.confirmed_at,
-        "evidence": contact_evidence(capture),
-    }
-
-
 def contact_evidence(capture: Any) -> dict:
     return {
         "confirmation_evidence": getattr(capture, "confirmation_evidence", None),
@@ -219,23 +199,37 @@ def contact_evidence(capture: Any) -> dict:
     }
 
 
-def snapshot_slots(captured_slots: Any) -> dict[str, dict]:
-    """The facts this call has established, keyed by ``field_key``.
+def _capture_row(capture: Any, field_type: str) -> dict | None:
+    from app.domain.services.voice_pipeline.contact_capture import CaptureStatus
 
-    Empty for most turns — a caller who has not yet given an email, a number, a
-    day or a yes/no has established nothing, and §7's "unknown" is represented
-    by the ABSENCE of a row, not by writing the string.
-    """
+    if (capture.validation_status in {"needs_clarification", "invalid", "cancelled"}
+            and capture.from_caller and (capture.value_source is not None or capture.status_source is not None)):
+        return {"value": None, "field_type": field_type, "confirmed": False,
+                "raw_value": capture.raw_value, "normalized_value": None,
+                "validation_status": capture.validation_status, "confirmed_at": None,
+                "evidence": contact_evidence(capture)}
+    if capture.validation_status not in _KEPT_CAPTURE_STATES or not capture.normalized_value:
+        return None
+    confirmed = capture.status is CaptureStatus.CONFIRMED
+    if not confirmed and not capture.from_caller:
+        return None
+    return {"value": capture.normalized_value, "field_type": field_type,
+            "confirmed": confirmed, "raw_value": capture.raw_value,
+            "normalized_value": capture.normalized_value,
+            "validation_status": capture.validation_status,
+            "confirmed_at": capture.confirmed_at if confirmed else None,
+            "evidence": contact_evidence(capture)}
+
+
+def snapshot_slots(captured_slots: Any) -> dict[str, dict]:
+    """Caller-owned contact snapshots keyed by stable lead field keys."""
     out: dict[str, dict] = {}
     if captured_slots is None:
         return out
     for kind in ("email", "phone"):
-        for index, earlier in enumerate(
-            getattr(captured_slots, f"earlier_{kind}_captures", ()) or ()
-        ):
-            if getattr(earlier, "normalized_value", None):
-                key = kind if index == 0 else f"{kind}_{index + 1}"
-                out[key] = _confirmed_row(earlier, kind)
+        for key, capture in contact_entries(captured_slots, kind).items():
+            if capture is not None and (row := _capture_row(capture, kind)) is not None:
+                out[key] = row
     for attr, field_key, field_type, confirmed_attr in SLOT_FIELDS:
         capture = (
             getattr(captured_slots, f"{field_key}_capture", None)
@@ -245,44 +239,7 @@ def snapshot_slots(captured_slots: Any) -> dict[str, dict]:
         if field_key in {"email", "phone"}:
             field_key = contact_field_key(captured_slots, field_key)
         if capture is not None:
-            from app.domain.services.voice_pipeline.contact_capture import (
-                CaptureStatus,
-            )
-
-            if (capture.validation_status in {"needs_clarification", "invalid", "cancelled"}
-                    and capture.from_caller and (capture.value_source is not None or capture.status_source is not None)):
-                # A real caller-owned transition can be recorded without
-                # inventing a usable value. Default/agent-seeded modes have no
-                # source ownership and deliberately create no row.
-                out[field_key] = {"value": None, "field_type": field_type, "confirmed": False,
-                    "raw_value": capture.raw_value, "normalized_value": None,
-                    "validation_status": capture.validation_status, "confirmed_at": None,
-                    "evidence": contact_evidence(capture)}
-                continue
-
-            # A value the machine parsed from the caller's words is kept while
-            # it is confirmed or being read back; confirmed only once approved.
-            if (
-                capture.validation_status not in _KEPT_CAPTURE_STATES
-                or not capture.normalized_value
-            ):
-                continue
-            confirmed = capture.status is CaptureStatus.CONFIRMED
-            if not confirmed and not getattr(capture, "from_caller", False):
-                # Never invented: a pending value the caller did not say
-                # (e.g. the agent's own assembled read-back) waits for a yes.
-                continue
-            out[field_key] = {
-                "value": capture.normalized_value,
-                "field_type": field_type,
-                "confirmed": confirmed,
-                "raw_value": capture.raw_value,
-                "normalized_value": capture.normalized_value,
-                "validation_status": capture.validation_status,
-                "confirmed_at": capture.confirmed_at if confirmed else None,
-                "evidence": contact_evidence(capture),
-            }
-            continue
+            continue  # Already projected above, including earlier entries.
         raw = getattr(captured_slots, attr, None)
         if raw is None:
             continue
@@ -299,11 +256,8 @@ def snapshot_slots(captured_slots: Any) -> dict[str, dict]:
             else False
         )
         if confirmed_attr and not confirmed:
-            # Contact fields (email, phone) persist ONLY after the prospect has
-            # confirmed the read-back. The pending value lives in CallState for
-            # the confirm loop; writing it early put a row in the CRM before
-            # anyone agreed it, and a later mis-hearing could replace a
-            # confirmed value while inheriting its confirmed flag (2026-09-02).
+            # Historical scalar-only contacts lack caller source evidence;
+            # retain their existing confirmed-only persistence behavior.
             continue
         out[field_key] = {
             "value": value,
@@ -338,34 +292,31 @@ def pending_contact_revocations(session: Any) -> dict[str, str]:
     revocations: dict[str, str] = {}
     capture_keys = set()
     for kind in ("email", "phone"):
-        capture_keys.update(kind if index == 0 else f"{kind}_{index + 1}"
-            for index, _ in enumerate(getattr(captured_slots, f"earlier_{kind}_captures", ()) or ()))
-        capture = getattr(captured_slots, f"{kind}_capture", None)
-        field_key = contact_field_key(captured_slots, kind)
-        capture_keys.add(field_key)
-        previous = written.get(field_key)
-        if previous is None or capture is None:
-            continue
-        previous_value = previous[0] if isinstance(previous, tuple) else None
-        previous_confirmed = bool(previous[1]) if isinstance(previous, tuple) else True
-        if (previous_value is None and not previous_confirmed and len(previous) > 4
-                and previous[4] == capture.validation_status):
-            continue  # The same durable tombstone was already acknowledged.
-        if capture.status in (CaptureStatus.CANCELLED, CaptureStatus.INVALID):
-            withdrawn = True
-        elif capture.status is CaptureStatus.NEEDS_CLARIFICATION:
-            # A rejected read-back clears normalized_value ("no, that's wrong");
-            # an exhausted unclear loop keeps it — the caller never disowned
-            # the value they gave, so its unconfirmed row stays.
-            withdrawn = (
-                previous_confirmed
-                or not capture.normalized_value
-                or capture.normalized_value != previous_value
-            )
-        else:
-            withdrawn = previous_confirmed and capture.status is not CaptureStatus.CONFIRMED
-        if withdrawn:
-            revocations[field_key] = capture.validation_status
+        for field_key, capture in contact_entries(captured_slots, kind).items():
+            capture_keys.add(field_key)
+            previous = written.get(field_key)
+            if previous is None or capture is None:
+                continue
+            previous_value = previous[0] if isinstance(previous, tuple) else None
+            previous_confirmed = bool(previous[1]) if isinstance(previous, tuple) else True
+            if (previous_value is None and not previous_confirmed and len(previous) > 4
+                    and previous[4] == capture.validation_status):
+                continue  # The same durable tombstone was already acknowledged.
+            if capture.status in (CaptureStatus.CANCELLED, CaptureStatus.INVALID):
+                withdrawn = True
+            elif capture.status is CaptureStatus.NEEDS_CLARIFICATION:
+                # A rejected read-back clears normalized_value ("no, that's wrong");
+                # an exhausted unclear loop keeps it — the caller never disowned
+                # the value they gave, so its unconfirmed row stays.
+                withdrawn = (
+                    previous_confirmed
+                    or not capture.normalized_value
+                    or capture.normalized_value != previous_value
+                )
+            else:
+                withdrawn = previous_confirmed and capture.status is not CaptureStatus.CONFIRMED
+            if withdrawn:
+                revocations[field_key] = capture.validation_status
     for key, previous in written.items():
         if key not in capture_keys and isinstance(previous, tuple) and previous[0] is not None:
             # A corrected current "additional contact" item can retract its
@@ -390,10 +341,12 @@ def _fingerprint(item: dict) -> tuple:
             item.get("confirmed_at"), json.dumps(item.get("evidence") or {}, sort_keys=True))
 
 
-def contact_save_acknowledged(session: Any, kind: str) -> bool:
-    """Whether this exact current contact snapshot has an acknowledged write."""
+def contact_save_acknowledged(session: Any, kind: str, *, field_key: str | None = None) -> bool:
+    """Whether the exact selected contact snapshot has an acknowledged write."""
     slots = getattr(session, "captured_slots", None)
-    key = contact_field_key(slots, kind)
+    key = contact_field_key(slots, kind) if field_key is None else field_key
+    if key not in contact_entries(slots, kind):
+        return False
     item = snapshot_slots(slots).get(key)
     written = getattr(session, _WRITTEN_ATTR, None)
     return bool(item is not None and isinstance(written, dict)
@@ -659,13 +612,14 @@ def contact_outcome(captured_slots: Any) -> dict:
         confirmed = bool(getattr(captured_slots, f"{field}_confirmed", False)) or (
             capture is not None and capture.status is CaptureStatus.CONFIRMED
         )
-        if not confirmed and getattr(captured_slots, f"earlier_{field}_captures", ()):
-            # One was confirmed; only the extra one is open. That is not a
-            # contact the team has to chase.
-            confirmed = True
+        earlier = getattr(captured_slots, f"earlier_{field}_captures", ())
+        if not confirmed:
+            confirmed = any(item.status is CaptureStatus.CONFIRMED and item.normalized_value
+                            for item in earlier)
         if confirmed:
             status = "confirmed"
-        elif capture is not None and capture.status is not CaptureStatus.CANCELLED:
+        elif any(item is not None and item.status is not CaptureStatus.CANCELLED
+                 for item in (*earlier, capture)):
             status = "unconfirmed"
         elif capture is not None and capture.attempts:
             status = "unconfirmed"  # gave up after repeated tries, not a "never mind"

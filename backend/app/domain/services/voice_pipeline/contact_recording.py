@@ -16,7 +16,7 @@ from app.domain.services.phone_number_normalizer import normalize_phone_for_capt
 from app.domain.services.voice_pipeline.contact_capture import (
     CaptureStatus, ContactCaptureState, ContactSource,
 )
-from app.services.scripts.call_state_tracker import CallState
+from app.services.scripts.call_state_tracker import CallState, contact_entries
 
 CONTACT_TOOL_NAME = "record_contact"
 _UNSET = object()
@@ -30,7 +30,8 @@ CONTACT_TOOL_SPEC = {
             "record another person's contact as the caller's. Set keeps a pending candidate; "
             "confirm records a later caller's clear agreement to that exact candidate. "
             "Add preserves a confirmed contact when the caller offers another. Withdraw "
-            "removes the current contact. Quote their current words exactly. Ask naturally "
+            "removes the selected contact. Use its field_key to correct or withdraw an earlier "
+            "contact; omit it for the current contact. Quote their current words exactly. Ask naturally "
             "when unclear. Only claim saving when saved=true; this tool sends nothing."
         ),
         "parameters": {
@@ -39,7 +40,8 @@ CONTACT_TOOL_SPEC = {
                 "kind": {"type": "string", "enum": ["email", "phone"]},
                 "operation": {"type": "string", "enum": ["set", "add", "confirm", "withdraw"]},
                 "value": {"type": ["string", "null"], "description": "Complete intended value, or incomplete caller-provided value to retain for clarification; null for withdrawal."},
-                "expected_value": {"type": ["string", "null"], "description": "Exact current candidate shown in contact state, or null when absent. Never substitute the replacement here."},
+                "expected_value": {"type": ["string", "null"], "description": "Exact selected candidate shown in contact state, or null when absent. Never substitute the replacement here."},
+                "field_key": {"type": ["string", "null"], "description": "Existing contact key from state or tool results (email, email_2, phone, etc.); omitted/null selects current. Add is current-only."},
                 "source_quote": {"type": "string", "description": "Exact excerpt of the current caller turn supporting this operation."},
             },
             "required": ["kind", "operation", "value", "expected_value", "source_quote"],
@@ -81,37 +83,45 @@ def _with_contact_changes(state: CallState, **changes) -> CallState:
 
 
 def invalidate_revised_contacts(session, source: ContactSource) -> bool:
-    """A revised source withdraws only its own current contribution, not new facts."""
+    """A revised source withdraws only its owned current or earlier contribution."""
     state = getattr(session, "captured_slots", None)
     if not isinstance(state, CallState):
         return False
+    def changed(owner):
+        return (owner is not None and owner.provider_item_id == source.provider_item_id
+                and owner.caller_turn_order == source.caller_turn_order
+                and owner.revision_sha256 != source.revision_sha256)
+
+    def revised(capture):
+        if capture is None:
+            return capture
+        if changed(capture.value_source):
+            return replace(capture, status=CaptureStatus.NEEDS_CLARIFICATION,
+                normalized_value=None, raw_value=None, confirmed_at=None,
+                confirmation_source=None, confirmation_evidence=None, readback=None,
+                status_source=source)
+        if changed(capture.confirmation_source):
+            return replace(capture, status=CaptureStatus.AWAITING_CONFIRMATION,
+                confirmed_at=None, confirmation_source=None,
+                confirmation_evidence=None, readback=None, status_source=source)
+        if changed(capture.status_source):
+            return replace(capture, status=CaptureStatus.NEEDS_CLARIFICATION,
+                normalized_value=None, raw_value=None, confirmed_at=None,
+                confirmation_source=None, confirmation_evidence=None, readback=None,
+                status_source=source)
+        return capture
+
     changes = {}
     for kind in ("email", "phone"):
         capture = getattr(state, f"{kind}_capture", None)
-        if capture is None:
-            continue
-        def changed(owner):
-            return (owner is not None and owner.provider_item_id == source.provider_item_id
-                    and owner.caller_turn_order == source.caller_turn_order
-                    and owner.revision_sha256 != source.revision_sha256)
-        if changed(capture.value_source):
-            updated = replace(capture, status=CaptureStatus.NEEDS_CLARIFICATION,
-                normalized_value=None, raw_value=None, confirmed_at=None,
-                confirmation_source=None, confirmation_evidence=None, readback=None,
-                status_source=source)
-        elif changed(capture.confirmation_source):
-            updated = replace(capture, status=CaptureStatus.AWAITING_CONFIRMATION,
-                confirmed_at=None, confirmation_source=None,
-                confirmation_evidence=None, readback=None, status_source=source)
-        elif changed(capture.status_source):
-            updated = replace(capture, status=CaptureStatus.NEEDS_CLARIFICATION,
-                normalized_value=None, raw_value=None, confirmed_at=None,
-                confirmation_source=None, confirmation_evidence=None, readback=None,
-                status_source=source)
-        else:
-            continue
-        changes.update({f"{kind}_capture": updated, kind: updated.normalized_value,
-                        f"{kind}_confirmed": False})
+        updated = revised(capture)
+        if updated is not capture:
+            changes.update({f"{kind}_capture": updated, kind: updated.normalized_value,
+                            f"{kind}_confirmed": False})
+        earlier = getattr(state, f"earlier_{kind}_captures", ())
+        updated_earlier = tuple(revised(item) for item in earlier)
+        if updated_earlier != earlier:
+            changes[f"earlier_{kind}_captures"] = updated_earlier
     if changes:
         session.captured_slots = _with_contact_changes(state, **changes)
         session._lead_capture_revision_source = source
@@ -129,8 +139,14 @@ def _normalise(kind, value, region):
         return None
 
 
-def _result(status, *, capture=None, saved=False):
+def _result(status, *, session, field_key=None, capture=None, saved=False):
+    contacts = {key: {"value": item.normalized_value, "validation_status": item.validation_status,
+                      "caller_quote": item.raw_value}
+                for kind in ("email", "phone")
+                for key, item in contact_entries(getattr(session, "captured_slots", None), kind).items()
+                if item is not None}
     return {"action": CONTACT_TOOL_NAME, "success": saved, "saved": saved,
+            "field_key": field_key, "contacts": contacts,
             "status": status, "value": getattr(capture, "normalized_value", None),
             "validation_status": getattr(capture, "validation_status", None),
             "caller_quote": getattr(capture, "raw_value", None),
@@ -141,31 +157,43 @@ async def record_contact(session, arguments, *, turn=_UNSET, pool=None) -> dict:
     """Apply one model interpretation against a fixed caller and candidate snapshot."""
     turn = getattr(session, "_contact_turn", None) if turn is _UNSET else turn
     kind = arguments.get("kind") if isinstance(arguments, dict) else None
-    def current_capture():
-        return (getattr(getattr(session, "captured_slots", None), f"{kind}_capture", None)
-                if kind in ("email", "phone") else None)
+    field_key = arguments.get("field_key") if isinstance(arguments, dict) else None
+    def result(status, *, capture=None, saved=False):
+        entries = contact_entries(getattr(session, "captured_slots", None), kind) if kind in ("email", "phone") else {}
+        key = field_key if isinstance(field_key, str) else next(reversed(entries), None)
+        return _result(status, session=session, field_key=key,
+                       capture=capture if capture is not None else entries.get(key), saved=saved)
     if not isinstance(turn, ContactTurn):
-        return _result("caller_evidence_unavailable", capture=current_capture())
-    if not isinstance(arguments, dict) or set(arguments) != {"kind", "operation", "value", "expected_value", "source_quote"}:
-        return _result("invalid_arguments", capture=current_capture())
+        return result("caller_evidence_unavailable")
+    if not isinstance(arguments, dict) or set(arguments) not in ({"kind", "operation", "value", "expected_value", "source_quote"},
+            {"kind", "operation", "value", "expected_value", "source_quote", "field_key"}):
+        return result("invalid_arguments")
     kind, operation = arguments["kind"], arguments["operation"]
     quote, value, expected = arguments["source_quote"], arguments["value"], arguments["expected_value"]
     if (kind not in ("email", "phone") or operation not in ("set", "add", "confirm", "withdraw")
             or not isinstance(quote, str) or not 1 <= len(quote.strip()) <= 2000
             or quote.strip() not in turn.text
             or (value is not None and (not isinstance(value, str) or len(value) > 320))
-            or (expected is not None and not isinstance(expected, str))):
-        return _result("invalid_arguments", capture=current_capture())
+            or (expected is not None and not isinstance(expected, str))
+            or (field_key is not None and (not isinstance(field_key, str) or not field_key))):
+        return result("invalid_arguments")
     lock = getattr(session, "_contact_record_lock", None)
     if lock is None:
         lock = session._contact_record_lock = asyncio.Lock()
     async with lock:
         if getattr(session, "_contact_turn", None) is not turn:
-            return _result("stale_caller_turn", capture=current_capture())
+            return result("stale_caller_turn")
         state = session.captured_slots
-        current = getattr(state, f"{kind}_capture", None)
+        entries = contact_entries(state, kind)
+        current_key = next(reversed(entries))
+        field_key = current_key if field_key is None else field_key
+        if field_key not in entries:
+            return result("contact_not_found")
+        if operation == "add" and field_key != current_key:
+            return result("additional_contact_not_ready")
+        current = entries[field_key]
         if expected != getattr(current, "normalized_value", None):
-            return _result("contact_changed", capture=current)
+            return result("contact_changed", capture=current)
         normalized = _normalise(kind, value, getattr(session, "contact_phone_region", None))
         source = turn.source
         extra = {}
@@ -174,26 +202,26 @@ async def record_contact(session, arguments, *, turn=_UNSET, pool=None) -> dict:
                     or current.status not in {CaptureStatus.AWAITING_CONFIRMATION, CaptureStatus.CONFIRMED}
                     or current.value_source is None
                     or source.caller_turn_order <= current.value_source.caller_turn_order):
-                return _result("confirmation_not_current", capture=current)
+                return result("confirmation_not_current", capture=current)
             capture = current if current.status is CaptureStatus.CONFIRMED else replace(
                 current, status=CaptureStatus.CONFIRMED, confirmed_at=datetime.now(timezone.utc),
                 confirmation_source=source, status_source=source, readback=None,
                 confirmation_evidence="model_interpreted_caller_confirmation")
         elif operation == "withdraw":
             if value is not None or current is None:
-                return _result("invalid_arguments", capture=current)
+                return result("invalid_arguments", capture=current)
             capture = replace(current, status=CaptureStatus.CANCELLED, normalized_value=None,
                 raw_value=quote.strip(), confirmed_at=None, confirmation_source=None,
                 confirmation_evidence=None, readback=None, status_source=source)
         else:
             if not isinstance(value, str) or not value.strip():
-                return _result("invalid_arguments", capture=current)
+                return result("invalid_arguments", capture=current)
             if operation == "add":
                 if (current is None or current.status is not CaptureStatus.CONFIRMED
                         or current.confirmation_source is None
                         or source.caller_turn_order <= current.confirmation_source.caller_turn_order
                         or normalized == current.normalized_value):
-                    return _result("additional_contact_not_ready", capture=current)
+                    return result("additional_contact_not_ready", capture=current)
                 extra[f"earlier_{kind}_captures"] = (*getattr(state, f"earlier_{kind}_captures"), current)
             capture = ContactCaptureState(kind=kind,
                 status=CaptureStatus.AWAITING_CONFIRMATION if normalized else CaptureStatus.NEEDS_CLARIFICATION,
@@ -201,14 +229,20 @@ async def record_contact(session, arguments, *, turn=_UNSET, pool=None) -> dict:
                 value_source=source, status_source=source)
             if operation == "set" and current is not None and normalized and normalized == current.normalized_value:
                 capture = current  # Repeating a value does not erase prior confirmation.
-        session.captured_slots = _with_contact_changes(state, **extra, **{
-            f"{kind}_capture": capture, kind: capture.normalized_value,
-            f"{kind}_confirmed": capture.status is CaptureStatus.CONFIRMED,
-            "active_contact_kind": None, "agent_asked_kind": None,
-        })
+        if field_key == current_key:
+            extra.update({f"{kind}_capture": capture, kind: capture.normalized_value,
+                          f"{kind}_confirmed": capture.status is CaptureStatus.CONFIRMED})
+        else:
+            earlier = list(getattr(state, f"earlier_{kind}_captures"))
+            earlier[list(entries).index(field_key)] = capture
+            extra[f"earlier_{kind}_captures"] = tuple(earlier)
+        session.captured_slots = _with_contact_changes(state, **extra,
+            active_contact_kind=None, agent_asked_kind=None)
         from app.domain.services.voice_pipeline.lead_slot_capture import (
             capture_turn_slots, contact_field_key, contact_save_acknowledged, contact_save_failed_fields,
         )
+        if operation == "add":
+            field_key = contact_field_key(session.captured_slots, kind)
         if pool is None:
             pool = getattr(session, "_voice_action_pool", None)
         if pool is None:
@@ -220,8 +254,8 @@ async def record_contact(session, arguments, *, turn=_UNSET, pool=None) -> dict:
         if pool is not None:
             await capture_turn_slots(session, pool=pool, reason="record_contact_tool")
         if getattr(session, "_contact_turn", None) is not turn:
-            return _result("stale_caller_turn", capture=current_capture())
-        saved = contact_save_acknowledged(session, kind)
-        failed = contact_field_key(session.captured_slots, kind) in contact_save_failed_fields(session)
-        return _result("saved" if saved else "save_failed" if failed else "not_saved",
+            return result("stale_caller_turn")
+        saved = contact_save_acknowledged(session, kind, field_key=field_key)
+        failed = field_key in contact_save_failed_fields(session)
+        return result("saved" if saved else "save_failed" if failed else "not_saved",
                        capture=capture, saved=saved)
