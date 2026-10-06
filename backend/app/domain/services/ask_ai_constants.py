@@ -7,9 +7,7 @@ from voice_orchestrator, which in turn imports voice_pipeline_service —
 a circular dependency that crashes the server at startup.
 """
 
-# Full product knowledge, injected only when the user asks about the product,
-# pricing, or features (keyword-gated, see PRODUCT_KEYWORDS). Tessa paraphrases
-# it naturally for the phone — never reads it like a list.
+# The demo always receives this small fact sheet; the model decides relevance.
 TALKY_PRODUCT_INFO = (
     "Talk-Lee is an AI voice-calling platform for businesses: natural-sounding "
     "AI agents that make and answer phone calls — for outbound sales, lead "
@@ -29,12 +27,3 @@ TALKY_PRODUCT_INFO = (
     "(1,500 minutes, 3 agents, custom voices — most popular); Enterprise "
     "$199/month (5,000 minutes, 10 agents, API access, full suite)."
 )
-
-# Keywords that signal the user is asking about product/pricing.
-PRODUCT_KEYWORDS: frozenset[str] = frozenset({
-    "price", "pricing", "cost", "plan", "plans", "package", "packages",
-    "subscription", "tier", "basic", "professional", "enterprise",
-    "minute", "minutes", "agent", "agents", "feature", "features",
-    "how much", "what does", "what can", "what do you", "tell me about",
-    "crm", "integration", "api", "analytics",
-})

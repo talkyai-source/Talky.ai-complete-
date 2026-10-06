@@ -475,7 +475,6 @@ async def test_live_action_gate_does_not_activate_legacy_rule_keyword_heuristic(
     service.synthesize_and_send_audio = AsyncMock(return_value=False)
     session = _session()
     session.agent_config = SimpleNamespace(
-        response_max_sentences=2,
         rules=ConversationRule(
             do_not_say_rules=[
                 "Never push too hard - if rejected twice, close politely",

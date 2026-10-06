@@ -24,12 +24,10 @@ from app.infrastructure.llm.groq import GroqLLMProvider, LLMTimeoutError
 from app.infrastructure.telephony.browser_media_gateway import SessionGoneError
 from app.domain.interfaces.tts_provider import TTSProvider
 from app.domain.interfaces.media_gateway import MediaGateway
-from app.domain.services.conversation_engine import ConversationEngine
 from app.domain.services.transcript_service import TranscriptService
 from app.domain.services.llm_guardrails import LLMGuardrails, LLMGuardrailsConfig, get_guardrails
 from app.domain.services.latency_tracker import get_latency_tracker
 from app.domain.services.global_ai_config import get_global_config
-from app.domain.services.ask_ai_constants import TALKY_PRODUCT_INFO as _ASK_AI_PRODUCT_INFO, PRODUCT_KEYWORDS as _ASK_AI_PRODUCT_KEYWORDS
 from app.domain.services.end_session_action import (
     build_end_session_tool_instructions,
     parse_end_session_action,
@@ -38,9 +36,6 @@ from app.domain.services.voice_pipeline import (
     find_sentence_end as _find_sentence_end_impl,
     is_terminal_period_boundary as _is_terminal_period_boundary_impl,
     is_repetitive_transcript as _is_repetitive_transcript_impl,
-)
-from app.domain.services.voice_pipeline.llm_response import (
-    response_max_sentences_for_turn as _response_max_sentences_for_turn_impl,
 )
 from app.domain.services.voice_pipeline.tts_playback import TtsPlayback
 from app.domain.services.voice_pipeline.turn_runner import TurnRunner
@@ -259,12 +254,6 @@ class VoicePipelineService:
             reason,
             extra={"call_id": call_id, "turn_silent_reason": reason},
         )
-
-    # Sentence-budget logic extracted to voice_pipeline.llm_response (item 2,
-    # slice 2). Uses no instance state, so it's a static delegator — call
-    # sites (self._response_max_sentences_for_turn(...)) and the tests that
-    # call it on the instance are unchanged.
-    _response_max_sentences_for_turn = staticmethod(_response_max_sentences_for_turn_impl)
 
     def _barge_in_event_for(self, session: CallSession) -> asyncio.Event:
         event = self._barge_in_events.get(session.call_id)

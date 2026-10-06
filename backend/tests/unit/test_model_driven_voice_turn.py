@@ -93,6 +93,24 @@ async def test_available_tools_are_not_hidden_by_keyword_guessing(monkeypatch):
     assert "transfer_call" not in names
 
 
+async def test_complete_model_answer_is_not_cut_at_a_sentence_quota(monkeypatch):
+    answer = "First detail. Second detail. Third detail. Fourth detail. Fifth detail. What else would help?"
+    service, session, _ = setup_turn(monkeypatch, "Please explain the details.", [answer])
+    response, _, _ = await service._stream_llm_and_tts(session)
+    assert response == answer
+    assert " ".join(session._spoken_sentences) == answer
+
+
+@pytest.mark.parametrize("question", ["Can you help our shop?", "What would that mean for us?", "Hello."])
+async def test_demo_facts_are_available_without_a_keyword_gate(monkeypatch, question):
+    from app.domain.services.ask_ai_constants import TALKY_PRODUCT_INFO
+    service, session, rounds = setup_turn(monkeypatch, question, ["What would you like to know?"])
+    session.campaign_id = "ask-ai"
+    await service._stream_llm_and_tts(session)
+    assert TALKY_PRODUCT_INFO in rounds[0][1]["system_prompt"]
+    assert rounds[0][0][-1].content == question
+
+
 async def test_read_catalog_read_again_keeps_current_source_evidence(monkeypatch):
     steps = []
     service, session, rounds = setup_turn(monkeypatch, "When is my refund?", steps)
@@ -148,9 +166,3 @@ async def test_native_adapter_reads_same_scoped_sections_and_fences_body_once(mo
     denied = await bridge._lookup_knowledge(arguments)
     assert denied["status"] == "unavailable"
     assert not denied["sources"] and not bridge._verified_knowledge
-
-
-def test_retired_query_qualification_cannot_claim_new_architecture_is_qualified():
-    from scripts.qualify_ag02_semantic import main, QualificationBoundaryError
-    with pytest.raises(QualificationBoundaryError, match="superseded"):
-        main(["--dry-run"])

@@ -10,11 +10,7 @@ from app.services.scripts.prompts.guardrails import COMMUNICATION_PRINCIPLES
 def test_ask_ai_uses_shared_communication_principles():
     # Single source: literally the same constant the campaign agents use.
     assert COMMUNICATION_PRINCIPLES in ASK_AI_SYSTEM_PROMPT
-    # COMMUNICATION_PRINCIPLES was distilled (2026-07-02) from the old
-    # "7 C's / 4 maxims of conversation" listing down to a single spoken
-    # paragraph. Assert the distilled content, not the retired headings.
-    assert "COMMUNICATION PRINCIPLES" in ASK_AI_SYSTEM_PROMPT
-    assert "lead with the answer" in ASK_AI_SYSTEM_PROMPT
+
 
 
 def test_ask_ai_has_sensitive_info_boundaries():
@@ -28,7 +24,7 @@ def test_ask_ai_has_sensitive_info_boundaries():
 
 def test_ask_ai_knows_the_product():
     assert "AI voice-calling platform" in ASK_AI_SYSTEM_PROMPT  # always-known summary
-    # Keyword-gated full detail covers features + plans.
+    # The always-available fact sheet covers features and plans.
     for token in ("voice cloning", "knowledge base", "timezone-aware",
                   "Basic", "Professional", "Enterprise"):
         assert token in TALKY_PRODUCT_INFO

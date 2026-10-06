@@ -60,7 +60,7 @@ ASK_AI_CONFIG = {
 }
 
 # Re-export from the constants module (no circular-import risk there).
-from app.domain.services.ask_ai_constants import TALKY_PRODUCT_INFO, PRODUCT_KEYWORDS  # noqa: F401
+from app.domain.services.ask_ai_constants import TALKY_PRODUCT_INFO  # noqa: F401
 
 # The exact greeting already played to the caller by the client-side audio clip.
 # Injected into conversation_history as the first assistant turn so the LLM
@@ -118,7 +118,6 @@ def create_ask_ai_agent_config() -> AgentConfig:
             ]
         ),
         max_conversation_turns=20,
-        response_max_sentences=2,
     )
 
 

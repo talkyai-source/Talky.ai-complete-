@@ -28,7 +28,6 @@ from fastapi import WebSocket
 from app.domain.models.conversation import MessageRole
 from app.domain.models.session import CallSession
 from app.domain.services.ask_ai_constants import (
-    PRODUCT_KEYWORDS as _ASK_AI_PRODUCT_KEYWORDS,
     TALKY_PRODUCT_INFO as _ASK_AI_PRODUCT_INFO,
 )
 from app.domain.services.end_session_action import (
@@ -44,9 +43,6 @@ from app.services.scripts.prompts.guardrails import (
 )
 from app.infrastructure.llm.groq import LLMTimeoutError
 from app.services.scripts.prompts.build import build_turn_prompt
-from app.domain.services.voice_pipeline.sentence_cap import (
-    cap_allows_another,
-)
 from app.domain.services.voice_pipeline.grounded_links import grounded_url_hosts
 from app.services.scripts.prompts.live_state import build_live_state_block
 from app.domain.services.voice_pipeline.knowledge_tool import (
@@ -134,11 +130,6 @@ def _truncate_history(history: list, max_pairs: int = _MAX_HISTORY_PAIRS) -> lis
     return history[-(max_pairs * 2):]
 
 
-async def _knowledge_block_for_turn(session: CallSession, messages: list) -> str:
-    """Compatibility entry point: navigation for the model, never keyword selection."""
-    return knowledge_system_addendum(session)
-
-
 class TurnStreamer:
     """Streams one turn's LLM tokens and pipelines TTS per sentence."""
 
@@ -164,7 +155,7 @@ class TurnStreamer:
 
         messages = _truncate_history(session.conversation_history)
         contact_turn = getattr(session, "_contact_turn", None)
-        last_user_text_for_limit = next(
+        last_user_text = next(
             (m.content for m in reversed(messages) if m.role == MessageRole.USER),
             "",
         )
@@ -181,16 +172,8 @@ class TurnStreamer:
         )
         # Resolve available tools and runtime facts for the single prompt assembler.
 
-        # Ask AI: product/pricing info only when the user's message contains
-        # relevant keywords (keeps the non-product system prompt small).
-        ask_ai_block = None
-        if session.campaign_id == "ask-ai" and messages:
-            last_user_text = next(
-                (m.content.lower() for m in reversed(messages) if m.role == MessageRole.USER),
-                "",
-            )
-            if any(kw in last_user_text for kw in _ASK_AI_PRODUCT_KEYWORDS):
-                ask_ai_block = _ASK_AI_PRODUCT_INFO
+        # The demo's small fact sheet is always available; the model decides relevance.
+        ask_ai_block = _ASK_AI_PRODUCT_INFO if session.campaign_id == "ask-ai" else None
 
         # The conversational model selects sections from its scoped catalog.
         # No literal search, lexical threshold, or recovery model runs before it.
@@ -280,24 +263,17 @@ class TurnStreamer:
             turn_profile(session, system_prompt, None if kb_tools else knowledge_block), sort_keys=True,
         ))
 
-        # Explicit operator limits remain; question keywords no longer alter them.
-        max_sentences = getattr(getattr(session, "agent_config", None), "response_max_sentences", None)
-
         all_tokens: list[str] = []
         buf = ""
         first_token = True
         first_sentence = True
         sentences_done = 0
-        # One sentence of grace past the cap, only for the turn's question —
-        # see sentence_cap.py. Consumed the first time it is used.
-        question_grace_used = False
         tts_was_interrupted = False
         suppressed_for_action = False
         # Source hosts help sentence segmentation keep URLs intact.
         turn_grounding: list[str] = []
         # Canonical history source: TTS submissions that returned without
-        # interruption. Raw generation can include unsent text after a cap,
-        # rewrite or provider error. Submission is not a heard/playback receipt;
+        # interruption. Raw generation can include unsent text after interruption or a provider error. Submission is not a heard/playback receipt;
         # action confirmation separately requires correlated playout below.
         session._spoken_sentences = []
         _action_delivered_sentences = []
@@ -365,7 +341,7 @@ class TurnStreamer:
                         session,
                         _name,
                         _args,
-                        user_text=last_user_text_for_limit,
+                        user_text=last_user_text,
                     )
                 except Exception:
                     logger.exception(
@@ -455,9 +431,7 @@ class TurnStreamer:
 
                 # Flush each complete sentence (or, for long buffers, the first
                 # clause) to TTS as tokens arrive.
-                while cap_allows_another(
-                    sentences_done, max_sentences, buf, grace_used=question_grace_used
-                ):
+                while True:
                     grounded_hosts = grounded_url_hosts([
                         *getattr(session, "_knowledge_grounding", []), *turn_grounding,
                     ]) if "." in buf else ()
@@ -528,14 +502,10 @@ class TurnStreamer:
                     _record_action_playback(sentence, tts_was_interrupted)
                     first_sentence = False
                     t_tts_end = time.monotonic()
-                    # Early comma flushes reduce latency; they are playback
-                    # chunks, not completed sentences. Counting them toward
-                    # the cap can stop an otherwise valid reply mid-sentence.
+                    # Count completed sentences for delivery diagnostics.
                     if self._p._find_sentence_end(
                         sentence, allow_clause=False, known_hosts=grounded_hosts,
                     ) >= 0:
-                        if max_sentences and sentences_done >= max_sentences:
-                            question_grace_used = True
                         sentences_done += 1
                     if not tts_was_interrupted:
                         session._spoken_sentences.append(sentence)
@@ -603,40 +573,37 @@ class TurnStreamer:
         # TTS any trailing buffer (final sentence without terminal punctuation).
         if not ask_ai_end_action and not tts_was_interrupted and buf.strip():
             if not _barged():
-                if cap_allows_another(
-                    sentences_done, max_sentences, buf, grace_used=question_grace_used
-                ):
-                    # Same extract-first ordering as the per-sentence loop:
-                    # this trailing tail is the MOST common place the sentinel
-                    # actually lands (the model's closing line ends in
-                    # punctuation, which flushes as a full sentence above, and
-                    # " [[END_CALL]]" is left over as the unterminated tail).
-                    raw_tail = strip_and_flag(session, buf.strip())
-                    sentence = guardrails.clean_response(
-                        raw_tail, tts_model_id=_tts_model_id,
-                        protected_values=_protected_readback,
+                # Same extract-first ordering as the per-sentence loop:
+                # this trailing tail is the MOST common place the sentinel
+                # actually lands (the model's closing line ends in
+                # punctuation, which flushes as a full sentence above, and
+                # " [[END_CALL]]" is left over as the unterminated tail).
+                raw_tail = strip_and_flag(session, buf.strip())
+                sentence = guardrails.clean_response(
+                    raw_tail, tts_model_id=_tts_model_id,
+                    protected_values=_protected_readback,
+                )
+                if sentence:
+                    if t_tts_first is None:
+                        t_tts_first = time.monotonic()
+                        self._p.latency_tracker.mark_tts_start(call_id)
+                    session.tts_active = True
+                    session._voice_action_delivered_text = ""
+                    tts_was_interrupted = await self._p.synthesize_and_send_audio(
+                        session, sentence, websocket, track_latency=first_sentence,
                     )
-                    if sentence:
-                        if t_tts_first is None:
-                            t_tts_first = time.monotonic()
-                            self._p.latency_tracker.mark_tts_start(call_id)
-                        session.tts_active = True
-                        session._voice_action_delivered_text = ""
-                        tts_was_interrupted = await self._p.synthesize_and_send_audio(
-                            session, sentence, websocket, track_latency=first_sentence,
-                        )
-                        _record_action_playback(sentence, tts_was_interrupted)
-                        first_sentence = False
-                        t_tts_end = time.monotonic()
-                        if not tts_was_interrupted:
-                            session._spoken_sentences.append(sentence)
+                    _record_action_playback(sentence, tts_was_interrupted)
+                    first_sentence = False
+                    t_tts_end = time.monotonic()
+                    if not tts_was_interrupted:
+                        session._spoken_sentences.append(sentence)
         # Anti-silence safety net: the LLM stream completed WITHOUT error but
         # produced no spoken content at all (e.g. a reasoning model burned its
         # whole token budget on internal thinking, or an empty completion).
         # That is NOT an error path, so nothing above caught it — without this
         # the caller just hears dead air. Speak a short recovery line instead.
         from app.domain.services.end_session_action import caller_signaled_end, previous_assistant_turn
-        caller_finished = caller_signaled_end(last_user_text_for_limit,
+        caller_finished = caller_signaled_end(last_user_text,
             previous_assistant_text=previous_assistant_turn(messages))
         if (
             not tts_was_interrupted
@@ -675,7 +642,7 @@ class TurnStreamer:
 
         # Build normal history from the same chunks used by the spoken path.
         # Recounting sentence punctuation here loses early comma/clause flushes
-        # and can retain a tail that the live chunk cap never submitted.
+        # and can retain a tail that never reached playback.
         # Legacy action JSON is a control result consumed by the turn finisher.
         if ask_ai_end_action:
             full_text = raw_response_text.strip()

@@ -224,7 +224,7 @@ class TestBuildTelephonySessionConfigDirection:
         # No hardcoded fallback anymore — defaults to lead_gen, composed via
         # the layered persona system (guardrails always present).
         assert cfg.persona_type == "lead_gen"
-        assert "HARD RULES" in cfg.system_prompt
+        assert "CONVERSATION GUIDE" in cfg.system_prompt
         assert TELEPHONY_COMPANY_NAME in cfg.system_prompt
         # Retired legacy markers must be gone for good.
         assert "Business Development Specialist" not in cfg.system_prompt
@@ -263,31 +263,6 @@ class TestBuildTelephonySessionConfigDirection:
         )
         assert cfg.direction == Direction.OUTBOUND
 
-    def test_per_turn_sentence_ceiling_is_phone_sized(self):
-        """A per-turn ceiling on a PHONE call is the behaviour, not headroom.
-
-        2026-08-05: a callee sat through 11.7s of unbroken agent speech
-        (4.0s recording notice + 7.7s greeting), never tried to interrupt
-        (interrupted=False), and hung up the instant it stopped. The ceiling was
-        5 sentences — ~60 words, ~21s at 2.8 words/second — which licenses a
-        turn nobody on a phone call will wait out.
-
-        3 keeps the shapes the agent legitimately needs (acknowledge -> answer
-        -> question; read-back -> confirm) at ~13s. Not 2: that is the ask_ai
-        value and it truncates the trailing confirmation question, which is how
-        a mis-heard email ships silently.
-        """
-        from app.domain.services.telephony_session_config import (
-            build_telephony_session_config,
-        )
-        cfg = build_telephony_session_config(
-            gateway_type="telephony", campaign=None,
-        )
-        limit = cfg.agent_config.response_max_sentences
-        assert 2 < limit <= 3, (
-            f"telephony per-turn sentence ceiling is {limit} "
-            f"(~{limit * 12 / 2.8:.0f}s of speech); must stay at 3"
-        )
 
 
 class TestBuildPersonaGreeting:
@@ -742,7 +717,7 @@ class TestBuildTelephonySessionConfig:
         assert config.persona_type == "lead_gen"
         assert "Acme" in config.system_prompt
         assert "Alex" in config.system_prompt
-        assert "HARD RULES" in config.system_prompt
+        assert "CONVERSATION GUIDE" in config.system_prompt
         # Retired legacy markers must never reappear.
         assert "Business Development Specialist" not in config.system_prompt
         assert "GREETING RESPONSE" not in config.system_prompt

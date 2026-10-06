@@ -1,26 +1,7 @@
-"""The model writes both sides of the exchange inside one completion.
+"""Sentence boundaries for compact prose, emails, initials and decimals.
 
-Production, call c01404ba (2026-09-22). One LLM response, spoken in full:
-
-    "Would you like Azian to review the multi-site setup and suggest the best
-     option?Yes.Could I confirm the best email to send the details to?state
-     estimation at gmail dot com - right?Perfect, I'll pass that to Azian..."
-
-The caller said none of it; the mic was quiet (audio_level rms=140). The agent
-invented the caller's "Yes.", invented an email, read it back to itself,
-confirmed it, and hung up -- the end-call action rode in on the same
-completion.
-
-Nothing caught it because every splitter here required WHITESPACE after a
-terminator to call it a sentence end, and the model writes its turn boundaries
-with no separator. The whole exchange counted as one sentence, so the
-three-sentence telephony cap passed it through untouched.
-
-The tell is deterministic: a terminator with no space after it. Measured over
-306 real agent turns (30 days, two tenants, ten campaigns) that appears 8
-times and all 8 are this defect -- no false positives. These tests pin both
-halves: it must fire on every production instance, and must NOT fire on the
-abbreviations, initials and decimals that legitimately carry a bare period.
+Historical utterances below exercise segmentation only. They do not establish
+that the runtime identifies invented dialogue or truncates model speech.
 """
 import pytest
 
@@ -28,9 +9,7 @@ from app.domain.services.voice_pipeline.sentence_segmentation import (
     _is_missing_space_boundary,
     find_sentence_end,
 )
-from app.domain.services.voice_pipeline.sentence_cap import truncate_to_cap
 
-TELEPHONY_CAP = 3  # telephony_session_config.py
 
 
 def _first_boundary(text: str) -> int:
@@ -105,63 +84,18 @@ PRODUCTION_CASES = [
 
 
 @pytest.mark.parametrize("text,spoken_prefix", PRODUCTION_CASES)
-def test_turn_is_cut_at_the_invented_boundary(text, spoken_prefix):
+def test_missing_separator_has_a_sentence_boundary(text, spoken_prefix):
     idx = _first_boundary(text)
     assert idx >= 0, "no boundary detected in a known production instance"
     assert text[: idx + 1] == spoken_prefix
 
 
-def _replay_flush_loop(text: str):
-    """Reproduce turn_streamer's per-sentence flush, including the stop.
-
-    Mirrors the real loop: find the next sentence end, note whether it is a
-    missing-space boundary, speak that sentence, and stop the turn if it was.
-    Returns (spoken_sentences, text_left_unspoken).
-    """
-    spoken, buf = [], text
-    while buf:
-        idx = find_sentence_end(buf, allow_clause=len(buf) >= 80)
-        if idx < 0:
-            spoken.append(buf.strip())
-            buf = ""
-            break
-        boundary = _is_missing_space_boundary(buf, idx)
-        spoken.append(buf[: idx + 1].strip())
-        skip = 2 if (idx + 1 < len(buf) and buf[idx + 1].isspace()) else 1
-        buf = buf[idx + skip :] if idx + skip <= len(buf) else ""
-        if boundary:
-            return spoken, buf
-    return spoken, buf
 
 
-@pytest.mark.parametrize("text,spoken_prefix", PRODUCTION_CASES)
-def test_the_caller_hears_only_our_own_turn(text, spoken_prefix):
-    """The whole point: the caller hears our sentence and nothing we invented."""
-    spoken, left = _replay_flush_loop(text)
-    assert " ".join(spoken) == spoken_prefix
-    assert left, "the invented remainder should have been left unspoken"
 
 
-@pytest.mark.parametrize("text,spoken_prefix", PRODUCTION_CASES)
-def test_the_separator_skip_does_not_eat_the_next_letter(text, spoken_prefix):
-    """buf[idx + 2:] assumed a space always follows the terminator.
-
-    At a missing-space boundary that silently swallows the first character of
-    whatever comes next, so the dropped remainder would have been wrong too.
-    """
-    _, left = _replay_flush_loop(text)
-    assert text.endswith(left)
 
 
-def test_the_cap_alone_did_not_catch_c01404ba():
-    """Why this needed its own guard rather than a bigger cap.
-
-    The fabricated close is three sentences once the boundary is visible, so a
-    three-sentence ceiling still passes the invented caller lines through. The
-    cap limits LENGTH; it was never a turn-boundary control.
-    """
-    text = PRODUCTION_CASES[7].values[0]
-    assert truncate_to_cap(text, TELEPHONY_CAP) == text.strip()
 
 
 # --- the other half of the bar: text that must NOT be split -----------------
@@ -193,4 +127,3 @@ def test_legitimate_bare_periods_are_not_boundaries(text):
 )
 def test_normal_spaced_prose_is_untouched(text):
     assert _first_boundary(text) == -1
-    assert truncate_to_cap(text, TELEPHONY_CAP) == text.strip()

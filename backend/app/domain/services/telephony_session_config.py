@@ -1617,32 +1617,6 @@ def build_telephony_session_config(
                 else 2
             )
         ),
-        # Per-turn ceiling (not a target). 2 forced every reply terse — no room
-        # for consultative discovery, mood-matching, or natural expressiveness.
-        # 5 was set as "headroom, not a mandate to monologue" and trusted the
-        # persona prompt to stay short by default.
-        #
-        # The 2026-08-05 hang-up says that trust is misplaced: given room, this
-        # agent uses all of it. The callee sat through 11.7s of unbroken speech
-        # (4.0s notice + 7.7s greeting) with interrupted=False and hung up the
-        # moment it stopped — they did not fight for the turn, they left. On a
-        # phone call the ceiling IS the behaviour, so it has to be set to what
-        # is acceptable, not to what is tolerable.
-        #
-        #   5 sentences x ~12 words x (1 / 2.8 words/s)  ~= 21s per turn
-        #   3 sentences x ~12 words x (1 / 2.8 words/s)  ~= 13s per turn
-        #
-        # 3 is the smallest value that still fits the shapes this agent
-        # legitimately needs and 2 clips:
-        #   * acknowledge -> answer -> question (the consultative turn)
-        #   * read-back -> confirm question, which llm_response.py already
-        #     raises to 3 on its own when an email is captured-but-unconfirmed —
-        #     at a default of 5 that bump was invisible, at 3 the default and
-        #     the read-back budget finally agree.
-        # Not 2: that is the ask_ai value and it truncates the trailing
-        # confirmation question, which is how a mis-heard email ships silently.
-        # Pricing answers on a custom prompt still bump to 4 in llm_response.py.
-        response_max_sentences=3,
     )
 
     # Audio sample-rate strategy:

@@ -140,12 +140,6 @@ class AgentConfig(BaseModel):
         le=20,
         description="Maximum conversation turns before ending"
     )
-    response_max_sentences: int = Field(
-        default=2,
-        ge=1,
-        le=5,
-        description="Maximum sentences per response"
-    )
     
     # Context (optional, campaign-specific)
     context: Dict[str, str] = Field(

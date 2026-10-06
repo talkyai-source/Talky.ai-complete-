@@ -28,45 +28,14 @@ def _make_session() -> CallSession:
             company_name="Talky.ai",
             rules=ConversationRule(),
             flow=ConversationFlow(),
-            response_max_sentences=2,
         ),
     )
     session.barge_in_event = asyncio.Event()
     return session
 
 
-def test_pricing_questions_get_extended_sentence_budget_for_custom_prompt_sessions():
-    service = VoicePipelineService(
-        stt_provider=MagicMock(),
-        llm_provider=AsyncMock(),
-        tts_provider=AsyncMock(),
-        media_gateway=AsyncMock(),
-    )
-
-    limit = service._response_max_sentences_for_turn(
-        _make_session(),
-        "Can you explain all your plans and pricing?",
-        has_custom_prompt=True,
-    )
-
-    assert limit == 4
 
 
-def test_non_pricing_questions_keep_default_sentence_budget():
-    service = VoicePipelineService(
-        stt_provider=MagicMock(),
-        llm_provider=AsyncMock(),
-        tts_provider=AsyncMock(),
-        media_gateway=AsyncMock(),
-    )
-
-    limit = service._response_max_sentences_for_turn(
-        _make_session(),
-        "What does Talky do?",
-        has_custom_prompt=True,
-    )
-
-    assert limit == 2
 
 
 def test_ask_ai_end_session_action_parser():
@@ -1033,19 +1002,17 @@ async def test_failed_dnc_write_is_not_confirmed_aloud(monkeypatch):
     assert getattr(session, "_caller_opted_out", False) is True
 
 
-# --- the sentence cap must not cut the question off (2026-09-02) -------------
+# --- Complete model responses reach speech without a sentence quota -------
 
 @pytest.mark.asyncio
-async def test_sentence_cap_lets_the_immediately_following_question_through():
-    """Three statements then the question, cap of 3: the caller must hear the
-    question. Before this the fourth sentence was dropped and the turn dead-ended."""
+async def test_model_followup_question_reaches_speech():
+    """The caller hears the model's complete response, including its question."""
     service = _make_service_for_disposition([
         "Got it. ", "That's the common one. ", "Most folks say the same. ",
         "What would fix it for you?",
     ])
     session = _make_session()
     session.campaign_id = "campaign-123"
-    session.agent_config.response_max_sentences = 3
     session.current_user_input = "It's just been unreliable lately."
     session.conversation_history.append(Message(role=MessageRole.USER, content="Hi"))
     session.conversation_history.append(Message(role=MessageRole.ASSISTANT, content="Hi, Sarah here from Acme — got a minute?"))
@@ -1060,14 +1027,13 @@ async def test_sentence_cap_lets_the_immediately_following_question_through():
 
 
 @pytest.mark.asyncio
-async def test_sentence_cap_still_drops_a_fourth_statement():
+async def test_all_model_statements_reach_speech():
     service = _make_service_for_disposition([
         "Got it. ", "That's the common one. ", "Most folks say the same. ",
         "We also do same-day payouts. ", "And weekend support.",
     ])
     session = _make_session()
     session.campaign_id = "campaign-123"
-    session.agent_config.response_max_sentences = 3
     session.current_user_input = "It's just been unreliable lately."
     session.conversation_history.append(Message(role=MessageRole.USER, content="Hi"))
     session.conversation_history.append(Message(role=MessageRole.ASSISTANT, content="Hi, Sarah here from Acme — got a minute?"))
@@ -1075,9 +1041,9 @@ async def test_sentence_cap_still_drops_a_fourth_statement():
     await service.handle_turn_end(session, AsyncMock())
 
     spoken = " ".join(getattr(session, "_spoken_sentences", []))
-    assert "same-day" not in spoken
-    assert "weekend" not in spoken
-    assert "same-day" not in session.conversation_history[-1].content
+    assert "same-day" in spoken
+    assert "weekend" in spoken
+    assert "same-day" in session.conversation_history[-1].content
 
 
 # --- NON-NEGOTIABLES reaches the model exactly once, last (2026-09-02) -------

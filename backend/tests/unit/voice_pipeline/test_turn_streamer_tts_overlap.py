@@ -117,8 +117,6 @@ class _FakePipeline:
     def _supports_llm_end_session_action(self, session):
         return False
 
-    def _response_max_sentences_for_turn(self, session, text, has_custom_prompt):
-        return None
 
     @staticmethod
     def _find_sentence_end(buf, allow_clause=False, *, known_hosts=()):
