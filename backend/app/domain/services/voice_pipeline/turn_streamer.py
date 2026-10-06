@@ -47,6 +47,7 @@ from app.services.scripts.prompts.live_state import build_live_state_block
 from app.services.scripts.knowledge.budget import context_window_for, estimate_tokens
 from app.domain.services.voice_pipeline.knowledge_tool import (
     KB_TOOL_NAME, knowledge_tools_for, knowledge_system_addendum, run_knowledge_lookup,
+    knowledge_navigation_continuation,
 )
 from app.domain.services.voice_pipeline.contact_recording import (
     CONTACT_TOOL_NAME, CONTACT_TOOL_SPEC, record_contact,
@@ -414,6 +415,7 @@ class TurnStreamer:
                 tools=offered_tools,
                 max_tool_rounds=3,
                 read_only_tools={KB_TOOL_NAME},
+                navigation_round_allowed=knowledge_navigation_continuation(session),
                 tool_runner=_voice_tool_runner,
                 require_tool_result_before_content=False,
                 temperature=getattr(session, "llm_temperature", None),

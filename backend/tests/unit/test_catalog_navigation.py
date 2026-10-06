@@ -31,6 +31,29 @@ def navigation_steps(session, count=4):
     return steps
 
 
+async def test_live_turn_streamer_wires_navigation_budget_before_exact_read(monkeypatch):
+    from tests.unit.test_model_driven_voice_turn import setup_turn
+    scoped = catalog_session()
+    steps = navigation_steps(scoped)
+    steps.append("The authored conditions apply.")
+    service, session, rounds = setup_turn(monkeypatch, "Explain the late section.", steps)
+    session.tenant_id, session.campaign_id = scoped.tenant_id, scoped.campaign_id
+    session._knowledge_catalog = scoped._knowledge_catalog
+    model = service.llm_provider.stream_chat_with_timeout
+    async def honour_tool_availability(messages, **kwargs):
+        if not kwargs.get("tools"):
+            yield "The authored conditions apply."
+            return
+        async for token in model(messages, **kwargs):
+            yield token
+    monkeypatch.setattr(service.llm_provider, "stream_chat_with_timeout", honour_tool_availability)
+    response, _, _ = await service._stream_llm_and_tts(session)
+    assert response == "The authored conditions apply."
+    assert session._knowledge_evidence["status"] == "available"
+    assert "exclude tax" in session._knowledge_evidence["text"]
+    assert len(rounds) == 6
+
+
 def test_oversized_navigation_heading_remains_browsable_without_clipping_source():
     heading = "Authored long heading " * 410
     rows = [{"id": "first", "source_id": "manual", "source_version": 1, "version": 1,
