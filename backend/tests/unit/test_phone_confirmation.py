@@ -1,11 +1,7 @@
-"""Gap #1 (HIGH): a phone / callback number must be READ BACK + confirmed before
-it is treated as a committed fact — the SAME fail-closed gate email has.
+"""Historical phone parser compatibility and current neutral prompt state.
 
-Before this fix `CallState` had only an `email` confirmable slot; a callback
-number was protected by prompt prose alone. These tests pin the confirm-before-
-commit behaviour for the phone slot on the live CallState path, and its prompt
-surfacing.
-"""
+These parser utilities do not establish live model interpretation. Current
+model-tool confirmation/persistence is covered in test_model_contact_recording."""
 from __future__ import annotations
 
 from app.services.scripts.call_state_tracker import (
@@ -95,66 +91,26 @@ def test_email_and_phone_gates_are_independent():
 
 # ── read-back gate (turn_runner) ─────────────────────────────────────────────
 
-def _msg(role, content):
-    from app.domain.models.conversation import Message
-    return Message(role=role, content=content)
-
-
-def test_agent_read_back_phone_matches_any_formatting():
-    from app.domain.services.voice_pipeline.turn_runner import _agent_read_back_phone
-    from app.domain.models.conversation import MessageRole as R
-    h = [_msg(R.ASSISTANT, "So that's 555-123-4567 — did I get that right?")]
-    assert _agent_read_back_phone(h, "5551234567") is True
-    h2 = [_msg(R.ASSISTANT, "So that's 5 5 5 1 2 3 4 5 6 7, right?")]
-    assert _agent_read_back_phone(h2, "5551234567") is True
-    h3 = [_msg(R.ASSISTANT, "Are you the homeowner?")]
-    assert _agent_read_back_phone(h3, "5551234567") is False
-
-
-def test_agent_read_back_phone_skips_silence_check():
-    from app.domain.services.voice_pipeline.turn_runner import _agent_read_back_phone
-    from app.domain.models.conversation import MessageRole as R
-    h = [
-        _msg(R.ASSISTANT, "So that's 555 123 4567, did I get that right?"),
-        _msg(R.USER, "..."),
-        _msg(R.ASSISTANT, "Are you still there?"),
-    ]
-    assert _agent_read_back_phone(h, "5551234567") is True
-
-
-def test_full_phone_mention_with_unrelated_question_is_not_confirmation_gate():
-    from app.domain.services.voice_pipeline.turn_runner import _agent_read_back_phone
-    from app.domain.models.conversation import MessageRole as R
-
-    h = [_msg(R.ASSISTANT, "I noted 5 5 5 1 2 3 4 5 6 7. Are you available tomorrow?")]
-    assert _agent_read_back_phone(h, "5551234567") is False
-
 
 # ── prompt surfacing ─────────────────────────────────────────────────────────
 
-def test_prompt_unconfirmed_phone_demands_readback():
+def test_prompt_unconfirmed_phone_reports_pending():
     out = compose_system_prompt(BASE, CallState(phone="5551234567", phone_confirmed=False))
-    low = out.lower()
-    assert "5551234567" in out
-    assert "say exactly" in low
-    assert "did i get that right" in low
-    # The exact read-back: every digit on its own, in comma-paused groups.
-    assert "5 5 5, 1 2 3, 4 5 6 7" in out
-    assert "do not re-ask" not in low
+    assert "5551234567" in out and '"status": "awaiting_confirmation"' in out
+    assert "say exactly" not in out.lower() and "did i get that right" not in out.lower()
 
 
 def test_prompt_confirmed_phone_is_a_captured_fact():
     out = compose_system_prompt(BASE, CallState(phone="5551234567", phone_confirmed=True))
-    assert "CAPTURED" in out
-    assert "do not re-ask" in out.lower()
+    assert "CONTACT CONTEXT" in out and '"status": "confirmed"' in out
     assert "5551234567" in out
 
 
-def test_prompt_phone_readback_attempts_trigger_fallback():
+def test_legacy_phone_attempt_state_survives_without_scripted_fallback():
     s = update_state_from_user_turn(CallState(), "my number is +1 415 555 2671")
     for _ in range(3):
         s = update_state_from_user_turn(s, "um hold on", phone_readback_issued=True)
     assert s.phone_readback_attempts >= 3
-    out = compose_system_prompt("BASE", s).lower()
-    assert ("digit by digit" in out) or ("another way" in out)
-    assert "+14155552671" in out
+    out = compose_system_prompt("BASE", s)
+    assert "+14155552671" in out and "needs_clarification" in out
+    assert "digit by digit" not in out and "Say EXACTLY" not in out
