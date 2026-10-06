@@ -1,0 +1,12 @@
+{
+  "source_commit": "2d17c523",
+  "unit_command": "node --test --import tsx --import ./src/test-utils/setup.ts src/components/campaigns/knowledge-panel.test.tsx",
+  "unit_result": "11 passed, 0 failed",
+  "lint_command": "node node_modules/eslint/bin/eslint.js src/components/campaigns/knowledge-panel.tsx src/components/campaigns/knowledge-panel.test.tsx",
+  "lint_exit_code": 0,
+  "source_sha256_lf": {
+    "Talk-Leee/src/components/campaigns/knowledge-panel.tsx": "a3bc5f2fca1ae914bd1a9cd0bd80f778991fe90d541aaaa6e481f86785c021db",
+    "Talk-Leee/src/components/campaigns/knowledge-panel.test.tsx": "59ca8959cdee3fe909d1b98a4fa9b9914d72d55ce4fed6a691925eaa60497906"
+  },
+  "limits": "Copy-only component checks; no browser, live AI or release acceptance."
+}

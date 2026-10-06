@@ -1,0 +1,19 @@
+✔ read-only knowledge hides every mutation control (194.0775ms)
+✔ a superseded knowledge request cannot replace the current campaign tree (64.4224ms)
+✔ switching campaigns immediately removes already-loaded knowledge while the next request is pending (76.7135ms)
+✔ question result preserves matched and never displays generated raw-hit phrasing (95.7708ms)
+✔ question result preserves weak_match and never displays generated raw-hit phrasing (77.6241ms)
+✔ question result preserves no_match and never displays generated raw-hit phrasing (75.197ms)
+✔ absent enrichment and provenance still show original source with explicit unavailable revision (64.4042ms)
+✔ editing the query clears evidence and ignores an older pending result (99.0411ms)
+✔ campaign switch and old request errors cannot replace current diagnostics (90.5882ms)
+✔ a source mutation clears reviewed evidence and blocks testing until it finishes (121.4762ms)
+✔ request errors stay errors rather than becoming no-match evidence (68.1839ms)
+ℹ tests 11
+ℹ suites 0
+ℹ pass 11
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 28517.1181

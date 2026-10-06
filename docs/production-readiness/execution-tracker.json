@@ -4,7 +4,7 @@
   "created_at": "2026-10-04",
   "plan_status": "in_progress",
   "plan_file": "docs/production ready.md",
-  "scope_policy": "Fixed to the October 2 assessment; no unrelated feature work.",
+  "scope_policy": "Fixed to the October 2 assessment; no unrelated feature work. On 7 October the user explicitly revised AG02–AG05 implementation toward concise prompts, model-selected knowledge and model-interpreted contact tools; unrelated scope remains frozen.",
   "feature_freeze": {
     "active": true,
     "source": "Explicit user instruction on 4 October 2026",
@@ -541,10 +541,14 @@
           "path": "docs/sessions/2026-10-07-ag02-query-quality.md",
           "kind": "query_intent_and_current_tool_evidence_with_bounded_semantic_runner",
           "candidate": "c0f0429895f87dcf4ec7d6b1e75c2dda42740af4"
+        },
+        {
+          "path": "docs/sessions/2026-10-07-model-owned-conversation.md",
+          "kind": "user_requested_model_owned_architecture_revision_local_only"
         }
       ],
-      "blocker": "Local source, passage, diagnostic and current-tool-evidence repairs are verified. The latest committed-source run passed 534 tests; prior PostgreSQL/UI evidence remains separately bounded. The unchanged raw quality gate fails: pinned 42/45 recall and 32/45 sufficient; prior SQL 40/45 and 31/45. Default injection does not perform semantic reformulation. Existing tool mode is available but a rewritten-query match does not prove fidelity to the original question. The bounded 80-question synthetic Groq runner is offline verified and its integrated dry plan is ready; a credential source has not been designated for execution. Approved campaign facts, full configured prompt/voice behavior, human answer review and deployed timing remain unqualified. No AG02 or customer-acceptance closure is claimed.",
-      "next_action": "Use the designated existing Groq credential for the reviewed single synthetic run (openai/gpt-oss-20b, retrieve, 80 questions, at most 160 requests and 204800 reserved completion tokens), then inspect original-question meaning and every actual answer before considering default recovery. Keep the raw gate and thresholds unchanged. Separately obtain the current campaign name/ID and approved versions, qualify its full saved profile and SQL/native/call paths, and complete human factual/audio and deployed timing acceptance.",
+      "blocker": "Live keyword ranking/query-recovery is superseded by model-selected scoped authored sections. Local source/tool/session integration is tested, but original-question actual-model accuracy, full campaign profile, voice timing and human/customer acceptance remain unqualified. Historical raw scores remain unchanged and do not qualify the new architecture. The old query-based qualification CLI is explicitly retired; no provider credential has been used for this revision.",
+      "next_action": "Review a bounded actual-model section-selection profile using unchanged gold questions/thresholds, then use a designated existing account under its reviewed execution limits. Verify original-question answers and contact interpretation. Qualify current approved campaign versions, native/traditional runtime, saved leads, audio and deployed timing before acceptance.",
       "target_date": null,
       "execution_note": "Local candidate 69d09fe575831c42a14b28c0a7417ca1b388c492: 791 combined backend and 9 PostgreSQL tests passed. Synthetic 60-question quality gate failed (pinned 93.33/71.11%, SQL 88.89/68.89%, targets 90/85%). No provider calls, push or deployment; no package closure."
     },
@@ -554,7 +558,7 @@
       "owner_role": "Realtime engineering lead",
       "assigned_person": "Codex implementation team",
       "reviewer": "Independent assertion, ordering, playback and action-admission review; provider/release qualification remains AG04/OP08",
-      "status": "candidate_verified",
+      "status": "in_progress",
       "start_after_milestone": "RG01 baseline recorded",
       "dependencies_and_tests": "See package text; coordination and final acceptance dependencies are distinct from entry milestones.",
       "finding_ids": [
@@ -574,10 +578,14 @@
           "path": "docs/sessions/2026-10-05-ag03-customer-claim-followup.md",
           "kind": "exact_denied_customer_output_regression",
           "candidate": "7f9ec58f3657e8a5fd7bcd3a3e3d882fb1f5a341"
+        },
+        {
+          "path": "docs/sessions/2026-10-07-model-owned-conversation.md",
+          "kind": "user_requested_model_owned_architecture_revision_local_only"
         }
       ],
-      "blocker": null,
-      "next_action": "Retain deterministic candidate evidence; qualify real provider/telephone behavior under AG04 and consume saved ASR revision evidence under AG05. No release or feature closure.",
+      "blocker": "The user-requested model-owned revision removes deterministic relationship interpretation and speech rewrites. Prior candidate_verified evidence is historical; current relationship comprehension/retention needs actual-model and call evaluation.",
+      "next_action": "Validate caller corrections and relationship understanding from original conversation history under AG04; do not restore scripted relationship rules or count retired regex tests as current qualification.",
       "target_date": null,
       "execution_note": "Local candidate 27c04347b2f0d5d0eccf83b3c31663eb3cfbd145: 1588 focused backend tests passed, zero skips; CI-rule Ruff on all17 changed files and staged diff checks passed. No migration, live provider/audio, push or deployment."
     },
@@ -665,10 +673,14 @@
           "kind": "bounded_explicit_secret_text_and_prompt_contract_repair_not_privacy_acceptance",
           "candidate": "38b5a8ab",
           "owner_candidate": "939567b9137adaa19cd5fc807b9c0a9a080dcc83"
+        },
+        {
+          "path": "docs/sessions/2026-10-07-model-owned-conversation.md",
+          "kind": "user_requested_model_owned_architecture_revision_local_only"
         }
       ],
-      "blocker": "Bounded explicit-secret text persistence and privacy/name prompt contracts are repaired locally with 472 affected tests passing; this is not universal redaction, model behavior or privacy acceptance. Captured Groq semantic failure is retained. Proposed matrix remains 43/50 mapped by offline replay; seven canonical conditions and the intended profile/rubric/cohort remain unqualified. Live/human/audio/effect acceptance is not run, and AG02 retrieval quality still fails.",
-      "next_action": "Qualify actual acoustic behavior, sensitive/unrelated requests and unclear-name model responses on the approved profile/corpus. Preserve the bounded sanitization limits, failed Groq semantics and current matrix count; complete per-profile human/live qualification. Passing source/persistence/prompt checks does not establish spoken refusal, secure capture, semantic accuracy or customer acceptance.",
+      "blocker": "Concise guides and model-owned speech replace the old output semantic judge; deterministic privacy/effect/transport controls remain. Historical replay mappings and preserved Groq semantic failure are retained, but do not qualify this revised prompt/runtime. Actual model, acoustic, interruption, unsupported-fact and premature-success behavior needs new profile acceptance.",
+      "next_action": "Evaluate actual responses from each configured provider using approved original scenarios and source versions; inspect factual meaning, tool timing, corrections and audio. No local unit count establishes a spoken semantic guarantee.",
       "target_date": null,
       "execution_note": "1797 tests passed0skip;170offline rows1120controlchecks0failed;1retained semantic failure/169unreviewed. Local source commit only; no provider call/push/deploy."
     },
@@ -708,10 +720,14 @@
           "path": "docs/sessions/2026-10-05-exact-integration-verification.md",
           "kind": "integrated_local_regression_not_release_acceptance",
           "candidate": "44dcc2367446cbe85c9c2757838b8695cf15bf1f"
+        },
+        {
+          "path": "docs/sessions/2026-10-07-model-owned-conversation.md",
+          "kind": "user_requested_model_owned_architecture_revision_local_only"
         }
       ],
-      "blocker": "Local source, persistence and display repairs pass. Exact contact cohort accuracy, qualification precision/recall and correction burden, real Sales Hub browser acceptance, connector frozen-payload handling and release acceptance remain unverified. Same-process retry cannot recover evidence that was never committed before process death.",
-      "next_action": "Complete approved cohort/profile, browser and real connector acceptance for saved source/confirmation evidence. Retain unknown save states and no unsupported contact confirmation.",
+      "blocker": "Model record_contact now interprets email/phone and uses existing validated persistence/source revisions. Local saving and invalidation controls pass; real interpretation accuracy, correction burden, Sales Hub browser and connector acceptance remain unverified. New spoken name/company lead fields were not added. Same-process retry cannot recover evidence never committed before process death.",
+      "next_action": "Qualify actual caller spellings/corrections/confirmations and saved pending/confirmed display on the approved cohort/profile, then real connector outcomes. Confirmation evidence is model interpretation, not guaranteed transcription correctness.",
       "target_date": null
     },
     {
