@@ -19,12 +19,13 @@ def campaign(script):
     return {"id": "synthetic-campaign", "tenant_id": "synthetic-tenant", "script_config": script}
 
 
-async def assemble(monkeypatch, config, *, mock_connect=True):
+async def assemble(monkeypatch, config, *, mock_connect=True, db_pool=None):
     from app.domain.services import credential_resolver
     from app.domain.services.voice_pipeline import action_execution
     from app.core import container
     monkeypatch.setattr(credential_resolver, "get_credential_resolver", lambda: SimpleNamespace(resolve=AsyncMock(return_value="synthetic-key")))
-    monkeypatch.setattr(container, "get_container", lambda: SimpleNamespace(is_initialized=False))
+    monkeypatch.setattr(container, "get_container", lambda: SimpleNamespace(
+        is_initialized=db_pool is not None, db_client=SimpleNamespace(pool=db_pool)))
     async def context(session):
         session._voice_action_context = None
         session._voice_action_capabilities = {"send_email": "Synthetic configured email capability"}
@@ -85,6 +86,50 @@ async def test_initial_effective_prompt_identity_includes_capability_instruction
     assert config.system_prompt == instructions
     assert config.prompt_hash == hashlib.sha256(instructions.encode()).hexdigest()[:16]
     assert result.call_session.system_prompt == instructions
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("policy", ["call_snapshot", "admission_snapshot"])
+async def test_exact_source_catalog_reaches_native_handshake_before_model_can_respond(monkeypatch, policy):
+    from app.services.scripts.knowledge.sections import build_section_catalog
+    from app.domain.services.voice_pipeline.knowledge_tool import KNOWLEDGE_TOOL_SPEC
+    config = VoiceSessionConfig(pipeline_mode="realtime", tenant_id="tenant-a", campaign_id="campaign-a")
+    config._knowledge_catalog = build_section_catalog([
+        {"id": "saved-node", "source_id": "saved-source", "source_version": 2,
+         "version": "2026-10-07T00:00:00Z", "parent_id": None, "path": "1", "depth": 1,
+         "heading": "Warranty", "content": "Authored five-year warranty.", "summary": "Generated wrong claim."},
+    ], tenant_id=config.tenant_id, campaign_id=config.campaign_id, source_policy=policy)
+    observed = []
+    async def connect(provider):
+        wire = provider._build_session_update()["session"]
+        assert "Warranty" in wire["instructions"] and "section_ids" in wire["instructions"]
+        assert "Authored five-year" not in wire["instructions"] and "Generated wrong" not in wire["instructions"]
+        tool = next(tool for tool in wire["tools"] if tool["name"] == "knowledge_lookup")
+        assert tool["parameters"] == KNOWLEDGE_TOOL_SPEC["function"]["parameters"]
+        observed.append(wire)
+        return True
+    monkeypatch.setattr(OpenAIRealtimeSession, "connect", connect)
+    result = await assemble(monkeypatch, config, mock_connect=False)
+    assert len(observed) == 1
+    assert result.realtime_bridge._knowledge_catalog is config._knowledge_catalog
+    assert result.call_session._knowledge_catalog is config._knowledge_catalog
+    assert config.prompt_hash == hashlib.sha256(observed[0]["instructions"].encode()).hexdigest()[:16]
+
+
+@pytest.mark.asyncio
+async def test_native_without_catalog_does_not_offer_unusable_knowledge_tool(monkeypatch):
+    result = await assemble(monkeypatch, VoiceSessionConfig(pipeline_mode="realtime"))
+    wire = result.realtime_session._build_session_update()["session"]
+    assert all(tool["name"] != "knowledge_lookup" for tool in wire["tools"])
+    assert "source knowledge is unavailable" in wire["instructions"]
+
+
+@pytest.mark.asyncio
+async def test_native_retains_contact_persistence_pool_independently_of_knowledge_catalog(monkeypatch):
+    pool = object()
+    result = await assemble(monkeypatch, VoiceSessionConfig(pipeline_mode="realtime"), db_pool=pool)
+    assert result.realtime_bridge._knowledge_catalog is None
+    assert result.realtime_bridge._knowledge_pool is pool
 
 
 class Handshake:
@@ -341,6 +386,11 @@ async def test_all_offered_native_voices_and_hidden_xai_have_sanitized_wire_evid
             data = CampaignCreateRequest(name="Synthetic", company_name="Synthetic", agent_names=["Alex"], persona_type="lead_gen")
             script, _ = await build_campaign_voice_config(data, source)
             config = build_telephony_session_config(campaign=campaign(json.loads(json.dumps(script))), ai_config_override=source)
+        from app.services.scripts.knowledge.sections import build_section_catalog
+        config._knowledge_catalog = build_section_catalog([
+            {"id": "source-node", "source_id": "source-doc", "source_version": 1,
+             "version": "2026-10-07T00:00:00Z", "heading": "Policy", "content": "Authored policy."},
+        ], tenant_id=config.tenant_id, campaign_id=config.campaign_id, source_policy="call_snapshot")
         result = await assemble(monkeypatch, config, mock_connect=False)
         try:
             wire = transport.sent[0]["session"]
@@ -356,17 +406,16 @@ async def test_all_offered_native_voices_and_hidden_xai_have_sanitized_wire_evid
             assert "knowledge_lookup" in profile["submitted"]["enabled_tools"]
             # Inspect the actual configured runtime wire, not a stand-alone policy constant.
             lookup = next(tool for tool in wire["tools"] if tool["name"] == "knowledge_lookup")
-            query = lookup["parameters"]["properties"]["query"]
-            assert lookup["parameters"]["required"] == ["query"]
-            assert query["type"] == "string"
-            for constraint in ("named products", "country/location", "timing", "negation", "relationship"):
-                assert constraint in wire["instructions"] and constraint in query["description"]
-            assert "matched label alone is not proof" in wire["instructions"]
-            assert config.prompt_version == "realtime@8"
+            from app.services.scripts.knowledge.sections import SECTION_TOOL_PARAMETERS
+            from app.realtime.prompts import PROMPT_VERSION
+            assert lookup["parameters"] == SECTION_TOOL_PARAMETERS
+            assert "caller’s meaning" in wire["instructions"] or "caller's meaning" in wire["instructions"]
+            assert "Available means the source was read" in wire["instructions"]
+            assert config.prompt_version == PROMPT_VERSION
             assert config.prompt_hash == hashlib.sha256(wire["instructions"].encode()).hexdigest()[:16]
             assert "send_email" in profile["submitted"]["enabled_tools"]
             assert "temperature" not in wire
-            assert profile["knowledge_reference"]["status"] == "unversioned"
+            assert profile["knowledge_reference"] == {"status": "versioned", "snapshot_sha256": config._knowledge_catalog.checksum}
             if not xai:
                 assert profile["submitted"]["noise_reduction"] == {"type": "far_field"}
                 assert profile["submitted"]["max_output_tokens"] == 512

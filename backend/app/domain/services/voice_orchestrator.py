@@ -259,6 +259,10 @@ class VoiceSessionConfig(RealtimeSessionConfig):
     # Validated tenant-authored guidance only, without cascaded voice tags or
     # an outbound persona body. Shared with the realtime instruction builder.
     campaign_guidance: str = ""
+    # Prepared before provider connection. Runtime section reads never refresh
+    # this call's published/admission source snapshot.
+    _knowledge_catalog: object = field(default=None, repr=False)
+    knowledge_mode: Optional[str] = None
     # ── Prompt identity (goals.md §6) ────────────────────────────────────
     # Which instructions this call actually ran on. `prompt_version` is the
     # name a human rolls back to; `prompt_hash` is derived from the composed
@@ -594,6 +598,8 @@ class VoiceOrchestrator:
         )
         call_session.talklee_call_id = talklee_call_id
         call_session.barge_in_event = asyncio.Event()
+        from app.services.scripts.knowledge.session_inject import copy_prepared_knowledge
+        copy_prepared_knowledge(config, call_session)
 
         # WHICH INSTRUCTIONS DID THIS CALL RUN ON? (goals.md §6)
         # The identity is computed in build_telephony_session_config, which

@@ -1,206 +1,102 @@
-"""Unit tests for pre-warm campaign-knowledge injection (vectorless RAG P2).
+"""Setup pins one scoped catalog for every non-none campaign mode."""
+from contextlib import asynccontextmanager
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
-apply_campaign_knowledge() runs at pre-originate warmup. It must:
-  - be a strict no-op when the feature flag is off,
-  - bake the full tree for inline, the skeleton for map_retrieve,
-  - set knowledge_mode (+tenant) for retrieve WITHOUT inlining,
-  - never raise (a knowledge hiccup can't break call setup).
+import pytest
 
-compact_tree is monkeypatched so these stay DB-free. A plain SimpleNamespace
-stands in for CallSession since the function only touches four attributes.
-"""
-from __future__ import annotations
-
-import asyncio
-import types
-
+from app.domain.services.voice_pipeline.knowledge_tool import knowledge_system_addendum
 from app.services.scripts.knowledge import session_inject
 
-
-async def _fake_compact_tree(pool, tenant_id, campaign_id, *, skeleton_only=False, max_chars=12000):
-    return "SKELETON_TOC" if skeleton_only else "FULL_TREE_BODY"
-
-
-def _session(**kw):
-    base = dict(system_prompt="PERSONA", campaign_id="c1", tenant_id=None, knowledge_mode=None)
-    base.update(kw)
-    return types.SimpleNamespace(**base)
+ROWS = [{"id": "node-a", "source_id": "source-a", "source_version": 2,
+         "version": "2026-10-07T00:00:00Z", "parent_id": None, "path": "1", "depth": 1,
+         "heading": "Warranty", "content": "The warranty lasts five years."}]
 
 
-def _row(mode):
-    return {"knowledge_mode": mode, "tenant_id": "t1", "id": "c1"}
+def session(**changes):
+    return SimpleNamespace(**{**dict(system_prompt="PERSONA", campaign_id="c1", tenant_id=None,
+                                    knowledge_mode=None), **changes})
 
 
-def _run(coro):
-    return asyncio.run(coro)
+def snapshot(mode="retrieve"):
+    return {"enabled": True, "mode": mode, "tenant_id": "t1", "campaign_id": "c1",
+            "checksum": "saved-admission-checksum", "nodes": ROWS}
 
 
-def test_flag_off_is_noop(monkeypatch):
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["inline", "map_retrieve", "retrieve"])
+async def test_actual_loader_pins_all_modes_without_full_dump(monkeypatch, mode):
+    from app.core import db_utils
+    monkeypatch.setenv("CAMPAIGN_KNOWLEDGE_ENABLED", "true")
+    calls = []
+    class Connection:
+        async def fetch(self, sql, *args):
+            assert "n.parent_id" in sql and "s.status = 'ready'" in sql and "AND n.enabled" in sql
+            calls.append(args)
+            return [{**ROWS[0], "updated_at": ROWS[0]["version"]}]
+    @asynccontextmanager
+    async def acquire(pool, tenant_id):
+        assert tenant_id == "t1" and pool == "synthetic-pool"
+        yield Connection()
+    monkeypatch.setattr(db_utils, "acquire_with_tenant", acquire)
+    config = session()
+    await session_inject.apply_campaign_knowledge(config, {"id": "c1", "tenant_id": "t1", "knowledge_mode": mode}, pool="synthetic-pool")
+    assert calls == [("c1", "t1")]
+    assert config.knowledge_mode == mode and config.system_prompt == "PERSONA"
+    assert config._knowledge_catalog.source_policy == "call_snapshot"
+    assert "Warranty" in knowledge_system_addendum(config)
+    assert "five years" not in knowledge_system_addendum(config)
+    call_session = session()
+    session_inject.copy_prepared_knowledge(config, call_session)
+    assert call_session._knowledge_catalog is config._knowledge_catalog and call_session.tenant_id == "t1"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reason", ["flag_off", "mode_none", "wrong_tenant", "wrong_campaign"])
+async def test_disabled_or_cross_scope_setup_does_not_read(monkeypatch, reason):
+    monkeypatch.setenv("CAMPAIGN_KNOWLEDGE_ENABLED", "false" if reason == "flag_off" else "true")
+    load = AsyncMock(side_effect=AssertionError("must not load"))
+    monkeypatch.setattr(session_inject, "load_section_catalog", load)
+    cs = session(tenant_id="other" if reason == "wrong_tenant" else None,
+                 campaign_id="other" if reason == "wrong_campaign" else "c1")
+    await session_inject.apply_campaign_knowledge(cs, {"id": "c1", "tenant_id": "t1",
+        "knowledge_mode": "none" if reason == "mode_none" else "retrieve"}, pool=object())
+    load.assert_not_awaited()
+    assert cs._knowledge_catalog is None and cs.system_prompt == "PERSONA"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("error", [RuntimeError("unavailable"), TimeoutError()])
+async def test_setup_failure_is_explicit_unavailable_without_lexical_fallback(monkeypatch, error):
+    monkeypatch.setenv("CAMPAIGN_KNOWLEDGE_ENABLED", "true")
+    monkeypatch.setattr(session_inject, "load_section_catalog", AsyncMock(side_effect=error))
+    cs = session()
+    await session_inject.apply_campaign_knowledge(cs, {"id": "c1", "tenant_id": "t1", "knowledge_mode": "inline"}, pool=object())
+    assert cs._knowledge_catalog is None and "unavailable" in knowledge_system_addendum(cs)
+    assert cs.system_prompt == "PERSONA"
+
+
+@pytest.mark.parametrize("mode", ["inline", "map_retrieve", "retrieve"])
+def test_pinned_snapshot_remains_original_without_environment_or_database(monkeypatch, mode):
     monkeypatch.delenv("CAMPAIGN_KNOWLEDGE_ENABLED", raising=False)
-    monkeypatch.setattr(session_inject, "compact_tree", _fake_compact_tree)
-    cs = _session()
-    _run(session_inject.apply_campaign_knowledge(cs, _row("inline"), pool=object()))
-    assert cs.knowledge_mode is None
-    assert cs.system_prompt == "PERSONA"
+    cs = session()
+    session_inject.apply_pinned_campaign_knowledge(cs, snapshot(mode))
+    assert cs._knowledge_catalog.source_policy == "admission_snapshot"
+    assert cs._knowledge_snapshot_checksum == "saved-admission-checksum"
+    assert cs._knowledge_catalog.nodes[0]["content"] == ROWS[0]["content"]
+    assert cs.knowledge_mode == mode and cs.system_prompt == "PERSONA"
 
 
-def test_mode_none_is_noop(monkeypatch):
-    monkeypatch.setenv("CAMPAIGN_KNOWLEDGE_ENABLED", "true")
-    monkeypatch.setattr(session_inject, "compact_tree", _fake_compact_tree)
-    cs = _session()
-    _run(session_inject.apply_campaign_knowledge(cs, _row("none"), pool=object()))
-    assert cs.knowledge_mode is None
-    assert cs.system_prompt == "PERSONA"
-
-
-def test_inline_bakes_full_tree(monkeypatch):
-    monkeypatch.setenv("CAMPAIGN_KNOWLEDGE_ENABLED", "true")
-    monkeypatch.setattr(session_inject, "compact_tree", _fake_compact_tree)
-    cs = _session()
-    _run(session_inject.apply_campaign_knowledge(cs, _row("inline"), pool=object()))
-    assert cs.knowledge_mode == "inline"
-    assert cs.tenant_id == "t1"
-    assert cs.system_prompt.startswith("PERSONA")
-    assert "FULL_TREE_BODY" in cs.system_prompt
-    # price guard rides ADJACENT to the baked knowledge (2026-07-02 A/B:
-    # knowledge-adjacent placement is what stops llama inventing figures)
-    from app.services.scripts.prompts.guardrails import KNOWLEDGE_PRICE_GUARD
-    assert KNOWLEDGE_PRICE_GUARD in cs.system_prompt
-    assert cs.system_prompt.index("FULL_TREE_BODY") < cs.system_prompt.index(
-        KNOWLEDGE_PRICE_GUARD)
-
-
-def test_map_retrieve_bakes_skeleton_only(monkeypatch):
-    monkeypatch.setenv("CAMPAIGN_KNOWLEDGE_ENABLED", "true")
-    monkeypatch.setattr(session_inject, "compact_tree", _fake_compact_tree)
-    cs = _session()
-    _run(session_inject.apply_campaign_knowledge(cs, _row("map_retrieve"), pool=object()))
-    assert cs.knowledge_mode == "map_retrieve"
-    assert "SKELETON_TOC" in cs.system_prompt
-    assert "FULL_TREE_BODY" not in cs.system_prompt
-
-
-def test_retrieve_sets_mode_without_inlining(monkeypatch):
-    monkeypatch.setenv("CAMPAIGN_KNOWLEDGE_ENABLED", "true")
-    monkeypatch.setattr(session_inject, "compact_tree", _fake_compact_tree)
-    cs = _session()
-    _run(session_inject.apply_campaign_knowledge(cs, _row("retrieve"), pool=object()))
-    assert cs.knowledge_mode == "retrieve"
-    assert cs.tenant_id == "t1"
-    assert cs.system_prompt == "PERSONA"  # large KB: served per-turn, not inlined
-
-
-def test_no_pool_is_noop(monkeypatch):
-    monkeypatch.setenv("CAMPAIGN_KNOWLEDGE_ENABLED", "true")
-    monkeypatch.setattr(session_inject, "compact_tree", _fake_compact_tree)
-    cs = _session()
-    _run(session_inject.apply_campaign_knowledge(cs, _row("inline"), pool=None))
-    assert cs.knowledge_mode is None
-    assert cs.system_prompt == "PERSONA"
-
-
-def test_never_raises_when_compact_tree_blows_up(monkeypatch):
-    monkeypatch.setenv("CAMPAIGN_KNOWLEDGE_ENABLED", "true")
-
-    async def _boom(*a, **k):
-        raise RuntimeError("db down")
-
-    monkeypatch.setattr(session_inject, "compact_tree", _boom)
-    cs = _session()
-    # must not propagate — call setup continues on the persona prompt
-    _run(session_inject.apply_campaign_knowledge(cs, _row("inline"), pool=object()))
-    assert cs.system_prompt == "PERSONA"
-
-
-def test_inline_bake_failure_falls_back_to_retrieve(monkeypatch, caplog):
-    """Issue #4: an inline-load failure must NOT leave the session marked
-    'inline' (the turn loop skips per-turn retrieval for inline → zero KB). It
-    falls back to 'retrieve' so per-turn retrieval still serves the KB, and logs
-    the failure loudly (ERROR), not swallowed."""
-    import logging
-    monkeypatch.setenv("CAMPAIGN_KNOWLEDGE_ENABLED", "true")
-
-    async def _boom(*a, **k):
-        raise RuntimeError("db down")
-
-    monkeypatch.setattr(session_inject, "compact_tree", _boom)
-    cs = _session()
-    with caplog.at_level(logging.ERROR):
-        _run(session_inject.apply_campaign_knowledge(cs, _row("inline"), pool=object()))
-    assert cs.knowledge_mode == "retrieve"     # NOT left as "inline"
-    assert cs.tenant_id == "t1"                 # tenant still stamped for retrieval
-    assert cs.system_prompt == "PERSONA"        # nothing baked
-    assert "FALLING BACK to per-turn retrieve" in caplog.text
-
-
-def test_inline_empty_tree_falls_back_to_retrieve(monkeypatch):
-    """A compact_tree that returns '' (e.g. it swallowed a DB error) must not
-    leave the call marked 'inline' with nothing baked — that would skip per-turn
-    retrieval. Fall back to 'retrieve'."""
-    monkeypatch.setenv("CAMPAIGN_KNOWLEDGE_ENABLED", "true")
-
-    async def _empty(*a, **k):
-        return ""
-
-    monkeypatch.setattr(session_inject, "compact_tree", _empty)
-    cs = _session()
-    _run(session_inject.apply_campaign_knowledge(cs, _row("inline"), pool=object()))
-    assert cs.knowledge_mode == "retrieve"
-    assert cs.system_prompt == "PERSONA"
-
-
-def test_does_not_clobber_existing_tenant(monkeypatch):
-    monkeypatch.setenv("CAMPAIGN_KNOWLEDGE_ENABLED", "true")
-    monkeypatch.setattr(session_inject, "compact_tree", _fake_compact_tree)
-    cs = _session(tenant_id="already-set")
-    _run(session_inject.apply_campaign_knowledge(cs, _row("inline"), pool=object()))
-    assert cs.tenant_id == "already-set"
-    assert cs.system_prompt == "PERSONA"
-    assert cs.knowledge_mode is None
-
-
-def test_pinned_retrieve_uses_snapshot_even_if_live_flag_changes(monkeypatch):
-    monkeypatch.delenv("CAMPAIGN_KNOWLEDGE_ENABLED", raising=False)
-    cs = _session()
-    snapshot = {
-        "enabled": True,
-        "mode": "retrieve",
-        "tenant_id": "t1",
-        "campaign_id": "c1",
-        "checksum": "abc",
-        "nodes": [
-            {
-                "heading": "Warranty",
-                "content": "The warranty lasts five years.",
-                "search_text": "warranty lasts five years",
-                "priority": 5,
-            }
-        ],
-    }
-    session_inject.apply_pinned_campaign_knowledge(cs, snapshot)
-    assert cs.knowledge_mode == "retrieve"
-    assert cs._knowledge_snapshot_nodes[0]["content"].endswith("five years.")
-    assert cs._knowledge_snapshot_checksum == "abc"
-
-
-def test_pinned_inline_bakes_only_captured_nodes():
-    cs = _session()
-    session_inject.apply_pinned_campaign_knowledge(
-        cs,
-        {
-            "enabled": True,
-            "mode": "inline",
-            "tenant_id": "t1",
-            "campaign_id": "c1",
-            "checksum": "abc",
-            "nodes": [
-                {
-                    "depth": 0,
-                    "heading": "Old policy",
-                    "content": "Captured before answer.",
-                }
-            ],
-        },
-    )
-    assert cs.knowledge_mode == "inline"
-    assert "Captured before answer." in cs.system_prompt
+@pytest.mark.parametrize("mutation", ["disabled", "tenant", "campaign", "revision"])
+def test_pinned_bad_scope_or_proof_is_unavailable(mutation):
+    from copy import deepcopy
+    saved = deepcopy(snapshot())
+    if mutation == "disabled":
+        saved["enabled"] = False
+    elif mutation in {"tenant", "campaign"}:
+        saved[f"{mutation}_id"] = "other"
+    else:
+        saved["nodes"][0]["source_version"] = None
+    cs = session(tenant_id="t1")
+    session_inject.apply_pinned_campaign_knowledge(cs, saved)
+    assert cs._knowledge_catalog is None

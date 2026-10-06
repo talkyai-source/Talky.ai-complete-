@@ -90,8 +90,12 @@ async def create_realtime_voice_session(
         await prepare_voice_action_context(action_context)
         from app.domain.services.voice_pipeline.action_execution import enabled_voice_actions
         from app.domain.services.voice_pipeline.action_tools import action_tool_system_addendum
-        instructions = prepare_realtime_prompt(config, capability_instructions=
-            action_tool_system_addendum(enabled_voice_actions(action_context)))
+        from app.domain.services.voice_pipeline.knowledge_tool import knowledge_system_addendum, knowledge_tools_for
+        capabilities = action_tool_system_addendum(enabled_voice_actions(action_context))
+        if getattr(config, "_knowledge_catalog", None) is None:
+            capabilities += "\n\n" + knowledge_system_addendum(config, tool_name="knowledge_lookup")
+        instructions = prepare_realtime_prompt(config, capability_instructions=capabilities)
+        knowledge_tools = [knowledge_lookup_tool()] if knowledge_tools_for(config, SimpleNamespace(supports_tools=True)) else []
 
         # Media gateway at 8 kHz internal so the μ-law wire needs NO
         # resampling — only the codec conversion in the bridge.
@@ -121,7 +125,7 @@ async def create_realtime_voice_session(
                 agent_id=rt_settings.get("agent_id"),
                 voice=config.realtime_voice,
                 instructions=instructions,
-                tools=[knowledge_lookup_tool(), *realtime_voice_action_tools(action_context)],
+                tools=[*knowledge_tools, *realtime_voice_action_tools(action_context)],
                 settings=config.realtime_settings,
                 call_id=call_id,
             )
@@ -131,11 +135,14 @@ async def create_realtime_voice_session(
                 model=config.realtime_model or "gpt-realtime-2",
                 voice=config.realtime_voice or "marin",
                 instructions=instructions,
-                tools=[knowledge_lookup_tool(), *realtime_voice_action_tools(action_context)],
+                tools=[*knowledge_tools, *realtime_voice_action_tools(action_context)],
                 settings=config.realtime_settings,
                 call_id=call_id,
             )
         rt._prompt_identity = {"template": config.prompt_template, "version": config.prompt_version}
+        if getattr(config, "_knowledge_catalog", None) is not None:
+            config._knowledge_snapshot_checksum = config._knowledge_catalog.checksum
+        rt._knowledge_reference_session = config
         connected = await rt.connect()
         if not connected:
             logger.warning(
@@ -147,20 +154,14 @@ async def create_realtime_voice_session(
                 pass
             return None
 
-        # Knowledge context (reuse the cascaded retrieval). Best-effort — a
-        # missing pool just means the knowledge tool returns "no info".
+        # The existing bridge pool also persists contact revisions and final
+        # contact flushes. Section reads use the cached catalog, not this pool.
         knowledge_pool = None
         try:
             from app.core.container import get_container
-            c = get_container()
-            if c.is_initialized:
-                # Use the SAME accessor the cascaded per-turn retrieval uses
-                # (turn_streamer._knowledge_block_for_turn:
-                #   getattr(container.db_client, "pool", None)). Both resolve
-                # to the one asyncpg pool, but aligning the accessor keeps the
-                # two knowledge paths provably identical and avoids the
-                # db_pool @property raising if the pool is torn down mid-setup.
-                knowledge_pool = getattr(c.db_client, "pool", None)
+            container = get_container()
+            if container.is_initialized:
+                knowledge_pool = getattr(container.db_client, "pool", None)
         except Exception:
             knowledge_pool = None
 
@@ -189,13 +190,13 @@ async def create_realtime_voice_session(
         )
         call_session.talklee_call_id = talklee_call_id
         call_session.barge_in_event = asyncio.Event()
+        from app.services.scripts.knowledge.session_inject import copy_prepared_knowledge
+        copy_prepared_knowledge(config, call_session)
         call_session._call_direction = config.direction.value
         call_session._voice_action_context = action_context._voice_action_context
         call_session._voice_action_capabilities = action_context._voice_action_capabilities
         call_session._voice_action_context_loaded = True
-        # Knowledge is injected after assembly on supported call paths. Read
-        # only its validated checksum when later evidence is requested; never
-        # assume the initial handshake contained a pinned knowledge snapshot.
+        # Same catalog/checksum as the initial handshake, now on the live session.
         rt._knowledge_reference_session = call_session
 
         # Transcript accumulation for the realtime path. The speech-to-speech
@@ -240,6 +241,7 @@ async def create_realtime_voice_session(
             call_direction=config.direction.value,
             action_session=call_session,
         )
+        bridge._knowledge_catalog = getattr(config, "_knowledge_catalog", None)
 
         voice_session = VoiceSession(
             call_id=call_id,

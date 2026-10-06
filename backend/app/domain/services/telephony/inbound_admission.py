@@ -843,7 +843,7 @@ class InboundAdmissionService:
                     )
                     for raw_node in rows:
                         node = dict(raw_node)
-                        for key in ("id", "source_id", "updated_at"):
+                        for key in ("id", "parent_id", "source_id", "updated_at"):
                             if node.get(key) is not None:
                                 node[key] = str(node[key])
                         for key in ("keywords", "example_questions"):

@@ -409,6 +409,12 @@ async def prepare_prewarmed_session(
         # greeting and the callee's reply is short and back-and-forth.
         if effective_first_speaker == "user":
             config.stt_eot_timeout_ms = 1000
+        # Prepare before creation: native instructions are sent during connect.
+        from app.services.scripts.knowledge.session_inject import apply_campaign_knowledge
+        await apply_campaign_knowledge(
+            config, campaign_row,
+            pool=getattr(getattr(container, "db_client", None), "pool", None),
+        )
         pre_warm_session = await orchestrator.create_voice_session(config)
         pre_warm_session._first_speaker = effective_first_speaker
         # Mirror onto call_session so downstream code (latency telemetry,
@@ -458,22 +464,7 @@ async def prepare_prewarmed_session(
         # story.
         _start_opening_ladder_generation(pre_warm_session, effective_first_speaker)
 
-        # ── Campaign knowledge (vectorless RAG, P2) ─────────────────────
-        # Flag-gated + fail-soft: for inline/map_retrieve campaigns this bakes
-        # the (compacted) knowledge tree into the session's system prompt now,
-        # while we're async with a DB pool in hand, so every turn has it for
-        # free. retrieve-mode campaigns get nothing here and are served per
-        # turn in turn_streamer. A failure leaves the persona prompt untouched.
-        try:
-            from app.services.scripts.knowledge.session_inject import (
-                apply_campaign_knowledge,
-            )
-            _kb_pool = getattr(getattr(container, "db_client", None), "pool", None)
-            await apply_campaign_knowledge(
-                pre_warm_session.call_session, campaign_row, pool=_kb_pool,
-            )
-        except Exception as _kb_exc:
-            logger.debug("campaign_knowledge_inject_skipped: %s", _kb_exc)
+        # The model-selected catalog was pinned before session creation above.
 
         # ───────────────────────────────────────────────────────────────
         # Strict warmup gate — racer-in-starting-blocks model.

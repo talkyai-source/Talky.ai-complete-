@@ -71,6 +71,9 @@ def prepare_realtime_prompt(config, *, capability_instructions: str = ""):
     instructions = build_realtime_instructions(build_realtime_persona(config))
     if capability_instructions:
         instructions += "\n\n" + capability_instructions
+    if getattr(config, "_knowledge_catalog", None) is not None:
+        from app.domain.services.voice_pipeline.knowledge_tool import knowledge_system_addendum
+        instructions += "\n\n" + knowledge_system_addendum(config, tool_name="knowledge_lookup")
     config.system_prompt = instructions
     config.prompt_template = "realtime_voice"
     config.prompt_version = PROMPT_VERSION

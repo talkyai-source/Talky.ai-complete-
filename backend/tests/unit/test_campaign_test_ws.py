@@ -797,7 +797,6 @@ async def test_browser_test_applies_campaign_knowledge_like_prewarm():
 
     apply_kb.assert_awaited_once()
     args, kwargs = apply_kb.await_args
-    ended = h.orchestrator.end_session.await_args.args[0]
-    assert args[0] is ended.call_session
+    assert args[0] is h.captured["config"]
     assert args[1] is row
     assert kwargs["pool"] is h.container.db_pool

@@ -379,7 +379,7 @@ async def load_current_knowledge_nodes(conn, tenant_id: str, campaign_id: str) -
         return []
     rows = await conn.fetch(
         """
-        SELECT n.id, n.depth, n.path, n.position, n.heading, n.content,
+        SELECT n.id, n.parent_id, n.depth, n.path, n.position, n.heading, n.content,
                n.summary, n.voice_answer, n.keywords, n.example_questions,
                n.search_text, n.priority, n.updated_at, n.source_id,
                s.version AS source_version

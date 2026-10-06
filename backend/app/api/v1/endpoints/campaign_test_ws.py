@@ -704,6 +704,8 @@ async def campaign_test_websocket(
             )
 
             orchestrator = container.voice_orchestrator
+            from app.services.scripts.knowledge.session_inject import apply_campaign_knowledge
+            await apply_campaign_knowledge(config, campaign_row, pool=container.db_pool)
             # Configuration resolution awaited I/O. Recheck the original
             # login/tenant and current grants immediately before provider use.
             if not await _check_login_session(websocket, db_client.pool, user_id, payload.get("sid"), tenant_id):
@@ -797,32 +799,12 @@ async def campaign_test_websocket(
                 except Exception as exc:  # noqa: BLE001
                     logger.debug("campaign_test_ws inbound prompt swap failed: %s", exc)
 
-            # ── Campaign knowledge — the same call prewarm makes for a phone
-            #    call (prewarm.py, "Campaign knowledge" block). This endpoint
-            #    skips prewarm, and until 2026-09-02 nothing else injected the
-            #    knowledge base, so the test agent knew nothing about the
-            #    company while the docstring above promised parity. Fail-soft,
-            #    same as prewarm: a knowledge failure must never stop a test.
-            try:
-                from app.services.scripts.knowledge.session_inject import (
-                    apply_campaign_knowledge,
-                )
-
-                await apply_campaign_knowledge(
-                    getattr(voice_session, "call_session", None),
-                    campaign_row,
-                    pool=container.db_pool,
-                )
-                logger.info(
-                    "campaign_test_knowledge_applied campaign=%s mode=%s",
-                    str(campaign_id)[:8],
-                    getattr(getattr(voice_session, "call_session", None), "knowledge_mode", None),
-                )
-            except Exception as _kb_exc:  # noqa: BLE001
-                logger.warning(
-                    "campaign_test_knowledge_inject_failed campaign=%s err=%s",
-                    str(campaign_id)[:8], _kb_exc,
-                )
+            # Knowledge was pinned before either provider runtime connected.
+            logger.info(
+                "campaign_test_knowledge_applied campaign=%s mode=%s",
+                str(campaign_id)[:8],
+                getattr(getattr(voice_session, "call_session", None), "knowledge_mode", None),
+            )
 
             # Rates come off the gateway AFTER create — realtime forces 8 kHz.
             out_rate = getattr(gateway, "_sample_rate", config.gateway_sample_rate)

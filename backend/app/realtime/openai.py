@@ -1166,24 +1166,13 @@ class OpenAIRealtimeSession:
 
 # ── Tool schema helper ──────────────────────────────────────────────────────
 def knowledge_lookup_tool() -> Dict[str, Any]:
-    """Company-facts knowledge lookup in the Realtime API function-tool shape.
-    The gateway fulfils it by calling
-    `retrieve_knowledge(...)` and returning the text via send_function_result.
-    """
-    from app.realtime.prompts import KNOWLEDGE_QUERY_DESCRIPTION, KNOWLEDGE_TOOL_DESCRIPTION
+    """Native adapter for the shared exact-section reader, never query search."""
+    from copy import deepcopy
+    from app.services.scripts.knowledge.sections import SECTION_TOOL_DESCRIPTION, SECTION_TOOL_PARAMETERS
 
     return {
         "type": "function",
         "name": "knowledge_lookup",
-        "description": KNOWLEDGE_TOOL_DESCRIPTION,
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "query": {
-                    "type": "string",
-                    "description": KNOWLEDGE_QUERY_DESCRIPTION,
-                },
-            },
-            "required": ["query"],
-        },
+        "description": SECTION_TOOL_DESCRIPTION,
+        "parameters": deepcopy(SECTION_TOOL_PARAMETERS),
     }

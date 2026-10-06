@@ -3589,6 +3589,8 @@ def _build_pinned_inbound_config(
     config.realtime_greet_on_start = first_speaker == "agent"
     config.realtime_opening_greeting = pinned_greeting if config.realtime_greet_on_start else None
     config.realtime_message_intake = selected_action == "voicemail"
+    from app.services.scripts.knowledge.session_inject import apply_pinned_campaign_knowledge
+    apply_pinned_campaign_knowledge(config, snapshot.get("knowledge_snapshot"))
     if getattr(config, "pipeline_mode", None) == "realtime":
         from app.realtime.prompt_config import prepare_realtime_prompt
         prepare_realtime_prompt(config)
@@ -4242,31 +4244,8 @@ async def _on_new_call(call_id: str, inbound_admission: Any = None) -> None:
                     _call_session._dialer_tenant_id = voice_session._dialer_tenant_id
                     _call_session._dialer_campaign_id = voice_session._dialer_campaign_id
 
-                # Knowledge content itself is captured during pre-answer
-                # admission.  Never re-read campaign nodes here: a mid-call KB
-                # edit must affect only the next admitted call.
-                try:
-                    from app.services.scripts.knowledge.session_inject import (
-                        apply_pinned_campaign_knowledge,
-                    )
-
-                    _knowledge_snapshot = (
-                        snapshot.get("knowledge_snapshot") if isinstance(snapshot, dict) else None
-                    )
-                    if _call_session is not None:
-                        apply_pinned_campaign_knowledge(
-                            _call_session,
-                            _knowledge_snapshot,
-                        )
-                        _realtime_bridge = getattr(voice_session, "realtime_bridge", None)
-                        if _realtime_bridge is not None:
-                            _realtime_bridge._knowledge_snapshot_nodes = getattr(
-                                _call_session,
-                                "_knowledge_snapshot_nodes",
-                                None,
-                            )
-                except Exception as _kb_exc:
-                    raise RuntimeError("failed to apply pinned inbound knowledge") from _kb_exc
+                # Admission knowledge was applied to config before creation,
+                # so native instructions and the reader share the same snapshot.
             elif _c.is_initialized:
                 # Preserve the existing outbound association path.
                 await bind_telephony_call(
