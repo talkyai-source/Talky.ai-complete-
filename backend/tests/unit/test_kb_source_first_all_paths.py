@@ -1,33 +1,4 @@
-"""All THREE knowledge delivery paths must render nodes source-first.
-
-WHY THIS EXISTS (2026-07-31)
-----------------------------
-`voice_answer` is an enricher summary of only the TOP of a knowledge node, but
-retrieval (FTS + pg_trgm) can match a fact ANYWHERE in the node. Leading with
-`voice_answer` therefore silently drops any fact below the first sentence —
-the "KB was bad even on the realtime model" bug.
-
-`render_node_answer()` fixed that by leading with the node's own `content`.
-But the fix was only wired into TWO of the three delivery paths:
-
-    compact_tree            (inline bake)      -> fixed
-    realtime_bridge         (realtime model)   -> fixed
-    turn_streamer inject    (DEFAULT per-turn) -> STILL BROKEN
-    knowledge_tool          (tool-call mode)   -> STILL BROKEN
-
-The two that were missed are the ones most campaigns actually use. Concretely,
-for a node whose content is:
-
-    "Our base plan is 200 pounds a month. The tender add-on is an extra 75
-     pounds per month. Onboarding is free."
-
-...with voice_answer "Our base plan is 200 pounds a month.", a caller asking
-about the add-on got a context window that did not contain the 75-pound fact
-at all — so the agent either failed to answer or invented a number.
-
-These tests exercise each delivery path with authored text and conflicting
-generated text. An unused renderer import is not evidence of source-first use.
-"""
+"""Authored source wins over generated derivatives in diagnostics and both live adapters."""
 from __future__ import annotations
 
 import pytest
@@ -71,50 +42,39 @@ def test_truncation_respects_the_budget():
 async def _delivered_source(path, *, with_source=True):
     from types import SimpleNamespace
 
-    from app.domain.models.conversation import Message, MessageRole
     from app.domain.services.voice_pipeline.knowledge_tool import run_knowledge_lookup
-    from app.domain.services.voice_pipeline.turn_streamer import _knowledge_block_for_turn
     from app.realtime.bridge import RealtimeBridge
+    from app.services.scripts.knowledge.sections import build_section_catalog
 
     node = {**_NODE, "id": "synthetic-pricing", "version": 1,
+            "source_id": "handbook", "source_version": 1,
             "content": _NODE["content"] if with_source else "",
             "voice_answer": "The tender add-on costs 999 pounds per month.",
             "summary": "The tender add-on costs 999 pounds per month."}
-    query = "tender add-on"
-    session = SimpleNamespace(call_id="synthetic-source-test", knowledge_mode="retrieve",
-                              _knowledge_snapshot_nodes=[node])
-    if path == "inject":
-        text = await _knowledge_block_for_turn(session, [Message(role=MessageRole.USER, content=query)])
-    elif path == "tool":
-        text = await run_knowledge_lookup(session, query)
-    else:
-        bridge = RealtimeBridge(call_id="synthetic-source-test", realtime_session=SimpleNamespace(),
-                                media_gateway=SimpleNamespace(), tenant_id="synthetic",
-                                campaign_id="synthetic", knowledge_snapshot_nodes=[node])
-        result = await bridge._lookup_knowledge(query)
-        return result["text"], result["status"]
-    return text, session._knowledge_evidence["status"]
+    catalog = build_section_catalog([node], tenant_id="synthetic", campaign_id="synthetic",
+                                    source_policy="call_snapshot")
+    arguments = {"section_ids": [catalog.nodes[0]["section_id"]]}
+    if path == "tool":
+        session = SimpleNamespace(tenant_id="synthetic", campaign_id="synthetic", _knowledge_catalog=catalog)
+        text = await run_knowledge_lookup(session, arguments)
+        return text, session._knowledge_evidence["status"]
+    bridge = RealtimeBridge(call_id="synthetic-source-test", realtime_session=SimpleNamespace(),
+                            media_gateway=SimpleNamespace(), tenant_id="synthetic", campaign_id="synthetic")
+    bridge._knowledge_catalog = catalog
+    result = await bridge._lookup_knowledge(arguments)
+    return result["text"], result["status"]
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("path", ["inject", "tool", "realtime"])
+@pytest.mark.parametrize("path", ["tool", "realtime"])
 @pytest.mark.parametrize("with_source", [True, False])
 async def test_every_delivery_path_uses_authored_source(path, with_source):
     text, status = await _delivered_source(path, with_source=with_source)
     assert "999 pounds" not in text
     if with_source:
-        assert status == "matched"
-        assert "75 pounds" in text
+        assert status == "available"
+        assert text.count("75 pounds") == 1
         assert "Onboarding is free" in text
     else:
-        assert status != "matched"
+        assert status == "unavailable"
         assert "75 pounds" not in text
-
-
-@pytest.mark.asyncio
-async def test_price_guard_reaches_the_tool_path():
-    from app.services.scripts.prompts.guardrails import KNOWLEDGE_PRICE_GUARD
-
-    text, status = await _delivered_source("tool")
-    assert status == "matched"
-    assert KNOWLEDGE_PRICE_GUARD in text

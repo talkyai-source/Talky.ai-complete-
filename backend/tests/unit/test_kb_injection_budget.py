@@ -1,56 +1,39 @@
-"""Unit tests for the per-turn knowledge-injection budget (latency fix).
+"""The retired full-body injection budget is now catalog + atomic section reads."""
+from types import SimpleNamespace
 
-Injecting full bodies of k=5 nodes ballooned the prompt to ~12k tokens and
-stalled the LLM. This guards complete source passages and the total prepared-context budget.
-"""
-import asyncio
-from unittest.mock import patch
-
-import app.domain.services.voice_pipeline.turn_streamer as ts
+from app.domain.services.voice_pipeline.knowledge_tool import knowledge_system_addendum, run_knowledge_lookup
+from app.services.scripts.knowledge.sections import (
+    CATALOG_MAX_CHARS, SECTIONS_MAX_CHARS, build_section_catalog, render_catalog_page,
+)
 
 
-class _FakeSession:
-    call_id = "call-xyz-1234"
-    tenant_id = "t1"
-    campaign_id = "c1"
-    knowledge_mode = "retrieve"
+async def test_large_catalog_is_paged_without_injecting_source_bodies():
+    catalog = build_section_catalog([
+        {"id": str(i), "source_id": "guide", "source_version": 1, "version": 1,
+         "heading": f"Topic {i} " + "navigation " * 8, "content": "PRIVATE SOURCE BODY"}
+        for i in range(150)
+    ], tenant_id="t1", campaign_id="c1", source_policy="call_snapshot")
+    session = SimpleNamespace(tenant_id="t1", campaign_id="c1", _knowledge_catalog=catalog)
+    first = render_catalog_page(catalog)
+    assert first["status"] == "catalog" and first["next_offset"] is not None
+    guide = knowledge_system_addendum(session)
+    assert len(guide) <= CATALOG_MAX_CHARS + 1500
+    assert "PRIVATE SOURCE BODY" not in guide
+    await run_knowledge_lookup(session, {"catalog_offset": first["next_offset"]})
+    assert session._knowledge_evidence["status"] == "catalog"
+    assert session._knowledge_evidence["passages"] == []
+    assert session._knowledge_grounding == []
 
 
-def test_knowledge_block_respects_total_budget(monkeypatch):
-    """Five huge nodes must be trimmed + budgeted to a small block, not dumped."""
-    from app.domain.models.conversation import Message, MessageRole
-
-    big = "The product includes scheduled reports. " * 600
-    hits = [
-        {"id": f"node-{i}", "heading": f"Product {i}", "coverage": 1.0,
-         "voice_answer": None, "summary": None, "content": big}
-        for i in range(5)
-    ]
-
-    async def fake_retrieve(*a, **k):
-        return hits
-
-    # Container/pool plumbing the function checks before retrieving.
-    class _Pool: ...
-    class _DB: pool = _Pool()
-    class _Container:
-        is_initialized = True
-        db_client = _DB()
-
-    # The function imports these fresh inside, so patch them at their source.
-    monkeypatch.setattr("app.core.container.get_container", lambda: _Container())
-    monkeypatch.setattr(
-        "app.services.scripts.knowledge.retrieval.retrieve_knowledge", fake_retrieve
-    )
-
-    msgs = [Message(role=MessageRole.USER, content="tell me about your product")]
-    block = asyncio.run(ts._knowledge_block_for_turn(_FakeSession(), msgs))
-
-    # The whole block must stay near the budget, NOT ~100k chars of raw dump.
-    assert len(block) <= ts._KB_TOTAL_CHARS + 600   # header + a little slack
-    assert "company knowledge" in block.lower()
-    # Untrusted KB is delimited (Spotlighting fence) — guard against regression.
-    assert "<company_knowledge>" in block and "</company_knowledge>" in block
-    # Select complete relevant facts rather than cutting a fact mid-sentence.
-    assert "The product includes scheduled reports." in block
-    assert big not in block
+async def test_oversized_authored_section_is_withheld_instead_of_truncating_conditions():
+    content = "Details. " * SECTIONS_MAX_CHARS + "Excludes installation and tax."
+    catalog = build_section_catalog([
+        {"id": "price", "source_id": "guide", "source_version": 1, "version": 1,
+         "heading": "Price", "content": content},
+    ], tenant_id="t1", campaign_id="c1", source_policy="call_snapshot")
+    session = SimpleNamespace(tenant_id="t1", campaign_id="c1", _knowledge_catalog=catalog)
+    result = await run_knowledge_lookup(session, {"section_ids": [catalog.nodes[0]["section_id"]]})
+    assert session._knowledge_evidence["status"] == "too_large"
+    assert session._knowledge_evidence["passages"] == []
+    assert session._knowledge_grounding == []
+    assert "Details." not in result and "Excludes installation" not in result

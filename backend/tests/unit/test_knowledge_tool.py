@@ -1,27 +1,30 @@
-"""Unit tests for on-demand KB via tool-call (#2 voice latency win).
+"""Exact section tool gating and read behavior; retained diagnostic/provider contracts.
 
-Covers the gating (which turns get the tool vs the inject fallback), the
-lookup execution + budget, and the Groq provider's 2-round tool orchestration
-(answer-directly fast path vs run-the-tool path) — without any live API.
+The diagnostic lexical API remains supported, but live reads never use it.
 """
 import asyncio
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 
 import app.domain.services.voice_pipeline.knowledge_tool as kt
+from app.services.scripts.knowledge.sections import build_section_catalog
 from app.infrastructure.llm.groq import (
-    GroqLLMProvider,
-    _accumulate_tool_call_frags,
-    _finalize_tool_calls,
+    GroqLLMProvider, _accumulate_tool_call_frags, _finalize_tool_calls,
 )
 
 
-# ---------------------------------------------------------------------------
-# Gating
-# ---------------------------------------------------------------------------
 class _Session:
     call_id = "call-abcd-1234"
     tenant_id = "t1"
     campaign_id = "c1"
     knowledge_mode = "retrieve"
+
+    def __init__(self):
+        self._knowledge_catalog = build_section_catalog([
+            {"id": "price", "source_id": "handbook", "source_version": 1, "version": 1,
+             "heading": "Pricing", "content": "Starter costs $20 per month, excluding tax."},
+        ], tenant_id=self.tenant_id, campaign_id=self.campaign_id, source_policy="call_snapshot")
 
 
 class _GroqProvider:
@@ -36,138 +39,78 @@ class _GeminiProvider:
     _model = "gemini-2.5-flash"
 
 
-def test_tools_off_by_default(monkeypatch):
-    monkeypatch.delenv("VOICE_KB_MODE", raising=False)
-    assert kt.knowledge_tools_for(_Session(), _GroqProvider()) is None
-
-
-def test_tools_on_when_flag_set(monkeypatch):
-    monkeypatch.setenv("VOICE_KB_MODE", "tool")
-    tools = kt.knowledge_tools_for(_Session(), _GroqProvider())
-    assert tools and tools[0]["function"]["name"] == "lookup_company_knowledge"
-
-
-def test_tools_on_for_gemini(monkeypatch):
-    # Gemini now has native function calling wired (stream_chat_with_tools).
-    monkeypatch.setenv("VOICE_KB_MODE", "tool")
-    tools = kt.knowledge_tools_for(_Session(), _GeminiProvider())
-    assert tools and tools[0]["function"]["name"] == "lookup_company_knowledge"
-
-
-def test_tools_skip_unsupported_provider(monkeypatch):
-    monkeypatch.setenv("VOICE_KB_MODE", "tool")
-
-    class _Other:
-        name = "anthropic"
-        _model = "claude"
-
-    assert kt.knowledge_tools_for(_Session(), _Other()) is None
-
-
-def test_tools_support_gpt_oss(monkeypatch):
-    monkeypatch.setenv("VOICE_KB_MODE", "tool")
-    p = _GroqProvider()
-    p._model = "openai/gpt-oss-120b"
-    assert kt.knowledge_tools_for(_Session(), p)
-
-
-def test_tools_skip_non_retrieve_mode(monkeypatch):
-    monkeypatch.setenv("VOICE_KB_MODE", "tool")
-    s = _Session()
-    s.knowledge_mode = "inline"
-    assert kt.knowledge_tools_for(s, _GroqProvider()) is None
-
-
-def test_addendum_mentions_tool():
-    text = kt.tool_system_addendum()
-    assert "lookup_company_knowledge" in text
-    assert "smalltalk" in text.lower()
-
-
-# ---------------------------------------------------------------------------
-# run_knowledge_lookup — budget + fail-soft
-# ---------------------------------------------------------------------------
-def test_lookup_budget_and_format(monkeypatch):
-    big = "The price is £49 monthly. " * 4000
-    hits = [
-        {"heading": f"Node {i}", "voice_answer": None, "summary": None, "content": big}
-        for i in range(5)
-    ]
-
-    async def fake_retrieve(*a, **k):
-        return hits
-
-    class _Pool: ...
-    class _DB: pool = _Pool()
-    class _Container:
-        is_initialized = True
-        db_client = _DB()
-
-    monkeypatch.setattr("app.core.container.get_container", lambda: _Container())
-    monkeypatch.setattr(
-        "app.services.scripts.knowledge.retrieval.retrieve_knowledge", fake_retrieve
-    )
-
-    out = asyncio.run(kt.run_knowledge_lookup(_Session(), "what is the price"))
-    # Budgeted, not a 100k dump. The allowance is stated in terms of the two
-    # KNOWN fixed additions rather than a magic number, so the next constant
-    # added to the result is a deliberate decision instead of slack that
-    # quietly ran out: the <company_knowledge> fence, and the trusted
-    # KNOWLEDGE_PRICE_GUARD that rides outside it.
-    from app.services.scripts.prompts.guardrails import KNOWLEDGE_PRICE_GUARD
-
-    fixed_overhead = len(KNOWLEDGE_PRICE_GUARD) + 2 * len(kt.KB_FENCE_TAG) + 32
-    assert len(out) <= kt._KB_TOTAL_CHARS + fixed_overhead
-    assert "Node 0" in out
-    assert "£49 monthly." in out  # Complete source passage survives the budget.
-
-
-def test_lookup_passes_bump_hits_false(monkeypatch):
-    """Voice hot path must NOT write hit_count on the answer connection — the
-    per-turn UPDATE was serializing on popular nodes. Assert the tool lookup
-    calls retrieve_knowledge with bump_hits=False."""
-    seen = {}
-
-    async def fake_retrieve(*a, **k):
-        seen["kwargs"] = k
-        return [{"heading": "N", "voice_answer": "hi", "summary": None, "content": None}]
-
-    class _Pool: ...
-    class _DB: pool = _Pool()
-    class _Container:
-        is_initialized = True
-        db_client = _DB()
-
-    monkeypatch.setattr("app.core.container.get_container", lambda: _Container())
-    monkeypatch.setattr(
-        "app.services.scripts.knowledge.retrieval.retrieve_knowledge", fake_retrieve
-    )
-    asyncio.run(kt.run_knowledge_lookup(_Session(), "what is the price"))
-    assert seen["kwargs"].get("bump_hits") is False
-
-
-def test_lookup_empty_query_returns_sentinel():
-    out = asyncio.run(kt.run_knowledge_lookup(_Session(), "   "))
-    assert out == kt.NO_KB_FACTS
-
-
-def test_weak_surviving_evidence_is_distinct_from_provider_unavailable(monkeypatch):
+@pytest.mark.parametrize("flag", [None, "inject", "tool"])
+@pytest.mark.parametrize("mode", ["inline", "map_retrieve", "retrieve"])
+def test_scoped_catalog_offers_reader_independently_of_retired_mode_flag(monkeypatch, flag, mode):
+    if flag is None:
+        monkeypatch.delenv("VOICE_KB_MODE", raising=False)
+    else:
+        monkeypatch.setenv("VOICE_KB_MODE", flag)
     session = _Session()
-    session._knowledge_snapshot_nodes = [{"id": "weak", "heading": "Coverage", "content": "Service is available locally."}]
-    monkeypatch.setattr("app.services.scripts.knowledge.retrieval.retrieve_pinned_knowledge", lambda *a, **k: session._knowledge_snapshot_nodes)
-    monkeypatch.setattr(kt, "prepare_knowledge_evidence", lambda *a, **k: {
-        "status": "weak_match", "text": "Service is available locally.", "passages": [{"text": "Service is available locally."}],
-    })
-    result = asyncio.run(kt.run_knowledge_lookup(session, "Do you provide international coverage?"))
-    assert "No confirmed answer" in result
-    assert "company_knowledge" in result
-    assert result != kt.KB_UNAVAILABLE
+    session.knowledge_mode = mode
+    tools = kt.knowledge_tools_for(session, _GroqProvider())
+    assert tools and tools[0]["function"]["name"] == kt.KB_TOOL_NAME
+    assert "query" not in tools[0]["function"]["parameters"]["properties"]
+
+
+@pytest.mark.parametrize("provider", [_GroqProvider(), _GeminiProvider()])
+def test_reader_supports_existing_tool_providers(provider):
+    assert kt.knowledge_tools_for(_Session(), provider)
+
+
+@pytest.mark.parametrize("missing", ["catalog", "tenant", "campaign", "tools"])
+def test_reader_requires_call_scope_and_tool_capability(missing):
+    session, provider = _Session(), _GroqProvider()
+    if missing == "catalog":
+        session._knowledge_catalog = None
+    elif missing == "tenant":
+        session.tenant_id = "foreign"
+    elif missing == "campaign":
+        session.campaign_id = "foreign"
+    else:
+        provider.supports_tools = False
+    assert kt.knowledge_tools_for(session, provider) is None
+
+
+def test_tools_support_gpt_oss():
+    provider = _GroqProvider()
+    provider._model = "openai/gpt-oss-120b"
+    assert kt.knowledge_tools_for(_Session(), provider)
+
+
+def test_addendum_is_navigation_not_a_source_body_or_answer_claim():
+    text = kt.knowledge_system_addendum(_Session())
+    assert kt.KB_TOOL_NAME in text
+    assert "Small talk needs no lookup" in text
+    assert "not that it answers the question" in text
+    assert "Pricing" in text and "$20" not in text
+
+
+async def test_live_lookup_uses_prepared_snapshot_without_db_or_hit_count(monkeypatch):
+    live = AsyncMock(side_effect=AssertionError("No live SQL search"))
+    pinned = MagicMock(side_effect=AssertionError("No lexical snapshot search"))
+    monkeypatch.setattr("app.services.scripts.knowledge.retrieval.retrieve_knowledge", live)
+    monkeypatch.setattr("app.services.scripts.knowledge.retrieval.retrieve_pinned_knowledge", pinned)
+    session = _Session()
+    result = await kt.run_knowledge_lookup(session, {"section_ids": [session._knowledge_catalog.nodes[0]["section_id"]]})
+    assert result.count("Starter costs $20 per month, excluding tax.") == 1
+    assert session._knowledge_evidence["status"] == "available"
+    live.assert_not_awaited()
+    pinned.assert_not_called()
+
+
+@pytest.mark.parametrize("arguments", ["price", {}, {"query": "price"}, {"section_ids": []},
+                                      {"section_ids": ["foreign"]}, {"catalog_offset": True}])
+async def test_invalid_or_legacy_query_requests_are_explicitly_unavailable(arguments):
+    session = _Session()
+    session._knowledge_grounding = ["Stale price"]
+    result = await kt.run_knowledge_lookup(session, arguments)
+    assert session._knowledge_evidence["status"] == "unavailable"
     assert session._knowledge_grounding == []
+    assert "$20" not in result
 
 
-# ---------------------------------------------------------------------------
-# retrieve_knowledge — bump_hits gates the hit_count UPDATE (voice hot path)
-# ---------------------------------------------------------------------------
+# The existing admin/search diagnostic API intentionally retains its hit-count option.
 class _FakeConn:
     def __init__(self, rows):
         self._rows = rows
@@ -225,27 +168,6 @@ def test_retrieve_bump_true_still_updates(monkeypatch):
     assert out and out[0]["heading"] == "H"  # same returned shape as bump_hits=False
 
 
-def test_lookup_no_hits_returns_sentinel(monkeypatch):
-    async def fake_retrieve(*a, **k):
-        return []
-
-    class _Pool: ...
-    class _DB: pool = _Pool()
-    class _Container:
-        is_initialized = True
-        db_client = _DB()
-
-    monkeypatch.setattr("app.core.container.get_container", lambda: _Container())
-    monkeypatch.setattr(
-        "app.services.scripts.knowledge.retrieval.retrieve_knowledge", fake_retrieve
-    )
-    out = asyncio.run(kt.run_knowledge_lookup(_Session(), "anything"))
-    assert out == kt.NO_KB_FACTS
-
-
-# ---------------------------------------------------------------------------
-# Tool-call fragment assembly
-# ---------------------------------------------------------------------------
 class _Fn:
     def __init__(self, name=None, arguments=None):
         self.name = name
@@ -262,12 +184,12 @@ class _Frag:
 def test_tool_call_fragments_assemble():
     acc = {}
     _accumulate_tool_call_frags(acc, [_Frag(0, id="call_1", name="lookup_company_knowledge")])
-    _accumulate_tool_call_frags(acc, [_Frag(0, arguments='{"que')])
-    _accumulate_tool_call_frags(acc, [_Frag(0, arguments='ry": "price"}')])
+    _accumulate_tool_call_frags(acc, [_Frag(0, arguments='{"section_')])
+    _accumulate_tool_call_frags(acc, [_Frag(0, arguments='ids": ["section-1"]}')])
     calls = _finalize_tool_calls(acc)
     assert len(calls) == 1
     assert calls[0]["name"] == "lookup_company_knowledge"
-    assert calls[0]["arguments"] == {"query": "price"}
+    assert calls[0]["arguments"] == {"section_ids": ["section-1"]}
     assert calls[0]["id"] == "call_1"
 
 
@@ -314,7 +236,7 @@ def test_tool_path_runs_then_answers(monkeypatch):
     """Round 0 yields no content but populates the sink → runner runs → round 1
     streams the grounded answer."""
     p = GroqLLMProvider()
-    seen = {"query": None, "rounds": 0}
+    seen = {"section_ids": None, "rounds": 0}
 
     async def fake_timeout(messages, **kwargs):
         seen["rounds"] += 1
@@ -324,8 +246,8 @@ def test_tool_path_runs_then_answers(monkeypatch):
             sink.append({
                 "id": "call_1",
                 "name": "lookup_company_knowledge",
-                "arguments_raw": '{"query": "price"}',
-                "arguments": {"query": "price"},
+                "arguments_raw": '{"section_ids": ["section-1"]}',
+                "arguments": {"section_ids": ["section-1"]},
             })
             return
             yield  # pragma: no cover (makes this an async generator)
@@ -337,14 +259,14 @@ def test_tool_path_runs_then_answers(monkeypatch):
     monkeypatch.setattr(p, "stream_chat_with_timeout", fake_timeout)
 
     async def runner(name, args):
-        seen["query"] = args.get("query")
+        seen["section_ids"] = args.get("section_ids")
         return "Premium plan is $99/mo."
 
     out = _collect(p.stream_chat_with_tools(
         [], system_prompt="x", tools=[kt.KNOWLEDGE_TOOL_SPEC], tool_runner=runner,
     ))
     assert "".join(out) == "It's $99."
-    assert seen["query"] == "price"
+    assert seen["section_ids"] == ["section-1"]
     assert seen["rounds"] == 2
 
 
