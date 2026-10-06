@@ -1,4 +1,7 @@
-"""C3: one fail-closed contact-capture machine for every voice pipeline."""
+"""Legacy pure parser diagnostics plus current model-tool/persistence boundaries.
+
+advance_capture diagnostics do not describe active voice orchestration.
+"""
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -20,6 +23,7 @@ from app.services.scripts.call_state_tracker import (
 )
 from app.services.scripts.prompt_builder import compose_system_prompt
 from app.domain.services.voice_pipeline.lead_slot_capture import snapshot_slots
+from tests.unit.test_ag05_native_contact_revision import replay, record
 
 
 def _capture(kind: str, utterance: str, **kwargs):
@@ -317,18 +321,13 @@ def test_non_e164_phone_valid_in_several_countries_asks_for_the_country():
     assert state.normalized_value == "+442079460958"
 
 
-def test_non_e164_phone_valid_in_one_likely_country_is_read_back_with_its_code():
-    # Test call 1436672a: "zero three one two, zero seven five, zero four nine
-    # six" is valid only as a Pakistani number. It is taken, and the read-back
-    # says the country code aloud, so the caller's yes confirms the country.
-    state = update_state_from_user_turn(
-        CallState(), "my number is 020 7946 0958", phone_region=None
-    )
-    assert state.phone_capture.status is CaptureStatus.AWAITING_CONFIRMATION
-    assert state.phone == "+442079460958"
+def test_legacy_phone_candidate_is_neutral_context_without_a_scripted_readback():
+    state = update_state_from_user_turn(CallState(), "my number is 020 7946 0958", phone_region=None)
+    assert state.phone == "+442079460958" and not state.phone_confirmed
     prompt = compose_system_prompt("BASE", state)
-    assert "plus 4 4" in prompt
-    assert state.phone_confirmed is False
+    assert '"value": "+442079460958"' in prompt
+    assert '"status": "awaiting_confirmation"' in prompt
+    assert "plus 4 4" not in prompt and "Say EXACTLY" not in prompt
 
 
 def test_non_e164_phone_normalizes_with_explicit_region_context():
@@ -466,22 +465,18 @@ def test_caller_can_cancel_capture(kind: str):
     assert state.confirmed_at is None
 
 
-def test_email_clarification_mode_is_injected_into_the_next_turn_prompt():
-    state = update_state_from_user_turn(
-        CallState(), "all state estimation at gmail dot com"
-    )
-    prompt = compose_system_prompt("BASE", state).lower()
-    assert "spell" in prompt
-    assert "one letter at a time" in prompt
+def test_email_clarification_is_neutral_candidate_data_in_the_next_prompt():
+    state = update_state_from_user_turn(CallState(), "all state estimation at gmail dot com")
+    prompt = compose_system_prompt("BASE", state)
+    assert '"status": "needs_clarification"' in prompt and '"value": null' in prompt
+    assert "one letter at a time" not in prompt and "Say EXACTLY" not in prompt
 
 
-def test_phone_missing_region_prompt_asks_for_country_instead_of_guessing_us():
-    state = update_state_from_user_turn(
-        CallState(), "my number is 207 946 0958", phone_region=None
-    )
-    prompt = compose_system_prompt("BASE", state).lower()
-    assert "country" in prompt
-    assert "+1" not in prompt
+def test_phone_missing_region_context_does_not_guess_a_number_or_script_question():
+    state = update_state_from_user_turn(CallState(), "my number is 207 946 0958", phone_region=None)
+    prompt = compose_system_prompt("BASE", state)
+    assert '"status": "needs_clarification"' in prompt and '"value": null' in prompt
+    assert "+1" not in prompt and "Say EXACTLY" not in prompt
 
 
 def test_agent_phone_question_arms_mode_for_bare_national_number_reply():
@@ -560,40 +555,23 @@ def test_normal_agent_readback_with_again_does_not_create_false_ambiguity():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("evidence,expected_mode", [("transport_played", "phone"), ("transmitted", None)])
-async def test_both_live_pipelines_consume_agent_contact_mode_signal(evidence, expected_mode):
-    from app.realtime.bridge import RealtimeBridge
-    from app.realtime.openai import RealtimeEvent
-    from app.domain.services.voice_pipeline.turn_runner import TurnRunner
-    from unittest.mock import AsyncMock
-
-    # Inspect the loaded callable rather than source offsets which can move
-    # while a long test run is using an already-imported module.
-    assert "update_state_from_agent_turn" in TurnRunner.run.__code__.co_names
-    contact = SimpleNamespace(captured_slots=CallState())
-    gateway = SimpleNamespace(
-        send_audio=AsyncMock(), begin_playback=AsyncMock(),
-        finish_playback=AsyncMock(return_value={"utterance_id": "rt-1", "status": "completed", "evidence": evidence}),
-    )
-    bridge = RealtimeBridge(call_id="fixture", realtime_session=SimpleNamespace(update_live_state=AsyncMock(), close=AsyncMock()),
-                            media_gateway=gateway, contact_session=contact)
-    await bridge._play_validated_response(RealtimeEvent(kind="response_candidate",
-        text="What is the best phone number to call you back on?", audio=b"\xff" * 320))
-    assert contact.captured_slots.agent_asked_kind == expected_mode
-    assert contact.captured_slots.active_contact_kind == expected_mode
-    assert contact.captured_slots.phone_capture is None
+@pytest.mark.parametrize("evidence", ["transport_played", "transmitted"])
+async def test_native_played_contact_question_does_not_start_regex_capture_mode(evidence):
+    r = replay("openai")
+    await r.step({"kind": "response", "text": "What is the best phone number to call you back on?",
+        "receipt": "completed" if evidence == "transport_played" else "transmitted"})
+    assert getattr(r.session.captured_slots, "agent_asked_kind", None) is None
+    assert getattr(r.session.captured_slots, "active_contact_kind", None) is None
+    assert getattr(r.session.captured_slots, "phone_capture", None) is None
+    assert r.gateway.submissions
 
 
-def test_cancelled_capture_is_not_reasked_or_rendered_as_a_fact():
+def test_cancelled_capture_is_visible_as_cancelled_without_a_usable_value():
     state = update_state_from_user_turn(CallState(), "bob at acme dot com")
     state = update_state_from_user_turn(state, "never mind, don't save that")
-    # has_callback_executor=True isolates this from the unrelated, always-on
-    # CALLBACK POLICY line (prompt_builder.py) so this keeps testing exactly
-    # what its name says: no captured/conduct block for a cancelled value.
-    assert (
-        compose_system_prompt("BASE", state, has_callback_executor=True)
-        == "BASE"
-    )
+    prompt = compose_system_prompt("BASE", state, has_callback_executor=True)
+    assert '"status": "cancelled"' in prompt and '"value": null' in prompt
+    assert "Say EXACTLY" not in prompt and prompt.endswith("BASE")
 
 
 def test_cancel_applies_only_to_the_active_contact_mode():
@@ -612,51 +590,27 @@ def test_cancel_applies_only_to_the_active_contact_mode():
     assert state.phone_capture.status is CaptureStatus.CANCELLED
 
 
-def test_one_turn_can_retain_both_contacts_but_serializes_confirmation():
-    state = update_state_from_user_turn(
-        CallState(),
-        "My email is bob@acme.com and my phone number is +1 415 555 2671",
-    )
-    assert state.email == "bob@acme.com"
-    assert state.phone == "+14155552671"
-    assert state.active_contact_kind == "email"
-
+def test_neutral_prompt_exposes_both_contact_candidates_without_forced_order():
+    state = update_state_from_user_turn(CallState(),
+        "My email is bob@acme.com and my phone number is +1 415 555 2671")
     prompt = compose_system_prompt("BASE", state)
-    assert "bob" in prompt.lower()
-    assert "+14155552671" not in prompt
-
-    state = update_state_from_user_turn(
-        state,
-        "yes",
-        readback_issued=True,
-        confirmation_verdict="affirm",
-    )
-    assert state.email_confirmed is True
-    assert state.active_contact_kind == "phone"
-    assert "+14155552671" in compose_system_prompt("BASE", state)
+    assert "bob@acme.com" in prompt and "+14155552671" in prompt
+    assert prompt.count('"status": "awaiting_confirmation"') == 2
+    assert "Say EXACTLY" not in prompt
 
 
 @pytest.mark.asyncio
-async def test_realtime_bridge_uses_same_machine_and_confirms_only_after_readback():
-    from app.realtime.bridge import RealtimeBridge
-
-    session = SimpleNamespace(captured_slots=None)
-    bridge = RealtimeBridge(
-        call_id="voice-call",
-        realtime_session=object(),
-        media_gateway=object(),
-        contact_session=session,
-        contact_phone_region="GB",
-    )
-    await bridge._observe_contact_turn("bob at acme dot com")
-    assert session.captured_slots.email_capture.status is CaptureStatus.AWAITING_CONFIRMATION
-
-    bridge._remember_contact_turn(
-        "assistant", "So that's bob at acme dot com — did I get that right?"
-    )
-    await bridge._observe_contact_turn("yes, that's right")
-    assert session.captured_slots.email_capture.status is CaptureStatus.CONFIRMED
-    assert session.captured_slots.email == "bob@acme.com"
+async def test_native_tool_sets_pending_and_confirms_from_later_caller_evidence():
+    r = replay("openai")
+    await r.step({"kind": "caller", "text": "bob at acme dot com"})
+    assert snapshot_slots(r.session.captured_slots) == {}
+    await record(r, "bob@acme.com")
+    assert r.session.captured_slots.email_capture.status is CaptureStatus.AWAITING_CONFIRMATION
+    await r.step({"kind": "caller", "text": "yes, that's right"})
+    assert not r.session.captured_slots.email_confirmed
+    await record(r, "bob@acme.com", operation="confirm")
+    assert r.session.captured_slots.email_capture.status is CaptureStatus.CONFIRMED
+    assert r.session.captured_slots.email_capture.readback is None
 
 
 @pytest.mark.asyncio
@@ -667,143 +621,51 @@ async def test_realtime_bridge_uses_same_machine_and_confirms_only_after_readbac
         ("never mind, don't save that", "cancelled"),
     ),
 )
-async def test_realtime_resolution_supersedes_pending_contact_directive(
-    reply: str,
-    expected_status: str,
-):
-    from app.realtime.bridge import RealtimeBridge
-
-    class RT:
-        def __init__(self):
-            self.directives = []
-
-        async def interrupt_with_text(self, text):
-            self.directives.append(text)
-
-    class Gateway:
-        async def clear_output_buffer(self, _call_id):
-            return None
-
-    rt = RT()
-    bridge = RealtimeBridge(
-        call_id="voice-call",
-        realtime_session=rt,
-        media_gateway=Gateway(),
-    )
-    await bridge._observe_contact_turn("bob at acme dot com")
-    bridge._remember_contact_turn(
-        "assistant",
-        "So that's bob at acme dot com, did I get that right?",
-    )
-    await bridge._observe_contact_turn(reply)
-
-    assert len(rt.directives) == 2
-    assert "awaiting_confirmation" in rt.directives[0]
-    assert expected_status in rt.directives[1]
-    assert "stop asking" in rt.directives[1].lower()
+async def test_native_model_resolution_updates_contact_without_directive_interrupt(reply, expected_status):
+    r = replay("openai")
+    await r.step({"kind": "caller", "text": "bob at acme dot com"})
+    await record(r, "bob@acme.com")
+    await r.step({"kind": "caller", "text": reply})
+    await record(r, "bob@acme.com" if expected_status == "confirmed" else None,
+        operation="confirm" if expected_status == "confirmed" else "withdraw")
+    assert r.session.captured_slots.email_capture.validation_status == expected_status
+    assert not any("BACKEND CONTACT MODE" in str(event) for event in r.socket.sent)
 
 
 @pytest.mark.asyncio
-async def test_realtime_dual_contact_retires_email_before_advancing_to_phone():
-    from app.realtime.bridge import RealtimeBridge
-
-    class RT:
-        def __init__(self):
-            self.directives = []
-
-        async def interrupt_with_text(self, text):
-            self.directives.append(text)
-
-    class Gateway:
-        async def clear_output_buffer(self, _call_id):
-            return None
-
-    rt = RT()
-    bridge = RealtimeBridge(
-        call_id="voice-call",
-        realtime_session=rt,
-        media_gateway=Gateway(),
-    )
-    await bridge._observe_contact_turn(
-        "My email is bob@acme.com and my phone number is +1 415 555 2671"
-    )
-    bridge._remember_contact_turn(
-        "assistant",
-        "So that's bob at acme dot com, did I get that right?",
-    )
-    await bridge._observe_contact_turn("yes")
-
-    assert len(rt.directives) == 2
-    assert "awaiting_confirmation (email)" in rt.directives[0]
-    assert "confirmed (email)" in rt.directives[1]
-    assert "awaiting_confirmation (phone)" in rt.directives[1]
-    assert rt.directives[1].index("confirmed (email)") < rt.directives[1].index(
-        "awaiting_confirmation (phone)"
-    )
+async def test_native_model_can_record_both_fields_without_forced_capture_order():
+    r = replay("openai")
+    await r.step({"kind": "caller", "text": "My email is bob@acme.com and phone is +14155552671"})
+    await record(r, "+14155552671", kind="phone")
+    await record(r, "bob@acme.com")
+    assert r.session.captured_slots.active_contact_kind is None
+    assert not r.session.captured_slots.email_confirmed and not r.session.captured_slots.phone_confirmed
+    await r.step({"kind": "caller", "text": "Yes, both details are correct"})
+    await record(r, "bob@acme.com", operation="confirm")
+    await record(r, "+14155552671", kind="phone", operation="confirm")
+    assert r.session.captured_slots.email_confirmed and r.session.captured_slots.phone_confirmed
+    assert not any("BACKEND CONTACT MODE" in str(event) for event in r.socket.sent)
 
 
 @pytest.mark.asyncio
-async def test_realtime_bridge_none_confidence_is_neutral_but_alternatives_vary():
-    from app.realtime.bridge import RealtimeBridge
-
-    session = SimpleNamespace(captured_slots=None)
-    bridge = RealtimeBridge(
-        call_id="voice-call",
-        realtime_session=object(),
-        media_gateway=object(),
-        contact_session=session,
-    )
-    await bridge._observe_contact_turn(
-        "bob at acme dot com",
-        {"confidence": None, "alternatives": []},
-    )
-    assert session.captured_slots.email_capture.status is CaptureStatus.AWAITING_CONFIRMATION
-
-    await bridge._observe_contact_turn(
-        "bob at acme dot com",
-        {
-            "confidence": None,
-            "alternatives": [{"transcript": "bob at acne dot com"}],
-        },
-    )
-    assert session.captured_slots.email_capture.status is CaptureStatus.NEEDS_CLARIFICATION
+async def test_native_none_confidence_does_not_create_contact_without_model_tool():
+    r = replay("openai")
+    await r.step({"kind": "caller", "text": "bob at acme dot com", "confidence": None})
+    assert snapshot_slots(r.session.captured_slots) == {}
+    await record(r, "bob@acme.com")
+    assert r.session.captured_slots.email_capture.status is CaptureStatus.AWAITING_CONFIRMATION
 
 
 @pytest.mark.asyncio
-async def test_realtime_ambiguity_interrupts_speculation_with_backend_directive():
-    from app.realtime.bridge import RealtimeBridge
-
-    class RT:
-        def __init__(self):
-            self.directives = []
-
-        async def interrupt_with_text(self, text):
-            self.directives.append(text)
-
-    class Gateway:
-        def __init__(self):
-            self.cleared = []
-
-        async def clear_output_buffer(self, call_id):
-            self.cleared.append(call_id)
-
-    rt = RT()
-    gateway = Gateway()
-    bridge = RealtimeBridge(
-        call_id="voice-call",
-        realtime_session=rt,
-        media_gateway=gateway,
-    )
-    await bridge._observe_contact_turn(
-        "bob at acme dot com",
-        {"confidence": None, "alternatives": ["bob at acne dot com"]},
-    )
-
-    assert gateway.cleared == ["voice-call"]
-    assert len(rt.directives) == 1
-    assert "needs_clarification" in rt.directives[0]
-    assert "two different versions" in rt.directives[0]
-    assert "do not confirm" in rt.directives[0].lower()
+async def test_native_partial_tool_candidate_does_not_force_an_interruption_or_wording():
+    r = replay("openai")
+    await r.step({"kind": "caller", "text": "My email starts bob at"})
+    await record(r, "bob at")
+    assert r.session.captured_slots.email is None
+    assert r.session.captured_slots.email_capture.status is CaptureStatus.NEEDS_CLARIFICATION
+    assert not any("BACKEND CONTACT MODE" in str(event) for event in r.socket.sent)
+    await r.step({"kind": "response", "text": "What comes after that?"})
+    assert any(event.get("text") == "What comes after that?" for event in r.gateway.controls)
 
 
 @pytest.mark.asyncio
@@ -961,97 +823,54 @@ class _AuditPool:
         return _AsyncContext(self.conn)
 
 
+def _audit_native(conn):
+    r = replay("openai")
+    r.session._lead_capture_binding = {
+        "call_id": "22222222-2222-2222-2222-222222222222",
+        "tenant_id": "11111111-1111-1111-1111-111111111111",
+        "campaign_id": "33333333-3333-3333-3333-333333333333",
+        "lead_id": "44444444-4444-4444-4444-444444444444",
+    }
+    r.bridge._knowledge_pool = _AuditPool(conn)
+    r.bridge._schedule_transcript_flush = lambda: None  # separate transcript persistence contract
+    return r
+
+
 @pytest.mark.asyncio
 async def test_realtime_confirmation_persists_canonical_value_and_audit_once():
-    from app.realtime.bridge import RealtimeBridge
-
     conn = _AuditConn()
-    call_id = "22222222-2222-2222-2222-222222222222"
-    tenant_id = "11111111-1111-1111-1111-111111111111"
-    session = SimpleNamespace(
-        captured_slots=None,
-        _dialer_call_id=call_id,
-        _dialer_tenant_id=tenant_id,
-        _dialer_campaign_id="33333333-3333-3333-3333-333333333333",
-        _dialer_lead_id="44444444-4444-4444-4444-444444444444",
-    )
-    bridge = RealtimeBridge(
-        call_id="voice-call",
-        realtime_session=object(),
-        media_gateway=object(),
-        contact_session=session,
-        knowledge_pool=_AuditPool(conn),
-    )
-    await bridge._observe_contact_turn("bob at acme dot com")
-    if bridge._contact_tasks:
-        await asyncio.gather(*tuple(bridge._contact_tasks))
-    # 2026-09-28: the caller-stated value is written at once, unconfirmed.
-    pending = [a for sql, a in conn.statements if "INSERT INTO call_lead_details" in sql]
+    r = _audit_native(conn)
+    await r.step({"kind": "caller", "text": "bob at acme dot com"})
+    await record(r, "bob@acme.com")
+    pending = [args for sql, args in conn.statements if "INSERT INTO call_lead_details" in sql]
     assert len(pending) == 1 and pending[0][8] is False
     conn.statements.clear()
-
-    bridge._remember_contact_turn(
-        "assistant", "So that's bob at acme dot com — did I get that right?"
-    )
-    await bridge._observe_contact_turn("yes, that's right")
-    if bridge._contact_tasks:
-        await asyncio.gather(*tuple(bridge._contact_tasks))
-
-    inserts = [item for item in conn.statements if "INSERT INTO call_lead_details" in item[0]]
+    await r.step({"kind": "caller", "text": "yes, that's right"})
+    await record(r, "bob@acme.com", operation="confirm")
+    await record(r, "bob@acme.com", operation="confirm")
+    inserts = [(sql, args) for sql, args in conn.statements if "INSERT INTO call_lead_details" in sql]
     assert len(inserts) == 1
-    _sql, args = inserts[0]
-    assert args[6] == "bob@acme.com"          # value
-    assert args[8] is True                     # confirmed
-    assert args[10] == "bob at acme dot com"  # raw_value
-    assert args[11] == "bob@acme.com"         # normalized_value
-    assert args[12] == "confirmed"
-    assert args[13] is not None                # confirmed_at
+    _, args = inserts[0]
+    assert args[6] == args[11] == "bob@acme.com" and args[8] is True
+    assert args[10] == "bob at acme dot com" and args[12] == "confirmed" and args[13] is not None
 
 
 @pytest.mark.asyncio
 async def test_realtime_pending_correction_revokes_prior_caller_contact_row():
-    from app.realtime.bridge import RealtimeBridge
-
     conn = _AuditConn()
-    session = SimpleNamespace(
-        captured_slots=None,
-        _dialer_call_id="22222222-2222-2222-2222-222222222222",
-        _dialer_tenant_id="11111111-1111-1111-1111-111111111111",
-        _dialer_campaign_id="33333333-3333-3333-3333-333333333333",
-        _dialer_lead_id="44444444-4444-4444-4444-444444444444",
-    )
-    bridge = RealtimeBridge(
-        call_id="voice-call",
-        realtime_session=object(),
-        media_gateway=object(),
-        contact_session=session,
-        knowledge_pool=_AuditPool(conn),
-    )
-    await bridge._observe_contact_turn("bob at acme dot com")
-    bridge._remember_contact_turn(
-        "assistant", "So that's bob at acme dot com — did I get that right?"
-    )
-    await bridge._observe_contact_turn("yes")
-    if bridge._contact_persist_tail:
-        await bridge._contact_persist_tail
-
-    await bridge._observe_contact_turn(
-        "Actually, change my email to alice@example.com"
-    )
-    if bridge._contact_persist_tail:
-        await bridge._contact_persist_tail
-
-    revocations = [
-        item
-        for item in conn.statements
-        if "UPDATE call_lead_details" in item[0]
-        and "source = 'caller_stated'" in item[0]
-    ]
+    r = _audit_native(conn)
+    await r.step({"kind": "caller", "text": "bob at acme dot com"})
+    await record(r, "bob@acme.com")
+    await r.step({"kind": "caller", "text": "yes"})
+    await record(r, "bob@acme.com", operation="confirm")
+    await r.step({"kind": "caller", "text": "Actually, change my email to alice@example.com"})
+    await record(r, "alice@example.com")
+    revocations = [(sql, args) for sql, args in conn.statements
+        if "UPDATE call_lead_details" in sql and "source = 'caller_stated'" in sql]
     assert len(revocations) == 1
     sql, args = revocations[0]
-    assert "value = NULL" in sql
-    assert args[2] == "email"
-    assert args[3] == "awaiting_confirmation"
+    assert "value = NULL" in sql and args[2] == "email" and args[3] == "awaiting_confirmation"
+    assert r.session.captured_slots.email == "alice@example.com" and not r.session.captured_slots.email_confirmed
 
 
 @pytest.mark.asyncio
@@ -1126,18 +945,13 @@ def test_campaign_phone_region_is_threaded_only_when_explicitly_configured():
     assert absent.contact_phone_region is None
 
 
-def test_realtime_model_is_told_the_same_confirm_before_commit_contract():
-    from app.realtime.prompts import (
-        RealtimePersona,
-        build_realtime_instructions,
-    )
-
+def test_realtime_guide_distinguishes_pending_confirmation_and_persistence():
+    from app.realtime.prompts import RealtimePersona, build_realtime_instructions
     text = build_realtime_instructions(RealtimePersona()).lower()
-    assert "contact details" in text
-    assert "country code" in text
-    assert "confirm" in text
-    assert "do not say you saved" in text
-    assert "only that segment" in text
+    assert "record_contact" in text and "expected_value" in text
+    assert "new value is pending" in text and "result says saved" in text
+    assert "confirmation does not mean a message was sent" in text
+    assert "say exactly" not in text
 
 
 def test_turn_telemetry_never_logs_raw_contact_bearing_transcripts():
@@ -1148,16 +962,3 @@ def test_turn_telemetry_never_logs_raw_contact_bearing_transcripts():
     assert '"transcript": full_transcript' not in source
     assert '"response": response_text' not in source
     assert '"voice.turn.transcript"' not in source
-
-
-def test_cascaded_contact_evidence_is_bound_to_the_same_detached_turn():
-    from app.domain.services.voice_pipeline.transcript_handler import TranscriptHandler
-    from app.domain.services.voice_pipeline.turn_ender import TurnEnder
-    from app.domain.services.voice_pipeline.turn_runner import TurnRunner
-
-    dispatch = inspect.getsource(TranscriptHandler.handle)
-    ender = inspect.getsource(TurnEnder.handle)
-    runner = inspect.getsource(TurnRunner.run)
-    assert "transcript_alternatives=_alternatives" in dispatch
-    assert "_active_turn_transcript_alternatives" in ender
-    assert "_active_turn_transcript_alternatives" in runner

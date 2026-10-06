@@ -1,4 +1,4 @@
-"""Model-evaluation regressions at the shared parser/state/prompt boundaries."""
+"""Legacy pure parser diagnostics and current neutral-state/native-tool contracts."""
 import pytest
 from types import SimpleNamespace
 
@@ -43,7 +43,7 @@ def test_explicit_self_email_cue_keeps_spoken_syntax_without_needing_a_colon(utt
     assert state.email == expected
     assert not state.email_confirmed
     assert state.email_capture.status is CaptureStatus.AWAITING_CONFIRMATION
-    assert "spell the email one letter" not in turn_directive(state).lower()
+    assert turn_directive(state) is None
 
 
 @pytest.mark.parametrize("utterance", [
@@ -94,13 +94,15 @@ def test_caller_can_resume_paused_capture_by_volunteering_a_new_value():
     state = update_state_from_user_turn(state, "Actually my email is anna.service@example.com")
     assert not state.contact_capture_paused
     assert state.email == "anna.service@example.com" and not state.email_confirmed
-    assert turn_directive(state) is not None
+    assert turn_directive(state) is None
+    assert "anna.service@example.com" in compose_system_prompt("BASE", state)
 
 
 def test_same_turn_literal_capture_uses_exact_address_and_stays_unconfirmed():
     state = update_state_from_user_turn(CallState(), "My email is anna.support@example.com. Please take it down.")
     assert state.email == "anna.support@example.com" and not state.email_confirmed
-    assert "dot please" not in turn_directive(state)
+    assert turn_directive(state) is None
+    assert '"value": "anna.support@example.com"' in compose_system_prompt("BASE", state)
 
 
 def test_goodbye_preserves_unconfirmed_evidence_but_disowning_revokes_it():
@@ -113,28 +115,19 @@ def test_goodbye_preserves_unconfirmed_evidence_but_disowning_revokes_it():
 
 
 @pytest.mark.asyncio
-async def test_realtime_pause_replaces_old_readback_directive_then_resumes():
-    from app.realtime.bridge import RealtimeBridge
-
-    class Provider:
-        def __init__(self):
-            self.directives = []
-
-        async def interrupt_with_text(self, text):
-            self.directives.append(text)
-
-    provider = Provider()
-    session = SimpleNamespace(captured_slots=None)
-    bridge = RealtimeBridge(call_id="synthetic-contact", realtime_session=provider,
-                            media_gateway=object(), contact_session=session)
-    await bridge._observe_contact_turn("My email is anna@example.com", {})
-    assert "awaiting_confirmation" in provider.directives[-1]
-    await bridge._observe_contact_turn("Leave it unconfirmed.", {})
-    assert session.captured_slots.email == "anna@example.com"
-    assert session.captured_slots.contact_capture_paused
-    assert "paused" in provider.directives[-1].lower()
-    assert "ask for a clear yes" not in provider.directives[-1]
-    await bridge._observe_contact_turn("Actually my email is anna.service@example.com", {})
-    assert not session.captured_slots.contact_capture_paused
-    assert "awaiting_confirmation" in provider.directives[-1]
-    assert "anna.service@example.com" in provider.directives[-1]
+async def test_native_pending_contact_survives_conversation_until_model_records_correction():
+    from tests.unit.test_ag05_native_contact_revision import replay, record
+    r = replay("openai")
+    await r.step({"kind": "caller", "text": "My email is anna@example.com"})
+    await record(r, "anna@example.com")
+    pending = r.session.captured_slots.email_capture
+    await r.step({"kind": "caller", "text": "Leave it unconfirmed."})
+    await r.step({"kind": "response", "text": "Okay. What would you like to discuss?"})
+    assert r.session.captured_slots.email_capture is pending
+    assert not r.session.captured_slots.email_confirmed
+    await r.step({"kind": "caller", "text": "Actually my email is anna.service@example.com"})
+    assert r.session.captured_slots.email == "anna@example.com"
+    await record(r, "anna.service@example.com")
+    assert r.session.captured_slots.email == "anna.service@example.com"
+    assert not r.session.captured_slots.email_confirmed
+    assert not any("BACKEND CONTACT MODE" in str(event) for event in r.socket.sent)

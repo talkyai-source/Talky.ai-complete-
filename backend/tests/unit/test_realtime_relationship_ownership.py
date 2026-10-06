@@ -1,4 +1,7 @@
-"""AG03 native lifetime/order proofs; fake model events, no provider calls."""
+"""Native caller lifetime/order and transport proofs; meaning stays with the model.
+
+Fake model events; no provider calls or semantic-answer quality claim.
+"""
 import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
@@ -47,14 +50,17 @@ async def admitted(bridge, text):
 
 
 @pytest.mark.asyncio
-async def test_explicit_denial_survives_thirty_later_ordinary_caller_turns():
+async def test_caller_history_stays_bounded_without_a_second_semantic_speech_gate():
     bridge = make_bridge()
     await pump(bridge, [start("denial", 0), final("denial", "I am not your customer.")])
     for index in range(30):
         await pump(bridge, [start(f"ordinary-{index}", (index + 1) * 1000),
                            final(f"ordinary-{index}", "Tell me about your services.")])
     assert len(bridge._contact_history) <= 12
-    assert not await admitted(bridge, "You are our existing customer.")
+    assert bridge._live_user_turn_seq == 31
+    assert bridge._latest_caller_text == "Tell me about your services."
+    assert bridge._live_state.customer_relationship.value == "unknown"
+    assert await admitted(bridge, "You are our existing customer.")
     assert await admitted(bridge, "I will not assume you are a customer.")
 
 
@@ -63,7 +69,7 @@ async def test_delayed_old_final_cannot_overwrite_newer_denial():
     bridge = make_bridge()
     await pump(bridge, [start("old", 0), start("new", 1000),
         final("new", "I am not your customer."), final("old", "I am your customer.")])
-    assert not await admitted(bridge, "You are our existing customer.")
+    assert await admitted(bridge, "You are our existing customer.")
     assert bridge._latest_caller_text == "I am not your customer."
 
 
@@ -108,7 +114,7 @@ async def test_normal_continuation_preserves_current_history_and_active_response
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("blocked_at", ["send", "finish"])
-async def test_late_denial_cannot_resume_after_gateway_suppresses_cancellation(blocked_at):
+async def test_barge_in_cannot_resume_after_gateway_suppresses_cancellation(blocked_at):
     entered = asyncio.Event()
     never_release = asyncio.Event()
     submission_count = 0
@@ -154,7 +160,7 @@ async def test_late_denial_cannot_resume_after_gateway_suppresses_cancellation(b
         RealtimeEvent(kind="response_candidate", text="Our records show you are an existing customer.",
             audio=b"\xff" * 640, raw={"audio_parts": [{"item_id": "answer", "content_index": 0, "audio_bytes": 640}]})])
     await asyncio.wait_for(entered.wait(), timeout=1)
-    await feed([final("current", "I am not your customer.")])
+    await feed([start("next", 1000), final("next", "I am not your customer.")])
     await asyncio.wait_for(asyncio.gather(bridge._playback_task, return_exceptions=True), timeout=1)
 
     assert submission_count == (1 if blocked_at == "send" else 2)
@@ -164,9 +170,9 @@ async def test_late_denial_cannot_resume_after_gateway_suppresses_cancellation(b
     assert bridge._action_session._voice_action_delivered_text == ""
     gateway.clear_output_buffer.assert_awaited_once()
     assert provider.truncate_response.await_args.kwargs == {"played_ms": 17}
-    provider.request_response.assert_awaited_once()
+    provider.request_response.assert_not_awaited()
     provider.repair_unspoken_response.assert_not_awaited()
-    assert timeline[:2] == ["state", "continue"]
+    assert timeline == []
     recorded = [call for call in bridge._record_turn.call_args_list if call.args[0] == "assistant"]
     assert len(recorded) == 1
     assert recorded[0].kwargs["metadata"]["delivery"]["status"] == "interrupted"
@@ -174,29 +180,14 @@ async def test_late_denial_cannot_resume_after_gateway_suppresses_cancellation(b
 
 
 @pytest.mark.asyncio
-async def test_pre_send_guard_does_not_cancel_itself_and_repairs_only_once():
-    from app.domain.services.voice_pipeline.live_structured_state import evidence_from_transcript, reduce_live_state
-
-    provider = SimpleNamespace(update_live_state=AsyncMock(), request_response=AsyncMock(),
-        repair_unspoken_response=AsyncMock(), truncate_response=AsyncMock(), close=AsyncMock())
-    gateway = SimpleNamespace(send_audio=AsyncMock(), clear_output_buffer=AsyncMock())
-    bridge = RealtimeBridge(call_id="ag03-pre-send", realtime_session=provider,
-        media_gateway=gateway, call_direction="inbound", greet_on_start=False)
-    bridge._live_state = reduce_live_state(bridge._live_state,
-        evidence_from_transcript(role="user", text="I am not your customer.", turn_id="fixture"))
-    event = RealtimeEvent(kind="response_candidate", text="You are our existing customer.", audio=b"\xff" * 320)
-    bridge._playback_task = asyncio.create_task(bridge._play_validated_response(event))
-    await asyncio.wait_for(bridge._playback_task, timeout=1)
-    assert not bridge._playback_task.cancelled()
-    gateway.send_audio.assert_not_awaited()
-    provider.request_response.assert_awaited_once()
-    provider.repair_unspoken_response.assert_not_awaited()
-    bridge._utterance = None
-    bridge._playback_task = asyncio.create_task(bridge._play_validated_response(event))
-    await asyncio.wait_for(bridge._playback_task, timeout=1)
-    provider.request_response.assert_awaited_once()
-    provider.close.assert_awaited_once()
-    assert bridge._stop.is_set() and bridge._failure_reason
+async def test_model_prose_passes_without_regex_repair_or_session_shutdown():
+    bridge = make_bridge()
+    await pump(bridge, [start("caller", 0), final("caller", "I am not your customer.")])
+    # Meaning is model-owned: runtime no longer replaces prose based on a regex.
+    assert await admitted(bridge, "You are our existing customer.")
+    assert await admitted(bridge, "I will not assume you are a customer.")
+    bridge._rt.repair_unspoken_response.assert_not_awaited()
+    assert not bridge._stop.is_set() and bridge._failure_reason is None
 
 
 @pytest.mark.asyncio
@@ -230,7 +221,7 @@ async def test_late_prior_denial_survives_current_ordinary_transcript_replacemen
     await pump(bridge, [start("old", 0), start("new", 1000),
         final("new", "Tell me about your services."), final("old", "I am not your customer."),
         final("new", "What services are available?")])
-    assert not await admitted(bridge, "You are our existing customer.")
+    assert await admitted(bridge, "You are our existing customer.")
     assert bridge._latest_caller_text == "What services are available?"
     assert bridge._observe_contact_turn.await_count == 2
     assert bridge._observe_contact_turn.await_args_list[-1].kwargs == {"revision": True}
@@ -248,7 +239,8 @@ async def test_evicted_speech_anchor_replay_cannot_reverse_newer_correction():
         RealtimeEvent(kind="caller_turn", raw={"item_id": "retired", "previous_item_id": "old-assistant"}),
         final("retired", "I am your customer.")])
     assert len(bridge._caller_items) <= 64
-    assert not await admitted(bridge, "You are our existing customer.")
+    assert bridge._latest_caller_text == "Tell me more."
+    assert await admitted(bridge, "You are our existing customer.")
 
 
 @pytest.mark.asyncio
@@ -258,7 +250,8 @@ async def test_malformed_speech_offsets_do_not_authorize_caller_correction(offse
     await pump(bridge, [start("denial", 0), final("denial", "I am not your customer."),
         start("invalid", offset), RealtimeEvent(kind="caller_turn", raw={"item_id": "invalid"}),
         final("invalid", "I am your customer.")])
-    assert not await admitted(bridge, "You are our existing customer.")
+    assert bridge._latest_caller_text == "I am not your customer."
+    assert await admitted(bridge, "You are our existing customer.")
 
 
 @pytest.mark.asyncio
@@ -266,7 +259,9 @@ async def test_unknown_previous_assistant_id_is_not_a_caller_order_error():
     bridge = make_bridge()
     await pump(bridge, [RealtimeEvent(kind="caller_turn", raw={"item_id": "current", "previous_item_id": "assistant-outside-caller-map"}),
         final("current", "I am not your customer.")])
-    assert not await admitted(bridge, "You are our existing customer.")
+    assert bridge._current_caller_order == 1
+    assert bridge._latest_caller_text == "I am not your customer."
+    assert await admitted(bridge, "You are our existing customer.")
 
 
 @pytest.mark.asyncio

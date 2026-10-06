@@ -70,6 +70,16 @@ def bind_contact_turn(session, text: str, source: ContactSource | None) -> Conta
     return turn
 
 
+def _with_contact_changes(state: CallState, **changes) -> CallState:
+    updated = replace(state, **changes)
+    # CallState's legacy scalar lift must not manufacture capture evidence for
+    # an unrelated field while applying this contact's change.
+    for field in ("email_capture", "phone_capture"):
+        if field not in changes:
+            object.__setattr__(updated, field, getattr(state, field))
+    return updated
+
+
 def invalidate_revised_contacts(session, source: ContactSource) -> bool:
     """A revised source withdraws only its own current contribution, not new facts."""
     state = getattr(session, "captured_slots", None)
@@ -103,7 +113,7 @@ def invalidate_revised_contacts(session, source: ContactSource) -> bool:
         changes.update({f"{kind}_capture": updated, kind: updated.normalized_value,
                         f"{kind}_confirmed": False})
     if changes:
-        session.captured_slots = replace(state, **changes)
+        session.captured_slots = _with_contact_changes(state, **changes)
         session._lead_capture_revision_source = source
     return bool(changes)
 
@@ -191,7 +201,7 @@ async def record_contact(session, arguments, *, turn=_UNSET, pool=None) -> dict:
                 value_source=source, status_source=source)
             if operation == "set" and current is not None and normalized and normalized == current.normalized_value:
                 capture = current  # Repeating a value does not erase prior confirmation.
-        session.captured_slots = replace(state, **extra, **{
+        session.captured_slots = _with_contact_changes(state, **extra, **{
             f"{kind}_capture": capture, kind: capture.normalized_value,
             f"{kind}_confirmed": capture.status is CaptureStatus.CONFIRMED,
             "active_contact_kind": None, "agent_asked_kind": None,
