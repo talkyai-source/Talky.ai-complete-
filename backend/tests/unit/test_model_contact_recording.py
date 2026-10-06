@@ -322,6 +322,34 @@ async def test_native_prose_is_not_rejected_by_old_price_relationship_or_action_
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("provider", ["openai", "xai"])
+async def test_native_current_historical_and_revised_words_do_not_become_inferred_state(provider):
+    replay = native(provider)
+    actual = replace(replay.bridge._live_state, identity_introduced=True,
+        last_tool_name="send_email", last_tool_success=False, last_tool_code="failed")
+    replay.bridge._live_state = actual
+    await replay.step({"kind": "start", "item": "older"})
+    await replay.step({"kind": "start", "item": "current"})
+    original = "I am your customer. Our current provider is Acme. I am very interested."
+    await replay.step({"kind": "caller", "item": "current", "revision": True, "text": original})
+    assert replay.bridge._live_state == actual
+    await replay.step({"kind": "caller", "item": "older", "revision": True,
+        "text": "I am not your customer. Our current provider is Before."})
+    assert replay.bridge._live_state == actual
+    assert replay.bridge._latest_caller_text == original
+    corrected = "Actually, I am not your customer. I only want information."
+    await replay.step({"kind": "caller", "item": "current", "revision": True, "text": corrected})
+    assert replay.bridge._live_state == actual
+    assert replay.bridge._latest_caller_text == corrected
+    assert replay.session._contact_turn.text == corrected
+    assert replay.session._voice_action_user_turn == 2
+    rows = replay.transcripts.get_transcript_json(replay.call_id)
+    current = next(row for row in rows if row["metadata"].get("provider_item_id") == "current")
+    assert current["original_content"] == original and current["content"] == corrected
+    assert current["metadata"]["caller_turn_order"] == 2
+
+
+@pytest.mark.asyncio
 async def test_actual_turn_runner_binds_evidence_but_does_not_parse_or_classify_contact():
     from app.domain.services.transcript_service import TranscriptService
     from app.domain.services.voice_pipeline.turn_runner import TurnRunner

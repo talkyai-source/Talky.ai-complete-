@@ -44,7 +44,6 @@ import json
 import logging
 import os
 import time
-from dataclasses import replace
 from typing import Any, Awaitable, Callable, Optional
 
 from app.domain.services.voice_pipeline.live_structured_state import (
@@ -52,7 +51,6 @@ from app.domain.services.voice_pipeline.live_structured_state import (
     IdentityEvidence,
     LiveConversationState,
     ToolResultEvidence,
-    evidence_from_transcript,
     reduce_live_state,
     render_live_state_block,
 )
@@ -150,7 +148,6 @@ class RealtimeBridge:
         self._opt_out_task: Optional[asyncio.Task] = None
         self._opt_out_acknowledged = False
         self._opt_out_repair = None
-        self._pre_current_relationship_state = self._live_state
         self._call_direction = str(call_direction or "outbound").strip().lower()
         # Shared CallSession for deterministic voice-action results. Optional so
         # older construction sites/tests remain compatible; the bridge itself
@@ -498,12 +495,6 @@ class RealtimeBridge:
         self._current_caller_order = order
         return order, "replacement" if replacement else "current"
 
-    @staticmethod
-    def _with_relationship(state: LiveConversationState, evidence_state: LiveConversationState) -> LiveConversationState:
-        return replace(state, customer_relationship=evidence_state.customer_relationship,
-                       relationship_turn_id=evidence_state.relationship_turn_id,
-                       relationship_turn_order=evidence_state.relationship_turn_order)
-
     # ── Model events: OpenAI -> gateway (+ tools, barge-in) ──────────────
     async def _pump_model_events(self) -> None:
         try:
@@ -593,32 +584,11 @@ class RealtimeBridge:
                             update_activity = getattr(self._contact_session, "update_activity", None)
                             if callable(update_activity):
                                 update_activity()
-                        evidence = evidence_from_transcript(
-                            role="user", text=text,
-                            turn_id=f"realtime:{caller_order}", caller_turn_order=caller_order,
-                        )
                         if admission_kind == "historical":
-                            if evidence is not None:
-                                previous = self._live_state
-                                self._live_state = self._with_relationship(self._live_state,
-                                    reduce_live_state(self._live_state, evidence))
-                                # Current-item retraction must restore the
-                                # latest prior evidence, including late ASR.
-                                self._pre_current_relationship_state = self._with_relationship(
-                                    self._pre_current_relationship_state,
-                                    reduce_live_state(self._pre_current_relationship_state, evidence))
-                                if previous != self._live_state:
-                                    await self._publish_live_state()
                             self._record_turn("user", text, metadata={
                                 "caller_turn_order": caller_order, "late_final": True})
                             continue
                         if admission_kind == "replacement":
-                            # A corrected final for the current item replaces
-                            # only that item's relationship contribution. Never
-                            # roll back intervening tool/contact/delivery facts.
-                            corrected = (reduce_live_state(self._pre_current_relationship_state, evidence)
-                                         if evidence is not None else self._pre_current_relationship_state)
-                            self._live_state = self._with_relationship(self._live_state, corrected)
                             self._latest_caller_text = text
                             # This is the same caller item, but its old ASR can
                             # no longer authorize a pending external action.
@@ -629,7 +599,6 @@ class RealtimeBridge:
                             await self._observe_contact_turn(text, caller_raw, revision=True)
                             await self._publish_live_state()
                             continue
-                        self._pre_current_relationship_state = self._live_state
                         if not self._caller_transcript_pending:
                             self._snapshot_caller_question()
                         self._revoke_pending_end_call()
@@ -643,11 +612,6 @@ class RealtimeBridge:
                         # The caller owns close/DNC intent even when the model
                         # produces only a plain goodbye and omits its tool.
                         self._arm_caller_end_call(require_explicit=True)
-                        if evidence is not None:
-                            self._live_state = reduce_live_state(
-                                self._live_state, evidence
-                            )
-                            await self._publish_live_state()
                         _tidx = self._turn_index
                         await self._observe_contact_turn(text, caller_raw)
                         self._remember_contact_turn("user", text)
