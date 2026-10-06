@@ -127,16 +127,9 @@ def caller_talking_over_close(session, turn_started_at: float) -> bool:
     re-issued reply ("Thanks, I'll pass that on...") carried a hangup; their
     words streamed in from 20:02:28 and the call was cut at 20:02:31. Hanging
     up over someone who is still talking is never a clean close, on any
-    campaign. A backchannel or a goodbye said over the agent's goodbye does
-    not count -- the caller is closing too.
+    campaign. Fresh speech activity wins over a partial courtesy word. Once
+    the caller is quiet, a completed backchannel or goodbye can still close.
     """
-    newest = str(getattr(session, "current_user_input", "") or "").strip()
-    if newest and (
-        _is_backchannel(newest)
-        or contains_explicit_goodbye(newest)
-        or _is_courtesy(newest)
-    ):
-        return False
     # The floor flag has been stuck True before (see playback_gate); trust it
     # only while fresh, so a stuck flag can never keep a call open forever.
     since = getattr(session, "_caller_speaking_since", None)
@@ -146,6 +139,13 @@ def caller_talking_over_close(session, turn_started_at: float) -> bool:
         and time.monotonic() - since < _SPEAKING_FLAG_FRESH_S
     ):
         return True
+    newest = str(getattr(session, "current_user_input", "") or "").strip()
+    if newest and (
+        _is_backchannel(newest)
+        or contains_explicit_goodbye(newest)
+        or _is_courtesy(newest)
+    ):
+        return False
     last_words_at = getattr(session, "_caller_last_text_at", None)
     return (
         isinstance(last_words_at, (int, float))
@@ -364,21 +364,10 @@ class TurnEnder:
             except Exception as exc:  # metrics must never break a turn
                 logger.debug("interruption_classify_failed err=%s", exc)
 
-        # Exception: if the agent's LAST turn was a QUESTION, a short
-        # "yep / yes / no / sure" is the ANSWER, not a listening noise —
-        # suppressing it strands the call in silence (observed 2026-07-08:
-        # agent asked "is that Sam?", caller said "Yep", it was dropped and
-        # the agent never replied). A question ends with "?" — when it does,
-        # let the affirmative through to the LLM.
-        #
-        # Checking only whether the WHOLE message ends in "?" missed an
-        # embedded permission question followed by a declarative clause
-        # (Dojo-PC opener: "Alex here from Dojo — got a minute? We're
-        # checking in on your payment setup." — ends in "."). The caller's
-        # "Yes." was dropped as a backchannel and the agent sat mute for
-        # 9.3s until the tester hung up (call 36357ad0, 2026-09-23 18:14:49;
-        # also 2b36df30, 2026-09-22). A question anywhere in the agent's
-        # last turn — i.e. ANY of its sentences ending in "?" — counts.
+        # Only suppress listener acknowledgements during actual agent speech.
+        # A completed short answer while idle belongs to the model, regardless
+        # of punctuation in the previous question or request. During overlap,
+        # retain the existing exception for an answer to an agent question.
         _agent_last_msg = next(
             (m.content for m in reversed(session.conversation_history)
              if m.role == MessageRole.ASSISTANT),
@@ -392,6 +381,7 @@ class TurnEnder:
 
         if (
             _is_backchannel(full_transcript)
+            and session.tts_active
             and _has_prior_user_turn
             and not _agent_asked_question
         ):
@@ -422,7 +412,8 @@ class TurnEnder:
             # The behaviour was right; the reason was wrong, which is exactly
             # what misleads an incident review.
             _reason = (
-                "turn_0_first_utterance" if not _has_prior_user_turn
+                "agent_not_speaking" if not session.tts_active
+                else "turn_0_first_utterance" if not _has_prior_user_turn
                 else "answers_agent_question"
             )
             logger.info(

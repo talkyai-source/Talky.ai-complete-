@@ -32,60 +32,6 @@ _CALLER_END_INTENT = re.compile(
 )
 
 
-_SENTINEL_RE = re.compile(r"\[\[?\s*END_CALL\s*\]?\]", re.IGNORECASE)
-
-
-def agent_left_a_question_open(agent_text: Optional[str]) -> bool:
-    """True when the agent's own last sentence this turn was a question.
-
-    Asking a question and hanging up in the same breath is never a close. The
-    [[END_CALL]] sentinel path honoured the model's hangup unconditionally
-    (only a wrong-person turn was exempt), while the JSON end-session path
-    already required the caller to have finished. In the 30 days to
-    2026-09-23 the sentinel hung up on callers straight after:
-
-        "Mike at example dot com - right?"              (35d3fd2f)
-        "Does that process ever hold you up?"           (3aae86c6)
-        "When's a good time to call back?"               (77531765) - the
-                                   caller had just said "Can you hold for a
-                                   second?"
-
-    Every legitimate close in that window ended in a statement ("Thanks for
-    your time - have a good day."), which is why this looks only at the final
-    sentence's punctuation rather than at anything the caller said.
-    """
-    text = _SENTINEL_RE.sub("", str(agent_text or "")).strip()
-    # Trailing ellipses too: live call d1121622 (2026-09-24 11:12:13) ended
-    # its turn "...could you repeat that?..." with a hangup request, this
-    # check read the final "." as a statement, and the agent hung up on the
-    # question it had just asked.
-    text = text.rstrip(" \"'”’)].…")
-    return text.endswith("?")
-
-
-def contact_capture_open(call_state) -> bool:
-    """True while an email or phone number is part-way through capture.
-
-    A value read back but not yet confirmed, or one the agent is still
-    clarifying, is the lead the call exists to produce. Hanging up then throws
-    it away: on call 2427af7e the caller was mid-correction of their email
-    ("I'm not asking for the spelling...") when the agent said "got it" and
-    ended the call. Unlike a question, this needs nothing inferred from the
-    caller's words - the capture state machine already knows.
-    """
-    from app.domain.services.voice_pipeline.contact_capture import CaptureStatus
-
-    open_states = {
-        CaptureStatus.NEEDS_CLARIFICATION,
-        CaptureStatus.AWAITING_CONFIRMATION,
-    }
-    for name in ("email_capture", "phone_capture"):
-        capture = getattr(call_state, name, None)
-        if capture is not None and getattr(capture, "status", None) in open_states:
-            return True
-    return False
-
-
 def previous_assistant_turn(history) -> str:
     """Assistant turn before the latest caller, never this turn's new farewell."""
     items = list(history or ())

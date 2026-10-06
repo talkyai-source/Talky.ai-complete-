@@ -16,11 +16,11 @@ dropped (`backchannel_suppressed transcript_chars=4`), and the agent never
 replied — 9.3s of dead air until the tester closed the browser. The same
 signature reproduced the day before on 2b36df30 (19:13:27.701).
 
-THE FIX
--------
-Treat the agent's last turn as a question if ANY of its sentences ends in
-"?", not just the final character of the whole message. A true backchannel
-after a message with NO question anywhere must still be suppressed.
+CURRENT CONTRACT
+----------------
+Completed short replies reach the model whenever agent speech is inactive,
+including after compound questions and ordinary statements. Suppression is
+reserved for actual speech overlap, covered by test_agent_input_repairs.
 
 Driven through the REAL TurnEnder.handle via the same STT-boundary path
 production uses (TranscriptHandler.handle -> handle_turn_end -> TurnEnder),
@@ -147,13 +147,12 @@ async def test_bare_yes_after_a_compound_question_opener_is_not_dropped(caplog):
         await deliver_end_of_turn(p, s)
 
     assert "backchannel_suppressed" not in caplog.text
-    assert "backchannel_allowed reason=answers_agent_question" in caplog.text
+    assert "backchannel_allowed reason=agent_not_speaking" in caplog.text
 
 
 @pytest.mark.asyncio
-async def test_a_true_backchannel_after_a_pure_statement_is_still_suppressed(caplog):
-    """No question anywhere in the agent's last turn -> a bare 'yeah' is
-    still a listening noise, not an answer."""
+async def test_idle_acknowledgement_after_a_pure_statement_is_not_suppressed(caplog):
+    """Without overlapping speech, punctuation cannot discard a final reply."""
     p, s = _Pipeline(), real_session(current_user_input="yeah")
     s.conversation_history = [
         Message(role=MessageRole.ASSISTANT, content="Hello?"),
@@ -163,4 +162,5 @@ async def test_a_true_backchannel_after_a_pure_statement_is_still_suppressed(cap
     with caplog.at_level("INFO"):
         await deliver_end_of_turn(p, s)
 
-    assert "backchannel_suppressed" in caplog.text
+    assert "backchannel_suppressed" not in caplog.text
+    assert "backchannel_allowed reason=agent_not_speaking" in caplog.text

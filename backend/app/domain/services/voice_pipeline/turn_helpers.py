@@ -93,7 +93,11 @@ def _should_reject_turn_0(
     kwargs to the module constants when running outside a configured
     session.
     """
-    if _alpha_char_count(transcript) < min_alpha_chars:
+    # A number can be a complete first answer (including a single digit).
+    # Keep the letter floor for fragments and reject punctuation-only noise;
+    # numeric content still goes through the same confidence check below.
+    has_numeric_content = any(character.isdecimal() for character in transcript)
+    if _alpha_char_count(transcript) < min_alpha_chars and not has_numeric_content:
         return "too_short"
     if confidence is not None and confidence < min_confidence:
         return "low_confidence"

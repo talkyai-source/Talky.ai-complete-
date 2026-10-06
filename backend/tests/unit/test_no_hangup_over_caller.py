@@ -44,11 +44,11 @@ def test_trailing_copies_of_the_triggering_words_do_not_count():
     assert not caller_talking_over_close(_session(_caller_last_text_at=started + 0.4), started)
 
 
-def test_a_goodbye_or_backchannel_over_the_goodbye_still_closes():
+def test_a_completed_goodbye_or_backchannel_with_quiet_caller_still_closes():
     started = time.monotonic() - 5.0
     for words in ("Bye bye.", "okay", "thank you"):
         s = _session(current_user_input=words, _caller_last_text_at=started + 3.0,
-                     _caller_speaking=True, _caller_speaking_since=time.monotonic())
+                     _caller_speaking=False, _caller_speaking_since=time.monotonic())
         assert not caller_talking_over_close(s, started), words
 
 
