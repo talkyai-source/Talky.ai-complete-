@@ -754,3 +754,60 @@ not current designations. The existing request for the campaign, approved
 document/version, owned test number and connected test accounts is unanswered.
 No package or readiness gate is promoted, no deferred package is resumed, and no
 deployment or push is claimed.
+
+## Knowledge source evidence and diagnostic parity (6 October)
+
+Three independently reviewed repairs are now integrated:
+
+- `15c6a7c0`: [adjacent required terms](2026-10-06-ag02-required-conditions.md)
+  remain with a selected price or both are withheld. Four generic English
+  obligation markers extend the existing grouping; this is not general semantic
+  qualifier recognition. Baseline thirteen failing/one passing controls became
+  fourteen passing controls, included in 143 passing affected tests.
+- `059334c4`: [authored-source coverage](2026-10-06-ag02-authored-coverage.md)
+  prevents valid same-node generated aliases and other nodes' alias frequency
+  from granting factual confidence. Search ranking and candidates are unchanged.
+  Numeric-only queries cannot inherit an older coverage score. Final owner
+  verification passed 174 unit tests and thirteen separate actual PostgreSQL
+  controls. The SQL run preceded the final pinned-only correction; exact SQL
+  function bytes remained identical and that source distinction is recorded.
+- `bb678ac0`: [existing knowledge test preview](2026-10-06-ag02-knowledge-diagnostic-evidence.md)
+  now shows the same admitted source passages, weak/no-match state and provenance
+  as the shared voice boundary. Generated derivatives remain in the legacy raw
+  candidate response for compatibility, but the UI never uses them as evidence.
+  Query/campaign/content changes invalidate stale results. The frontend rejects
+  missing/inconsistent evidence rather than silently using an older response.
+  Backend and frontend must be released compatibly. Owner checks passed 156
+  backend and 25 frontend tests, TypeScript, scoped lint and the Next production
+  build. These separately scoped totals overlap other checks and are not added.
+
+The [combined root artifact](artifacts/ag02-source-evidence-integration/manifest.json)
+records **220 passing tests, ten warnings and zero skips** across thirteen
+modules in 9.38 seconds on committed `059334c4`. All 25 recorded source inputs
+matched Git before execution and remained unchanged afterward. Socket and async
+transport prohibited-attempt counters were zero; 231 internal socketpairs were
+recorded. This is offline actual-method integration with synthetic ports, not
+another database, browser, provider or full-backend qualification.
+
+The same run executed the unchanged sixty-question raw-source evaluator:
+**42/45 expected-source recall and 32/45 sufficient passages**, quality-gate exit
+one. Every case result equals the preserved pinned baseline. The owner SQL run
+retains **40/45 recall and 31/45 sufficiency**. Neither gate is redefined by the
+passing regression tests. Gold files, thresholds, providers and dependencies are
+unchanged; the owner's LF/CRLF matrix-hash difference is explicitly reconciled.
+
+These repairs reduce misleading previews and unsupported evidence admission.
+They do not establish semantic answer accuracy or improve the measured raw
+paraphrase score. Authored-source SQL weighting adds query work; deployed timing
+and configured model/audio behavior still require qualification. The requested
+current campaign designation is pending, along with approved versioned facts,
+owned destinations/accounts and the existing customer/operational acceptance.
+No package, scenario or final gate is promoted; CP05/CP06/CP09 stay deferred.
+
+Final read-only parity verified eleven owned owner/integrated Git blob pairs,
+46 owner artifact/report hashes and exact equality of the entire integrated
+Talk-Leee tree with the frontend owner's source commit. Independent review
+verified the combined 25 source and five artifact hashes, all sixty unchanged
+gold case objects and unchanged tracker states. These were parity checks, not
+additional test executions. The stronger combined source evidence is separate
+from earlier owner runs whose dependency files preceded the sibling repairs.

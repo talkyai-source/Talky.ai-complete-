@@ -509,10 +509,30 @@
           "path": "docs/sessions/artifacts/knowledge-evidence-budget/verification.md",
           "kind": "budget_starvation_repair_and_210_test_combined_knowledge_regression",
           "candidate": "d3821a0b"
+        },
+        {
+          "path": "docs/sessions/2026-10-06-ag02-required-conditions.md",
+          "kind": "bounded_required_term_passage_repair",
+          "candidate": "15c6a7c0"
+        },
+        {
+          "path": "docs/sessions/2026-10-06-ag02-authored-coverage.md",
+          "kind": "authored_source_coverage_and_alias_frequency_isolation",
+          "candidate": "059334c4"
+        },
+        {
+          "path": "docs/sessions/2026-10-06-ag02-knowledge-diagnostic-evidence.md",
+          "kind": "existing_preview_shared_runtime_evidence_projection",
+          "candidate": "bb678ac0"
+        },
+        {
+          "path": "docs/sessions/artifacts/ag02-source-evidence-integration/manifest.json",
+          "kind": "220_integrated_unit_checks_and_preserved_failed_raw_quality_gate",
+          "candidate": "059334c4"
         }
       ],
-      "blocker": "Request-owned enrichment decoding and sufficient-source budget starvation are repaired locally, with 210 combined regression tests passing. The unchanged raw pinned quality evaluator still fails at 32/45 sufficient passages (42/45 expected-source recall); these repairs do not resolve that quality gap. Two local normalization proposals remain rejected after unrelated passages became answerable; no threshold, corpus answer or dependency change was accepted. Approved representative campaign corpus and live/profile content review remain pending.",
-      "next_action": "Qualify existing ingestion/enrichment and source-only retrieval on a versioned content-owner-reviewed campaign corpus. Preserve the raw-source failure, rejected normalization evidence and unchanged quality thresholds; complete reviewed provider/telephone acceptance.",
+      "blocker": "Local source/tenant/version, enrichment ownership, passage budget/required-term, authored-source coverage and existing diagnostic preview repairs are verified. The combined committed-source regression passed 220 tests; separate actual PostgreSQL and frontend/type/build checks passed. The unchanged raw-source quality gate still fails: pinned 42/45 recall and 32/45 sufficient; SQL 40/45 and 31/45. Generated aliases can route candidates but cannot establish factual confidence. Approved versioned campaign facts, semantic answer fidelity, configured provider/telephone behavior and deployed timing remain unqualified. No current acceptance campaign has been designated; passing code checks do not close AG02.",
+      "next_action": "Obtain the current campaign name/ID, inspect its saved knowledge versions and AI profile through existing authenticated tools, then qualify representative approved questions through the existing ingestion, source-only retrieval and actual configured model/call flow. Use the repaired diagnostic preview for source/provenance review. Retain the failed raw-source gate and unchanged quality thresholds; complete designated accounts/destinations, human factual/audio review and release timing before closure.",
       "target_date": null,
       "execution_note": "Local candidate 69d09fe575831c42a14b28c0a7417ca1b388c492: 791 combined backend and 9 PostgreSQL tests passed. Synthetic 60-question quality gate failed (pinned 93.33/71.11%, SQL 88.89/68.89%, targets 90/85%). No provider calls, push or deployment; no package closure."
     },
