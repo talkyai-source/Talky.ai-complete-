@@ -1,21 +1,9 @@
-"""On-demand campaign knowledge via an LLM function tool (#2, voice latency).
+"""Campaign knowledge through the existing conversational model's search tool.
 
-The default per-turn path injects the top-k knowledge block into the system
-prompt on EVERY turn (see ``turn_streamer._knowledge_block_for_turn``). That
-runs an FTS query and grows the prompt even on smalltalk turns ("yes, we can
-talk", "okay", greetings) that need no company facts at all.
-
-This module is the opt-in alternative: expose a ``lookup_company_knowledge``
-function tool so the model fetches facts ONLY when it decides it needs them.
-Most turns then carry zero knowledge — no retrieval, no injection, smaller
-prompt, faster reply. On the minority of turns that do need facts, the model
-self-authors a focused query (robust to STT mishears in the raw transcript)
-and the answer round-trip is covered by the existing thinking-filler.
-
-Gated behind ``VOICE_KB_MODE=tool`` (default ``inject``) so it ships dark and
-can be flipped per-environment without a redeploy. Wired for Groq (OpenAI-style
-tool calls) and Gemini (native function calling); gpt-oss and any other provider
-fall back to the inject path automatically.
+``VOICE_KB_MODE=tool`` offers lookup to providers with ``supports_tools``;
+otherwise the turn uses ordinary injection. Both paths share source evidence
+and passage budgets. A model-authored query can bridge different wording, but
+its lexical score cannot establish equivalence to the caller's question.
 """
 from __future__ import annotations
 
@@ -31,8 +19,8 @@ from app.domain.models.session import CallSession
 from app.domain.services.voice_pipeline.kb_budget import (
     prepare_knowledge_evidence,
     _KB_MAX_CHUNKS,
-    _KB_CHUNK_CHARS,
-    _KB_TOTAL_CHARS,
+    _KB_CHUNK_CHARS as _KB_CHUNK_CHARS,
+    _KB_TOTAL_CHARS as _KB_TOTAL_CHARS,
     _KNOWLEDGE_RETRIEVE_TIMEOUT_S,
 )
 
@@ -68,8 +56,9 @@ KNOWLEDGE_TOOL_SPEC = {
         "description": (
             "Look up the company's official knowledge base for facts about the "
             "product, pricing, plans, features, policies, coverage, hours, or "
-            "any specific detail about the business. Call this ONLY when the "
-            "caller asks something concrete you are not already certain of. Do "
+            "any specific detail about the business. Use a lookup this turn "
+            "before answering concrete company questions; confidence or a "
+            "previous assistant answer is not verification. Do "
             "NOT call it for greetings, smalltalk, confirmations, or chit-chat."
         ),
         "parameters": {
@@ -78,10 +67,11 @@ KNOWLEDGE_TOOL_SPEC = {
                 "query": {
                     "type": "string",
                     "description": (
-                        "A short, focused search query for the fact you need, "
-                        "e.g. 'price of the premium plan' or 'do you offer "
-                        "refunds'. Phrase it clearly even if the caller was "
-                        "vague or misheard."
+                        "A focused search for the caller's original question. "
+                        "Rephrase without dropping named products, locations, "
+                        "timing, negation or who the question concerns. Use "
+                        "context only to resolve a clear reference. Clarify "
+                        "ambiguous or misheard words rather than guessing."
                     ),
                 }
             },
@@ -93,12 +83,17 @@ KNOWLEDGE_TOOL_SPEC = {
 _TOOL_ADDENDUM = (
     "## Company knowledge\n"
     f"You have a tool `{KB_TOOL_NAME}` that looks up the company's official "
-    "knowledge base. Use it ONLY when the caller asks a concrete question "
+    "knowledge base. Use it this turn before answering a concrete question "
     "about the product, pricing, plans, features, policies, coverage, or "
-    "hours that you are not already certain of — then answer naturally from "
-    "what it returns, staying faithful to those facts. For greetings, "
-    "smalltalk, confirmations, or anything you can answer from the "
-    "conversation so far, just reply directly and do NOT call the tool.\n"
+    "hours. Confidence and previous assistant answers are not verification. "
+    "Rephrase for search without changing the caller's meaning: preserve "
+    "named products, locations, timing, negation and who the question concerns. "
+    "Use context only to resolve a clear reference; clarify ambiguity instead "
+    "of guessing. A search match alone is not an answer: check that the returned "
+    "source actually answers the original question, including its conditions "
+    "and exclusions. Otherwise say you cannot confirm, with no invented "
+    "follow-up promise. For greetings, smalltalk and contact confirmations, "
+    "reply directly without a lookup.\n"
     # Trust boundary for the TOOL RESULT. A function-tool result is read by the
     # model as authoritative system-supplied fact, but its text is tenant/3rd-
     # party data. This rule lives in the SYSTEM prompt — the trusted channel —
@@ -178,7 +173,6 @@ async def run_knowledge_lookup(session: CallSession, query: str) -> str:
         return NO_KB_FACTS
     try:
         from app.services.scripts.knowledge.retrieval import (
-            render_node_answer,
             retrieve_pinned_knowledge,
             retrieve_knowledge,
         )
