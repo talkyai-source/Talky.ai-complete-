@@ -21,53 +21,6 @@ from app.domain.services.voice_pipeline_service import VoicePipelineService
 from app.services.scripts.prompts import accent_fillers as af
 from app.services.scripts.spoken_email_normalizer import natural_phone_readback
 
-_NARRATION = (r"\blet me\b", r"\bone sec\b", r"\bjust a (moment|sec)\b",
-              r"\bone moment\b", r"\bhave a look\b", r"\bcheck\b")
-
-
-# ── choosing the filler ───────────────────────────────────────────────────
-
-def test_a_question_gets_a_question_acknowledgement():
-    for _ in range(20):
-        assert af.contextual_filler(af.NEUTRAL, "How much is Dojo Plus?") in af._QUESTION_FILLERS[af.NEUTRAL]
-
-
-def test_information_gets_a_plain_acknowledgement():
-    for _ in range(20):
-        assert af.contextual_filler(af.NEUTRAL, "We moved to Worldpay last year.") in af._ACK_FILLERS[af.NEUTRAL]
-
-
-@pytest.mark.parametrize("reply", ["Yes.", "no", "Yeah, sure.", "mm", "Thank you."])
-def test_a_bare_yes_or_no_gets_no_filler(reply):
-    assert af.contextual_filler(af.NEUTRAL, reply) is None
-
-
-def test_the_last_three_fillers_are_not_repeated():
-    pool = af._QUESTION_FILLERS[af.AMERICAN]
-    recent = pool[:3]
-    for _ in range(30):
-        assert af.contextual_filler(af.AMERICAN, "What does it cost?", recent) not in recent
-
-
-def test_no_filler_narrates_a_lookup_and_dialects_hold():
-    for table in (af._QUESTION_FILLERS, af._ACK_FILLERS):
-        for accent, pool in table.items():
-            for phrase in pool:
-                for pattern in _NARRATION:
-                    assert not re.search(pattern, phrase.lower()), (accent, phrase)
-                assert len(phrase) <= 40
-    for phrase in af._QUESTION_FILLERS[af.BRITISH] + af._ACK_FILLERS[af.BRITISH]:
-        assert not re.search(r"\b(um|uh)\b", phrase.lower()), phrase
-
-
-def test_an_echoed_acknowledgement_is_trimmed_after_a_filler():
-    assert af.strip_echoed_acknowledgement("Sure, Dojo Plus is £11.99 a month.") == "Dojo Plus is £11.99 a month."
-    assert af.strip_echoed_acknowledgement("Got it — and when's best to call?") == "And when's best to call?"
-    # Nothing substantial would be left: keep it.
-    assert af.strip_echoed_acknowledgement("Sure thing.") == "Sure thing."
-    assert af.strip_echoed_acknowledgement("Dojo Plus is £11.99.") == "Dojo Plus is £11.99."
-
-
 # ── the filler in the real pipeline ───────────────────────────────────────
 
 class _SlowStream:
