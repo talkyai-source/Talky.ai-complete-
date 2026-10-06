@@ -123,7 +123,7 @@ def test_direct_answer_skips_tool(rich_genai):
 
 
 def test_tool_call_then_grounded_answer(rich_genai):
-    fc = rich_genai.FunctionCall(name="lookup_company_knowledge", args={"query": "price"})
+    fc = rich_genai.FunctionCall(name="lookup_company_knowledge", args={"section_ids": ["price-section"]})
     # Round 0: function_call only (no text). Round 1: grounded text answer.
     p = _provider_with_streams([
         _FakeStream([_FakeChunk(function_calls=[fc])]),
@@ -133,7 +133,7 @@ def test_tool_call_then_grounded_answer(rich_genai):
 
     async def runner(name, args):
         seen["name"] = name
-        seen["query"] = args.get("query")
+        seen["section_ids"] = args.get("section_ids")
         return "Premium plan is $49/month."
 
     out = _run(p.stream_chat_with_tools(
@@ -141,7 +141,7 @@ def test_tool_call_then_grounded_answer(rich_genai):
         system_prompt="sys", tools=[KNOWLEDGE_TOOL_SPEC], tool_runner=runner))
     assert "".join(out) == "It's forty nine a month."
     assert seen["name"] == "lookup_company_knowledge"
-    assert seen["query"] == "price"
+    assert seen["section_ids"] == ["price-section"]
 
 
 def test_strict_action_turn_discards_premature_round_zero_claim(rich_genai):
