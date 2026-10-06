@@ -182,7 +182,7 @@ ssh -t -i "$KEY" "$PROD" "
             exit 1
         fi
     done
-    for enabled_unit in talky-api.service talky-dialer-worker.service talky-voice-worker.service talky-reminder-worker.service talky-voice-gateway.service talky-trunk-status.timer talky-inbound-synthetic.timer; do
+    for enabled_unit in talky-api.service talky-dialer-worker.service talky-voice-worker.service talky-reminder-worker.service talky-voice-gateway.service talky-trunk-status.service talky-inbound-synthetic.timer; do
         if ! systemctl is-enabled --quiet \"\$enabled_unit\"; then
             echo \"!! Required systemd unit \$enabled_unit is not enabled.\" >&2
             exit 1
@@ -215,15 +215,16 @@ ssh -t -i "$KEY" "$PROD" "
     sudo bash backend/scripts/reconcile_asterisk_release.sh
     echo '--> restarting backend services after the authenticated gateway is healthy'
     sudo systemctl restart talky-api talky-dialer-worker talky-voice-worker talky-reminder-worker
-    sudo systemctl restart talky-trunk-status.timer
     sudo systemctl restart talky-inbound-synthetic.timer
-    if ! sudo systemctl start talky-trunk-status.service; then
-        echo '!! talky-trunk-status one-shot failed; timer remains active and will retry.' >&2
+    # Long-running loop since 2026-10-07 (its 15 s timer was retired). A failed
+    # restart never aborts the deploy: the unit has Restart=always.
+    if ! sudo systemctl restart talky-trunk-status.service; then
+        echo '!! talky-trunk-status restart failed; Restart=always will keep retrying.' >&2
     fi
     sleep 6
     echo '--> service status:'
     service_failure=0
-    for s in talky-api talky-dialer-worker talky-voice-worker talky-reminder-worker talky-voice-gateway talky-trunk-status.timer talky-inbound-synthetic.timer; do
+    for s in talky-api talky-dialer-worker talky-voice-worker talky-reminder-worker talky-voice-gateway talky-trunk-status talky-inbound-synthetic.timer; do
         state=\"\$(systemctl is-active \"\$s\" 2>/dev/null || true)\"
         printf '    %-26s %s\n' \"\$s\" \"\$state\"
         if [ \"\$state\" != 'active' ]; then

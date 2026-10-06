@@ -39,7 +39,7 @@ def test_deploy_runs_migrations_before_application_restart():
     verify_at = deploy.index("backend/scripts/verify_alembic_current_heads.py")
     restart_at = deploy.index("sudo systemctl restart talky-api talky-dialer-worker")
     assert install_at < migrate_at < verify_at < restart_at
-    assert "sudo systemctl start talky-trunk-status.service" in deploy
+    assert "sudo systemctl restart talky-trunk-status.service" in deploy
 
 
 def test_deploy_preflights_migration_runner_before_checkout():
@@ -71,7 +71,7 @@ def test_deploy_proves_required_units_loaded_and_persistent_units_enabled():
         "talky-voice-worker.service",
         "talky-reminder-worker.service",
         "talky-voice-gateway.service",
-        "talky-trunk-status.timer",
+        "talky-trunk-status.service",
         "talky-inbound-synthetic.timer",
     ):
         assert required in deploy[enabled_at:gateway_restart_at]
@@ -246,14 +246,16 @@ def test_migration_unit_uses_backend_environment_and_current_head():
     assert "[Install]" not in unit
 
 
-def test_installer_reconciles_and_enables_trunk_status_timer():
+def test_installer_reconciles_timers_and_enables_the_trunk_status_loop():
     installer = (BACKEND / "systemd" / "install-services.sh").read_text(encoding="utf-8")
 
     # The units were consolidated into backend/systemd/ on 2026-08-27; the
-    # installer's glob must therefore cover .timer units in its own directory
-    # and the timer must be enabled so trunk evidence keeps refreshing.
+    # installer's glob must cover .timer units in its own directory. Since
+    # 2026-10-07 trunk evidence is refreshed by a long-running loop (the 15 s
+    # timer was retired), so the service itself must be enabled.
     assert '"$SCRIPT_DIR"/*.timer' in installer
-    assert "systemctl enable talky-trunk-status.timer" in installer
+    assert "systemctl enable talky-trunk-status.service" in installer
+    assert not (BACKEND / "systemd" / "talky-trunk-status.timer").exists()
 
 
 def test_inbound_foundation_downgrade_locks_every_guarded_writer():

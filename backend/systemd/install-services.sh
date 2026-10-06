@@ -40,9 +40,11 @@ systemctl daemon-reload
 #   * talky-migrate.service — oneshot, started explicitly by deploy_to_server.sh
 #     before the app restarts. Migrations must never run just because the
 #     machine booted. (See the unit's own header.)
-#   * talky-cleanup.service / talky-healthwatch.service / talky-trunk-status.service / talky-db-backup.service
+#   * talky-cleanup.service / talky-healthwatch.service / talky-db-backup.service
 #     / talky-inbound-synthetic.service — oneshots activated by their .timer,
 #     which IS enabled below.
+#   * talky-trunk-status.service — long-running loop since 2026-10-07 (its
+#     15-second timer was retired), enabled directly.
 echo "  Enabling services..."
 systemctl enable talky-api.service
 systemctl enable talky-voice-worker.service
@@ -51,7 +53,7 @@ systemctl enable talky-reminder-worker.service
 systemctl enable talky-voice-gateway.service   # C++ media gateway; see the unit's header
 systemctl enable talky-cleanup.timer   # activates talky-cleanup.service nightly
 systemctl enable talky-healthwatch.timer   # activates talky-healthwatch.service every 2 min
-systemctl enable talky-trunk-status.timer  # refreshes runtime SIP evidence every 15 sec
+systemctl enable talky-trunk-status.service  # refreshes runtime SIP evidence every 15 sec (loop)
 systemctl enable talky-inbound-synthetic.timer  # hourly carrier-hairpin proof
 systemctl enable talky-db-backup.timer  # nightly verified pg_dump (deploy/db-backup.sh)
 systemctl enable talky.target
