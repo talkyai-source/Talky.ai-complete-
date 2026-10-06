@@ -1,0 +1,168 @@
+[
+  {
+    "path": "backend/tests/unit/test_agent_knowledge_repairs.py",
+    "unchanged_functions": [
+      "test_approved_spoken_price_with_unit_passes",
+      "test_deep_answer_and_qualification_survive_voice_budget",
+      "test_amount_local_paraphrases_keep_same_qualifications",
+      "test_instruction_numbers_and_wrong_period_are_not_financial_evidence",
+      "test_price_cannot_drop_prefix_qualification_or_reuse_negated_source",
+      "test_pinned_ranking_ignores_conversational_stopwords",
+      "test_spoken_money_is_blocked_without_evidence",
+      "test_removed_strong_hit_cannot_promote_weak_surviving_evidence"
+    ],
+    "updated_existing_functions": [],
+    "retired_or_renamed_functions": [
+      "test_tool_and_injection_use_same_deep_fact"
+    ],
+    "new_or_replacement_functions": [
+      "test_catalog_navigates_to_complete_deep_source_fact"
+    ]
+  },
+  {
+    "path": "backend/tests/unit/test_kb_injection_budget.py",
+    "unchanged_functions": [],
+    "updated_existing_functions": [],
+    "retired_or_renamed_functions": [
+      "test_knowledge_block_respects_total_budget"
+    ],
+    "new_or_replacement_functions": [
+      "test_large_catalog_is_paged_without_injecting_source_bodies",
+      "test_oversized_authored_section_is_withheld_instead_of_truncating_conditions"
+    ]
+  },
+  {
+    "path": "backend/tests/unit/test_kb_source_first_all_paths.py",
+    "unchanged_functions": [
+      "test_a_fact_below_the_first_sentence_survives",
+      "test_truncation_respects_the_budget",
+      "test_no_source_text_cannot_be_replaced_by_unapproved_generated_fact",
+      "test_the_old_precedence_would_have_lost_it"
+    ],
+    "updated_existing_functions": [
+      "test_every_delivery_path_uses_authored_source"
+    ],
+    "retired_or_renamed_functions": [
+      "test_price_guard_reaches_the_tool_path"
+    ],
+    "new_or_replacement_functions": []
+  },
+  {
+    "path": "backend/tests/unit/test_knowledge_default_recovery.py",
+    "unchanged_functions": [],
+    "updated_existing_functions": [],
+    "retired_or_renamed_functions": [
+      "test_ambiguous_recovery_can_clarify_without_lookup",
+      "test_default_failed_literal_search_gets_existing_model_lookup",
+      "test_default_matched_source_does_not_claim_original_intent_verified",
+      "test_existing_non_recovery_path_stays_one_model_round",
+      "test_existing_topic_map_remains_navigation_only_during_recovery",
+      "test_failed_recovery_revokes_prior_facts",
+      "test_ineligible_session_or_provider_keeps_plain_path",
+      "test_only_one_actual_recovery_lookup_per_turn",
+      "test_original_prior_caller_context_survives_recovery",
+      "test_recovery_keeps_authorized_action_tool_and_dispatch",
+      "test_recovery_limit_is_per_turn_not_per_call",
+      "test_recovery_withholds_prelookup_claim_before_speech",
+      "test_shared_recovery_helper_reuses_copied_evidence",
+      "test_unavailable_initial_lookup_does_not_start_model_recovery",
+      "test_wrong_intent_rewrite_is_not_original_question_proof"
+    ],
+    "new_or_replacement_functions": [
+      "test_model_can_clarify_without_reading_or_claiming_evidence",
+      "test_model_section_selection_is_primary_without_literal_search",
+      "test_section_tools_keep_existing_action_dispatch_boundary"
+    ]
+  },
+  {
+    "path": "backend/tests/unit/test_knowledge_tool.py",
+    "unchanged_functions": [
+      "test_retrieve_bump_true_still_updates",
+      "test_tool_call_bad_json_yields_empty_args",
+      "test_direct_answer_skips_tool",
+      "test_no_tools_delegates_to_normal_stream",
+      "test_retrieve_bump_false_runs_no_update"
+    ],
+    "updated_existing_functions": [
+      "test_tool_path_runs_then_answers",
+      "test_tools_support_gpt_oss",
+      "test_tool_call_fragments_assemble"
+    ],
+    "retired_or_renamed_functions": [
+      "test_addendum_mentions_tool",
+      "test_lookup_budget_and_format",
+      "test_lookup_empty_query_returns_sentinel",
+      "test_lookup_no_hits_returns_sentinel",
+      "test_lookup_passes_bump_hits_false",
+      "test_tools_off_by_default",
+      "test_tools_on_for_gemini",
+      "test_tools_on_when_flag_set",
+      "test_tools_skip_non_retrieve_mode",
+      "test_tools_skip_unsupported_provider",
+      "test_weak_surviving_evidence_is_distinct_from_provider_unavailable"
+    ],
+    "new_or_replacement_functions": [
+      "test_addendum_is_navigation_not_a_source_body_or_answer_claim",
+      "test_invalid_or_legacy_query_requests_are_explicitly_unavailable",
+      "test_live_lookup_uses_prepared_snapshot_without_db_or_hit_count",
+      "test_reader_requires_call_scope_and_tool_capability",
+      "test_reader_supports_existing_tool_providers",
+      "test_scoped_catalog_offers_reader_independently_of_retired_mode_flag"
+    ]
+  },
+  {
+    "path": "backend/tests/unit/test_knowledge_tool_evidence_lifecycle.py",
+    "unchanged_functions": [],
+    "updated_existing_functions": [],
+    "retired_or_renamed_functions": [
+      "test_current_non_tool_source_still_authorizes_price",
+      "test_knowledge_only_turn_withholds_prose_until_tool_result",
+      "test_latest_lookup_supersedes_earlier_facts_in_same_turn",
+      "test_malformed_tool_evidence_cannot_record_success",
+      "test_no_tool_smalltalk_clears_evidence_without_changing_spoken_reply",
+      "test_prior_turn_price_requires_current_lookup",
+      "test_tool_success_comes_from_admitted_evidence",
+      "test_unavailable_lookup_is_not_a_success"
+    ],
+    "new_or_replacement_functions": [
+      "test_latest_read_replaces_prior_factual_evidence_in_same_turn",
+      "test_no_tool_smalltalk_clears_evidence_without_changing_reply",
+      "test_prior_turn_read_is_not_reported_as_current_evidence",
+      "test_tool_state_distinguishes_navigation_read_and_failure"
+    ]
+  },
+  {
+    "path": "backend/tests/unit/test_knowledge_uncertainty_contract.py",
+    "unchanged_functions": [],
+    "updated_existing_functions": [
+      "test_outbound_does_not_load_other_call_scope",
+      "test_inbound_snapshot_must_match_existing_call_scope"
+    ],
+    "retired_or_renamed_functions": [
+      "test_actual_retrieval_fallback_cannot_instruct_unavailable_followup",
+      "test_assembled_prompt_and_submitted_speech_use_current_evidence",
+      "test_inline_filter_cannot_remove_a_price_condition_and_keep_its_price",
+      "test_inline_missing_fact_instruction_does_not_promise_followup",
+      "test_live_lookup_rechecks_current_version_and_clears_old_authorization",
+      "test_weak_lookup_uses_canonical_status_and_does_not_log_private_content"
+    ],
+    "new_or_replacement_functions": [
+      "test_existing_call_keeps_its_snapshot_new_call_gets_new_source_revision",
+      "test_logged_prompt_hash_and_evidence_describe_actual_model_turn",
+      "test_missing_catalog_guide_does_not_promise_unavailable_followup",
+      "test_poisoned_governing_condition_withholds_child_price_as_well",
+      "test_reads_do_not_log_private_source_or_question"
+    ]
+  },
+  {
+    "path": "backend/tests/unit/voice_pipeline/test_turn_streamer_kb_prefetch.py",
+    "unchanged_functions": [],
+    "updated_existing_functions": [],
+    "retired_or_renamed_functions": [
+      "test_kb_fetch_still_serial_no_overlap"
+    ],
+    "new_or_replacement_functions": [
+      "test_model_starts_from_prepared_catalog_without_turn_fetch"
+    ]
+  }
+]

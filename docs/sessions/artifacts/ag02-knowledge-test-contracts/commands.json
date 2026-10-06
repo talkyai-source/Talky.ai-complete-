@@ -1,0 +1,121 @@
+[
+  {
+    "phase": "baseline",
+    "command": "& \"C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\backend\\.venv\\Scripts\\python.exe\" docs/sessions/artifacts/ag02-knowledge-test-contracts/unit_probe.py baseline",
+    "environment": {
+      "PYTHONPATH": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-knowledge-test-contracts-20261007\\backend",
+      "PYTHONUTF8": "1",
+      "PYTHONDONTWRITEBYTECODE": "1"
+    },
+    "cwd": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-knowledge-test-contracts-20261007",
+    "pytest_argv": [
+      "tests/unit/test_agent_knowledge_repairs.py",
+      "tests/unit/test_kb_injection_budget.py",
+      "tests/unit/test_kb_source_first_all_paths.py",
+      "tests/unit/test_knowledge_default_recovery.py",
+      "tests/unit/test_knowledge_tool.py",
+      "tests/unit/test_knowledge_tool_evidence_lifecycle.py",
+      "tests/unit/test_knowledge_uncertainty_contract.py",
+      "tests/unit/voice_pipeline/test_turn_streamer_kb_prefetch.py",
+      "-q",
+      "--tb=short",
+      "--disable-warnings"
+    ],
+    "exit_code": 1,
+    "source_unchanged": true,
+    "prohibited_attempts": 0
+  },
+  {
+    "phase": "final",
+    "command": "& \"C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\backend\\.venv\\Scripts\\python.exe\" docs/sessions/artifacts/ag02-knowledge-test-contracts/unit_probe.py final",
+    "environment": {
+      "PYTHONPATH": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-knowledge-test-contracts-20261007\\backend",
+      "PYTHONUTF8": "1",
+      "PYTHONDONTWRITEBYTECODE": "1"
+    },
+    "cwd": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-knowledge-test-contracts-20261007",
+    "pytest_argv": [
+      "tests/unit/test_agent_knowledge_repairs.py",
+      "tests/unit/test_kb_injection_budget.py",
+      "tests/unit/test_kb_source_first_all_paths.py",
+      "tests/unit/test_knowledge_default_recovery.py",
+      "tests/unit/test_knowledge_tool.py",
+      "tests/unit/test_knowledge_tool_evidence_lifecycle.py",
+      "tests/unit/test_knowledge_uncertainty_contract.py",
+      "tests/unit/voice_pipeline/test_turn_streamer_kb_prefetch.py",
+      "-q",
+      "--tb=short",
+      "--disable-warnings"
+    ],
+    "exit_code": 2,
+    "source_unchanged": true,
+    "prohibited_attempts": 0
+  },
+  {
+    "phase": "corrected",
+    "command": "& \"C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\backend\\.venv\\Scripts\\python.exe\" docs/sessions/artifacts/ag02-knowledge-test-contracts/unit_probe.py corrected",
+    "environment": {
+      "PYTHONPATH": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-knowledge-test-contracts-20261007\\backend",
+      "PYTHONUTF8": "1",
+      "PYTHONDONTWRITEBYTECODE": "1"
+    },
+    "cwd": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-knowledge-test-contracts-20261007",
+    "pytest_argv": [
+      "tests/unit/test_agent_knowledge_repairs.py",
+      "tests/unit/test_kb_injection_budget.py",
+      "tests/unit/test_kb_source_first_all_paths.py",
+      "tests/unit/test_knowledge_default_recovery.py",
+      "tests/unit/test_knowledge_tool.py",
+      "tests/unit/test_knowledge_tool_evidence_lifecycle.py",
+      "tests/unit/test_knowledge_uncertainty_contract.py",
+      "tests/unit/voice_pipeline/test_turn_streamer_kb_prefetch.py",
+      "-q",
+      "--tb=short",
+      "--disable-warnings"
+    ],
+    "exit_code": 1,
+    "source_unchanged": true,
+    "prohibited_attempts": 0
+  },
+  {
+    "phase": "verified",
+    "command": "& \"C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\backend\\.venv\\Scripts\\python.exe\" docs/sessions/artifacts/ag02-knowledge-test-contracts/unit_probe.py verified",
+    "environment": {
+      "PYTHONPATH": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-knowledge-test-contracts-20261007\\backend",
+      "PYTHONUTF8": "1",
+      "PYTHONDONTWRITEBYTECODE": "1"
+    },
+    "cwd": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-knowledge-test-contracts-20261007",
+    "pytest_argv": [
+      "tests/unit/test_agent_knowledge_repairs.py",
+      "tests/unit/test_kb_injection_budget.py",
+      "tests/unit/test_kb_source_first_all_paths.py",
+      "tests/unit/test_knowledge_default_recovery.py",
+      "tests/unit/test_knowledge_tool.py",
+      "tests/unit/test_knowledge_tool_evidence_lifecycle.py",
+      "tests/unit/test_knowledge_uncertainty_contract.py",
+      "tests/unit/voice_pipeline/test_turn_streamer_kb_prefetch.py",
+      "-q",
+      "--tb=short",
+      "--disable-warnings"
+    ],
+    "exit_code": 0,
+    "source_unchanged": true,
+    "prohibited_attempts": 0
+  },
+  {
+    "phase": "quality",
+    "command": "python -m ruff check --select F backend/tests/unit/test_agent_knowledge_repairs.py backend/tests/unit/test_kb_injection_budget.py backend/tests/unit/test_kb_source_first_all_paths.py backend/tests/unit/test_knowledge_default_recovery.py backend/tests/unit/test_knowledge_tool.py backend/tests/unit/test_knowledge_tool_evidence_lifecycle.py backend/tests/unit/test_knowledge_uncertainty_contract.py backend/tests/unit/voice_pipeline/test_turn_streamer_kb_prefetch.py",
+    "interpreter": "C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/backend/.venv/Scripts/python.exe",
+    "cwd": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-knowledge-test-contracts-20261007",
+    "exit_code": 0,
+    "log": "lint.txt"
+  },
+  {
+    "phase": "quality",
+    "command": "git diff --check",
+    "cwd": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-knowledge-test-contracts-20261007",
+    "exit_code": 0,
+    "log": "diff-check.txt"
+  }
+]

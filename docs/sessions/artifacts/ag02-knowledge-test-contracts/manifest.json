@@ -1,0 +1,37 @@
+{
+  "base_commit": "2d17c523e05b43c07d8d9c96942c6c5dff56dd20",
+  "source_commit": "ee31fd102ce1bf78c5d47f2f62ffa5d2c15dee8c",
+  "final_result": "unit-verified-result.json",
+  "tests": {
+    "passed": 93,
+    "warnings": 52,
+    "seconds": 4.63,
+    "modules": 8
+  },
+  "scope": "Synthetic source/path tests only; no model/provider/browser/DB qualification",
+  "tracked_source_parity": 20,
+  "recorded_inputs": 21,
+  "artifact_hash_format": "sha256 LF normalized",
+  "artifacts": {
+    "docs/sessions/artifacts/ag02-knowledge-test-contracts/collection-test_knowledge_tool_evidence_lifecycle.py": "a98e5b8bd0caaa1ff8ccb71e14fd0db4fe8f66e0c482f16e4bb4d10ea345e617",
+    "docs/sessions/artifacts/ag02-knowledge-test-contracts/collection-test_knowledge_uncertainty_contract.py": "5b5297e30ebaf1da165ee0f38d73f58727294708dc20ec4ac006d86326f03cf8",
+    "docs/sessions/artifacts/ag02-knowledge-test-contracts/commands.json": "c3383f14723d34db9845856793fa4b91486099a2fd85fade3572afafc79f0713",
+    "docs/sessions/artifacts/ag02-knowledge-test-contracts/corrected-test_knowledge_tool_evidence_lifecycle.py": "664b7b5181f9024007602a2246a08bf980589b705857566402eaaaa6e20fe12c",
+    "docs/sessions/artifacts/ag02-knowledge-test-contracts/corrected-test_knowledge_uncertainty_contract.py": "264762ea8a5fffaa318e461fffed834672c7e5ff44e68baeb8e2ef477ef5b2fc",
+    "docs/sessions/artifacts/ag02-knowledge-test-contracts/diff-check.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "docs/sessions/artifacts/ag02-knowledge-test-contracts/initial-unit-probe.py": "f568d561fd44898fe34375ecaef27781b2c129521ccb413a43f00a0c5ef7bc23",
+    "docs/sessions/artifacts/ag02-knowledge-test-contracts/lint.txt": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18",
+    "docs/sessions/artifacts/ag02-knowledge-test-contracts/retirement-inventory.json": "afef3646ad29b02c054b2923a2fdc773a5047baeacb1acaec98bbabcc9bd327d",
+    "docs/sessions/artifacts/ag02-knowledge-test-contracts/source-hashes.json": "9bae17f787a099ad2ee8f2f2bf517dbdfbe9cf1715a54dd84ff2d11d9ef8a6c8",
+    "docs/sessions/artifacts/ag02-knowledge-test-contracts/unit-baseline-result.json": "bc5b40d22c9ac5708abbce2ce1dd01502c170f9601f06cc1ffd226d25b8b1886",
+    "docs/sessions/artifacts/ag02-knowledge-test-contracts/unit-baseline.log": "64a4ad7ace097e06b7d042b7397f6381f53ce60b79b19ce903d0d9f275f425e0",
+    "docs/sessions/artifacts/ag02-knowledge-test-contracts/unit-corrected-result.json": "58018b167c10637a2a6b988d7e7b45a13bdcaeb8805aeb0bb284dd01841f88e1",
+    "docs/sessions/artifacts/ag02-knowledge-test-contracts/unit-corrected.log": "3cee57fb667d0a27ff8ad96972361eaf3132ccff38a47481e56107ab6ae628c4",
+    "docs/sessions/artifacts/ag02-knowledge-test-contracts/unit-final-result.json": "cfc06d663b9a10524a11c1b174facbe4c8b9ba7ae2800c11696d9847d211a39e",
+    "docs/sessions/artifacts/ag02-knowledge-test-contracts/unit-final.log": "118788d08e90ca4f6d3e416a9e63d93779eca0bb27bea1a2addc386838a431f4",
+    "docs/sessions/artifacts/ag02-knowledge-test-contracts/unit-verified-result.json": "b2342b8ee8a3c85b91a598acee368cd68d4fc10fae3a63b43f5ea188abb45e63",
+    "docs/sessions/artifacts/ag02-knowledge-test-contracts/unit-verified.log": "e4270fa29fefe427422d6802c085b490a5b02291c36cc51b975ab7dfcd7aae39",
+    "docs/sessions/artifacts/ag02-knowledge-test-contracts/unit_probe.py": "25a6bd374cb4aed3623848fb26b77a0dc81faacda24ade6a52b06985f45c3026",
+    "docs/sessions/2026-10-07-ag02-knowledge-test-contracts.md": "08aef4efeb6ef12c3040dd8069b59af8fc069298d11eba8ac35a57bc671fe292"
+  }
+}
