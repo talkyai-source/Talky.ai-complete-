@@ -6,6 +6,14 @@ The 10 original schemas are listed first (verbatim), followed by
 the 6 campaign-admin tools added in feat/assistant-campaign-tools.
 """
 
+from copy import deepcopy
+
+from app.services.scripts.knowledge.sections import SECTION_TOOL_PARAMETERS
+
+_CAMPAIGN_SECTION_PARAMETERS = deepcopy(SECTION_TOOL_PARAMETERS)
+_CAMPAIGN_SECTION_PARAMETERS["properties"]["campaign_id"] = {"type": "string", "description": "Campaign UUID"}
+_CAMPAIGN_SECTION_PARAMETERS["required"] = ["campaign_id"]
+
 GROQ_TOOL_SCHEMAS = [
     {
         "type": "function",
@@ -377,7 +385,7 @@ GROQ_TOOL_SCHEMAS = [
         "function": {
             "name": "get_knowledge_tree",
             "description": (
-                "List a campaign's knowledge-tree nodes (headings, summaries, enabled, hit_count)."
+                "Inspect campaign knowledge metadata for editing; summaries are generated metadata, not factual evidence. Use retrieve_knowledge to read authored source."
             ),
             "parameters": {
                 "type": "object",
@@ -393,17 +401,13 @@ GROQ_TOOL_SCHEMAS = [
         "function": {
             "name": "retrieve_knowledge",
             "description": (
-                "Run the LIVE knowledge retriever for a caller-style question and show exactly "
-                "what the agent would pull from the tree. Use to test knowledge quality."
+                "Browse campaign source sections with catalog_offset=0, then choose exact "
+                "section_ids to read authored facts. Use next_offset for later catalog pages. "
+                "Headings and generated metadata are navigation, not answers. Available means "
+                "source was read, not that it answers the original question. If references "
+                "become unavailable after an edit, list the catalog again."
             ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "campaign_id": {"type": "string", "description": "Campaign UUID"},
-                    "query": {"type": "string", "description": "The caller question to test"}
-                },
-                "required": ["campaign_id", "query"]
-            }
+            "parameters": _CAMPAIGN_SECTION_PARAMETERS
         }
     },
     # -------------------------------------------------------------------------

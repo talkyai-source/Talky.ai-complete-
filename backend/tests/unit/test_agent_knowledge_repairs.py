@@ -78,8 +78,7 @@ def test_removed_strong_hit_cannot_promote_weak_surviving_evidence():
 
 @pytest.mark.asyncio
 async def test_catalog_navigates_to_complete_deep_source_fact():
-    from app.domain.models.conversation import Message, MessageRole
-    from app.domain.services.voice_pipeline.turn_streamer import _knowledge_block_for_turn
+    from app.domain.services.voice_pipeline.knowledge_tool import knowledge_system_addendum
     from app.services.scripts.knowledge.sections import build_section_catalog
     node = {"id": "w", "source_id": "handbook", "source_version": 1, "version": 1,
             "heading": "Warranty", "content":
@@ -87,7 +86,7 @@ async def test_catalog_navigates_to_complete_deep_source_fact():
     catalog = build_section_catalog([node], tenant_id="t", campaign_id="c", source_policy="call_snapshot")
     session = SimpleNamespace(_knowledge_catalog=catalog, call_id="kb-test", tenant_id="t", campaign_id="c",
                               knowledge_mode="retrieve")
-    guide = await _knowledge_block_for_turn(session, [Message(role=MessageRole.USER, content="What is the warranty?")])
+    guide = knowledge_system_addendum(session)
     assert catalog.nodes[0]["section_id"] in guide
     assert "two years" not in guide
     tool = await run_knowledge_lookup(session, {"section_ids": [catalog.nodes[0]["section_id"]]})

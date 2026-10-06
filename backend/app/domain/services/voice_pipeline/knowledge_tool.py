@@ -15,8 +15,6 @@ from app.services.scripts.prompts.prompt_safety import DATA_ONLY_NOTE, fence_unt
 
 KB_TOOL_NAME = "lookup_company_knowledge"
 KB_FENCE_TAG = "company_knowledge"
-NO_KB_FACTS = "No confirmed answer in company knowledge."
-KB_UNAVAILABLE = "Company knowledge is unavailable."
 KNOWLEDGE_TOOL_SPEC = {
     "type": "function", "function": {
         "name": KB_TOOL_NAME, "description": SECTION_TOOL_DESCRIPTION,
@@ -70,17 +68,3 @@ async def run_knowledge_lookup(session, arguments: dict) -> str:
     session._knowledge_evidence = result
     session._knowledge_grounding = [p["text"] for p in result["passages"]] if result["status"] == "available" else []
     return fence_kb_result(serialize_section_result(result), with_note=False)
-
-
-# Import compatibility while the shared streamer is migrated in a separate slice.
-# These never enable a lexical path or a second recovery implementation.
-def kb_tool_mode_enabled() -> bool:
-    return True
-
-
-def knowledge_recovery_for(session, provider):
-    return None
-
-
-def tool_system_addendum() -> str:
-    return "Choose exact section_ids from the call catalog and read their authored source before answering company questions."

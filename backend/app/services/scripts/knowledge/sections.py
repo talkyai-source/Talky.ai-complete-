@@ -55,7 +55,7 @@ class SectionCatalog:
 def build_section_catalog(nodes, *, tenant_id: str, campaign_id: str,
                           source_policy: str, checksum: str | None = None) -> SectionCatalog:
     """Copy trusted scoped rows; reject inconsistent identities/revisions."""
-    if not tenant_id or not campaign_id or source_policy not in ("call_snapshot", "admission_snapshot"):
+    if not tenant_id or not campaign_id or source_policy not in ("call_snapshot", "admission_snapshot", "current_read"):
         raise ValueError("Knowledge scope is unavailable")
     copied, identities, revisions = [], set(), {}
     for raw in nodes:

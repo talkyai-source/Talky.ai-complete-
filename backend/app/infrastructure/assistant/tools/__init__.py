@@ -187,8 +187,8 @@ QUERY_TOOLS = {
     "retrieve_knowledge": {
         "function": retrieve_knowledge,
         "description": (
-            "Run the live RAG retriever for a query against a campaign's knowledge tree; "
-            "returns top-3 matching nodes (heading, voice_answer, summary) without bumping hit_count"
+            "Browse a scoped source catalog with catalog_offset, then read exact section_ids; "
+            "returns complete authored sections and provenance without lexical matching or hit-count writes"
         ),
         "input_schema": None,
     },

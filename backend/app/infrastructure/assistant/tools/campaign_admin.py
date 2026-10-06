@@ -1,7 +1,7 @@
 """
 Campaign admin tools for the assistant agent.
 
-Provides read access (campaign detail, knowledge tree, live RAG retrieval)
+Provides read access (campaign detail, knowledge metadata, model-selected source sections)
 and edit-with-confirm access (campaign config, knowledge nodes, lead management).
 
 All tools follow the standard signature: async def tool(tenant_id, db_client, ...).
@@ -10,6 +10,7 @@ without writing; if confirm=True, apply and return applied=True with the diff.
 """
 from __future__ import annotations
 
+import json
 import logging
 import uuid
 from datetime import datetime
@@ -28,8 +29,9 @@ from app.infrastructure.assistant.tools.campaign_direction import (
     inbound_campaign_refusal,
     outbound_campaign_refusal,
 )
-from app.services.scripts.knowledge.retrieval import (
-    retrieve_knowledge as retrieve_knowledge_fn,
+from app.services.scripts.knowledge.retrieval import load_current_knowledge_nodes
+from app.services.scripts.knowledge.sections import (
+    build_section_catalog, run_section_request, serialize_section_result,
 )
 
 logger = logging.getLogger(__name__)
@@ -212,14 +214,22 @@ async def retrieve_knowledge(
     tenant_id: str,
     db_client,
     campaign_id: str,
-    query: str,
+    section_ids: Optional[List[str]] = None,
+    catalog_offset: Optional[int] = None,
     actor_user_id: Optional[str] = None,
 ) -> Dict[str, Any]:
+    """Browse or read exact authored sections under a fresh campaign read lease.
+
+    Dashboard requests read the current published snapshot each time. Opaque
+    references change with that snapshot; a stale selection must be listed again.
     """
-    Run the live RAG retriever for a query against a campaign's knowledge tree.
-    Does NOT bump hit_count (read-only diagnostics).
-    Verifies campaign ownership before retrieving.
-    """
+    arguments = {}
+    if section_ids is not None:
+        arguments["section_ids"] = section_ids
+    if catalog_offset is not None:
+        arguments["catalog_offset"] = catalog_offset
+    if len(arguments) != 1:
+        return {"status": "unavailable", "reason": "invalid_arguments"}
     try:
         async with campaign_knowledge_access_lease(
             db_client.pool,
@@ -228,27 +238,15 @@ async def retrieve_knowledge(
             actor_user_id=actor_user_id or "",
             mutate=False,
         ) as lease:
-            hits = await retrieve_knowledge_fn(
-                db_client.pool,
-                lease.tenant_id,
-                lease.campaign_id,
-                query,
-                k=3,
-                bump_hits=False,
-                conn=lease.conn,
-                raise_on_error=True,
-            )
-        return {
-            "query": query,
-            "hits": [
-                {
-                    "heading": h.get("heading"),
-                    "voice_answer": h.get("voice_answer"),
-                    "summary": h.get("summary"),
-                }
-                for h in hits
-            ],
-        }
+            nodes = await load_current_knowledge_nodes(lease.conn, lease.tenant_id, lease.campaign_id)
+            try:
+                catalog = build_section_catalog(nodes, tenant_id=lease.tenant_id,
+                    campaign_id=lease.campaign_id, source_policy="current_read")
+            except (ValueError, TypeError):
+                return {"status": "unavailable", "reason": "source_snapshot_unavailable"}
+            result = run_section_request(catalog, arguments)
+        # Keep section provenance without repeating every source body in aggregate text.
+        return json.loads(serialize_section_result(result))
     except CampaignKnowledgeAccessError as exc:
         return _knowledge_access_failure(exc)
     except Exception as exc:  # pragma: no cover - defensive classification

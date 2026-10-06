@@ -370,25 +370,89 @@ async def test_knowledge_tree_read_is_authorized_and_uses_lease_connection():
     assert denied["error"] == "permission_denied"
 
 
+def _section_connection(*, direction="outbound", permission=CAMPAIGNS_READ):
+    from datetime import datetime, timezone
+    conn = _Conn(direction=direction, permissions={permission})
+    conn.node.update(source_id="handbook", source_version=1,
+                     updated_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+                     content="The plan costs $20 monthly. It excludes installation and tax.",
+                     summary="It costs $999, everything included.", voice_answer="It costs $999.")
+    return conn
+
+
+async def _read_sections(conn, **arguments):
+    return await dispatch_tool("retrieve_knowledge", TENANT_ID, SimpleNamespace(pool=_Pool(conn)), None,
+                               {"campaign_id": CAMPAIGN_ID, **arguments}, actor_user_id=ACTOR_ID)
+
+
 @pytest.mark.asyncio
-async def test_retriever_reuses_authorized_lease_connection(monkeypatch):
-    conn = _Conn(permissions={CAMPAIGNS_READ})
-    seen = {}
+async def test_assistant_catalog_then_exact_read_uses_authored_facts_and_current_lease():
+    conn = _section_connection()
+    page = await _read_sections(conn, catalog_offset=0)
+    assert page["status"] == "catalog"
+    assert "$20" not in str(page) and "$999" not in str(page)
+    ref = page["entries"][0]["section_id"]
+    result = await _read_sections(conn, section_ids=[ref])
+    assert result["status"] == "available" and result["source_policy"] == "current_read"
+    assert result["passages"][0]["source_version"] == 1
+    assert result["passages"][0]["node_id"] == NODE_ID
+    assert str(result).count("excludes installation and tax") == 1
+    assert "$999" not in str(result) and "summary" not in result
+    assert "text" not in result  # Source text is not duplicated in an aggregate.
+    assert len(conn.lock_sql) == 2 and conn.updated == []
 
-    async def fake_retrieve(pool, tenant_id, campaign_id, query, **kwargs):
-        seen.update(pool=pool, tenant_id=tenant_id, campaign_id=campaign_id, conn=kwargs.get("conn"))
-        return [{"heading": "Pricing", "voice_answer": "Ten", "summary": "Price"}]
 
-    monkeypatch.setattr(campaign_admin, "retrieve_knowledge_fn", fake_retrieve)
-    result = await campaign_admin.retrieve_knowledge(
-        TENANT_ID,
-        SimpleNamespace(pool=_Pool(conn)),
-        campaign_id=CAMPAIGN_ID,
-        query="price",
-        actor_user_id=ACTOR_ID,
-    )
-    assert result["hits"][0]["heading"] == "Pricing"
-    assert seen["conn"] is conn
+@pytest.mark.asyncio
+async def test_assistant_exact_read_reauthorizes_after_catalog():
+    conn = _section_connection()
+    page = await _read_sections(conn, catalog_offset=0)
+    conn.permissions.clear()
+    denied = await _read_sections(conn, section_ids=[page["entries"][0]["section_id"]])
+    assert denied["error"] == "permission_denied" and "passages" not in denied
+
+
+@pytest.mark.asyncio
+async def test_assistant_changed_source_rejects_stale_section_reference():
+    conn = _section_connection()
+    page = await _read_sections(conn, catalog_offset=0)
+    ref = page["entries"][0]["section_id"]
+    conn.node.update(source_version=2, content="The plan costs $30 monthly.")
+    result = await _read_sections(conn, section_ids=[ref])
+    assert result["status"] == "unavailable" and "passages" not in result
+    new_page = await _read_sections(conn, catalog_offset=0)
+    new_ref = new_page["entries"][0]["section_id"]
+    assert new_ref != ref
+    current = await _read_sections(conn, section_ids=[new_ref])
+    assert current["status"] == "available" and "$30" in str(current)
+    assert current["passages"][0]["source_version"] == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("arguments", [{}, {"query": "price"}, {"section_ids": []},
+    {"section_ids": ["other-call-id"]}, {"catalog_offset": True},
+    {"section_ids": ["x"], "catalog_offset": 0}])
+async def test_assistant_section_reader_rejects_invalid_or_old_query_arguments(arguments):
+    result = await _read_sections(_section_connection(), **arguments)
+    assert result.get("error") or result["status"] == "unavailable"
+    assert "$20" not in str(result) and "passages" not in result
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("permission,allowed", [(INBOUND_READ, True), (CAMPAIGNS_READ, False)])
+async def test_assistant_section_reader_preserves_inbound_read_authority(permission, allowed):
+    result = await _read_sections(_section_connection(direction="inbound", permission=permission), catalog_offset=0)
+    if allowed:
+        assert result["status"] == "catalog"
+    else:
+        assert result["error"] == "permission_denied" and result["required"] == INBOUND_READ
+
+
+@pytest.mark.asyncio
+async def test_assistant_invalid_source_proof_is_unavailable_not_generated_fallback():
+    conn = _section_connection()
+    conn.node.pop("source_id")
+    result = await _read_sections(conn, catalog_offset=0)
+    assert result["status"] == "unavailable" and "$999" not in str(result)
 
 
 @pytest.mark.asyncio
@@ -588,3 +652,15 @@ async def test_streaming_dispatch_threads_authenticated_actor(monkeypatch):
         events.append(event)
     assert events[-1]["type"] == "final"
     assert captured["actor_user_id"] == ACTOR_ID
+
+
+def test_assistant_schema_uses_same_exact_reader_arguments_and_not_query_search():
+    from app.infrastructure.assistant.tools.llm_schemas import GROQ_TOOL_SCHEMAS
+    from app.services.scripts.knowledge.sections import SECTION_TOOL_PARAMETERS
+    schema = next(tool["function"] for tool in GROQ_TOOL_SCHEMAS if tool["function"]["name"] == "retrieve_knowledge")
+    params = schema["parameters"]
+    assert set(params["properties"]) == {"campaign_id", "section_ids", "catalog_offset"}
+    assert params["oneOf"] == SECTION_TOOL_PARAMETERS["oneOf"]
+    assert params["additionalProperties"] is False and params["required"] == ["campaign_id"]
+    assert "what the agent would pull" not in schema["description"]
+    assert "catalog_offset=0" in agent.SYSTEM_PROMPT
