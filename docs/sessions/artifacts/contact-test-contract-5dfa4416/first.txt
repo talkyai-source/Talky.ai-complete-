@@ -1,0 +1,33 @@
+FF.......                                                                [100%]
+================================== FAILURES ===================================
+_ test_model_phone_request_preserves_pending_email_and_unrelated_turn_does_not_consume_attempt _
+
+    @pytest.mark.asyncio
+    async def test_model_phone_request_preserves_pending_email_and_unrelated_turn_does_not_consume_attempt():
+        # Model-selected arguments exercise persistence, not a speech-understanding claim.
+        from app.domain.services.voice_pipeline.contact_recording import record_contact
+        from tests.unit.test_model_contact_recording import SQLPort, args, caller, session
+        pool, state = SQLPort(), session()
+        email = "allstateestimation@gmail.com"
+        caller(state, "Allstate estimation at Gmail dot com.", 1)
+        result = await record_contact(state, args("Allstate estimation at Gmail dot com.", value=email), pool=pool)
+        assert result["saved"] and not state.captured_slots.email_confirmed
+        request = "And note down my mobile number as well?"
+        caller(state, request, 2)
+        result = await record_contact(state, args(request, kind="phone", value=None), pool=pool)
+>       assert result["saved"] and result["validation_status"] == "needs_clarification"
+E       assert (False)
+
+tests\unit\test_call_5dfa4416_regressions.py:43: AssertionError
+_________ test_the_caller_stated_email_is_stored_even_before_the_yes __________
+
+    def test_the_caller_stated_email_is_stored_even_before_the_yes():
+        rows = snapshot_slots(_open_state())
+>       assert rows["email"]["value"] == "allstateestimation@gmail.com"
+E       KeyError: 'email'
+
+tests\unit\test_call_5dfa4416_regressions.py:63: KeyError
+=========================== short test summary info ===========================
+FAILED tests/unit/test_call_5dfa4416_regressions.py::test_model_phone_request_preserves_pending_email_and_unrelated_turn_does_not_consume_attempt
+FAILED tests/unit/test_call_5dfa4416_regressions.py::test_the_caller_stated_email_is_stored_even_before_the_yes
+2 failed, 7 passed in 4.37s

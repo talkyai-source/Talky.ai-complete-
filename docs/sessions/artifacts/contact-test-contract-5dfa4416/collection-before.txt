@@ -1,0 +1,15 @@
+
+=================================== ERRORS ====================================
+________ ERROR collecting tests/unit/test_call_5dfa4416_regressions.py ________
+ImportError while importing test module 'C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\agent-guide-prompts-20261007\backend\tests\unit\test_call_5dfa4416_regressions.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\importlib\__init__.py:90: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+tests\unit\test_call_5dfa4416_regressions.py:30: in <module>
+    from app.domain.services.voice_pipeline.turn_runner import _spelled_by_caller
+E   ImportError: cannot import name '_spelled_by_caller' from 'app.domain.services.voice_pipeline.turn_runner' (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\agent-guide-prompts-20261007\backend\app\domain\services\voice_pipeline\turn_runner.py)
+=========================== short test summary info ===========================
+ERROR tests/unit/test_call_5dfa4416_regressions.py
+!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!
+no tests collected, 1 error in 4.07s
