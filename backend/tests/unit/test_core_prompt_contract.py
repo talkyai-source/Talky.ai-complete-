@@ -3,7 +3,6 @@ from enum import Enum
 
 import pytest
 
-from app.domain.services.voice_pipeline.conversation_craft import craft_reanchor
 from app.services.scripts.prompts.composer import compose_prompt_document
 from app.services.scripts.prompts.live_state import build_live_state_block
 
@@ -53,18 +52,6 @@ def test_true_inbound_runtime_state_never_adds_a_cold_call_opening(introduced):
         assert "direction=inbound" in block
         assert ("introduction=delivered" if introduced else "introduction=not_delivered") in block
         assert "why you're calling" not in block and "got a minute" not in block.lower()
-
-
-def test_per_turn_craft_does_not_invent_contacts_or_force_email():
-    block = " ".join(craft_reanchor().split())
-    assert "already have their number" not in block
-    assert "email for a sample" not in block
-    assert "current runtime state" in block
-    assert "planned or queued action is not done" in block
-    assert "Caller-confirmed facts establish customer status and product use" in block
-    assert "not campaign audience assumptions" in block
-    assert "rephrase your actual last question from the conversation" in block
-    assert "If their words are unclear instead" in block
 
 
 def test_legacy_action_prompt_does_not_treat_a_completed_task_as_call_authorization():

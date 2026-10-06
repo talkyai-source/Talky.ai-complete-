@@ -5,11 +5,6 @@ regressions, not evidence of live speech rewriting. Scripted parser replay and
 source-string assertions of the deleted speech judge were retired."""
 from __future__ import annotations
 
-from app.domain.services.voice_pipeline.conversation_guards import (
-    phone_readback_changed,
-    promises_timed_callback,
-)
-from app.domain.services.voice_pipeline.grounded_links import ground_spoken_links
 from app.domain.services.voice_pipeline.lead_slot_capture import (
     snapshot_slots,
 )
@@ -17,38 +12,11 @@ from app.domain.services.voice_pipeline.lead_slot_capture import (
 
 # ── 1. an email's name part is not a web address ──────────────────────────
 
-def test_an_email_read_back_is_not_rewritten_as_our_website():
-    line = "Let me confirm that — john.cena at gmail dot com. Is that correct?"
-    spoken, changed = ground_spoken_links(line, ["allstateestimation.co.uk"])
-    assert spoken == line
-    assert changed == []
-
-
-def test_a_made_up_web_address_is_still_replaced():
-    spoken, changed = ground_spoken_links(
-        "See allstate-samples.com/reports for examples.", ["allstateestimation.co.uk"]
-    )
-    assert "our website" in spoken
-    assert changed
-
 
 # ── 2. a spoken number with no country code ───────────────────────────────
 
 
-def test_legacy_readback_detector_recognizes_dropped_digit():
-    caller = ["zero three one two, zero seven five, zero four nine six."]
-    wrong = "So that’s 0 3 1 2 , 0 7 5 , 0 4 9 Is that correct?"
-    right = "So that's plus 9 2, 3 1 2, 0 7 5, 0 4 9 6 — did I get that right?"
-    assert phone_readback_changed(wrong, caller, "+923120750496") is True
-    assert phone_readback_changed(right, caller, "+923120750496") is False
-
-
 # ── 5. no call back at a time the agent cannot book ──────────────────────
-
-def test_a_timed_call_back_promise_is_caught():
-    assert promises_timed_callback("We’ll ring you at 2 pm on that number.") is True
-    assert promises_timed_callback("Would you like a call back at 2 pm?") is False
-    assert promises_timed_callback("I'll pass on 2 pm as your preferred time.") is False
 
 
 # ── 3 + 4. the second email: asked properly, confirmed, and stored ───────

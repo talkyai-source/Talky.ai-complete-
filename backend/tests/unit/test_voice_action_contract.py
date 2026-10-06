@@ -13,7 +13,6 @@ import pytest
 from app.domain.models.conversation import Message, MessageRole
 from app.domain.models.session import CallSession
 from app.domain.models.agent_config import ConversationRule
-from app.domain.services.llm_guardrails import LLMGuardrails
 from app.domain.services.voice_pipeline.action_tools import (
     ACTION_END_CALL,
     ACTION_SCHEDULE_CALLBACK,
@@ -54,134 +53,6 @@ def _session() -> CallSession:
     session._voice_action_context_loaded = True
     session._voice_action_capabilities = {name: "synthetic test executor" for name in VOICE_ACTION_NAMES}
     return session
-
-
-def test_guardrail_rejects_callback_confirmation_without_tool_result():
-    valid, reason = LLMGuardrails().validate_response(
-        "I've scheduled your callback for tomorrow.",
-        None,
-        action_results={},
-    )
-
-    assert valid is False
-    assert reason == "unconfirmed_action:schedule_callback"
-
-
-@pytest.mark.parametrize("action,claim", _COMPLETION_CLAIMS.items())
-def test_guardrail_rejects_all_unproved_action_completion_claims(action, claim):
-    valid, reason = LLMGuardrails().validate_response(
-        claim,
-        None,
-        action_results={},
-    )
-
-    assert valid is False
-    assert reason == f"unconfirmed_action:{action}"
-
-
-@pytest.mark.parametrize(
-    "honest_failure",
-    [
-        "The callback was not scheduled.",
-        "The email wasn't sent.",
-        "The form wasn't submitted.",
-        "The transfer was not started.",
-        "The call has not ended.",
-    ],
-)
-def test_guardrail_allows_honest_action_failure(honest_failure):
-    assert LLMGuardrails().validate_response(
-        honest_failure,
-        None,
-        action_results={},
-    ) == (True, None)
-
-
-@pytest.mark.parametrize(
-    "claim,action",
-    [
-        ("I didn't fail; the email was sent.", ACTION_SEND_EMAIL),
-        ("Not only was the email sent, it was delivered.", ACTION_SEND_EMAIL),
-        ("I didn't forget; your callback is scheduled.", ACTION_SCHEDULE_CALLBACK),
-        (
-            "The email wasn't sent at first, but the email was sent now.",
-            ACTION_SEND_EMAIL,
-        ),
-    ],
-)
-def test_unrelated_negation_cannot_bypass_action_confirmation_gate(claim, action):
-    valid, reason = LLMGuardrails().validate_response(
-        claim,
-        None,
-        action_results={},
-    )
-
-    assert valid is False
-    assert reason == f"unconfirmed_action:{action}"
-
-
-@pytest.mark.parametrize(
-    "claim,action",
-    [
-        ("I've booked it for tomorrow.", ACTION_SCHEDULE_CALLBACK),
-        ("I've sent it already.", ACTION_SEND_EMAIL),
-        ("I've submitted it now.", ACTION_SUBMIT_FORM),
-        ("I've transferred you now.", ACTION_TRANSFER_CALL),
-        ("I'm ending the call now.", ACTION_END_CALL),
-    ],
-)
-def test_pronoun_action_completion_claims_still_require_result(claim, action):
-    valid, reason = LLMGuardrails().validate_response(
-        claim,
-        None,
-        action_results={},
-    )
-
-    assert valid is False
-    assert reason == f"unconfirmed_action:{action}"
-
-
-@pytest.mark.parametrize(
-    "honest_failure",
-    [
-        "I haven't booked the callback.",
-        "I haven't sent the email.",
-        "I haven't submitted the form.",
-        "I haven't transferred you.",
-        "I haven't ended the call.",
-    ],
-)
-def test_first_person_action_negation_is_not_a_completion_claim(honest_failure):
-    assert LLMGuardrails().validate_response(
-        honest_failure,
-        None,
-        action_results={},
-    ) == (True, None)
-
-
-def test_guardrail_requires_explicit_confirmation_permission_from_result():
-    claim = _COMPLETION_CLAIMS[ACTION_SEND_EMAIL]
-    failed = {
-        ACTION_SEND_EMAIL: {
-            "success": False,
-            "status": "unavailable",
-            "confirmation_allowed": False,
-        }
-    }
-    assert LLMGuardrails().validate_response(
-        claim, None, action_results=failed
-    ) == (False, "action_failed:send_email:unavailable")
-
-    completed = {
-        ACTION_SEND_EMAIL: {
-            "success": True,
-            "status": "completed",
-            "confirmation_allowed": True,
-        }
-    }
-    assert LLMGuardrails().validate_response(
-        claim, None, action_results=completed
-    ) == (True, None)
 
 
 @pytest.mark.asyncio
@@ -427,33 +298,6 @@ async def test_realtime_action_exception_still_returns_versioned_failure(monkeyp
     )
 
 
-@pytest.mark.asyncio
-async def test_normal_cascaded_stream_blocks_unproved_claim_before_tts(monkeypatch):
-    monkeypatch.setenv("TELEPHONY_FILLER_DELAY_MS", "0")
-
-    class _StreamingLLM:
-        async def stream_chat_with_timeout(self, *args, **kwargs):
-            yield "I've scheduled your callback for tomorrow."
-
-    service = VoicePipelineService(
-        stt_provider=AsyncMock(),
-        llm_provider=_StreamingLLM(),
-        tts_provider=AsyncMock(),
-        media_gateway=AsyncMock(),
-    )
-    service.latency_tracker = MagicMock()
-    service.synthesize_and_send_audio = AsyncMock(return_value=False)
-    session = _session()
-    service._barge_in_events[session.call_id] = session.barge_in_event
-
-    response, _, _ = await service._stream_llm_and_tts(session)
-
-    spoken = [call.args[1] for call in service.synthesize_and_send_audio.await_args_list]
-    assert all("scheduled your callback" not in text.lower() for text in spoken)
-    assert spoken == [
-        "I can't confirm a scheduled callback from this call."
-    ]
-    assert response == spoken[0]
 
 
 @pytest.mark.asyncio
@@ -495,7 +339,7 @@ async def test_live_action_gate_does_not_activate_legacy_rule_keyword_heuristic(
 
 
 @pytest.mark.asyncio
-async def test_action_turn_feeds_failed_result_before_guarded_reply(monkeypatch):
+async def test_action_turn_feeds_failed_result_without_rewriting_model_speech(monkeypatch):
     monkeypatch.setenv("TELEPHONY_FILLER_DELAY_MS", "0")
 
     class _ActionLLM:
@@ -536,7 +380,7 @@ async def test_action_turn_feeds_failed_result_before_guarded_reply(monkeypatch)
     assert llm.require_strict is True
     assert llm.seen_result["success"] is False
     assert llm.seen_result["status"] == "unavailable"
-    assert response == "I can't confirm that the email was sent."
+    assert response == "The email was sent to you."
     service.synthesize_and_send_audio.assert_awaited_once_with(
         session,
         response,

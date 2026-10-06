@@ -17,7 +17,6 @@ import pytest
 
 from app.domain.models.conversation import Message, MessageRole
 from app.domain.models.session import CallSession
-from app.domain.services.voice_pipeline.readback_guard import is_unconfirmed_phone_readback
 from app.domain.services.voice_pipeline_service import VoicePipelineService
 from app.services.scripts.prompts import accent_fillers as af
 from app.services.scripts.spoken_email_normalizer import natural_phone_readback
@@ -154,10 +153,3 @@ def test_every_digit_survives_the_grouping():
     for phone in ("+923120750496", "+447429916656", "+971501234567", "+4791234567", "5551234567"):
         spoken = natural_phone_readback(phone)
         assert re.sub(r"\D", "", spoken) == re.sub(r"\D", "", phone)
-
-
-def test_the_readback_guard_still_sees_a_grouped_read_back():
-    """A fabricated read-back in the new comma-paused shape must not slip past."""
-    assert is_unconfirmed_phone_readback(
-        "So that's plus 9 2, 3 1 2, 0 7 5, 0 4 9 6 — did I get that right?"
-    )

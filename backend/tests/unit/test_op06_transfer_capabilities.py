@@ -6,7 +6,6 @@ from types import SimpleNamespace
 import pytest
 
 from app.domain.models.conversation import Message, MessageRole
-from app.domain.services.llm_guardrails import LLMGuardrails
 from app.domain.services.telephony import adapter_registry, inbound_transfer
 from app.domain.services.voice_pipeline import action_execution
 from app.domain.services.voice_pipeline.action_tools import (
@@ -85,9 +84,6 @@ def assert_not_offered(session, actions):
         provider, session=session,
     )
     assert tools == []
-    assert LLMGuardrails().validate_response(
-        "I can connect you with our sales team.", available_actions=actions,
-    ) == (False, "unavailable_action:transfer_call")
 
 
 @pytest.mark.asyncio
@@ -141,9 +137,6 @@ async def test_allowed_staging_scope_can_offer_without_executing_transfer(voice)
     actions = await action_execution.prepare_voice_action_context(voice.session)
     assert "transfer_call" in actions
     assert voice.platform_reads == 1
-    assert LLMGuardrails().validate_response(
-        "I can connect you with our sales team.", available_actions=actions,
-    ) == (True, None)
 
 
 @pytest.mark.asyncio

@@ -88,13 +88,6 @@ Hard rules:
 """
 
 
-# Compatibility wording for callers that still render a supplied knowledge block.
-KNOWLEDGE_PRICE_GUARD = (
-    "Quote a price only when supplied by approved knowledge or runtime evidence. "
-    "Otherwise say you cannot confirm it; offer only an available next step."
-)
-
-
 # =============================================================================
 # COMPLIANCE FLOOR — the customization-vs-invariants boundary
 # =============================================================================
@@ -114,19 +107,6 @@ def compliance_floor(company_name: str) -> str:
     """The non-negotiable safety floor, appended AFTER tenant instructions so it
     wins on the few invariants via recency without touching their content."""
     return COMPLIANCE_FLOOR_TEMPLATE.format(company_name=company_name)
-
-
-# Compatibility export; the live assembler relocates the single base floor.
-COMPLIANCE_REANCHOR_TEMPLATE = """\
-## NON-NEGOTIABLES
-Respect the caller and use current evidence. Only successful runtime receipts establish
-completed actions for {company_name}; never promise unavailable work.
-"""
-
-
-def compliance_reanchor(company_name: str) -> str:
-    """Return the compact compatibility wording for legacy callers."""
-    return COMPLIANCE_REANCHOR_TEMPLATE.format(company_name=company_name)
 
 
 # Patterns in tenant additional_instructions that try to make the agent DENY it
@@ -161,12 +141,3 @@ def scan_instruction_conflicts(additional_instructions: str) -> list:
             "ignored at call time. Please remove it to avoid confusion."
         )
     return warnings
-
-
-# Compatibility exports: all models now use the same natural contact guide.
-GEMINI_EMAIL_READBACK_ADDENDUM = ''
-
-
-def model_prompt_addendum(model: str) -> str:
-    """No model-specific dialogue script is appended."""
-    return ""

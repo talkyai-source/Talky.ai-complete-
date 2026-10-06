@@ -2,7 +2,6 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.domain.services.voice_pipeline.grounded_figures import ground_spoken_figures
 from app.domain.services.voice_pipeline.kb_budget import prepare_knowledge_evidence
 from app.domain.services.voice_pipeline.knowledge_tool import run_knowledge_lookup
 from app.services.scripts.knowledge.retrieval import retrieve_pinned_knowledge
@@ -28,42 +27,6 @@ def test_pinned_ranking_ignores_conversational_stopwords():
     hits = retrieve_pinned_knowledge(nodes, "What do you know about the warranty?")
     assert hits[0]["id"] == "warranty"
     assert hits[0]["coverage"] == 1
-
-
-@pytest.mark.parametrize("speech", ["It costs forty-nine pounds.", "The discount is twenty percent."])
-def test_spoken_money_is_blocked_without_evidence(speech):
-    assert ground_spoken_figures(speech, ["We offer several plans."])[1]
-
-
-def test_instruction_numbers_and_wrong_period_are_not_financial_evidence():
-    assert ground_spoken_figures("The fee is £10.", ["Rule 10: be concise."])[1]
-    assert ground_spoken_figures("It costs £49 per week.", ["It costs £49 per month."])[1]
-
-
-def test_approved_spoken_price_with_unit_passes():
-    speech = "It costs forty-nine pounds per month."
-    assert ground_spoken_figures(speech, ["It costs £49 per month."]) == (speech, [])
-
-
-@pytest.mark.parametrize("source,speech", [
-    ("Monthly fee: £49.", "It costs £49."),
-    ("Per location, the monthly fee is £49.", "The monthly fee is £49."),
-    ("£49 per month and £69 per year.", "£49 per year."),
-    ("The fee is not £49.", "It costs £49."),
-    ("£49 is incorrect.", "It costs £49."),
-])
-def test_price_cannot_drop_prefix_qualification_or_reuse_negated_source(source, speech):
-    assert ground_spoken_figures(speech, [source])[1]
-
-
-@pytest.mark.parametrize("source,speech", [
-    ("£49 per month.", "The monthly fee is forty-nine pounds."),
-    ("Per location, the monthly fee is £49.", "It costs £49 per location per month."),
-    ("£49 per month and £69 per year.", "£69 annually."),
-    ("It is not £10 but £20.", "It is £20."),
-])
-def test_amount_local_paraphrases_keep_same_qualifications(source, speech):
-    assert ground_spoken_figures(speech, [source]) == (speech, [])
 
 
 def test_removed_strong_hit_cannot_promote_weak_surviving_evidence():

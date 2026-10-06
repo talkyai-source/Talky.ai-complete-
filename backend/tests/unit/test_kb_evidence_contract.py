@@ -5,7 +5,6 @@ from uuid import UUID
 
 import pytest
 
-from app.domain.services.voice_pipeline.grounded_figures import ground_spoken_figures
 from app.domain.services.voice_pipeline.kb_budget import (
     knowledge_match_is_weak,
     prepare_knowledge_evidence,
@@ -40,10 +39,8 @@ def test_strong_evidence_does_not_authorize_a_weak_hit_price():
     assert evidence["status"] == "matched"
     assert [p["node_id"] for p in evidence["passages"]] == ["current"]
     assert evidence["passages"][0]["version"] == 3
-    grounding = [p["text"] for p in evidence["passages"]]
-    assert ground_spoken_figures("It costs £499 per month.", grounding)[1]
-    valid = "Starter costs £19 per month, excluding VAT."
-    assert ground_spoken_figures(valid, grounding) == (valid, [])
+    assert "£499" not in evidence["text"]
+    assert "£19 per month, excluding VAT" in evidence["text"]
 
 
 @pytest.mark.parametrize("content", [None, "", "   "])

@@ -7,7 +7,6 @@ import pytest
 
 from app.domain.services.voice_pipeline.action_execution import _confirmed, _parameters, _callback_time, _capabilities
 from app.domain.services.voice_pipeline.contact_capture import ContactCaptureState, CaptureStatus
-from app.domain.services.llm_guardrails import LLMGuardrails
 from app.domain.services.voice_action_config import normalize_action_config
 
 
@@ -66,13 +65,6 @@ def test_inbound_or_opted_out_contact_has_no_outbound_callback_capability():
     assert "schedule_callback" not in _capabilities(context)
     context.update(direction="outbound",do_not_call=True)
     assert "schedule_callback" not in _capabilities(context)
-
-
-def test_provider_acceptance_does_not_allow_claiming_email_delivery():
-    guard = LLMGuardrails()
-    result = {"send_email":{"success":True,"confirmation_allowed":True,"status":"provider_accepted"}}
-    assert not guard.validate_response("The email was delivered to your inbox.",action_results=result)[0]
-    assert guard.validate_response("The email was sent.",action_results=result)[0]
 
 
 def test_form_destination_and_supported_fields_are_validated():

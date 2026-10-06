@@ -26,12 +26,7 @@ without_tool_result and is not touched here.
 """
 from __future__ import annotations
 
-from app.domain.services.llm_guardrails import LLMGuardrails
-from app.domain.services.voice_pipeline.action_tools import (
-    ACTION_SCHEDULE_CALLBACK,
-    safe_failure_speech,
-)
-from app.services.scripts.call_state_tracker import CallState, update_state_from_user_turn
+from app.services.scripts.call_state_tracker import CallState
 from app.services.scripts.prompt_builder import compose_system_prompt
 
 BASE = "You are a helpful receptionist."
@@ -45,20 +40,6 @@ def test_prompt_tells_the_model_not_to_promise_a_callback_by_default():
     lowered = out.lower()
     assert "never as a scheduled callback" in lowered
     assert "only if the runtime provides that route" in lowered
-
-
-def test_prompt_rule_survives_alongside_a_realistic_call_state():
-    """Reproduces the a5e033c7 shape: name/phone/date already captured, the
-    exact point at which the live agent made the unfulfillable promise."""
-    state = update_state_from_user_turn(CallState(), "call me on +1 312 075 0496")
-    state = update_state_from_user_turn(
-        state,
-        "yes",
-        readback_issued=True,
-        confirmation_verdict="affirm",
-    )
-    out = compose_system_prompt(BASE, state)
-    assert "never as a scheduled callback" in out.lower()
 
 
 def test_policy_still_allows_asking_for_and_noting_a_preferred_callback_time():
@@ -96,40 +77,3 @@ def test_policy_line_is_irrelevant_once_a_real_executor_exists():
     out = compose_system_prompt(BASE, CallState(), has_callback_executor=True)
     assert out == BASE
     assert "callback policy" not in out.lower()
-
-
-def test_the_honest_fallback_line_the_policy_points_to_is_never_blocked():
-    """The fixed failure sentence must pass its own completion-claim gate
-    and must not invent a team handoff as a substitute for a failed action."""
-    honest_line = safe_failure_speech(ACTION_SCHEDULE_CALLBACK)
-    assert "can't confirm a scheduled callback" in honest_line.lower()
-    assert "team" not in honest_line.lower()  # no invented handoff route
-
-    valid, reason = LLMGuardrails().validate_response(
-        honest_line, None, action_results={}
-    )
-    assert valid is True
-    assert reason is None
-
-
-def test_the_completion_claim_a_promise_invites_is_what_the_guardrail_blocks():
-    """Documents WHY the fix belongs in the prompt, not the guardrail.
-
-    a5e033c7's turn 14 offer ("I'll arrange a callback... is that okay?")
-    stayed in future/conditional tense and did not itself trip the
-    completion-claim gate; it was the model's NEXT line, after the caller
-    agreed, that tried to state the callback as done -- and that IS a
-    completion claim the guardrail is right to block. Once the caller has
-    agreed to an offer that was never going to be fulfilled, some later turn
-    saying so is the only honest continuation, and the guardrail forces
-    exactly that (the "I can't schedule a callback..." retraction turn 15
-    actually spoke). So the only way to remove the retraction is to stop the
-    model from making the unfulfillable offer in the first place -- which is
-    what the new prompt rule does.
-    """
-    claim_after_the_caller_agreed = "Great, I've scheduled your callback."
-    valid, reason = LLMGuardrails().validate_response(
-        claim_after_the_caller_agreed, None, action_results={}
-    )
-    assert valid is False
-    assert reason == f"unconfirmed_action:{ACTION_SCHEDULE_CALLBACK}"

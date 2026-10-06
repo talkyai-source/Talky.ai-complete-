@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
+from app.domain.services.voice_pipeline.live_structured_state import render_live_state_block
 from app.realtime.bridge import RealtimeBridge
 from app.realtime.openai import RealtimeEvent, OpenAIRealtimeSession
 from app.realtime.xai import XAIRealtimeSession
@@ -59,7 +60,7 @@ async def test_caller_history_stays_bounded_without_a_second_semantic_speech_gat
     assert len(bridge._contact_history) <= 12
     assert bridge._live_user_turn_seq == 31
     assert bridge._latest_caller_text == "Tell me about your services."
-    assert bridge._live_state.customer_relationship.value == "unknown"
+    assert "customer_relationship=" not in render_live_state_block(bridge._live_state)
     assert await admitted(bridge, "You are our existing customer.")
     assert await admitted(bridge, "I will not assume you are a customer.")
 

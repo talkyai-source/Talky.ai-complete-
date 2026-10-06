@@ -174,16 +174,6 @@ def test_compliance_floor_is_appended_after_tenant_instructions():
     assert out.index("NON-NEGOTIABLES") > out.index("real call, promise")
 
 
-def test_models_share_natural_contact_guidance():
-    # Per-model END addendum (recency) — only the gemini-3.x family gets the
-    # email-read-back reminder (it spells emails out otherwise; verified
-    # 2026-06-27). Every other model gets nothing.
-    # Model-specific forced email wording is intentionally retired.
-    from app.services.scripts import model_prompt_addendum
-    for model in ("gemini-3.1-flash-lite-preview", "gemini-3.5-flash", "gemini-2.5-flash", "llama-3.1-8b-instant", "qwen/qwen3.6-27b", "", None):
-        assert model_prompt_addendum(model) == ""
-
-
 def test_prompt_identity_is_honest_not_deceptive():
     out = " ".join(compose_prompt("lead_gen", "Alex", "Acme", LEAD_GEN_SLOTS).split())
     assert "You are Alex, an AI assistant for Acme" in out
@@ -391,7 +381,6 @@ def test_scope_guardrail_keeps_last_slot_after_per_turn_knowledge_block():
 
 def test_scope_guardrail_is_brief():
     # HARD BUDGET: this rule is on the wire for every turn of every call.
-    # Floor bullet + per-turn echo together must stay <= 60 words.
-    from app.services.scripts.prompts.guardrails import compliance_floor, compliance_reanchor
+    # The actual customization boundary remains compact.
+    from app.services.scripts.prompts.guardrails import compliance_floor
     assert len(compliance_floor("Acme").split()) < 75
-    assert len(compliance_reanchor("Acme").split()) < 45

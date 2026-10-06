@@ -756,10 +756,11 @@ async def test_capture_turn_slots_never_raises_when_the_state_map_explodes(
 A_STATUS = 12
 
 
-def _stated(utterance: str) -> CallState:
-    from app.services.scripts.call_state_tracker import update_state_from_user_turn
-
-    return update_state_from_user_turn(CallState(), utterance)
+def _stated(kind: str, value: str, raw: str) -> CallState:
+    from app.domain.services.voice_pipeline.contact_capture import ContactCaptureState, CaptureStatus
+    capture = ContactCaptureState(kind=kind, status=CaptureStatus.AWAITING_CONFIRMATION,
+                                  normalized_value=value, raw_value=raw)
+    return CallState(**{kind: value, f"{kind}_capture": capture})
 
 
 def _phone_state(status, normalized="+14155552671"):
@@ -767,7 +768,7 @@ def _phone_state(status, normalized="+14155552671"):
 
     from app.domain.services.voice_pipeline.contact_capture import CaptureStatus
 
-    base = _stated("call me on +1 415 555 2671")
+    base = _stated("phone", "+14155552671", "call me on +1 415 555 2671")
     capture = replace(base.phone_capture, status=status, normalized_value=normalized)
     # Keep the scalar slot in step with the machine, as call_state_tracker does.
     return replace(
@@ -781,7 +782,7 @@ def _phone_state(status, normalized="+14155552671"):
 @pytest.mark.asyncio
 async def test_a_number_the_caller_said_is_kept_before_confirmation():
     conn = _FakeConn()
-    session = SimpleNamespace(call_id=CALL, captured_slots=_stated("call me on +1 415 555 2671"))
+    session = SimpleNamespace(call_id=CALL, captured_slots=_stated("phone", "+14155552671", "call me on +1 415 555 2671"))
 
     assert await _flush(session, conn) == 1
     args = conn.inserts[0][1]
@@ -794,17 +795,17 @@ async def test_a_number_the_caller_said_is_kept_before_confirmation():
 
 @pytest.mark.asyncio
 async def test_an_email_the_caller_said_is_kept_and_then_upgraded_on_confirmation():
-    from app.services.scripts.call_state_tracker import update_state_from_user_turn
 
     conn = _FakeConn()
-    pending = _stated("bob at acme dot com")
+    pending = _stated("email", "bob@acme.com", "bob at acme dot com")
     session = SimpleNamespace(call_id=CALL, captured_slots=pending)
     assert await _flush(session, conn) == 1
     assert conn.inserts[-1][1][A_CONFIRMED] is False
 
-    session.captured_slots = update_state_from_user_turn(
-        pending, "yes, that's right", readback_issued=True, confirmation_verdict="affirm"
-    )
+    from dataclasses import replace
+    from app.domain.services.voice_pipeline.contact_capture import CaptureStatus
+    session.captured_slots = replace(pending, email_confirmed=True,
+        email_capture=replace(pending.email_capture, status=CaptureStatus.CONFIRMED))
     assert await _flush(session, conn) == 1
     assert conn.inserts[-1][1][A_VALUE] == "bob@acme.com"
     assert conn.inserts[-1][1][A_CONFIRMED] is True

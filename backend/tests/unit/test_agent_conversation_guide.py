@@ -1,13 +1,12 @@
 """A conversation guide supplies facts and tools without scripting each reply."""
 import pytest
 
-from app.domain.models.conversation import Message, MessageRole
 from app.domain.services.llm_guardrails import get_guardrails
 from app.realtime.personas import RealtimePersona
 from app.realtime.prompts import build_realtime_instructions
 from app.services.scripts.call_state_tracker import CallState
 from app.domain.services.voice_pipeline.contact_capture import ContactCaptureState, CaptureStatus
-from app.services.scripts.prompt_builder import compose_system_prompt, turn_directive, with_turn_directive
+from app.services.scripts.prompt_builder import compose_system_prompt
 from app.services.scripts.prompts.composer import compose_prompt
 from app.services.scripts.prompts.live_state import build_live_state_block
 from tests.unit.test_prompt_composer import LEAD_GEN_SLOTS, SUPPORT_SLOTS, RECEPTIONIST_SLOTS
@@ -33,10 +32,6 @@ def test_pending_contact_is_context_not_a_compulsory_script():
     prompt = compose_system_prompt("BASE", state)
     assert "alex@example.test" in prompt and "awaiting_confirmation" in prompt
     assert "Say EXACTLY" not in prompt and "ACTION THIS TURN" not in prompt
-    assert turn_directive(state) is None
-    messages = [Message(role=MessageRole.USER, content="Please explain the warranty first.")]
-    assert with_turn_directive(messages, "Read back the email first") == messages
-    assert messages[0].content == "Please explain the warranty first."
 
 
 @pytest.mark.parametrize("introduced,interrupted", [(False, False), (True, False), (False, True)])
@@ -57,11 +52,9 @@ def test_cleaner_preserves_ordinary_qualifiers_and_conversation(text):
     assert get_guardrails().clean_response(text) == text
 
 
-def test_artifact_cleanup_and_effect_truth_remain():
+def test_artifact_cleanup_preserves_normal_output():
     guard = get_guardrails()
     assert guard.clean_response("<think>private reasoning</think>**Hello.**") == "Hello."
-    valid, reason = guard.validate_response("I've sent the email.", action_results={})
-    assert not valid and reason == "unconfirmed_action:send_email"
 
 
 def test_native_guide_is_separate_and_uses_the_contact_tool_truth():

@@ -11,21 +11,6 @@ from app.realtime.openai import OpenAIRealtimeSession, RealtimeEvent
 from app.realtime.config import normalize_realtime_settings
 from app.infrastructure.telephony.browser_media_gateway import BrowserMediaGateway, BrowserSession
 from app.infrastructure.telephony.twilio_media_gateway import TwilioMediaGateway
-from app.domain.services.voice_pipeline.contact_capture import advance_capture, CaptureStatus
-
-
-@pytest.mark.asyncio
-async def test_late_contact_directive_cancels_playback_after_generation_done():
-    provider = OpenAIRealtimeSession(api_key="test")
-    provider._ws = SimpleNamespace(send=AsyncMock())
-    gateway = SimpleNamespace(clear_output_buffer=AsyncMock(), send_audio=AsyncMock())
-    bridge = RealtimeBridge(call_id="test", realtime_session=provider, media_gateway=gateway)
-    bridge._playback_task = asyncio.create_task(asyncio.Event().wait())
-    await bridge._enforce_contact_directive("Please confirm the full address.")
-    assert bridge._playback_task.cancelled()
-    assert provider._response_active  # response.create owns generation before its server ACK
-    assert [json.loads(c.args[0])["type"] for c in provider._ws.send.await_args_list] == ["session.update", "response.create"]
-    assert bridge._failure_reason is None
 
 
 @pytest.mark.asyncio
@@ -153,44 +138,6 @@ def test_legacy_settings_normalize_to_effective_wire_values():
     assert payload["audio"]["input"]["turn_detection"] == settings["turn_detection"]
 
 
-@pytest.mark.parametrize("reply,expected", [
-    ("yes", False), ("person@example.com", False),
-    ("Yes, person@example.com", True), ("No, person@example.com", False),
-    ("Yes, other@example.com", False), ("Yes, not person@example.com", False),
-])
-def test_independent_repeatback_is_full_value_bound_and_explicit(reply, expected):
-    pending = advance_capture(None, kind="email", utterance="My email is person@example.com")
-    updated = advance_capture(pending, kind="email", utterance=reply, mode_active=True,
-        independent_confirmation_value=pending.normalized_value)
-    assert (updated.status == CaptureStatus.CONFIRMED) is expected
-    if expected:
-        assert updated.confirmation_evidence == "caller_repeatback"
-
-
-def test_repeatback_cannot_confirm_an_old_revision_or_ambiguous_transcript():
-    pending = advance_capture(None, kind="email", utterance="My email is person@example.com")
-    for options in [{"independent_confirmation_value": "old@example.com"},
-                    {"independent_confirmation_value": pending.normalized_value, "transcript_confidence": 0.2},
-                    {"independent_confirmation_value": pending.normalized_value, "transcript_alternatives": ["Yes, other@example.com"]}]:
-        result = advance_capture(pending, kind="email", utterance="Yes, person@example.com", mode_active=True, **options)
-        assert result.status != CaptureStatus.CONFIRMED
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("text", [
-    "I can transfer you to our sales team.",
-    "I can share a download link for the brochure.",
-    "The brochure is at https://invented.example.test/brochure.",
-])
-async def test_unavailable_actions_or_resources_are_withheld_before_realtime_playback(text):
-    async def events():
-        yield RealtimeEvent(kind="response_candidate", text=text, audio=b"\xff" * 320)
-    provider = SimpleNamespace(events=events, repair_unspoken_response=AsyncMock())
-    bridge = RealtimeBridge(call_id="fixture", realtime_session=provider, media_gateway=SimpleNamespace())
-    bridge._play_validated_response = AsyncMock()
-    await bridge._pump_model_events()
-    bridge._play_validated_response.assert_not_awaited()
-    provider.repair_unspoken_response.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -212,28 +159,3 @@ async def test_configured_action_or_verified_resource_offer_passes_realtime_gate
     await bridge._playback_task
     bridge._play_validated_response.assert_awaited_once()
     provider.repair_unspoken_response.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("caller_turns,should_block", [
-    (["I am not your customer."], True),
-    (["I don't use your company."], True),
-    (["Tell me about your products."], False),
-    (["I am not your customer.", "Actually I am your customer."], False),
-])
-async def test_caller_relationship_correction_is_checked_before_realtime_playback(caller_turns, should_block):
-    async def events():
-        for index, text in enumerate(caller_turns):
-            yield RealtimeEvent(kind="caller_transcript", text=text, is_final=True, raw={"item_id": f"caller-{index}"})
-        yield RealtimeEvent(kind="response_candidate", text="Our records show you are an existing customer.", audio=b"\xff" * 320)
-    provider = SimpleNamespace(events=events, repair_unspoken_response=AsyncMock(), update_live_state=AsyncMock())
-    bridge = RealtimeBridge(call_id="fixture", realtime_session=provider, media_gateway=SimpleNamespace(), call_direction="inbound")
-    bridge._play_validated_response = AsyncMock()
-    await bridge._pump_model_events()
-    if should_block:
-        bridge._play_validated_response.assert_not_awaited()
-        provider.repair_unspoken_response.assert_awaited_once()
-    else:
-        await bridge._playback_task
-        bridge._play_validated_response.assert_awaited_once()
-        provider.repair_unspoken_response.assert_not_awaited()

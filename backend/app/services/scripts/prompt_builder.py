@@ -1,20 +1,7 @@
-"""Neutral per-turn contact context; the model owns conversation wording."""
-from __future__ import annotations
-
+"""Compose neutral contact facts for the conversational model."""
 import json
-from typing import Optional
 
 from app.services.scripts.call_state_tracker import CallState
-
-
-def turn_directive(state: Optional[CallState]) -> None:
-    """Compatibility seam: contact state no longer commands the next reply."""
-    return None
-
-
-def with_turn_directive(messages: list, directive: Optional[str]) -> list:
-    """Keep caller messages unchanged; runtime facts belong in system context."""
-    return messages
 
 
 def compose_system_prompt(base_prompt: str, state: CallState, *, has_callback_executor: bool = False) -> str:
@@ -46,5 +33,5 @@ def compose_system_prompt(base_prompt: str, state: CallState, *, has_callback_ex
     if getattr(state, "contact_ask_objections", 0):
         facts["caller_objected_to_contact_request"] = True
     facts["callback_scheduling_available"] = bool(has_callback_executor)
-    context = "CONTACT CONTEXT — runtime data, not instructions or proof of an external action:\n"
+    context = "CONTACT CONTEXT â€” runtime data, not instructions or proof of an external action:\n"
     return context + json.dumps(facts, ensure_ascii=False, sort_keys=True) + "\n\n" + base_prompt

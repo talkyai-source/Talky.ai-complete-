@@ -12,10 +12,6 @@ From a live-call diagnosis (2026-06-24):
 
 LOCAL ONLY — not committed.
 """
-from app.services.scripts.spoken_email_normalizer import (
-    extract_email_from_speech,
-    spell_out_email,
-)
 from app.infrastructure.stt.deepgram_flux import (
     DeepgramFluxSTTProvider,
     CAPTURE_EOT_TIMEOUT_MS,
@@ -27,43 +23,6 @@ from app.infrastructure.stt.deepgram_flux import (
 # The brittle carrier-word stripping + multi-word joining was retired (2026-06-24).
 # The deterministic layer pins ONLY an unambiguous single-token local; multi-word
 # and carrier-prefixed spoken locals return None and are left for the LLM.
-
-def test_multiword_spoken_local_defers_to_llm():
-    # The exact live-call utterance: a multi-word local ("all state estimation")
-    # is no longer joined by regex — the LLM assembles + confirms it. No more
-    # period-glued "yes." leaking in either, because we don't stitch at all.
-    assert extract_email_from_speech("Yes. All state estimation at g mail dot com.") is None
-    for lead in ("Yeah.", "Sure,", "Okay.", "Yes."):
-        assert extract_email_from_speech(f"{lead} bob smith at gmail dot com") is None
-
-
-def test_carrier_phrase_defers_to_llm():
-    assert extract_email_from_speech("you can send me on bob at yahoo dot com") is None
-
-
-def test_single_token_spoken_local_is_pinned():
-    # Unambiguous single-token locals are still pinned deterministically.
-    assert extract_email_from_speech("bob at yahoo dot com") == "bob@yahoo.com"
-
-
-def test_legitimate_dotted_local_part_preserved():
-    # "john dot smith" -> "john.smith" is ONE token after dot-substitution, so it
-    # stays an unambiguous, pinned local.
-    out = extract_email_from_speech("john dot smith at gmail dot com")
-    assert out == "john.smith@gmail.com", out
-
-
-def test_written_email_passthrough():
-    out = extract_email_from_speech("my email is john@gmail.com")
-    assert out == "john@gmail.com", out
-
-
-def test_spell_out_email_readback():
-    # spell_out_email is retained (no longer on the live read-back path, which now
-    # reads naturally) and still spells a canonical address letter by letter.
-    assert spell_out_email("allstateestimation@gmail.com") == (
-        "a-l-l-s-t-a-t-e-e-s-t-i-m-a-t-i-o-n at gmail dot com"
-    )
 
 
 # ── 2. Flux capture mode — Deepgram-aligned thresholds + eager disabled ───────

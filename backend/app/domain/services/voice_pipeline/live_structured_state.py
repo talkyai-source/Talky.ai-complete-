@@ -1,124 +1,31 @@
-"""Bounded runtime facts for the voice prompt.
-
-Only identity delivery, contacts and tool outcomes are published to live models.
-Legacy transcript classification helpers remain for historical diagnostics; live
-conversation understanding is owned by the conversational model.
-"""
-
+"""Bounded runtime facts for the voice prompt, without transcript classification."""
 from __future__ import annotations
 
 import re
 import unicodedata
 from dataclasses import dataclass, replace
-from enum import Enum
 from typing import Optional, Union
-
-from app.domain.services.voice_pipeline.conversation_guards import (
-    CustomerRelationship,
-    caller_relationship_assertion,
-)
-
 
 MAX_LIVE_STATE_BLOCK_CHARS = 768
 LIVE_STATE_BLOCK_START = "LIVE STRUCTURED STATE v1 — evidence only; unknown means not confirmed:"
 LIVE_STATE_BLOCK_END = "END LIVE STRUCTURED STATE"
-
-_MAX_PROVIDER_CHARS = 48
 _MAX_EMAIL_CHARS = 128
 _MAX_PHONE_CHARS = 32
 _MAX_TOOL_NAME_CHARS = 48
 _MAX_TOOL_CODE_CHARS = 32
-
-
-class DecisionMakerStatus(str, Enum):
-    UNKNOWN = "unknown"
-    YES = "yes"
-    NO = "no"
-    SHARED = "shared"
-
-
-class PainPriority(str, Enum):
-    UNKNOWN = "unknown"
-    COST = "cost"
-    SPEED = "speed"
-    QUALITY = "quality"
-    RELIABILITY = "reliability"
-    SUPPORT = "support"
-    CAPACITY = "capacity"
-    OTHER = "other"
-
-
-class InterestLevel(str, Enum):
-    UNKNOWN = "unknown"
-    NONE = "none"
-    LOW = "low"
-    MEDIUM = "medium"
-    HIGH = "high"
-
-
-class RequestedNextAction(str, Enum):
-    UNKNOWN = "unknown"
-    CALLBACK = "callback"
-    EMAIL = "email"
-    FORM = "form"
-    TRANSFER = "transfer"
-    MORE_INFORMATION = "more_information"
-    END_CALL = "end_call"
-
-
-class SalesStage(str, Enum):
-    OPENING = "opening"
-    DISCOVERY = "discovery"
-    QUALIFICATION = "qualification"
-    NEXT_STEP = "next_step"
-    CONVERTED = "converted"
-    CLOSED_LOST = "closed_lost"
+_SPACE_RE = re.compile(r"\s+")
 
 
 @dataclass(frozen=True)
 class LiveConversationState:
-    """Immutable state; internal turn identity keeps retries idempotent."""
+    """Runtime identity, confirmed contacts and actual tool outcomes only."""
 
     identity_introduced: Optional[bool] = None
-    decision_maker: DecisionMakerStatus = DecisionMakerStatus.UNKNOWN
-    current_provider: Optional[str] = None
-    pain_priority: PainPriority = PainPriority.UNKNOWN
-    interest_level: InterestLevel = InterestLevel.UNKNOWN
-    refusal_count: int = 0
-    requested_next_action: RequestedNextAction = RequestedNextAction.UNKNOWN
     confirmed_email: Optional[str] = None
     confirmed_phone: Optional[str] = None
     last_tool_name: Optional[str] = None
     last_tool_success: Optional[bool] = None
     last_tool_code: Optional[str] = None
-    sales_stage: SalesStage = SalesStage.OPENING
-    last_user_turn_id: Optional[str] = None
-    last_user_turn_order: Optional[int] = None
-    customer_relationship: CustomerRelationship = CustomerRelationship.UNKNOWN
-    relationship_turn_id: Optional[str] = None
-    relationship_turn_order: Optional[int] = None
-
-
-@dataclass(frozen=True)
-class CallerRelationshipEvidence:
-    """Only the latest explicit assertion from a coalesced accepted final."""
-
-    position: CustomerRelationship
-    turn_id: str
-    turn_order: int
-
-
-@dataclass(frozen=True)
-class UserTurnEvidence:
-    turn_id: str
-    decision_maker: Optional[DecisionMakerStatus] = None
-    current_provider: Optional[str] = None
-    pain_priority: Optional[PainPriority] = None
-    interest_level: Optional[InterestLevel] = None
-    refusal: bool = False
-    requested_next_action: Optional[RequestedNextAction] = None
-    caller_turn_order: Optional[int] = None
-    customer_relationship: Optional[CustomerRelationship] = None
 
 
 @dataclass(frozen=True)
@@ -135,13 +42,6 @@ class ConfirmedContactsEvidence:
 
 
 @dataclass(frozen=True)
-class RefusalCountEvidence:
-    """Absolute count from the canonical cascaded call-state tracker."""
-
-    count: int
-
-
-@dataclass(frozen=True)
 class ToolResultEvidence:
     """A completed tool result. ``success`` must come from tool execution."""
 
@@ -150,152 +50,11 @@ class ToolResultEvidence:
     code: str = "ok"
 
 
-LiveStateEvidence = Union[
-    UserTurnEvidence,
-    IdentityEvidence,
-    ConfirmedContactsEvidence,
-    RefusalCountEvidence,
-    ToolResultEvidence,
-]
-
-
-_SPACE_RE = re.compile(r"\s+")
-_UNSAFE_FACT_RE = re.compile(
-    r"\b(ignore|instruction|prompt|system|assistant|developer|tool)\b",
-    re.IGNORECASE,
-)
-_PROVIDER_NONE_RE = re.compile(
-    r"\b(?:we|i)\s+(?:do\s+not|don't|dont)\s+(?:use|have)\s+"
-    r"(?:a\s+)?(?:provider|vendor|anyone)\b|"
-    r"\bno\s+(?:current\s+)?(?:provider|vendor)\b",
-    re.IGNORECASE,
-)
-_PROVIDER_NAME_RES = (
-    re.compile(
-        r"\b(?:our\s+)?current\s+(?:provider|vendor)\s+is\s+" r"([^,.;!?]{1,200})",
-        re.IGNORECASE,
-    ),
-    re.compile(
-        r"\bwe(?:'re|\s+are)\s+(?:currently\s+)?(?:with|using)\s+" r"([^,.;!?]{1,200})",
-        re.IGNORECASE,
-    ),
-)
-
-_DECISION_NO_RE = re.compile(
-    r"\b(?:i(?:'m|\s+am)\s+not\s+(?:the\s+)?decision[ -]?maker|"
-    r"i\s+do(?:n't|\s+not)\s+make\s+(?:the\s+)?decisions?|"
-    r"you(?:'ll|\s+will)?\s+need\s+to\s+(?:speak|talk)\s+to\b)",
-    re.IGNORECASE,
-)
-_DECISION_SHARED_RE = re.compile(
-    r"\b(?:we\s+(?:decide|make\s+the\s+decision)\s+together|"
-    r"shared\s+decision|decision\s+is\s+shared)\b",
-    re.IGNORECASE,
-)
-_DECISION_YES_RE = re.compile(
-    r"\b(?:i(?:'m|\s+am)\s+(?:the\s+)?decision[ -]?maker|"
-    r"i\s+make\s+(?:the\s+)?decisions?|i\s+decide)\b",
-    re.IGNORECASE,
-)
-
-_REFUSAL_RE = re.compile(
-    r"\b(?:not\s+(?:(?:really|very|that)\s+)?interested|no\s+thanks?|"
-    r"don'?t\s+want|do\s+not\s+call\s+me|don'?t\s+call\s+me|"
-    r"stop\s+calling|remove\s+me|take\s+me\s+off|leave\s+me\s+alone)\b",
-    re.IGNORECASE,
-)
-_INTEREST_NONE_RE = re.compile(
-    r"\b(?:not\s+(?:(?:really|very|that)\s+)?interested|no\s+interest|" r"don'?t\s+want)\b",
-    re.IGNORECASE,
-)
-_INTEREST_HIGH_RE = re.compile(
-    r"\b(?:very|really|definitely|extremely)\s+interested\b|"
-    r"\b(?:sounds\s+great|let'?s\s+do\s+it|keen\s+to\s+proceed)\b",
-    re.IGNORECASE,
-)
-_INTEREST_MEDIUM_RE = re.compile(
-    r"\b(?:i(?:'m|\s+am)\s+interested|sounds\s+good|tell\s+me\s+more)\b",
-    re.IGNORECASE,
-)
-_INTEREST_LOW_RE = re.compile(
-    r"\b(?:maybe|possibly|not\s+sure|might\s+be\s+interested)\b",
-    re.IGNORECASE,
-)
-
-_PAIN_SIGNAL_RE = re.compile(
-    r"\b(?:our|my)\s+(?:biggest\s+)?(?:problem|issue|challenge|priority)\s+is\b|"
-    r"\bwe\s+(?:struggle|are\s+struggling)\s+with\b|"
-    r"\bwe\s+(?:need|must)\s+(?:better|more|faster|lower)\b|"
-    r"\b(?:cost|speed|quality|reliability|support|capacity)\s+is\s+"
-    r"(?:the|our)\s+(?:main\s+)?priority\b",
-    re.IGNORECASE,
-)
-_PAIN_PATTERNS = (
-    (PainPriority.COST, re.compile(r"\b(?:cost|price|pricing|expensive|budget)\b", re.I)),
-    (PainPriority.SPEED, re.compile(r"\b(?:speed|slow|turnaround|delay|faster)\b", re.I)),
-    (PainPriority.QUALITY, re.compile(r"\b(?:quality|accuracy|mistake|error)\b", re.I)),
-    (PainPriority.RELIABILITY, re.compile(r"\b(?:reliability|reliable|downtime|outage)\b", re.I)),
-    (PainPriority.SUPPORT, re.compile(r"\b(?:support|service|response\s+time)\b", re.I)),
-    (PainPriority.CAPACITY, re.compile(r"\b(?:capacity|volume|backlog|workload|scale)\b", re.I)),
-)
-
-_ACTION_END_RE = re.compile(
-    r"\b(?:end\s+the\s+call|hang\s+up|do\s+not\s+call\s+me(?:\s+back)?|"
-    r"don'?t\s+call\s+me(?:\s+back)?|stop\s+calling|remove\s+me|"
-    r"take\s+me\s+off|leave\s+me\s+alone)\b",
-    re.IGNORECASE,
-)
-_ACTION_CALLBACK_RE = re.compile(r"\b(?:call\s+me\s+back|give\s+me\s+a\s+call|callback)\b", re.I)
-_ACTION_EMAIL_RE = re.compile(
-    r"\b(?:email\s+me|send\s+me\s+(?:an\s+)?email|send\s+(?:it|the\s+"
-    r"details?|information)\s+to\s+my\s+email)\b",
-    re.I,
-)
-_ACTION_TRANSFER_RE = re.compile(r"\b(?:put\s+me\s+through|connect\s+me|transfer\s+me)\b", re.I)
-_ACTION_FORM_RE = re.compile(r"\b(?:submit|send|complete)\s+(?:the|that|a)\s+form\b", re.I)
-_ACTION_INFO_RE = re.compile(
-    r"\b(?:send\s+me|give\s+me)\s+(?:more\s+)?(?:details|information)\b|" r"\btell\s+me\s+more\b",
-    re.I,
-)
-_ACTION_CALLBACK_NEG_RE = re.compile(
-    r"\b(?:do\s+not|don'?t)\s+(?:call\s+me\s+back|give\s+me\s+a\s+call)\b",
-    re.I,
-)
-_ACTION_EMAIL_NEG_RE = re.compile(
-    r"\b(?:do\s+not|don'?t)\s+(?:email\s+me|send\s+me\s+(?:an\s+)?email)\b",
-    re.I,
-)
-_ACTION_TRANSFER_NEG_RE = re.compile(
-    r"\b(?:do\s+not|don'?t)\s+(?:transfer|connect|put)\s+me\b", re.I
-)
-_ACTION_FORM_NEG_RE = re.compile(
-    r"\b(?:do\s+not|don'?t)\s+(?:submit|send|complete)\s+(?:the|that|a)\s+form\b",
-    re.I,
-)
-
-_CONVERSION_TOOLS = {
-    "schedule_callback",
-    "send_email",
-    "submit_form",
-    "transfer_call",
-}
+LiveStateEvidence = Union[IdentityEvidence, ConfirmedContactsEvidence, ToolResultEvidence]
 
 
 def _normalise_text(value: str) -> str:
     return _SPACE_RE.sub(" ", unicodedata.normalize("NFKC", value or "")).strip()
-
-
-def _safe_provider(value: str) -> Optional[str]:
-    value = _normalise_text(value)
-    if not value or len(value) > _MAX_PROVIDER_CHARS:
-        return None
-    if _UNSAFE_FACT_RE.search(value):
-        return None
-    if re.match(r"^(?:not|no)\b", value, re.IGNORECASE):
-        return None
-    if not re.fullmatch(r"[\w][\w .&'+()/-]*", value, re.UNICODE):
-        return None
-    return value
 
 
 def _safe_contact(value: Optional[str], *, max_chars: int) -> Optional[str]:
@@ -328,178 +87,19 @@ def _safe_identifier(value: str, *, max_chars: int) -> Optional[str]:
     return value
 
 
-def evidence_from_transcript(
-    *, role: object, text: str, turn_id: str, caller_turn_order: Optional[int] = None
-) -> Optional[UserTurnEvidence]:
-    """Extract conservative evidence from one *final caller* transcript.
-
-    Passing assistant/model text is an explicit no-op.  This role gate is kept
-    here, rather than left to each integration, so assistant claims cannot
-    accidentally become trusted state during a later refactor.
-    """
-    role_value = getattr(role, "value", role)
-    if str(role_value or "").strip().lower() != "user":
-        return None
-    utterance = _normalise_text(text)
-    if not utterance:
-        return None
-
-    decision_maker: Optional[DecisionMakerStatus] = None
-    if _DECISION_NO_RE.search(utterance):
-        decision_maker = DecisionMakerStatus.NO
-    elif _DECISION_SHARED_RE.search(utterance):
-        decision_maker = DecisionMakerStatus.SHARED
-    elif _DECISION_YES_RE.search(utterance):
-        decision_maker = DecisionMakerStatus.YES
-
-    provider: Optional[str] = None
-    if _PROVIDER_NONE_RE.search(utterance):
-        provider = "none"
-    else:
-        for pattern in _PROVIDER_NAME_RES:
-            match = pattern.search(utterance)
-            if match:
-                provider = _safe_provider(match.group(1))
-                break
-
-    pain: Optional[PainPriority] = None
-    if _PAIN_SIGNAL_RE.search(utterance):
-        for category, pattern in _PAIN_PATTERNS:
-            if pattern.search(utterance):
-                pain = category
-                break
-        if pain is None:
-            pain = PainPriority.OTHER
-
-    interest: Optional[InterestLevel] = None
-    if _INTEREST_NONE_RE.search(utterance):
-        interest = InterestLevel.NONE
-    elif _INTEREST_HIGH_RE.search(utterance):
-        interest = InterestLevel.HIGH
-    elif _INTEREST_MEDIUM_RE.search(utterance):
-        interest = InterestLevel.MEDIUM
-    elif _INTEREST_LOW_RE.search(utterance):
-        interest = InterestLevel.LOW
-
-    requested: Optional[RequestedNextAction] = None
-    if _ACTION_END_RE.search(utterance):
-        requested = RequestedNextAction.END_CALL
-    elif _ACTION_CALLBACK_RE.search(utterance) and not _ACTION_CALLBACK_NEG_RE.search(utterance):
-        requested = RequestedNextAction.CALLBACK
-    elif _ACTION_EMAIL_RE.search(utterance) and not _ACTION_EMAIL_NEG_RE.search(utterance):
-        requested = RequestedNextAction.EMAIL
-    elif _ACTION_TRANSFER_RE.search(utterance) and not _ACTION_TRANSFER_NEG_RE.search(utterance):
-        requested = RequestedNextAction.TRANSFER
-    elif _ACTION_FORM_RE.search(utterance) and not _ACTION_FORM_NEG_RE.search(utterance):
-        requested = RequestedNextAction.FORM
-    elif _ACTION_INFO_RE.search(utterance):
-        requested = RequestedNextAction.MORE_INFORMATION
-
-    return UserTurnEvidence(
-        turn_id=str(turn_id),
-        caller_turn_order=caller_turn_order,
-        customer_relationship=caller_relationship_assertion(utterance),
-        decision_maker=decision_maker,
-        current_provider=provider,
-        pain_priority=pain,
-        interest_level=interest,
-        refusal=bool(_REFUSAL_RE.search(utterance)),
-        requested_next_action=requested,
-    )
-
-
-def _sales_stage(state: LiveConversationState) -> SalesStage:
-    if state.requested_next_action is RequestedNextAction.END_CALL:
-        return SalesStage.CLOSED_LOST
-    if state.interest_level is InterestLevel.NONE and state.refusal_count > 0:
-        return SalesStage.CLOSED_LOST
-    if state.last_tool_success is True and state.last_tool_name in _CONVERSION_TOOLS:
-        return SalesStage.CONVERTED
-    if state.requested_next_action is not RequestedNextAction.UNKNOWN:
-        return SalesStage.NEXT_STEP
-    if (
-        state.decision_maker is not DecisionMakerStatus.UNKNOWN
-        or state.interest_level is not InterestLevel.UNKNOWN
-    ):
-        return SalesStage.QUALIFICATION
-    if state.current_provider is not None or state.pain_priority is not PainPriority.UNKNOWN:
-        return SalesStage.DISCOVERY
-    return SalesStage.OPENING
-
-
 def reduce_live_state(
     state: LiveConversationState, event: LiveStateEvidence
 ) -> LiveConversationState:
     """Pure reducer.  Unknown/invalid values never overwrite known evidence."""
-    if isinstance(event, UserTurnEvidence):
-        if event.turn_id == state.last_user_turn_id:
-            return state
-        relationship = event.customer_relationship
-        if (not isinstance(relationship, CustomerRelationship)
-                or relationship not in (CustomerRelationship.DENIED, CustomerRelationship.AFFIRMED)):
-            relationship = None
-        if event.caller_turn_order is not None:
-            if (isinstance(event.caller_turn_order, bool)
-                    or not isinstance(event.caller_turn_order, int)
-                    or event.caller_turn_order < 0):
-                return state
-            if (state.last_user_turn_order is not None
-                    and event.caller_turn_order <= state.last_user_turn_order):
-                # ASR may finalize an earlier utterance after a newer ordinary
-                # question. Keep its explicit relationship unless a newer
-                # relationship assertion already superseded it; never replay
-                # its contact/interest/action/refusal fields as current state.
-                if relationship is not None and (
-                    (state.relationship_turn_order is not None
-                     and event.caller_turn_order > state.relationship_turn_order)
-                    or (state.relationship_turn_order is None
-                        and state.customer_relationship is CustomerRelationship.UNKNOWN)
-                ):
-                    return replace(
-                        state, customer_relationship=relationship,
-                        relationship_turn_id=event.turn_id,
-                        relationship_turn_order=event.caller_turn_order,
-                    )
-                return state
-        state = replace(
-            state,
-            decision_maker=event.decision_maker or state.decision_maker,
-            current_provider=(
-                event.current_provider
-                if event.current_provider is not None
-                else state.current_provider
-            ),
-            pain_priority=event.pain_priority or state.pain_priority,
-            interest_level=event.interest_level or state.interest_level,
-            refusal_count=state.refusal_count + (1 if event.refusal else 0),
-            requested_next_action=(
-                event.requested_next_action
-                if event.requested_next_action is not None
-                else state.requested_next_action
-            ),
-            last_user_turn_id=event.turn_id,
-            last_user_turn_order=(event.caller_turn_order if event.caller_turn_order is not None
-                                  else state.last_user_turn_order),
-            customer_relationship=relationship or state.customer_relationship,
-            relationship_turn_id=event.turn_id if relationship else state.relationship_turn_id,
-            relationship_turn_order=(event.caller_turn_order if relationship else state.relationship_turn_order),
-        )
-    elif isinstance(event, IdentityEvidence):
+    if isinstance(event, IdentityEvidence):
         state = replace(state, identity_introduced=bool(event.introduced))
     elif isinstance(event, ConfirmedContactsEvidence):
         # This is a snapshot, not a sticky patch.  A corrected-but-pending value
-        # clears the previously confirmed value until the new read-back passes.
+        # clears the previously confirmed value until the caller confirms the new value.
         state = replace(
             state,
             confirmed_email=(_safe_email(event.email) if event.email_confirmed else None),
             confirmed_phone=(_safe_phone(event.phone) if event.phone_confirmed else None),
-        )
-    elif isinstance(event, RefusalCountEvidence):
-        # Refusals are monotonic.  A lagging canonical tracker snapshot must not
-        # erase explicit caller evidence already reduced for this same turn.
-        state = replace(
-            state,
-            refusal_count=max(state.refusal_count, max(0, int(event.count))),
         )
     elif isinstance(event, ToolResultEvidence):
         name = _safe_identifier(event.tool_name, max_chars=_MAX_TOOL_NAME_CHARS)
@@ -514,7 +114,7 @@ def reduce_live_state(
         )
     else:  # pragma: no cover - closed union, defensive for untyped callers
         raise TypeError(f"unsupported live-state event: {type(event)!r}")
-    return replace(state, sales_stage=_sales_stage(state))
+    return state
 
 
 def reduce_cascaded_session_live_state(
@@ -526,7 +126,7 @@ def reduce_cascaded_session_live_state(
     """Publish runtime identity, contacts and tool results, without interpreting speech.
 
     Conversation meaning stays in the caller's original history for the model.
-    The historical pure reducer remains available to diagnostics and old evidence.
+    messages/user_text are retained call-signature inputs, never classified here.
     """
     state = getattr(session, "_live_structured_state", None)
     if not isinstance(state, LiveConversationState):

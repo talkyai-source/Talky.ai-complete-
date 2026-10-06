@@ -316,7 +316,6 @@ class NativeReplay:
             "dnc_acknowledged": self.bridge._opt_out_acknowledged,
             "llm_controls": [item["text"] for item in self.gateway.controls
                 if item.get("type") == "llm_response"],
-            "relationship": self.bridge._live_state.customer_relationship.value,
             "identity_introduced": self.bridge._live_state.identity_introduced,
             "opening_interrupted": self.bridge._opening_interrupted,
             "opening_state_on_wire": any("opening=interrupted" in message.get("session", {}).get("instructions", "")

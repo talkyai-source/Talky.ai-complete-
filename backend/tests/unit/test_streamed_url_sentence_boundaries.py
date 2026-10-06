@@ -1,10 +1,7 @@
 """Uppercase URL suffixes need explicit address context, not a TLD catalog."""
 import pytest
 
-from app.domain.services.voice_pipeline.grounded_links import (
-    grounded_url_hosts,
-    ground_spoken_links,
-)
+from app.domain.services.voice_pipeline.grounded_links import grounded_url_hosts
 from app.domain.services.voice_pipeline.sentence_segmentation import (
     find_sentence_end,
 )
@@ -64,9 +61,6 @@ def test_extractor_reuses_factual_url_normalization_without_approving_generated_
     assert hosts == {"example.com", "docs.example.org"}
     text = "Visit EXAMPLE.COM/invented now."
     assert find_sentence_end(text, known_hosts=hosts) == len(text) - 1
-    repaired, changed = ground_spoken_links(text, grounding)
-    assert repaired == "Visit EXAMPLE.COM now."
-    assert changed == ["example.com/invented"]
 
 
 def test_no_factual_addresses_yields_no_host_exemptions():

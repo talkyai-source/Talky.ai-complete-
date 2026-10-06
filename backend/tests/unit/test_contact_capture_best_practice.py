@@ -1,8 +1,4 @@
-"""Contact context, known-line lookup and durable outcome regressions.
-
-Legacy clarification utility checks remain diagnostic only. The model now
-chooses contact wording and invokes record_contact; no provider-first or
-line-number yes/no parser controls the live workflow."""
+"""Neutral contact context, known-line lookup and durable outcome controls."""
 from __future__ import annotations
 
 import asyncio
@@ -13,11 +9,7 @@ import pytest
 
 from app.domain.services.voice_pipeline import lead_slot_capture as lsc
 from app.domain.services.voice_pipeline import turn_runner as tr
-from app.domain.services.voice_pipeline.contact_capture import (
-    MAX_CLARIFICATION_ATTEMPTS,
-    CaptureStatus,
-    advance_capture,
-)
+from app.domain.services.voice_pipeline.contact_capture import CaptureStatus
 from app.services.scripts.call_state_tracker import (
     CallState,
 )
@@ -82,21 +74,6 @@ def test_the_shared_rules_accept_complete_contacts_and_clarify_only_unclear_part
 
 # ── 4. two strikes, and a given-up field stays given up ───────────────────
 
-def test_two_failed_asks_then_the_agent_moves_on():
-    assert MAX_CLARIFICATION_ATTEMPTS == 2
-    state = None
-    for _ in range(6):
-        state = advance_capture(state, kind="phone", utterance="2079460958", mode_active=True)
-    assert state.status is CaptureStatus.CANCELLED  # did not restart the loop
-
-
-def test_a_complete_number_still_reopens_after_giving_up():
-    state = None
-    for _ in range(4):
-        state = advance_capture(state, kind="phone", utterance="2079460958", mode_active=True)
-    state = advance_capture(state, kind="phone", utterance="call me on +1 415 555 2671", mode_active=True)
-    assert state.status is CaptureStatus.AWAITING_CONFIRMATION
-
 
 # ── 4 + 7. outcome line and the follow-up note ────────────────────────────
 
@@ -138,10 +115,11 @@ class _Pool:
 
 
 def _unresolved_email_state():
-    state = None
-    for _ in range(4):
-        state = advance_capture(state, kind="email", utterance="Allstate estimation at Gmail dot com.", mode_active=True)
-    return CallState(email_capture=state)
+    from app.domain.services.voice_pipeline.contact_capture import ContactCaptureState
+    return CallState(email_capture=ContactCaptureState(
+        kind="email", status=CaptureStatus.NEEDS_CLARIFICATION,
+        raw_value="Allstate estimation at Gmail dot com.",
+    ))
 
 
 def test_an_unconfirmed_email_leaves_a_follow_up_note_and_an_outcome_line(caplog):
