@@ -166,19 +166,48 @@ async def execute_tool_call(call, tools, runner, *, timeout_seconds=8.0):
                        "message": "The action could not be confirmed. Do not retry it automatically."})
 
 
+MAX_NAVIGATION_ROUNDS = 4
+
+
+class ToolRoundBudget:
+    """Keep ordinary decisions bounded while crediting verified navigation only."""
+
+    def __init__(self, max_tool_rounds, navigation_round_allowed=None):
+        if type(max_tool_rounds) is not int or not 1 <= max_tool_rounds <= 3:
+            raise ValueError("max_tool_rounds must be an integer from 1 to 3")
+        if navigation_round_allowed is not None and not callable(navigation_round_allowed):
+            raise ValueError("navigation_round_allowed must be callable")
+        self.remaining = max_tool_rounds
+        self.navigation_left = MAX_NAVIGATION_ROUNDS
+        self.navigation_round_allowed = navigation_round_allowed
+
+    def finish_round(self, results):
+        if self.navigation_round_allowed is not None and self.navigation_left:
+            try:
+                allowed = self.navigation_round_allowed(results) is True
+            except Exception:
+                allowed = False
+            if allowed:
+                self.navigation_left -= 1
+                return
+        self.remaining -= 1
+
+
 async def stream_tool_turn(provider, messages, *, tools=None, tool_runner=None,
                            require_tool_result_before_content=False, timeout_seconds=10.0,
                            max_tool_rounds=1,
                            read_only_tools=(),
+                           navigation_round_allowed=None,
                            **kwargs):
     """Bounded tool dialogue; the default remains one decision and one answer.
 
     Live knowledge can browse a catalog then read a section. Identical tool
     write requests share their result throughout the turn. Read-only tools can
     run again so their current evidence stays aligned with the returned result.
+    The optional callback may credit at most four verified navigation rounds;
+    it does not increase the ordinary decision budget or remove the final cap.
     """
-    if type(max_tool_rounds) is not int or not 1 <= max_tool_rounds <= 3:
-        raise ValueError("max_tool_rounds must be an integer from 1 to 3")
+    budget = ToolRoundBudget(max_tool_rounds, navigation_round_allowed)
     if not tools or tool_runner is None:
         async with aclosing(provider.stream_chat_with_timeout(messages, timeout_seconds=timeout_seconds, **kwargs)) as stream:
             async for token in stream:
@@ -186,7 +215,7 @@ async def stream_tool_turn(provider, messages, *, tools=None, tool_runner=None,
         return
     extra = []
     results = {}
-    for _ in range(max_tool_rounds):
+    while budget.remaining:
         calls, content = [], []
         continuation = {"extra_messages": list(extra)} if extra else {}
         async with aclosing(provider.stream_chat_with_timeout(
@@ -202,11 +231,14 @@ async def stream_tool_turn(provider, messages, *, tools=None, tool_runner=None,
                 yield "".join(content)
             return
         extra.append(assistant_tool_message(calls, "".join(content) or None))
+        round_results = []
         for call in calls:
             key = (call["name"], json.dumps(call["arguments"], sort_keys=True), call.get("arguments_valid", True))
             if key not in results or call["name"] in read_only_tools:
                 results[key] = await execute_tool_call(call, tools, tool_runner)
             extra.append({"role": "tool", "tool_call_id": call["id"], "content": results[key]})
+            round_results.append((call, results[key]))
+        budget.finish_round(round_results)
     answer = []
     async with aclosing(provider.stream_chat_with_timeout(
         messages, timeout_seconds=timeout_seconds, extra_messages=extra, **kwargs,

@@ -16,6 +16,7 @@ from typing import Any
 from app.services.scripts.prompts.prompt_safety import scan_for_injection
 
 CATALOG_MAX_CHARS = 8000
+CATALOG_LABEL_MAX_CHARS = 160
 SECTIONS_MAX_CHARS = 12000
 MAX_SELECTED_SECTIONS = 3
 _PATH = re.compile(r"[1-9][0-9]*(?:\.[1-9][0-9]*){0,5}\Z")
@@ -23,7 +24,8 @@ _PATH = re.compile(r"[1-9][0-9]*(?:\.[1-9][0-9]*){0,5}\Z")
 SECTION_TOOL_DESCRIPTION = (
     "Read exact company source sections selected from the catalog. Send "
     "section_ids to read up to three sections, OR catalog_offset to see another "
-    "catalog page. Catalog headings are navigation, not answers."
+    "catalog page. Catalog labels may be shortened and are navigation, not answers. "
+    "Use returned next_offset to continue, including after a skipped oversized entry."
 )
 SECTION_TOOL_PARAMETERS = {
     "type": "object",
@@ -166,20 +168,28 @@ def render_catalog_page(catalog: SectionCatalog | None, offset: int = 0,
     entries, used = [], 0
     for row in catalog.nodes[offset:]:
         chain = _chain(catalog, row)
+        labels = [row["heading"], *[item["heading"] for item in chain or ()]]
+        shortened = [label if len(label) <= CATALOG_LABEL_MAX_CHARS
+                     else label[:CATALOG_LABEL_MAX_CHARS - 1] + "…" for label in labels]
         entry = {"section_id": row["section_id"], "source_id": row["source_id"],
-                 "heading": row["heading"],
-                 "path": [item["heading"] for item in chain] if chain else [],
+                 "heading": shortened[0], "path": shortened[1:],
+                 "labels_truncated": labels != shortened,
                  "readable": chain is not None}
         size = len(json.dumps(entry, ensure_ascii=False)) + 1
         if used + size > max_chars:
             if not entries:
-                return _result(catalog, "too_large", reason="catalog_entry_too_large")
+                complete = offset + 1 == len(catalog.nodes)
+                return _result(catalog, "too_large", reason="catalog_entry_too_large",
+                               offset=offset, total_sections=len(catalog.nodes),
+                               skipped_offset=offset, complete=complete,
+                               next_offset=None if complete else offset + 1)
             break
         entries.append(entry)
         used += size
     next_offset = offset + len(entries)
     complete = next_offset == len(catalog.nodes)
     return _result(catalog, "catalog", entries=entries, complete=complete,
+                   offset=offset, total_sections=len(catalog.nodes),
                    next_offset=None if complete else next_offset)
 
 

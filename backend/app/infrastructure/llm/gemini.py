@@ -505,6 +505,7 @@ class GeminiLLMProvider(LLMProvider):
         require_tool_result_before_content: bool = False,
         max_tool_rounds: int = 1,
         read_only_tools=(),
+        navigation_round_allowed=None,
         **kwargs,
     ) -> AsyncIterator[str]:
         """Stream a turn that MAY call a function tool, using Gemini function
@@ -513,12 +514,13 @@ class GeminiLLMProvider(LLMProvider):
         str-yield contract.
 
         The default remains one tool decision then a tool-less answer. Live
-        section navigation can opt into at most three decisions. Native model
+        section navigation can opt into three ordinary decisions plus at most
+        four verified advancing catalog decisions. Native model
         parts (including thought signatures) are preserved in every continuation.
         Repeated writes share a receipt; read-only tools rerun to refresh evidence.
         """
-        if type(max_tool_rounds) is not int or not 1 <= max_tool_rounds <= 3:
-            raise ValueError("max_tool_rounds must be an integer from 1 to 3")
+        from app.infrastructure.llm.streaming import ToolRoundBudget
+        budget = ToolRoundBudget(max_tool_rounds, navigation_round_allowed)
         if not tools or tool_runner is None:
             async with aclosing(self.stream_chat_with_timeout(
                 messages, timeout_seconds=timeout_seconds, system_prompt=system_prompt,
@@ -621,7 +623,7 @@ class GeminiLLMProvider(LLMProvider):
 
         decision_cfg = genai_types.GenerateContentConfig(tools=gemini_tools, **base_cfg)
         tool_results = {}
-        for _ in range(max_tool_rounds):
+        while budget.remaining:
             # A new list per response avoids mutating already-sent signed parts.
             model_parts, fcalls, decision_tokens = [], [], []
             async with aclosing(_stream(decision_cfg, fcalls, model_parts)) as stream:
@@ -636,6 +638,7 @@ class GeminiLLMProvider(LLMProvider):
                 return
 
             resp_parts = []
+            round_results = []
             for fc in fcalls:
                 if not any(getattr(p, "function_call", None) == fc for p in model_parts):
                     model_parts.append(genai_types.Part(function_call=fc))
@@ -656,8 +659,10 @@ class GeminiLLMProvider(LLMProvider):
                     name=fc.name,
                     response={"result": result or "No specific information found."},
                 ))
+                round_results.append(({"name": fc.name, "arguments": args}, result))
             contents.append(genai_types.Content(role="model", parts=model_parts))
             contents.append(genai_types.Content(role="user", parts=resp_parts))
+            budget.finish_round(round_results)
 
         round1_cfg = genai_types.GenerateContentConfig(**base_cfg)  # no tools
         if require_tool_result_before_content:
