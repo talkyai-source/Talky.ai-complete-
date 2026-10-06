@@ -1,0 +1,112 @@
+FFFF.                                                                    [100%]
+================================== FAILURES ===================================
+_ test_identity_language_reaches_model_without_scripted_reply[Sorry, you've got the wrong company.] _
+
+caller = "Sorry, you've got the wrong company."
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("caller", [
+        "Sorry, you've got the wrong company.",
+        "Wrong number.",
+        "This is a personal number, but tell me what this is about.",
+    ])
+    async def test_identity_language_reaches_model_without_scripted_reply(caller):
+        service = _make_service_for_disposition(["Could you tell me who you were trying to reach?"])
+        session = _make_session()
+        session.campaign_id = "campaign-123"
+        session.current_user_input = caller
+    
+        await service.handle_turn_end(session, AsyncMock())
+    
+        assert [m.content for m in session.conversation_history if m.role == MessageRole.USER] == [caller]
+>       assert [m.content for m in session.conversation_history if m.role == MessageRole.ASSISTANT] == [
+            "Could you tell me who you were trying to reach?"
+        ]
+E       assert ['Sorry about.... Take care.'] == ['Could you t...ng to reach?']
+E         At index 0 diff: "Sorry about that — looks like I've got the wrong number. Take care." != 'Could you tell me who you were trying to reach?'
+E         Use -v to get more diff
+
+backend\tests\unit\test_dialogue_cleanup.py:25: AssertionError
+_ test_identity_language_reaches_model_without_scripted_reply[Wrong number.] __
+
+caller = 'Wrong number.'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("caller", [
+        "Sorry, you've got the wrong company.",
+        "Wrong number.",
+        "This is a personal number, but tell me what this is about.",
+    ])
+    async def test_identity_language_reaches_model_without_scripted_reply(caller):
+        service = _make_service_for_disposition(["Could you tell me who you were trying to reach?"])
+        session = _make_session()
+        session.campaign_id = "campaign-123"
+        session.current_user_input = caller
+    
+        await service.handle_turn_end(session, AsyncMock())
+    
+        assert [m.content for m in session.conversation_history if m.role == MessageRole.USER] == [caller]
+>       assert [m.content for m in session.conversation_history if m.role == MessageRole.ASSISTANT] == [
+            "Could you tell me who you were trying to reach?"
+        ]
+E       assert ['Sorry — do ...rong person?'] == ['Could you t...ng to reach?']
+E         At index 0 diff: "Sorry — do you mean I've reached the wrong business entirely, or just the wrong person?" != 'Could you tell me who you were trying to reach?'
+E         Use -v to get more diff
+
+backend\tests\unit\test_dialogue_cleanup.py:25: AssertionError
+_ test_identity_language_reaches_model_without_scripted_reply[This is a personal number, but tell me what this is about.] _
+
+caller = 'This is a personal number, but tell me what this is about.'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("caller", [
+        "Sorry, you've got the wrong company.",
+        "Wrong number.",
+        "This is a personal number, but tell me what this is about.",
+    ])
+    async def test_identity_language_reaches_model_without_scripted_reply(caller):
+        service = _make_service_for_disposition(["Could you tell me who you were trying to reach?"])
+        session = _make_session()
+        session.campaign_id = "campaign-123"
+        session.current_user_input = caller
+    
+        await service.handle_turn_end(session, AsyncMock())
+    
+        assert [m.content for m in session.conversation_history if m.role == MessageRole.USER] == [caller]
+>       assert [m.content for m in session.conversation_history if m.role == MessageRole.ASSISTANT] == [
+            "Could you tell me who you were trying to reach?"
+        ]
+E       assert ['Sorry about.... Take care.'] == ['Could you t...ng to reach?']
+E         At index 0 diff: "Sorry about that — looks like I've got the wrong number. Take care." != 'Could you tell me who you were trying to reach?'
+E         Use -v to get more diff
+
+backend\tests\unit\test_dialogue_cleanup.py:25: AssertionError
+___ test_unauthorized_legacy_end_preserves_prose_without_retry_or_script[] ____
+
+spoken = ''
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("spoken", ["", "I can explain the available options. "])
+    async def test_unauthorized_legacy_end_preserves_prose_without_retry_or_script(spoken):
+        service = _make_service_for_disposition([])
+        session = _make_session()
+        session.campaign_id = "campaign-123"
+        service._stream_llm_and_tts = AsyncMock(return_value=(
+            spoken + '{"action":"end_ask_ai_session","reason":"conversation_complete","farewell":"Bye."}',
+            1.0, 2.0,
+        ))
+        service.synthesize_and_send_audio = AsyncMock()
+    
+        result, _, _ = await service._run_turn(session, "Could you explain my options?", None, 0)
+    
+>       assert result == spoken.strip()
+E       assert "Sorry, I'm s...elp you with?" == ''
+E         + Sorry, I'm still here — what else can I help you with?
+
+backend\tests\unit\test_dialogue_cleanup.py:45: AssertionError
+=========================== short test summary info ===========================
+FAILED backend\tests\unit\test_dialogue_cleanup.py::test_identity_language_reaches_model_without_scripted_reply[Sorry, you've got the wrong company.]
+FAILED backend\tests\unit\test_dialogue_cleanup.py::test_identity_language_reaches_model_without_scripted_reply[Wrong number.]
+FAILED backend\tests\unit\test_dialogue_cleanup.py::test_identity_language_reaches_model_without_scripted_reply[This is a personal number, but tell me what this is about.]
+FAILED backend\tests\unit\test_dialogue_cleanup.py::test_unauthorized_legacy_end_preserves_prose_without_retry_or_script[]
+4 failed, 1 passed, 15 warnings in 8.31s

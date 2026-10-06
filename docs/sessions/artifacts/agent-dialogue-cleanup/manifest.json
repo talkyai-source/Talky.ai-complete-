@@ -1,0 +1,318 @@
+{
+  "source_commit": "c89d58cc0c430252c707ad81957e3c3cd4af7ba4",
+  "base": "458c6798e8e1c6eb5664da938b396f5be7f82a9a",
+  "files": {
+    "backend/app/domain/services/telephony/modes/agent_first.py": {
+      "sha256": "24d69797cdb2796730aae32228dcaa1a11885464dbe0fec17626deeffdfc8e45"
+    },
+    "backend/app/domain/services/telephony/opening_ladder.py": {
+      "deleted": true
+    },
+    "backend/app/domain/services/telephony/prewarm.py": {
+      "sha256": "64973dffbf0a8385d22eff49b18636fc2f48a7db3012baa6c46c3cc663acfa4a"
+    },
+    "backend/app/domain/services/voice_pipeline/audio_ingest.py": {
+      "sha256": "720e6e36eee5e5fe7d70f2fcc311248604c9870d56aac5463480fd38cd7554c9"
+    },
+    "backend/app/domain/services/voice_pipeline/end_call.py": {
+      "sha256": "2e8975a7e719bfba0e016835fe429979520ebcc5f7c784b2a776a8ac4d51c6bb"
+    },
+    "backend/app/domain/services/voice_pipeline/identity_disposition.py": {
+      "sha256": "979599d2e7b6fdf76fb3e674b3e0bf7011535d029a42e40d54c80d41274bc296"
+    },
+    "backend/app/domain/services/voice_pipeline/transcript_handler.py": {
+      "sha256": "2e30a7497f78a6e5d55f96e8a6b2c0d4ba4dbf716c7fb40951e201a2ef49979b"
+    },
+    "backend/app/domain/services/voice_pipeline/turn_director.py": {
+      "deleted": true
+    },
+    "backend/app/domain/services/voice_pipeline/turn_ender.py": {
+      "sha256": "d43bf0269b258caccf3a35e5bbdfcbdea740d0615b88264c96c68201cb591ed0"
+    },
+    "backend/app/domain/services/voice_pipeline/turn_runner.py": {
+      "sha256": "73d004d982143c12769c15acfeb8681b1602f357b2a6227f61bf3bf3bb890392"
+    },
+    "backend/app/domain/services/voice_pipeline_service.py": {
+      "sha256": "ec83e579a6929f4933b13b9a595c0acf3f8fa96f4888bcc4e66a515fb6359e40"
+    },
+    "backend/tests/unit/test_ag03_caller_dispatch_order.py": {
+      "sha256": "aebf73772afd1569b189a3751180537f33ddf798e7070454f25c1710bb941e50"
+    },
+    "backend/tests/unit/test_audio_ingest_caller_first_silence.py": {
+      "sha256": "51b25db3d95dbf6886a46ca70fb60368fb6a4963507287dbe25cc9a878878cea"
+    },
+    "backend/tests/unit/test_behavioral_fixes.py": {
+      "sha256": "96731a16a1a4aee5e2509e9cfff6880e41903c23eb577d4aa5739baedb802005"
+    },
+    "backend/tests/unit/test_caller_authorized_end_call.py": {
+      "sha256": "d15773f1c166e8edf1d1d9c601f38ec1dd45360e6326f4c3cc7063a959f5a073"
+    },
+    "backend/tests/unit/test_dialogue_cleanup.py": {
+      "sha256": "8b742ab24995871e456b9cde7b825f7b8a658046a34e6b46112aac7fdb24f358"
+    },
+    "backend/tests/unit/test_greeting_duplication.py": {
+      "deleted": true
+    },
+    "backend/tests/unit/test_no_hangup_on_an_open_question.py": {
+      "deleted": true
+    },
+    "backend/tests/unit/test_op02_lifecycle_ownership.py": {
+      "sha256": "3e7240d1500f825460d6df2ab42341d59c20b5fc2893d6f1e669cc4234004ace"
+    },
+    "backend/tests/unit/test_opening_ladder.py": {
+      "deleted": true
+    },
+    "backend/tests/unit/test_opening_nudge_words_without_start_of_turn.py": {
+      "sha256": "0fd23b43e6d3fdee90bb3ab8a8214824c619aa149713bf7d214cfd09d2d1a5ae"
+    },
+    "backend/tests/unit/test_phantom_goodbye_recovery.py": {
+      "sha256": "7f79a02b253e537a39131b20dde4c6e8cf49c6e0c150b2b516a47ad52396668a"
+    },
+    "backend/tests/unit/test_prewarm_opening_ladder.py": {
+      "deleted": true
+    },
+    "backend/tests/unit/test_regreet_ladder_over_open_caller_turn.py": {
+      "sha256": "5e0b142427853c8bb209f47c574796f26215380391193a9acce3f641e5310616"
+    },
+    "backend/tests/unit/test_silence_action.py": {
+      "sha256": "6cec9c7cf87317bfbc8dff2be97213ff70b2b170278d2950eabf363caf2fddec"
+    },
+    "backend/tests/unit/test_silence_nudge_latency_not_tracked.py": {
+      "deleted": true
+    },
+    "backend/tests/unit/test_tenant_profile_admission.py": {
+      "sha256": "159a8c91c9de4ded14b3f8cd9422462632bb5edcdbcd7776055451a7801b20cf"
+    },
+    "backend/tests/unit/test_turn_director.py": {
+      "deleted": true
+    },
+    "backend/tests/unit/test_voice_pipeline_service.py": {
+      "sha256": "0a99fb367f6053be03fa5edf2aba0d0803052fa02afa97b2e46252fe17447c7e"
+    },
+    "backend/tests/unit/voice_pipeline/test_identity_disposition.py": {
+      "sha256": "d5aa3e6f867af22c295c811e734f7623d58f190f63485087052e604ed6695c01"
+    }
+  },
+  "retired_tests": {
+    "backend/tests/unit/test_ag03_caller_dispatch_order.py": [
+      "test_coalesced_queued_denial_survives_later_ordinary_question"
+    ],
+    "backend/tests/unit/test_audio_ingest_caller_first_silence.py": [
+      "test_agent_first_after_a_BARE_HELLO_does_get_re_greeted",
+      "test_agent_first_after_a_real_introduction_still_suppresses_mid_nudge",
+      "test_caller_first_session_reaches_opening_hello_nudge",
+      "test_first_audio_is_stamped_in_the_one_ingest_path_every_call_uses",
+      "test_no_audio_nudge_gate_does_not_remove_terminal_silence_timeout",
+      "test_opening_clock_counts_from_first_audio_not_from_monitor_start",
+      "test_opening_ladder_is_bounded_and_never_nags_past_its_cap",
+      "test_opening_nudge_waits_for_caller_audio",
+      "test_stale_backchannel_stamp_does_not_crash_silence_monitor"
+    ],
+    "backend/tests/unit/test_behavioral_fixes.py": [
+      "test_silence_check_never_raises_on_bad_session",
+      "test_silence_check_recorded_to_history_and_transcript"
+    ],
+    "backend/tests/unit/test_greeting_duplication.py": [
+      "test_a_second_DIFFERENT_greeting_is_still_rejected",
+      "test_escalating_the_same_call_out_is_allowed",
+      "test_every_turn_section_control_flags_the_old_bullet",
+      "test_every_turn_section_has_no_opening_instruction",
+      "test_every_turn_section_is_real_and_still_intact",
+      "test_few_shot_controls_flag_the_old_exemplar",
+      "test_few_shot_does_not_key_on_a_bare_hello",
+      "test_few_shot_has_no_reintroducing_agent_line",
+      "test_few_shot_keeps_its_teaching_value",
+      "test_opening_instruction_still_present_in_every_stage_one",
+      "test_opening_ladder_control_flags_a_collapsed_single_rung_ladder",
+      "test_opening_ladder_control_flags_the_old_second_rung",
+      "test_opening_ladder_never_starts_a_FRESH_greeting_after_the_first",
+      "test_opening_ladder_still_escalates_and_never_repeats_itself",
+      "test_stage_one_still_covers_reason_first_and_the_easy_out"
+    ],
+    "backend/tests/unit/test_no_hangup_on_an_open_question.py": [
+      "test_a_first_reply_hangup_is_held",
+      "test_a_machine_still_ends_on_the_first_reply",
+      "test_a_question_followed_by_an_ellipsis_is_still_open",
+      "test_a_statement_ending_in_an_ellipsis_is_not_a_question",
+      "test_an_email_being_clarified_is_an_open_capture",
+      "test_an_email_read_back_but_unconfirmed_is_an_open_capture",
+      "test_legitimate_closes_are_left_alone",
+      "test_no_capture_and_a_confirmed_capture_are_both_closed",
+      "test_production_hangups_after_a_question_are_recognised",
+      "test_the_gate_holds_the_call_while_a_capture_is_open",
+      "test_the_sentinel_gate_uses_it_and_dnc_and_goodbye_still_win",
+      "test_turn_id_is_read_before_it_is_incremented"
+    ],
+    "backend/tests/unit/test_opening_ladder.py": [
+      "test_a_first_rung_that_is_not_a_greeting_is_refused",
+      "test_a_flat_ladder_that_never_escalates_is_refused",
+      "test_a_good_ladder_is_accepted",
+      "test_a_good_reply_is_returned_and_validated",
+      "test_a_pathologically_long_rung_is_refused",
+      "test_a_provider_exception_falls_back_to_none",
+      "test_a_retry_recovers_after_one_bad_attempt",
+      "test_a_rung_over_the_word_budget_is_refused",
+      "test_a_rung_with_no_words_is_refused",
+      "test_a_shrinking_ladder_is_refused",
+      "test_a_slow_provider_times_out_and_falls_back_to_none",
+      "test_cancellation_propagates_instead_of_being_swallowed",
+      "test_control_a_second_greeting_rung_is_refused",
+      "test_control_a_third_rung_greeting_is_also_refused",
+      "test_control_the_literal_task_example_middle_rung_would_be_refused",
+      "test_duplicate_rungs_are_refused",
+      "test_duplicate_rungs_are_refused_case_insensitively",
+      "test_empty_reply_falls_back_to_none",
+      "test_garbage_output_is_rejected_not_spoken",
+      "test_no_provider_returns_none_without_crashing",
+      "test_non_speakable_characters_are_refused",
+      "test_only_a_real_truthy_value_enables_it",
+      "test_only_rung_one_may_greet",
+      "test_pitch_and_introduction_language_is_refused",
+      "test_prompt_example_is_internally_consistent_with_its_own_hard_rule",
+      "test_prompt_never_mentions_a_company_or_agent_placeholder",
+      "test_recognised_truthy_values",
+      "test_retry_prompt_carries_the_rejection_reason",
+      "test_rung_count_defaults_to_three",
+      "test_rung_count_falls_back_on_garbage_value",
+      "test_rung_count_falls_back_on_non_positive_value",
+      "test_rung_count_follows_the_nudge_cap_env_var",
+      "test_rungs_override_matches_a_non_default_nudge_cap",
+      "test_the_feature_is_off_unless_explicitly_enabled",
+      "test_the_worked_example_in_the_docstring_is_valid",
+      "test_too_many_rungs_is_refused",
+      "test_with_the_flag_off_the_llm_is_never_called",
+      "test_wrong_rung_count_is_refused"
+    ],
+    "backend/tests/unit/test_opening_nudge_words_without_start_of_turn.py": [
+      "test_once_the_turn_ends_the_opening_ladder_still_runs",
+      "test_words_still_arriving_hold_the_opening_nudge"
+    ],
+    "backend/tests/unit/test_phantom_goodbye_recovery.py": [
+      "test_canned_line_only_once_the_retry_is_also_silent",
+      "test_prose_already_spoken_is_kept_and_nothing_extra_is_said",
+      "test_silent_turn_is_retried_and_the_retry_is_what_the_caller_gets",
+      "test_the_canned_line_never_repeats_itself_verbatim",
+      "test_the_nudge_is_removed_even_when_the_retry_raises",
+      "test_the_nudge_is_visible_to_the_model_during_the_retry",
+      "test_the_retry_nudge_is_removed_from_history_again"
+    ],
+    "backend/tests/unit/test_prewarm_opening_ladder.py": [
+      "test_a_provider_error_leaves_the_attribute_unset",
+      "test_a_successful_generation_is_stashed_on_call_session",
+      "test_a_timeout_leaves_the_attribute_unset",
+      "test_agent_first_calls_never_start_generation",
+      "test_flag_off_starts_nothing",
+      "test_garbage_output_leaves_the_attribute_unset",
+      "test_missing_call_session_does_not_raise",
+      "test_no_llm_provider_starts_nothing",
+      "test_the_hook_returns_immediately_even_with_a_slow_provider"
+    ],
+    "backend/tests/unit/test_regreet_ladder_over_open_caller_turn.py": [
+      "test_a_stale_open_stamp_does_not_silence_nudges_forever",
+      "test_a_wordless_speech_start_holds_nudges_only_briefly",
+      "test_nudging_resumes_normally_once_the_turn_actually_ends",
+      "test_open_caller_turn_suppresses_the_opening_nudge"
+    ],
+    "backend/tests/unit/test_silence_action.py": [
+      "test_a_genuinely_dead_line_is_still_checked",
+      "test_agent_first_bare_hello_still_gets_a_re_greet",
+      "test_agent_first_bare_hello_uses_the_OPENING_threshold_not_mid",
+      "test_agent_first_uses_mid_threshold_not_opening",
+      "test_audible_speech_does_not_block_the_hangup",
+      "test_audible_speech_suppresses_the_nudge",
+      "test_caller_first_behaviour_is_unchanged_by_the_new_parameter",
+      "test_first_regreet_fires_at_the_new_production_interval",
+      "test_first_regreet_waits_just_under_the_new_interval",
+      "test_grace_still_suppresses_opening_nudge_under_new_thresholds",
+      "test_grace_still_suppresses_the_new_opening_path",
+      "test_grace_waits_even_at_hangup_threshold",
+      "test_hangup_at_caller_silence_threshold",
+      "test_mid_conversation_uses_mid_threshold",
+      "test_no_hangup_just_under_threshold",
+      "test_nudge_allowed_after_gap",
+      "test_once_introduced_the_agent_first_call_returns_to_the_MID_cadence",
+      "test_opening_gap_defaults_to_the_mid_gap_when_not_supplied",
+      "test_opening_gap_is_independent_of_the_mid_gap",
+      "test_opening_gap_never_applies_to_a_mid_conversation_tick",
+      "test_opening_gap_still_waits_before_its_own_threshold",
+      "test_opening_nudges_after_threshold",
+      "test_opening_regreets_never_reset_the_hangup_clock",
+      "test_opening_waits_before_threshold",
+      "test_recent_nudge_waits",
+      "test_the_guard_cannot_resurrect_a_suppressed_tick",
+      "test_the_guard_defaults_off",
+      "test_the_hangup_clock_is_unaffected",
+      "test_the_hangup_clock_is_untouched_by_the_fix",
+      "test_the_opening_threshold_is_untouched_by_the_mid_change",
+      "test_twelve_seconds_of_thinking_is_no_longer_prodded"
+    ],
+    "backend/tests/unit/test_silence_nudge_latency_not_tracked.py": [
+      "test_opening_nudge_passes_track_latency_false"
+    ],
+    "backend/tests/unit/test_turn_director.py": [
+      "test_a_non_iterable_ladder_falls_back_to_the_static_ladder",
+      "test_default_call_sites_are_completely_unaffected",
+      "test_does_not_suppress_on_caller_first_calls",
+      "test_does_not_suppress_once_caller_has_spoken",
+      "test_ladder_argument_clamps_to_its_own_last_rung",
+      "test_ladder_argument_is_ignored_on_the_mid_tier",
+      "test_ladder_argument_is_used_when_provided_for_opening",
+      "test_mid_first_nudge_is_neutral_still_there",
+      "test_mid_index_clamps_to_last_rung",
+      "test_mid_ladder_never_repeats_i_am_still_here_as_first_line",
+      "test_mid_second_nudge_is_warm_reoffer",
+      "test_never_uses_did_i_lose_you_phrasing",
+      "test_none_or_empty_ladder_falls_back_to_the_static_ladder",
+      "test_opening_first_nudge_is_hello",
+      "test_opening_index_clamps_to_last_rung",
+      "test_opening_negative_index_clamps_to_first_rung",
+      "test_opening_second_nudge_escalates",
+      "test_opening_third_nudge_escalates_again_without_a_FRESH_greeting",
+      "test_suppresses_mid_nudge_on_agent_first_call_caller_never_spoke"
+    ],
+    "backend/tests/unit/test_voice_pipeline_service.py": [
+      "test_deterministic_dnc_persists_opt_out_and_hangs_up",
+      "test_deterministic_dnc_survives_repetition_guard",
+      "test_disposition_early_returns_reset_speculative_snapshot",
+      "test_identity_clarify_flag_is_consumed_after_one_turn",
+      "test_live_turn_prompt_carries_the_floor_once_and_last",
+      "test_telephony_session_wrong_business_still_ends_deterministically",
+      "test_turn_disposition_does_not_go_stale_across_turns"
+    ],
+    "backend/tests/unit/voice_pipeline/test_identity_disposition.py": [
+      "test_bare_wrong_number_after_clarify_resolves_to_business",
+      "test_bare_wrong_number_is_ambiguous_first",
+      "test_clarify_answer_business_ends",
+      "test_clarify_answer_person_pivots",
+      "test_dnc_ends",
+      "test_end_lines",
+      "test_explicit_goodbye_does_not_change_classify_precedence",
+      "test_genuine_dnc_still_ends",
+      "test_live_prospect_phrases_never_end",
+      "test_ordinary_turns_are_none",
+      "test_post_clarify_business_answer_still_ends",
+      "test_post_clarify_person_answer_pivots",
+      "test_post_clarify_right_business_pivots_not_ends",
+      "test_prompt_blocks_are_not_contradictory_on_wrong_number",
+      "test_second_bare_wrong_number_after_clarify_resolves_to_business",
+      "test_valid_prospect_phrasings_do_not_end",
+      "test_wrong_business_ends",
+      "test_wrong_number_plus_person_evidence_pivots",
+      "test_wrong_person_pivots_never_ends"
+    ]
+  },
+  "artifacts": {
+    "commands.txt": "788ea214736968f3173b9f8606c2ef4aad01bd015dc03631837a9e724e8e2100",
+    "dialogue-affected-initial.txt": "fbf251339cb7980300a62698669673be80007083ea13538fceb84c2a635b9708",
+    "dialogue-baseline-valid.txt": "aadb579d73b8725967718b5f488840d9be131743a78f6dd22991aa7d07edfa7f",
+    "dialogue-baseline.txt": "90ca060f38b19be88dd1573ee4485ec29ee5d997fdd80c5366d57c58d219ce68",
+    "dialogue-final-candidate.txt": "a7c3768038d800d672529b188203db3431ccba6993d40fbf1afb61dea35084bf",
+    "dialogue-final.txt": "cf30c2c1d2d3968250cb8196963cffed93921e30832c4684595a39fdc276a07b",
+    "dialogue-focused-initial.txt": "4a04843a23693692db19acc1abd09c8e70097a31a47448a765bcb46ffd62d604",
+    "dialogue-lint-final.txt": "f49bf4aaa9c3a9daf6c1bad0f2b1a7f90d8cbc3bccd988a4970a12d811da7926",
+    "dialogue-lint-initial.txt": "b8ac93f8fa5b1128cf7b6f99776e4a5e3b63c10a90f80463f721c0823cd6ddf0",
+    "dialogue-lint-verified.txt": "a4443afdcfb6d7363adb285762515ccf7cf50473b1a05c20c1a50f6bed4d26b0",
+    "dialogue-outcome-assertion-final.txt": "c277766f245ce37fce8a940d0ce96092be9ecbdff6df1e3a307d2672c17283a4",
+    "diff-check.txt": "a9f58776a09b5dac438049683f24bf85764e0ff8e7455952456165c68c158627"
+  }
+}
