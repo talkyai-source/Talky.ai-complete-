@@ -13,7 +13,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-from dataclasses import is_dataclass, replace
+from dataclasses import replace
 from typing import Optional
 
 from fastapi import WebSocket
@@ -25,20 +25,8 @@ from app.domain.services.end_session_action import (
     should_honor_end_session,
     previous_assistant_turn,
 )
-from app.domain.services.voice_pipeline import capture_mode
-from app.services.scripts import (
-    CallState as CapturedSlotsState,
-    update_state_from_user_turn,
-)
-from app.services.scripts.call_state_tracker import _classify_core_confirmation
-from app.services.scripts.spoken_email_normalizer import (
-    extract_email_from_agent_readback,
-    extract_email_from_speech,
-    extract_phone_from_speech,
-    natural_email_readback,
-    natural_phone_readback,
-)
-from app.domain.services.voice_pipeline.confirm_llm import llm_confirmation_verdict
+from app.services.scripts.call_state_tracker import CallState as CapturedSlotsState
+from app.domain.services.voice_pipeline.contact_recording import bind_contact_turn
 from app.domain.services.voice_pipeline.identity_disposition import (
     IdentityDisposition,
     contains_dnc,
@@ -146,93 +134,6 @@ def _same_utterance(a, b) -> bool:
     return bool(na) and na == nb
 
 
-def _is_interstitial_agent_turn(text) -> bool:
-    """True for an agent line the PIPELINE injected rather than the model wrote.
-
-    Silence checks and the phantom-goodbye recovery lines are both spoken to keep
-    a call alive; neither is a reply and neither is a read-back. Treating one as
-    "the agent's most recent real turn" masks the read-back the caller is
-    actually answering, so a correction or a "yes" lands against the wrong turn.
-    Observed live on 2026-09-21: the recovery line hid an email read-back and the
-    caller's corrected address was discarded.
-    """
-    c = str(text or "").lower()
-    if _SILENCE_CHECK_RE.search(c):
-        return True
-    return any(line.lower() in c for line in _PHANTOM_GOODBYE_RECOVERIES)
-
-
-def _is_email_correction(utterance, current_email) -> bool:
-    """True if the caller restated a DIFFERENT email — a correction, which the
-    capture path (not the confirmation path) handles. Used to skip the LLM
-    confirmation call when the turn is actually a re-capture."""
-    if not current_email:
-        return False
-    parsed = extract_email_from_speech(utterance)
-    return bool(parsed and parsed != current_email)
-
-
-# A turn that explicitly asks the caller to confirm ("did I get that right?").
-# Required to promote a DOMAIN-ONLY match to a read-back (issue #4): naming the
-# domain ("reach you at your gmail dot com address?") is NOT a read-back unless
-# the turn also names the local part or asks for confirmation.
-_CONFIRM_QUESTION_RE = re.compile(
-    r"\b(did\s+i\s+(get|say|hear)\s+(that|it|this)|is\s+(that|this|it)\s+(right|correct)|"
-    r"got\s+(that|it)\s+right|that\s+right\?|is\s+that\s+ok(ay)?\?|"
-    r"sounds?\s+right|correct\?|right\?)",
-    re.IGNORECASE,
-)
-
-
-def _is_phone_correction(utterance, current_phone) -> bool:
-    """True if the caller restated a DIFFERENT phone number — a correction handled
-    by the capture path, so we skip the confirmation classification for it."""
-    if not current_phone:
-        return False
-    parsed = extract_phone_from_speech(utterance)
-    return bool(parsed and parsed != current_phone)
-
-
-# The agent asking to confirm the number the caller is already on:
-# "Is this number the best one to reach you on?", "...on the number you're
-# calling from?", "Can we reach you on this line?".
-_THIS_NUMBER_RE = re.compile(
-    r"\b(?:this|that|the\s+same)\s+(?:number|line)\b[^?]{0,80}\?"
-    r"|\bnumber\s+(?:you'?re|you\s+are)\s+(?:calling\s+from|on|using)\b[^?]{0,60}\?",
-    re.IGNORECASE,
-)
-
-
-def phone_on_the_table(pending, history):
-    """Offer the number the call is on when the agent just asked to confirm it.
-
-    2026-09-30: most callers can be reached on the number they're on, so the
-    agent asks one yes/no instead of taking digits by voice. When the agent's
-    latest turn is that question, the line number becomes the value the
-    caller's yes confirms. Returns ``(pending_state, offered)``.
-    """
-    line = getattr(pending, "line_phone", None)
-    if (
-        not line
-        or getattr(pending, "phone", None)
-        or getattr(pending, "phone_confirmed", False)
-    ):
-        return pending, False
-    for m in reversed(history or []):
-        if getattr(m, "role", None) != MessageRole.ASSISTANT:
-            continue
-        text = m.content or ""
-        if _is_interstitial_agent_turn(text.lower()):
-            continue
-        if _THIS_NUMBER_RE.search(text):
-            return (
-                replace(pending, phone=line, phone_confirmed=False, phone_readback_attempts=0),
-                True,
-            )
-        return pending, False
-    return pending, False
-
-
 async def known_line_number(session) -> Optional[str]:
     """The E.164 number this call is on, or None. One small read per call.
 
@@ -271,195 +172,6 @@ async def known_line_number(session) -> Optional[str]:
     except Exception as exc:  # noqa: BLE001 - never block a turn on this
         logger.debug("known_line_number unavailable: %s", exc)
         return None
-
-
-def email_on_the_table(pending, full_transcript, history):
-    """The email the caller is answering about, and whether it was read back.
-
-    The agent's LATEST read-back is the value on the table: the caller's yes
-    to an address read back to them word for word is what makes it correct,
-    not the deterministic parser. A confirmed email is never replaced, and a
-    caller who just said a fresh address is parsed from their own words.
-    Returns ``(pending_state, readback_issued)``.
-    """
-    pending_email = getattr(pending, "email", None)
-    latest = None
-    if (
-        not getattr(pending, "email_confirmed", False)
-        and extract_email_from_speech(full_transcript) is None
-    ):
-        latest = _email_from_recent_agent_readback(history)
-        if latest and latest != pending_email:
-            pending = replace(
-                pending, email=latest, email_confirmed=False,
-                email_readback_attempts=0,
-            )
-            pending_email = latest
-            if _spelled_by_caller(latest, history) and pending.email_capture:
-                # Every letter of it came from the caller's own recent words
-                # ("Allstate estimation at Gmail dot com" + "one word"); the
-                # agent only chose the separator they asked for. It is the
-                # caller's, stored unconfirmed. Test call 5dfa4416 stored
-                # nothing because this was marked agent-invented.
-                pending = replace(
-                    pending,
-                    email_capture=replace(pending.email_capture, from_caller=True),
-                )
-    readback_issued = _agent_read_back_email(history, pending_email) or bool(
-        latest and latest == pending_email
-    )
-    return pending, readback_issued
-
-
-def _spelled_by_caller(email: str, history) -> bool:
-    """True when the caller SAID this address in one of their last few turns:
-    its name part is exactly the one to four words just before an "at", and
-    its domain is the words after it ("dot" as the dot). Only the separator
-    between the name words may differ -- which is what the agent asks about.
-    """
-    email = str(email or "").lower()
-    if "@" not in email:
-        return False
-    local, domain = email.split("@", 1)
-    want_local = re.sub(r"[^a-z0-9]", "", local)
-    want_domain = re.sub(r"[^a-z0-9]", "", domain)
-    if not want_local or not want_domain:
-        return False
-    said = [
-        str(m.content or "").lower()
-        for m in (history or [])[-8:]
-        if getattr(m, "role", None) == MessageRole.USER
-    ][-4:]
-    for text in said:
-        for word, digit in _READBACK_DIGIT_WORDS.items():
-            text = re.sub(rf"\b{word}\b", digit, text)
-        for sep in re.finditer(r"\s(?:at\s+the\s+rate|at)\s|@", text):
-            before = re.findall(r"[a-z0-9]+", text[: sep.start()])
-            after = re.findall(r"[a-z0-9]+", text[sep.end():])
-            after = [w for w in after if w != "dot"]
-            if "".join(after).startswith(want_domain) and any(
-                "".join(before[-n:]) == want_local for n in range(1, 5)
-            ):
-                return True
-    return False
-
-
-def _email_from_recent_agent_readback(history):
-    """Parse an ASSEMBLED email out of the agent's most recent REAL turn (gap #2).
-
-    Only inspects the latest non-silence-check assistant turn — the read-back the
-    caller is replying to right now — and returns the assembled address only when
-    that turn is unmistakably a read-back-for-confirmation (see
-    ``extract_email_from_agent_readback``). None otherwise.
-    """
-    for m in reversed(history or []):
-        if getattr(m, "role", None) != MessageRole.ASSISTANT:
-            continue
-        c = m.content or ""
-        if _is_interstitial_agent_turn(c):
-            continue
-        return extract_email_from_agent_readback(c)
-    return None
-
-
-_READBACK_DIGIT_WORDS = {
-    "zero": "0",
-    "one": "1",
-    "two": "2",
-    "three": "3",
-    "four": "4",
-    "five": "5",
-    "six": "6",
-    "seven": "7",
-    "eight": "8",
-    "nine": "9",
-}
-
-
-def _normalize_readback_words(text: str) -> str:
-    normalized = str(text or "").lower()
-    for word, digit in _READBACK_DIGIT_WORDS.items():
-        normalized = re.sub(rf"\b{word}\b", digit, normalized)
-    normalized = re.sub(r"[-‐‑‒–—]", " ", normalized)
-    return " ".join(normalized.split())
-
-
-def _agent_read_back_email(history, email) -> bool:
-    """True if the agent's most recent REAL turn read the pending email back — so
-    the caller's current turn can safely be interpreted as a confirmation reply.
-
-    Robust to how the address is actually spoken: the agent voices separators and
-    digits as words ("j dot smith", "seven eight"), so a literal match of the
-    glyph-laden read-back string fails for dotted/underscored/digit local parts.
-    We therefore also match the domain-as-words (always spoken the same way,
-    e.g. "gmail dot com") — but ONLY when the local part is ALSO signalled, or the
-    turn asks for confirmation. A bare domain mention ("reach you at your gmail
-    dot com address?") does NOT verify the LOCAL part, so it must not let a "yeah"
-    confirm an unheard local (issue #4). Silence-check turns are skipped so an
-    interposed "are you still there?" can't mask the read-back (re-audit flow #1).
-    """
-    if not email or "@" not in email:
-        return False
-    spoken = natural_email_readback(email).lower()
-    normalized_spoken = _normalize_readback_words(spoken)
-    for m in reversed(history or []):
-        if getattr(m, "role", None) != MessageRole.ASSISTANT:
-            continue
-        c = (m.content or "").lower()
-        if _is_interstitial_agent_turn(c):
-            continue  # not a real turn — keep scanning back for the read-back
-        confirm_question = bool(_CONFIRM_QUESTION_RE.search(c))
-        normalized_content = _normalize_readback_words(c)
-        full_value = (
-            bool(normalized_spoken) and normalized_spoken in normalized_content
-        ) or (email.lower() in c)
-        if full_value:
-            return confirm_question
-        return False
-    return False
-
-
-def _agent_read_back_phone(history, phone) -> bool:
-    """True if the agent's most recent REAL turn read the pending phone number
-    back. Matches on the digit string regardless of formatting (the agent may
-    speak "555-123-4567", "5 5 5 …", or grouped), so a caller "yes" only counts
-    once the digits were actually voiced. Silence checks are skipped."""
-    if not phone:
-        return False
-    digits = re.sub(r"\D", "", phone)
-    if len(digits) < 7:
-        return False
-    spoken = natural_phone_readback(phone).lower()
-    for m in reversed(history or []):
-        if getattr(m, "role", None) != MessageRole.ASSISTANT:
-            continue
-        c = (m.content or "").lower()
-        if _is_interstitial_agent_turn(c):
-            continue
-        c_digits = re.sub(r"\D", "", c)
-        full_value = (digits in c_digits) or (bool(spoken) and spoken in c)
-        return full_value and bool(_CONFIRM_QUESTION_RE.search(c))
-    return False
-
-
-def _unwrap_verdict(result, field: str) -> str:
-    """Fail-closed unwrap of one branch of a gathered confirmation verdict.
-
-    ``llm_confirmation_verdict`` already swallows provider errors and timeouts and
-    returns 'unclear', so an Exception surfacing here means something outside its
-    own guard went wrong — treat it the same way, leaving the value PENDING rather
-    than guessing. CancelledError is NOT a failure: it is a barge-in cancelling the
-    turn, so re-raise it and let ``run()`` unwind exactly as it did when the two
-    calls were sequential.
-    """
-    if isinstance(result, asyncio.CancelledError):
-        raise result
-    if isinstance(result, BaseException):
-        logger.debug(
-            "%s_confirm verdict failed, failing closed to unclear: %s", field, result
-        )
-        return "unclear"
-    return result
 
 
 class TurnRunner:
@@ -573,153 +285,27 @@ class TurnRunner:
             Message(role=MessageRole.USER, content=full_transcript)
         )
 
-        # This user turn is the one we may have relaxed STT for (e.g. they just
-        # spelled an email). It has arrived, so revert to normal turn-detection.
-        capture_mode.maybe_exit(getattr(self._p, "stt_provider", None), call_id)
-
-        captured_slots = getattr(session, "captured_slots", None)
-        if captured_slots is None or not is_dataclass(captured_slots):
+        # The model interprets contact language through record_contact. Bind the
+        # actual caller source before generation; a turn counter alone is no proof.
+        if not isinstance(getattr(session, "captured_slots", None), CapturedSlotsState):
             session.captured_slots = CapturedSlotsState()
-        # Confirmation of a pending email only counts when the agent's last turn
-        # actually read it back (see _agent_read_back_email). HYBRID classifier:
-        # the fast deterministic regex resolves the clear cases with zero added
-        # latency; only the ambiguous tail asks a small, tightly-bounded LLM —
-        # fail-closed, so an unresolved verdict leaves the value pending.
-        _pending = session.captured_slots
-        _pending_email = getattr(_pending, "email", None)
-        # Gap #2: a multi-word / carrier-prefixed spoken email never enters
-        # CallState via the deterministic user-turn extractor (it refuses to guess
-        # a word boundary), so the HARDEST emails bypassed the gate. When nothing
-        # is pinned yet and this turn isn't itself a fresh email, seed the address
-        # the AGENT assembled and read back in its prior turn as UNCONFIRMED — so
-        # the SAME read-back → verdict → commit loop runs over it.
-        #
-        # 2026-09-29 (test call 56578fa2): this used to seed ONLY when nothing
-        # was pending, so once a first read-back was pinned, every correction
-        # the agent read back afterwards ("remove the dot" -> "allstateestimation
-        # at gmail dot com, is that correct?") was ignored and the caller's
-        # "yes" confirmed nothing. The agent's LATEST read-back is what the
-        # caller is answering, so it is the value on the table -- whatever the
-        # deterministic parser made of the earlier words. The caller's yes to a
-        # value read back to them word for word is the guarantee; nothing is
-        # persisted before it (lead_slot_capture keeps agent-assembled values
-        # in memory until confirmed).
-        if getattr(_pending, "line_phone", None) is None and not getattr(
-            session, "_line_phone_checked", False
-        ):
-            session._line_phone_checked = True
-            _line = await known_line_number(session)
-            if _line:
-                _pending = replace(_pending, line_phone=_line)
-        _pending, _readback_issued = email_on_the_table(
-            _pending, full_transcript, session.conversation_history
-        )
-        _pending, _line_offered = phone_on_the_table(_pending, session.conversation_history)
-        session.captured_slots = _pending
-        _pending_email = getattr(_pending, "email", None)
-        # Phone / callback number — SAME gate as email, resolved independently.
-        _pending_phone = getattr(_pending, "phone", None)
-        _phone_readback_issued = _line_offered or _agent_read_back_phone(
-            session.conversation_history, _pending_phone
-        )
-
-        _email_gate_open = bool(
-            _pending_email
-            and not getattr(_pending, "email_confirmed", False)
-            and _readback_issued
-            and not _is_email_correction(full_transcript, _pending_email)
-        )
-        _phone_gate_open = bool(
-            _pending_phone
-            and not getattr(_pending, "phone_confirmed", False)
-            and _phone_readback_issued
-            and not _is_phone_correction(full_transcript, _pending_phone)
-        )
-
-        # Fast deterministic pass first — pure, zero-latency, and identical for
-        # both fields, so running it for BOTH gates up front changes nothing
-        # except that the ambiguous tail is now known before any await.
-        _confirm_verdict = (
-            _classify_core_confirmation(full_transcript) if _email_gate_open else None
-        )
-        _phone_verdict = (
-            _classify_core_confirmation(full_transcript) if _phone_gate_open else None
-        )
-        _email_via_llm = _confirm_verdict == "unclear"
-        _phone_via_llm = _phone_verdict == "unclear"
-
-        if _email_via_llm and _phone_via_llm:
-            # LATENCY: these two bounded LLM calls used to run SEQUENTIALLY, so a
-            # turn that was ambiguous on BOTH fields stacked two 1.5s timeouts —
-            # up to 3s of dead air before the caller's real answer started
-            # streaming. The fields are independent (neither verdict feeds the
-            # other; both are applied together below), so resolve them
-            # CONCURRENTLY: worst case is now one timeout, not two. Each call
-            # keeps its own timeout and return_exceptions means one failing can
-            # never abort or discard the other.
-            _results = await asyncio.gather(
-                llm_confirmation_verdict(
-                    self._p.llm_provider, full_transcript, _pending_email
-                ),
-                llm_confirmation_verdict(
-                    self._p.llm_provider, full_transcript, _pending_phone,
-                    subject="phone number",
-                ),
-                return_exceptions=True,
-            )
-            _confirm_verdict = _unwrap_verdict(_results[0], "email")
-            _phone_verdict = _unwrap_verdict(_results[1], "phone")
-        elif _email_via_llm:
-            # Single-field case: awaited directly — no gather/task overhead.
-            _confirm_verdict = await llm_confirmation_verdict(
-                self._p.llm_provider, full_transcript, _pending_email
-            )
-        elif _phone_via_llm:
-            _phone_verdict = await llm_confirmation_verdict(
-                self._p.llm_provider, full_transcript, _pending_phone,
-                subject="phone number",
-            )
-
-        if _email_gate_open:
-            logger.info(
-                "email_confirm call=%s via_llm=%s verdict=%s",
-                call_id[:8], _email_via_llm, _confirm_verdict,
-            )
-        if _phone_gate_open:
-            logger.info("phone_confirm call=%s verdict=%s", call_id[:8], _phone_verdict)
-
-        session.captured_slots = update_state_from_user_turn(
-            _pending,
-            full_transcript,
-            readback_issued=_readback_issued,
-            confirmation_verdict=_confirm_verdict,
-            phone_readback_issued=_phone_readback_issued,
-            phone_confirmation_verdict=_phone_verdict,
-            phone_region=getattr(session, "contact_phone_region", None),
-            # Flux deliberately supplies None. The state machine treats None as
-            # "signal unavailable", never as low recognition confidence.
-            transcript_confidence=getattr(
-                session,
-                "_active_turn_transcript_confidence",
-                getattr(session, "_last_transcript_confidence", None),
-            ),
-            transcript_alternatives=getattr(
-                session,
-                "_active_turn_transcript_alternatives",
-                getattr(session, "_last_transcript_alternatives", ()),
-            ),
-        )
-        # Resolve the accepted dispatch identity to the exact raw caller row.
-        # An absent binding stays unknown; a session turn counter is not proof.
-        from app.domain.services.voice_pipeline.contact_capture import ContactSource, bind_contact_evidence
+        from app.domain.services.voice_pipeline.contact_capture import ContactSource
         order = getattr(asyncio.current_task(), "_caller_turn_order", None)
         source = None
         if isinstance(order, int) and not isinstance(order, bool):
             resolver = getattr(self._p.transcript_service, "caller_source", None)
             evidence = resolver(call_id, order) if callable(resolver) else None
             if isinstance(evidence, dict):
-                source = ContactSource(**evidence)
-        session.captured_slots = bind_contact_evidence(_pending, session.captured_slots, source)
+                try:
+                    source = ContactSource(**evidence)
+                except (TypeError, ValueError):
+                    pass
+        bind_contact_turn(session, full_transcript, source)
+        if not session.captured_slots.line_phone and not getattr(session, "_line_phone_checked", False):
+            session._line_phone_checked = True
+            line = await known_line_number(session)
+            if line:
+                session.captured_slots = replace(session.captured_slots, line_phone=line)
 
         response_text = ""
         llm_latency_ms = 0.0
@@ -779,7 +365,7 @@ class TurnRunner:
                     # post-turn block run, which is the point: the old early
                     # return hand-rolled its own history append and transcript
                     # write and therefore skipped update_state_from_agent_turn,
-                    # _has_introduced AND capture_mode.maybe_enter. A suppressed
+                    # _has_introduced. A suppressed
                     # turn that asked for an email never relaxed endpointing, so
                     # the caller's spell-out was cut off mid-address.
                     ask_ai_end_action = None
@@ -826,14 +412,6 @@ class TurnRunner:
                 session.conversation_history.append(
                     Message(role=MessageRole.ASSISTANT, content=response_text)
                 )
-                from app.services.scripts.call_state_tracker import (
-                    update_state_from_agent_turn,
-                )
-
-                session.captured_slots = update_state_from_agent_turn(
-                    session.captured_slots,
-                    response_text,
-                )
                 # The agent has now delivered a real reply — since 2026-08-11
                 # that is the turn AFTER the bare pickup greeting, not turn 1
                 # (turn 1 is TTS-only and runs no LLM call at all). Flip the
@@ -849,11 +427,6 @@ class TurnRunner:
                     event_type="assistant_response",
                     is_final=True,
                     include_in_plaintext=True,
-                )
-                # If the agent just asked for an email / to spell something,
-                # relax STT for the caller's upcoming spell-out turn.
-                capture_mode.maybe_enter(
-                    getattr(self._p, "stt_provider", None), call_id, response_text
                 )
             else:
                 logger.warning(

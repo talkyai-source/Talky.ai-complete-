@@ -63,8 +63,8 @@ from uuid import UUID
 
 logger = logging.getLogger(__name__)
 
-# Everything CallState knows, it learned by parsing the caller's own utterance.
-# None of it is a model inference, so none of it may be stored as one.
+# Contact records are attributed to caller words with source/revision evidence.
+# record_contact uses model interpretation; attribution is not a semantic proof.
 CAPTURE_SOURCE = "caller_stated"
 
 # (CallState attribute, field_key, field_type, confirmed-flag attribute or None)
@@ -384,6 +384,22 @@ def _stash(session: Any, name: str, value: Any) -> None:
         pass
 
 
+def _fingerprint(item: dict) -> tuple:
+    return (item["value"], item["confirmed"], item.get("raw_value"),
+            item.get("normalized_value"), item.get("validation_status"),
+            item.get("confirmed_at"), json.dumps(item.get("evidence") or {}, sort_keys=True))
+
+
+def contact_save_acknowledged(session: Any, kind: str) -> bool:
+    """Whether this exact current contact snapshot has an acknowledged write."""
+    slots = getattr(session, "captured_slots", None)
+    key = contact_field_key(slots, kind)
+    item = snapshot_slots(slots).get(key)
+    written = getattr(session, _WRITTEN_ATTR, None)
+    return bool(item is not None and isinstance(written, dict)
+                and written.get(key) == _fingerprint(item))
+
+
 async def _call_is_test(pool: Any, tenant_id: str, call_id: str) -> Optional[bool]:
     """``calls.is_test`` for this call, or None when no such row exists.
 
@@ -472,17 +488,6 @@ async def _capture(
     if not isinstance(written, dict):
         written = {}
 
-    def fingerprint(item: dict) -> tuple:
-        return (
-            item["value"],
-            item["confirmed"],
-            item.get("raw_value"),
-            item.get("normalized_value"),
-            item.get("validation_status"),
-            item.get("confirmed_at"),
-            json.dumps(item.get("evidence") or {}, sort_keys=True),
-        )
-
     def expected_contact(previous) -> dict:
         if previous is None:
             return {"absent": True}
@@ -492,7 +497,7 @@ async def _capture(
     changed = {
         key: item
         for key, item in pending.items()
-        if written.get(key) != fingerprint(item)
+        if written.get(key) != _fingerprint(item)
     }
     if not changed and not revocations:
         return 0
@@ -568,7 +573,7 @@ async def _capture(
         revoked_evidence = {**expected["evidence"], "status": "revoked"}
         if cause is not None:
             revoked_evidence["status_source"] = cause
-        written[field_key] = fingerprint({"value": None, "confirmed": False,
+        written[field_key] = _fingerprint({"value": None, "confirmed": False,
             "validation_status": validation_status, "evidence": revoked_evidence})
         if revoked:
             _save_failed(session, (field_key,), failed=False)
@@ -616,7 +621,7 @@ async def _capture(
             continue
         _save_failed(session, (field_key,), failed=False)
         if stored:
-            written[field_key] = fingerprint(item)
+            written[field_key] = _fingerprint(item)
             count += 1
 
     _stash(session, _WRITTEN_ATTR, written)

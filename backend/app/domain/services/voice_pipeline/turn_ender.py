@@ -302,51 +302,8 @@ class TurnEnder:
                     pass
                 return
 
-        # Caller-first INSTANT opener: the first bare "Hello?" is answered by
-        # the ringing-phase pre-synth greeting (~0.3s) instead of a full
-        # LLM+TTS round trip (3-14s+ — two of eight live calls lost the human
-        # to that silence, 2026-07-08). Only the FIRST turn, only a bare
-        # greeting; a real question still gets the LLM. Fail-soft.
-        #
-        # Since the 2026-08-11 opener redesign the pre-synth greeting is
-        # content-free ("Hi, hello."/"Hey there." — no name, no reason for the
-        # call), so STOPPING here after it played left the caller with
-        # nothing: call 6e0e221b (2026-09-23) got the instant greeting after
-        # its own "Hello?", then 15.7s of silence until the callee hung up.
-        # Continue into the normal LLM turn for this SAME utterance instead of
-        # returning, so the identity/permission line follows immediately —
-        # the fast first sound is kept either way. The greeting is already in
-        # conversation_history (appended by _send_outbound_greeting BEFORE
-        # this call returns), so the turn below sees it as the most recent
-        # ASSISTANT message and, via the same has_introduced=False -> "give
-        # your opening" prompt path already proven on agent-first calls' own
-        # bare-pickup turn 1, must not greet again. A failed/no-op instant
-        # opener (is_bare_greeting False, no pre-synth audio, etc.) already
-        # falls through identically, so there is nothing special to branch on.
-        #
-        # 2026-09-24 review follow-up: the above assumed the pre-synth
-        # greeting is ALWAYS content-free. When TELEPHONY_LLM_OPENER_ENABLED
-        # is on, the pre-synth greeting is LLM-authored and already carries
-        # identity plus a single trailing question (llm_opener.py's
-        # validated shape) — _send_outbound_greeting's own
-        # _looks_like_bare_pickup_greeting check then sets
-        # session._has_introduced True (agent_first.py ~680). Falling
-        # through unconditionally ran a SECOND LLM turn on the caller's same
-        # "Hello?", talking straight over the greeting's own question before
-        # the caller could answer it. Only continue into the normal LLM turn
-        # when the greeting that just played did NOT introduce the agent
-        # (_has_introduced still False, the bare-pickup case this
-        # fallthrough exists for); an introducing greeting keeps the old
-        # behavior of returning here and waiting for the reply to its
-        # question.
-        if not _has_prior_user_turn_for_floor and _first_speaker_label(session) == "user":
-            from app.domain.services.voice_pipeline.instant_opener import (
-                is_bare_greeting, try_instant_opener,
-            )
-            if is_bare_greeting(full_transcript):
-                _opener_played = await try_instant_opener(session, full_transcript)
-                if _opener_played and getattr(session, "_has_introduced", False):
-                    return
+        # Caller-first speech reaches the model unchanged, including a bare
+        # greeting. Do not play a separate scripted opener before this reply.
 
         # Guard against the confirmed Deepgram Flux hallucination bug (GitHub #1524)
         # where the STT model outputs repetitive nonsense text ("blah blah blah…").

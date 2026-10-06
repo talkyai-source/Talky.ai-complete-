@@ -17,6 +17,9 @@ def realtime_voice_action_tools(session=None) -> list[dict[str, Any]]:
     tools: list[dict[str, Any]] = []
     from app.domain.services.voice_pipeline.action_execution import enabled_voice_actions
     enabled = enabled_voice_actions(session) if session is not None else set(VOICE_ACTION_NAMES)
+    from app.domain.services.voice_pipeline.contact_recording import CONTACT_TOOL_SPEC
+    contact = CONTACT_TOOL_SPEC["function"]
+    tools.append({"type": "function", **contact})
     for action in VOICE_ACTION_NAMES:
         if action not in enabled:
             continue

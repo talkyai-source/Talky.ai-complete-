@@ -44,7 +44,7 @@ import json
 import logging
 import os
 import time
-from dataclasses import is_dataclass, replace
+from dataclasses import replace
 from typing import Any, Awaitable, Callable, Optional
 
 from app.domain.services.voice_pipeline.live_structured_state import (
@@ -145,11 +145,6 @@ class RealtimeBridge:
         self._current_caller_item_key = None
         self._current_caller_order = 0
         self._current_caller_transcript_index = None
-        self._current_contact_baseline = None
-        self._current_contact_result = None
-        self._current_contact_history = ()
-        self._current_contact_readback = None
-        self._last_contact_readback = None
         self._transcript_flush_task = None
         self._transcript_flush_pending = False
         self._opt_out_task: Optional[asyncio.Task] = None
@@ -231,11 +226,10 @@ class RealtimeBridge:
 
             contact_session = SimpleNamespace(captured_slots=None)
         self._contact_session = contact_session
+        self._contact_session.contact_phone_region = contact_phone_region
         self._contact_history: list[Any] = []
         self._contact_tasks: "set[asyncio.Task]" = set()
         self._contact_persist_tail: Optional[asyncio.Task] = None
-        self._pending_contact_agent_turn: Optional[str] = None
-        self._contact_agent_interrupted = False
         # Identity is delivery evidence, not generated-text evidence. Consume
         # this exactly once when the opening response completes uninterrupted.
         self._identity_opening_pending = bool(greet_on_start)
@@ -521,31 +515,8 @@ class RealtimeBridge:
                 if kind == "response_candidate":
                     if self._stale_opt_out_response(ev):
                         continue
-                    from app.domain.services.llm_guardrails import get_guardrails
-                    from app.domain.services.voice_pipeline.action_tools import action_results_for_session
-                    from app.domain.services.voice_pipeline.action_execution import enabled_voice_actions
-                    valid, reason = get_guardrails().validate_response(
-                        ev.text or "", action_results=action_results_for_session(self._action_session),
-                        available_actions=set(enabled_voice_actions(self._action_session)))
-                    from app.domain.services.voice_pipeline.grounded_figures import ground_spoken_figures
-                    grounded, unsupported = ground_spoken_figures(ev.text or "", self._verified_knowledge)
-                    if grounded != (ev.text or "") or unsupported:
-                        valid, reason = False, "unsupported_company_figure"
-                    from app.domain.services.voice_pipeline.grounded_links import ground_spoken_links
-                    grounded_links, unsupported_links = ground_spoken_links(ev.text or "", self._verified_knowledge)
-                    if grounded_links != (ev.text or "") or unsupported_links:
-                        valid, reason = False, "unsupported_company_resource"
-                    from app.domain.services.voice_pipeline.conversation_guards import contradicted_customer_claim
-                    if contradicted_customer_claim(ev.text or "", relationship=self._live_state.customer_relationship):
-                        valid, reason = False, "contradicted_customer_relationship"
-                    if not valid:
-                        logger.warning("realtime_playout_rejected call=%s reason=%s", self._call_id, reason)
-                        if self._repair_attempted:
-                            self._failure_reason = "Realtime reply failed validation twice"
-                            break
-                        self._repair_attempted = True
-                        await self._rt.repair_unspoken_response((ev.raw or {}).get("response") or {})
-                        continue
+                    # Normal prose is model-owned. Tool receipts and concise
+                    # guidance carry facts; no second regex judge rewrites it.
                     if self._playback_task and not self._playback_task.done():
                         # A replacement may follow asynchronous transcription or
                         # tool results. Stop the owned utterance before replacing
@@ -571,6 +542,7 @@ class RealtimeBridge:
                     if not self._caller_transcript_pending:
                         self._snapshot_caller_question()
                     self._revoke_pending_end_call(awaiting_transcript=True)
+                    self._contact_session._contact_turn = None
                     await self._cancel_playback(getattr(ev, "raw", None))
                     if self._identity_opening_pending:
                         # A later completed answer need not contain the identity
@@ -578,8 +550,6 @@ class RealtimeBridge:
                         self._identity_opening_pending = False
                         self._opening_interrupted = True
                         await self._publish_live_state()
-                    if bool((getattr(ev, "raw", None) or {}).get("during_response")):
-                        self._contact_agent_interrupted = True
 
                 elif kind == "function_call" and ev.function_call:
                     # Do NOT await here — this is the SOLE event pump. The tool
@@ -590,7 +560,8 @@ class RealtimeBridge:
                     # socket; send_function_result already sequences the
                     # follow-up response.create safely (app/realtime/openai.py).
                     tool_task = asyncio.create_task(
-                        self._handle_function_call(ev.function_call),
+                        self._handle_function_call(ev.function_call,
+                            contact_turn=getattr(self._contact_session, "_contact_turn", None)),
                         name=f"rt-tool-{self._call_id}",
                     )
                     self._tool_tasks.add(tool_task)
@@ -637,7 +608,6 @@ class RealtimeBridge:
                                     self._pre_current_relationship_state,
                                     reduce_live_state(self._pre_current_relationship_state, evidence))
                                 if previous != self._live_state:
-                                    await self._invalidate_contradicted_playback()
                                     await self._publish_live_state()
                             self._record_turn("user", text, metadata={
                                 "caller_turn_order": caller_order, "late_final": True})
@@ -657,7 +627,6 @@ class RealtimeBridge:
                             self._revoke_pending_end_call()
                             self._record_caller_revision(caller_order, text)
                             await self._observe_contact_turn(text, caller_raw, revision=True)
-                            await self._invalidate_contradicted_playback()
                             await self._publish_live_state()
                             continue
                         self._pre_current_relationship_state = self._live_state
@@ -678,15 +647,9 @@ class RealtimeBridge:
                             self._live_state = reduce_live_state(
                                 self._live_state, evidence
                             )
-                            await self._invalidate_contradicted_playback()
                             await self._publish_live_state()
                         _tidx = self._turn_index
-                        self._current_contact_baseline = getattr(self._contact_session, "captured_slots", None)
-                        self._current_contact_history = tuple(self._contact_history)
-                        self._current_contact_readback = self._last_contact_readback
                         await self._observe_contact_turn(text, caller_raw)
-                        observed_slots = getattr(self._contact_session, "captured_slots", None)
-                        self._current_contact_result = replace(observed_slots) if is_dataclass(observed_slots) else None
                         self._remember_contact_turn("user", text)
                         self._current_caller_transcript_index = self._record_turn("user", text, metadata={
                             "provider_item_id": self._current_caller_item_key,
@@ -731,36 +694,6 @@ class RealtimeBridge:
         send = getattr(self._gw, "send_control_event", None)
         if callable(send):
             await send(self._call_id, payload)
-
-    async def _invalidate_contradicted_playback(self, owned_utterance=None) -> bool:
-        """Stop only an unfinished utterance contradicted by accepted evidence."""
-        from app.domain.services.voice_pipeline.conversation_guards import contradicted_customer_claim
-        utterance = self._utterance
-        if owned_utterance is not None and (
-                utterance is not owned_utterance
-                or owned_utterance.get("status") == "interrupted"):
-            return True
-        if (not utterance or utterance.get("status") in {"completed", "interrupted"}
-                or not contradicted_customer_claim(utterance.get("text", ""),
-                    relationship=self._live_state.customer_relationship)):
-            return False
-        retry_available = not self._repair_attempted
-        self._repair_attempted = True
-        await self._cancel_playback()
-        if not retry_available:
-            self._failure_reason = "Realtime reply failed validation twice"
-            self._stop.set()
-            close = getattr(self._rt, "close", None)
-            if callable(close):
-                await close()
-            return True
-        # Some of this utterance may have reached the transport. Preserve its
-        # delivery/truncation evidence; never label it wholly withheld/unheard.
-        await self._publish_live_state()
-        request = getattr(self._rt, "request_response", None)
-        if callable(request) and not self._stop.is_set():
-            await request()
-        return True
 
     def _owns_unfinished_playback(self, utterance) -> bool:
         return (self._utterance is utterance
@@ -917,7 +850,7 @@ class RealtimeBridge:
         try:
             if not await self._admit_opt_out_playback(event, utterance):
                 return
-            if await self._invalidate_contradicted_playback(utterance):
+            if not self._owns_unfinished_playback(utterance):
                 return
             self._action_session._voice_action_delivered_text = ""
             await self._send_control_event({"type": "llm_response", "text": event.text})
@@ -940,7 +873,7 @@ class RealtimeBridge:
                     return
                 # Admission precedes each transport submission; ASR may finish
                 # while begin_playback/send_audio is awaiting the gateway.
-                if await self._invalidate_contradicted_playback(utterance):
+                if not self._owns_unfinished_playback(utterance):
                     return
                 if not await self._admit_opt_out_playback(event, utterance):
                     return
@@ -976,16 +909,12 @@ class RealtimeBridge:
             utterance["receipt"] = receipt
             self._record_turn("assistant", event.text, metadata={"delivery": receipt})
             utterance["transcript_recorded"] = True
-            # Generated text and queue acceptance are not contact confirmation.
-            # Only a transport with explicit playback acknowledgement may advance
-            # the contact readback state; other transports retain pending details.
+            # Retain delivery evidence for action authorization and history.
+            # Contact interpretation is handled by record_contact, not prose parsing.
             if (receipt.get("utterance_id") == utterance["id"]
                     and receipt.get("status") == "completed"
                     and receipt.get("evidence") == "transport_played"):
-                from app.domain.services.voice_pipeline.contact_capture import ContactReadback
-                self._last_contact_readback = ContactReadback(utterance_id=utterance["id"])
                 utterance["status"] = "completed"
-                self._observe_contact_agent_turn(event.text)
                 self._remember_contact_turn("assistant", event.text)
                 self._action_session._voice_action_delivered_text = event.text
                 if self._identity_opening_pending:
@@ -1035,267 +964,35 @@ class RealtimeBridge:
         if len(self._contact_history) > 12:
             del self._contact_history[:-12]
 
-    def _observe_contact_agent_turn(self, text: str) -> None:
-        from app.services.scripts.call_state_tracker import (
-            CallState,
-            update_state_from_agent_turn,
-        )
-
-        slots = getattr(self._contact_session, "captured_slots", None)
-        if slots is None or not is_dataclass(slots):
-            slots = CallState()
-        self._contact_session.captured_slots = update_state_from_agent_turn(
-            slots,
-            text,
-        )
-
-    @staticmethod
-    def _contact_evidence(raw: Any) -> tuple[Optional[float], tuple[str, ...], bool]:
-        if not isinstance(raw, dict):
-            return None, (), False
-        confidence = raw.get("confidence")
-        alternatives_raw = raw.get("alternatives") or raw.get(
-            "transcript_alternatives"
-        ) or ()
-        alternatives: list[str] = []
-        if isinstance(alternatives_raw, (list, tuple)):
-            for item in alternatives_raw:
-                value = (
-                    item.get("transcript") or item.get("text")
-                    if isinstance(item, dict)
-                    else item
-                )
-                if value:
-                    alternatives.append(str(value))
-        try:
-            parsed_confidence = float(confidence) if confidence is not None else None
-        except (TypeError, ValueError):
-            parsed_confidence = None
-        return (
-            parsed_confidence,
-            tuple(alternatives),
-            bool(raw.get("contact_reask")),
-        )
-
     async def _observe_contact_turn(self, text: str, raw: Any = None, *, revision: bool = False) -> None:
-        """Run the canonical contact machine on one realtime caller final."""
-        from app.services.scripts.call_state_tracker import (
-            CallState,
-            _classify_core_confirmation,
-            update_state_from_user_turn,
-        )
-        from app.domain.services.voice_pipeline.turn_runner import (
-            _agent_read_back_phone,
-            _is_email_correction,
-            _is_phone_correction,
-            email_on_the_table,
-        )
-        from app.domain.services.voice_pipeline.contact_capture import (
-            ContactSource, ContactCaptureState, CaptureStatus, bind_contact_evidence,
-        )
-
-        slots = getattr(self._contact_session, "captured_slots", None)
-        if slots is None or not is_dataclass(slots):
-            slots = CallState()
-        before_signature = self._contact_state_signature(slots)
-        current_slots = slots
-        history = self._contact_history
-        readback_receipt = self._last_contact_readback
+        """Bind caller ownership without parsing or interrupting the model reply."""
+        from app.domain.services.voice_pipeline.contact_capture import ContactSource
+        from app.domain.services.voice_pipeline.contact_recording import bind_contact_turn
         source = None
         if self._caller_item_id(raw) == self._current_caller_item_key and self._current_caller_item_key is not None:
             source = ContactSource(self._current_caller_item_key, self._current_caller_order,
                 hashlib.sha256(text.strip().encode("utf-8")).hexdigest())
+        before = getattr(self._contact_session, "captured_slots", None)
+        bind_contact_turn(self._contact_session, text, source)
         if revision:
-            slots = self._current_contact_baseline or CallState()
-            history = self._current_contact_history
-            readback_receipt = self._current_contact_readback
-        baseline = slots
-
-        # Same rule as the cascaded path (turn_runner.email_on_the_table): the
-        # agent's LATEST read-back is the value the caller is answering.
-        slots, email_readback = email_on_the_table(slots, text, history)
-        pending_email = getattr(slots, "email", None)
-
-        pending_phone = getattr(slots, "phone", None)
-        phone_readback = _agent_read_back_phone(
-            history, pending_phone
-        )
-        email_gate = bool(
-            pending_email
-            and not getattr(slots, "email_confirmed", False)
-            and email_readback
-            and not _is_email_correction(text, pending_email)
-        )
-        phone_gate = bool(
-            pending_phone
-            and not getattr(slots, "phone_confirmed", False)
-            and phone_readback
-            and not _is_phone_correction(text, pending_phone)
-        )
-        confidence, alternatives, explicit_reask = self._contact_evidence(raw)
-        updated = update_state_from_user_turn(
-            slots,
-            text,
-            readback_issued=email_readback,
-            confirmation_verdict=(
-                _classify_core_confirmation(text) if email_gate else None
-            ),
-            phone_readback_issued=phone_readback,
-            phone_confirmation_verdict=(
-                _classify_core_confirmation(text) if phone_gate else None
-            ),
-            phone_region=self._contact_phone_region,
-            independent_confirmation_value=pending_email,
-            phone_independent_confirmation_value=pending_phone,
-            transcript_confidence=confidence,
-            transcript_alternatives=alternatives,
-            explicit_contact_reask=explicit_reask,
-        )
-        updated = bind_contact_evidence(baseline, updated, source, readback=readback_receipt)
-        if revision:
-            # Re-evaluate only the current ASR item's contribution against its
-            # original context. Never restore the whole old CallState: another
-            # contact/tool/manual producer may have changed unrelated fields.
-            changes = {}
-            owned_kinds = set()
-            prior_result = self._current_contact_result or baseline
-            for kind in ("email", "phone"):
-                previous = getattr(prior_result, f"{kind}_capture", None)
-                owned_fields = (f"{kind}_capture", kind, f"{kind}_confirmed",
-                                f"{kind}_readback_attempts", f"earlier_{kind}_captures")
-                if any(getattr(current_slots, name, None) != getattr(prior_result, name, None)
-                       for name in owned_fields):
-                    continue
-                # Equality with the result we actually observed proves this
-                # field has no intervening independent writer, including a
-                # result with no contact where corrected ASR introduces one.
-                candidate = getattr(updated, f"{kind}_capture", None)
-                if candidate is None and previous is not None:
-                    candidate = ContactCaptureState(kind=kind, status=CaptureStatus.NEEDS_CLARIFICATION,
-                        value_source=source, status_source=source,
-                        clarification_prompt="Please state that contact detail again.")
-                changes[f"{kind}_capture"] = candidate
-                changes[kind] = candidate.normalized_value if candidate else None
-                changes[f"{kind}_confirmed"] = bool(candidate and candidate.status is CaptureStatus.CONFIRMED)
-                changes[f"{kind}_readback_attempts"] = candidate.attempts if candidate else 0
-                # Additional contacts are part of this field only; an unrelated
-                # current capture does not authorize reverting their sequence.
-                previous_earlier = getattr(prior_result, f"earlier_{kind}_captures", ())
-                if getattr(current_slots, f"earlier_{kind}_captures", ()) == previous_earlier:
-                    changes[f"earlier_{kind}_captures"] = getattr(updated, f"earlier_{kind}_captures", ())
-                owned_kinds.add(kind)
-            if getattr(current_slots, "active_contact_kind", None) in owned_kinds or current_slots.active_contact_kind is None:
-                changes["active_contact_kind"] = updated.active_contact_kind
-            if current_slots.contact_capture_paused == prior_result.contact_capture_paused:
-                changes["contact_capture_paused"] = updated.contact_capture_paused
-            updated = replace(current_slots, **changes)
-            for kind in {"email", "phone"} - owned_kinds:
-                # CallState's compatibility constructor lifts bare scalars.
-                # A revision must preserve an independent producer's exact
-                # evidence shape, not manufacture structured confirmation.
-                object.__setattr__(updated, f"{kind}_capture", getattr(current_slots, f"{kind}_capture", None))
-            self._current_contact_result = replace(prior_result, **changes)
-            self._contact_session._lead_capture_revision_source = source
-            # Replace, rather than append, this caller entry in the short
-            # readback history; it is the same caller turn.
             for index in range(len(self._contact_history) - 1, -1, -1):
                 item = self._contact_history[index]
                 if str(getattr(item.role, "value", item.role)) == "user":
                     self._contact_history[index] = item.model_copy(update={"content": text})
                     break
-        self._contact_session.captured_slots = updated
-        previous_live_state = self._live_state
-        email_changed = not revision or (current_slots.email, current_slots.email_confirmed) != (updated.email, updated.email_confirmed)
-        phone_changed = not revision or (current_slots.phone, current_slots.phone_confirmed) != (updated.phone, updated.phone_confirmed)
-        self._live_state = reduce_live_state(
-            self._live_state,
-            ConfirmedContactsEvidence(
-                email=updated.email if email_changed else self._live_state.confirmed_email,
-                email_confirmed=bool(updated.email_confirmed) if email_changed else bool(self._live_state.confirmed_email),
-                phone=updated.phone if phone_changed else self._live_state.confirmed_phone,
-                phone_confirmed=bool(updated.phone_confirmed) if phone_changed else bool(self._live_state.confirmed_phone),
-            ),
-        )
-        if self._live_state != previous_live_state:
-            # Publish the canonical confirmation snapshot before any backend
-            # contact directive can trigger the provider's next response.
+        if before != self._contact_session.captured_slots:
+            self._sync_contact_state()
             await self._publish_live_state()
-        contact_changed = self._contact_state_signature(updated) != before_signature
-        if contact_changed:
-            from app.domain.services.voice_pipeline.contact_capture import (
-                CaptureStatus,
-                capture_mode_directive,
-            )
+            self._schedule_contact_persist(force=True)
 
-            directive_captures = []
-            for resolved_kind in ("email", "phone"):
-                candidate = getattr(updated, f"{resolved_kind}_capture", None)
-                prior = getattr(current_slots, f"{resolved_kind}_capture", None)
-                if (
-                    candidate is not None
-                    and candidate != prior
-                    and candidate.status
-                    in {CaptureStatus.CONFIRMED, CaptureStatus.CANCELLED}
-                ):
-                    directive_captures.append(candidate)
-
-            active_kind = getattr(updated, "active_contact_kind", None)
-            active_capture = getattr(updated, f"{active_kind}_capture", None)
-            paused = bool(getattr(updated, "contact_capture_paused", False))
-            if not paused and active_capture is not None and active_capture not in directive_captures:
-                directive_captures.append(active_capture)
-
-            directives = [
-                directive
-                for capture in directive_captures
-                if (directive := capture_mode_directive(capture))
-            ]
-            if getattr(self._gw, "playback_evidence", None) == "transmitted":
-                directives = [d.replace("ask for a clear yes or no", "ask the caller to say 'yes' and repeat the complete value, including the country code for a phone number") for d in directives]
-            if paused:
-                directives.append(
-                    "The caller paused or declined contact confirmation. Do not ask for or read back "
-                    "contact details unless the caller explicitly offers or resumes them. Retained "
-                    "candidates remain unconfirmed. Respect the caller's goodbye."
-                )
-            if directives:
-                # One provider interruption, ordered resolution first. This
-                # retires stale persistent system items before advancing to a
-                # second contact field without issuing two cancel requests.
-                await self._enforce_contact_directive("\n".join(directives))
-        self._schedule_contact_persist(force=contact_changed)
-
-    @staticmethod
-    def _contact_state_signature(slots: Any) -> tuple:
-        def one(name: str) -> tuple:
-            capture = getattr(slots, f"{name}_capture", None)
-            if capture is None:
-                return ()
-            return (
-                capture.status,
-                capture.normalized_value,
-                capture.attempts,
-                capture.clarification_prompt,
-                capture.value_source,
-                capture.confirmation_source,
-                capture.status_source,
-                capture.readback,
-            )
-
-        return (getattr(slots, "active_contact_kind", None),
-                bool(getattr(slots, "contact_capture_paused", False)), one("email"), one("phone"))
-
-    async def _enforce_contact_directive(self, directive: str) -> None:
-        """Replace the provider's speculative reply with backend-owned mode."""
-        sender = getattr(self._rt, "interrupt_with_text", None)
-        if not callable(sender):
-            logger.warning(
-                "realtime_contact_directive_unsupported call=%s",
-                self._call_id[:12],
-            )
+    def _sync_contact_state(self) -> None:
+        slots = self._contact_session.captured_slots
+        if slots is None:
             return
-        await self._cancel_playback()
-        await sender(directive)
+        self._action_session.captured_slots = slots
+        self._live_state = reduce_live_state(self._live_state, ConfirmedContactsEvidence(
+            email=slots.email, email_confirmed=slots.email_confirmed,
+            phone=slots.phone, phone_confirmed=slots.phone_confirmed))
 
     def _schedule_contact_persist(self, *, force: bool = False) -> None:
         if self._knowledge_pool is None:
@@ -1449,10 +1146,17 @@ class RealtimeBridge:
                 result = {**result, "status": "superseded", "text": _SUPERSEDED_KB_INFO, "sources": []}
             await self._rt.send_function_result(call_id, result)
 
-    async def _handle_function_call(self, fc: Any) -> None:
+    async def _handle_function_call(self, fc: Any, *, contact_turn=None) -> None:
         """Fulfil knowledge and deterministic action tools. Never raises."""
         try:
-            if fc.name == "knowledge_lookup":
+            if fc.name == "record_contact":
+                from app.domain.services.voice_pipeline.contact_recording import record_contact
+                result = await record_contact(self._contact_session, fc.parsed_arguments(),
+                    turn=contact_turn, pool=self._knowledge_pool)
+                self._sync_contact_state()
+                await self._publish_live_state()
+                await self._send_tool_result_after_playback(fc.call_id, result)
+            elif fc.name == "knowledge_lookup":
                 query = fc.parsed_arguments().get("query", "")
                 result = await self._lookup_knowledge(query)
                 if result["status"] != "superseded":
@@ -1541,7 +1245,7 @@ class RealtimeBridge:
                 fallback = (
                     execution_failure_result(self._action_session, fc.name)
                     if getattr(fc, "name", None) in VOICE_ACTION_NAMES
-                    else {"error": "lookup failed"}
+                    else {"error": "tool failed", "saved": False}
                 )
                 await self._send_tool_result_after_playback(
                     fc.call_id, fallback
