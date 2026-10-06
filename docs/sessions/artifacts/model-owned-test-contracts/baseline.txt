@@ -1,0 +1,346 @@
+..........FF.FF...............FFFFFFFFF.....FFFFFFFFFFF.F...FFFFFFFFFFFF [ 62%]
+FF...FFFFFFF...FFFFFFFF.F...FF.F....F.......                             [100%]
+================================== FAILURES ===================================
+____________ test_dry_run_does_not_initialize_provider_or_read_key ____________
+tests\unit\test_ag02_semantic_qualification.py:119: in test_dry_run_does_not_initialize_provider_or_read_key
+    assert q.main(["--endpoint", q.ENDPOINT, "--model", "openai/gpt-oss-20b", "--knowledge-mode", "retrieve",
+scripts\qualify_ag02_semantic.py:389: in main
+    raise QualificationBoundaryError(
+E   scripts.qualify_ag02_semantic.QualificationBoundaryError: The query-based qualification profile is superseded by model-selected section retrieval. A reviewed section-selection profile is required.
+_________________ test_existing_output_cannot_be_overwritten __________________
+tests\unit\test_ag02_semantic_qualification.py:132: in test_existing_output_cannot_be_overwritten
+    q.main(["--endpoint", q.ENDPOINT, "--model", "openai/gpt-oss-20b", "--knowledge-mode", "retrieve", "--output", str(output)])
+scripts\qualify_ag02_semantic.py:389: in main
+    raise QualificationBoundaryError(
+E   scripts.qualify_ag02_semantic.QualificationBoundaryError: The query-based qualification profile is superseded by model-selected section retrieval. A reviewed section-selection profile is required.
+_ test_real_adapter_two_rounds_capture_original_query_evidence_answer_and_profile _
+tests\unit\test_ag02_semantic_qualification.py:166: in test_real_adapter_two_rounds_capture_original_query_evidence_answer_and_profile
+    assert result["lookups"][0]["query"] == "refund processing"
+E   IndexError: list index out of range
+---------------------------- Captured log teardown ----------------------------
+ERROR    asyncio:base_events.py:1833 Task was destroyed but it is pending!
+task: <Task pending name='Task-16' coro=<<async_generator_athrow without __name__>()>>
+ERROR    asyncio:base_events.py:1833 Task was destroyed but it is pending!
+task: <Task pending name='Task-17' coro=<<async_generator_athrow without __name__>()>>
+ERROR    asyncio:base_events.py:1833 Task was destroyed but it is pending!
+task: <Task pending name='Task-18' coro=<<async_generator_athrow without __name__>()>>
+ERROR    asyncio:base_events.py:1833 Task was destroyed but it is pending!
+task: <Task pending name='Task-19' coro=<<async_generator_athrow without __name__>()>>
+________ test_wrong_final_answer_cannot_be_counted_as_semantic_success ________
+tests\unit\test_ag02_semantic_qualification.py:186: in test_wrong_final_answer_cannot_be_counted_as_semantic_success
+    assert result["mechanical"]["matched_expected_passage"] is True
+E   assert False is True
+---------------------------- Captured log teardown ----------------------------
+ERROR    asyncio:base_events.py:1833 Task was destroyed but it is pending!
+task: <Task pending name='Task-22' coro=<<async_generator_athrow without __name__>()>>
+ERROR    asyncio:base_events.py:1833 Task was destroyed but it is pending!
+task: <Task pending name='Task-23' coro=<<async_generator_athrow without __name__>()>>
+ERROR    asyncio:base_events.py:1833 Task was destroyed but it is pending!
+task: <Task pending name='Task-24' coro=<<async_generator_athrow without __name__>()>>
+ERROR    asyncio:base_events.py:1833 Task was destroyed but it is pending!
+task: <Task pending name='Task-25' coro=<<async_generator_athrow without __name__>()>>
+_______ test_no_exemplar_is_longer_than_one_short_beat[lead_gen-slots0] _______
+tests\unit\test_prompt_small_dialogue.py:188: in test_no_exemplar_is_longer_than_one_short_beat
+    assert exemplars, f"{persona} lost its few-shot exemplars"
+E   AssertionError: lead_gen lost its few-shot exemplars
+E   assert []
+___ test_no_exemplar_is_longer_than_one_short_beat[customer_support-slots1] ___
+tests\unit\test_prompt_small_dialogue.py:188: in test_no_exemplar_is_longer_than_one_short_beat
+    assert exemplars, f"{persona} lost its few-shot exemplars"
+E   AssertionError: customer_support lost its few-shot exemplars
+E   assert []
+_____ test_no_exemplar_is_longer_than_one_short_beat[receptionist-slots2] _____
+tests\unit\test_prompt_small_dialogue.py:188: in test_no_exemplar_is_longer_than_one_short_beat
+    assert exemplars, f"{persona} lost its few-shot exemplars"
+E   AssertionError: receptionist lost its few-shot exemplars
+E   assert []
+_ test_the_average_exemplar_is_a_short_beat_not_a_paragraph[lead_gen-slots0] __
+tests\unit\test_prompt_small_dialogue.py:204: in test_the_average_exemplar_is_a_short_beat_not_a_paragraph
+    mean = sum(_spoken_words(e) for e in exemplars) / len(exemplars)
+E   ZeroDivisionError: division by zero
+_ test_the_average_exemplar_is_a_short_beat_not_a_paragraph[customer_support-slots1] _
+tests\unit\test_prompt_small_dialogue.py:204: in test_the_average_exemplar_is_a_short_beat_not_a_paragraph
+    mean = sum(_spoken_words(e) for e in exemplars) / len(exemplars)
+E   ZeroDivisionError: division by zero
+_ test_the_average_exemplar_is_a_short_beat_not_a_paragraph[receptionist-slots2] _
+tests\unit\test_prompt_small_dialogue.py:204: in test_the_average_exemplar_is_a_short_beat_not_a_paragraph
+    mean = sum(_spoken_words(e) for e in exemplars) / len(exemplars)
+E   ZeroDivisionError: division by zero
+__________ test_some_exemplars_are_a_bare_fragment[lead_gen-slots0] ___________
+tests\unit\test_prompt_small_dialogue.py:220: in test_some_exemplars_are_a_bare_fragment
+    assert len(beats) / len(exemplars) >= _MIN_BEAT_FRACTION, (
+E   ZeroDivisionError: division by zero
+______ test_some_exemplars_are_a_bare_fragment[customer_support-slots1] _______
+tests\unit\test_prompt_small_dialogue.py:220: in test_some_exemplars_are_a_bare_fragment
+    assert len(beats) / len(exemplars) >= _MIN_BEAT_FRACTION, (
+E   ZeroDivisionError: division by zero
+________ test_some_exemplars_are_a_bare_fragment[receptionist-slots2] _________
+tests\unit\test_prompt_small_dialogue.py:220: in test_some_exemplars_are_a_bare_fragment
+    assert len(beats) / len(exemplars) >= _MIN_BEAT_FRACTION, (
+E   ZeroDivisionError: division by zero
+________ test_a_fragment_is_licensed_as_a_whole_turn[lead_gen-slots0] _________
+tests\unit\test_prompt_small_dialogue.py:309: in test_a_fragment_is_licensed_as_a_whole_turn
+    assert "a fragment is a whole turn" in out.lower()
+E   assert 'a fragment is a whole turn' in "## conversation guide you are alex, an ai assistant for acme. be honest about that identity. help with the caller's c...failed work is not complete. never promise an unavailable follow-up or conceal that you are an ai assistant for acme. "
+E    +  where "## conversation guide you are alex, an ai assistant for acme. be honest about that identity. help with the caller's c...failed work is not complete. never promise an unavailable follow-up or conceal that you are an ai assistant for acme. " = <built-in method lower of str object at 0x0000023B1560C010>()
+E    +    where <built-in method lower of str object at 0x0000023B1560C010> = "## CONVERSATION GUIDE You are Alex, an AI assistant for Acme. Be honest about that identity. Help with the caller's c...failed work is not complete. Never promise an unavailable follow-up or conceal that you are an AI assistant for Acme. ".lower
+____ test_a_fragment_is_licensed_as_a_whole_turn[customer_support-slots1] _____
+tests\unit\test_prompt_small_dialogue.py:309: in test_a_fragment_is_licensed_as_a_whole_turn
+    assert "a fragment is a whole turn" in out.lower()
+E   assert 'a fragment is a whole turn' in "## conversation guide you are alex, an ai assistant for acme. be honest about that identity. help with the caller's c...failed work is not complete. never promise an unavailable follow-up or conceal that you are an ai assistant for acme. "
+E    +  where "## conversation guide you are alex, an ai assistant for acme. be honest about that identity. help with the caller's c...failed work is not complete. never promise an unavailable follow-up or conceal that you are an ai assistant for acme. " = <built-in method lower of str object at 0x0000023B155C5D00>()
+E    +    where <built-in method lower of str object at 0x0000023B155C5D00> = "## CONVERSATION GUIDE You are Alex, an AI assistant for Acme. Be honest about that identity. Help with the caller's c...failed work is not complete. Never promise an unavailable follow-up or conceal that you are an AI assistant for Acme. ".lower
+______ test_a_fragment_is_licensed_as_a_whole_turn[receptionist-slots2] _______
+tests\unit\test_prompt_small_dialogue.py:309: in test_a_fragment_is_licensed_as_a_whole_turn
+    assert "a fragment is a whole turn" in out.lower()
+E   assert 'a fragment is a whole turn' in "## conversation guide you are alex, an ai assistant for acme. be honest about that identity. help with the caller's c...failed work is not complete. never promise an unavailable follow-up or conceal that you are an ai assistant for acme. "
+E    +  where "## conversation guide you are alex, an ai assistant for acme. be honest about that identity. help with the caller's c...failed work is not complete. never promise an unavailable follow-up or conceal that you are an ai assistant for acme. " = <built-in method lower of str object at 0x0000023B15352F90>()
+E    +    where <built-in method lower of str object at 0x0000023B15352F90> = "## CONVERSATION GUIDE You are Alex, an AI assistant for Acme. Be honest about that identity. Help with the caller's c...failed work is not complete. Never promise an unavailable follow-up or conceal that you are an AI assistant for Acme. ".lower
+_______ test_acknowledge_then_ask_is_named_as_the_move[lead_gen-slots0] _______
+tests\unit\test_prompt_small_dialogue.py:320: in test_acknowledge_then_ask_is_named_as_the_move
+    assert "lead with the answer" in out
+E   assert 'lead with the answer' in "## CONVERSATION GUIDE You are Alex, an AI assistant for Acme. Be honest about that identity. Help with the caller's c...failed work is not complete. Never promise an unavailable follow-up or conceal that you are an AI assistant for Acme. "
+___ test_acknowledge_then_ask_is_named_as_the_move[customer_support-slots1] ___
+tests\unit\test_prompt_small_dialogue.py:320: in test_acknowledge_then_ask_is_named_as_the_move
+    assert "lead with the answer" in out
+E   assert 'lead with the answer' in "## CONVERSATION GUIDE You are Alex, an AI assistant for Acme. Be honest about that identity. Help with the caller's c...failed work is not complete. Never promise an unavailable follow-up or conceal that you are an AI assistant for Acme. "
+_____ test_acknowledge_then_ask_is_named_as_the_move[receptionist-slots2] _____
+tests\unit\test_prompt_small_dialogue.py:320: in test_acknowledge_then_ask_is_named_as_the_move
+    assert "lead with the answer" in out
+E   assert 'lead with the answer' in "## CONVERSATION GUIDE You are Alex, an AI assistant for Acme. Be honest about that identity. Help with the caller's c...failed work is not complete. Never promise an unavailable follow-up or conceal that you are an AI assistant for Acme. "
+_______ test_the_agent_is_told_to_hand_the_floor_back[lead_gen-slots0] ________
+tests\unit\test_prompt_small_dialogue.py:327: in test_the_agent_is_told_to_hand_the_floor_back
+    assert "hand the floor back" in out
+E   assert 'hand the floor back' in "## CONVERSATION GUIDE You are Alex, an AI assistant for Acme. Be honest about that identity. Help with the caller's c...failed work is not complete. Never promise an unavailable follow-up or conceal that you are an AI assistant for Acme. "
+___ test_the_agent_is_told_to_hand_the_floor_back[customer_support-slots1] ____
+tests\unit\test_prompt_small_dialogue.py:327: in test_the_agent_is_told_to_hand_the_floor_back
+    assert "hand the floor back" in out
+E   assert 'hand the floor back' in "## CONVERSATION GUIDE You are Alex, an AI assistant for Acme. Be honest about that identity. Help with the caller's c...failed work is not complete. Never promise an unavailable follow-up or conceal that you are an AI assistant for Acme. "
+_____ test_the_agent_is_told_to_hand_the_floor_back[receptionist-slots2] ______
+tests\unit\test_prompt_small_dialogue.py:327: in test_the_agent_is_told_to_hand_the_floor_back
+    assert "hand the floor back" in out
+E   assert 'hand the floor back' in "## CONVERSATION GUIDE You are Alex, an AI assistant for Acme. Be honest about that identity. Help with the caller's c...failed work is not complete. Never promise an unavailable follow-up or conceal that you are an AI assistant for Acme. "
+______________ test_the_recency_slot_names_the_sub_sentence_turn ______________
+tests\unit\test_prompt_small_dialogue.py:333: in test_the_recency_slot_names_the_sub_sentence_turn
+    assert "often just a few words" in COMMUNICATION_PRINCIPLES
+E   AssertionError: assert 'often just a few words' in '## HOW TO SPEAK\nBe warm, clear and concise; expand when the caller needs detail. Use your own natural\nwording. Ask ...dy delivered. Speak only caller-facing words, without internal\nreasoning, tool names, markdown or stage directions.\n'
+________ test_every_block_that_sizes_the_opener_states_the_same_budget ________
+tests\unit\test_prompt_small_dialogue.py:379: in test_every_block_that_sizes_the_opener_states_the_same_budget
+    assert "one breath" in low, f"{name} does not budget the opener"
+E   AssertionError: lead_gen outbound does not budget the opener
+E   assert 'one breath' in 'opening context this is an outbound call about {call_reason}. introduce {agent_name} and {company_name} naturally if needed, then listen. '
+______ test_live_state_still_asks_for_the_opening_it_is_there_to_trigger ______
+tests\unit\test_prompt_small_dialogue.py:409: in test_live_state_still_asks_for_the_opening_it_is_there_to_trigger
+    assert "have not introduced yourself yet" in block
+E   AssertionError: assert 'have not introduced yourself yet' in 'LIVE STATE — runtime facts, not a script: agent=Alex company=Acme direction=outbound introduction=not_delivered'
+__ test_fewest_sentences_instruction_reaches_every_persona[lead_gen-slots0] ___
+tests\unit\test_prompt_brevity_and_narration.py:125: in test_fewest_sentences_instruction_reaches_every_persona
+    assert "Answer in the fewest sentences that actually answer it" in out
+E   assert 'Answer in the fewest sentences that actually answer it' in "## CONVERSATION GUIDE You are Alex, an AI assistant for Acme. Be honest about that identity. Help with the caller's c...failed work is not complete. Never promise an unavailable follow-up or conceal that you are an AI assistant for Acme. "
+_ test_fewest_sentences_instruction_reaches_every_persona[customer_support-slots1] _
+tests\unit\test_prompt_brevity_and_narration.py:125: in test_fewest_sentences_instruction_reaches_every_persona
+    assert "Answer in the fewest sentences that actually answer it" in out
+E   assert 'Answer in the fewest sentences that actually answer it' in "## CONVERSATION GUIDE You are Alex, an AI assistant for Acme. Be honest about that identity. Help with the caller's c...failed work is not complete. Never promise an unavailable follow-up or conceal that you are an AI assistant for Acme. "
+_ test_fewest_sentences_instruction_reaches_every_persona[receptionist-slots2] _
+tests\unit\test_prompt_brevity_and_narration.py:125: in test_fewest_sentences_instruction_reaches_every_persona
+    assert "Answer in the fewest sentences that actually answer it" in out
+E   assert 'Answer in the fewest sentences that actually answer it' in "## CONVERSATION GUIDE You are Alex, an AI assistant for Acme. Be honest about that identity. Help with the caller's c...failed work is not complete. Never promise an unavailable follow-up or conceal that you are an AI assistant for Acme. "
+_ test_knowledge_driven_campaigns_get_the_same_brevity_target[lead_gen-slots0] _
+tests\unit\test_prompt_brevity_and_narration.py:132: in test_knowledge_driven_campaigns_get_the_same_brevity_target
+    assert out.count("Answer in the fewest sentences that actually answer it") == 1
+E   assert 0 == 1
+E    +  where 0 = <built-in method count of str object at 0x0000023B05A52CE0>('Answer in the fewest sentences that actually answer it')
+E    +    where <built-in method count of str object at 0x0000023B05A52CE0> = "## CONVERSATION GUIDE You are Alex, an AI assistant for Acme. Be honest about that identity. Help with the caller's c...failed work is not complete. Never promise an unavailable follow-up or conceal that you are an AI assistant for Acme. ".count
+_ test_knowledge_driven_campaigns_get_the_same_brevity_target[customer_support-slots1] _
+tests\unit\test_prompt_brevity_and_narration.py:132: in test_knowledge_driven_campaigns_get_the_same_brevity_target
+    assert out.count("Answer in the fewest sentences that actually answer it") == 1
+E   assert 0 == 1
+E    +  where 0 = <built-in method count of str object at 0x0000023B0590BC30>('Answer in the fewest sentences that actually answer it')
+E    +    where <built-in method count of str object at 0x0000023B0590BC30> = "## CONVERSATION GUIDE You are Alex, an AI assistant for Acme. Be honest about that identity. Help with the caller's c...failed work is not complete. Never promise an unavailable follow-up or conceal that you are an AI assistant for Acme. ".count
+_ test_knowledge_driven_campaigns_get_the_same_brevity_target[receptionist-slots2] _
+tests\unit\test_prompt_brevity_and_narration.py:132: in test_knowledge_driven_campaigns_get_the_same_brevity_target
+    assert out.count("Answer in the fewest sentences that actually answer it") == 1
+E   assert 0 == 1
+E    +  where 0 = <built-in method count of str object at 0x0000023B0556A6B0>('Answer in the fewest sentences that actually answer it')
+E    +    where <built-in method count of str object at 0x0000023B0556A6B0> = "## CONVERSATION GUIDE You are Alex, an AI assistant for Acme. Be honest about that identity. Help with the caller's c...failed work is not complete. Never promise an unavailable follow-up or conceal that you are an AI assistant for Acme. ".count
+____________ test_one_question_then_stop_talking[lead_gen-slots0] _____________
+tests\unit\test_prompt_brevity_and_narration.py:139: in test_one_question_then_stop_talking
+    assert "Ask at most ONE question per turn" in out
+E   assert 'Ask at most ONE question per turn' in "## CONVERSATION GUIDE You are Alex, an AI assistant for Acme. Be honest about that identity. Help with the caller's c...failed work is not complete. Never promise an unavailable follow-up or conceal that you are an AI assistant for Acme. "
+________ test_one_question_then_stop_talking[customer_support-slots1] _________
+tests\unit\test_prompt_brevity_and_narration.py:139: in test_one_question_then_stop_talking
+    assert "Ask at most ONE question per turn" in out
+E   assert 'Ask at most ONE question per turn' in "## CONVERSATION GUIDE You are Alex, an AI assistant for Acme. Be honest about that identity. Help with the caller's c...failed work is not complete. Never promise an unavailable follow-up or conceal that you are an AI assistant for Acme. "
+__________ test_one_question_then_stop_talking[receptionist-slots2] ___________
+tests\unit\test_prompt_brevity_and_narration.py:139: in test_one_question_then_stop_talking
+    assert "Ask at most ONE question per turn" in out
+E   assert 'Ask at most ONE question per turn' in "## CONVERSATION GUIDE You are Alex, an AI assistant for Acme. Be honest about that identity. Help with the caller's c...failed work is not complete. Never promise an unavailable follow-up or conceal that you are an AI assistant for Acme. "
+________ test_no_statement_explanation_question_stack[lead_gen-slots0] ________
+tests\unit\test_prompt_brevity_and_narration.py:146: in test_no_statement_explanation_question_stack
+    assert "let that be the whole turn; add a question only when useful" in out
+E   assert 'let that be the whole turn; add a question only when useful' in "## CONVERSATION GUIDE You are Alex, an AI assistant for Acme. Be honest about that identity. Help with the caller's c...failed work is not complete. Never promise an unavailable follow-up or conceal that you are an AI assistant for Acme. "
+____ test_no_statement_explanation_question_stack[customer_support-slots1] ____
+tests\unit\test_prompt_brevity_and_narration.py:146: in test_no_statement_explanation_question_stack
+    assert "let that be the whole turn; add a question only when useful" in out
+E   assert 'let that be the whole turn; add a question only when useful' in "## CONVERSATION GUIDE You are Alex, an AI assistant for Acme. Be honest about that identity. Help with the caller's c...failed work is not complete. Never promise an unavailable follow-up or conceal that you are an AI assistant for Acme. "
+______ test_no_statement_explanation_question_stack[receptionist-slots2] ______
+tests\unit\test_prompt_brevity_and_narration.py:146: in test_no_statement_explanation_question_stack
+    assert "let that be the whole turn; add a question only when useful" in out
+E   assert 'let that be the whole turn; add a question only when useful' in "## CONVERSATION GUIDE You are Alex, an AI assistant for Acme. Be honest about that identity. Help with the caller's c...failed work is not complete. Never promise an unavailable follow-up or conceal that you are an AI assistant for Acme. "
+______ test_communication_principles_do_not_license_the_three_part_stack ______
+tests\unit\test_prompt_brevity_and_narration.py:163: in test_communication_principles_do_not_license_the_three_part_stack
+    assert "lead with the answer" in flat
+E   AssertionError: assert 'lead with the answer' in '## HOW TO SPEAK Be warm, clear and concise; expand when the caller needs detail. Use your own natural wording. Ask on...eady delivered. Speak only caller-facing words, without internal reasoning, tool names, markdown or stage directions. '
+___________ test_the_three_turn_shape_blocks_agree_with_each_other ____________
+tests\unit\test_prompt_brevity_and_narration.py:172: in test_the_three_turn_shape_blocks_agree_with_each_other
+    assert "fewest sentences" in COMMUNICATION_PRINCIPLES
+E   AssertionError: assert 'fewest sentences' in '## HOW TO SPEAK\nBe warm, clear and concise; expand when the caller needs detail. Use your own natural\nwording. Ask ...dy delivered. Speak only caller-facing words, without internal\nreasoning, tool names, markdown or stage directions.\n'
+____________ test_thinking_and_lookups_are_silent[lead_gen-slots0] ____________
+tests\unit\test_prompt_brevity_and_narration.py:210: in test_thinking_and_lookups_are_silent
+    assert "Thinking, reading and tools all happen silently" in out
+E   assert 'Thinking, reading and tools all happen silently' in "## CONVERSATION GUIDE You are Alex, an AI assistant for Acme. Be honest about that identity. Help with the caller's c...failed work is not complete. Never promise an unavailable follow-up or conceal that you are an AI assistant for Acme. "
+________ test_thinking_and_lookups_are_silent[customer_support-slots1] ________
+tests\unit\test_prompt_brevity_and_narration.py:210: in test_thinking_and_lookups_are_silent
+    assert "Thinking, reading and tools all happen silently" in out
+E   assert 'Thinking, reading and tools all happen silently' in "## CONVERSATION GUIDE You are Alex, an AI assistant for Acme. Be honest about that identity. Help with the caller's c...failed work is not complete. Never promise an unavailable follow-up or conceal that you are an AI assistant for Acme. "
+__________ test_thinking_and_lookups_are_silent[receptionist-slots2] __________
+tests\unit\test_prompt_brevity_and_narration.py:210: in test_thinking_and_lookups_are_silent
+    assert "Thinking, reading and tools all happen silently" in out
+E   assert 'Thinking, reading and tools all happen silently' in "## CONVERSATION GUIDE You are Alex, an AI assistant for Acme. Be honest about that identity. Help with the caller's c...failed work is not complete. Never promise an unavailable follow-up or conceal that you are an AI assistant for Acme. "
+__ test_a_knowledge_miss_is_a_next_step_not_a_status_report[lead_gen-slots0] __
+tests\unit\test_prompt_brevity_and_narration.py:218: in test_a_knowledge_miss_is_a_next_step_not_a_status_report
+    assert "Offer only a next step actually available" in out
+E   assert 'Offer only a next step actually available' in "## CONVERSATION GUIDE You are Alex, an AI assistant for Acme. Be honest about that identity. Help with the caller's c...failed work is not complete. Never promise an unavailable follow-up or conceal that you are an AI assistant for Acme. "
+_ test_a_knowledge_miss_is_a_next_step_not_a_status_report[customer_support-slots1] _
+tests\unit\test_prompt_brevity_and_narration.py:218: in test_a_knowledge_miss_is_a_next_step_not_a_status_report
+    assert "Offer only a next step actually available" in out
+E   assert 'Offer only a next step actually available' in "## CONVERSATION GUIDE You are Alex, an AI assistant for Acme. Be honest about that identity. Help with the caller's c...failed work is not complete. Never promise an unavailable follow-up or conceal that you are an AI assistant for Acme. "
+_ test_a_knowledge_miss_is_a_next_step_not_a_status_report[receptionist-slots2] _
+tests\unit\test_prompt_brevity_and_narration.py:218: in test_a_knowledge_miss_is_a_next_step_not_a_status_report
+    assert "Offer only a next step actually available" in out
+E   assert 'Offer only a next step actually available' in "## CONVERSATION GUIDE You are Alex, an AI assistant for Acme. Be honest about that identity. Help with the caller's c...failed work is not complete. Never promise an unavailable follow-up or conceal that you are an AI assistant for Acme. "
+________ test_never_mention_the_knowledge_base_covers_its_paraphrases _________
+tests\unit\test_prompt_brevity_and_narration.py:224: in test_never_mention_the_knowledge_base_covers_its_paraphrases
+    assert "do not narrate searches, the knowledge base or internal systems" in flat
+E   AssertionError: assert 'do not narrate searches, the knowledge base or internal systems' in '## COMPANY KNOWLEDGE Use the available knowledge tool for company facts, prices, policies and eligibility. Search the...ng campaign prose. If no source supports the answer, say you cannot confirm it and offer only an available next step. '
+_ test_filler_permission_survives_the_narration_fix[customer_support-slots0] __
+tests\unit\test_prompt_brevity_and_narration.py:284: in test_filler_permission_survives_the_narration_fix
+    assert "Use occasional fillers" in out
+E   assert 'Use occasional fillers' in "## CONVERSATION GUIDE You are Alex, an AI assistant for Acme. Be honest about that identity. Help with the caller's c...failed work is not complete. Never promise an unavailable follow-up or conceal that you are an AI assistant for Acme. "
+___ test_filler_permission_survives_the_narration_fix[receptionist-slots1] ____
+tests\unit\test_prompt_brevity_and_narration.py:284: in test_filler_permission_survives_the_narration_fix
+    assert "Use occasional fillers" in out
+E   assert 'Use occasional fillers' in "## CONVERSATION GUIDE You are Alex, an AI assistant for Acme. Be honest about that identity. Help with the caller's c...failed work is not complete. Never promise an unavailable follow-up or conceal that you are an AI assistant for Acme. "
+_____________ test_few_shot_exemplars_are_short[lead_gen-slots0] ______________
+tests\unit\test_prompt_brevity_and_narration.py:296: in test_few_shot_exemplars_are_short
+    assert exemplars, f"{persona} lost its few-shot exemplars"
+E   AssertionError: lead_gen lost its few-shot exemplars
+E   assert []
+_________ test_few_shot_exemplars_are_short[customer_support-slots1] __________
+tests\unit\test_prompt_brevity_and_narration.py:296: in test_few_shot_exemplars_are_short
+    assert exemplars, f"{persona} lost its few-shot exemplars"
+E   AssertionError: customer_support lost its few-shot exemplars
+E   assert []
+___________ test_few_shot_exemplars_are_short[receptionist-slots2] ____________
+tests\unit\test_prompt_brevity_and_narration.py:296: in test_few_shot_exemplars_are_short
+    assert exemplars, f"{persona} lost its few-shot exemplars"
+E   AssertionError: receptionist lost its few-shot exemplars
+E   assert []
+_____________ test_lead_gen_opener_shape_fits_the_decision_window _____________
+tests\unit\test_prompt_brevity_and_narration.py:328: in test_lead_gen_opener_shape_fits_the_decision_window
+    assert shapes, f"{direction} opener lost its example shape"
+E   AssertionError: outbound opener lost its example shape
+E   assert []
+___________ test_lead_gen_opener_tells_the_agent_to_stop[outbound] ____________
+tests\unit\test_prompt_brevity_and_narration.py:351: in test_lead_gen_opener_tells_the_agent_to_stop
+    assert "one breath" in block.lower()
+E   AssertionError: assert 'one breath' in 'opening context this is an outbound call about {call_reason}. introduce {agent_name} and {company_name} naturally if needed, then listen. '
+E    +  where 'opening context this is an outbound call about {call_reason}. introduce {agent_name} and {company_name} naturally if needed, then listen. ' = <built-in method lower of str object at 0x0000023B167559B0>()
+E    +    where <built-in method lower of str object at 0x0000023B167559B0> = 'OPENING CONTEXT This is an outbound call about {call_reason}. Introduce {agent_name} and {company_name} naturally if needed, then listen. '.lower
+____________ test_lead_gen_opener_tells_the_agent_to_stop[inbound] ____________
+tests\unit\test_prompt_brevity_and_narration.py:351: in test_lead_gen_opener_tells_the_agent_to_stop
+    assert "one breath" in block.lower()
+E   AssertionError: assert 'one breath' in 'opening context this is an outbound call; the recipient speaks first. explain the purpose ({call_reason}) naturally when relevant. '
+E    +  where 'opening context this is an outbound call; the recipient speaks first. explain the purpose ({call_reason}) naturally when relevant. ' = <built-in method lower of str object at 0x0000023B1672AA20>()
+E    +    where <built-in method lower of str object at 0x0000023B1672AA20> = 'OPENING CONTEXT This is an outbound call; the recipient speaks first. Explain the purpose ({call_reason}) naturally when relevant. '.lower
+________ test_compliance_reanchor_carries_key_invariants_and_is_short _________
+tests\unit\test_prompt_audit_fixes.py:18: in test_compliance_reanchor_carries_key_invariants_and_is_short
+    assert "ai assistant for acme roofing" in low          # AI-disclosure
+E   AssertionError: assert 'ai assistant for acme roofing' in '## non-negotiables\nrespect the caller and use current evidence. only successful runtime receipts establish\ncompleted actions for acme roofing; never promise unavailable work.\n'
+_____________ test_knowledge_precedence_allows_prompt_body_facts ______________
+tests\unit\test_prompt_audit_fixes.py:66: in test_knowledge_precedence_allows_prompt_body_facts
+    assert "campaign details" in low
+E   AssertionError: assert 'campaign details' in '## company knowledge\nuse the available knowledge tool for company facts, prices, policies and eligibility.\nsearch t... campaign prose. if no source supports\nthe answer, say you cannot confirm it and offer only an available next step.\n'
+_____________ test_inline_kb_rejects_poisoned_tree_before_baking ______________
+tests\unit\test_prompt_audit_fixes.py:87: in test_inline_kb_rejects_poisoned_tree_before_baking
+    monkeypatch.setattr(si, "compact_tree", fake_compact_tree)
+E   AttributeError: <module 'app.services.scripts.knowledge.session_inject' from 'C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\model-owned-test-contracts-20261007\\backend\\app\\services\\scripts\\knowledge\\session_inject.py'> has no attribute 'compact_tree'
+_________ test_kd_agent_first_prompt_keeps_the_pickup_greeting_stage __________
+tests\unit\test_prompt_consistency.py:43: in test_kd_agent_first_prompt_keeps_the_pickup_greeting_stage
+    assert "already played" in p
+E   assert 'already played' in "## CONVERSATION GUIDE\nYou are Sarah, an AI assistant for Dojo. Be honest about that identity.\nHelp with the caller'...led work\nis not complete. Never promise an unavailable follow-up or conceal that you are an AI\nassistant for Dojo.\n"
+____________ test_wrong_person_is_a_pivot_everywhere_not_a_hangup _____________
+tests\unit\test_prompt_consistency.py:84: in test_wrong_person_is_a_pivot_everywhere_not_a_hangup
+    assert "WRONG NUMBER / WRONG BUSINESS" in p
+E   assert 'WRONG NUMBER / WRONG BUSINESS' in "## CONVERSATION GUIDE\nYou are Sarah, an AI assistant for Dojo. Be honest about that identity.\nHelp with the caller'...led work\nis not complete. Never promise an unavailable follow-up or conceal that you are an AI\nassistant for Dojo.\n"
+=========================== short test summary info ===========================
+FAILED tests/unit/test_ag02_semantic_qualification.py::test_dry_run_does_not_initialize_provider_or_read_key
+FAILED tests/unit/test_ag02_semantic_qualification.py::test_existing_output_cannot_be_overwritten
+FAILED tests/unit/test_ag02_semantic_qualification.py::test_real_adapter_two_rounds_capture_original_query_evidence_answer_and_profile
+FAILED tests/unit/test_ag02_semantic_qualification.py::test_wrong_final_answer_cannot_be_counted_as_semantic_success
+FAILED tests/unit/test_prompt_small_dialogue.py::test_no_exemplar_is_longer_than_one_short_beat[lead_gen-slots0]
+FAILED tests/unit/test_prompt_small_dialogue.py::test_no_exemplar_is_longer_than_one_short_beat[customer_support-slots1]
+FAILED tests/unit/test_prompt_small_dialogue.py::test_no_exemplar_is_longer_than_one_short_beat[receptionist-slots2]
+FAILED tests/unit/test_prompt_small_dialogue.py::test_the_average_exemplar_is_a_short_beat_not_a_paragraph[lead_gen-slots0]
+FAILED tests/unit/test_prompt_small_dialogue.py::test_the_average_exemplar_is_a_short_beat_not_a_paragraph[customer_support-slots1]
+FAILED tests/unit/test_prompt_small_dialogue.py::test_the_average_exemplar_is_a_short_beat_not_a_paragraph[receptionist-slots2]
+FAILED tests/unit/test_prompt_small_dialogue.py::test_some_exemplars_are_a_bare_fragment[lead_gen-slots0]
+FAILED tests/unit/test_prompt_small_dialogue.py::test_some_exemplars_are_a_bare_fragment[customer_support-slots1]
+FAILED tests/unit/test_prompt_small_dialogue.py::test_some_exemplars_are_a_bare_fragment[receptionist-slots2]
+FAILED tests/unit/test_prompt_small_dialogue.py::test_a_fragment_is_licensed_as_a_whole_turn[lead_gen-slots0]
+FAILED tests/unit/test_prompt_small_dialogue.py::test_a_fragment_is_licensed_as_a_whole_turn[customer_support-slots1]
+FAILED tests/unit/test_prompt_small_dialogue.py::test_a_fragment_is_licensed_as_a_whole_turn[receptionist-slots2]
+FAILED tests/unit/test_prompt_small_dialogue.py::test_acknowledge_then_ask_is_named_as_the_move[lead_gen-slots0]
+FAILED tests/unit/test_prompt_small_dialogue.py::test_acknowledge_then_ask_is_named_as_the_move[customer_support-slots1]
+FAILED tests/unit/test_prompt_small_dialogue.py::test_acknowledge_then_ask_is_named_as_the_move[receptionist-slots2]
+FAILED tests/unit/test_prompt_small_dialogue.py::test_the_agent_is_told_to_hand_the_floor_back[lead_gen-slots0]
+FAILED tests/unit/test_prompt_small_dialogue.py::test_the_agent_is_told_to_hand_the_floor_back[customer_support-slots1]
+FAILED tests/unit/test_prompt_small_dialogue.py::test_the_agent_is_told_to_hand_the_floor_back[receptionist-slots2]
+FAILED tests/unit/test_prompt_small_dialogue.py::test_the_recency_slot_names_the_sub_sentence_turn
+FAILED tests/unit/test_prompt_small_dialogue.py::test_every_block_that_sizes_the_opener_states_the_same_budget
+FAILED tests/unit/test_prompt_small_dialogue.py::test_live_state_still_asks_for_the_opening_it_is_there_to_trigger
+FAILED tests/unit/test_prompt_brevity_and_narration.py::test_fewest_sentences_instruction_reaches_every_persona[lead_gen-slots0]
+FAILED tests/unit/test_prompt_brevity_and_narration.py::test_fewest_sentences_instruction_reaches_every_persona[customer_support-slots1]
+FAILED tests/unit/test_prompt_brevity_and_narration.py::test_fewest_sentences_instruction_reaches_every_persona[receptionist-slots2]
+FAILED tests/unit/test_prompt_brevity_and_narration.py::test_knowledge_driven_campaigns_get_the_same_brevity_target[lead_gen-slots0]
+FAILED tests/unit/test_prompt_brevity_and_narration.py::test_knowledge_driven_campaigns_get_the_same_brevity_target[customer_support-slots1]
+FAILED tests/unit/test_prompt_brevity_and_narration.py::test_knowledge_driven_campaigns_get_the_same_brevity_target[receptionist-slots2]
+FAILED tests/unit/test_prompt_brevity_and_narration.py::test_one_question_then_stop_talking[lead_gen-slots0]
+FAILED tests/unit/test_prompt_brevity_and_narration.py::test_one_question_then_stop_talking[customer_support-slots1]
+FAILED tests/unit/test_prompt_brevity_and_narration.py::test_one_question_then_stop_talking[receptionist-slots2]
+FAILED tests/unit/test_prompt_brevity_and_narration.py::test_no_statement_explanation_question_stack[lead_gen-slots0]
+FAILED tests/unit/test_prompt_brevity_and_narration.py::test_no_statement_explanation_question_stack[customer_support-slots1]
+FAILED tests/unit/test_prompt_brevity_and_narration.py::test_no_statement_explanation_question_stack[receptionist-slots2]
+FAILED tests/unit/test_prompt_brevity_and_narration.py::test_communication_principles_do_not_license_the_three_part_stack
+FAILED tests/unit/test_prompt_brevity_and_narration.py::test_the_three_turn_shape_blocks_agree_with_each_other
+FAILED tests/unit/test_prompt_brevity_and_narration.py::test_thinking_and_lookups_are_silent[lead_gen-slots0]
+FAILED tests/unit/test_prompt_brevity_and_narration.py::test_thinking_and_lookups_are_silent[customer_support-slots1]
+FAILED tests/unit/test_prompt_brevity_and_narration.py::test_thinking_and_lookups_are_silent[receptionist-slots2]
+FAILED tests/unit/test_prompt_brevity_and_narration.py::test_a_knowledge_miss_is_a_next_step_not_a_status_report[lead_gen-slots0]
+FAILED tests/unit/test_prompt_brevity_and_narration.py::test_a_knowledge_miss_is_a_next_step_not_a_status_report[customer_support-slots1]
+FAILED tests/unit/test_prompt_brevity_and_narration.py::test_a_knowledge_miss_is_a_next_step_not_a_status_report[receptionist-slots2]
+FAILED tests/unit/test_prompt_brevity_and_narration.py::test_never_mention_the_knowledge_base_covers_its_paraphrases
+FAILED tests/unit/test_prompt_brevity_and_narration.py::test_filler_permission_survives_the_narration_fix[customer_support-slots0]
+FAILED tests/unit/test_prompt_brevity_and_narration.py::test_filler_permission_survives_the_narration_fix[receptionist-slots1]
+FAILED tests/unit/test_prompt_brevity_and_narration.py::test_few_shot_exemplars_are_short[lead_gen-slots0]
+FAILED tests/unit/test_prompt_brevity_and_narration.py::test_few_shot_exemplars_are_short[customer_support-slots1]
+FAILED tests/unit/test_prompt_brevity_and_narration.py::test_few_shot_exemplars_are_short[receptionist-slots2]
+FAILED tests/unit/test_prompt_brevity_and_narration.py::test_lead_gen_opener_shape_fits_the_decision_window
+FAILED tests/unit/test_prompt_brevity_and_narration.py::test_lead_gen_opener_tells_the_agent_to_stop[outbound]
+FAILED tests/unit/test_prompt_brevity_and_narration.py::test_lead_gen_opener_tells_the_agent_to_stop[inbound]
+FAILED tests/unit/test_prompt_audit_fixes.py::test_compliance_reanchor_carries_key_invariants_and_is_short
+FAILED tests/unit/test_prompt_audit_fixes.py::test_knowledge_precedence_allows_prompt_body_facts
+FAILED tests/unit/test_prompt_audit_fixes.py::test_inline_kb_rejects_poisoned_tree_before_baking
+FAILED tests/unit/test_prompt_consistency.py::test_kd_agent_first_prompt_keeps_the_pickup_greeting_stage
+FAILED tests/unit/test_prompt_consistency.py::test_wrong_person_is_a_pivot_everywhere_not_a_hangup
+59 failed, 57 passed in 6.35s
