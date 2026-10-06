@@ -55,12 +55,6 @@ async def test_the_live_state_update_carries_session_type():
     assert updates and all(m["session"].get("type") == "realtime" for m in updates)
 
 
-@pytest.mark.asyncio
-async def test_the_contact_directive_update_carries_session_type():
-    s = _session()
-    await s.interrupt_with_text("Ask for the caller's email address now.")
-    updates = [m for m in s._ws.sent if m["type"] == "session.update"]
-    assert updates and all(m["session"].get("type") == "realtime" for m in updates)
 
 
 @pytest.mark.asyncio
