@@ -1,0 +1,19 @@
+.................................FF.........................F.......     [100%]
+================================== FAILURES ===================================
+_ test_actual_transcript_dispatch_echo_cleanup_keeps_canonical_contact_evidence[] _
+tests\unit\test_model_contact_recording.py:421: in test_actual_transcript_dispatch_echo_cleanup_keeps_canonical_contact_evidence
+    assert row["content"] == row["original_content"] == original.content == canonical
+E   KeyError: 'original_content'
+_ test_actual_transcript_dispatch_echo_cleanup_keeps_canonical_contact_evidence[ My password is Qwerty!.] _
+tests\unit\test_model_contact_recording.py:421: in test_actual_transcript_dispatch_echo_cleanup_keeps_canonical_contact_evidence
+    assert row["content"] == row["original_content"] == original.content == canonical
+E   KeyError: 'original_content'
+_ test_actual_traditional_runner_contact_sources_resolve_to_saved_caller_rows _
+tests\unit\test_ag05_transcript_evidence.py:258: in test_actual_traditional_runner_contact_sources_resolve_to_saved_caller_rows
+    assert capture.normalized_value == "alex@example.com"
+E   AttributeError: 'NoneType' object has no attribute 'normalized_value'
+=========================== short test summary info ===========================
+FAILED tests/unit/test_model_contact_recording.py::test_actual_transcript_dispatch_echo_cleanup_keeps_canonical_contact_evidence[]
+FAILED tests/unit/test_model_contact_recording.py::test_actual_transcript_dispatch_echo_cleanup_keeps_canonical_contact_evidence[ My password is Qwerty!.]
+FAILED tests/unit/test_ag05_transcript_evidence.py::test_actual_traditional_runner_contact_sources_resolve_to_saved_caller_rows
+3 failed, 65 passed, 158 warnings in 3.34s
