@@ -65,7 +65,7 @@ test("read-only knowledge hides every mutation control", async () => {
     assert.ok(await screen.findByText("readonly.md"));
     assert.equal(screen.queryByRole("button", { name: /upload/i }), null);
     assert.equal(screen.queryByTitle("Edit"), null);
-    assert.equal(screen.queryByTitle("Pin (prioritise)"), null);
+    assert.equal(screen.queryByTitle("Pin (source-search priority)"), null);
     assert.equal(screen.queryByTitle("Disable"), null);
     assert.equal(screen.queryByTitle("Delete this source and its sections"), null);
 });
@@ -139,19 +139,19 @@ for (const status of ["matched", "weak_match", "no_match"] as const) {
         api.testCampaignKnowledge = async () => result(status);
         await openQuestion();
         const region = within(await screen.findByRole("region", { name: "Knowledge test result" }));
-        assert.ok(region.getByText(status === "matched" ? "Source passages found" : "No confirmed answer"));
+        assert.ok(region.getByText(status === "matched" ? "Source passages found" : "No strong source-search match"));
         assert.equal(region.queryByText(/\$999|Everything is free/), null);
         assert.equal(region.queryByText(/follow.up/i), null);
-        assert.ok(region.getByText(/does not test a generated answer or a call/));
+        assert.ok(region.getByText(/does not test AI section selection, a generated answer, or a call/));
         if (status === "no_match") {
-            assert.ok(region.getByText(/cannot confirm this detail/));
+            assert.ok(region.getByText(/does not determine which sections the AI would select/));
             assert.equal(region.queryByText(/Original price/), null);
         } else {
             assert.ok(region.getByText(/Original price is \$20 per month, excluding tax/));
             assert.ok(region.getByText(/Source: source-a · Revision: 4/));
             assert.ok(region.getByText(/Section: node-a · Version: 2026-10-06/));
         }
-        if (status === "weak_match") assert.ok(region.getByText(/insufficient to confirm/));
+        if (status === "weak_match") assert.ok(region.getByText(/review their relevance/));
     });
 }
 
@@ -176,7 +176,7 @@ test("editing the query clears evidence and ignores an older pending result", as
     assert.equal(screen.queryByRole("region", { name: "Knowledge test result" }), null);
     api.testCampaignKnowledge = async () => result("no_match", "Support hours");
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Test" })); });
-    assert.ok(await screen.findByText("No confirmed answer"));
+    assert.ok(await screen.findByText("No strong source-search match"));
     await act(async () => { fireEvent.change(input, { target: { value: "Another question" } }); });
     assert.equal(screen.queryByRole("region", { name: "Knowledge test result" }), null);
 });

@@ -1,16 +1,16 @@
 "use client";
 
 /**
- * Campaign knowledge panel — the vectorless-RAG knowledge tree.
+ * Campaign knowledge panel — source sections and a source-search diagnostic.
  *
  * Upload a .md/.txt doc; the backend parses it into a heading tree, LLM-enriches
- * each node, and retrieves it into the agent's prompt on calls. This panel lets
+ * each node. On calls, the AI selects and reads authored source sections. This panel lets
  * the owner:
- *   - "Test a question" → see exactly which node(s) the retriever returns,
+ *   - "Test a question" → inspect source-search results, not live AI selection,
  *   - search/filter the tree, expand/collapse all,
  *   - tune nodes: enable/disable, pin (priority), and edit heading / spoken
  *     answer / content inline,
- *   - watch which nodes get used (hit_count) + the active retrieval mode.
+ *   - inspect recorded search hits (hit_count) and source availability.
  *
  * Behind CAMPAIGN_KNOWLEDGE_ENABLED on the backend; when off the GET 404s and
  * this renders nothing.
@@ -36,11 +36,11 @@ type NodeEdit = { heading: string; voice_answer: string; content: string };
 function modeLook(mode: string | null | undefined): { label: string; desc: string; cls: string } {
     switch (mode) {
         case "inline":
-            return { label: "Inline", desc: "Small enough that the whole tree rides in every call's prompt.", cls: "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300" };
+            return { label: "AI-selected sources", desc: "On calls, the AI selects source sections from the campaign's knowledge catalog and reads their content.", cls: "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300" };
         case "map_retrieve":
-            return { label: "Map + retrieve", desc: "The agent always sees the outline; details are fetched per question.", cls: "bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300" };
+            return { label: "AI-selected sources", desc: "On calls, the AI selects source sections from the campaign's knowledge catalog and reads their content.", cls: "bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300" };
         case "retrieve":
-            return { label: "Retrieve", desc: "Large KB — the best-matching sections are searched in per question.", cls: "bg-violet-100 text-violet-800 dark:bg-violet-950 dark:text-violet-300" };
+            return { label: "AI-selected sources", desc: "On calls, the AI selects source sections from the campaign's knowledge catalog and reads their content.", cls: "bg-violet-100 text-violet-800 dark:bg-violet-950 dark:text-violet-300" };
         default:
             return { label: "No knowledge", desc: "Upload a document to give this campaign a knowledge base.", cls: "bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300" };
     }
@@ -133,9 +133,9 @@ function KnowledgeTreeNode(props: TreeNodeProps) {
                         {(!isEditing || readOnly) && (
                             <div className="flex items-center gap-2 flex-wrap">
                                 <span className="text-sm font-medium text-gray-900 dark:text-zinc-100">{node.heading}</span>
-                                {isPinned && <span title="Pinned (prioritised in retrieval)"><Pin className="h-3 w-3 text-amber-500 fill-amber-500" /></span>}
+                                {isPinned && <span title="Pinned (source-search priority)"><Pin className="h-3 w-3 text-amber-500 fill-amber-500" /></span>}
                                 {node.hit_count > 0 && (
-                                    <span className="inline-flex items-center gap-1 rounded-full bg-orange-100 dark:bg-orange-950/60 px-1.5 py-0.5 text-[10px] font-medium text-orange-700 dark:text-orange-300" title={`Used in ${node.hit_count} call turn(s)`}>
+                                    <span className="inline-flex items-center gap-1 rounded-full bg-orange-100 dark:bg-orange-950/60 px-1.5 py-0.5 text-[10px] font-medium text-orange-700 dark:text-orange-300" title={`Recorded source-search hits: ${node.hit_count}`}>
                                         <TrendingUp className="h-2.5 w-2.5" />{node.hit_count}
                                     </span>
                                 )}
@@ -163,14 +163,14 @@ function KnowledgeTreeNode(props: TreeNodeProps) {
                                     value={draft.voice_answer}
                                     onChange={(e) => setDraft((d) => ({ ...d, voice_answer: e.target.value }))}
                                     rows={2}
-                                    placeholder="Spoken answer — what the agent says for this topic"
+                                    placeholder="Saved answer note (for reference, not a live-call script)"
                                     className="w-full rounded-md border border-gray-300 dark:border-white/15 bg-white dark:bg-zinc-900 px-2 py-1.5 text-xs text-gray-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-emerald-500"
                                 />
                                 <textarea
                                     value={draft.content}
                                     onChange={(e) => setDraft((d) => ({ ...d, content: e.target.value }))}
                                     rows={3}
-                                    placeholder="Full content (used for retrieval matching)"
+                                    placeholder="Source content (read when the AI selects this section)"
                                     className="w-full rounded-md border border-gray-300 dark:border-white/15 bg-white dark:bg-zinc-900 px-2 py-1.5 text-xs text-muted-foreground focus:outline-none focus:ring-2 focus:ring-emerald-500"
                                 />
                                 <div className="flex gap-1.5">
@@ -188,7 +188,7 @@ function KnowledgeTreeNode(props: TreeNodeProps) {
                     {!readOnly && !isEditing && (
                         <div className="flex shrink-0 items-center gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
                             <button type="button" onClick={() => props.onStartEdit(node)} className="rounded p-1 text-muted-foreground hover:text-gray-900 dark:hover:text-zinc-100 hover:bg-gray-100 dark:hover:bg-white/10" title="Edit"><Pencil className="h-3.5 w-3.5" /></button>
-                            <button type="button" onClick={() => props.onTogglePin(node)} disabled={isBusy} className={`rounded p-1 hover:bg-gray-100 dark:hover:bg-white/10 ${isPinned ? "text-amber-500" : "text-muted-foreground hover:text-gray-900 dark:hover:text-zinc-100"}`} title={isPinned ? "Unpin" : "Pin (prioritise)"}><Pin className={`h-3.5 w-3.5 ${isPinned ? "fill-amber-500" : ""}`} /></button>
+                            <button type="button" onClick={() => props.onTogglePin(node)} disabled={isBusy} className={`rounded p-1 hover:bg-gray-100 dark:hover:bg-white/10 ${isPinned ? "text-amber-500" : "text-muted-foreground hover:text-gray-900 dark:hover:text-zinc-100"}`} title={isPinned ? "Unpin" : "Pin (source-search priority)"}><Pin className={`h-3.5 w-3.5 ${isPinned ? "fill-amber-500" : ""}`} /></button>
                             <button type="button" onClick={() => props.onToggleEnabled(node)} disabled={isBusy} className="rounded p-1 text-muted-foreground hover:text-gray-900 dark:hover:text-zinc-100 hover:bg-gray-100 dark:hover:bg-white/10" title={node.enabled ? "Disable" : "Enable"}>
                                 {isBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : node.enabled ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
                             </button>
@@ -384,18 +384,19 @@ function KnowledgePanelScope({ campaignId, readOnly = false }: KnowledgePanelPro
                 <div className="px-4 py-8 text-center">
                     <BookOpen className="mx-auto h-8 w-8 text-muted-foreground/40" />
                     <p className="mt-2 text-sm font-medium text-gray-900 dark:text-zinc-100">No knowledge yet</p>
-                    <p className="mt-1 text-xs text-muted-foreground max-w-md mx-auto">{readOnly ? "No knowledge has been added to this campaign." : "Upload a Markdown or text doc — pricing, FAQs, services. We'll parse it into sections, write a spoken answer for each, and the agent will use it on calls."}</p>
+                    <p className="mt-1 text-xs text-muted-foreground max-w-md mx-auto">{readOnly ? "No knowledge has been added to this campaign." : "Upload a Markdown or text doc — pricing, FAQs, services. We'll organize it into source sections for the AI to select and read during calls."}</p>
                 </div>
             ) : (
                 <div className="divide-y divide-gray-200 dark:divide-white/10">
                     {/* Test a question */}
                     <div className="px-4 py-3 bg-gray-50/60 dark:bg-white/[0.02]">
+                        <p className="mb-2 text-xs text-muted-foreground">On calls, the AI selects and reads source sections. The source-search diagnostic below does not run the AI.</p>
                         <div className="flex items-center gap-2">
                             <input
                                 value={testQuery}
                                 onChange={(e) => { clearTest(); setTestQuery(e.target.value); }}
                                 onKeyDown={(e) => { if (e.key === "Enter") void runTest(); }}
-                                placeholder="Test a question — e.g. “how much does it cost?”"
+                                placeholder="Test a question with source search — e.g. “how much does it cost?”"
                                 className="flex-1 rounded-md border border-gray-300 dark:border-white/15 bg-white dark:bg-zinc-900 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
                             />
                             <Button size="sm" onClick={runTest} disabled={testing || uploading || busy.size > 0 || !!deletingSourceId || !testQuery.trim()} className="h-8 px-3 text-xs">
@@ -404,9 +405,9 @@ function KnowledgePanelScope({ campaignId, readOnly = false }: KnowledgePanelPro
                         </div>
                         {testResult !== null && (
                             <div className="mt-2 space-y-1.5" role="region" aria-label="Knowledge test result">
-                                <p className="text-xs font-medium">{testResult.evidence.status === "matched" ? "Source passages found" : "No confirmed answer"}</p>
-                                {testResult.evidence.status === "weak_match" && <p className="text-xs text-muted-foreground">These passages may be related, but are insufficient to confirm the answer.</p>}
-                                {testResult.evidence.status === "no_match" && <p className="text-xs text-muted-foreground">No usable source passage was found. The agent should say it cannot confirm this detail.</p>}
+                                <p className="text-xs font-medium">{testResult.evidence.status === "matched" ? "Source passages found" : "No strong source-search match"}</p>
+                                {testResult.evidence.status === "weak_match" && <p className="text-xs text-muted-foreground">Source search found related passages; review their relevance to your question.</p>}
+                                {testResult.evidence.status === "no_match" && <p className="text-xs text-muted-foreground">No source passage matched this search. This does not determine which sections the AI would select.</p>}
                                 {testResult.evidence.passages.map((passage, i) => (
                                     <div key={`${passage.node_id}:${i}`} className="rounded-md border border-gray-200 dark:border-white/10 bg-white dark:bg-zinc-900 px-2.5 py-1.5">
                                         <p className="text-xs whitespace-pre-wrap text-gray-900 dark:text-zinc-100">{passage.text}</p>
@@ -416,7 +417,7 @@ function KnowledgePanelScope({ campaignId, readOnly = false }: KnowledgePanelPro
                                         </p>
                                     </div>
                                 ))}
-                                <p className="text-xs text-muted-foreground">Retrieval check only. Review whether the source answers your question; this does not test a generated answer or a call.</p>
+                                <p className="text-xs text-muted-foreground">Source-search diagnostic only. Review whether the source answers your question; this does not test AI section selection, a generated answer, or a call.</p>
                             </div>
                         )}
                     </div>
