@@ -1,0 +1,55 @@
+{
+  "base_head": "3717766791fff3a4ad4c01606102e14ceda67043",
+  "dependencies": [
+    "0c385e86",
+    "f9a725cc",
+    "4dd3c252"
+  ],
+  "source_sha256": {
+    "backend/tests/unit/test_call_1436672a_regressions.py": "15c07dfdb8d80eba5fa09d2d200dd3f0b587d669693385b406f7712f44b96596",
+    "backend/tests/unit/test_contact_capture_best_practice.py": "971dbb0ca6b521676c60114cba4fbe219140fb4e0135506ec3f61f3f66e334c2",
+    "backend/tests/unit/test_email_confirmation.py": "077348b91a7d312d681d964b8d40ca2724f63fa682245631fac00831eddc007f",
+    "backend/tests/unit/test_email_llm_first_capture.py": "68fd51f5bdf0261da68e3961d85441831b488c8260810348ab0136dd17a5c612",
+    "backend/tests/unit/test_phantom_goodbye_recovery.py": "da76d5caf557b8e3caf21f74b34c5ff452f26d1ff2dfd8aa80016257febfd27e",
+    "backend/tests/unit/test_phone_confirmation.py": "9ef65cac5390a9179bc48ff65cefb389c14bf1ef0a77d09a992592c2134ed5cd"
+  },
+  "python": {
+    "executable": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\backend\\.venv\\Scripts\\python.exe",
+    "version": "3.12.12",
+    "provenance": "Existing backend/.venv; not a fresh exact-requirements environment"
+  },
+  "commands": {
+    "collection": "python -B -m pytest tests/unit/test_call_1436672a_regressions.py tests/unit/test_contact_capture_best_practice.py tests/unit/test_email_confirmation.py tests/unit/test_email_llm_first_capture.py tests/unit/test_phantom_goodbye_recovery.py tests/unit/test_phone_confirmation.py --collect-only -q -o addopts=",
+    "final": "python -B -m pytest tests/unit/test_call_1436672a_regressions.py tests/unit/test_contact_capture_best_practice.py tests/unit/test_email_confirmation.py tests/unit/test_email_llm_first_capture.py tests/unit/test_phantom_goodbye_recovery.py tests/unit/test_phone_confirmation.py tests/unit/test_model_contact_recording.py -q -o addopts=",
+    "lint": "python -B -m ruff check --select F <six modified test files>",
+    "diff": "git -c core.safecrlf=false diff --check"
+  },
+  "environment": {
+    "ENVIRONMENT": "test",
+    "PYTHONPATH": "<worktree>/backend",
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "PYTHONUTF8": "1"
+  },
+  "results": {
+    "before": "87 collected,1collectionerror (removed _agent_read_back_email import)",
+    "first": "78pass,2fail,22warnings; two legacy capture statuses were needs_clarification, not awaiting_confirmation",
+    "final": "114pass,46warnings,3.35s; includes80 across six targetmodules and34 existing modelcontact controls",
+    "ruff": "pass",
+    "diff": "pass after EOF-only cleanup"
+  },
+  "retired_function_count": 35,
+  "new_cases": 3,
+  "artifacts": {
+    "affected-final.txt": "2218bc84992c39434a75d3449a6dd101f04d76397d89a425d0126665e5a883bd",
+    "affected-first.txt": "bb3fcdeb237b1d4e238866fdfa66e5fcd092e9a30ee1fbdef955ecb0f208ba16",
+    "collection-before.txt": "15fb188e3e9d905832a97dd6c267073b98a9469c622f1bbf191a267d8922215a",
+    "retired-assertions.json": "e802d1f9a286cba61d18225a47e37986f117094c8f52429e5c94d7cc99d9f023",
+    "ruff-final.txt": "a4443afdcfb6d7363adb285762515ccf7cf50473b1a05c20c1a50f6bed4d26b0"
+  },
+  "limits": [
+    "Tests only; no product source change or restored dead runtime helpers.",
+    "Synthetic model arguments/SQL/transport ports; no provider, DB, actual STT/audio or model semantic-fidelity proof.",
+    "Legacy pure utilities retained as diagnostics, not asserted live wiring.",
+    "Final source differs from finaltest input only by removal of extra EOF blank line in test_email_confirmation.py."
+  ]
+}

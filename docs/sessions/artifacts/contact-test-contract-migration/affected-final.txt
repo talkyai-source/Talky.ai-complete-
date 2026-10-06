@@ -1,0 +1,26 @@
+........................................................................ [ 63%]
+..........................................                               [100%]
+============================== warnings summary ===============================
+tests/unit/test_phantom_goodbye_recovery.py: 10 warnings
+tests/unit/test_model_contact_recording.py: 5 warnings
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\backend\.venv\Lib\site-packages\pydantic\main.py:250: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+
+tests/unit/test_phantom_goodbye_recovery.py::test_a_suppressed_turn_keeps_prose_without_automatic_contact_parser
+tests/unit/test_phantom_goodbye_recovery.py::test_actual_cerebras_thanks_envelope_is_recovered_without_saying_goodbye
+tests/unit/test_model_contact_recording.py::test_caller_first_hello_reaches_model_once_without_presynth_script
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\agent-guide-prompts-20261007\backend\app\domain\services\voice_pipeline\turn_ender.py:551: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "timestamp": datetime.utcnow().isoformat(),
+
+tests/unit/test_phantom_goodbye_recovery.py: 2 warnings
+tests/unit/test_model_contact_recording.py: 14 warnings
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\agent-guide-prompts-20261007\backend\app\domain\services\transcript_service.py:375: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    timestamp=datetime.utcnow().isoformat(),
+
+tests/unit/test_phantom_goodbye_recovery.py: 8 warnings
+tests/unit/test_model_contact_recording.py: 4 warnings
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\agent-guide-prompts-20261007\backend\app\domain\models\session.py:207: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    self.last_activity_at = datetime.utcnow()
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+114 passed, 46 warnings in 3.35s
