@@ -1,0 +1,59 @@
+{
+  "source_head": "458c6798e8e1c6eb5664da938b396f5be7f82a9a",
+  "source_before": {
+    "backend/tests/unit/test_assistant_knowledge_authorization.py": "f86d62d9498fa790d2d503283e75457556915beac034acaac57ab8c93fe179a7",
+    "backend/tests/unit/test_assistant_agent_service.py": "1ce81c829b55616901c35bae1d4133acd94843edf81439798105c71c6e304b72",
+    "backend/tests/unit/test_knowledge_model_sections.py": "1db228e2baf6802897256ed3c36fb30e5789686c9f37f91b1a45bab1fd7d758c",
+    "backend/tests/unit/test_knowledge_tool.py": "ad4ad4d3be930bfac266012720282fafd9c145bd7248a0f1aeda0cb3dc2c27d7",
+    "backend/tests/unit/test_knowledge_relevance.py": "18882d82e59b6de40d8da1dc4e15ea95cf8ac67439af9e36aa01a610cdee67cd",
+    "backend/tests/unit/test_agent_knowledge_repairs.py": "8b9b4c9604f0deceaeebfaaae9950ae418e59b72169dd5cf05da844971312e42",
+    "backend/tests/unit/voice_pipeline/test_turn_streamer_kb_prefetch.py": "6991c2b0f97ba4905a7fe63161217a48ea969fb95e5267cdc7a23e1f2d38bc62",
+    "backend/tests/security/test_kb_tool_injection.py": "abb8efb04baecd6f8ec3cea5440ce29c01f8877eebdf20ae57f0f9fd75891864",
+    "backend/app/infrastructure/assistant/tools/campaign_admin.py": "55e896023b71d92a311209772b7609efb4a148cffa938607058d976ff736c414",
+    "backend/app/infrastructure/assistant/tools/llm_schemas.py": "71e191816c99872bd3803969f524cf6ef7280c48006db03522327d80f5823791",
+    "backend/app/infrastructure/assistant/tools/__init__.py": "6b68050621242ca7699901681a2c36e6d1a25a619aa801e651cc6ee4340ddbcc",
+    "backend/app/infrastructure/assistant/agent.py": "89cdb4a613f1151c487084c0d072a44490d02ee368b0540fd5427661d69e9513",
+    "backend/app/services/scripts/knowledge/sections.py": "4ba281a6de5c8cc70693e065888058932a7ed615485d0d8e04047ab838870a5b",
+    "backend/app/domain/services/voice_pipeline/knowledge_tool.py": "3b3de3bd2e1a0d4196c1cccf4f4dcca358c3f9f3e7eeecd5c66a68a14ab50e61"
+  },
+  "python": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\backend\\.venv\\Scripts\\python.exe",
+  "python_version": "3.12.12 (main, Dec  9 2025, 19:02:55) [MSC v.1944 64 bit (AMD64)]",
+  "environment": {
+    "PYTHONPATH": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\agent-knowledge-cleanup-20261007\\backend",
+    "PYTHONUTF8": "1",
+    "PYTHONDONTWRITEBYTECODE": "1"
+  },
+  "installed_versions": {
+    "pytest": "7.4.4",
+    "pytest-asyncio": "0.23.3",
+    "pydantic": "2.12.5",
+    "fastapi": "0.139.0",
+    "groq": "0.37.0"
+  },
+  "pytest_argv": [
+    "tests/unit/test_assistant_knowledge_authorization.py",
+    "-q",
+    "--tb=short",
+    "--disable-warnings"
+  ],
+  "exit_code": 1,
+  "source_after": {
+    "backend/tests/unit/test_assistant_knowledge_authorization.py": "f86d62d9498fa790d2d503283e75457556915beac034acaac57ab8c93fe179a7",
+    "backend/tests/unit/test_assistant_agent_service.py": "1ce81c829b55616901c35bae1d4133acd94843edf81439798105c71c6e304b72",
+    "backend/tests/unit/test_knowledge_model_sections.py": "1db228e2baf6802897256ed3c36fb30e5789686c9f37f91b1a45bab1fd7d758c",
+    "backend/tests/unit/test_knowledge_tool.py": "ad4ad4d3be930bfac266012720282fafd9c145bd7248a0f1aeda0cb3dc2c27d7",
+    "backend/tests/unit/test_knowledge_relevance.py": "18882d82e59b6de40d8da1dc4e15ea95cf8ac67439af9e36aa01a610cdee67cd",
+    "backend/tests/unit/test_agent_knowledge_repairs.py": "8b9b4c9604f0deceaeebfaaae9950ae418e59b72169dd5cf05da844971312e42",
+    "backend/tests/unit/voice_pipeline/test_turn_streamer_kb_prefetch.py": "6991c2b0f97ba4905a7fe63161217a48ea969fb95e5267cdc7a23e1f2d38bc62",
+    "backend/tests/security/test_kb_tool_injection.py": "abb8efb04baecd6f8ec3cea5440ce29c01f8877eebdf20ae57f0f9fd75891864",
+    "backend/app/infrastructure/assistant/tools/campaign_admin.py": "55e896023b71d92a311209772b7609efb4a148cffa938607058d976ff736c414",
+    "backend/app/infrastructure/assistant/tools/llm_schemas.py": "71e191816c99872bd3803969f524cf6ef7280c48006db03522327d80f5823791",
+    "backend/app/infrastructure/assistant/tools/__init__.py": "6b68050621242ca7699901681a2c36e6d1a25a619aa801e651cc6ee4340ddbcc",
+    "backend/app/infrastructure/assistant/agent.py": "89cdb4a613f1151c487084c0d072a44490d02ee368b0540fd5427661d69e9513",
+    "backend/app/services/scripts/knowledge/sections.py": "4ba281a6de5c8cc70693e065888058932a7ed615485d0d8e04047ab838870a5b",
+    "backend/app/domain/services/voice_pipeline/knowledge_tool.py": "3b3de3bd2e1a0d4196c1cccf4f4dcca358c3f9f3e7eeecd5c66a68a14ab50e61"
+  },
+  "internal_socketpairs": 67,
+  "prohibited_attempts": 0,
+  "source_unchanged": true
+}

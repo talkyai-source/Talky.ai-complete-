@@ -1,0 +1,48 @@
+................FFF......FFF......                                       [100%]
+================================== FAILURES ===================================
+_ test_assistant_catalog_then_exact_read_uses_authored_facts_and_current_lease _
+tests\unit\test_assistant_knowledge_authorization.py:392: in test_assistant_catalog_then_exact_read_uses_authored_facts_and_current_lease
+    assert page["status"] == "catalog"
+E   KeyError: 'status'
+------------------------------ Captured log call ------------------------------
+WARNING  app.infrastructure.assistant.tools.dispatch:dispatch.py:335 dispatch_tool retrieve_knowledge bad args {'campaign_id': '2aaaaaaa-0000-0000-0000-000000000002', 'catalog_offset': 0}: retrieve_knowledge() got an unexpected keyword argument 'catalog_offset'
+____________ test_assistant_exact_read_reauthorizes_after_catalog _____________
+tests\unit\test_assistant_knowledge_authorization.py:410: in test_assistant_exact_read_reauthorizes_after_catalog
+    denied = await _read_sections(conn, section_ids=[page["entries"][0]["section_id"]])
+E   KeyError: 'entries'
+------------------------------ Captured log call ------------------------------
+WARNING  app.infrastructure.assistant.tools.dispatch:dispatch.py:335 dispatch_tool retrieve_knowledge bad args {'campaign_id': '2aaaaaaa-0000-0000-0000-000000000002', 'catalog_offset': 0}: retrieve_knowledge() got an unexpected keyword argument 'catalog_offset'
+________ test_assistant_changed_source_rejects_stale_section_reference ________
+tests\unit\test_assistant_knowledge_authorization.py:418: in test_assistant_changed_source_rejects_stale_section_reference
+    ref = page["entries"][0]["section_id"]
+E   KeyError: 'entries'
+------------------------------ Captured log call ------------------------------
+WARNING  app.infrastructure.assistant.tools.dispatch:dispatch.py:335 dispatch_tool retrieve_knowledge bad args {'campaign_id': '2aaaaaaa-0000-0000-0000-000000000002', 'catalog_offset': 0}: retrieve_knowledge() got an unexpected keyword argument 'catalog_offset'
+_ test_assistant_section_reader_preserves_inbound_read_authority[inbound:read-True] _
+tests\unit\test_assistant_knowledge_authorization.py:445: in test_assistant_section_reader_preserves_inbound_read_authority
+    assert result["status"] == "catalog"
+E   KeyError: 'status'
+------------------------------ Captured log call ------------------------------
+WARNING  app.infrastructure.assistant.tools.dispatch:dispatch.py:335 dispatch_tool retrieve_knowledge bad args {'campaign_id': '2aaaaaaa-0000-0000-0000-000000000002', 'catalog_offset': 0}: retrieve_knowledge() got an unexpected keyword argument 'catalog_offset'
+_ test_assistant_section_reader_preserves_inbound_read_authority[campaigns:read-False] _
+tests\unit\test_assistant_knowledge_authorization.py:447: in test_assistant_section_reader_preserves_inbound_read_authority
+    assert result["error"] == "permission_denied" and result["required"] == INBOUND_READ
+E   assert ("Invalid argu...talog_offset'" == 'permission_denied'
+E     - permission_denied
+E     + Invalid arguments for retrieve_knowledge: retrieve_knowledge() got an unexpected keyword argument 'catalog_offset')
+------------------------------ Captured log call ------------------------------
+WARNING  app.infrastructure.assistant.tools.dispatch:dispatch.py:335 dispatch_tool retrieve_knowledge bad args {'campaign_id': '2aaaaaaa-0000-0000-0000-000000000002', 'catalog_offset': 0}: retrieve_knowledge() got an unexpected keyword argument 'catalog_offset'
+__ test_assistant_invalid_source_proof_is_unavailable_not_generated_fallback __
+tests\unit\test_assistant_knowledge_authorization.py:455: in test_assistant_invalid_source_proof_is_unavailable_not_generated_fallback
+    assert result["status"] == "unavailable" and "$999" not in str(result)
+E   KeyError: 'status'
+------------------------------ Captured log call ------------------------------
+WARNING  app.infrastructure.assistant.tools.dispatch:dispatch.py:335 dispatch_tool retrieve_knowledge bad args {'campaign_id': '2aaaaaaa-0000-0000-0000-000000000002', 'catalog_offset': 0}: retrieve_knowledge() got an unexpected keyword argument 'catalog_offset'
+=========================== short test summary info ===========================
+FAILED tests/unit/test_assistant_knowledge_authorization.py::test_assistant_catalog_then_exact_read_uses_authored_facts_and_current_lease
+FAILED tests/unit/test_assistant_knowledge_authorization.py::test_assistant_exact_read_reauthorizes_after_catalog
+FAILED tests/unit/test_assistant_knowledge_authorization.py::test_assistant_changed_source_rejects_stale_section_reference
+FAILED tests/unit/test_assistant_knowledge_authorization.py::test_assistant_section_reader_preserves_inbound_read_authority[inbound:read-True]
+FAILED tests/unit/test_assistant_knowledge_authorization.py::test_assistant_section_reader_preserves_inbound_read_authority[campaigns:read-False]
+FAILED tests/unit/test_assistant_knowledge_authorization.py::test_assistant_invalid_source_proof_is_unavailable_not_generated_fallback
+6 failed, 28 passed, 1 warning in 5.79s
