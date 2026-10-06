@@ -1,6 +1,7 @@
 "use client";
 
 import { RealtimeControls } from "@/components/realtime/ai-options-controls";
+import { Select } from "@/components/ui/select";
 import { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { ApplyToCampaignsModal } from "@/components/campaigns/apply-to-campaigns-modal";
@@ -441,6 +442,9 @@ export default function AIOptionsPage() {
     const sttEngineInfo = sttEngines.find((e) => e.id === config?.stt_engine);
     const ttsModelInfo = ttsModelsForSelectedProvider.find((model) => model.id === config?.tts_model);
     const selectCls = "w-full rounded-lg border border-border bg-background px-4 py-2.5 text-sm text-foreground outline-none transition focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/40";
+    // Same sizing on the shared Select's trigger: h-auto lets py-2.5 set the
+    // height like the old native control; pr-9 keeps text clear of the chevron.
+    const sharedSelectCls = `${selectCls} h-auto pr-9`;
 
     // Compact Save button — rendered in a card header's `right` slot (top-right
     // of the Test LLM card in cascaded mode, beside the model badge in realtime
@@ -560,26 +564,27 @@ export default function AIOptionsPage() {
                         <div className="grid gap-5 lg:grid-cols-[1fr_auto]">
                             <div className="space-y-3">
                                 <label htmlFor="ai-options-llm-model" className="block text-sm font-medium text-muted-foreground">Model</label>
-                                <select
+                                <Select
                                     id="ai-options-llm-model"
+                                    ariaLabel="Model"
                                     value={config.llm_model}
-                                    onChange={(e) => {
-                                        const picked = providers?.llm.models.find((m) => m.id === e.target.value);
-                                        setConfig({ ...config, llm_model: e.target.value, llm_provider: (picked?.provider as typeof config.llm_provider) || config.llm_provider });
+                                    onChange={(next) => {
+                                        const picked = providers?.llm.models.find((m) => m.id === next);
+                                        setConfig({ ...config, llm_model: next, llm_provider: (picked?.provider as typeof config.llm_provider) || config.llm_provider });
                                     }}
-                                    aria-invalid={llmModelUnavailable}
-                                    aria-describedby={llmModelUnavailable ? "ai-options-llm-model-warning" : undefined}
-                                    className={selectCls}
+                                    ariaInvalid={llmModelUnavailable}
+                                    ariaDescribedBy={llmModelUnavailable ? "ai-options-llm-model-warning" : undefined}
+                                    selectClassName={sharedSelectCls}
                                 >
                                     {llmModelUnavailable && (
                                         <option value={config.llm_model} disabled>
-                                            [{config.llm_provider}] {config.llm_model} (currently unavailable)
+                                            {`[${config.llm_provider}] ${config.llm_model} (currently unavailable)`}
                                         </option>
                                     )}
                                     {providers?.llm.models.map((model) => (
                                         <option key={model.id} value={model.id}>{model.provider ? `[${model.provider}] ${model.name}` : model.name}</option>
                                     ))}
-                                </select>
+                                </Select>
                                 {llmModelUnavailable && (
                                     <div id="ai-options-llm-model-warning" role="status" className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-300">
                                         <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
@@ -679,17 +684,18 @@ export default function AIOptionsPage() {
                         <SectionHeader icon={<Mic className="h-5 w-5" />} title="Speech-to-Text" subtitle="The engine that hears the caller" />
                         <div className="space-y-3">
                             <label htmlFor="ai-options-stt-engine" className="block text-sm font-medium text-muted-foreground">Engine</label>
-                            <select
+                            <Select
                                 id="ai-options-stt-engine"
+                                ariaLabel="Engine"
                                 value={config.stt_engine}
-                                onChange={(e) => setConfig({ ...config, stt_engine: e.target.value })}
-                                className={selectCls}
+                                onChange={(next) => setConfig({ ...config, stt_engine: next })}
+                                selectClassName={sharedSelectCls}
                             >
                                 {sttEngines.length === 0 && <option value={config.stt_engine}>{config.stt_engine}</option>}
                                 {sttEngines.map((eng) => (
-                                    <option key={eng.id} value={eng.id}>{eng.name}{eng.is_preview ? " (beta)" : ""}</option>
+                                    <option key={eng.id} value={eng.id}>{`${eng.name}${eng.is_preview ? " (beta)" : ""}`}</option>
                                 ))}
-                            </select>
+                            </Select>
                             {sttEngineInfo && (
                                 <div className="rounded-lg border border-border bg-muted/40 p-3">
                                     <p className="text-sm text-foreground">{sttEngineInfo.description}</p>
@@ -725,9 +731,9 @@ export default function AIOptionsPage() {
                         <div className={`mb-4 grid gap-3 ${showAccentFilter ? "sm:grid-cols-2" : ""}`}>
                             <div>
                                 <label className="mb-1.5 block text-sm font-medium text-muted-foreground">TTS Model</label>
-                                <select value={config.tts_model} onChange={(e) => setConfig({ ...config, tts_model: e.target.value })} className={selectCls}>
+                                <Select ariaLabel="TTS model" value={config.tts_model} onChange={(next) => setConfig({ ...config, tts_model: next })} selectClassName={sharedSelectCls}>
                                     {ttsModelsForSelectedProvider.map((model) => (<option key={model.id} value={model.id}>{model.name}</option>))}
-                                </select>
+                                </Select>
                             </div>
                             {showAccentFilter && (
                                 <div>

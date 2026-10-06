@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useRef } from "react";
+import { Select } from "@/components/ui/select";
 import { aiOptionsApi, type ProviderListResponse } from "@/lib/ai-options-api";
 
 import { RealtimePromptEditor } from "./prompt-editor";
@@ -32,12 +33,15 @@ export function CampaignVoiceSettings({ value, onChange }: {
     }, []);
     const realtime = value.pipeline_mode === "realtime";
     const prompt = value.realtime_prompt ?? DEFAULT_REALTIME_PROMPT;
-    const inputClass = "mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm";
+    // Shared Select instead of a native <select>: the browser-drawn popup grew
+    // wider than this card on phones. Closed sizing mirrors the old
+    // "px-3 py-2 text-sm" control via selectClassName.
+    const selectSizing = "h-auto px-3 py-2 text-sm rounded-md border bg-background";
     return <section aria-label="Campaign voice engine" className="space-y-4 rounded-xl border p-4">
         <label className="block text-sm font-medium">Voice engine
-            <select className={inputClass} value={value.pipeline_mode ?? ""} onChange={(event) => {
+            <Select className="mt-1" selectClassName={selectSizing} ariaLabel="Voice engine" value={value.pipeline_mode ?? ""} onChange={(next) => {
                 changed.current = true;
-                const mode = event.target.value as "cascaded" | "realtime";
+                const mode = next as "cascaded" | "realtime";
                 onChange({ ...value, pipeline_mode: mode,
                     ...(mode === "realtime" ? { realtime_model: catalog?.model, realtime_voice: value.realtime_voice || catalog?.voices[0]?.id,
                         realtime_prompt: prompt } : {}) });
@@ -45,16 +49,16 @@ export function CampaignVoiceSettings({ value, onChange }: {
                 <option value="" disabled>Select a voice engine</option>
                 <option value="cascaded">Traditional · separate speech and language providers</option>
                 <option value="realtime" disabled={!catalog?.available}>GPT Realtime · speech to speech</option>
-            </select>
+            </Select>
         </label>
         {(error || catalog?.unavailable_reason) && <p role="status" className="text-sm text-muted-foreground">{error || catalog?.unavailable_reason}</p>}
         {realtime && <>
             <p className="text-sm text-muted-foreground">Realtime uses its own prompt and voice. Traditional instructions, model, and TTS settings do not apply. Replies are checked before playback; connection failures are reported without changing engines.</p>
             <label className="block text-sm font-medium">Realtime voice
-                <select className={inputClass} value={value.realtime_voice ?? ""} onChange={(event) => onChange({ ...value, realtime_voice: event.target.value })}>
+                <Select className="mt-1" selectClassName={selectSizing} ariaLabel="Realtime voice" value={value.realtime_voice ?? ""} onChange={(next) => onChange({ ...value, realtime_voice: next })}>
                     <option value="" disabled>Select a Realtime voice</option>
                     {catalog?.voices.map((voice) => <option key={voice.id} value={voice.id}>{voice.name}</option>)}
-                </select>
+                </Select>
             </label>
             <RealtimePromptEditor value={prompt} onChange={(realtime_prompt) => onChange({ ...value, realtime_prompt })} />
         </>}

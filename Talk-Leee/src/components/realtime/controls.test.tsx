@@ -19,6 +19,15 @@ const originalConfig = aiOptionsApi.getConfig;
 const originalProviders = aiOptionsApi.getProviders;
 afterEach(() => { cleanup(); aiOptionsApi.getConfig = originalConfig; aiOptionsApi.getProviders = originalProviders; });
 
+// jsdom has no layout engine; the shared Select scrolls its active option into view.
+if (!Element.prototype.scrollIntoView) Element.prototype.scrollIntoView = () => {};
+
+/** Drives the shared Select the way a person would: open, click the option. */
+function pickOption(selectLabel: string, optionLabel: string | RegExp) {
+    fireEvent.click(screen.getByRole("combobox", { name: selectLabel }));
+    fireEvent.click(screen.getByRole("option", { name: optionLabel }));
+}
+
 test("Realtime controls keep traditional settings intact and preserve each prompt field", () => {
     let saved = initial;
     function Harness() {
@@ -26,7 +35,7 @@ test("Realtime controls keep traditional settings intact and preserve each promp
         return <RealtimeControls config={config} catalog={catalog} onChange={(next) => { saved = next; setConfig(next); }} onPreview={() => {}} previewing={false} />;
     }
     render(<Harness />);
-    fireEvent.change(screen.getByLabelText("Realtime persona"), { target: { value: "sales" } });
+    pickOption("Realtime persona", "Sales");
     fireEvent.change(screen.getByLabelText("Realtime instructions"), { target: { value: "Ask about their needs" } });
     fireEvent.change(screen.getByLabelText("Speech speed"), { target: { value: "1.2" } });
     assert.equal(saved.realtime_settings?.prompt?.persona, "sales");
@@ -41,7 +50,7 @@ test("Realtime controls keep traditional settings intact and preserve each promp
 test("Unavailable Realtime reports its reason and disables controls", () => {
     render(<RealtimeControls config={initial} catalog={{ ...catalog, available: false, unavailable_reason: "OpenAI is not configured" }} onChange={() => {}} onPreview={() => {}} previewing={false} />);
     assert.match(screen.getByRole("alert").textContent || "", /not configured/);
-    assert.equal(screen.getByLabelText("Realtime voice").closest("fieldset")?.disabled, true);
+    assert.equal(screen.getByRole("combobox", { name: "Realtime voice" }).closest("fieldset")?.disabled, true);
 });
 
 test("Campaign inherits Realtime defaults and retains its prompt across engine switches", async () => {
@@ -56,9 +65,9 @@ test("Campaign inherits Realtime defaults and retains its prompt across engine s
     await waitFor(() => assert.equal(saved.pipeline_mode, "realtime"));
     assert.equal(saved.realtime_prompt?.instructions, "Keep this");
     fireEvent.change(screen.getByLabelText("Realtime goal"), { target: { value: "Campaign-specific goal" } });
-    fireEvent.change(screen.getByLabelText("Voice engine"), { target: { value: "cascaded" } });
+    pickOption("Voice engine", /Traditional/);
     assert.equal(screen.queryByLabelText("Realtime goal"), null);
-    fireEvent.change(screen.getByLabelText("Voice engine"), { target: { value: "realtime" } });
+    pickOption("Voice engine", /GPT Realtime/);
     assert.equal(saved.realtime_prompt?.goal, "Campaign-specific goal");
     assert.equal(saved.realtime_voice, "ash");
 });

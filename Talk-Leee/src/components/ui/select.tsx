@@ -3,7 +3,7 @@
 import { cn } from "@/lib/utils";
 import { useTheme } from "@/components/providers/theme-provider";
 import { ChevronDown } from "lucide-react";
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useId, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 export function Select({
@@ -13,6 +13,10 @@ export function Select({
     className,
     selectClassName,
     ariaLabel,
+    id,
+    ariaInvalid,
+    ariaDescribedBy,
+    fitLongestOption,
     disabled,
     lightThemeGreen,
 }: {
@@ -22,6 +26,19 @@ export function Select({
     className?: string;
     selectClassName?: string;
     ariaLabel: string;
+    /** Forwarded to the trigger button so a <label htmlFor> keeps working. */
+    id?: string;
+    /** Forwarded as aria-invalid so error styling/announcement survives. */
+    ariaInvalid?: boolean;
+    /** Forwarded as aria-describedby so warning/hint text stays announced. */
+    ariaDescribedBy?: string;
+    /**
+     * Auto-width parity with native <select>: size the closed trigger to the
+     * LONGEST option (native behaviour) instead of the selected one, so the
+     * control neither jumps on selection nor shrinks below its old footprint.
+     * For width-constrained (w-full) layouts leave this off.
+     */
+    fitLongestOption?: boolean;
     disabled?: boolean;
     lightThemeGreen?: boolean;
 }) {
@@ -65,6 +82,8 @@ export function Select({
 
     const [open, setOpen] = useState(false);
     const [activeIndex, setActiveIndex] = useState(selectedIndex);
+    const listboxId = useId();
+    const [fitMinWidth, setFitMinWidth] = useState<number | undefined>(undefined);
     const rootRef = useRef<HTMLDivElement>(null);
     const buttonRef = useRef<HTMLButtonElement>(null);
     const panelRef = useRef<HTMLDivElement>(null);
@@ -79,6 +98,25 @@ export function Select({
         // eslint-disable-next-line react-hooks/set-state-in-effect -- hydration-mounted flag gating the document.body portal
         setMounted(true);
     }, []);
+
+    useEffect(() => {
+        // fitLongestOption: measure the widest label with the trigger's own
+        // font and reserve that width, as a native closed <select> does.
+        if (!fitLongestOption) return;
+        const btn = buttonRef.current;
+        if (!btn) return;
+        try {
+            const ctx = document.createElement("canvas").getContext("2d");
+            if (!ctx) return;
+            const cs = window.getComputedStyle(btn);
+            ctx.font = `${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;
+            let max = 0;
+            for (const opt of options) max = Math.max(max, ctx.measureText(opt.label).width);
+            const pad = parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight) + parseFloat(cs.borderLeftWidth) + parseFloat(cs.borderRightWidth);
+            const next = Math.min(Math.ceil(max + pad) + 2, window.innerWidth - 16);
+            setFitMinWidth(next);
+        } catch { /* keep natural width */ }
+    }, [fitLongestOption, options]);
 
     useEffect(() => {
         if (!open) {
@@ -99,7 +137,25 @@ export function Select({
             const GAP = 4;      // gap between trigger and panel
             const ROW = 36;     // measured option-row height; flip once <3 rows fit below
 
-            const left = Math.max(MARGIN, Math.min(rect.left, vw - rect.width - MARGIN));
+            // Like a native popup, the panel may grow past a narrow trigger to
+            // fit its longest option — but never past the screen. Canvas text
+            // metrics; on failure (no 2D context) it falls back to the trigger
+            // width, which was the previous behaviour.
+            let contentWidth = 0;
+            try {
+                const ctx = document.createElement("canvas").getContext("2d");
+                if (ctx) {
+                    const cs = window.getComputedStyle(btn);
+                    ctx.font = `400 14px ${cs.fontFamily}`; // option rows are text-sm
+                    for (const opt of options) contentWidth = Math.max(contentWidth, ctx.measureText(opt.label).width);
+                    contentWidth = Math.ceil(contentWidth) + 24 /* row px-3 */ + 18 /* scrollbar room */;
+                }
+            } catch { /* fall back to trigger width */ }
+            // Hard viewport cap LAST: even a trigger mid-layout-animation (or
+            // genuinely wider than a tiny screen) must never push the panel out.
+            const width = Math.min(Math.max(rect.width, contentWidth), vw - 2 * MARGIN);
+
+            const left = Math.max(MARGIN, Math.min(rect.left, vw - width - MARGIN));
             const spaceBelow = vh - rect.bottom - GAP - MARGIN;
             const spaceAbove = rect.top - GAP - MARGIN;
             const flip = spaceBelow < ROW * 3 && spaceAbove > spaceBelow;
@@ -107,8 +163,8 @@ export function Select({
 
             setPanelStyle(
                 flip
-                    ? { left, width: rect.width, maxHeight, bottom: vh - rect.top + GAP }
-                    : { left, width: rect.width, maxHeight, top: rect.bottom + GAP }
+                    ? { left, width, maxHeight, bottom: vh - rect.top + GAP }
+                    : { left, width, maxHeight, top: rect.bottom + GAP }
             );
         };
 
@@ -123,7 +179,7 @@ export function Select({
             window.removeEventListener("resize", onResize);
             window.removeEventListener("scroll", onScroll, { capture: true } as AddEventListenerOptions);
         };
-    }, [open]);
+    }, [open, options]);
 
     useEffect(() => {
         if (!open) return;
@@ -161,6 +217,19 @@ export function Select({
         buttonRef.current?.focus();
     };
 
+    // Native selects never land arrows on a disabled option; mirror that by
+    // walking past them (staying put when nothing enabled lies beyond).
+    const nextEnabled = (from: number, dir: 1 | -1) => {
+        for (let i = from + dir; i >= 0 && i < options.length; i += dir) {
+            if (!options[i].disabled) return i;
+        }
+        return null;
+    };
+
+    // Type-ahead buffer (native selects jump to options matching typed text);
+    // entries older than a second start a fresh prefix.
+    const typeaheadRef = useRef({ buffer: "", at: 0 });
+
     const onKeyDown = (e: React.KeyboardEvent) => {
         if (disabled) return;
 
@@ -174,25 +243,52 @@ export function Select({
 
         if (e.key === "Escape") {
             e.preventDefault();
+            // The panel consumed this Escape; without this an enclosing Modal's
+            // window-level keydown listener would close the modal as well.
+            e.stopPropagation();
             setOpen(false);
             return;
         }
 
         if (e.key === "ArrowDown") {
             e.preventDefault();
-            setActiveIndex((i) => Math.min(options.length - 1, i + 1));
+            setActiveIndex((i) => nextEnabled(i, 1) ?? i);
             return;
         }
 
         if (e.key === "ArrowUp") {
             e.preventDefault();
-            setActiveIndex((i) => Math.max(0, i - 1));
+            setActiveIndex((i) => nextEnabled(i, -1) ?? i);
             return;
         }
 
         if (e.key === "Enter") {
             e.preventDefault();
             commitValue(activeIndex);
+            return;
+        }
+
+        // Type-ahead: single printable characters, no modifiers. A lone space
+        // is left alone (it would hijack scrolling and native space-toggling).
+        if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+            const ta = typeaheadRef.current;
+            if (e.key === " " && ta.buffer === "") return;
+            e.preventDefault();
+            const now = e.timeStamp; // monotonic per-event time; pure to read
+            if (now - ta.at > 1000) ta.buffer = "";
+            ta.buffer += e.key.toLowerCase();
+            ta.at = now;
+            // A fresh single character searches from the NEXT option so
+            // repeated presses cycle through matches, as native selects do.
+            const start = ta.buffer.length === 1 ? activeIndex + 1 : activeIndex;
+            for (let step = 0; step < options.length; step++) {
+                const idx = (start + step) % options.length;
+                const opt = options[idx];
+                if (!opt.disabled && opt.label.trim().toLowerCase().startsWith(ta.buffer)) {
+                    setActiveIndex(idx);
+                    break;
+                }
+            }
         }
     };
 
@@ -201,6 +297,7 @@ export function Select({
             ? createPortal(
                 <div
                     ref={panelRef}
+                    id={listboxId}
                     role="listbox"
                     aria-label={ariaLabel}
                     className={cn(
@@ -271,17 +368,34 @@ export function Select({
             <button
                 ref={buttonRef}
                 type="button"
+                id={id}
+                // W3C "select-only combobox" pattern: combobox (not button) is
+                // the role a native <select> exposes, and it supports aria-invalid.
+                role="combobox"
                 aria-label={ariaLabel}
                 aria-haspopup="listbox"
+                aria-controls={listboxId}
                 aria-expanded={open}
+                aria-invalid={ariaInvalid === undefined ? undefined : ariaInvalid}
+                aria-describedby={ariaDescribedBy}
                 disabled={disabled}
+                style={fitMinWidth !== undefined ? { minWidth: fitMinWidth } : undefined}
                 onClick={() => setOpen((v) => !v)}
                 className={cn(
                     "flex h-10 w-full items-center rounded-md border border-input bg-background px-3 pr-9 text-left text-sm text-foreground shadow-sm transition-[background-color,border-color,box-shadow] duration-150 ease-out hover:bg-accent/20 hover:border-foreground/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/20 disabled:cursor-not-allowed disabled:opacity-50",
+                    // A long SELECTED label must not widen narrow grid/flex
+                    // tracks: flex intrinsic sizing ignores min-width:0, so the
+                    // nowrap label propagates unless intrinsic size is contained.
+                    // fitLongestOption triggers skip this — they shrink-to-fit by
+                    // design and their min-width already covers every option.
+                    !fitLongestOption && "[contain:inline-size]",
                     selectClassName
                 )}
             >
-                <span className="min-w-0 truncate">{selectedLabel}</span>
+                {/* flex-1 basis-0 keeps the button's INTRINSIC width at its
+                    padding: a long selected label must never widen a narrow
+                    grid/flex track the way a nowrap span's min-content would. */}
+                <span className="min-w-0 flex-1 truncate">{selectedLabel}</span>
             </button>
             <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
             {panel}

@@ -18,6 +18,9 @@ import { ensureDom } from "@/test-utils/dom";
 
 ensureDom();
 
+// jsdom has no layout engine; the shared Select scrolls its active option into view.
+if (!Element.prototype.scrollIntoView) Element.prototype.scrollIntoView = () => {};
+
 const originalGetMyReview = extendedApi.getMyReview;
 const originalSubmitReview = extendedApi.submitReview;
 
@@ -35,15 +38,16 @@ test("lead dropdown exposes cold, warm, hot, and follow-up color states", async 
 
     render(<Harness />);
     const user = userEvent.setup({ document });
-    const select = screen.getByRole("combobox", { name: /lead type for/i });
+    const trigger = screen.getByRole("combobox", { name: /lead type for/i });
 
+    await user.click(trigger);
     assert.deepEqual(
         screen.getAllByRole("option").map((option) => option.textContent),
         ["Cold", "Warm", "Hot", "Follow-up"],
     );
-    await user.selectOptions(select, "hot");
-    assert.equal((select as HTMLSelectElement).value, "hot");
-    assert.match(select.className, /emerald/);
+    await user.click(screen.getByRole("option", { name: "Hot" }));
+    await waitFor(() => assert.match(trigger.textContent ?? "", /Hot/));
+    assert.match(trigger.className, /emerald/);
 });
 
 test("completing the post-call form persists its values and turns its trigger green", async () => {

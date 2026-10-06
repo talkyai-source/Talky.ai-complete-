@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { Select } from "@/components/ui/select";
 import { useEmailAuditActions, useEmailAuditState } from "@/lib/email-audit-client";
 import { cn } from "@/lib/utils";
 
@@ -29,17 +30,18 @@ export function SendHistory({ className }: { className?: string }) {
                     <div className="mt-1 text-xs text-gray-300">Includes successful and failed send attempts.</div>
                 </div>
                 <div className="flex flex-wrap gap-2">
-                    <select
+                    <Select
                         value={filter}
-                        onChange={(e) => setFilter(e.target.value as typeof filter)}
-                        className="h-9 rounded-md border border-white/10 bg-white/5 px-2 text-sm text-white"
-                        aria-label="Filter history"
+                        onChange={(next) => setFilter(next as typeof filter)}
+                        selectClassName="h-9 border-white/10 bg-white/5 px-2 pr-9 text-white hover:bg-white/10"
+                        ariaLabel="Filter history"
+                        fitLongestOption
                     >
                         <option value="all">All</option>
                         <option value="success">Success</option>
                         <option value="failed">Failed</option>
                         <option value="pending">Pending</option>
-                    </select>
+                    </Select>
                     <Button
                         type="button"
                         variant="secondary"

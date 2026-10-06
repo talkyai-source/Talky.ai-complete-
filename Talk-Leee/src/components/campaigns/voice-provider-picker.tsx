@@ -17,6 +17,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Play, Sparkles, Square } from "lucide-react";
 
 import { Label } from "@/components/ui/label";
+import { Select } from "@/components/ui/select";
 import { aiOptionsApi, VoiceInfo } from "@/lib/ai-options-api";
 import { PersonaType } from "@/lib/dashboard-api";
 import {
@@ -172,15 +173,17 @@ export function VoiceProviderPicker({
                 {providerOptions.length > 0 && (
                     <div className="flex items-center gap-1.5">
                         <span className="text-xs text-muted-foreground">Provider</span>
-                        <select
+                        <Select
+                            ariaLabel="Voice provider"
+                            fitLongestOption
                             value={provider}
-                            onChange={(e) => changeProvider(e.target.value)}
-                            className="rounded-md border border-gray-300 dark:border-white/15 bg-white dark:bg-zinc-900 px-2 py-1 text-xs capitalize focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                            onChange={changeProvider}
+                            selectClassName="h-auto border-gray-300 dark:border-white/15 bg-white dark:bg-zinc-900 px-2 py-1 pr-8 text-xs capitalize"
                         >
                             {providerOptions.map((p) => (
                                 <option key={p} value={p}>{p}</option>
                             ))}
-                        </select>
+                        </Select>
                     </div>
                 )}
             </div>
