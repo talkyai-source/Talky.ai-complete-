@@ -249,8 +249,7 @@ async def test_partial_delivery_keeps_only_what_was_actually_spoken(monkeypatch)
 
     full_text, _llm_ms, _tts_ms = await streamer.stream(session, websocket=None)
 
-    # clean_response strips the "Great," filler opener — the point of this
-    # test is that the DELIVERED sentence survives at all, not its wording.
-    assert session._spoken_sentences == ["Thanks for calling."]
-    assert full_text == "Thanks for calling."
+    # The model's delivered wording survives; the failed second sentence does not.
+    assert session._spoken_sentences == ["Great, thanks for calling."]
+    assert full_text == "Great, thanks for calling."
     assert "tomorrow" not in full_text

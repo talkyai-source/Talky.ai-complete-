@@ -35,6 +35,7 @@ def test_unheard_opening_interruptions_do_not_invent_delivered_identity():
     block = build_live_state_block(agent_name="Ava", company_name="Northwind",
         opening_interrupted=bool(session._greeting_bargein_count))
     assert "interrupted" in block
-    assert "latest" in block
+    assert "agent=Ava" in block
+    assert "company=Northwind" in block
     assert "ALREADY introduced" not in block
     assert "then stop and let them answer" not in block
