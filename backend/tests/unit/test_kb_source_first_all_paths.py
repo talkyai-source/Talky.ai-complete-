@@ -25,8 +25,8 @@ for a node whose content is:
 about the add-on got a context window that did not contain the 75-pound fact
 at all — so the agent either failed to answer or invented a number.
 
-These tests pin the shared renderer AND assert structurally that no delivery
-path has reverted to the old precedence.
+These tests exercise each delivery path with authored text and conflicting
+generated text. An unused renderer import is not evidence of source-first use.
 """
 from __future__ import annotations
 
@@ -68,43 +68,53 @@ def test_truncation_respects_the_budget():
     assert len(out) <= 40
 
 
-@pytest.mark.parametrize(
-    "module_path",
-    [
-        "app/domain/services/voice_pipeline/turn_streamer.py",
-        "app/domain/services/voice_pipeline/knowledge_tool.py",
-        "app/realtime/bridge.py",
-    ],
-)
-def test_every_delivery_path_uses_the_shared_renderer(module_path):
-    """Structural pin.
+async def _delivered_source(path, *, with_source=True):
+    from types import SimpleNamespace
 
-    The old precedence is a one-liner that is very easy to reintroduce by
-    copy-paste, and it fails SILENTLY — the call still works, the agent just
-    quietly stops knowing things. So assert no path carries it.
-    """
-    from pathlib import Path
+    from app.domain.models.conversation import Message, MessageRole
+    from app.domain.services.voice_pipeline.knowledge_tool import run_knowledge_lookup
+    from app.domain.services.voice_pipeline.turn_streamer import _knowledge_block_for_turn
+    from app.realtime.bridge import RealtimeBridge
 
-    src = (Path(__file__).resolve().parents[2] / module_path).read_text(encoding="utf-8")
-    renderer = "prepare_knowledge_evidence" if module_path == "app/realtime/bridge.py" else "render_node_answer"
-    assert renderer in src, f"{module_path} must use the shared source renderer"
-    assert 'voice_answer") or h.get("summary")' not in src, (
-        f"{module_path} has reverted to the old voice_answer-first precedence, "
-        "which silently drops any fact below the first sentence of a node"
-    )
+    node = {**_NODE, "id": "synthetic-pricing", "version": 1,
+            "content": _NODE["content"] if with_source else "",
+            "voice_answer": "The tender add-on costs 999 pounds per month.",
+            "summary": "The tender add-on costs 999 pounds per month."}
+    query = "tender add-on"
+    session = SimpleNamespace(call_id="synthetic-source-test", knowledge_mode="retrieve",
+                              _knowledge_snapshot_nodes=[node])
+    if path == "inject":
+        text = await _knowledge_block_for_turn(session, [Message(role=MessageRole.USER, content=query)])
+    elif path == "tool":
+        text = await run_knowledge_lookup(session, query)
+    else:
+        bridge = RealtimeBridge(call_id="synthetic-source-test", realtime_session=SimpleNamespace(),
+                                media_gateway=SimpleNamespace(), tenant_id="synthetic",
+                                campaign_id="synthetic", knowledge_snapshot_nodes=[node])
+        result = await bridge._lookup_knowledge(query)
+        return result["text"], result["status"]
+    return text, session._knowledge_evidence["status"]
 
 
-def test_price_guard_reaches_the_tool_path():
-    """The guard is empirically load-bearing (11/12 invented prices without it,
-    0/12 with it) and tool mode targets the very model family it was proven
-    against — it must not be inject-path-only."""
-    from pathlib import Path
+@pytest.mark.asyncio
+@pytest.mark.parametrize("path", ["inject", "tool", "realtime"])
+@pytest.mark.parametrize("with_source", [True, False])
+async def test_every_delivery_path_uses_authored_source(path, with_source):
+    text, status = await _delivered_source(path, with_source=with_source)
+    assert "999 pounds" not in text
+    if with_source:
+        assert status == "matched"
+        assert "75 pounds" in text
+        assert "Onboarding is free" in text
+    else:
+        assert status != "matched"
+        assert "75 pounds" not in text
 
-    src = (
-        Path(__file__).resolve().parents[2]
-        / "app/domain/services/voice_pipeline/knowledge_tool.py"
-    ).read_text(encoding="utf-8")
-    assert "KNOWLEDGE_PRICE_GUARD" in src, (
-        "the tool-call KB path returns facts with no price guard; a caller "
-        "asking an uncovered price can be quoted an invented number"
-    )
+
+@pytest.mark.asyncio
+async def test_price_guard_reaches_the_tool_path():
+    from app.services.scripts.prompts.guardrails import KNOWLEDGE_PRICE_GUARD
+
+    text, status = await _delivered_source("tool")
+    assert status == "matched"
+    assert KNOWLEDGE_PRICE_GUARD in text
