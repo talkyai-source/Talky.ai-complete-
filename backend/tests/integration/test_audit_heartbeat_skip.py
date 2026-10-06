@@ -17,7 +17,7 @@ import uuid
 import pytest
 from sqlalchemy import create_engine, text
 
-MIGRATION = importlib.import_module("Alembic.versions.0048_audit_skip_heartbeat_updates")
+MIGRATION = importlib.import_module("Alembic.versions.0048_audit_skip_heartbeat")
 
 
 def _dsn_or_skip() -> str:

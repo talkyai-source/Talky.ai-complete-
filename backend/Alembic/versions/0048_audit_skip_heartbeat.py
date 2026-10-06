@@ -30,7 +30,8 @@ from typing import Sequence, Union
 
 from alembic import op
 
-revision: str = "0048_audit_skip_heartbeat_updates"
+# alembic_version.version_num is VARCHAR(32): revision ids must fit it.
+revision: str = "0048_audit_skip_heartbeat"
 down_revision: Union[str, None] = "0047_protect_ai_config_backup"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
