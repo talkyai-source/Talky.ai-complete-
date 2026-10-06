@@ -1,0 +1,18 @@
+........................................................................ [ 13%]
+........................................................................ [ 27%]
+........................................................................ [ 40%]
+........................................................................ [ 54%]
+........................................................................ [ 67%]
+........................................................................ [ 81%]
+........................................................................ [ 94%]
+........................F..                                              [100%]
+================================== FAILURES ===================================
+_ test_every_delivery_path_uses_the_shared_renderer[app/domain/services/voice_pipeline/knowledge_tool.py] _
+tests\unit\test_kb_source_first_all_paths.py:90: in test_every_delivery_path_uses_the_shared_renderer
+    assert renderer in src, f"{module_path} must use the shared source renderer"
+E   AssertionError: app/domain/services/voice_pipeline/knowledge_tool.py must use the shared source renderer
+E   assert 'render_node_answer' in '"""Campaign knowledge through the existing conversational model\'s search tool.\n\n``VOICE_KB_MODE=tool`` offers look...s",\n                       getattr(session, "call_id", "?")[:8], type(exc).__name__)\n        return KB_UNAVAILABLE\n'
+=========================== short test summary info ===========================
+FAILED tests/unit/test_kb_source_first_all_paths.py::test_every_delivery_path_uses_the_shared_renderer[app/domain/services/voice_pipeline/knowledge_tool.py]
+1 failed, 530 passed, 186 warnings in 13.17s
+{"pytest_exit_code": 1, "gold_gate_exit_code": 1, "gold_cases_unchanged_from_preserved_baseline": true, "gold_recall_at_3": 0.9333333333333333, "gold_sufficient_passage_rate": 0.7111111111111111}

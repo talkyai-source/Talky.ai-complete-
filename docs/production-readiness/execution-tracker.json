@@ -62,7 +62,14 @@
     "api_auth_availability_commit": "12b262435636fb5ef2a342509bd97d858633fb8f",
     "postgres_matrix_fixture_commit": "3435fe353d10b5ff97b5785a3d73068273606ba7",
     "retention_copy_commit": "db482b89d6072ff45b18e7647939278d8d57b0ae",
-    "migrated_ci_extension_commit": "91e37616461a9ed4849ab7564350945c15eb915a"
+    "migrated_ci_extension_commit": "91e37616461a9ed4849ab7564350945c15eb915a",
+    "ag02_query_quality_20261007": {
+      "source_candidate": "c0f0429895f87dcf4ec7d6b1e75c2dda42740af4",
+      "report": "docs/sessions/2026-10-07-ag02-query-quality.md",
+      "verification": "docs/sessions/artifacts/ag02-query-integration/manifest.json",
+      "provider_run": "not_run",
+      "default_recovery_enabled": false
+    }
   },
   "status_rules": {
     "execution": [
@@ -529,10 +536,15 @@
           "path": "docs/sessions/artifacts/ag02-source-evidence-integration/manifest.json",
           "kind": "220_integrated_unit_checks_and_preserved_failed_raw_quality_gate",
           "candidate": "059334c4"
+        },
+        {
+          "path": "docs/sessions/2026-10-07-ag02-query-quality.md",
+          "kind": "query_intent_and_current_tool_evidence_with_bounded_semantic_runner",
+          "candidate": "c0f0429895f87dcf4ec7d6b1e75c2dda42740af4"
         }
       ],
-      "blocker": "Local source/tenant/version, enrichment ownership, passage budget/required-term, authored-source coverage and existing diagnostic preview repairs are verified. The combined committed-source regression passed 220 tests; separate actual PostgreSQL and frontend/type/build checks passed. The unchanged raw-source quality gate still fails: pinned 42/45 recall and 32/45 sufficient; SQL 40/45 and 31/45. Generated aliases can route candidates but cannot establish factual confidence. Approved versioned campaign facts, semantic answer fidelity, configured provider/telephone behavior and deployed timing remain unqualified. No current acceptance campaign has been designated; passing code checks do not close AG02.",
-      "next_action": "Obtain the current campaign name/ID, inspect its saved knowledge versions and AI profile through existing authenticated tools, then qualify representative approved questions through the existing ingestion, source-only retrieval and actual configured model/call flow. Use the repaired diagnostic preview for source/provenance review. Retain the failed raw-source gate and unchanged quality thresholds; complete designated accounts/destinations, human factual/audio review and release timing before closure.",
+      "blocker": "Local source, passage, diagnostic and current-tool-evidence repairs are verified. The latest committed-source run passed 534 tests; prior PostgreSQL/UI evidence remains separately bounded. The unchanged raw quality gate fails: pinned 42/45 recall and 32/45 sufficient; prior SQL 40/45 and 31/45. Default injection does not perform semantic reformulation. Existing tool mode is available but a rewritten-query match does not prove fidelity to the original question. The bounded 80-question synthetic Groq runner is offline verified and its integrated dry plan is ready; a credential source has not been designated for execution. Approved campaign facts, full configured prompt/voice behavior, human answer review and deployed timing remain unqualified. No AG02 or customer-acceptance closure is claimed.",
+      "next_action": "Use the designated existing Groq credential for the reviewed single synthetic run (openai/gpt-oss-20b, retrieve, 80 questions, at most 160 requests and 204800 reserved completion tokens), then inspect original-question meaning and every actual answer before considering default recovery. Keep the raw gate and thresholds unchanged. Separately obtain the current campaign name/ID and approved versions, qualify its full saved profile and SQL/native/call paths, and complete human factual/audio and deployed timing acceptance.",
       "target_date": null,
       "execution_note": "Local candidate 69d09fe575831c42a14b28c0a7417ca1b388c492: 791 combined backend and 9 PostgreSQL tests passed. Synthetic 60-question quality gate failed (pinned 93.33/71.11%, SQL 88.89/68.89%, targets 90/85%). No provider calls, push or deployment; no package closure."
     },

@@ -811,3 +811,21 @@ verified the combined 25 source and five artifact hashes, all sixty unchanged
 gold case objects and unchanged tracker states. These were parity checks, not
 additional test executions. The stronger combined source evidence is separate
 from earlier owner runs whose dependency files preceded the sibling repairs.
+
+## Knowledge query and tool evidence checkpoint — 7 October 2026
+
+The [query-quality record](2026-10-07-ag02-query-quality.md) binds 534 passing
+checks across 22 modules at `c0f0429895f87dcf4ec7d6b1e75c2dda42740af4`, with 37
+unchanged committed input hashes. It covers the current-turn/successive-lookup
+evidence repairs, knowledge-only tool buffering, separate native query intent
+instructions and the offline-tested bounded semantic qualification runner.
+The first integrated structural-test failure is preserved; the repaired test
+checks actual source delivery instead of requiring an unused import.
+
+This checkpoint used the existing virtual environment, not the exact dependency
+target used for the original whole-backend run. No provider, database, browser,
+audio or customer acceptance was performed. The integrated synthetic model dry
+plan is ready; its designated credential source remains pending. All sixty raw
+gold case results are unchanged, including the failed 32/45 sufficiency score.
+Default injection has no automatic reformulation added. No acceptance status,
+deferred package or feature-freeze decision changes.

@@ -1,0 +1,101 @@
+{
+  "python": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\backend\\.venv\\Scripts\\python.exe",
+  "cwd": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\production-ready-20261004\\backend",
+  "environment": {
+    "PYTHONUTF8": "1",
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "ENVIRONMENT": "test",
+    "DATABASE_URL": "postgresql://test:test@127.0.0.1:1/unavailable_test",
+    "PYTHONPATH": "."
+  },
+  "runs": [
+    {
+      "prompt": [
+        "tests/unit/test_knowledge_tool.py",
+        "tests/unit/test_knowledge_uncertainty_contract.py",
+        "tests/unit/test_llm_tool_continuation.py",
+        "tests/unit/test_gemini_tools.py",
+        "-q",
+        "--tb=short",
+        "--disable-warnings",
+        "-o",
+        "addopts="
+      ]
+    },
+    {
+      "combined": [
+        "tests/unit/test_knowledge_tool.py",
+        "tests/unit/test_knowledge_uncertainty_contract.py",
+        "tests/unit/test_llm_tool_continuation.py",
+        "tests/unit/test_gemini_tools.py",
+        "tests/unit/test_knowledge_tool_evidence_lifecycle.py",
+        "tests/unit/test_ag02_semantic_qualification.py",
+        "tests/unit/test_realtime_quality_pass.py",
+        "tests/unit/test_realtime_profile_contract.py",
+        "tests/unit/test_realtime_independent.py",
+        "tests/unit/test_explicit_secret_boundary.py",
+        "tests/unit/test_true_inbound_prompt_separation.py",
+        "tests/unit/test_prompt_versions.py",
+        "tests/unit/test_voice_action_contract.py",
+        "tests/unit/test_knowledge_required_conditions.py",
+        "tests/unit/test_knowledge_authored_coverage.py",
+        "tests/unit/test_kb_evidence_contract.py",
+        "tests/unit/test_knowledge_evidence_budget_order.py",
+        "tests/unit/test_agent_knowledge_repairs.py",
+        "tests/unit/test_realtime_knowledge_evidence.py",
+        "tests/unit/test_knowledge_relevance.py",
+        "tests/unit/test_knowledge_render.py",
+        "tests/unit/test_kb_source_first_all_paths.py",
+        "-q",
+        "--tb=short",
+        "--disable-warnings",
+        "-o",
+        "addopts="
+      ]
+    },
+    {
+      "final": [
+        "tests/unit/test_knowledge_tool.py",
+        "tests/unit/test_knowledge_uncertainty_contract.py",
+        "tests/unit/test_llm_tool_continuation.py",
+        "tests/unit/test_gemini_tools.py",
+        "tests/unit/test_knowledge_tool_evidence_lifecycle.py",
+        "tests/unit/test_ag02_semantic_qualification.py",
+        "tests/unit/test_realtime_quality_pass.py",
+        "tests/unit/test_realtime_profile_contract.py",
+        "tests/unit/test_realtime_independent.py",
+        "tests/unit/test_explicit_secret_boundary.py",
+        "tests/unit/test_true_inbound_prompt_separation.py",
+        "tests/unit/test_prompt_versions.py",
+        "tests/unit/test_voice_action_contract.py",
+        "tests/unit/test_knowledge_required_conditions.py",
+        "tests/unit/test_knowledge_authored_coverage.py",
+        "tests/unit/test_kb_evidence_contract.py",
+        "tests/unit/test_knowledge_evidence_budget_order.py",
+        "tests/unit/test_agent_knowledge_repairs.py",
+        "tests/unit/test_realtime_knowledge_evidence.py",
+        "tests/unit/test_knowledge_relevance.py",
+        "tests/unit/test_knowledge_render.py",
+        "tests/unit/test_kb_source_first_all_paths.py",
+        "-q",
+        "--tb=short",
+        "--disable-warnings",
+        "-o",
+        "addopts="
+      ]
+    }
+  ],
+  "dry_run": [
+    "scripts/qualify_ag02_semantic.py",
+    "--endpoint",
+    "https://api.groq.com/openai/v1/chat/completions",
+    "--model",
+    "openai/gpt-oss-20b",
+    "--knowledge-mode",
+    "retrieve",
+    "--output",
+    "../docs/sessions/artifacts/ag02-query-integration/provider-dry-plan.json"
+  ],
+  "provider_execution": "not run; designated credential source pending",
+  "runner_note": "Archived runner is the final version, with repository-root discovery and a final phase added after the earlier runs. Test argv and source hashes for every attempt are retained."
+}
