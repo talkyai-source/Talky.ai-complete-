@@ -1,0 +1,226 @@
+.F........FFFF.......................................................... [ 57%]
+......................................................                   [100%]
+================================== FAILURES ===================================
+_______ test_shared_loop_four_catalog_steps_still_reaches_exact_source ________
+
+    @pytest.mark.asyncio
+    async def test_shared_loop_four_catalog_steps_still_reaches_exact_source():
+        session = catalog_session()
+        steps = navigation_steps(session)
+        requests = []
+    
+        async def model(messages, **kwargs):
+            requests.append(kwargs)
+            if kwargs.get("tools") and len(requests) <= len(steps):
+                args = steps[len(requests) - 1]
+                kwargs["tool_calls_sink"].append({"id": str(len(requests)), "name": kt.KB_TOOL_NAME,
+                                                   "arguments": args, "arguments_raw": json.dumps(args)})
+            else:
+                yield "The authored conditions apply."
+    
+        async def runner(name, args):
+            return await kt.run_knowledge_lookup(session, args)
+    
+        output = [part async for part in stream_tool_turn(SimpleNamespace(stream_chat_with_timeout=model),
+            [Message(role=MessageRole.USER, content="Please explain the late section.")],
+            tools=[kt.KNOWLEDGE_TOOL_SPEC], tool_runner=runner, max_tool_rounds=3,
+            read_only_tools={kt.KB_TOOL_NAME}, navigation_round_allowed=kt.knowledge_navigation_continuation(session))]
+        assert output == ["The authored conditions apply."]
+        assert session._knowledge_evidence["status"] == "available"
+>       assert "excluding tax" in session._knowledge_evidence["text"]
+E       AssertionError: assert 'excluding tax' in 'Section 16: label label label label label label label label label label label label label label label label label lab...abel label label label label label label label label label label label \nOriginal section 16. All amounts exclude tax.'
+
+tests\unit\test_catalog_navigation.py:74: AssertionError
+_ test_actual_provider_navigation_is_bounded_and_does_not_replay_writes[navigate_read-groq] _
+
+adapter = 'groq', scenario = 'navigate_read'
+rich_genai = namespace(Content=<function rich_genai.<locals>.<lambda> at 0x000001D4E0784860>, Part=<class 'tests.unit.test_gemini_t...<locals>.<lambda> at 0x000001D4E2B9A5C0>, ThinkingConfig=<function rich_genai.<locals>.<lambda> at 0x000001D4E2BE77E0>)
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("adapter", ["groq", "cerebras", "openai", "gemini"])
+    @pytest.mark.parametrize("scenario", ["navigate_read", "repeat", "mixed_write", "hard_cap", "default"])
+    async def test_actual_provider_navigation_is_bounded_and_does_not_replay_writes(adapter, scenario, rich_genai):
+        session = catalog_session()
+        navigation = navigation_steps(session, 8)
+        if scenario == "navigate_read":
+            calls = navigation_steps(session, 4)
+        elif scenario == "repeat":
+            calls = [navigation[0]] * 8
+        else:
+            calls = navigation
+        steps = [[(kt.KB_TOOL_NAME, args)] for args in calls]
+        specs = [kt.KNOWLEDGE_TOOL_SPEC]
+        if scenario == "mixed_write":
+            for step in steps:
+                step.append(("save_fixture", {}))
+            specs.append({"type": "function", "function": {"name": "save_fixture",
+                "parameters": {"type": "object", "properties": {}, "additionalProperties": False}}})
+        provider, requests, signed = make_loop_provider(adapter, steps, rich_genai)
+        writes = []
+        async def run(name, args):
+            if name == kt.KB_TOOL_NAME:
+                return await kt.run_knowledge_lookup(session, args)
+            writes.append(name)
+            return '{"success":true}'
+        kwargs = {} if scenario == "default" else {"navigation_round_allowed": kt.knowledge_navigation_continuation(session)}
+        output = [part async for part in provider.stream_chat_with_tools(
+            [Message(role=MessageRole.USER, content="The original question.")], tools=specs, tool_runner=run,
+            max_tool_rounds=3, read_only_tools={kt.KB_TOOL_NAME}, **kwargs)]
+        assert output == ["Final answer."]
+        expected = {"navigate_read": 6, "repeat": 5, "mixed_write": 4, "hard_cap": 8, "default": 4}[scenario]
+        assert len(requests) == expected
+        if scenario == "navigate_read":
+            assert session._knowledge_evidence["status"] == "available"
+>           assert "excluding tax" in session._knowledge_evidence["text"]
+E           AssertionError: assert 'excluding tax' in 'Section 16: label label label label label label label label label label label label label label label label label lab...abel label label label label label label label label label label label \nOriginal section 16. All amounts exclude tax.'
+
+tests\unit\test_catalog_navigation.py:187: AssertionError
+_ test_actual_provider_navigation_is_bounded_and_does_not_replay_writes[navigate_read-cerebras] _
+
+adapter = 'cerebras', scenario = 'navigate_read'
+rich_genai = namespace(Content=<function rich_genai.<locals>.<lambda> at 0x000001D4E2BFCFE0>, Part=<class 'tests.unit.test_gemini_t...<locals>.<lambda> at 0x000001D4E2BFCEA0>, ThinkingConfig=<function rich_genai.<locals>.<lambda> at 0x000001D4E2BFD080>)
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("adapter", ["groq", "cerebras", "openai", "gemini"])
+    @pytest.mark.parametrize("scenario", ["navigate_read", "repeat", "mixed_write", "hard_cap", "default"])
+    async def test_actual_provider_navigation_is_bounded_and_does_not_replay_writes(adapter, scenario, rich_genai):
+        session = catalog_session()
+        navigation = navigation_steps(session, 8)
+        if scenario == "navigate_read":
+            calls = navigation_steps(session, 4)
+        elif scenario == "repeat":
+            calls = [navigation[0]] * 8
+        else:
+            calls = navigation
+        steps = [[(kt.KB_TOOL_NAME, args)] for args in calls]
+        specs = [kt.KNOWLEDGE_TOOL_SPEC]
+        if scenario == "mixed_write":
+            for step in steps:
+                step.append(("save_fixture", {}))
+            specs.append({"type": "function", "function": {"name": "save_fixture",
+                "parameters": {"type": "object", "properties": {}, "additionalProperties": False}}})
+        provider, requests, signed = make_loop_provider(adapter, steps, rich_genai)
+        writes = []
+        async def run(name, args):
+            if name == kt.KB_TOOL_NAME:
+                return await kt.run_knowledge_lookup(session, args)
+            writes.append(name)
+            return '{"success":true}'
+        kwargs = {} if scenario == "default" else {"navigation_round_allowed": kt.knowledge_navigation_continuation(session)}
+        output = [part async for part in provider.stream_chat_with_tools(
+            [Message(role=MessageRole.USER, content="The original question.")], tools=specs, tool_runner=run,
+            max_tool_rounds=3, read_only_tools={kt.KB_TOOL_NAME}, **kwargs)]
+        assert output == ["Final answer."]
+        expected = {"navigate_read": 6, "repeat": 5, "mixed_write": 4, "hard_cap": 8, "default": 4}[scenario]
+        assert len(requests) == expected
+        if scenario == "navigate_read":
+            assert session._knowledge_evidence["status"] == "available"
+>           assert "excluding tax" in session._knowledge_evidence["text"]
+E           AssertionError: assert 'excluding tax' in 'Section 16: label label label label label label label label label label label label label label label label label lab...abel label label label label label label label label label label label \nOriginal section 16. All amounts exclude tax.'
+
+tests\unit\test_catalog_navigation.py:187: AssertionError
+_ test_actual_provider_navigation_is_bounded_and_does_not_replay_writes[navigate_read-openai] _
+
+adapter = 'openai', scenario = 'navigate_read'
+rich_genai = namespace(Content=<function rich_genai.<locals>.<lambda> at 0x000001D4E2BFD260>, Part=<class 'tests.unit.test_gemini_t...<locals>.<lambda> at 0x000001D4E2BFDB20>, ThinkingConfig=<function rich_genai.<locals>.<lambda> at 0x000001D4E2BFD9E0>)
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("adapter", ["groq", "cerebras", "openai", "gemini"])
+    @pytest.mark.parametrize("scenario", ["navigate_read", "repeat", "mixed_write", "hard_cap", "default"])
+    async def test_actual_provider_navigation_is_bounded_and_does_not_replay_writes(adapter, scenario, rich_genai):
+        session = catalog_session()
+        navigation = navigation_steps(session, 8)
+        if scenario == "navigate_read":
+            calls = navigation_steps(session, 4)
+        elif scenario == "repeat":
+            calls = [navigation[0]] * 8
+        else:
+            calls = navigation
+        steps = [[(kt.KB_TOOL_NAME, args)] for args in calls]
+        specs = [kt.KNOWLEDGE_TOOL_SPEC]
+        if scenario == "mixed_write":
+            for step in steps:
+                step.append(("save_fixture", {}))
+            specs.append({"type": "function", "function": {"name": "save_fixture",
+                "parameters": {"type": "object", "properties": {}, "additionalProperties": False}}})
+        provider, requests, signed = make_loop_provider(adapter, steps, rich_genai)
+        writes = []
+        async def run(name, args):
+            if name == kt.KB_TOOL_NAME:
+                return await kt.run_knowledge_lookup(session, args)
+            writes.append(name)
+            return '{"success":true}'
+        kwargs = {} if scenario == "default" else {"navigation_round_allowed": kt.knowledge_navigation_continuation(session)}
+        output = [part async for part in provider.stream_chat_with_tools(
+            [Message(role=MessageRole.USER, content="The original question.")], tools=specs, tool_runner=run,
+            max_tool_rounds=3, read_only_tools={kt.KB_TOOL_NAME}, **kwargs)]
+        assert output == ["Final answer."]
+        expected = {"navigate_read": 6, "repeat": 5, "mixed_write": 4, "hard_cap": 8, "default": 4}[scenario]
+        assert len(requests) == expected
+        if scenario == "navigate_read":
+            assert session._knowledge_evidence["status"] == "available"
+>           assert "excluding tax" in session._knowledge_evidence["text"]
+E           AssertionError: assert 'excluding tax' in 'Section 16: label label label label label label label label label label label label label label label label label lab...abel label label label label label label label label label label label \nOriginal section 16. All amounts exclude tax.'
+
+tests\unit\test_catalog_navigation.py:187: AssertionError
+_ test_actual_provider_navigation_is_bounded_and_does_not_replay_writes[navigate_read-gemini] _
+
+adapter = 'gemini', scenario = 'navigate_read'
+rich_genai = namespace(Content=<function rich_genai.<locals>.<lambda> at 0x000001D4E2BFDEE0>, Part=<class 'tests.unit.test_gemini_t...<locals>.<lambda> at 0x000001D4E2BFDF80>, ThinkingConfig=<function rich_genai.<locals>.<lambda> at 0x000001D4E2BFE020>)
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("adapter", ["groq", "cerebras", "openai", "gemini"])
+    @pytest.mark.parametrize("scenario", ["navigate_read", "repeat", "mixed_write", "hard_cap", "default"])
+    async def test_actual_provider_navigation_is_bounded_and_does_not_replay_writes(adapter, scenario, rich_genai):
+        session = catalog_session()
+        navigation = navigation_steps(session, 8)
+        if scenario == "navigate_read":
+            calls = navigation_steps(session, 4)
+        elif scenario == "repeat":
+            calls = [navigation[0]] * 8
+        else:
+            calls = navigation
+        steps = [[(kt.KB_TOOL_NAME, args)] for args in calls]
+        specs = [kt.KNOWLEDGE_TOOL_SPEC]
+        if scenario == "mixed_write":
+            for step in steps:
+                step.append(("save_fixture", {}))
+            specs.append({"type": "function", "function": {"name": "save_fixture",
+                "parameters": {"type": "object", "properties": {}, "additionalProperties": False}}})
+        provider, requests, signed = make_loop_provider(adapter, steps, rich_genai)
+        writes = []
+        async def run(name, args):
+            if name == kt.KB_TOOL_NAME:
+                return await kt.run_knowledge_lookup(session, args)
+            writes.append(name)
+            return '{"success":true}'
+        kwargs = {} if scenario == "default" else {"navigation_round_allowed": kt.knowledge_navigation_continuation(session)}
+        output = [part async for part in provider.stream_chat_with_tools(
+            [Message(role=MessageRole.USER, content="The original question.")], tools=specs, tool_runner=run,
+            max_tool_rounds=3, read_only_tools={kt.KB_TOOL_NAME}, **kwargs)]
+        assert output == ["Final answer."]
+        expected = {"navigate_read": 6, "repeat": 5, "mixed_write": 4, "hard_cap": 8, "default": 4}[scenario]
+        assert len(requests) == expected
+        if scenario == "navigate_read":
+            assert session._knowledge_evidence["status"] == "available"
+>           assert "excluding tax" in session._knowledge_evidence["text"]
+E           AssertionError: assert 'excluding tax' in 'Section 16: label label label label label label label label label label label label label label label label label lab...abel label label label label label label label label label label label \nOriginal section 16. All amounts exclude tax.'
+
+tests\unit\test_catalog_navigation.py:187: AssertionError
+============================== warnings summary ===============================
+tests/unit/test_model_driven_voice_turn.py: 24 warnings
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\backend\.venv\Lib\site-packages\pydantic\main.py:250: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+
+tests/unit/test_assistant_knowledge_authorization.py::test_streaming_dispatch_threads_authenticated_actor
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\agent-catalog-repairs-20261007\backend\app\infrastructure\assistant\streaming.py:340: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    system_prompt = SYSTEM_PROMPT.format(current_time=datetime.utcnow().isoformat())
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/unit/test_catalog_navigation.py::test_shared_loop_four_catalog_steps_still_reaches_exact_source
+FAILED tests/unit/test_catalog_navigation.py::test_actual_provider_navigation_is_bounded_and_does_not_replay_writes[navigate_read-groq]
+FAILED tests/unit/test_catalog_navigation.py::test_actual_provider_navigation_is_bounded_and_does_not_replay_writes[navigate_read-cerebras]
+FAILED tests/unit/test_catalog_navigation.py::test_actual_provider_navigation_is_bounded_and_does_not_replay_writes[navigate_read-openai]
+FAILED tests/unit/test_catalog_navigation.py::test_actual_provider_navigation_is_bounded_and_does_not_replay_writes[navigate_read-gemini]
+5 failed, 121 passed, 25 warnings in 22.14s
