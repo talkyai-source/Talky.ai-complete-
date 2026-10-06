@@ -1,0 +1,36 @@
+{
+  "source_commit": "d69cc8b13a4c37e1be8b046d821fff3129f92c82",
+  "base_commit": "458c6798",
+  "cwd": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\agent-dead-code-cleanup-20261007",
+  "source_scope": {
+    "app_paths": 15,
+    "test_and_fixture_paths": 54,
+    "deleted_app_files": 5,
+    "deleted_test_modules": 21
+  },
+  "environment": {
+    "PYTHONUTF8": "1",
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "ENVIRONMENT": "test",
+    "DATABASE_URL": "postgresql://test:test@127.0.0.1:1/unavailable_test",
+    "PYTHONPATH": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\agent-dead-code-cleanup-20261007\\backend"
+  },
+  "python": "3.12.12 (main, Dec  9 2025, 19:02:55) [MSC v.1944 64 bit (AMD64)]",
+  "versions": {
+    "pytest": "7.4.4",
+    "pytest-asyncio": "0.23.3",
+    "pydantic": "2.12.5"
+  },
+  "command": "& 'C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/backend/.venv/Scripts/python.exe' -B docs/sessions/artifacts/agent-dead-code-cleanup/check.py tests/unit/test_model_contact_recording.py tests/unit/test_ag05_native_contact_revision.py tests/unit/test_realtime_relationship_ownership.py tests/unit/test_spoken_email_normalizer.py tests/unit/test_llm_guardrails.py tests/unit/test_prompt_safety.py tests/unit/test_expressive_caps.py tests/unit/test_agent_conversation_guide.py tests/unit/test_core_prompt_contract.py tests/unit/test_streamed_url_sentence_boundaries.py tests/unit/test_live_call_lead_capture.py tests/unit/test_kb_evidence_contract.py *> docs/sessions/artifacts/agent-dead-code-cleanup/initial.txt",
+  "verification": {
+    "modules": 12,
+    "passed": 261,
+    "failed": 9,
+    "warnings": 62,
+    "seconds": 16.82,
+    "internal_socketpairs": 245,
+    "prohibited": 0,
+    "failures": "All nine stopped at LLMGuardrailsConfig import in voice_pipeline_service, whose coordinated cleanup is owned by a separate agent."
+  },
+  "qualification": "Existing shared venv, not a fresh exact dependency installation. Synthetic ports only. No provider, SQL, browser or model-quality acceptance."
+}
