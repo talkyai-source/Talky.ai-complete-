@@ -1,13 +1,15 @@
 """Campaign knowledge through the existing conversational model's search tool.
 
 ``VOICE_KB_MODE=tool`` offers lookup to providers with ``supports_tools``;
-otherwise the turn uses ordinary injection. Both paths share source evidence
-and passage budgets. A model-authored query can bridge different wording, but
+otherwise the turn uses injection with one tool recovery on a completed weak
+or missing match. Both paths share source evidence and passage budgets.
+A model-authored query can bridge different wording, but
 its lexical score cannot establish equivalence to the caller's question.
 """
 from __future__ import annotations
 
 import asyncio
+from copy import deepcopy
 import logging
 import os
 import time
@@ -152,6 +154,64 @@ def knowledge_tools_for(session: CallSession, provider) -> list | None:
 def tool_system_addendum() -> str:
     """Short system-prompt addendum that teaches the model when to call the tool."""
     return _TOOL_ADDENDUM
+
+
+class KnowledgeRecovery:
+    """One default-path recovery lookup; owned by a single confirmed turn."""
+
+    def __init__(self, session: CallSession) -> None:
+        self.session = session
+        self._query: str | None = None
+        self._result = ""
+        self._evidence = None
+        self._grounding: list[str] = []
+
+    def system_addendum(self) -> str:
+        return (
+            "The initial literal search did not confirm an answer. You have one "
+            "recovery lookup for this turn: rephrase the original question for "
+            "search if its meaning is clear, using topic hints only for navigation. "
+            "Until a returned source answers the original question and its "
+            "conditions, do not confirm business facts. If the meaning is ambiguous, "
+            "ask for clarification; if recovery is insufficient, say you cannot confirm.\n"
+            + tool_system_addendum()
+        )
+
+    async def lookup(self, query: str) -> str:
+        q = (query or "").strip()
+        if self._query is not None:
+            if q == self._query:
+                self.session._knowledge_evidence = deepcopy(self._evidence)
+                self.session._knowledge_grounding = list(self._grounding)
+                return self._result
+            self.session._knowledge_evidence = {
+                "status": "unavailable", "passages": [], "reason": "recovery_limit",
+            }
+            self.session._knowledge_grounding = []
+            return (
+                "No additional knowledge lookup was performed: the one recovery "
+                "lookup for this turn was already used. This new query is unconfirmed. "
+                "Do not infer its answer from the earlier result."
+            )
+        self._query = q
+        self._result = await run_knowledge_lookup(self.session, q)
+        self._evidence = deepcopy(self.session._knowledge_evidence)
+        self._grounding = list(self.session._knowledge_grounding)
+        return self._result
+
+
+def knowledge_recovery_for(session: CallSession, provider) -> KnowledgeRecovery | None:
+    """Select only after this turn's actual inject lookup completed without facts."""
+    if kb_tool_mode_enabled():
+        return None
+    if getattr(session, "knowledge_mode", None) not in ("retrieve", "map_retrieve"):
+        return None
+    if not getattr(provider, "supports_tools", False):
+        return None
+    evidence = getattr(session, "_knowledge_evidence", None)
+    if not isinstance(evidence, dict) or evidence.get("status") not in ("weak_match", "no_match"):
+        return None
+    return KnowledgeRecovery(session)
 
 
 async def run_knowledge_lookup(session: CallSession, query: str) -> str:

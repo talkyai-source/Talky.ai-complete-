@@ -80,6 +80,8 @@ from app.domain.services.voice_pipeline.readback_guard import phone_readback_gua
 from app.services.scripts.prompts.live_state import build_live_state_block
 from app.domain.services.voice_pipeline.knowledge_tool import (
     KB_TOOL_NAME,
+    KNOWLEDGE_TOOL_SPEC,
+    knowledge_recovery_for,
     knowledge_tools_for,
     run_knowledge_lookup,
     tool_system_addendum,
@@ -318,7 +320,13 @@ async def _knowledge_block_for_turn(session: CallSession, messages: list) -> str
         header = (
             KNOWLEDGE_WEAK_MATCH_HEADER
             if weak
-            else "COMPANY KNOWLEDGE — official answers for this caller's question.\n"
+            else (
+                "COMPANY KNOWLEDGE — retrieved source passages.\n"
+                "Check that the source answers the caller's original question, "
+                "including named products, locations, timing, negation, relationships "
+                "and conditions. A search match alone is not an answer. Clarify "
+                "ambiguity; if the source does not support the answer, say you cannot confirm.\n"
+            )
         )
         return (
             header
@@ -437,12 +445,13 @@ class TurnStreamer:
         # Campaign knowledge (vectorless RAG). Two modes for retrieve /
         # map_retrieve campaigns (inline baked the whole tree at pre-warm):
         #   inject (default) — fetch the node(s) matching the caller's latest
-        #     message and inject them for THIS turn (bounded + fail-soft).
+        #     message; recover one completed weak/no-match through the same model.
         #   tool (VOICE_KB_MODE=tool) — expose a lookup tool so the model
         #     fetches facts ONLY when it needs them; most turns carry zero KB.
         # Tool mode is skipped on end-session-action turns (their JSON envelope
         # would clash with function tools) → those fall back to inject.
         kb_tools = None
+        kb_recovery = None
         knowledge_block = None
         if session.knowledge_mode in ("retrieve", "map_retrieve") and messages:
             kb_tools = knowledge_tools_for(session, self._p.llm_provider)
@@ -486,6 +495,11 @@ class TurnStreamer:
                 # designed out; it would just be a matter of moving the launch
                 # to this line and the await down to build_turn_prompt()).
                 knowledge_block = await _knowledge_block_for_turn(session, messages) or None
+                kb_recovery = knowledge_recovery_for(session, self._p.llm_provider)
+                if kb_recovery is not None:
+                    kb_tools = [KNOWLEDGE_TOOL_SPEC]
+                    knowledge_block = kb_recovery.system_addendum()
+                    legacy_end_action = False
 
         end_session_block = action_tool_system_addendum(enabled_voice_actions(session))
         if legacy_end_action:
@@ -981,7 +995,10 @@ class TurnStreamer:
             async def _voice_tool_runner(_name: str, _args: dict) -> str:
                 if _name == KB_TOOL_NAME:
                     q = (_args or {}).get("query") or last_user_text_for_limit
-                    result = await run_knowledge_lookup(session, q)
+                    result = await (
+                        kb_recovery.lookup(q) if kb_recovery is not None
+                        else run_knowledge_lookup(session, q)
+                    )
                     evidence = getattr(session, "_knowledge_evidence", None)
                     status = evidence.get("status") if isinstance(evidence, dict) else None
                     if status not in ("matched", "weak_match", "no_match", "unavailable"):
