@@ -503,6 +503,8 @@ class GeminiLLMProvider(LLMProvider):
         max_tokens: Optional[int] = None,
         timeout_seconds: float = DEFAULT_LLM_TIMEOUT,
         require_tool_result_before_content: bool = False,
+        max_tool_rounds: int = 1,
+        read_only_tools=(),
         **kwargs,
     ) -> AsyncIterator[str]:
         """Stream a turn that MAY call a function tool, using Gemini function
@@ -510,13 +512,13 @@ class GeminiLLMProvider(LLMProvider):
         pipeline drives on-demand KB on either provider through the same
         str-yield contract.
 
-        Round 0: offer the tool and stream. If the model answers directly it
-        streams immediately (the common, fast path). If it emits a function_call
-        instead, Round 1: run ``tool_runner`` for the fact(s), feed the
-        function_response back, and stream the grounded answer with NO tools (so
-        it cannot loop). ``tool_runner`` is async ``(name, args_dict) -> str``.
-        With no tools/runner this degrades to the normal timeout-guarded stream.
+        The default remains one tool decision then a tool-less answer. Live
+        section navigation can opt into at most three decisions. Native model
+        parts (including thought signatures) are preserved in every continuation.
+        Repeated writes share a receipt; read-only tools rerun to refresh evidence.
         """
+        if type(max_tool_rounds) is not int or not 1 <= max_tool_rounds <= 3:
+            raise ValueError("max_tool_rounds must be an integer from 1 to 3")
         if not tools or tool_runner is None:
             async with aclosing(self.stream_chat_with_timeout(
                 messages, timeout_seconds=timeout_seconds, system_prompt=system_prompt,
@@ -581,9 +583,7 @@ class GeminiLLMProvider(LLMProvider):
             except Exception:
                 return None
 
-        model_parts = []
-
-        async def _stream(cfg, fcalls_out):
+        async def _stream(cfg, fcalls_out, model_parts):
             async def chunks():
                 record_traditional_request(
                     provider=self.name,
@@ -619,61 +619,56 @@ class GeminiLLMProvider(LLMProvider):
                         "Gemini stream ended without a terminal reason"
                     )
 
-        # Round 0 — offer the tool; the model answers directly or calls it.
-        round0_cfg = genai_types.GenerateContentConfig(tools=gemini_tools, **base_cfg)
-        fcalls: list = []
-        produced = False
-        round_zero_tokens: list[str] = []
-        async with aclosing(_stream(round0_cfg, fcalls)) as stream:
-            async for tok in stream:
-                produced = True
-                if require_tool_result_before_content:
-                    round_zero_tokens.append(tok)
-                else:
-                    yield tok
-
-        if not fcalls:
-            if require_tool_result_before_content and produced:
-                yield "".join(round_zero_tokens)
-            return
-
-        # Round 1 — execute the tool(s), feed responses back (role="user", as the
-        # SDK's own auto-FC path does), stream the grounded answer with no tools.
-        resp_parts = []
+        decision_cfg = genai_types.GenerateContentConfig(tools=gemini_tools, **base_cfg)
         tool_results = {}
-        for fc in fcalls:
-            if not any(getattr(p, "function_call", None) == fc for p in model_parts):
-                model_parts.append(genai_types.Part(function_call=fc))
-            try:
-                args = dict(fc.args) if fc.args else {}
-            except Exception:
-                args = {}
-            try:
-                import json
-                key = (fc.name, json.dumps(args, sort_keys=True))
-                if key not in tool_results:
-                    tool_results[key] = await execute_tool_call({"name": fc.name, "arguments": args}, tools, tool_runner)
-                result = tool_results[key]
-            except Exception as exc:  # never let a tool failure stall the turn
-                logger.warning("gemini tool_runner failed name=%s: %s", fc.name, exc)
-                result = "No specific information found."
-            resp_parts.append(genai_types.Part.from_function_response(
-                name=fc.name,
-                response={"result": result or "No specific information found."},
-            ))
-        contents.append(genai_types.Content(role="model", parts=model_parts))
-        contents.append(genai_types.Content(role="user", parts=resp_parts))
+        for _ in range(max_tool_rounds):
+            # A new list per response avoids mutating already-sent signed parts.
+            model_parts, fcalls, decision_tokens = [], [], []
+            async with aclosing(_stream(decision_cfg, fcalls, model_parts)) as stream:
+                async for tok in stream:
+                    if require_tool_result_before_content:
+                        decision_tokens.append(tok)
+                    else:
+                        yield tok
+            if not fcalls:
+                if decision_tokens:
+                    yield "".join(decision_tokens)
+                return
+
+            resp_parts = []
+            for fc in fcalls:
+                if not any(getattr(p, "function_call", None) == fc for p in model_parts):
+                    model_parts.append(genai_types.Part(function_call=fc))
+                try:
+                    args = dict(fc.args) if fc.args else {}
+                except Exception:
+                    args = {}
+                try:
+                    import json
+                    key = (fc.name, json.dumps(args, sort_keys=True))
+                    if key not in tool_results or fc.name in read_only_tools:
+                        tool_results[key] = await execute_tool_call({"name": fc.name, "arguments": args}, tools, tool_runner)
+                    result = tool_results[key]
+                except Exception as exc:  # never let a tool failure stall the turn
+                    logger.warning("gemini tool_runner failed name=%s: %s", fc.name, exc)
+                    result = "No specific information found."
+                resp_parts.append(genai_types.Part.from_function_response(
+                    name=fc.name,
+                    response={"result": result or "No specific information found."},
+                ))
+            contents.append(genai_types.Content(role="model", parts=model_parts))
+            contents.append(genai_types.Content(role="user", parts=resp_parts))
 
         round1_cfg = genai_types.GenerateContentConfig(**base_cfg)  # no tools
         if require_tool_result_before_content:
             grounded_tokens: list[str] = []
-            async with aclosing(_stream(round1_cfg, [])) as stream:
+            async with aclosing(_stream(round1_cfg, [], [])) as stream:
                 async for tok in stream:
                     grounded_tokens.append(tok)
             if grounded_tokens:
                 yield "".join(grounded_tokens)
         else:
-            async with aclosing(_stream(round1_cfg, [])) as stream:
+            async with aclosing(_stream(round1_cfg, [], [])) as stream:
                 async for tok in stream:
                     yield tok
 

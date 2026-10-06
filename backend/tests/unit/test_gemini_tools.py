@@ -49,8 +49,10 @@ class _FakeStream:
 def _provider_with_streams(streams):
     p = GeminiLLMProvider()
     aio = SimpleNamespace(models=SimpleNamespace())
+    p._test_requests = []
 
     async def _gen(*a, **k):
+        p._test_requests.append({**k, "contents": tuple(k["contents"])})
         return streams.pop(0)
 
     aio.models.generate_content_stream = _gen
@@ -71,7 +73,9 @@ class _StubPart(SimpleNamespace):
 
     @staticmethod
     def from_function_response(name=None, response=None):
-        return _StubPart()
+        part = _StubPart()
+        part.function_response = SimpleNamespace(name=name, response=response)
+        return part
 
 
 @pytest.fixture
@@ -180,3 +184,83 @@ def test_strict_action_turn_discards_premature_round_zero_claim(rich_genai):
 
     assert out == ["I can't send an email from this call."]
     assert "sent that already" not in "".join(out).lower()
+
+
+def _signed_call(rich_genai, name, args, signature):
+    fc = rich_genai.FunctionCall(name=name, args=args)
+    part = SimpleNamespace(function_call=fc, thought_signature=signature, text=None)
+    chunk = _FakeChunk(function_calls=[fc])
+    chunk.candidates = [SimpleNamespace(content=SimpleNamespace(parts=[part]))]
+    return chunk, part
+
+
+def test_catalog_then_read_preserves_each_rounds_native_signed_parts(rich_genai):
+    from app.domain.services.voice_pipeline.knowledge_tool import run_knowledge_lookup
+    from app.services.scripts.knowledge.sections import build_section_catalog
+    context = build_section_catalog([
+        {"id": "refund", "source_id": "handbook", "source_version": 1, "version": "v1",
+         "heading": "Refunds", "content": "Refunds take five working days."},
+    ], tenant_id="t1", campaign_id="c1", source_policy="call_snapshot")
+    session = SimpleNamespace(tenant_id="t1", campaign_id="c1", _knowledge_catalog=context)
+    ref = context.nodes[0]["section_id"]
+    first, first_part = _signed_call(rich_genai, "lookup_company_knowledge", {"catalog_offset": 0}, b"catalog-signature")
+    second, second_part = _signed_call(rich_genai, "lookup_company_knowledge", {"section_ids": [ref]}, b"read-signature")
+    provider = _provider_with_streams([
+        _FakeStream([first]), _FakeStream([second]),
+        _FakeStream([_FakeChunk(text="Refunds take five working days.")]),
+    ])
+    async def runner(name, args):
+        return await run_knowledge_lookup(session, args)
+    result = _run(provider.stream_chat_with_tools(
+        [Message(role=MessageRole.USER, content="When will my money come back?")],
+        tools=[KNOWLEDGE_TOOL_SPEC], tool_runner=runner, max_tool_rounds=3,
+        read_only_tools=("lookup_company_knowledge",)))
+    assert result == ["Refunds take five working days."]
+    assert session._knowledge_evidence["status"] == "available"
+    assert len(provider._test_requests) == 3
+    final = provider._test_requests[2]["contents"]
+    assert final[1].parts == [first_part] and final[3].parts == [second_part]
+    assert final[1].parts[0] is first_part and final[3].parts[0] is second_part
+    assert "catalog" in final[2].parts[0].function_response.response["result"]
+    assert "available" in final[4].parts[0].function_response.response["result"]
+
+
+def test_repeated_write_runs_once_across_rounds_and_stops_at_budget(rich_genai):
+    spec = {"type": "function", "function": {"name": ACTION_SEND_EMAIL,
+        "parameters": {"type": "object", "properties": {}}}}
+    chunks = [_signed_call(rich_genai, ACTION_SEND_EMAIL, {}, bytes([i]))[0] for i in range(3)]
+    provider = _provider_with_streams([*[_FakeStream([c]) for c in chunks],
+        _FakeStream([_FakeChunk(text="The request was accepted.")])])
+    calls = []
+    async def runner(name, args):
+        calls.append((name, args))
+        return '{"success":true,"status":"accepted"}'
+    result = _run(provider.stream_chat_with_tools(
+        [Message(role=MessageRole.USER, content="Send it.")], tools=[spec], tool_runner=runner,
+        max_tool_rounds=3))
+    assert result == ["The request was accepted."] and calls == [(ACTION_SEND_EMAIL, {})]
+    assert len(provider._test_requests) == 4
+    assert not hasattr(provider._test_requests[-1]["config"], "tools")
+    assert len(provider._test_requests[-1]["contents"]) == 7
+
+
+def test_repeated_read_refreshes_evidence_after_catalog(rich_genai):
+    calls = []
+    args = [{"section_ids": ["a"]}, {"catalog_offset": 0}, {"section_ids": ["a"]}]
+    chunks = [_signed_call(rich_genai, "lookup_company_knowledge", arg, b"signature")[0] for arg in args]
+    provider = _provider_with_streams([*[_FakeStream([c]) for c in chunks],
+        _FakeStream([_FakeChunk(text="Current source answer.")])])
+    async def runner(name, arguments):
+        calls.append(arguments)
+        return "available" if "section_ids" in arguments else "catalog"
+    _run(provider.stream_chat_with_tools(
+        [Message(role=MessageRole.USER, content="Please check.")], tools=[KNOWLEDGE_TOOL_SPEC],
+        tool_runner=runner, max_tool_rounds=3, read_only_tools=("lookup_company_knowledge",)))
+    assert calls == args
+
+
+@pytest.mark.parametrize("budget", [True, 0, 4, -1, 1.5])
+def test_tool_round_budget_is_strict_even_without_tools(budget):
+    provider = GeminiLLMProvider()
+    with pytest.raises(ValueError, match="max_tool_rounds"):
+        _run(provider.stream_chat_with_tools([], max_tool_rounds=budget))
