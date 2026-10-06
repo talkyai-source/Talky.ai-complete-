@@ -237,75 +237,6 @@ async def _attach_llm_opener(
         )
 
 
-def _start_opening_ladder_generation(pre_warm_session, effective_first_speaker: str) -> None:
-    """Fire-and-forget: generate this call's LLM opening ladder in the
-    background, during the ring/warmup window.
-
-    NEVER AWAITED — this is the whole point. The opening "Hello?" ladder is
-    read by audio_ingest.py's silence monitor only once the callee has
-    already gone silent after pickup; an LLM round-trip at that moment is
-    exactly what the task forbids. Firing it here instead (before the strict
-    warmup gate even starts, so it gets the most wall-clock time possible
-    before the phone is answered) means a slow or failing provider costs the
-    call NOTHING: the strict gate below doesn't wait on this task, origination
-    proceeds on schedule either way, and turn_director.choose_silence_phrase
-    simply reads whatever landed on ``call_session._opening_ladder`` by the
-    time a nudge actually fires — the static ladder if this task is still
-    running, errored, or was never started.
-
-    Gated to caller-first ("user" first-speaker) calls only: the opening
-    ladder is only ever consulted when ``_is_caller_first`` is True in
-    audio_ingest.py (see turn_director.OPENING_PHRASES' docstring) — an
-    agent-first call would never read this, so generating it would just be a
-    wasted LLM call.
-    """
-    call_session = getattr(pre_warm_session, "call_session", None)
-    if call_session is None or effective_first_speaker != "user":
-        return
-    try:
-        from app.domain.services.telephony.opening_ladder import (
-            generate_opening_ladder,
-            opening_ladder_enabled,
-        )
-
-        # Cheapest possible check first: flag off costs one env read and
-        # starts no task at all.
-        if not opening_ladder_enabled():
-            return
-
-        llm_provider = getattr(pre_warm_session, "llm_provider", None)
-        if llm_provider is None:
-            return
-
-        call_id = getattr(pre_warm_session, "call_id", None)
-
-        async def _run() -> None:
-            try:
-                ladder = await generate_opening_ladder(
-                    llm_provider=llm_provider, call_id=call_id,
-                )
-            except asyncio.CancelledError:
-                raise
-            except Exception as run_exc:  # noqa: BLE001 - never surface
-                logger.debug(
-                    "opening_ladder_background_failed call=%s err=%r",
-                    str(call_id or "-")[:12], run_exc,
-                )
-                return
-            if ladder:
-                # Stashed exactly like _presynth_greeting_audio /
-                # _presynth_greeting_text below — a plain attribute the
-                # answer-path / nudge-path reads with getattr(..., None).
-                call_session._opening_ladder = ladder
-
-        asyncio.create_task(_run())
-    except Exception as exc:  # noqa: BLE001 - starting the task must never fail a call
-        logger.debug(
-            "opening_ladder_start_failed call=%s err=%r",
-            str(getattr(pre_warm_session, "call_id", "-"))[:12], exc,
-        )
-
-
 async def prepare_prewarmed_session(
     *,
     first_speaker: Optional[str],
@@ -456,13 +387,6 @@ async def prepare_prewarmed_session(
                 failure_reason=None,
             )
 
-        # LLM-authored opening ladder (flag-gated, DEFAULT OFF). Fired here,
-        # BEFORE the strict warmup gate below, so the background task gets the
-        # most possible time to land before the callee picks up — but it is
-        # never awaited, so a slow provider costs this call nothing. See
-        # _start_opening_ladder_generation's docstring for the full fail-soft
-        # story.
-        _start_opening_ladder_generation(pre_warm_session, effective_first_speaker)
 
         # The model-selected catalog was pinned before session creation above.
 

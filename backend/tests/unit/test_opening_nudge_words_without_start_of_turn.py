@@ -12,16 +12,14 @@ test_regreet_ladder_over_open_caller_turn.py.
 from __future__ import annotations
 
 import asyncio
-import os
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 
-from app.domain.services.voice_pipeline.audio_ingest import AudioIngest
 from tests.unit.test_audio_ingest_caller_first_silence import (
-    _instant_yield,
     _make_pipeline,
     _make_session,
+    _run_until_silence_tick,
 )
 
 
@@ -58,46 +56,12 @@ class _WordsThenEndOfTurnSTT:
         yield  # pragma: no cover
 
 
-async def _spoken_after(stt) -> list:
-    session = _make_session("user")
-    pipeline = _make_pipeline()
+@pytest.mark.asyncio
+@pytest.mark.parametrize("provider,should_close", [(_WordsNoStartOfTurnSTT, False), (_WordsThenEndOfTurnSTT, True)])
+async def test_stt_words_without_start_event_own_the_silence_deadline(provider, should_close):
+    session, pipeline = _make_session("user"), _make_pipeline()
     pipeline.handle_transcript = AsyncMock()
-    pipeline.stt_provider = stt
-    ingest = AudioIngest(pipeline)
-    with (
-        patch.dict(
-            os.environ,
-            {
-                "VOICE_OPENING_HELLO_S": "0.03",
-                "VOICE_MID_NUDGE_S": "0.03",
-                "VOICE_SILENCE_HANGUP_S": "30",
-                "VOICE_NUDGE_MIN_GAP_S": "0.03",
-            },
-        ),
-        patch("asyncio.sleep", new=_instant_yield),
-    ):
-        task = asyncio.ensure_future(ingest.process(session))
-        try:
-            await asyncio.wait_for(asyncio.shield(task), timeout=1.5)
-        except asyncio.TimeoutError:
-            pass
-        finally:
-            session.stt_active = False
-            task.cancel()
-            try:
-                await task
-            except (asyncio.CancelledError, Exception):
-                pass
-    return [c.args[1] for c in pipeline.synthesize_and_send_audio.await_args_list]
-
-
-@pytest.mark.asyncio
-async def test_words_still_arriving_hold_the_opening_nudge():
-    spoken = await _spoken_after(_WordsNoStartOfTurnSTT())
-    assert not spoken, f"nudged over a caller who was mid-turn: {spoken!r}"
-
-
-@pytest.mark.asyncio
-async def test_once_the_turn_ends_the_opening_ladder_still_runs():
-    spoken = await _spoken_after(_WordsThenEndOfTurnSTT())
-    assert spoken, "EndOfTurn closed the turn; the ladder must still be able to nudge"
+    pipeline.stt_provider = provider()
+    await _run_until_silence_tick(session, pipeline, hangup_s=0.03)
+    assert pipeline._shutdown_session_for_end_action.await_count == int(should_close)
+    pipeline.synthesize_and_send_audio.assert_not_awaited()

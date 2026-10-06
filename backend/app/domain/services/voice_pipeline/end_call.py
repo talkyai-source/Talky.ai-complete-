@@ -87,7 +87,6 @@ def model_end_call_allowed(session, user_text=None) -> bool:
     """Bind every model hangup request to caller or deterministic call evidence."""
     from app.domain.services.end_session_action import caller_signaled_end, repeated_decline_allows_end, previous_assistant_turn
     from app.domain.services.caller_assertions import continuation_after
-    from app.domain.services.voice_pipeline.identity_disposition import IdentityDisposition
 
     if user_text is None:
         user_text = next((
@@ -101,8 +100,6 @@ def model_end_call_allowed(session, user_text=None) -> bool:
     if continuation_after(user_text):
         return False
     if getattr(session, "_amd_voicemail", False) is True or getattr(session, "_machine_screening", False) is True:
-        return True
-    if getattr(session, "_turn_disposition", None) in {IdentityDisposition.WRONG_BUSINESS, IdentityDisposition.DNC}:
         return True
     declined = getattr(getattr(session, "captured_slots", None), "declined_count", 0)
     return repeated_decline_allows_end(user_text, declined, previous_assistant_text=previous)

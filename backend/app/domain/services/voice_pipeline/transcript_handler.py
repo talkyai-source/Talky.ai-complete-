@@ -24,9 +24,6 @@ from app.domain.services.explicit_secrets import sanitize_explicit_secrets, sani
 from app.domain.models.conversation import BargeInSignal
 from app.domain.models.session import CallSession
 from app.domain.services.voice_pipeline.backchannel import is_backchannel
-from app.domain.services.voice_pipeline.live_structured_state import (
-    CallerRelationshipEvidence, caller_relationship_assertion,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -305,22 +302,10 @@ class TranscriptHandler:
                 )
                 if _queued_duplicate:
                     _bind_caller_turn(session, self._p.transcript_service, _caller_order)
-                _preceding_relationship = (
-                    _previous_queue.get("preceding_relationship") if _previous_queue else None
-                )
-                if _previous_queue and not _queued_duplicate:
-                    _position = caller_relationship_assertion(_previous_queue.get("text") or "")
-                    _previous_order = _previous_queue.get("caller_turn_order")
-                    if (_position is not None and isinstance(_previous_order, int)
-                            and not isinstance(_previous_order, bool) and _previous_order > 0):
-                        _preceding_relationship = CallerRelationshipEvidence(
-                            _position, f"accepted:{_previous_order}", _previous_order,
-                        )
                 session._queued_next_turn = {
                     "text": session.current_user_input,
                     "seq": _current_seq,
                     "caller_turn_order": _caller_order,
-                    "preceding_relationship": _preceding_relationship,
                     "queued_monotonic": time.monotonic(),
                     "confidence": getattr(
                         session, "_last_transcript_confidence", None

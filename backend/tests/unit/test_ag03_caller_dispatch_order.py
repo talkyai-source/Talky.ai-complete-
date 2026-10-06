@@ -8,9 +8,6 @@ import pytest
 
 from app.domain.models.conversation import Message, MessageRole, TranscriptChunk
 from app.domain.models.session import CallSession
-from app.domain.services.voice_pipeline.live_structured_state import (
-    CallerRelationshipEvidence, CustomerRelationship, reduce_cascaded_session_live_state,
-)
 from app.domain.services.voice_pipeline_service import VoicePipelineService
 
 
@@ -49,8 +46,7 @@ async def test_real_queue_keeps_acceptance_order_with_reused_media_seq_and_dupli
 
     async def run(s, text, *_args, **_kwargs):
         task = asyncio.current_task()
-        state = reduce_cascaded_session_live_state(s, s.conversation_history, user_text=text)
-        observed.append((text, getattr(task, "_caller_turn_order", None), state))
+        observed.append((text, getattr(task, "_caller_turn_order", None)))
         if len(observed) == 1:
             entered.set()
             await release.wait()
@@ -82,7 +78,7 @@ async def test_real_queue_keeps_acceptance_order_with_reused_media_seq_and_dupli
             await asyncio.wait_for(second, 2)
         assert len(observed) == 2
         assert [row[1] for row in observed] == [1, 3 if coalesce else 2]
-        assert observed[-1][2].customer_relationship.value == ("affirmed" if coalesce else "denied")
+        assert observed[-1][0] == ("Actually, I am your customer." if coalesce else "What are the opening hours?")
         assert service._utterance_seq.get(session.call_id, 0) == 0
         assert session._queued_next_turn is None
     finally:
@@ -104,7 +100,7 @@ async def test_actual_detached_old_dispatch_cannot_reverse_a_newer_assertion():
         if user_text == "I am not your customer.":
             entered.set()
             await release.wait()
-        states.append(reduce_cascaded_session_live_state(s, s.conversation_history, user_text=user_text))
+        states.append((user_text, asyncio.current_task()._caller_turn_order))
 
     service.handle_turn_end = turn
     await final(service, session, "I am not your customer.")
@@ -119,8 +115,7 @@ async def test_actual_detached_old_dispatch_cannot_reverse_a_newer_assertion():
         await new
         release.set()
         await old
-        assert states[-1].customer_relationship.value == "affirmed"
-        assert states[-1].relationship_turn_order == 2
+        assert states == [("Actually, I am your customer.", 2), ("I am not your customer.", 1)]
         assert old._caller_turn_order == 1
         assert new._caller_turn_order == 2
     finally:
@@ -169,8 +164,7 @@ async def test_actual_barge_cancel_carries_accepted_order_into_replay(monkeypatc
 
     async def turn(*_args, **_kwargs):
         task = asyncio.current_task()
-        observations.append((getattr(task, "_caller_turn_order", None),
-                             getattr(task, "_preceding_relationship", None)))
+        observations.append(getattr(task, "_caller_turn_order", None))
         if len(observations) == 1:
             entered.set()
             await asyncio.Event().wait()
@@ -179,78 +173,16 @@ async def test_actual_barge_cancel_carries_accepted_order_into_replay(monkeypatc
     service.handle_turn_end = turn
     await final(service, session, "What are your opening hours?")
     old = service._pending_llm_tasks[session.call_id]
-    proof = CallerRelationshipEvidence(CustomerRelationship.DENIED, "accepted:1", 1)
-    old._preceding_relationship = proof
     try:
         await asyncio.wait_for(entered.wait(), 2)
         session.tts_active = True
         await service.handle_barge_in(session)
         await asyncio.wait_for(resumed.wait(), 2)
-        assert observations == [(2, proof), (2, proof)]
+        assert observations == [2, 2]
         assert session._accepted_caller_turn_order == 2
     finally:
         for task in (old, service._pending_llm_tasks.get(session.call_id)):
             if task is not None:
                 if not task.done():
                     task.cancel()
-                await asyncio.gather(task, return_exceptions=True)
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("queued,expected,order,replace_current", [
-    (["I am not your customer. Email me."], "denied", 2, False),
-    (["I am not your customer.", "Tell me your products."], "denied", 2, False),
-    (["I am not your customer.", "Actually, I am your customer."], "affirmed", 3, False),
-    (["I am not your customer.", 'He said "I am your customer".'], "denied", 2, False),
-    (['He said "I am not your customer".'], "unknown", None, False),
-    (["I am not your customer."], "denied", 2, True),
-])
-async def test_coalesced_queued_denial_survives_later_ordinary_question(queued, expected, order, replace_current):
-    service, session = pipeline()
-    release = asyncio.Event()
-    entered = asyncio.Event()
-    states = []
-
-    async def run(s, text, *_args, **_kwargs):
-        state = reduce_cascaded_session_live_state(s, s.conversation_history, user_text=text)
-        if states and replace_current:
-            assert state.customer_relationship.value == "affirmed"
-            state = reduce_cascaded_session_live_state(s, s.conversation_history,
-                                                      user_text="What are your opening hours?")
-        states.append(state)
-        if len(states) == 1:
-            entered.set()
-            await release.wait()
-        return "Thank you for explaining.", 1.0, 1.0
-
-    service._run_turn = run
-    await final(service, session, "What products do you offer?")
-    first = service._pending_llm_tasks[session.call_id]
-    second = None
-    try:
-        await asyncio.wait_for(entered.wait(), 2)
-        for text in queued:
-            await final(service, session, text)
-        current_text = "Actually, I am your customer." if replace_current else "What are your opening hours?"
-        await final(service, session, current_text)
-        assert session._queued_next_turn["caller_turn_order"] == 2 + len(queued)
-        # Repeated final neither advances order nor discards predecessor proof.
-        proof = session._queued_next_turn["preceding_relationship"]
-        await final(service, session, current_text)
-        assert session._queued_next_turn["preceding_relationship"] == proof
-        assert session._accepted_caller_turn_order == 2 + len(queued)
-        release.set()
-        await asyncio.wait_for(first, 2)
-        second = service._pending_llm_tasks.get(session.call_id)
-        if second is not None:
-            await asyncio.wait_for(second, 2)
-        assert len(states) == 2  # bounded queue still answers only latest words
-        assert states[-1].customer_relationship.value == expected
-        assert states[-1].relationship_turn_order == order
-        assert states[-1].requested_next_action == states[0].requested_next_action
-    finally:
-        release.set()
-        for task in (first, second, service._pending_llm_tasks.get(session.call_id)):
-            if task is not None and not task.done():
-                task.cancel()
                 await asyncio.gather(task, return_exceptions=True)

@@ -103,7 +103,6 @@ async def test_cancelled_actual_pre_originate_warmup_cleans_already_open_flux(mo
     orchestrator = SimpleNamespace(create_voice_session=AsyncMock(return_value=session), end_session=cleanup)
     monkeypatch.setattr(prewarm, "_get_orchestrator", lambda: orchestrator)
     monkeypatch.setattr(prewarm, "_build_telephony_session_config", lambda **_kw: SimpleNamespace(tts_provider_type="cartesia", tts_model="synthetic"))
-    monkeypatch.setattr(prewarm, "_start_opening_ladder_generation", lambda *_args: None)
     monkeypatch.setattr(voice_tuning, "get_voice_tuning_resolver", lambda: SimpleNamespace(for_tenant_async=AsyncMock(return_value={})))
     monkeypatch.setattr(tenant_ai_config_resolver, "get_tenant_ai_config_resolver", lambda: SimpleNamespace(for_tenant_async=AsyncMock(return_value={})))
     monkeypatch.setattr(session_inject, "apply_campaign_knowledge", AsyncMock())

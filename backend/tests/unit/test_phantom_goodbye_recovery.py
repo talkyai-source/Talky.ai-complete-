@@ -7,12 +7,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from app.domain.models.conversation import Message, MessageRole
+from app.domain.models.conversation import MessageRole
 from app.domain.services.voice_pipeline import capture_mode
 from app.domain.services.voice_pipeline.turn_runner import (
-    _PHANTOM_GOODBYE_RECOVERIES,
-    _PHANTOM_RETRY_INSTRUCTION,
-    TurnRunner,
     _same_utterance,
     _spoken_remainder,
 )
@@ -20,20 +17,8 @@ from app.domain.services.voice_pipeline.turn_runner import (
 _ENVELOPE = '{"action":"end_session","reason":"conversation_complete","farewell":"Bye."}'
 
 
-class _Session:
-    """Just enough session for the recovery path."""
-
-    def __init__(self):
-        self.call_id = "call-abc123"
-        self.conversation_history = []
-        self.tts_active = False
 
 
-def _runner(stream_returns):
-    pipeline = MagicMock()
-    pipeline._stream_llm_and_tts = AsyncMock(side_effect=stream_returns)
-    pipeline.synthesize_and_send_audio = AsyncMock()
-    return TurnRunner(pipeline), pipeline
 
 
 # --------------------------------------------------------------------------
@@ -61,109 +46,18 @@ def test_plain_prose_is_all_spoken():
 # --------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
-async def test_prose_already_spoken_is_kept_and_nothing_extra_is_said():
-    # The model answered AND asked to hang up. Only the hangup is suppressed;
-    # speaking a canned line on top would talk over a finished answer.
-    runner, pipeline = _runner([])
-    session = _Session()
-
-    out = await runner._recover_suppressed_turn(
-        session, None, "Yes, that address is updated. " + _ENVELOPE
-    )
-
-    assert out == "Yes, that address is updated."
-    pipeline._stream_llm_and_tts.assert_not_awaited()
-    pipeline.synthesize_and_send_audio.assert_not_awaited()
 
 
-@pytest.mark.asyncio
-async def test_silent_turn_is_retried_and_the_retry_is_what_the_caller_gets():
-    runner, pipeline = _runner([("Thanks, I have it as the new address.", 12.0, 8.0)])
-    session = _Session()
-
-    out = await runner._recover_suppressed_turn(session, None, _ENVELOPE)
-
-    assert out == "Thanks, I have it as the new address."
-    pipeline._stream_llm_and_tts.assert_awaited_once()
-    # The retry streams its own audio, so no canned line is synthesized.
-    pipeline.synthesize_and_send_audio.assert_not_awaited()
-    assert out not in _PHANTOM_GOODBYE_RECOVERIES
 
 
-@pytest.mark.asyncio
-async def test_the_retry_nudge_is_removed_from_history_again():
-    runner, pipeline = _runner([("Of course.", 1.0, 1.0)])
-    session = _Session()
-    session.conversation_history.append(
-        Message(role=MessageRole.USER, content="no, it is dot co dot uk")
-    )
-
-    await runner._recover_suppressed_turn(session, None, _ENVELOPE)
-
-    contents = [m.content for m in session.conversation_history]
-    assert _PHANTOM_RETRY_INSTRUCTION not in contents
-    assert contents == ["no, it is dot co dot uk"]
 
 
-@pytest.mark.asyncio
-async def test_the_nudge_is_visible_to_the_model_during_the_retry():
-    seen = {}
-
-    async def _capture(session, websocket=None):
-        seen["roles"] = [(m.role, m.content) for m in session.conversation_history]
-        return "Sure.", 1.0, 1.0
-
-    runner, pipeline = _runner([])
-    pipeline._stream_llm_and_tts = AsyncMock(side_effect=_capture)
-    session = _Session()
-
-    await runner._recover_suppressed_turn(session, None, _ENVELOPE)
-
-    assert seen["roles"][-1] == (MessageRole.SYSTEM, _PHANTOM_RETRY_INSTRUCTION)
 
 
-@pytest.mark.asyncio
-async def test_the_nudge_is_removed_even_when_the_retry_raises():
-    runner, pipeline = _runner([])
-    pipeline._stream_llm_and_tts = AsyncMock(side_effect=RuntimeError("provider down"))
-    session = _Session()
-
-    out = await runner._recover_suppressed_turn(session, None, _ENVELOPE)
-
-    assert _PHANTOM_RETRY_INSTRUCTION not in [
-        m.content for m in session.conversation_history
-    ]
-    assert out == _PHANTOM_GOODBYE_RECOVERIES[0]
 
 
-@pytest.mark.asyncio
-async def test_canned_line_only_once_the_retry_is_also_silent():
-    runner, pipeline = _runner([(_ENVELOPE, 1.0, 1.0)])
-    session = _Session()
-
-    out = await runner._recover_suppressed_turn(session, None, _ENVELOPE)
-
-    assert out == _PHANTOM_GOODBYE_RECOVERIES[0]
-    pipeline.synthesize_and_send_audio.assert_awaited_once()
-    assert pipeline.synthesize_and_send_audio.await_args.args[1] == out
-    assert session.tts_active is True
 
 
-@pytest.mark.asyncio
-async def test_the_canned_line_never_repeats_itself_verbatim():
-    # Firing twice on one call used to read the identical sentence twice, which
-    # is exactly what a caller hears as the agent looping.
-    runner, _ = _runner([(_ENVELOPE, 1.0, 1.0)] * 3)
-    session = _Session()
-
-    said = [
-        await runner._recover_suppressed_turn(session, None, _ENVELOPE)
-        for _ in range(3)
-    ]
-
-    assert said == list(_PHANTOM_GOODBYE_RECOVERIES)
-    assert len(set(said)) == 3
 
 
 # --------------------------------------------------------------------------
@@ -269,7 +163,6 @@ async def test_a_suppressed_turn_keeps_prose_without_automatic_contact_parser():
             if m.role == MessageRole.ASSISTANT
         ]
         assert spoken == ["What's your email address?"]
-        assert not any(line in spoken for line in _PHANTOM_GOODBYE_RECOVERIES)
         assert armed == []  # Spoken prose no longer enables a regex capture workflow.
     finally:
         capture_mode.clear(session.call_id)
@@ -312,12 +205,11 @@ async def test_actual_cerebras_thanks_envelope_is_recovered_without_saying_goodb
 
     await service.handle_turn_end(session, AsyncMock())
 
-    assert len(model_prompts) == 2  # One bounded recovery, not a silent turn.
-    assert " ".join(submitted) == acknowledgment
+    assert len(model_prompts) == 1  # No scripted retry after a denied effect.
+    assert submitted == []
     assistant_history = [m.content for m in session.conversation_history if m.role == MessageRole.ASSISTANT]
-    assert assistant_history == [acknowledgment]
+    assert assistant_history == []
     assert not getattr(session, "_end_call_requested", False)
     assert not session._end_session_action_handled
     assert session.state != CallState.ENDED
     service.media_gateway.hangup_call.assert_not_awaited()
-    assert _PHANTOM_RETRY_INSTRUCTION not in [m.content for m in session.conversation_history]

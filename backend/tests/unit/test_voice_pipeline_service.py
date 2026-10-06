@@ -7,7 +7,6 @@ from app.domain.models.agent_config import AgentConfig, AgentGoal, ConversationF
 from app.domain.models.conversation import Message, MessageRole
 from app.domain.models.conversation_state import ConversationContext, ConversationState
 from app.domain.models.session import CallSession, CallState
-from app.domain.services.voice_pipeline.identity_disposition import IdentityDisposition
 from app.domain.services.voice_pipeline_service import VoicePipelineService
 
 
@@ -310,28 +309,10 @@ async def test_ask_ai_session_skips_identity_disposition_block():
 
     await service.handle_turn_end(session, websocket)
 
-    assert session._turn_disposition == IdentityDisposition.NONE
     service.media_gateway.hangup_call.assert_not_awaited()
     assert session.state != CallState.ENDED
 
 
-@pytest.mark.asyncio
-async def test_telephony_session_wrong_business_still_ends_deterministically():
-    # Telephony behavior (campaign_id is a real campaign/lead id, not
-    # "ask-ai"/"voice-demo") must be unchanged by the session-type gate.
-    service = _make_service_for_disposition([])  # LLM must not be invoked
-    session = _make_session()
-    session.campaign_id = "campaign-123"
-    session.current_user_input = "Sorry, you've got the wrong company."
-    websocket = AsyncMock()
-
-    await service.handle_turn_end(session, websocket)
-
-    assert session._turn_disposition == IdentityDisposition.WRONG_BUSINESS
-    service.media_gateway.hangup_call.assert_awaited_once_with(
-        session.call_id, "wrong_number_disposition"
-    )
-    assert session.state == CallState.ENDED
 
 
 @pytest.mark.asyncio
@@ -348,7 +329,6 @@ async def test_wrong_person_plus_explicit_goodbye_honors_model_end_call():
 
     await service.handle_turn_end(session, websocket)
 
-    assert session._turn_disposition == IdentityDisposition.WRONG_PERSON
     service.media_gateway.hangup_call.assert_awaited_once_with(
         session.call_id, "agent_end_call"
     )
@@ -369,7 +349,6 @@ async def test_wrong_person_without_goodbye_still_strips_model_end_call():
 
     await service.handle_turn_end(session, websocket)
 
-    assert session._turn_disposition == IdentityDisposition.WRONG_PERSON
     service.media_gateway.hangup_call.assert_not_awaited()
     assert getattr(session, "_end_call_requested", False) is False
 
@@ -387,37 +366,11 @@ async def test_goodbye_alone_does_not_affect_a_non_wrong_person_end_call():
 
     await service.handle_turn_end(session, websocket)
 
-    assert session._turn_disposition == IdentityDisposition.NONE
     service.media_gateway.hangup_call.assert_awaited_once_with(
         session.call_id, "agent_end_call"
     )
 
 
-@pytest.mark.asyncio
-async def test_turn_disposition_does_not_go_stale_across_turns():
-    # Staleness check: a WRONG_PERSON turn followed by an ordinary turn must
-    # NOT leave the reverse gate acting on the first turn's stale disposition.
-    service = _make_service_for_disposition(
-        [
-            "Got it, thanks for letting me know.",  # turn 1: pivot, no END_CALL
-            "Great, take care! [[END_CALL]]",        # turn 2: ordinary end_call
-        ]
-    )
-    session = _make_session()
-    session.campaign_id = "campaign-123"
-    websocket = AsyncMock()
-
-    session.current_user_input = "She's not here."
-    await service.handle_turn_end(session, websocket)
-    assert session._turn_disposition == IdentityDisposition.WRONG_PERSON
-    service.media_gateway.hangup_call.assert_not_awaited()
-
-    session.current_user_input = "Sounds good, goodbye!"
-    await service.handle_turn_end(session, websocket)
-    assert session._turn_disposition == IdentityDisposition.NONE
-    service.media_gateway.hangup_call.assert_awaited_once_with(
-        session.call_id, "agent_end_call"
-    )
 
 
 def _make_service_for_bargein() -> VoicePipelineService:
@@ -666,11 +619,11 @@ async def test_bare_no_after_non_question_is_not_suppressed_as_backchannel():
 # --- F-13 / F-14 / F-15 / F-11b (2026-07-20) — hardening today's disposition
 #     work against the listening-path audit --------------------------------
 @pytest.mark.asyncio
-async def test_deterministic_dnc_persists_opt_out_and_hangs_up():
+async def test_caller_dnc_persists_opt_out_and_hangs_up():
     # F-13: the deterministic DNC path SPOKE "I'll take you off the list" but
     # never set _caller_opted_out, so teardown's opt-out purge never ran. It
     # must now mirror the LLM-JSON path and flag the session.
-    service = _make_service_for_disposition([])  # no LLM — deterministic path
+    service = _make_service_for_disposition(["Understood."])
     session = _make_session()
     session.campaign_id = "campaign-123"
     session.current_user_input = "Please stop calling me."
@@ -678,17 +631,16 @@ async def test_deterministic_dnc_persists_opt_out_and_hangs_up():
 
     await service.handle_turn_end(session, websocket)
 
-    assert session._turn_disposition == IdentityDisposition.DNC
     assert getattr(session, "_caller_opted_out", False) is True
     service.media_gateway.hangup_call.assert_awaited_once()
 
 
 @pytest.mark.asyncio
-async def test_deterministic_dnc_survives_repetition_guard():
+async def test_caller_dnc_survives_repetition_guard():
     # F-13(d): an emphatic repeated "no ... stop calling me" is >50% one word,
     # so the repetitive-STT guard used to drop it before classification. It must
     # now reach the DNC path and persist the opt-out.
-    service = _make_service_for_disposition([])
+    service = _make_service_for_disposition(["Understood."])
     session = _make_session()
     session.campaign_id = "campaign-123"
     session.current_user_input = "no no no no no no stop calling me"
@@ -696,7 +648,6 @@ async def test_deterministic_dnc_survives_repetition_guard():
 
     await service.handle_turn_end(session, websocket)
 
-    assert session._turn_disposition == IdentityDisposition.DNC
     assert getattr(session, "_caller_opted_out", False) is True
 
 
@@ -704,13 +655,12 @@ async def test_deterministic_dnc_survives_repetition_guard():
 async def test_wrong_business_is_not_an_opt_out():
     # A wrong-business end must NOT flag an opt-out (it's a wrong number, not a
     # do-not-call request) — the persistence is DNC-only.
-    service = _make_service_for_disposition([])
+    service = _make_service_for_disposition(["Understood."])
     session = _make_session()
     session.campaign_id = "campaign-123"
     session.current_user_input = "Sorry, you've got the wrong company."
     await service.handle_turn_end(session, AsyncMock())
 
-    assert session._turn_disposition == IdentityDisposition.WRONG_BUSINESS
     assert getattr(session, "_caller_opted_out", False) is False
 
 
@@ -733,7 +683,6 @@ async def test_json_end_on_wrong_person_turn_is_suppressed():
 
     await service.handle_turn_end(session, websocket)
 
-    assert session._turn_disposition == IdentityDisposition.WRONG_PERSON
     assert session.state != CallState.ENDED
     service.media_gateway.hangup_call.assert_not_awaited()
 
@@ -756,30 +705,15 @@ async def test_json_do_not_call_cannot_turn_ordinary_goodbye_into_opt_out():
     assert session.state == CallState.ENDED
 
 
-@pytest.mark.asyncio
-async def test_identity_clarify_flag_is_consumed_after_one_turn():
-    # F-14(d): _identity_clarify_asked was set but never cleared, so a single
-    # clarify permanently armed the aggressive post-clarify branch for the rest
-    # of the call. It must be consumed the turn we act on it.
-    service = _make_service_for_disposition(["Let me get the right person for you."])
-    session = _make_session()
-    session.campaign_id = "campaign-123"
-    session._identity_clarify_asked = True
-    session.current_user_input = "Just the wrong person, David moved teams."
-
-    await service.handle_turn_end(session, AsyncMock())
-
-    assert session._identity_clarify_asked is False
-    assert session._turn_disposition == IdentityDisposition.WRONG_PERSON
 
 
 @pytest.mark.asyncio
-async def test_disposition_early_returns_reset_speculative_snapshot():
+async def test_identity_turns_reset_speculative_snapshot():
     # F-11b: the deterministic early-returns append to history but return before
     # the finally-cleanup that clears the speculative snapshot. Left stale, a
     # barge-in truncates the just-committed exchange. Both paths must reset it.
     # WRONG_BUSINESS / DNC end path:
-    service = _make_service_for_disposition([])
+    service = _make_service_for_disposition(["Understood."])
     session = _make_session()
     session.campaign_id = "campaign-123"
     session._speculative_history_len = 0  # stale pre-turn snapshot
@@ -788,13 +722,12 @@ async def test_disposition_early_returns_reset_speculative_snapshot():
     assert session._speculative_history_len is None
 
     # AMBIGUOUS clarify path (call CONTINUES — matters most):
-    service2 = _make_service_for_disposition([])
+    service2 = _make_service_for_disposition(["Could you explain?"])
     session2 = _make_session()
     session2.campaign_id = "campaign-123"
     session2._speculative_history_len = 0
     session2.current_user_input = "Wrong number."
     await service2.handle_turn_end(session2, AsyncMock())
-    assert session2._turn_disposition == IdentityDisposition.AMBIGUOUS
     assert session2._speculative_history_len is None
 
 
@@ -953,7 +886,7 @@ async def test_dnc_record_is_written_before_the_farewell_is_spoken(monkeypatch):
 
     monkeypatch.setattr(opt_out_mod, "purge_opt_out_before_farewell", fake_purge)
 
-    service = _make_service_for_disposition([])
+    service = _make_service_for_disposition(["Understood."])
     original_tts = service.synthesize_and_send_audio
 
     async def spy_tts(session, text, websocket, **kw):
@@ -969,7 +902,7 @@ async def test_dnc_record_is_written_before_the_farewell_is_spoken(monkeypatch):
 
     assert order[0] == "purge", order
     assert order[1].startswith("speak:"), order
-    assert "off the list" in order[1] or "Understood" in order[1]
+    assert "Understood" in order[1]
 
 
 @pytest.mark.asyncio
@@ -981,7 +914,7 @@ async def test_failed_dnc_write_is_not_confirmed_aloud(monkeypatch):
 
     monkeypatch.setattr(opt_out_mod, "purge_opt_out_before_farewell", failing_purge)
 
-    service = _make_service_for_disposition([])
+    service = _make_service_for_disposition(["Understood."])
     spoken: list[str] = []
 
     async def spy_tts(session, text, websocket, **kw):
@@ -1063,7 +996,7 @@ class _CapturingLLMProvider(_StreamingLLMProvider):
 
 
 @pytest.mark.asyncio
-async def test_live_turn_prompt_carries_the_floor_once_and_last():
+async def test_live_turn_prompt_carries_current_boundaries_once():
     """The composed base ends with the full NON-NEGOTIABLES floor; per-turn
     blocks landed after it, so a compact copy was re-appended every turn. Now
     the base floor is relocated to the end and there is exactly one copy."""
@@ -1087,6 +1020,7 @@ async def test_live_turn_prompt_carries_the_floor_once_and_last():
     assert llm.system_prompts, "the LLM was not called"
     sp = llm.system_prompts[-1]
     assert sp.count("## NON-NEGOTIABLES") == 1
-    assert sp.rstrip().endswith("never repeat a mis-heard version back to them.")
-    # The per-turn craft block still precedes the floor.
-    assert sp.index("## THIS TURN") < sp.index("## NON-NEGOTIABLES")
+    assert "You are Sarah, an AI assistant for Acme" in sp
+    assert "Call UK retailers about card terminals." in sp
+    assert "failed work" in sp and "is not complete" in sp
+    assert "## THIS TURN" not in sp

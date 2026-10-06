@@ -28,40 +28,10 @@ from app.domain.services.end_session_action import (
 from app.services.scripts.call_state_tracker import CallState as CapturedSlotsState
 from app.domain.services.voice_pipeline.contact_recording import bind_contact_turn
 from app.domain.services.voice_pipeline.identity_disposition import (
-    IdentityDisposition,
     contains_dnc,
-    contains_explicit_goodbye,
 )
 
 logger = logging.getLogger(__name__)
-
-# Last resort when a phantom end-session is suppressed AND the model left the
-# turn with nothing to speak: it tried to hang up, the caller never signalled
-# they were done, and it emitted only the internal envelope. Keeps the call
-# alive instead of leaving dead air or an unwanted goodbye.
-#
-# A TUPLE, not one string, because the guard can fire repeatedly on one call and
-# the same canned sentence twice running is what a caller hears as the agent
-# looping. Indexed by how often it has already fired, so it stays deterministic.
-_PHANTOM_GOODBYE_RECOVERIES = (
-    "Sorry, I'm still here — what else can I help you with?",
-    "I'm still on the line. What else can I do for you?",
-    "Still with you — was there anything else?",
-)
-# The canonical first line, kept under its old name for callers and log reading.
-_PHANTOM_GOODBYE_RECOVERY = _PHANTOM_GOODBYE_RECOVERIES[0]
-
-# Appended for ONE retry when a suppressed end-session left nothing to say. The
-# canned line above answers no question the caller actually asked, so before
-# falling back to it we tell the model the call is continuing and let it reply
-# properly. Removed again immediately: it is scaffolding for this turn only.
-_PHANTOM_RETRY_INSTRUCTION = (
-    "SYSTEM: Your previous reply tried to end the call, but the caller has not "
-    "finished and the call is continuing. Do not end the session and do not "
-    "emit any JSON. Answer the caller's last message now, in one or two short "
-    "spoken sentences."
-)
-
 
 def _spoken_remainder(response_text) -> str:
     """The part of a turn the caller actually HEARD.
@@ -81,14 +51,6 @@ def _spoken_remainder(response_text) -> str:
     return (text if idx < 0 else text[:idx]).strip()
 
 
-def _drop_last_message(history, content) -> None:
-    """Remove the most recent message whose content is exactly ``content``."""
-    for i in range(len(history) - 1, -1, -1):
-        if getattr(history[i], "content", None) == content:
-            del history[i]
-            return
-
-
 def _note_unheard_greeting_bargein(session) -> None:
     """A barge-in cancelled a turn before ANY audio reached the caller (issue #23).
 
@@ -103,16 +65,6 @@ def _note_unheard_greeting_bargein(session) -> None:
         session._greeting_bargein_count = n
     except Exception:  # pragma: no cover - defensive
         pass
-
-
-# The silence monitor speaks these; they are NOT read-backs and must be skipped
-# when looking for the agent's real prior turn (else they mask the read-back).
-_SILENCE_CHECK_RE = re.compile(
-    r"\b(still\s+(there|with\s+me|on\s+the\s+line)|are\s+you\s+(still\s+)?there|"
-    r"you\s+(still\s+)?there|can\s+you\s+hear\s+me|did\s+i\s+lose\s+you|lost\s+you|"
-    r"you\s+on\s+the\s+line)\b",
-    re.IGNORECASE,
-)
 
 
 def _last_agent_turn(history) -> str:
@@ -179,85 +131,6 @@ class TurnRunner:
 
     def __init__(self, pipeline) -> None:
         self._p = pipeline
-
-    async def _recover_suppressed_turn(
-        self,
-        session: CallSession,
-        websocket: Optional[WebSocket],
-        response_text: str,
-    ) -> str:
-        """Return what the caller should end up having heard on a turn whose
-        end-session action was suppressed.
-
-        Three cases, in order of preference:
-
-        1. The model wrote prose AND the envelope. The prose was already
-           streamed to the caller, so the turn is complete — only the hangup
-           needed suppressing. Speaking a canned line on top would talk over a
-           finished answer with a non-sequitur.
-        2. The model emitted ONLY the envelope, so the caller heard nothing at
-           all. Ask once more, telling it the call is continuing. This is the
-           case that cost a live caller their answer on 2026-09-21: the guard
-           replaced the whole turn with a fixed sentence, so the question went
-           unanswered and the correction it contained was lost.
-        3. The retry also produced nothing. Fall back to the canned line, which
-           at least keeps the call alive — varied per firing so a repeat guard
-           does not read the identical sentence twice.
-        """
-        call_id = session.call_id
-
-        spoken = _spoken_remainder(response_text)
-        if spoken:
-            logger.info(
-                "phantom_goodbye_kept_prose call_id=%s chars=%d — answer already spoken",
-                call_id, len(spoken),
-            )
-            return spoken
-
-        retry_text = ""
-        try:
-            session.conversation_history.append(
-                Message(role=MessageRole.SYSTEM, content=_PHANTOM_RETRY_INSTRUCTION)
-            )
-            try:
-                retry_text, _, _ = await self._p._stream_llm_and_tts(session, websocket)
-            finally:
-                # Drop the nudge whether or not it worked — it is scaffolding
-                # for this turn, not conversation the model should keep seeing.
-                _drop_last_message(
-                    session.conversation_history, _PHANTOM_RETRY_INSTRUCTION
-                )
-        except asyncio.CancelledError:
-            raise
-        except Exception:  # pragma: no cover - defensive
-            logger.warning(
-                "phantom_goodbye_retry_failed call_id=%s", call_id, exc_info=True
-            )
-
-        retry_spoken = _spoken_remainder(retry_text)
-        if retry_spoken:
-            logger.info(
-                "phantom_goodbye_retry_spoke call_id=%s chars=%d", call_id, len(retry_spoken)
-            )
-            return retry_spoken
-
-        fired = int(getattr(session, "_phantom_recovery_count", 0) or 0)
-        line = _PHANTOM_GOODBYE_RECOVERIES[
-            min(fired, len(_PHANTOM_GOODBYE_RECOVERIES) - 1)
-        ]
-        try:
-            session._phantom_recovery_count = fired + 1
-        except Exception:  # pragma: no cover - defensive
-            pass
-        logger.info(
-            "phantom_goodbye_recovery_line call_id=%s fired=%d — retry produced nothing",
-            call_id, fired + 1,
-        )
-        session.tts_active = True
-        await self._p.synthesize_and_send_audio(
-            session, line, websocket, track_latency=False,
-        )
-        return line
 
     async def run(
         self,
@@ -327,54 +200,22 @@ class TurnRunner:
             if ask_ai_end_action and ask_ai_end_action.get("do_not_call") and not contains_dnc(full_transcript):
                 ask_ai_end_action = {**ask_ai_end_action, "do_not_call": False}
 
-            # Phantom-goodbye guard: the model emitted an end-session action but
-            # the caller never actually signalled they were done. Suppress the
-            # hangup and keep the call going with a short re-engagement line.
+            # Deny unauthorized effects without adding scripted speech or retries.
             if ask_ai_end_action:
                 user_turns = sum(
                     1 for m in session.conversation_history if m.role == MessageRole.USER
                 )
-                # Two declines = the persona legitimately closes (issue #16), so
-                # honor end-session rather than re-opening with the recovery line.
                 _declined = getattr(getattr(session, "captured_slots", None), "declined_count", 0)
-                # F-15 fix (2026-07-20): this JSON end-session path is the OTHER
-                # hangup gate, and it never consulted the deterministic
-                # disposition — so a model that chose the JSON format instead of
-                # the [[END_CALL]] sentinel bypassed turn_ender's wrong-person
-                # reverse gate entirely and could hang up on a valid prospect.
-                # Mirror that gate here: on a WRONG_PERSON turn (right business,
-                # wrong person → pivot) suppress the hangup unless the caller
-                # explicitly said goodbye. do_not_call is EXEMPT — a genuine
-                # opt-out always ends (and a DNC utterance classifies as DNC,
-                # not WRONG_PERSON, so this can never swallow an opt-out).
-                _wrong_person_block = (
-                    not ask_ai_end_action.get("do_not_call")
-                    and getattr(session, "_turn_disposition", IdentityDisposition.NONE)
-                    == IdentityDisposition.WRONG_PERSON
-                    and not contains_explicit_goodbye(full_transcript)
-                )
-                if _wrong_person_block or not should_honor_end_session(
+                if not should_honor_end_session(
                     ask_ai_end_action, full_transcript, user_turns, declined_count=_declined,
                     previous_assistant_text=previous_assistant_turn(session.conversation_history),
                 ):
                     logger.info(
-                        "phantom_goodbye_suppressed call_id=%s reason=%s user_turns=%d "
-                        "wrong_person_block=%s transcript_chars=%d — keeping call alive",
+                        "end_session_denied call_id=%s reason=%s user_turns=%d",
                         call_id, ask_ai_end_action.get("reason"), user_turns,
-                        _wrong_person_block, len(full_transcript or ""),
                     )
-                    # From here this is an ORDINARY turn. Dropping the action
-                    # skips the shutdown path below and lets the shared
-                    # post-turn block run, which is the point: the old early
-                    # return hand-rolled its own history append and transcript
-                    # write and therefore skipped update_state_from_agent_turn,
-                    # _has_introduced. A suppressed
-                    # turn that asked for an email never relaxed endpointing, so
-                    # the caller's spell-out was cut off mid-address.
                     ask_ai_end_action = None
-                    response_text = await self._recover_suppressed_turn(
-                        session, websocket, response_text
-                    )
+                    response_text = _spoken_remainder(response_text)
 
             if ask_ai_end_action:
                 # Compliance: caller asked never to be contacted again. Flag

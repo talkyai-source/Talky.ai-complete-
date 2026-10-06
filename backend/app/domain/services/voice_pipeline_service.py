@@ -10,26 +10,21 @@ import asyncio
 import logging
 import os
 import time
-from dataclasses import is_dataclass
-from typing import Any, Optional, AsyncIterator
+from typing import Any, Optional
 from datetime import datetime
 
 from fastapi import WebSocket
 
 from app.domain.models.session import CallSession, CallState
-from app.domain.models.conversation import AudioChunk, TranscriptChunk, Message, MessageRole, BargeInSignal
-from app.domain.models.conversation_state import ConversationState, CallOutcomeType
+from app.domain.models.conversation import MessageRole
 from app.domain.interfaces.stt_provider import STTProvider
-from app.infrastructure.llm.groq import GroqLLMProvider, LLMTimeoutError
-from app.infrastructure.telephony.browser_media_gateway import SessionGoneError
+from app.infrastructure.llm.groq import GroqLLMProvider
 from app.domain.interfaces.tts_provider import TTSProvider
 from app.domain.interfaces.media_gateway import MediaGateway
 from app.domain.services.transcript_service import TranscriptService
-from app.domain.services.llm_guardrails import LLMGuardrails, LLMGuardrailsConfig, get_guardrails
+from app.domain.services.llm_guardrails import get_guardrails as get_guardrails
 from app.domain.services.latency_tracker import get_latency_tracker
-from app.domain.services.global_ai_config import get_global_config
 from app.domain.services.end_session_action import (
-    build_end_session_tool_instructions,
     parse_end_session_action,
 )
 from app.domain.services.voice_pipeline import (
@@ -47,15 +42,8 @@ from app.domain.services.voice_pipeline.turn_ender import (
     _CONFIDENCE_UNSET,
     _CONTACT_EVIDENCE_UNSET,
 )
-from app.core.container import get_container
-from app.core.postgres_adapter import Client as PostgresAdapterClient
-from app.core.telemetry import get_tracer, pipeline_span, record_latency, voice_span
+from app.core.telemetry import get_tracer, voice_span
 from app.core.telephony_observability import record_turn_silent_reason
-from app.services.scripts import (
-    CallState as CapturedSlotsState,
-    compose_system_prompt,
-    update_state_from_user_turn,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -676,7 +664,6 @@ class VoicePipelineService:
             _cancelled_turn["text"] = getattr(cancelled_task, "_source_text", None)
             _cancelled_turn["type"] = getattr(cancelled_task, "_turn_type", "final")
             _cancelled_turn["caller_turn_order"] = getattr(cancelled_task, "_caller_turn_order", None)
-            _cancelled_turn["preceding_relationship"] = getattr(cancelled_task, "_preceding_relationship", None)
             # Bounded, NON-blocking cancel: never freeze the single STT consumer
             # waiting for the cancelled turn to unwind. Unbounded awaiting here let
             # rapid barge-ins pile up and dropped every backlogged turn → seconds
@@ -753,7 +740,6 @@ class VoicePipelineService:
                 self._resume_after_false_barge_in(
                     session, websocket, _cancelled_turn["text"], _barge_at,
                     caller_turn_order=_cancelled_turn.get("caller_turn_order"),
-                    preceding_relationship=_cancelled_turn.get("preceding_relationship"),
                 )
             )
         if websocket:
@@ -774,7 +760,6 @@ class VoicePipelineService:
         barge_at: float,
         *,
         caller_turn_order: Optional[int] = None,
-        preceding_relationship=None,
     ) -> None:
         """Re-issue a reply that a word-less barge-in cancelled.
 
@@ -844,7 +829,6 @@ class VoicePipelineService:
         task._turn_type = "final"
         task._utterance_seq = self._utterance_seq.get(call_id, 0)
         task._caller_turn_order = caller_turn_order
-        task._preceding_relationship = preceding_relationship
         task._source_text = user_text
         self._pending_llm_tasks[call_id] = task
 

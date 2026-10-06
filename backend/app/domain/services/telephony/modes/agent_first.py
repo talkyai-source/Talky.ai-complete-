@@ -37,7 +37,6 @@ import asyncio
 import logging
 
 from app.domain.services.telephony.config import (
-    _build_outbound_greeting,
     _build_call_greeting,
 )
 
@@ -368,7 +367,7 @@ async def _speak_recording_disclosure(voice_session) -> None:
         # reaches calls.transcript_json, so a notice recorded above but not
         # here is spoken on the call yet absent from the stored transcript —
         # 6e0e221b's saved transcript had 3 words even though a 60-character
-        # disclosure was spoken. Mirrors audio_ingest._record_silence_check's
+        # disclosure was spoken. Records the delivered disclosure using the existing
         # same-pattern fix for the silence-check phrase. Fail-soft: transcript
         # bookkeeping must never break the call.
         try:
@@ -653,7 +652,7 @@ async def _send_outbound_greeting(voice_session) -> None:
         # missing from every saved transcript ("Thanks for calling. How can
         # I help?" was spoken but 53d16d3e.transcript.txt starts with the
         # caller). Same fix as the disclosure append above, and the same
-        # audio_ingest._record_silence_check pattern. _spoken_text is
+        # delivered-assistant transcript pattern. _spoken_text is
         # already trimmed to what actually played on a barge-in. Fail-soft:
         # transcript bookkeeping must never break the call.
         try:

@@ -56,7 +56,6 @@ def admission(monkeypatch):
         port = AsyncMock()
         monkeypatch.setattr(prewarm, name, port)
         external.append(port)
-    monkeypatch.setattr(prewarm, "_start_opening_ladder_generation", lambda *args: None)
     monkeypatch.setattr("app.services.scripts.knowledge.session_inject.apply_campaign_knowledge", AsyncMock())
     monkeypatch.setattr("app.core.container.get_container", lambda: NS(db_pool=object()))
     route = AsyncMock(return_value=NS(resolved=True, tenant_id=TENANT))

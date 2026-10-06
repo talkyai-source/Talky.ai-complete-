@@ -20,7 +20,6 @@ from fastapi import WebSocket
 from app.core.telemetry import pipeline_span, record_latency
 from app.domain.models.conversation import AudioChunk, Message, MessageRole
 from app.domain.models.session import CallSession
-from app.domain.services.voice_pipeline import turn_director
 
 logger = logging.getLogger(__name__)
 
@@ -153,88 +152,11 @@ def voice_onset_age_s(session, *, now: Optional[float] = None) -> Optional[float
     return age
 
 
-def silence_action(
-    *,
-    caller_silence_s: float,
-    activity_silence_s: float,
-    since_last_nudge_s: Optional[float],
-    in_grace: bool,
-    is_caller_first: bool,
-    user_turns: int,
-    hangup_s: float,
-    opening_s: float,
-    mid_s: float,
-    nudge_gap_s: float,
-    opening_gap_s: Optional[float] = None,
-    agent_awaiting_first_reply: bool = False,
-    caller_audio_active: bool = False,
-) -> str:
-    """One silence-monitor tick decision → ``'hangup'`` | ``'nudge'`` | ``'wait'``.
-
-    Pure (no I/O, no clocks) so the natural caller-first flow is unit-testable
-    without a live audio pipeline. Mirrors the monitor loop's order exactly:
-
-      1. ``in_grace`` (the AI just finished speaking) suppresses everything;
-      2. ``caller_silence_s >= hangup_s`` (60s of no caller speech) → close;
-      3. otherwise nudge once the ACTIVITY silence passes the threshold
-         (``opening_s`` when caller-first and the caller hasn't spoken yet, else
-         ``mid_s``) AND at least the applicable gap has passed since the last
-         nudge — ``opening_gap_s`` while opening (a human's re-"Hello?" cadence
-         is a couple of seconds, not the ~15s that's reasonable for a mid-call
-         check-in), else ``nudge_gap_s``. ``opening_gap_s`` defaults to
-         ``None``, which falls back to ``nudge_gap_s`` — keeps every existing
-         caller (incl. the pre-2026-08-11 test suite) working unchanged if it
-         never passes the new parameter.
-
-    ``caller_audio_active`` is the ACOUSTIC signal — the caller's line is
-    carrying speech-level energy right now — and it suppresses nudging only.
-    Every other input to this function is derived from transcripts, which is
-    why 2026-08-13 went the way it did: on two calls Deepgram accepted the
-    audio and returned nothing at all, so by every transcript-derived measure
-    the caller was silent, and the ladder talked over someone who was speaking
-    at RMS 3504. 28 of 35 nudges that day (80%, across 20 of 40 calls) landed
-    on a caller who was audibly mid-sentence.
-
-    It deliberately does NOT block ``hangup``. Energy on the line is not proof
-    of a conversation — it is also what a TV in the background looks like — so
-    the 60s bound stays absolute and no call can be held open by noise alone.
-    A live person whose STT has died is rescued by the failover in
-    ``resilient_stt``, not by refusing to ever hang up.
-    """
+def silence_action(*, caller_silence_s: float, in_grace: bool, hangup_s: float) -> str:
+    """Enforce the silence deadline without generating conversational speech."""
     if in_grace:
         return "wait"
-    if caller_silence_s >= hangup_s:
-        return "hangup"
-    if caller_audio_active:
-        return "wait"
-    # "Opening" = the callee has not spoken yet AND the agent has not yet
-    # delivered a real introduction — it has, at most, said a bare hello.
-    #
-    # 2026-08-12 REGRESSION FIX. This used to be `is_caller_first and
-    # user_turns == 0`, which was correct only while agent-first calls opened
-    # with a full introduction ending in a question ("Hi! Alexia calling — got
-    # a moment?"). Once turn 1 became a bare two-word pickup greeting, an
-    # agent-first call fell into a hole: `opening` was False (not caller-first)
-    # so the re-greet ladder never applied, AND `should_suppress_mid_nudge`
-    # returned True (not caller-first, callee never spoke) so the mid nudge was
-    # skipped too. The agent said "Hi there." and then went silent until the
-    # 60s hangup — reported from a live test as "it stops after speaking one
-    # time, no follow up".
-    #
-    # A bare hello and the re-greet ladder are two halves of ONE design: a
-    # two-word greeting is only safe if something follows it up. So the trigger
-    # is now the state that actually matters — nobody has spoken and we have
-    # not introduced ourselves — not which side happened to dial.
-    opening = user_turns == 0 and (is_caller_first or agent_awaiting_first_reply)
-    threshold = opening_s if opening else mid_s
-    if activity_silence_s < threshold:
-        return "wait"
-    gap = nudge_gap_s
-    if opening and opening_gap_s is not None:
-        gap = opening_gap_s
-    if since_last_nudge_s is not None and since_last_nudge_s < gap:
-        return "wait"
-    return "nudge"
+    return "hangup" if caller_silence_s >= hangup_s else "wait"
 
 
 class TerminalSTTError(RuntimeError):
@@ -256,38 +178,6 @@ class TerminalSTTError(RuntimeError):
     ``BaseException``, already unaffected by the ``except Exception`` below)
     so a normal hangup — which cancels ``pipeline_task`` — is unaffected.
     """
-
-
-def _record_silence_check(pipeline, session, phrase: str) -> None:
-    """Record a spoken silence-check as an assistant turn (issue #8).
-
-    Writes to BOTH the live conversation_history (so the LLM knows it just asked
-    "you there?" and doesn't re-ask) AND the persisted transcript (so post-call
-    QA/compliance records match what was actually spoken on the line). Mirrors
-    turn_runner's assistant-turn append. Never raises — bookkeeping must not
-    break a call.
-    """
-    try:
-        session.conversation_history.append(
-            Message(role=MessageRole.ASSISTANT, content=phrase)
-        )
-    except Exception as exc:  # pragma: no cover - defensive
-        logger.debug("[SilenceMonitor] history append failed: %s", exc)
-    try:
-        ts = getattr(pipeline, "transcript_service", None)
-        if ts is not None:
-            ts.accumulate_turn(
-                call_id=session.call_id,
-                role="assistant",
-                content=phrase,
-                talklee_call_id=getattr(session, "talklee_call_id", None),
-                turn_index=getattr(session, "turn_id", 0),
-                event_type="assistant_response",
-                is_final=True,
-                include_in_plaintext=True,
-            )
-    except Exception as exc:  # pragma: no cover - defensive
-        logger.debug("[SilenceMonitor] transcript accumulate failed: %s", exc)
 
 
 class AudioIngest:
@@ -435,7 +325,7 @@ class AudioIngest:
                             # read ACOUSTIC caller activity. Every other signal
                             # it has is derived from transcripts, so when STT
                             # goes deaf this is the only evidence left that
-                            # somebody is talking — see silence_action's
+                            # somebody is talking.
                             # `caller_audio_active` and the 2026-08-13 calls
                             # where the ladder shouted over a live caller.
                             #
@@ -567,98 +457,16 @@ class AudioIngest:
                     self._p.latency_tracker.start_turn(call_id, session.turn_id)
                 self._p.latency_tracker.mark_listening_start(call_id)
 
-            # ── Silence monitor (telephony only) ───────────────────────────────
-            # After 5-7 seconds of continuous caller silence the agent asks if the
-            # caller is still there.  Phrases are varied each time to avoid sounding
-            # robotic.  Runs in parallel with the STT consumer loop; cancelled when
-            # the pipeline exits.  Disabled for Ask AI (browser sessions).
-            # Natural, GENTLE silence handling (product flow, 2026-07-07;
-            # opening cadence retuned 2026-08-11):
-            #   • agent waits (caller-first sends no greeting);
-            #   • after ~2-3s of dead air — how long a human actually pauses
-            #     before re-checking a silent line, not the old 10s that read
-            #     as a dropped call — one soft "Hello?" nudge, repeated up to
-            #     ``_OPENING_MAX_NUDGES`` times a couple of seconds apart
-            #     (never the old aggressive "Are you still there?");
-            #   • once the caller speaks, the LLM introduces itself and the
-            #     conversation proceeds naturally (prompt-driven);
-            #   • once the opening ladder is exhausted, no more nudges — the
-            #     existing 60s continuous-caller-silence hangup below is what
-            #     eventually ends the call, so this can never loop forever;
-            #   • after 60s of continuous caller silence, close the call politely.
-            _OPENING_HELLO_S = float(os.getenv("VOICE_OPENING_HELLO_S", "2.5"))
-            _session_opening_timeout = getattr(
-                session, "_silence_timeout_seconds", None,
-            )
-            if isinstance(_session_opening_timeout, (int, float)) and (
-                3.0 <= float(_session_opening_timeout) <= 60.0
-            ):
-                # Inbound campaign snapshots may override only the opening
-                # silence threshold. Mid-call thinking room and the absolute
-                # silence hangup remain platform safety controls.
-                _OPENING_HELLO_S = float(_session_opening_timeout)
-            # RAISED 10 -> 16 on 2026-08-12. A traced production call nudged
-            # "Still there?" twice while the caller was composing a question,
-            # and both times they began speaking 1.6-2.6s AFTER the prod:
-            #
-            #   20:54:46.881  silence (mid), nudging: 'Still there?'
-            #   20:54:49.522  EndOfTurn: 'So what can I do about that ...'
-            #   20:55:00.009  silence (mid), nudging: 'Still there?'
-            #   20:55:01.639  EndOfTurn: 'So what what I do ...'
-            #
-            # Ten seconds of quiet mid-conversation is not a dead line, it is
-            # someone thinking — and prodding them then is the same naggy
-            # behaviour the opening ladder was retuned to avoid, just at the
-            # other end of the call. The OPENING threshold stays short (2.5s:
-            # a silent pickup really might be a dead line); this one is about
-            # a person who has already spoken and is deciding what to say.
-            _MID_NUDGE_S = float(os.getenv("VOICE_MID_NUDGE_S", "16"))
+            # Silence owns only the configured disconnection deadline. Model
+            # turns and caller audio own speech; there is no nudge generator.
             _SILENCE_HANGUP_S = float(os.getenv("VOICE_SILENCE_HANGUP_S", "60"))
             _TTS_GRACE_S = 3.0
-            # ACOUSTIC nudge guard (2026-08-13). Same 500 RMS that every
-            # audio_level log line already prints as ">500=speech-likely", so
-            # the number a human reads while debugging is the number the code
-            # acts on. The stash refreshes ~1/s, so 2.0s of tolerance accepts
-            # the current reading and rejects a stale one — tighter than the
-            # 2.5s opening nudge gap, so a guard can never outlive the decision
-            # it was meant to inform.
-            _AUDIO_ACTIVE_RMS = float(os.getenv("VOICE_AUDIO_ACTIVE_RMS", "500"))
-            _AUDIO_ACTIVE_MAX_AGE_S = float(
-                os.getenv("VOICE_AUDIO_ACTIVE_MAX_AGE_S", "2.0")
-            )
-            # 2026-07-08: widened 12.0 -> 15.0 (env-overridable) so mid
-            # check-ins don't stack up as nagging on a caller who is just
-            # thinking; the opening ("hello?") gap is unaffected — it now has
-            # its own, much shorter, env var below.
-            _NUDGE_MIN_GAP_S = float(os.getenv("VOICE_NUDGE_MIN_GAP_S", "15.0"))
-            # 2026-08-11: a human re-dialling doesn't wait 15s between
-            # "Hello?"s — they say it again after a couple of seconds. This is
-            # the OPENING-only repeat gap (mid-call check-ins keep using
-            # _NUDGE_MIN_GAP_S above); silence_action falls back to
-            # _NUDGE_MIN_GAP_S whenever opening_gap_s is left unset, so mid
-            # behaviour is untouched by this change.
-            _OPENING_NUDGE_GAP_S = float(os.getenv("VOICE_OPENING_NUDGE_GAP_S", "2.5"))
-            # Safety cap for `session._caller_turn_open_since` (set on every
-            # StartOfTurn, cleared on EndOfTurn below). A lost EndOfTurn — e.g.
-            # across an STT reconnect — must not silence nudges for the rest of
-            # the call, so a turn stops counting as "open" past this age.
             _CALLER_TURN_OPEN_MAX_AGE_S = float(
                 os.getenv("VOICE_CALLER_TURN_OPEN_MAX_AGE_S", "12.0")
             )
-            # A turn-open stamp with NO caller words behind it only counts for
-            # this long. Nova's acoustic SpeechStarted fires on noise/echo and
-            # never gets an EndOfTurn; on live call c54579ea (2026-09-24) such
-            # events kept re-stamping the turn as open, which would hold off
-            # the "Still there?" recovery indefinitely. Real speech produces
-            # interim text within a second or two and keeps the turn open.
             _CALLER_TURN_NO_TEXT_S = float(
                 os.getenv("VOICE_CALLER_TURN_NO_TEXT_S", "3.0")
             )
-            # Phrase ladders + suppression rule moved to turn_director.py
-            # (2026-07-08) — pure, unit-tested, and shared so this monitor
-            # never again picks a random needy line at random tiers. See
-            # that module's docstring for the two production bugs this
-            # fixes.
 
             def _count_user_turns() -> int:
                 n = 0
@@ -672,442 +480,72 @@ class AudioIngest:
                 return n
 
             async def _silence_monitor() -> None:
-                try:
-                    from app.domain.services.voice_pipeline.turn_helpers import (
-                        _first_speaker_label,
-                    )
-                    # _first_speaker_label only ever returns "user" or "agent"
-                    # (see its docstring) — comparing against "inbound" here
-                    # was always False, so _is_caller_first was permanently
-                    # False: the OPENING "Hello?" ladder never fired and
-                    # should_suppress_mid_nudge always saw is_caller_first=False,
-                    # so a caller-first call with a silent callee got 60s of
-                    # dead air with no nudge at all. "user" is the correct
-                    # caller-first sentinel — matches turn_ender.py's own
-                    # `_first_speaker_label(session) == "user"` check for the
-                    # instant-opener path.
-                    _is_caller_first = _first_speaker_label(session) == "user"
-                except Exception:
-                    _is_caller_first = False
-
-                _now = time.monotonic
-                _last_caller_at = _now()   # last caller speech → drives the 60s hangup
-                _silence_since = _now()    # last caller OR AI activity → drives nudges
-                _last_nudge_at: Optional[float] = None
-                _nudge_count = 0
-                # Acoustic-guard bookkeeping. `_suppressing` makes the log one
-                # line per EPISODE rather than one per tick — a caller talking
-                # through a due nudge would otherwise produce a line every tick.
-                _nudge_suppressed = 0
-                _suppressing = False
-                # Opening ("Hello?...Hello?...Hello?") and mid-call
-                # ("Still there?") ladders are capped separately — a human
-                # re-checking a silent pickup gives it 2-3 tries, which is a
-                # different (shorter) budget than a mid-conversation check-in
-                # after the caller has already engaged. Both still fall
-                # through to the unconditional 60s hangup once exhausted, so
-                # neither can nudge forever.
-                _MID_MAX_NUDGES = int(os.getenv("VOICE_MID_MAX_NUDGES", "2"))
-                _OPENING_MAX_NUDGES = int(os.getenv("VOICE_OPENING_MAX_NUDGES", "3"))
-                _prev_user_turns = _count_user_turns()
-                _was_active = False
-                _tts_ended_at: Optional[float] = None
-
+                now = time.monotonic
+                last_caller_at = now()
+                previous_user_turns = _count_user_turns()
+                was_active = False
+                tts_ended_at = None
                 while session.stt_active:
                     await asyncio.sleep(1.0)
                     if not session.stt_active:
                         break
-
                     try:
-                        # Caller spoke since last tick → resets BOTH clocks (this is
-                        # the real signal that they're present and engaged).
-                        _uturns = _count_user_turns()
-                        # Suppressed backchannels ("Okay", "Yes") never enter
-                        # history but ARE the caller talking — honor the stamp
-                        # turn_ender leaves so brief affirmations reset the
-                        # clocks exactly like a full turn.
-                        _bc_at = getattr(session, "_last_backchannel_monotonic", None)
-                        _bc_fresh = (
-                            _bc_at is not None
-                            and (_now() - _bc_at) < 2.5
-                        )
-                        if _uturns > _prev_user_turns or _bc_fresh:
-                            _prev_user_turns = _uturns
-                            _last_caller_at = _now()
-                            _silence_since = _now()
-                            _last_nudge_at = None
-                            _nudge_count = 0  # they're back — fresh nudge budget
-                            _was_active = False
-                            _tts_ended_at = None
-                            # 2026-07-08: mark that the caller has produced real
-                            # audio at least once this call — other modules can
-                            # read this via getattr(session, "_caller_spoke_since_greeting", False)
-                            # without any dependency on this monitor's internals.
-                            try:
-                                session._caller_spoke_since_greeting = True
-                            except Exception:
-                                pass
-                            continue
-
-                        # AI speaking / thinking (incl. our own nudge) → resets the
-                        # NUDGE clock only, never the caller-silence (hangup) clock.
-                        _active = session.tts_active or session.llm_active
-                        if _active:
-                            _silence_since = _now()
-                            _tts_ended_at = None
-                            _was_active = True
-                            continue
-                        if _was_active:
-                            _tts_ended_at = _now()
-                            _silence_since = _tts_ended_at
-                            _was_active = False
-                            continue
-
-                        # The nudge clock measures the CALLER's silence, and a
-                        # caller cannot be heard before their audio reaches us.
-                        # It used to start when this monitor started -- before
-                        # the STT socket was even open. On call cf6bfed1 the
-                        # handshake and first audio took ~1.3s, so the 2.5s
-                        # opening timer fired after ~1.2s of real listening and
-                        # its "Hello?" landed on the caller's own first "Hello"
-                        # (audio 18.98, caller rising 20.71, nudge 20.80,
-                        # caller's transcript 21.00). Only the NUDGE clock
-                        # waits; the 60s hangup clock is untouched, so a call
-                        # whose audio never arrives still ends.
-                        _audio_from = getattr(session, "_caller_audio_started_at", None)
-                        if not isinstance(_audio_from, (int, float)):
-                            _silence_since = _now()
-                        elif _silence_since < _audio_from:
-                            _silence_since = _audio_from
-
-                        # Caller mid-utterance (StartOfTurn before the transcript).
-                        # Two signals, either sufficient: the tts_active-gated
-                        # barge-in event (a genuine interrupt of the agent), OR
-                        # the explicit turn-open stamp set on EVERY StartOfTurn
-                        # (also covers StartOfTurn arriving after the agent has
-                        # already finished speaking — see its comment above).
-                        # The stamp has a safety max age so a lost EndOfTurn
-                        # can't hold this "open" forever.
-                        _barge = self._p._barge_in_events.get(call_id)
-                        _turn_open_since = getattr(session, "_caller_turn_open_since", None)
-                        _last_text_at = getattr(session, "_caller_last_text_at", None)
-                        _turn_open = (
-                            isinstance(_turn_open_since, (int, float))
-                            and (_now() - _turn_open_since) < _CALLER_TURN_OPEN_MAX_AGE_S
-                            and (
-                                (_now() - _turn_open_since) < _CALLER_TURN_NO_TEXT_S
-                                or (
-                                    isinstance(_last_text_at, (int, float))
-                                    and (_now() - _last_text_at) < _CALLER_TURN_NO_TEXT_S
-                                )
-                            )
-                        )
-                        # Caller WORDS since the last turn ended mean the turn
-                        # is still open, StartOfTurn stamp or not. Test call
-                        # 5dfa4416 (2026-09-29): the caller's "Hello" arrived
-                        # as words at 22:30:39-41 with no turn-open stamp (its
-                        # StartOfTurn was not recorded), the provider held the
-                        # turn open until 22:30:46, and at 22:30:42 -- one
-                        # quiet second -- the opening "Hello?" was said over
-                        # it. Bounded by the same no-text window, so words
-                        # that stop still let the ladder run.
-                        _closed_at = getattr(session, "_caller_turn_closed_at", None)
-                        _words_open = (
-                            isinstance(_last_text_at, (int, float))
-                            and (_now() - _last_text_at) < _CALLER_TURN_NO_TEXT_S
-                            and (
-                                not isinstance(_closed_at, (int, float))
-                                or _last_text_at > _closed_at
-                            )
-                        )
-                        if (_barge and _barge.is_set()) or _turn_open or _words_open:
-                            _last_caller_at = _now()
-                            _silence_since = _now()
-                            continue
-
-                        # Decide this tick with the pure `silence_action` (unit-tested):
-                        # grace → wait; 60s caller silence → hangup; else nudge on the
-                        # opening/mid threshold + min gap.
-                        _in_grace = _tts_ended_at is not None and (
-                            _now() - _tts_ended_at
-                        ) < _TTS_GRACE_S
-                        # ACOUSTIC caller activity, published once a second by
-                        # the ingest loop. Read here rather than inside
-                        # silence_action so that function stays pure, and
-                        # required to be FRESH: the stash is ~1s granular, so
-                        # anything older than _AUDIO_ACTIVE_MAX_AGE_S is a
-                        # reading about a moment that has passed and must not
-                        # suppress a nudge now. Missing attribute → False →
-                        # exactly the pre-2026-08-13 behaviour, so a session
-                        # object that never carries the field is unaffected.
-                        _audio_active = False
-                        try:
-                            _rms_at = getattr(session, "_last_audio_rms_at", None)
-                            if _rms_at is not None and (
-                                _now() - _rms_at
-                            ) <= _AUDIO_ACTIVE_MAX_AGE_S:
-                                _audio_active = (
-                                    float(getattr(session, "_last_audio_rms", 0.0) or 0.0)
-                                    >= _AUDIO_ACTIVE_RMS
-                                )
-                        except Exception:
-                            _audio_active = False
-
-                        _action = silence_action(
-                            caller_audio_active=_audio_active,
-                            caller_silence_s=(_now() - _last_caller_at),
-                            activity_silence_s=(_now() - _silence_since),
-                            since_last_nudge_s=(
-                                (_now() - _last_nudge_at)
-                                if _last_nudge_at is not None else None
-                            ),
-                            in_grace=_in_grace,
-                            is_caller_first=_is_caller_first,
-                            user_turns=_prev_user_turns,
-                            hangup_s=_SILENCE_HANGUP_S,
-                            opening_s=_OPENING_HELLO_S,
-                            mid_s=_MID_NUDGE_S,
-                            nudge_gap_s=_NUDGE_MIN_GAP_S,
-                            opening_gap_s=_OPENING_NUDGE_GAP_S,
-                            # An agent-first call that has only said a bare
-                            # pickup greeting is in the OPENING state too —
-                            # see silence_action for the regression this fixes.
-                            # _has_introduced is set False by agent_first
-                            # precisely when the greeting was a bare hello.
-                            agent_awaiting_first_reply=(
-                                not getattr(session, "_has_introduced", False)
-                            ),
-                        )
-                        if _action == "wait":
-                            # DID THE ACOUSTIC GUARD ACTUALLY DO ANYTHING?
-                            #
-                            # The 2026-08-13 fix stops the ladder shouting over
-                            # a caller the STT cannot hear, and its entire
-                            # observable effect is a nudge that does NOT happen.
-                            # Absence is not evidence: a guard that silently
-                            # never fires and a guard that saved twenty calls
-                            # produce identical logs, which is the reporting
-                            # failure that hid two dead STT streams in the first
-                            # place. So say it out loud — but only when the
-                            # guard was DECISIVE. Re-running the pure decision
-                            # without the acoustic input is the exact test of
-                            # that, and it only runs on ticks where the caller
-                            # is audibly talking, so it costs nothing per call.
-                            if _audio_active:
-                                _would_have = silence_action(
-                                    caller_audio_active=False,
-                                    caller_silence_s=(_now() - _last_caller_at),
-                                    activity_silence_s=(_now() - _silence_since),
-                                    since_last_nudge_s=(
-                                        (_now() - _last_nudge_at)
-                                        if _last_nudge_at is not None else None
-                                    ),
-                                    in_grace=_in_grace,
-                                    is_caller_first=_is_caller_first,
-                                    user_turns=_prev_user_turns,
-                                    hangup_s=_SILENCE_HANGUP_S,
-                                    opening_s=_OPENING_HELLO_S,
-                                    mid_s=_MID_NUDGE_S,
-                                    nudge_gap_s=_NUDGE_MIN_GAP_S,
-                                    opening_gap_s=_OPENING_NUDGE_GAP_S,
-                                    agent_awaiting_first_reply=(
-                                        not getattr(session, "_has_introduced", False)
-                                    ),
-                                )
-                                if _would_have == "nudge":
-                                    _nudge_suppressed += 1
-                                    # Mirrored onto the session so the per-call
-                                    # audit can be written from outside this
-                                    # coroutine. The monitor is ended by
-                                    # task.cancel() at hangup, so anything that
-                                    # relies on falling out of this loop never
-                                    # runs.
-                                    try:
-                                        session._nudges_suppressed = _nudge_suppressed
-                                    except Exception:
-                                        pass
-                                    if not _suppressing:
-                                        _suppressing = True
-                                        logger.info(
-                                            "[SilenceMonitor] %s — nudge SUPPRESSED, "
-                                            "caller audio live rms=%.0f n=%d "
-                                            "(would have talked over them)",
-                                            call_id[:12],
-                                            float(getattr(session, "_last_audio_rms", 0.0) or 0.0),
-                                            _nudge_suppressed,
-                                        )
-                                else:
-                                    _suppressing = False
-                            else:
-                                _suppressing = False
-                            continue
-                        _suppressing = False
-
-                        if _action == "hangup":
-                            logger.info(
-                                "[SilenceMonitor] %s — %.0fs caller silence, closing call",
-                                call_id[:12], _SILENCE_HANGUP_S,
-                            )
-                            try:
-                                await self._p._shutdown_session_for_end_action(
-                                    session, websocket, "silence_timeout",
-                                    "I'll let you go for now — feel free to reach out anytime. Take care.",
-                                )
-                            except Exception as _close_exc:
-                                logger.debug("[SilenceMonitor] close-on-silence failed: %s", _close_exc)
-                            break
-
-                        # Missing input is not measured caller silence. Do not
-                        # rely on two monotonic reads being close enough: a
-                        # stalled event loop could otherwise make a nudge due
-                        # after resetting the clock above. The timeout still
-                        # closes a line whose audio never arrives.
-                        if not isinstance(_audio_from, (int, float)):
-                            continue
-
-                        # Never nudge a MACHINE. Once screening/voicemail wording
-                        # was heard (machine_detection flags), "Sorry, did I lose
-                        # you?" at a recording or a screening hold is pure waste
-                        # (observed 3x per voicemail call, 2026-07-08 audit) — and
-                        # during a screening hold, silence is the correct
-                        # etiquette. The 60s hangup above still applies.
-                        if _action == "nudge" and (
-                            getattr(session, "_machine_screening", False)
-                            or getattr(session, "_amd_voicemail", False)
+                        user_turns = _count_user_turns()
+                        backchannel_at = getattr(session, "_last_backchannel_monotonic", None)
+                        if user_turns > previous_user_turns or (
+                            backchannel_at is not None and now() - backchannel_at < 2.5
                         ):
-                            _last_nudge_at = _now()  # keep the gap clock sane
+                            previous_user_turns = user_turns
+                            last_caller_at = now()
+                            was_active = False
+                            tts_ended_at = None
+                            session._caller_spoke_since_greeting = True
+                            continue
+                        if session.tts_active or session.llm_active:
+                            was_active = True
+                            tts_ended_at = None
+                            continue
+                        if was_active:
+                            tts_ended_at = now()
+                            last_caller_at = tts_ended_at
+                            was_active = False
                             continue
 
-                        # _action == "nudge": opening (caller-first, not yet spoken)
-                        # → a soft "Hello?"; otherwise a light check-in. Computed
-                        # before the nudge-count cap below because opening and
-                        # mid now have different budgets (_OPENING_MAX_NUDGES vs
-                        # _MID_MAX_NUDGES).
-                        # MUST match silence_action's `opening` rule exactly.
-                        # 2026-08-12: these two drifted apart and the bug was
-                        # subtle — silence_action correctly decided to nudge an
-                        # agent-first call that had only said a bare hello, but
-                        # THIS line still said "not opening", so the phrase came
-                        # from the MID ladder: "No rush — I'm still on the line
-                        # whenever you're ready." That needy re-offer landing
-                        # before the prospect has spoken is precisely the
-                        # 2026-07-08 bug should_suppress_mid_nudge exists to
-                        # prevent — so a half-applied fix turned dead air into
-                        # the wrong words. Deciding WHETHER to nudge and
-                        # choosing WHAT to say must read the same state.
-                        _awaiting_first_reply = not getattr(
-                            session, "_has_introduced", False
+                        barge = self._p._barge_in_events.get(call_id)
+                        turn_open_since = getattr(session, "_caller_turn_open_since", None)
+                        last_text_at = getattr(session, "_caller_last_text_at", None)
+                        turn_open = (
+                            isinstance(turn_open_since, (int, float))
+                            and now() - turn_open_since < _CALLER_TURN_OPEN_MAX_AGE_S
+                            and (
+                                now() - turn_open_since < _CALLER_TURN_NO_TEXT_S
+                                or (isinstance(last_text_at, (int, float))
+                                    and now() - last_text_at < _CALLER_TURN_NO_TEXT_S)
+                            )
                         )
-                        _opening = _prev_user_turns == 0 and (
-                            _is_caller_first or _awaiting_first_reply
+                        closed_at = getattr(session, "_caller_turn_closed_at", None)
+                        words_open = (
+                            isinstance(last_text_at, (int, float))
+                            and now() - last_text_at < _CALLER_TURN_NO_TEXT_S
+                            and (not isinstance(closed_at, (int, float)) or last_text_at > closed_at)
                         )
-
-                        # Cap nudges per call: after the ladder's budget a silent
-                        # human isn't coming back, and one more "still with me?"
-                        # / "Hello?" reads as nagging (audited calls had up to
-                        # SIX). Let the 60s caller-silence hangup finish the call
-                        # quietly — this is the bound that keeps the re-greet
-                        # ladder from ever looping forever.
-                        _max_nudges = _OPENING_MAX_NUDGES if _opening else _MID_MAX_NUDGES
-                        if _action == "nudge" and _nudge_count >= _max_nudges:
-                            _last_nudge_at = _now()
+                        if (barge and barge.is_set()) or turn_open or words_open:
+                            last_caller_at = now()
                             continue
-
-                        # 2026-07-08 guard: on an AGENT-FIRST call where the
-                        # caller has NEVER spoken (no real turn, no fresh
-                        # backchannel), a MID nudge would be the caller's first
-                        # ever line from us — "I'm still here whenever you're
-                        # ready" landing before they've said a word. Skip the
-                        # nudge entirely; only the 60s hangup still applies.
-                        # Fails open (nudges as before) if the check itself errors.
-                        if not _opening:
-                            try:
-                                _caller_spoke = bool(
-                                    getattr(session, "_caller_spoke_since_greeting", False)
-                                ) or _prev_user_turns > 0
-                                # An agent that has only said a bare hello is
-                                # in the OPENING ladder, not the MID one — the
-                                # suppression below exists to stop "I'm still
-                                # here whenever you're ready" landing before
-                                # the prospect has spoken, which is a MID
-                                # phrase. Suppressing here instead left a bare
-                                # "Hi there." with no follow-up at all (see
-                                # silence_action, 2026-08-12).
-                                # _awaiting_first_reply computed once above,
-                                # with _opening — the three decisions (nudge?
-                                # / suppress? / which words?) must read one
-                                # value, not three copies that can drift.
-                                if not _awaiting_first_reply and turn_director.should_suppress_mid_nudge(
-                                    is_caller_first=_is_caller_first,
-                                    caller_has_ever_spoken=_caller_spoke,
-                                ):
-                                    _last_nudge_at = _now()
-                                    continue
-                            except Exception as _guard_exc:
-                                logger.debug(
-                                    "[SilenceMonitor] mid-nudge suppression check "
-                                    "failed, falling through to normal nudge: %s",
-                                    _guard_exc,
-                                )
-
-                        try:
-                            # 2026-08-11: read the per-call LLM-generated
-                            # ladder if opening_ladder.py stashed one during
-                            # pre-warm (see prewarm._start_opening_ladder_
-                            # generation). getattr default is None, which
-                            # choose_silence_phrase treats identically to not
-                            # passing the argument at all — this line changes
-                            # nothing for the (default-off) static path.
-                            _phrase = turn_director.choose_silence_phrase(
-                                is_opening=_opening, nudge_index=_nudge_count,
-                                ladder=getattr(session, "_opening_ladder", None)
-                                if _opening else None,
+                        if silence_action(
+                            caller_silence_s=now() - last_caller_at,
+                            in_grace=tts_ended_at is not None and now() - tts_ended_at < _TTS_GRACE_S,
+                            hangup_s=_SILENCE_HANGUP_S,
+                        ) == "hangup":
+                            await self._p._shutdown_session_for_end_action(
+                                session, websocket, "silence_timeout", "",
                             )
-                        except Exception as _phrase_exc:
-                            logger.debug(
-                                "[SilenceMonitor] choose_silence_phrase failed, "
-                                "falling back to 'Still there?': %s", _phrase_exc,
-                            )
-                            _phrase = "Hello?" if _opening else "Still there?"
-                        logger.info(
-                            "[SilenceMonitor] %s — silence (%s), nudging: %r",
-                            call_id[:12], "opening" if _opening else "mid", _phrase,
-                        )
-                        try:
-                            # track_latency=False: a nudge is not a turn. Without
-                            # this the nudge's TTS first-chunk/end stamps land on
-                            # the turn's LatencyMetrics object (mark_audio_start
-                            # / mark_tts_end are first-write-wins with no
-                            # staleness check), and the REAL reply's later,
-                            # LEGITIMATE stamps are then refused — producing
-                            # "Turn N latency: -3795ms" 4 times on 2026-09-23
-                            # (3a17c06c turn 0, 6aaeb4dd turn 17, etc.).
-                            await self._p.synthesize_and_send_audio(
-                                session, _phrase, websocket, track_latency=False,
-                            )
-                            _record_silence_check(self._p, session, _phrase)
-                        except Exception as _sm_exc:
-                            logger.debug("[SilenceMonitor] TTS failed: %s", _sm_exc)
-                        _last_nudge_at = _now()
-                        _nudge_count += 1
-                        try:
-                            session._nudges_spoken = _nudge_count
-                        except Exception:
-                            pass
-                        _silence_since = _now()  # give them room to answer before re-nudging
-                    except Exception as exc:
-                        logger.warning(
-                            "[SilenceMonitor] tick error call=%s err=%s — skipping tick",
-                            call_id[:12], exc, exc_info=True,
-                        )
-                        continue
+                            break
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception:
+                        logger.warning("silence_monitor_tick_failed call_id=%s", call_id, exc_info=True)
 
-            # Run for real phone calls AND for any session that explicitly opts
-            # in — the campaign Test-agent WebSocket sets `_enable_silence_monitor`
-            # so the test call behaves like a real one (10s hello, 60s auto-close).
-            # A plain Ask-AI widget never opts in, so it is never nagged. Missing
-            # gateway_type defaults to telephony so a real phone session always
-            # keeps its silence handling.
             _gw_type = getattr(getattr(session, "config", None), "gateway_type", "telephony")
             _opt_in = bool(getattr(session, "_enable_silence_monitor", False))
             _silence_task: Optional[asyncio.Task] = (
