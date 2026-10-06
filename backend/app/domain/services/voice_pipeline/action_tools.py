@@ -14,11 +14,8 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 from collections.abc import Iterable, Mapping
 from typing import Any
-
-from app.domain.models.conversation import MessageRole
 
 logger = logging.getLogger(__name__)
 
@@ -140,30 +137,6 @@ _SAFE_FAILURE_SPEECH = {
     ),
     ACTION_END_CALL: "I can't end the line from here; you can hang up whenever you're ready.",
 }
-
-_INTENT_PATTERNS = {
-    ACTION_SCHEDULE_CALLBACK: re.compile(
-        r"\b(?:call\s*back|callback|follow[- ]?up\s+call|"
-        r"call me (?:back|again|later))\b",
-        re.IGNORECASE,
-    ),
-    ACTION_SEND_EMAIL: re.compile(
-        r"\b(?:e-?mail|send (?:it|that|this|the (?:details|information|quote|estimate)))\b",
-        re.IGNORECASE,
-    ),
-    ACTION_SUBMIT_FORM: re.compile(
-        r"\b(?:(?:submit|send|complete|file) (?:the |that |this )?"
-        r"(?:form|application|request)|form submission)\b",
-        re.IGNORECASE,
-    ),
-    ACTION_TRANSFER_CALL: re.compile(
-        r"\b(?:transfer|connect me|put me through|speak (?:to|with)|talk (?:to|with))\b"
-        r".{0,35}\b(?:human|person|agent|representative|manager|team|someone)\b|"
-        r"\b(?:transfer|put me through)\b",
-        re.IGNORECASE,
-    ),
-}
-
 
 def _result(
     action: str,
@@ -363,46 +336,11 @@ def _provider_supports_action_tools(provider: Any) -> bool:
     )
 
 
-def _last_turn_text(messages: Iterable[Any]) -> tuple[str, str]:
-    items = list(messages)
-    user_index = next(
-        (
-            index
-            for index in range(len(items) - 1, -1, -1)
-            if getattr(items[index], "role", None) == MessageRole.USER
-        ),
-        -1,
-    )
-    if user_index < 0:
-        return "", ""
-    user_text = str(getattr(items[user_index], "content", "") or "")
-    previous_assistant = next(
-        (
-            str(getattr(items[index], "content", "") or "")
-            for index in range(user_index - 1, -1, -1)
-            if getattr(items[index], "role", None) == MessageRole.ASSISTANT
-        ),
-        "",
-    )
-    return user_text, previous_assistant
-
-
 def action_tools_for_turn(messages: Iterable[Any], provider: Any, *, session=None) -> list[dict[str, Any]]:
-    """Offer only actions relevant to the current exchange.
-
-    Tool-enabled turns buffer the model's first pass until it is known whether
-    a tool call exists.  Restricting that cost to an explicit action exchange
-    preserves the low-latency streaming path for ordinary conversation.
-    """
+    """Offer the connected actions; the model interprets the caller's intent."""
     if not _provider_supports_action_tools(provider):
         return []
-    user_text, previous_assistant = _last_turn_text(messages)
-    context = f"{previous_assistant}\n{user_text}"
-    actions = [
-        action for action in VOICE_ACTION_NAMES
-        if (end_call_intent_present(user_text, previous_assistant_text=previous_assistant) if action == ACTION_END_CALL
-            else _INTENT_PATTERNS[action].search(context))
-    ]
+    actions = VOICE_ACTION_NAMES
     if session is not None:
         from app.domain.services.voice_pipeline.action_execution import enabled_voice_actions
         enabled = enabled_voice_actions(session)

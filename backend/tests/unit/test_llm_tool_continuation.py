@@ -53,6 +53,49 @@ async def test_preamble_does_not_discard_tool_and_second_round_has_receipt(provi
     assert json.loads(receipt["content"])["success"] is True
 
 
+async def test_catalog_then_section_read_uses_one_model_with_all_tool_results():
+    provider = GroqLLMProvider()
+    rounds = []
+
+    async def stream(messages, **kwargs):
+        rounds.append(kwargs)
+        if len(rounds) <= 2:
+            query = "catalog" if len(rounds) == 1 else "section-7"
+            kwargs["tool_calls_sink"].append({**CALL, "id": f"read-{len(rounds)}",
+                "arguments": {"query": query}, "arguments_raw": json.dumps({"query": query})})
+        else:
+            yield "Refunds take five working days after approval."
+
+    provider.stream_chat = stream
+    runner = AsyncMock(side_effect=["Section 7: Refunds", "Five working days after approval"])
+    result = [t async for t in provider.stream_chat_with_tools(
+        MESSAGES, tools=TOOLS, tool_runner=runner, max_tool_rounds=3)]
+    assert len(rounds) == 3 and runner.await_count == 2
+    assert len(rounds[-1]["extra_messages"]) == 4
+    assert result == ["Refunds take five working days after approval."]
+
+
+async def test_repeated_tool_across_rounds_executes_once_and_has_finite_budget():
+    provider = GroqLLMProvider()
+    rounds = []
+
+    async def stream(messages, **kwargs):
+        rounds.append(kwargs)
+        if "tools" in kwargs:
+            kwargs["tool_calls_sink"].append({**CALL, "id": f"call-{len(rounds)}"})
+        else:
+            yield "The request was already handled."
+
+    provider.stream_chat = stream
+    runner = AsyncMock(return_value={"success": True})
+    result = [t async for t in provider.stream_chat_with_tools(
+        MESSAGES, tools=TOOLS, tool_runner=runner, max_tool_rounds=3)]
+    runner.assert_awaited_once()
+    assert len(rounds) == 4 and "tools" not in rounds[-1]
+    assert len(rounds[-1]["extra_messages"]) == 6
+    assert result == ["The request was already handled."]
+
+
 @pytest.mark.parametrize("call,status", [
     ({**CALL, "name": "delete_all"}, "unknown_tool"),
     ({**CALL, "arguments": {}, "arguments_valid": False}, "invalid_arguments"),

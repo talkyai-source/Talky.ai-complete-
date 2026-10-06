@@ -383,6 +383,16 @@ async def execute(profile, rt, plan, output, api_key):
 
 
 def main(argv=None):
+    # This historical profile qualified query reformulation. Live retrieval now
+    # uses model-selected section IDs, so its scores/budgets cannot qualify the
+    # replacement. Preserve fixtures and evidence; do not run a misleading test.
+    raise QualificationBoundaryError(
+        "The query-based qualification profile is superseded by model-selected "
+        "section retrieval. A reviewed section-selection profile is required."
+    )
+
+
+def _legacy_main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--endpoint", required=True)
     parser.add_argument("--model", required=True)

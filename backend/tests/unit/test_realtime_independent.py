@@ -56,17 +56,19 @@ async def test_unverified_audio_never_released(failure):
 
 
 @pytest.mark.asyncio
-async def test_false_completion_is_withheld_and_repair_is_bounded():
+async def test_prose_does_not_trigger_a_second_semantic_judge():
     async def events():
-        for _ in range(3):
-            yield RealtimeEvent(kind="response_candidate", text="I have sent the email.", audio=b"x", raw={"response": {"id": "r"}})
+        yield RealtimeEvent(kind="response_candidate", text="I have sent the email.", audio=b"x", raw={"response": {"id": "r"}})
     provider = SimpleNamespace(events=events, repair_unspoken_response=AsyncMock())
     gateway = SimpleNamespace(send_audio=AsyncMock())
     bridge = RealtimeBridge(call_id="test", realtime_session=provider, media_gateway=gateway)
     await bridge._pump_model_events()
-    gateway.send_audio.assert_not_awaited()
-    provider.repair_unspoken_response.assert_awaited_once()
-    assert bridge._failure_reason
+    await bridge._playback_task
+    gateway.send_audio.assert_awaited_once()
+    provider.repair_unspoken_response.assert_not_awaited()
+    assert not bridge._failure_reason
+    # Wording is model-owned; this does not create an email execution receipt.
+    assert bridge._live_state.last_tool_success is None
 
 
 @pytest.mark.asyncio

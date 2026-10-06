@@ -31,20 +31,6 @@ current candidate as expected_value. Report a detail as saved only when its pers
 result says saved. A known line number is context, not automatic confirmation. Contact
 confirmation does not mean a message was sent or an appointment booked."""
 
-KNOWLEDGE_TOOL_DESCRIPTION = (
-    "Search this campaign's approved company knowledge for a specific question. "
-    "Use for prices, policies, eligibility, availability, offers, service areas, "
-    "hours and product details unless a relevant verified result from this call "
-    "already answers it and the context has not changed. Do not use general model "
-    "knowledge as evidence for company facts. This is a read-only lookup."
-)
-KNOWLEDGE_QUERY_DESCRIPTION = (
-    "The caller's question, rephrased for search while preserving named products, "
-    "country/location, timing, negation and the relationship asked about. Resolve "
-    "only clear references from context; clarify ambiguity before calling. "
-    "Do not add assumptions to obtain a match."
-)
-
 _KNOWLEDGE = """COMPANY KNOWLEDGE
 Use the available knowledge tool to read relevant approved source sections for company
 facts. Choose sections for the caller's original question, preserving products, locations,

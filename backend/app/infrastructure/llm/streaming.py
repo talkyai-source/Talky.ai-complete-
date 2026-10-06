@@ -168,34 +168,45 @@ async def execute_tool_call(call, tools, runner, *, timeout_seconds=8.0):
 
 async def stream_tool_turn(provider, messages, *, tools=None, tool_runner=None,
                            require_tool_result_before_content=False, timeout_seconds=10.0,
+                           max_tool_rounds=1,
+                           read_only_tools=(),
                            **kwargs):
-    """At most two model rounds; calls run even alongside a spoken preamble."""
+    """Bounded tool dialogue; the default remains one decision and one answer.
+
+    Live knowledge can browse a catalog then read a section. Identical tool
+    write requests share their result throughout the turn. Read-only tools can
+    run again so their current evidence stays aligned with the returned result.
+    """
+    if type(max_tool_rounds) is not int or not 1 <= max_tool_rounds <= 3:
+        raise ValueError("max_tool_rounds must be an integer from 1 to 3")
     if not tools or tool_runner is None:
         async with aclosing(provider.stream_chat_with_timeout(messages, timeout_seconds=timeout_seconds, **kwargs)) as stream:
             async for token in stream:
                 yield token
         return
-    calls, content = [], []
-    async with aclosing(provider.stream_chat_with_timeout(
-        messages, timeout_seconds=timeout_seconds, tools=tools, tool_choice="auto",
-        tool_calls_sink=calls, **kwargs,
-    )) as stream:
-        async for token in stream:
-            content.append(token)
-            if not require_tool_result_before_content:
-                yield token
-    if not calls:
-        if require_tool_result_before_content and content:
-            yield "".join(content)
-        return
-    extra = [assistant_tool_message(calls, "".join(content) or None)]
+    extra = []
     results = {}
-    for call in calls:
-        # Duplicate identical requests in one decision round share one result.
-        key = (call["name"], json.dumps(call["arguments"], sort_keys=True), call.get("arguments_valid", True))
-        if key not in results:
-            results[key] = await execute_tool_call(call, tools, tool_runner)
-        extra.append({"role": "tool", "tool_call_id": call["id"], "content": results[key]})
+    for _ in range(max_tool_rounds):
+        calls, content = [], []
+        continuation = {"extra_messages": list(extra)} if extra else {}
+        async with aclosing(provider.stream_chat_with_timeout(
+            messages, timeout_seconds=timeout_seconds, tools=tools, tool_choice="auto",
+            tool_calls_sink=calls, **continuation, **kwargs,
+        )) as stream:
+            async for token in stream:
+                content.append(token)
+                if not require_tool_result_before_content:
+                    yield token
+        if not calls:
+            if require_tool_result_before_content and content:
+                yield "".join(content)
+            return
+        extra.append(assistant_tool_message(calls, "".join(content) or None))
+        for call in calls:
+            key = (call["name"], json.dumps(call["arguments"], sort_keys=True), call.get("arguments_valid", True))
+            if key not in results or call["name"] in read_only_tools:
+                results[key] = await execute_tool_call(call, tools, tool_runner)
+            extra.append({"role": "tool", "tool_call_id": call["id"], "content": results[key]})
     answer = []
     async with aclosing(provider.stream_chat_with_timeout(
         messages, timeout_seconds=timeout_seconds, extra_messages=extra, **kwargs,

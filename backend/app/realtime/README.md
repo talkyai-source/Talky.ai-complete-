@@ -10,7 +10,7 @@ pipeline does not compose or supply its prompts.
 | `campaign_config.py` | Campaign overrides and account defaults |
 | `runtime.py`, `credentials.py` | Credential resolution, provider session and bridge assembly |
 | `openai.py`, `xai.py` | Provider protocol adapters |
-| `playout_buffer.py`, `bridge.py` | Bounded response validation, playback, interruption and tools |
+| `playout_buffer.py`, `bridge.py` | Audio/transcript ownership, playback, interruption and tools |
 | `tools.py` | Realtime function schemas for shared business actions |
 | `preview.py` | Voice samples generated with the actual Realtime model |
 
@@ -21,25 +21,25 @@ independent `realtime_prompt`. No database migration is needed. Switching
 engines preserves the other engine's saved settings. Old campaigns without
 an engine selection inherit the account setting; saving explicitly pins it.
 
-## Prompt policy (`realtime@4`)
+## Prompt policy (`realtime@9`)
 
 The essential instruction is: represent the configured company, pursue the
 campaign goal with short natural turns, verify company claims through campaign
 knowledge, confirm exact contact details, and report actions only after backend
 success. Campaign guidance can change the task and style, not these boundaries.
 
-The base prompt keeps identity, opening, conversation, grounding, contact and
-action rules in short sections. Detailed business facts stay in campaign
-knowledge. Lookups do not depend on the model's confidence; a current verified
-result can be reused. Read-only lookups do not need permission, while email,
-callback, form and transfer actions need confirmation. A clear request to end
-the call needs no extra confirmation. Brief wait updates are conditional rather
-than forced filler. Missing facts or unavailable tools receive an honest answer.
+The base prompt is a conversation guide, without a prescribed sequence or
+regex-derived sales labels. The model chooses exact sections from its campaign
+catalog through `knowledge_lookup`; the backend returns complete authored text
+and ancestors from the call's scoped snapshot. Headings guide navigation and
+do not establish facts. `record_contact` lets the model interpret caller email
+and phone corrections; the backend validates source, currentness and saving.
+Read-only lookups need no permission. Consequential actions still use the
+existing authorization and execution contracts.
 
-Tool descriptions for this engine live in this module, independently of
-traditional prompt wording. Shared action argument schemas and execution remain
-unchanged. The model stays `gpt-realtime-2`, with low reasoning by default; no
-new service, model upgrade or additional inference stage is introduced.
+The native guide remains separate from traditional prompt wording. Knowledge,
+contact and action tool contracts share the existing backend implementations.
+No new service, model upgrade or separate extraction model is introduced.
 
 Reference: [OpenAI Realtime prompting guidance](https://developers.openai.com/api/docs/guides/voice-prompting).
 Offline checks verify prompt composition and integration, not guaranteed model
@@ -52,15 +52,19 @@ transcripts and lead storage remain shared services. The existing xAI adapter
 is retained for opt-in configuration; the dashboard catalog offers GPT Realtime.
 
 A selected Realtime engine never silently falls back to traditional providers.
-Audio is held until a complete matching transcript can be checked against the
-shared action guardrails. This adds a generation delay before playback. The
+Audio is held until a complete matching transcript establishes response ownership.
+This still adds a generation delay before playback. The
 buffer is capped at 30 seconds; incomplete or oversized responses fail explicitly.
-Guardrails are a defense against known false-action claims, not a guarantee of
-perfect model accuracy. Tool continuations wait for preceding playback while
+Normal prose is no longer judged or rewritten by price, relationship, contact
+or action-completion regexes. The model must follow its guide and actual tool
+results; real-model evaluation is needed to assess factual and action claims.
+Tool continuations wait for preceding playback while
 the event pump remains available for caller interruptions.
 
-Contact readbacks advance only after a transport playback acknowledgement.
-Browser playback supports that acknowledgement. Telephony transports without
-it retain pending contact details; live telephony confirmation is not certified
-by these unit checks. Production deployment and a complete inbound/outbound
-call acceptance test are separate from the isolated provider smoke check.
+Contacts begin pending and become confirmed through the model's interpretation
+of a later caller turn. Source revisions revoke stale contributions. A saved
+result requires a persistence acknowledgement; confirmation is not proof of
+transcription correctness or an external action. No prescribed readback format
+or separate confirmation classifier runs. Transport acknowledgements remain
+relevant to delivered history and consequential actions. Production deployment
+and full inbound/outbound acceptance remain separate from offline checks.

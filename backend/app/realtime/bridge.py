@@ -1121,14 +1121,13 @@ class RealtimeBridge:
                 await self._publish_live_state()
                 await self._send_tool_result_after_playback(fc.call_id, result)
             elif fc.name == "knowledge_lookup":
-                query = fc.parsed_arguments().get("query", "")
-                result = await self._lookup_knowledge(query)
+                result = await self._lookup_knowledge(fc.parsed_arguments())
                 if result["status"] != "superseded":
                     self._live_state = reduce_live_state(
                         self._live_state,
                         ToolResultEvidence(
                             tool_name="knowledge_lookup",
-                            success=result["status"] == "matched",
+                            success=result["status"] in {"available", "catalog"},
                             code=result["status"],
                         ),
                     )
@@ -1321,123 +1320,26 @@ class RealtimeBridge:
         self._stop.set()
         await self._rt.close()
 
-    async def _lookup_knowledge(self, query: str) -> dict:
-        """Top-k campaign-knowledge nodes rendered for the voice model. Returns
-        explicit evidence status, fenced data and source references. Reuses
-        retrieve_knowledge — the cascaded per-turn retrieval.
+    async def _lookup_knowledge(self, arguments: dict) -> dict:
+        """Execute the model's exact selection against this call's scoped snapshot."""
+        from app.services.scripts.knowledge.sections import SectionCatalog, run_section_request, serialize_section_result
+        from app.domain.services.voice_pipeline.knowledge_tool import fence_kb_result
 
-        SECURITY: what this returns lands in a ``function_call_output`` item,
-        which can appear authoritative to the model. Its contents are still
-        untrusted tenant/third-party data, so they receive
-        the SAME defenses the cascaded inject path applies
-        (``turn_streamer._knowledge_block_for_turn``): per-node
-        ``scan_for_injection`` drops a poisoned node, and ``fence_untrusted`` +
-        ``DATA_ONLY_NOTE`` delimit what survives. The note is carried INLINE here
-        (unlike the cascaded tool path, which puts it in its system addendum)
-        because this bridge does not author the realtime session instructions —
-        see app/realtime/prompts.py — so the result must be
-        self-framing.
-
-        BOUNDED: retrieval is capped by the shared per-turn budget. Without it a
-        saturated pool left the caller on an open-ended "let me check" hold with
-        no reply ever arriving.
-        """
         self._knowledge_lookup_seq = getattr(self, "_knowledge_lookup_seq", 0) + 1
-        lookup_seq = self._knowledge_lookup_seq
-        self._verified_knowledge = []
-        self._knowledge_evidence = {"status": "unavailable", "passages": [], "text": ""}
-        pinned_nodes = self._knowledge_snapshot_nodes
-        source_policy = "admission_snapshot" if pinned_nodes is not None else "current_lookup"
-
-        def finish(status, text, evidence=None):
-            if lookup_seq != self._knowledge_lookup_seq:
-                return {"status": "superseded", "text": _SUPERSEDED_KB_INFO,
-                        "sources": [], "source_policy": source_policy, "lookup_sequence": lookup_seq}
-            evidence = evidence or {"status": status, "passages": [], "text": ""}
-            self._knowledge_evidence = evidence
-            self._verified_knowledge = [p["text"] for p in evidence["passages"]] if status == "matched" else []
-            source_keys = ("node_id", "version", "coverage", "source_id", "source_version", "updated_at")
-            sources = [{key: passage[key] for key in source_keys if key in passage}
-                       for passage in evidence["passages"]]
-            # Query, headings and body text can contain private information.
-            # Trace status and source identity without logging their content.
-            digest = hashlib.sha256(json.dumps(sources, sort_keys=True, default=str).encode()).hexdigest()
-            logger.info("realtime_kb_evidence call=%s %s", self._call_id, json.dumps({
-                "status": status, "policy": source_policy, "passages": len(sources),
-                "sources_sha256": digest,
-            }, sort_keys=True))
-            return {"status": status, "text": text, "sources": sources,
-                    "source_policy": source_policy, "lookup_sequence": lookup_seq}
-
-        if not isinstance(query, str) or not query.strip() or not self._campaign_id:
-            return finish("no_match", _NO_KB_INFO)
-        query = query.strip()
-        # SECURITY — fail closed (issue #5): a missing/empty tenant must NEVER
-        # reach retrieve_knowledge. acquire_with_tenant treats tenant_id=None as
-        # an RLS BYPASS (app.bypass_rls='on'), so a tenantless realtime session
-        # would read ACROSS tenants. Without a validated tenant we decline the
-        # lookup entirely rather than risk cross-tenant KB exposure — we do NOT
-        # pass None through to get a bypass.
-        tenant_id = (self._tenant_id or "").strip()
-        if pinned_nodes is None and not self._knowledge_pool:
-            return finish("unavailable", "Company knowledge is unavailable. I cannot confirm that detail.")
-        if pinned_nodes is None and not tenant_id:
-            logger.warning(
-                "realtime_bridge KB lookup BLOCKED — no tenant on session call=%s "
-                "(refusing RLS-bypass cross-tenant read)", self._call_id,
-            )
-            return finish("unavailable", "Company knowledge is unavailable. I cannot confirm that detail.")
-        from app.domain.services.voice_pipeline.kb_budget import (
-            _KNOWLEDGE_RETRIEVE_TIMEOUT_S,
-        )
-        from app.domain.services.voice_pipeline.knowledge_tool import (
-            fence_kb_result,
-        )
-
-        try:
-            from app.services.scripts.knowledge.retrieval import (
-                retrieve_pinned_knowledge,
-                retrieve_knowledge,
-            )
-            if pinned_nodes is not None:
-                nodes = retrieve_pinned_knowledge(pinned_nodes, query, k=_REALTIME_KB_K)
-            else:
-                nodes = await asyncio.wait_for(
-                    retrieve_knowledge(
-                        self._knowledge_pool,
-                        tenant_id=tenant_id,
-                        campaign_id=self._campaign_id,
-                        query=query,
-                        k=_REALTIME_KB_K,
-                        bump_hits=False,
-                        raise_on_error=True,
-                    ),
-                    # The SHARED per-turn budget (kb_budget), the same one the inject
-                    # path and the cascaded tool path use — not a new number. On
-                    # expiry wait_for cancels the retrieval, which unwinds the pool
-                    # acquire too, so a saturated pool can't hold the turn open.
-                    timeout=_KNOWLEDGE_RETRIEVE_TIMEOUT_S,
-                )
-        except asyncio.TimeoutError:
-            # Match the other two paths: on timeout the turn proceeds WITHOUT
-            # facts. Returning the no-info sentinel (rather than nothing) keeps
-            # the tool round-trip closed so the model speaks instead of leaving
-            # the caller on an open hold, and gives it nothing to invent from.
-            logger.warning(
-                "realtime_bridge KB lookup TIMEOUT >%.0fms call=%s — answering "
-                "without facts", _KNOWLEDGE_RETRIEVE_TIMEOUT_S * 1000, self._call_id,
-            )
-            return finish("unavailable", "Company knowledge is temporarily unavailable. I cannot confirm that detail.")
-        except Exception as exc:  # noqa: BLE001
-            logger.debug("realtime_bridge knowledge lookup failed error_type=%s", type(exc).__name__)
-            return finish("unavailable", "Company knowledge is temporarily unavailable. I cannot confirm that detail.")
-        logger.info("realtime_kb_lookup call=%s query_chars=%d hits=%d",
-                    self._call_id, len(query), len(nodes or []))
-        if not nodes:
-            return finish("no_match", _NO_KB_INFO)
-        from app.domain.services.voice_pipeline.kb_budget import prepare_knowledge_evidence
-        evidence = prepare_knowledge_evidence(nodes, query,
-            chunk_chars=_REALTIME_NODE_CHARS, total_chars=_REALTIME_NODE_CHARS * 2)
-        if evidence["status"] != "matched":
-            return finish(evidence["status"], _NO_KB_INFO, evidence)
-        return finish("matched", fence_kb_result(evidence["text"], with_note=True), evidence)
+        lookup_sequence = self._knowledge_lookup_seq
+        catalog = getattr(self, "_knowledge_catalog", None)
+        if not (isinstance(catalog, SectionCatalog)
+                and catalog.tenant_id == str(self._tenant_id)
+                and catalog.campaign_id == str(self._campaign_id)):
+            catalog = None
+        evidence = run_section_request(catalog, arguments)
+        self._knowledge_evidence = evidence
+        self._verified_knowledge = [p["text"] for p in evidence["passages"]] if evidence["status"] == "available" else []
+        sources = [{key: passage[key] for key in ("node_id", "version", "source_id", "source_version")}
+                   for passage in evidence["passages"]]
+        logger.info("realtime_kb_evidence call=%s status=%s passages=%d",
+                    self._call_id, evidence["status"], len(sources))
+        return {"status": evidence["status"],
+                "text": fence_kb_result(serialize_section_result(evidence), with_note=True),
+                "sources": sources, "source_policy": evidence["source_policy"],
+                "lookup_sequence": lookup_sequence}
