@@ -59,7 +59,7 @@ KNOWLEDGE_TOOL_SPEC = {
             "any specific detail about the business. Use a lookup this turn "
             "before answering concrete company questions; confidence or a "
             "previous assistant answer is not verification. Do "
-            "NOT call it for greetings, smalltalk, confirmations, or chit-chat."
+            "NOT call it for greetings, smalltalk, contact confirmations, or chit-chat."
         ),
         "parameters": {
             "type": "object",
