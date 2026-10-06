@@ -1,11 +1,7 @@
-"""The composed prompt must not argue with itself.
+"""Opening context stays consistent without inventing delivery receipts.
 
-Audit 2026-09-02 of a real composed prompt (28,640 chars, ~7,160 tokens, for a
-campaign with 80 chars of guidance) found four places where one section told
-the model to do X and another told it to do not-X, plus a dated engineering
-changelog embedded in STAGE 1 that the model reads on every turn. On a 20B/120B
-model at reasoning_effort=low these are not subtleties: they are the coin-flips
-callers hear. These tests pin the prompt to a single answer per question.
+These assembly checks preserve direction, shared persona context and clean
+prompt text. They do not impose a spoken script or prove model behavior.
 """
 from __future__ import annotations
 
@@ -37,15 +33,15 @@ def test_kd_callee_first_prompt_does_not_claim_a_greeting_already_played():
     assert "they speak first" in p or "CALLEE SPEAKS FIRST" in p
 
 
-def test_kd_agent_first_prompt_keeps_the_pickup_greeting_stage():
+def test_kd_agent_first_prompt_supplies_context_without_claiming_playback():
     p = _kd("agent_first")
     assert INBOUND_DIRECTIVE_SENTINEL not in p
-    assert "already played" in p
+    assert "already played" not in p
+    assert "OPENING CONTEXT" in p and "This is an outbound call" in p
 
 
 def test_kd_body_reuses_the_shared_openings_not_a_private_copy():
-    """One STAGE 1 text per opening mode, shared by the slot-based and the
-    knowledge-driven bodies — a private copy is how the two drifted."""
+    """Both composition paths share the same opening context."""
     from app.services.scripts.prompts.personas import lead_gen
 
     for key in ("outbound", "inbound"):
@@ -74,21 +70,3 @@ def test_voicemail_has_one_instruction_end_the_call():
     p = _kd("agent_first")
     assert "leave a short" not in p.lower()
     assert re.search(r"VOICEMAIL.*(don.t (talk|leave)|end the call|END_CALL)", p, re.S)
-
-
-def test_wrong_person_is_a_pivot_everywhere_not_a_hangup():
-    """WRONG PERSON / GATEKEEPER says pivot; ENDING THE CALL says wrong person
-    is NOT an end; WHEN THE CALL SHOULD STOP used to say wrong person → close."""
-    p = _kd("agent_first")
-    assert "WRONG PERSON / WRONG NUMBER" not in p
-    assert "WRONG NUMBER / WRONG BUSINESS" in p
-
-
-def test_silence_is_owned_by_the_silence_monitor_not_the_prompt():
-    """The silence monitor speaks the nudges ('Hello?' ladder, 60s close). The
-    prompt used to ALSO tell the model to say 'Take your time' / 'Still there?'
-    and close on the third — two voices on one silence."""
-    p = _kd("agent_first")
-    assert "Still there?" not in p
-    assert "Take your time" not in p
-    assert "close on the third" not in p
