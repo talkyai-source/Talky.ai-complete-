@@ -354,6 +354,16 @@ async def test_all_offered_native_voices_and_hidden_xai_have_sanitized_wire_evid
             assert profile["submitted"]["speed"] == settings["speed"]
             assert profile["submitted"]["instructions_sha256"] == hashlib.sha256(wire["instructions"].encode()).hexdigest()
             assert "knowledge_lookup" in profile["submitted"]["enabled_tools"]
+            # Inspect the actual configured runtime wire, not a stand-alone policy constant.
+            lookup = next(tool for tool in wire["tools"] if tool["name"] == "knowledge_lookup")
+            query = lookup["parameters"]["properties"]["query"]
+            assert lookup["parameters"]["required"] == ["query"]
+            assert query["type"] == "string"
+            for constraint in ("named products", "country/location", "timing", "negation", "relationship"):
+                assert constraint in wire["instructions"] and constraint in query["description"]
+            assert "matched label alone is not proof" in wire["instructions"]
+            assert config.prompt_version == "realtime@8"
+            assert config.prompt_hash == hashlib.sha256(wire["instructions"].encode()).hexdigest()[:16]
             assert "send_email" in profile["submitted"]["enabled_tools"]
             assert "temperature" not in wire
             assert profile["knowledge_reference"]["status"] == "unversioned"

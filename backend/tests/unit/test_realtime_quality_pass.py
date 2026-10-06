@@ -462,10 +462,22 @@ def test_instructions_preserve_honesty_and_protected_data_rules():
 def test_knowledge_tool_and_prompt_require_evidence_not_model_confidence():
     from app.realtime.openai import knowledge_lookup_tool
     text = build_realtime_instructions(RealtimePersona())
-    description = knowledge_lookup_tool()["description"]
+    tool = knowledge_lookup_tool()
+    description = tool["description"]
     for fact in ("prices", "policies", "eligibility", "availability", "offers"):
         assert fact in text and fact in description
     assert "not certain" not in description
     assert "verified result from this call" in text and "verified result from this call" in description
     assert "without asking permission" in text
     assert "not general knowledge or campaign sales claims" in text
+    query = tool["parameters"]["properties"]["query"]
+    assert tool["name"] == "knowledge_lookup"
+    assert tool["parameters"]["required"] == ["query"]
+    assert query["type"] == "string"
+    for constraint in ("named products", "country/location", "timing", "negation", "relationship"):
+        assert constraint in text and constraint in query["description"]
+    assert "clear references from context" in text and "clear references from context" in query["description"]
+    assert "clarify" in text and "clarify" in query["description"]
+    assert "assumptions to obtain a match" in text and "assumptions to obtain a match" in query["description"]
+    assert "original question and its constraints" in text
+    assert "matched label alone is not proof" in text

@@ -1170,7 +1170,7 @@ def knowledge_lookup_tool() -> Dict[str, Any]:
     The gateway fulfils it by calling
     `retrieve_knowledge(...)` and returning the text via send_function_result.
     """
-    from app.realtime.prompts import KNOWLEDGE_TOOL_DESCRIPTION
+    from app.realtime.prompts import KNOWLEDGE_QUERY_DESCRIPTION, KNOWLEDGE_TOOL_DESCRIPTION
 
     return {
         "type": "function",
@@ -1181,7 +1181,7 @@ def knowledge_lookup_tool() -> Dict[str, Any]:
             "properties": {
                 "query": {
                     "type": "string",
-                    "description": "What to look up, in a few words.",
+                    "description": KNOWLEDGE_QUERY_DESCRIPTION,
                 },
             },
             "required": ["query"],

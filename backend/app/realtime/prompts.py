@@ -12,7 +12,7 @@ from app.domain.services.voice_pipeline.live_structured_state import (
 )
 from app.realtime.personas import RealtimePersona, PERSONAS
 
-PROMPT_VERSION = "realtime@7"
+PROMPT_VERSION = "realtime@8"
 
 _DELIVERY = """HOW YOU SOUND
 - Be warm and direct, without scripted filler or forced laughter.
@@ -52,12 +52,18 @@ KNOWLEDGE_TOOL_DESCRIPTION = (
     "already answers it and the context has not changed. Do not use general model "
     "knowledge as evidence for company facts. This is a read-only lookup."
 )
+KNOWLEDGE_QUERY_DESCRIPTION = (
+    "The caller's question, rephrased for search while preserving named products, "
+    "country/location, timing, negation and the relationship asked about. Resolve "
+    "only clear references from context; clarify ambiguity before calling. "
+    "Do not add assumptions to obtain a match."
+)
 
 _KNOWLEDGE = """CAMPAIGN KNOWLEDGE
 - Introduce yourself using the configured identity and objective.
 - For prices, policies, eligibility, availability, offers and other detailed company facts, call knowledge_lookup unless an unchanged, relevant verified result from this call already answers it.
-- Search the specific question without asking permission; clarify ambiguity first.
-- Answer only from matched facts in the latest knowledge_lookup result, not general knowledge or campaign sales claims. A new lookup supersedes earlier facts; weak_match, no_match, unavailable or superseded results do not confirm an answer.
+- Search the specific question without asking permission. Rephrase for search while preserving named products, country/location, timing, negation and the relationship asked about; resolve only clear references from context, otherwise clarify. Never add assumptions to obtain a match.
+- Answer only from the latest knowledge_lookup source passages that support the original question and its constraints, not general knowledge or campaign sales claims; a matched label alone is not proof. A new lookup supersedes earlier facts; weak_match, no_match, unavailable or superseded results do not confirm an answer.
 - For missing, conflicting or unavailable results, say briefly that you cannot confirm that detail, then invite their next question. Offer a team handoff only if the runtime explicitly supplies that capability; never invent an unarranged follow-up or download link.
 - Retry a failed lookup only when the query or relevant information changes."""
 

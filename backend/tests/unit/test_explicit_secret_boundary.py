@@ -271,7 +271,7 @@ def test_both_composed_prompt_engines_keep_privacy_scope_and_available_route_con
     from tests.unit.test_prompt_versions import compose
     realtime = build_realtime_instructions(RealtimePersona())
     traditional = compose("lead_gen")
-    assert PROMPT_VERSION == "realtime@7"
+    assert PROMPT_VERSION == "realtime@8"
     for prompt in (realtime, traditional):
         for text in ("passwords", "PINs", "backend", "removed text"):
             assert text in prompt
