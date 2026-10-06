@@ -1,0 +1,23 @@
+# AG02 native knowledge-query intent constraints
+
+Source commit: `d389c60c8a9ad04b602f57a3125bbb7e5e819040`, based on `76ba91eabfea5cbf1f6b106202e16a5dbf858b1b`.
+
+The native prompt previously instructed the model to search the specific question, while its actual `knowledge_lookup.query` description asked for a few words. Neither surface explicitly required a reformulation to preserve products, country/location, timing, negation or the relationship in the caller's question. A returned `matched` classification also needed a clear distinction from evidence that answers the original question.
+
+Two existing knowledge bullets now require preservation of those constraints, use of context only for clear references, clarification of ambiguity, and no assumptions added to obtain a match. Answers must be supported by the returned source passages for the original question and its constraints; the matched label alone is not proof. The query parameter carries the same search guidance. The native prompt version is `realtime@8`; composed and serialized instruction hashes continue to be calculated from the actual instructions. The existing `realtime@7` pins in two affected tests were updated deliberately. Traditional prompt versions, tool execution, retrieval ranking, thresholds, gold cases, provider selection and capabilities were not changed in this source commit.
+
+The change follows the official [OpenAI voice-prompting guidance](https://developers.openai.com/api/docs/guides/voice-prompting), read on 2026-10-07: keep tool instructions precise and consistent, and use representative evaluations to assess model behavior. This local change implements instruction consistency; it is not an evaluation of model compliance or improved semantic retrieval quality.
+
+## Executed checks
+
+- Before the application edits, two strengthened existing controls failed in **4.63 seconds, with 3 warnings**. One inspected actual composed instructions and the function schema; the other inspected the actual campaign/runtime WebSocket payload using synthetic storage and transport. Both failed because the required constraints were absent. These are two observations of one instruction gap, not two measured model failures.
+- After the change, **222 tests passed, 0 failed, 0 skipped, with 108 warnings, across 6 modules in 4.62 seconds**. The two strengthened controls are included in 222; no new test-case count is added. The runtime control checks all offered native voices plus existing hidden xAI serialization, validates the function's unchanged required string parameter, and compares the prompt/config/effective-wire hashes. Other affected controls retain native/traditional separation, campaign preview parity, inbound direction, privacy wording and traditional version governance.
+- All **15 selected source/test inputs** had identical LF-normalized SHA-256 hashes before and after each run. Final hashes also match committed source bytes after LF normalization.
+- Both runs denied external socket and asynchronous transport creation: **0 prohibited socket attempts, 0 prohibited asynchronous transport attempts**. The internal socketpair counts in the JSON evidence are event-loop plumbing. Provider credentials, storage and WebSocket acknowledgements in relevant controls are synthetic.
+- Scoped Ruff F checks with the repository's existing `F401,F841` exclusions passed. Source whitespace checks passed. Existing warnings are retained in the counts; they were not converted into quality evidence.
+
+The exact interpreter, selected environment, arguments, module list, dependency versions, source hashes and output logs are in [the evidence manifest](artifacts/ag02-native-query-intent/manifest.json). The existing root virtual environment was used; this is not an exact-requirements installation qualification. Baseline and final logs are preserved separately. The baseline PowerShell wrapper printed the log and returned zero; the runner's preserved `pytest_exit_code` is **1**, and the log records the two failures. The final wrapper propagated the runner's zero exit code.
+
+## Limits
+
+No provider, database, microphone/audio, browser or customer run was performed. Synthetic acknowledgements prove serialization, not provider acceptance. No holdout or raw-gold quality evaluation was rerun in this package. These checks do not establish that a model preserves intent, that a lexical match answers the question, or that customers receive acceptable answers. Root's traditional tool changes and other owners' retrieval lifecycle/qualification work are separate inputs and require their own evidence. Existing acceptance gaps, target thresholds and the production feature freeze remain in force.
