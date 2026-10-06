@@ -1,169 +1,94 @@
-"""Browser test call 5dfa4416 (2026-09-29, "Estimation new"), replayed.
+"""Call5dfa4416: keep pending email/phone visible without a scripted dialogue.
 
-The caller asked twice for their mobile number to be taken; the agent never
-asked for it, never re-confirmed the email, said goodbye with both open, and
-nothing at all was saved. Four independent causes, each pinned here:
-
-1. A phone request made while the email read-back was waiting was dropped:
-   only the field whose confirmation was in progress was advanced.
-2. The email the agent read back was spelled entirely from the caller's own
-   words, but was marked agent-invented, so it was never stored.
-3. A caller turn answering something else ("It's two PM Sunday.") counted as
-   a failed try at the number the agent never asked for.
-4. The open action sat mid system prompt and lost to the script's next line;
-   and nothing stopped "Thanks for your time" or "I'll pass the project
-   details" from being spoken while a contact was still open.
+Current model-tool regression uses synthetic arguments/SQL; it does not prove
+speech understanding. Remaining conversation-guard tests exercise historical
+pure utilities only, not current live speech judging or caller-message commands.
 """
 from __future__ import annotations
 
-from pathlib import Path
+import pytest
 
-from app.domain.services.voice_pipeline.contact_capture import CaptureStatus
+from app.domain.services.voice_pipeline.contact_capture import CaptureStatus, ContactCaptureState
 from app.domain.services.voice_pipeline.conversation_guards import (
     closing_while_contact_open,
-    pending_contact_ask,
     unbacked_contact_claim,
 )
 from app.domain.services.voice_pipeline.lead_slot_capture import snapshot_slots
 from app.domain.models.conversation import Message, MessageRole
 from app.domain.services.voice_pipeline.conversation_guards import _CLAIM
-from app.domain.services.voice_pipeline.turn_runner import _spelled_by_caller
 from app.services.scripts.prompt_builder import (
     compose_system_prompt,
     turn_directive,
     with_turn_directive,
 )
 
-from tests.unit.test_call_1436672a_regressions import Replay
+from app.services.scripts.call_state_tracker import CallState
 
 READBACK = "So that's allstateestimation at gmail dot com — did I get that right?"
 
 
-def _up_to_the_email_readback() -> Replay:
-    r = Replay()
-    r.agent("Perfect. What’s the best email address for you?")
-    r.caller("Allstate estimation at Gmail dot com.")
-    r.agent("Is that allstateestimation all one word, or allstate dot estimation, at gmail dot com?")
-    r.caller("in one word.")
-    r.agent("Let me confirm that — allstateestimation at gmail dot com. Is that correct?")
-    return r
+@pytest.mark.asyncio
+async def test_model_phone_request_preserves_pending_email_and_unrelated_turn_does_not_consume_attempt():
+    # Model-selected arguments exercise persistence, not a speech-understanding claim.
+    from app.domain.services.voice_pipeline.contact_recording import record_contact
+    from tests.unit.test_model_contact_recording import SQLPort, args, caller, session
+    pool, state = SQLPort(), session()
+    email = "allstateestimation@gmail.com"
+    caller(state, "Allstate estimation at Gmail dot com.", 1)
+    result = await record_contact(state, args("Allstate estimation at Gmail dot com.", value=email), pool=pool)
+    assert result["saved"] and not state.captured_slots.email_confirmed
+    request = "And note down my mobile number as well?"
+    caller(state, request, 2)
+    result = await record_contact(state, args(request, kind="phone", value=request), pool=pool)
+    assert result["saved"] and result["validation_status"] == "needs_clarification"
+    rows = snapshot_slots(state.captured_slots)
+    assert rows["email"]["value"] == email and not rows["email"]["confirmed"]
+    assert rows["phone"]["value"] is None and rows["phone"]["raw_value"] == request
+    # An unrelated accepted caller turn does not manufacture a failed number attempt.
+    caller(state, "It's two PM Sunday.", 3)
+    assert snapshot_slots(state.captured_slots) == rows
+    assert state.captured_slots.phone_capture.attempts == 0
+    prompt = compose_system_prompt("BASE", state.captured_slots)
+    assert email in prompt and request in prompt
+    assert turn_directive(state.captured_slots) is None
+    caller(state, "Yes, that email is correct.", 4)
+    result = await record_contact(state, args("Yes, that email is correct.", operation="confirm", value=email, expected=email), pool=pool)
+    assert result["saved"] and state.captured_slots.email_confirmed
+    assert state.captured_slots.phone_capture.status is CaptureStatus.NEEDS_CLARIFICATION
+    assert {"email", "phone"} <= {parameters[4] for _, parameters in pool.writes}
 
 
-def test_a_phone_request_during_the_email_read_back_is_kept_not_dropped():
-    r = _up_to_the_email_readback()
-    r.caller("And note down my mobile number as well?")
-
-    # The email is still waiting for its yes -- and it is the caller's own.
-    email = r.state.email_capture
-    assert email.status is CaptureStatus.AWAITING_CONFIRMATION
-    assert email.normalized_value == "allstateestimation@gmail.com"
-    assert email.from_caller is True
-    # The phone request exists, as a request -- not a failed try.
-    phone = r.state.phone_capture
-    assert phone is not None
-    assert phone.status is CaptureStatus.NEEDS_CLARIFICATION
-    assert phone.attempts == 0
-    assert "What's the best number to reach you on?" in phone.clarification_prompt
-
-    # This turn: settle the email. Next: the number. Both in the prompt.
-    directive = turn_directive(r.state)
-    assert "allstateestimation at gmail dot com" in directive
-    assert "Do not say goodbye" in directive
-    prompt = compose_system_prompt("BASE", r.state)
-    assert "Once that is settled, next: The caller wants you to take their phone number" in prompt
+def test_unowned_pending_state_cannot_be_saved_as_caller_evidence():
+    rows = snapshot_slots(_open_state())
+    assert "email" not in rows  # No caller source owns this synthetic display state.
 
 
-def test_the_caller_stated_email_is_stored_even_before_the_yes():
-    r = _up_to_the_email_readback()
-    r.caller("And note down my mobile number as well?")
-    rows = snapshot_slots(r.state)
-    assert rows["email"]["value"] == "allstateestimation@gmail.com"
-    assert rows["email"]["confirmed"] is False
-
-
-def test_a_false_acknowledgement_is_replaced_by_the_open_read_back():
-    r = _up_to_the_email_readback()
-    r.caller("And note down my mobile number as well?")
+def test_legacy_claim_detector_retains_pending_readback_result():
     said = unbacked_contact_claim(
         "Perfect. I'll pass the project details to the estimating team so they can follow up with you.",
-        r.state,
-        "And note down my mobile number as well?",
+        _open_state(), "And note down my mobile number as well?",
     )
     assert said == READBACK
 
 
-def test_with_the_fix_the_flow_confirms_the_email_then_takes_the_number():
-    r = _up_to_the_email_readback()
-    r.caller("And note down my mobile number as well?")
-    r.agent(READBACK)
-    r.caller("Yes.")
-    assert r.state.email_confirmed is True
-    assert r.state.active_contact_kind == "phone"
-    assert pending_contact_ask(r.state) == "What's the best number to reach you on?"
-    assert "take their phone number" in turn_directive(r.state)
-
-    r.agent("What's the best number to reach you on?")
-    r.caller("zero three one two, zero seven five, zero four nine six.")
-    assert r.state.phone_capture.status is CaptureStatus.AWAITING_CONFIRMATION
-    assert r.state.phone == "+923120750496"
-
-
-def test_as_it_happened_the_open_contacts_survive_and_the_goodbye_is_replaced():
-    r = _up_to_the_email_readback()
-    r.caller("And note down my mobile number as well?")
-    r.agent("Perfect. I’ll pass the project details to the estimating team so they can follow up with you. Would you prefer someone to call you back as well?")
-    r.caller("Yes. And you have to record my mobile number as well.")
-    r.agent("What time works best for you?")
-    r.caller("It's two PM Sunday.")
-
-    # Answering the time question is not a failed try at the number.
-    assert r.state.phone_capture.status is CaptureStatus.NEEDS_CLARIFICATION
-    assert r.state.phone_capture.attempts == 0
-    # And neither contact is forgotten.
-    assert r.state.email_capture.status is CaptureStatus.AWAITING_CONFIRMATION
-    assert turn_directive(r.state) is not None
-
-    ask = closing_while_contact_open(
-        "Thanks for your time.", r.state, "It's two PM Sunday."
-    )
-    assert ask in {READBACK, "What's the best number to reach you on?"}
-    assert closing_while_contact_open("Brilliant.", r.state, "It's two PM Sunday.") is None
-
-
 def test_a_caller_who_is_leaving_is_let_go():
-    r = _up_to_the_email_readback()
-    r.caller("And note down my mobile number as well?")
     assert closing_while_contact_open(
-        "No problem, have a good day.", r.state, "Sorry, I have to go now, bye."
+        "No problem, have a good day.", _open_state(), "Sorry, I have to go now, bye.",
     ) is None
 
 
 def test_nothing_open_nothing_replaced():
-    r = Replay()
-    assert closing_while_contact_open("Thanks for your time.", r.state, "ok") is None
-    assert turn_directive(r.state) is None
-
-
-def test_the_directive_is_sent_last_and_the_goodbye_gate_is_wired():
-    """Wiring guard (behaviour is proven above): the directive is appended
-    after the history for both LLM call paths, and the goodbye check sits in
-    the gate every spoken sentence passes."""
-    src = Path(__file__).resolve().parents[2].joinpath(
-        "app", "domain", "services", "voice_pipeline", "turn_streamer.py"
-    ).read_text(encoding="utf-8")
-    assert "llm_messages = with_turn_directive(messages, _directive)" in src
-    assert src.count("llm_messages,") == 2
-    gate = src[src.index("def _validate_for_tts(") :]
-    gate = gate[: gate.index("valid, reason = guardrails.validate_response(")]
-    assert "closing_while_contact_open(" in gate
+    state = CallState()
+    assert closing_while_contact_open("Thanks for your time.", state, "ok") is None
+    assert turn_directive(state) is None
 
 
 # ── review findings: none of these may be hijacked ──────────────────────
 
 def _open_state():
-    r = _up_to_the_email_readback()
-    r.caller("And note down my mobile number as well?")
-    return r.state
+    return CallState(email="allstateestimation@gmail.com", email_confirmed=False,
+        phone_capture=ContactCaptureState(kind="phone", status=CaptureStatus.NEEDS_CLARIFICATION,
+            raw_value="And note down my mobile number as well?"))
 
 
 def test_only_a_sentence_that_is_just_a_goodbye_is_replaced():
@@ -189,31 +114,15 @@ def test_a_claim_must_be_about_contact_details():
     assert not _CLAIM.search("I'll pass the invoice number along to accounting.")
 
 
-def test_an_address_counts_as_the_callers_only_if_they_said_it():
-    def u(text):
-        return Message(role=MessageRole.USER, content=text)
-
-    said = [u("Allstate estimation at Gmail dot com."), u("in one word.")]
-    assert _spelled_by_caller("allstateestimation@gmail.com", said)
-    assert _spelled_by_caller("allstate.estimation@gmail.com", said)
-    assert not _spelled_by_caller("allstateestimation@yahoo.com", said)
-    # Letters that merely occur somewhere in what they said are not an address.
-    assert not _spelled_by_caller(
-        "al@ex.com", [u("I run a company called Alex Com Logistics")]
-    )
-
-
-def test_the_directive_is_a_marked_note_on_the_callers_latest_turn():
+def test_caller_message_is_not_modified_by_a_retired_directive():
     history = [
         Message(role=MessageRole.ASSISTANT, content="Is that correct?"),
         Message(role=MessageRole.USER, content="And note down my mobile number as well?"),
     ]
     sent = with_turn_directive(history, "Do X.")
-    assert [m.role for m in sent] == [MessageRole.ASSISTANT, MessageRole.USER]
-    assert sent[-1].content.startswith("And note down my mobile number as well?")
-    assert "the caller did not say this: Do X." in sent[-1].content
-    # The stored history is untouched.
-    assert history[-1].content == "And note down my mobile number as well?"
+    assert sent is history
+    assert sent[-1].content == "And note down my mobile number as well?"
+    assert "Do X." not in sent[-1].content
     assert with_turn_directive(history, None) is history
 
 
@@ -260,14 +169,3 @@ def test_the_repeat_from_the_call_is_recognised_and_new_questions_are_not():
     note = answered_note(answered)
     assert "do not ask these again" in note
     assert "plenty of it" in note
-
-
-def test_the_answered_note_and_the_drop_are_wired():
-    src = Path(__file__).resolve().parents[2].joinpath(
-        "app", "domain", "services", "voice_pipeline", "turn_streamer.py"
-    ).read_text(encoding="utf-8")
-    # Plain noes are reported as declined (declined_note), not as answered.
-    assert "answered_note([qa for qa in _answered if not is_bare_no(qa[1])])" in src
-    gate = src[src.index("def _validate_for_tts(") :]
-    gate = gate[: gate.index("valid, reason = guardrails.validate_response(")]
-    assert "repeats_answered_question(" in gate
