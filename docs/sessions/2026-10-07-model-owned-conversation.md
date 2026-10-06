@@ -1,5 +1,7 @@
 # Model-owned conversation revision — 7 October 2026
 
+**Follow-up:** [Agent remnants cleanup](2026-10-07-agent-cleanup.md) removes the remaining sentence caps, scripted identity/silence paths, dead parsers/helpers and retired query CLI, and migrates dashboard knowledge to exact sections. This record describes the earlier candidate; its test counts and unresolved remnants are historical, not verification of the follow-up.
+
 The user explicitly requested a simpler guide, AI-selected knowledge, and removal of scripted contact and opening behavior. This revision changes the existing agent implementation within AG02–AG05. It adds no provider, vector database, service, or unrelated product feature. The production-readiness freeze remains active.
 
 ## What changed

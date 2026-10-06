@@ -69,6 +69,13 @@
       "verification": "docs/sessions/artifacts/ag02-query-integration/manifest.json",
       "provider_run": "not_run",
       "default_recovery_enabled": false
+    },
+    "agent_cleanup_20261007": {
+      "source_candidate": "afb2eaf6ce978fa47f91059526ed5baa4d5eb15f",
+      "report": "docs/sessions/2026-10-07-agent-cleanup.md",
+      "verification": "docs/sessions/artifacts/agent-cleanup/verification.json",
+      "provider_run": "not_run",
+      "deployment": "not_run"
     }
   },
   "status_rules": {
@@ -545,6 +552,10 @@
         {
           "path": "docs/sessions/2026-10-07-model-owned-conversation.md",
           "kind": "user_requested_model_owned_architecture_revision_local_only"
+        },
+        {
+          "path": "docs/sessions/2026-10-07-agent-cleanup.md",
+          "kind": "remaining_script_and_dead_code_cleanup_local_regression_only"
         }
       ],
       "blocker": "Live keyword ranking/query-recovery is superseded by model-selected scoped authored sections. Local source/tool/session integration is tested, but original-question actual-model accuracy, full campaign profile, voice timing and human/customer acceptance remain unqualified. Historical raw scores remain unchanged and do not qualify the new architecture. The old query-based qualification CLI is explicitly retired; no provider credential has been used for this revision.",
@@ -582,6 +593,10 @@
         {
           "path": "docs/sessions/2026-10-07-model-owned-conversation.md",
           "kind": "user_requested_model_owned_architecture_revision_local_only"
+        },
+        {
+          "path": "docs/sessions/2026-10-07-agent-cleanup.md",
+          "kind": "remaining_script_and_dead_code_cleanup_local_regression_only"
         }
       ],
       "blocker": "The user-requested model-owned revision removes deterministic relationship interpretation and speech rewrites. Prior candidate_verified evidence is historical; current relationship comprehension/retention needs actual-model and call evaluation.",
@@ -677,6 +692,10 @@
         {
           "path": "docs/sessions/2026-10-07-model-owned-conversation.md",
           "kind": "user_requested_model_owned_architecture_revision_local_only"
+        },
+        {
+          "path": "docs/sessions/2026-10-07-agent-cleanup.md",
+          "kind": "remaining_script_and_dead_code_cleanup_local_regression_only"
         }
       ],
       "blocker": "Concise guides and model-owned speech replace the old output semantic judge; deterministic privacy/effect/transport controls remain. Historical replay mappings and preserved Groq semantic failure are retained, but do not qualify this revised prompt/runtime. Actual model, acoustic, interruption, unsupported-fact and premature-success behavior needs new profile acceptance.",
@@ -724,6 +743,10 @@
         {
           "path": "docs/sessions/2026-10-07-model-owned-conversation.md",
           "kind": "user_requested_model_owned_architecture_revision_local_only"
+        },
+        {
+          "path": "docs/sessions/2026-10-07-agent-cleanup.md",
+          "kind": "remaining_script_and_dead_code_cleanup_local_regression_only"
         }
       ],
       "blocker": "Model record_contact now interprets email/phone and uses existing validated persistence/source revisions. Local saving and invalidation controls pass; real interpretation accuracy, correction burden, Sales Hub browser and connector acceptance remain unverified. New spoken name/company lead fields were not added. Same-process retry cannot recover evidence never committed before process death.",
@@ -937,7 +960,11 @@
           "candidate": "bbbb9450dfbff9e0436493a3b7b870a64481b77a"
         },
         "docs/sessions/2026-10-05-cloud-telephony-availability.md",
-        "docs/sessions/artifacts/provider-proof-fence/verification.md"
+        "docs/sessions/artifacts/provider-proof-fence/verification.md",
+        {
+          "path": "docs/sessions/2026-10-07-agent-cleanup.md",
+          "kind": "remaining_script_and_dead_code_cleanup_local_regression_only"
+        }
       ],
       "blocker": "A05 cleanup and documented crash contract are locally verified; remaining architecture dispositions follow lifecycle/provider/configuration owning repairs. No full architecture or live/release claim.",
       "next_action": "Retain selected-session/profile ownership, authoritative availability and bounded A05 closure. Legacy cloud callbacks and unsupported production selections are contained without adding a cloud route. Remaining unknown-provider/operator reconciliation and deployed acceptance follow OP02/OP05/OP12.",
