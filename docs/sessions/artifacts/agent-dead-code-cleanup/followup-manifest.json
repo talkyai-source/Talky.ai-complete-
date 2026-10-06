@@ -1,0 +1,22 @@
+{
+  "source_commit": "a99dcba90bb0c74d56d5faf53941965c10216743",
+  "application_tree_git_hash": "b2e8231626425800660de56b95c03821bab0edd4",
+  "application_tree_equal_to": "4cb20458",
+  "source_lf_sha256": {
+    "backend/tests/qualification/ag04_native.py": "e08584adaa8043e7f0491a3639a82639d86886365fe1e07579f6028fd4103dcc",
+    "backend/tests/unit/test_ag04_native_qualification.py": "f42df51129b22c3eeeca3a1dbe08c67d2bc4ab310556bd95ab1d39e89ea958f4",
+    "backend/tests/unit/test_callback_promise_prompt_policy.py": "9a5e9b98aae4dbb5c6c1d86fd5bcd01428cc77a974f2a31d5fe7a827ce4413bc",
+    "backend/tests/unit/test_live_structured_state.py": "48490878a423b9b56a622d9ec4a3ed277a818e1786166ca7033f6e2fa822700f",
+    "backend/tests/unit/test_natural_gap_fillers.py": "a76c1aa2de2fc77d8b7821345a40078f584e5ecb55c14ac887567d698c37e442",
+    "backend/tests/unit/test_op06_transfer_capabilities.py": "6c3aa8d3e646a4f2ffe02a2e0f0ae2bb7ea5a505bc926cadedbadd15eac954af",
+    "backend/tests/unit/test_voice_action_contract.py": "8d0e04173efa7b0744ceedbd1a32547be60dfb26b64389f29f5f986923d264d4"
+  },
+  "historical_corpus_lf_sha256": "8848b88c59de1232d725079a8ae23a96373dde90195aba723300747dead31c06",
+  "artifact_lf_sha256": {
+    "docs/sessions/2026-10-07-agent-dead-code-followup.md": "ef7bee7a081429047a3fb3dfb91c8d2273a86b8d2e4c3f63ec251ce33afac947",
+    "docs/sessions/artifacts/agent-dead-code-cleanup/affected-argv.json": "bdb302c228e19c59c5b0182aab57dc466ab7bd5500ef654acea87e182210b042",
+    "docs/sessions/artifacts/agent-dead-code-cleanup/affected-first.txt": "c206ac657675f80f155e3e78c755e43b7b7fdef8eae02d19d2171bedda76b1aa",
+    "docs/sessions/artifacts/agent-dead-code-cleanup/migration-first.txt": "72520ea26b74795b67c04ea5a3bb72a3ed430ae512b0981e62abeb6c1e03b74c",
+    "docs/sessions/artifacts/agent-dead-code-cleanup/followup-result.json": "fa4e747c8d13d09e4f3dd048305ab8f4dd7a8334447b0d1d852d29695cccc044"
+  }
+}
