@@ -83,7 +83,7 @@ def assert_not_offered(session, actions):
         [Message(role=MessageRole.USER, content="Please transfer me to a person.")],
         provider, session=session,
     )
-    assert tools == []
+    assert [tool["function"]["name"] for tool in tools] == ["end_call"]
 
 
 @pytest.mark.asyncio

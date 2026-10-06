@@ -107,11 +107,9 @@ async def _spoken(monkeypatch, chunks, caller, *, turn_id=3, last_filler_turn=No
 
 
 @pytest.mark.asyncio
-async def test_a_slow_answer_to_a_question_is_bridged_and_not_echoed(monkeypatch):
+async def test_slow_model_answer_is_not_prefixed_or_rewritten_by_a_canned_filler(monkeypatch):
     spoken = await _spoken(monkeypatch, ["Got it, Dojo Plus is £11.99 per location a month."], "How much is Dojo Plus?")
-    assert len(spoken) == 2, spoken
-    assert spoken[0] in tuple(p for t in af._QUESTION_FILLERS.values() for p in t)
-    assert spoken[1] == "Dojo Plus is £11.99 per location a month."
+    assert spoken == ["Got it, Dojo Plus is £11.99 per location a month."]
 
 
 @pytest.mark.asyncio

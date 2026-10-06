@@ -338,8 +338,8 @@ class NativeReplay:
             "last_tool_success": self.bridge._live_state.last_tool_success,
             "delivered_text": getattr(self.session, "_voice_action_delivered_text", ""),
         }
-        controls = [{"id": key, "pass": observed[key] == expected,
-            "detail": {"expected": expected, "observed": observed[key]}}
+        controls = [{"id": key, "pass": key in observed and observed[key] == expected,
+            "detail": {"expected": expected, "observed": observed.get(key)}}
             for key, expected in self.scenario["expect"].items()]
         checkpoints = {item["id"]: item["contacts"] for item in self.contact_checkpoints}
         for name, contacts_expected in self.scenario.get("contact_checkpoint_expectations", {}).items():

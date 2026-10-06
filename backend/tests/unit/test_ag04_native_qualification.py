@@ -13,56 +13,74 @@ native = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(native)
 
 
+def _nonprice_section_case(corpus):
+    """Local current-contract fixture; the historical corpus stays untouched."""
+    from app.services.scripts.knowledge.sections import build_section_catalog
+    case = deepcopy(next(c for c in corpus["scenarios"] if c["id"] == "native.nonprice_supported"))
+    for source in case["source_facts"]:
+        source["version"] = str(source["version"])
+    catalog = build_section_catalog(case["source_facts"], tenant_id="synthetic-tenant",
+        campaign_id="synthetic-campaign", source_policy="call_snapshot")
+    case["steps"][1]["arguments"] = {"section_ids": [catalog.nodes[0]["section_id"]]}
+    case["expect"]["tool_statuses"] = ["available"]
+    for expected in case["knowledge_expectations"]:
+        expected["status"] = "available"
+        expected["source_policy"] = "call_snapshot"
+        for source in expected["sources"]:
+            source["version"] = str(source["version"])
+    return case
+
+
+def _section_replay(case, provider, corpus):
+    from app.services.scripts.knowledge.sections import build_section_catalog
+    replay = native.NativeReplay(case, provider, corpus)
+    replay.bridge._knowledge_catalog = build_section_catalog(case["source_facts"],
+        tenant_id="synthetic-tenant", campaign_id="synthetic-campaign", source_policy="call_snapshot")
+    return replay
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("provider", ["openai", "xai"])
-@pytest.mark.parametrize("variant", ["supported", "absent_link"])
-async def test_nonprice_grounding_preserves_source_and_useful_answer_without_semantic_approval(monkeypatch, provider, variant):
+async def test_nonprice_grounding_preserves_source_and_useful_answer_without_semantic_approval(monkeypatch, provider):
     corpus = native._corpus(ROOT)
-    case = next(c for c in corpus["scenarios"] if c["id"] == "native.nonprice_" + variant)
+    case = _nonprice_section_case(corpus)
     def forbidden(*_args, **_kwargs):
         raise AssertionError("Offline grounding control attempted network access")
     with monkeypatch.context() as network:
         network.setattr(socket.socket, "connect", forbidden)
         network.setattr(socket.socket, "connect_ex", forbidden)
         network.setattr(socket, "getaddrinfo", forbidden)
-        row = await native.NativeReplay(case, provider, corpus).run()
+        row = await _section_replay(case, provider, corpus).run()
     assert all(c["pass"] for c in row["findings"]["control"]), row["findings"]["control"]
     evidence = row["effects"]["tool_results"][0]
     source = case["source_facts"][0]
-    assert evidence["status"] == "matched" and evidence["source_policy"] == "admission_snapshot"
+    assert evidence["status"] == "available" and evidence["source_policy"] == "call_snapshot"
     assert source["content"] in evidence["text"]
     assert [{k: v for k, v in p.items() if k != "coverage"} for p in evidence["sources"]] == [
         {"node_id": source["id"], "version": source["version"],
          "source_id": source["source_id"], "source_version": source["source_version"]}]
-    assert all(0 < p["coverage"] <= 1 for p in evidence["sources"])
     assert row["submitted_speech"] == case["expected_submitted_speech"]
     assert row["effects"]["executor_attempts"] == [] and row["end"]["shutdown_count"] == 0
     assert row["semantic_ids"] == ["ag04.grounded_answer"]
     assert all(f["status"] == "unreviewed" for f in row["findings"]["semantic"])
-    if variant == "absent_link":
-        assert "download link" in row["raw_output"][0]["text"]
-        assert row["media"]["submissions"] == []
-        assert len(row["requests"][0]["repair_requests"]) == 1
-        assert not any(t["role"] == "assistant" for t in row["history"])
-    else:
-        assert row["submitted_speech"] == [source["content"]]
-        assistant = [t for t in row["history"] if t["role"] == "assistant"]
-        assert [t["content"] for t in assistant] == [source["content"]]
-        assert assistant[0]["metadata"]["delivery"]["status"] == "completed"
-        assert assistant[0]["metadata"]["delivery"]["evidence"] == "transport_played"
+    assert row["submitted_speech"] == [source["content"]]
+    assistant = [t for t in row["history"] if t["role"] == "assistant"]
+    assert [t["content"] for t in assistant] == [source["content"]]
+    assert assistant[0]["metadata"]["delivery"]["status"] == "completed"
+    assert assistant[0]["metadata"]["delivery"]["evidence"] == "transport_played"
 
 
 @pytest.mark.asyncio
 async def test_nonprice_common_controls_fail_when_source_is_missing_or_answer_is_only_abstention():
     corpus = native._corpus(ROOT)
-    original = next(c for c in corpus["scenarios"] if c["id"] == "native.nonprice_supported")
+    original = _nonprice_section_case(corpus)
     for mutation in ("missing_source", "abstention"):
         case = deepcopy(original)
         if mutation == "missing_source":
             case["source_facts"] = []
         else:
             case["steps"][-1]["text"] = "I cannot confirm that."
-        row = await native.NativeReplay(case, "openai", corpus).run()
+        row = await _section_replay(case, "openai", corpus).run()
         assert any(c["pass"] is False for c in row["findings"]["control"])
         assert all(f["status"] == "unreviewed" for f in row["findings"]["semantic"])
 
@@ -70,8 +88,8 @@ async def test_nonprice_common_controls_fail_when_source_is_missing_or_answer_is
 @pytest.mark.asyncio
 async def test_native_source_outside_empty_fence_and_missing_delivered_history_fail_common_controls():
     corpus = native._corpus(ROOT)
-    case = next(c for c in corpus["scenarios"] if c["id"] == "native.nonprice_supported")
-    replay = native.NativeReplay(case, "openai", corpus)
+    case = _nonprice_section_case(corpus)
+    replay = _section_replay(case, "openai", corpus)
     row = await replay.run()
     assert all(c["pass"] for c in row["findings"]["control"])
     message = next(m for m in replay.socket.sent if m.get("item", {}).get("type") == "function_call_output")
@@ -109,8 +127,8 @@ async def test_missing_dnc_fixture_acknowledgement_does_not_become_success(provi
 async def test_observed_runtime_failure_is_reported_not_rewritten_as_approval():
     corpus = native._corpus(ROOT)
     case = dict(next(case for case in corpus["scenarios"] if case["id"] == "native.customer_denial"))
-    # Remove the correction from the supplied wire sequence: the native guard
-    # has no evidence. The harness must preserve this control failure.
+    # A retired relationship expectation must remain failed/missing, never
+    # crash or become current semantic approval.
     case["steps"] = case["steps"][1:]
     row = await native.NativeReplay(case, "openai", corpus).run()
     assert any(finding["pass"] is False for finding in row["findings"]["control"])

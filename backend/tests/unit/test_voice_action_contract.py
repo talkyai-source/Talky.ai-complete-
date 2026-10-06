@@ -141,17 +141,20 @@ class _ToolCapableGroq:
         ("No thanks, goodbye.", ACTION_END_CALL),
     ],
 )
-def test_cascaded_action_tool_is_offered_only_for_relevant_turn(user_text, expected):
+def test_cascaded_tools_follow_capabilities_not_keyword_intent(user_text, expected):
     messages = [Message(role=MessageRole.USER, content=user_text)]
 
-    tools = action_tools_for_turn(messages, _ToolCapableGroq())
-
-    assert [tool["function"]["name"] for tool in tools] == [expected]
+    session = SimpleNamespace(_voice_action_capabilities={expected: "synthetic executor"})
+    tools = action_tools_for_turn(messages, _ToolCapableGroq(), session=session)
+    assert {tool["function"]["name"] for tool in tools} == {expected, ACTION_END_CALL}
+    # The model, not a second phrase classifier, decides when to invoke them.
+    ordinary = [Message(role=MessageRole.USER, content="Tell me more about the options.")]
+    assert action_tools_for_turn(ordinary, _ToolCapableGroq(), session=session) == tools
 
 
 def test_realtime_schema_exposes_each_action_once_and_transfer_stays_gated():
     names = [tool["name"] for tool in realtime_voice_action_tools()]
-    assert names == list(VOICE_ACTION_NAMES)
+    assert names == ["record_contact", *VOICE_ACTION_NAMES]
     assert len(names) == len(set(names))
 
     from app.domain.services.telephony.inbound_transfer import (
@@ -213,17 +216,17 @@ async def test_realtime_preserves_knowledge_lookup_dispatch():
         realtime_session=realtime,
         media_gateway=SimpleNamespace(),
     )
-    knowledge = {"status": "matched", "text": "Verified hours", "sources": [], "source_policy": "current_lookup"}
+    knowledge = {"status": "available", "text": "Authored hours", "sources": [], "source_policy": "call_snapshot"}
     bridge._lookup_knowledge = AsyncMock(return_value=knowledge)
     function_call = SimpleNamespace(
         name="knowledge_lookup",
         call_id="kb-1",
-        parsed_arguments=lambda: {"query": "hours"},
+        parsed_arguments=lambda: {"section_ids": ["section-hours"]},
     )
 
     await bridge._handle_function_call(function_call)
 
-    bridge._lookup_knowledge.assert_awaited_once_with("hours")
+    bridge._lookup_knowledge.assert_awaited_once_with({"section_ids": ["section-hours"]})
     realtime.send_function_result.assert_awaited_once_with("kb-1", knowledge)
 
 
@@ -377,7 +380,7 @@ async def test_action_turn_feeds_failed_result_without_rewriting_model_speech(mo
 
     response, _, _ = await service._stream_llm_and_tts(session)
 
-    assert llm.require_strict is True
+    assert llm.require_strict is False
     assert llm.seen_result["success"] is False
     assert llm.seen_result["status"] == "unavailable"
     assert response == "The email was sent to you."

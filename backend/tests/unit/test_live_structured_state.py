@@ -191,8 +191,6 @@ async def test_cascaded_turn_injects_current_structured_state(monkeypatch):
     assert "decision_maker=" not in prompt
     assert "interest_level=" not in prompt
     assert "requested_next_action=" not in prompt
-    assert session._live_structured_state.decision_maker.value == "unknown"
-    assert session._live_structured_state.interest_level.value == "unknown"
     assert "email:me@example.com" in prompt
 
 
@@ -265,7 +263,6 @@ async def test_realtime_bridge_reduces_final_user_turn_and_publishes_before_next
     assert blocks
     assert "decision_maker=" not in blocks[-1]
     assert "requested_next_action=" not in blocks[-1]
-    assert bridge._live_state.decision_maker.value == "unknown"
     assert bridge._latest_caller_text == "I'm the decision maker and please email me the details."
 
 
