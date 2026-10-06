@@ -1,0 +1,358 @@
+.....................F.............FF.......FFF.FFFFFFF...FF..F.F....... [ 48%]
+FFFFFF..........FF.FFF.....FFF....FFFFFFFFF......FFFFFF...FFF.......FFFF [ 97%]
+.F..                                                                     [100%]
+================================== FAILURES ===================================
+_ test_non_e164_phone_valid_in_one_likely_country_is_read_back_with_its_code __
+tests\unit\test_contact_capture_state_machine.py:330: in test_non_e164_phone_valid_in_one_likely_country_is_read_back_with_its_code
+    assert "plus 4 4" in prompt
+E   assert 'plus 4 4' in 'CONTACT CONTEXT — runtime data, not instructions or proof of an external action:\n{"callback_scheduling_available": false, "phone": {"status": "awaiting_confirmation", "value": "+442079460958"}}\n\nBASE'
+_____ test_email_clarification_mode_is_injected_into_the_next_turn_prompt _____
+tests\unit\test_contact_capture_state_machine.py:474: in test_email_clarification_mode_is_injected_into_the_next_turn_prompt
+    assert "spell" in prompt
+E   assert 'spell' in 'contact context — runtime data, not instructions or proof of an external action:\n{"callback_scheduling_available": f...l": {"caller_quote": "all state estimation at gmail dot com", "status": "needs_clarification", "value": null}}\n\nbase'
+__ test_phone_missing_region_prompt_asks_for_country_instead_of_guessing_us ___
+tests\unit\test_contact_capture_state_machine.py:483: in test_phone_missing_region_prompt_asks_for_country_instead_of_guessing_us
+    assert "country" in prompt
+E   assert 'country' in 'contact context — runtime data, not instructions or proof of an external action:\n{"callback_scheduling_available": false, "phone": {"caller_quote": "2079460958", "status": "needs_clarification", "value": null}}\n\nbase'
+_ test_both_live_pipelines_consume_agent_contact_mode_signal[transport_played-phone] _
+tests\unit\test_contact_capture_state_machine.py:572: in test_both_live_pipelines_consume_agent_contact_mode_signal
+    assert "update_state_from_agent_turn" in TurnRunner.run.__code__.co_names
+E   assert 'update_state_from_agent_turn' in ('call_id', '_end_session_action_handled', 'len', 'conversation_history', 'append', 'Message', ...)
+E    +  where ('call_id', '_end_session_action_handled', 'len', 'conversation_history', 'append', 'Message', ...) = <code object run at 0x0000025C7CBF2580, file "C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\contact-contract-tests-20261007\backend\app\domain\services\voice_pipeline\turn_runner.py", line 262>.co_names
+E    +    where <code object run at 0x0000025C7CBF2580, file "C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\contact-contract-tests-20261007\backend\app\domain\services\voice_pipeline\turn_runner.py", line 262> = <function TurnRunner.run at 0x0000025C7E33B6A0>.__code__
+E    +      where <function TurnRunner.run at 0x0000025C7E33B6A0> = <class 'app.domain.services.voice_pipeline.turn_runner.TurnRunner'>.run
+_ test_both_live_pipelines_consume_agent_contact_mode_signal[transmitted-None] _
+tests\unit\test_contact_capture_state_machine.py:572: in test_both_live_pipelines_consume_agent_contact_mode_signal
+    assert "update_state_from_agent_turn" in TurnRunner.run.__code__.co_names
+E   assert 'update_state_from_agent_turn' in ('call_id', '_end_session_action_handled', 'len', 'conversation_history', 'append', 'Message', ...)
+E    +  where ('call_id', '_end_session_action_handled', 'len', 'conversation_history', 'append', 'Message', ...) = <code object run at 0x0000025C7CBF2580, file "C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\contact-contract-tests-20261007\backend\app\domain\services\voice_pipeline\turn_runner.py", line 262>.co_names
+E    +    where <code object run at 0x0000025C7CBF2580, file "C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\contact-contract-tests-20261007\backend\app\domain\services\voice_pipeline\turn_runner.py", line 262> = <function TurnRunner.run at 0x0000025C7E33B6A0>.__code__
+E    +      where <function TurnRunner.run at 0x0000025C7E33B6A0> = <class 'app.domain.services.voice_pipeline.turn_runner.TurnRunner'>.run
+_________ test_cancelled_capture_is_not_reasked_or_rendered_as_a_fact _________
+tests\unit\test_contact_capture_state_machine.py:593: in test_cancelled_capture_is_not_reasked_or_rendered_as_a_fact
+    assert (
+E   assert 'CONTACT CONT...ull}}\n\nBASE' == 'BASE'
+E     + CONTACT CONTEXT — runtime data, not instructions or proof of an external action:
+E     + {"callback_scheduling_available": true, "email": {"caller_quote": "never mind, don't save that", "status": "cancelled", "value": null}}
+E     + 
+E       BASE
+_____ test_one_turn_can_retain_both_contacts_but_serializes_confirmation ______
+tests\unit\test_contact_capture_state_machine.py:626: in test_one_turn_can_retain_both_contacts_but_serializes_confirmation
+    assert "+14155552671" not in prompt
+E   assert '+14155552671' not in 'CONTACT CON...1"}}\n\nBASE'
+E     '+14155552671' is contained here:
+E       "value": "+14155552671"}}
+E       
+E       BASE
+___ test_realtime_bridge_uses_same_machine_and_confirms_only_after_readback ___
+tests\unit\test_contact_capture_state_machine.py:652: in test_realtime_bridge_uses_same_machine_and_confirms_only_after_readback
+    assert session.captured_slots.email_capture.status is CaptureStatus.AWAITING_CONFIRMATION
+E   AttributeError: 'NoneType' object has no attribute 'status'
+------------------------------ Captured log call ------------------------------
+WARNING  app.realtime.bridge:bridge.py:1086 realtime_bridge live state unavailable call=voice-call
+_ test_realtime_resolution_supersedes_pending_contact_directive[yes, that's right-confirmed] _
+tests\unit\test_contact_capture_state_machine.py:700: in test_realtime_resolution_supersedes_pending_contact_directive
+    assert len(rt.directives) == 2
+E   assert 0 == 2
+E    +  where 0 = len([])
+E    +    where [] = <tests.unit.test_contact_capture_state_machine.test_realtime_resolution_supersedes_pending_contact_directive.<locals>.RT object at 0x0000025C7E131C70>.directives
+------------------------------ Captured log call ------------------------------
+WARNING  app.realtime.bridge:bridge.py:1086 realtime_bridge live state unavailable call=voice-call
+_ test_realtime_resolution_supersedes_pending_contact_directive[never mind, don't save that-cancelled] _
+tests\unit\test_contact_capture_state_machine.py:700: in test_realtime_resolution_supersedes_pending_contact_directive
+    assert len(rt.directives) == 2
+E   assert 0 == 2
+E    +  where 0 = len([])
+E    +    where [] = <tests.unit.test_contact_capture_state_machine.test_realtime_resolution_supersedes_pending_contact_directive.<locals>.RT object at 0x0000025C7E130260>.directives
+------------------------------ Captured log call ------------------------------
+WARNING  app.realtime.bridge:bridge.py:1086 realtime_bridge live state unavailable call=voice-call
+_____ test_realtime_dual_contact_retires_email_before_advancing_to_phone ______
+tests\unit\test_contact_capture_state_machine.py:736: in test_realtime_dual_contact_retires_email_before_advancing_to_phone
+    assert len(rt.directives) == 2
+E   assert 0 == 2
+E    +  where 0 = len([])
+E    +    where [] = <tests.unit.test_contact_capture_state_machine.test_realtime_dual_contact_retires_email_before_advancing_to_phone.<locals>.RT object at 0x0000025C7E130FE0>.directives
+------------------------------ Captured log call ------------------------------
+WARNING  app.realtime.bridge:bridge.py:1086 realtime_bridge live state unavailable call=voice-call
+____ test_realtime_bridge_none_confidence_is_neutral_but_alternatives_vary ____
+tests\unit\test_contact_capture_state_machine.py:760: in test_realtime_bridge_none_confidence_is_neutral_but_alternatives_vary
+    assert session.captured_slots.email_capture.status is CaptureStatus.AWAITING_CONFIRMATION
+E   AttributeError: 'NoneType' object has no attribute 'status'
+------------------------------ Captured log call ------------------------------
+WARNING  app.realtime.bridge:bridge.py:1086 realtime_bridge live state unavailable call=voice-call
+____ test_realtime_ambiguity_interrupts_speculation_with_backend_directive ____
+tests\unit\test_contact_capture_state_machine.py:802: in test_realtime_ambiguity_interrupts_speculation_with_backend_directive
+    assert gateway.cleared == ["voice-call"]
+E   AssertionError: assert [] == ['voice-call']
+E     Right contains one more item: 'voice-call'
+E     Use -v to get more diff
+------------------------------ Captured log call ------------------------------
+WARNING  app.realtime.bridge:bridge.py:1086 realtime_bridge live state unavailable call=voice-call
+_____ test_realtime_confirmation_persists_canonical_value_and_audit_once ______
+tests\unit\test_contact_capture_state_machine.py:990: in test_realtime_confirmation_persists_canonical_value_and_audit_once
+    assert len(pending) == 1 and pending[0][8] is False
+E   assert (0 == 1)
+E    +  where 0 = len([])
+------------------------------ Captured log call ------------------------------
+WARNING  app.realtime.bridge:bridge.py:1086 realtime_bridge live state unavailable call=voice-call
+______ test_realtime_pending_correction_revokes_prior_caller_contact_row ______
+tests\unit\test_contact_capture_state_machine.py:1050: in test_realtime_pending_correction_revokes_prior_caller_contact_row
+    assert len(revocations) == 1
+E   assert 0 == 1
+E    +  where 0 = len([])
+------------------------------ Captured log call ------------------------------
+WARNING  app.realtime.bridge:bridge.py:1086 realtime_bridge live state unavailable call=voice-call
+_____ test_realtime_model_is_told_the_same_confirm_before_commit_contract _____
+tests\unit\test_contact_capture_state_machine.py:1137: in test_realtime_model_is_told_the_same_confirm_before_commit_contract
+    assert "country code" in text
+E   AssertionError: assert 'country code' in 'who you are\nyou are alex, a friendly voice assistant for the company. your goal: have a helpful, natural conversatio...nstruction.\nidentity_introduced=unknown\nconfirmed_contacts=none\nlast_tool_result=unknown\nend live structured state'
+______ test_cascaded_contact_evidence_is_bound_to_the_same_detached_turn ______
+tests\unit\test_contact_capture_state_machine.py:1163: in test_cascaded_contact_evidence_is_bound_to_the_same_detached_turn
+    assert "_active_turn_transcript_alternatives" in runner
+E   AssertionError: assert '_active_turn_transcript_alternatives' in '    async def run(\n        self,\n        session: CallSession,\n        full_transcript: str,\n        websocket: O...ry = session.conversation_history[:history_snapshot]\n\n        return response_text, llm_latency_ms, tts_latency_ms\n'
+_ test_explicit_self_email_cue_keeps_spoken_syntax_without_needing_a_colon[Please note my email Anna dot support at example dot com.-anna.support@example.com] _
+tests\unit\test_contact_pause_and_punctuation.py:46: in test_explicit_self_email_cue_keeps_spoken_syntax_without_needing_a_colon
+    assert "spell the email one letter" not in turn_directive(state).lower()
+E   AttributeError: 'NoneType' object has no attribute 'lower'
+_ test_explicit_self_email_cue_keeps_spoken_syntax_without_needing_a_colon[My email Anna dot support at example dot com.-anna.support@example.com] _
+tests\unit\test_contact_pause_and_punctuation.py:46: in test_explicit_self_email_cue_keeps_spoken_syntax_without_needing_a_colon
+    assert "spell the email one letter" not in turn_directive(state).lower()
+E   AttributeError: 'NoneType' object has no attribute 'lower'
+_ test_explicit_self_email_cue_keeps_spoken_syntax_without_needing_a_colon[My email: anna dot support at example dot com.-anna.support@example.com] _
+tests\unit\test_contact_pause_and_punctuation.py:46: in test_explicit_self_email_cue_keeps_spoken_syntax_without_needing_a_colon
+    assert "spell the email one letter" not in turn_directive(state).lower()
+E   AttributeError: 'NoneType' object has no attribute 'lower'
+_ test_explicit_self_email_cue_keeps_spoken_syntax_without_needing_a_colon[My email is anna dot support at example dot com.-anna.support@example.com] _
+tests\unit\test_contact_pause_and_punctuation.py:46: in test_explicit_self_email_cue_keeps_spoken_syntax_without_needing_a_colon
+    assert "spell the email one letter" not in turn_directive(state).lower()
+E   AttributeError: 'NoneType' object has no attribute 'lower'
+_ test_explicit_self_email_cue_keeps_spoken_syntax_without_needing_a_colon[Please note my email me at example dot com.-me@example.com] _
+tests\unit\test_contact_pause_and_punctuation.py:46: in test_explicit_self_email_cue_keeps_spoken_syntax_without_needing_a_colon
+    assert "spell the email one letter" not in turn_directive(state).lower()
+E   AttributeError: 'NoneType' object has no attribute 'lower'
+_ test_explicit_self_email_cue_keeps_spoken_syntax_without_needing_a_colon[My email yes at example dot com.-yes@example.com] _
+tests\unit\test_contact_pause_and_punctuation.py:46: in test_explicit_self_email_cue_keeps_spoken_syntax_without_needing_a_colon
+    assert "spell the email one letter" not in turn_directive(state).lower()
+E   AttributeError: 'NoneType' object has no attribute 'lower'
+______ test_caller_can_resume_paused_capture_by_volunteering_a_new_value ______
+tests\unit\test_contact_pause_and_punctuation.py:97: in test_caller_can_resume_paused_capture_by_volunteering_a_new_value
+    assert turn_directive(state) is not None
+E   AssertionError: assert None is not None
+E    +  where None = turn_directive(CallState(email='anna.service@example.com', email_confirmed=False, email_readback_attempts=0, phone=None, phone_confir...declined_count=0, contact_ask_objections=0, contact_capture_paused=False, caller_asked_question=False, line_phone=None))
+___ test_same_turn_literal_capture_uses_exact_address_and_stays_unconfirmed ___
+tests\unit\test_contact_pause_and_punctuation.py:103: in test_same_turn_literal_capture_uses_exact_address_and_stays_unconfirmed
+    assert "dot please" not in turn_directive(state)
+E   TypeError: argument of type 'NoneType' is not iterable
+______ test_realtime_pause_replaces_old_readback_directive_then_resumes _______
+tests\unit\test_contact_pause_and_punctuation.py:131: in test_realtime_pause_replaces_old_readback_directive_then_resumes
+    assert "awaiting_confirmation" in provider.directives[-1]
+E   IndexError: list index out of range
+------------------------------ Captured log call ------------------------------
+WARNING  app.realtime.bridge:bridge.py:1086 realtime_bridge live state unavailable call=synthetic-contact
+______ test_explicit_denial_survives_thirty_later_ordinary_caller_turns _______
+tests\unit\test_realtime_relationship_ownership.py:57: in test_explicit_denial_survives_thirty_later_ordinary_caller_turns
+    assert not await admitted(bridge, "You are our existing customer.")
+E   assert not True
+____________ test_delayed_old_final_cannot_overwrite_newer_denial _____________
+tests\unit\test_realtime_relationship_ownership.py:66: in test_delayed_old_final_cannot_overwrite_newer_denial
+    assert not await admitted(bridge, "You are our existing customer.")
+E   assert not True
+_ test_late_denial_cannot_resume_after_gateway_suppresses_cancellation[send] __
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\tasks.py:520: in wait_for
+    return await fut
+E   asyncio.exceptions.CancelledError
+
+The above exception was the direct cause of the following exception:
+tests\unit\test_realtime_relationship_ownership.py:158: in test_late_denial_cannot_resume_after_gateway_suppresses_cancellation
+    await asyncio.wait_for(asyncio.gather(bridge._playback_task, return_exceptions=True), timeout=1)
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\tasks.py:519: in wait_for
+    async with timeouts.timeout(timeout):
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\timeouts.py:115: in __aexit__
+    raise TimeoutError from exc_val
+E   TimeoutError
+_ test_late_denial_cannot_resume_after_gateway_suppresses_cancellation[finish] _
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\tasks.py:520: in wait_for
+    return await fut
+E   asyncio.exceptions.CancelledError
+
+The above exception was the direct cause of the following exception:
+tests\unit\test_realtime_relationship_ownership.py:158: in test_late_denial_cannot_resume_after_gateway_suppresses_cancellation
+    await asyncio.wait_for(asyncio.gather(bridge._playback_task, return_exceptions=True), timeout=1)
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\tasks.py:519: in wait_for
+    async with timeouts.timeout(timeout):
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\timeouts.py:115: in __aexit__
+    raise TimeoutError from exc_val
+E   TimeoutError
+______ test_pre_send_guard_does_not_cancel_itself_and_repairs_only_once _______
+tests\unit\test_realtime_relationship_ownership.py:191: in test_pre_send_guard_does_not_cancel_itself_and_repairs_only_once
+    gateway.send_audio.assert_not_awaited()
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:2429: in assert_not_awaited
+    raise AssertionError(msg)
+E   AssertionError: Expected mock to not have been awaited. Awaited 1 times.
+___ test_late_prior_denial_survives_current_ordinary_transcript_replacement ___
+tests\unit\test_realtime_relationship_ownership.py:233: in test_late_prior_denial_survives_current_ordinary_transcript_replacement
+    assert not await admitted(bridge, "You are our existing customer.")
+E   assert not True
+______ test_evicted_speech_anchor_replay_cannot_reverse_newer_correction ______
+tests\unit\test_realtime_relationship_ownership.py:251: in test_evicted_speech_anchor_replay_cannot_reverse_newer_correction
+    assert not await admitted(bridge, "You are our existing customer.")
+E   assert not True
+____ test_malformed_speech_offsets_do_not_authorize_caller_correction[-1] _____
+tests\unit\test_realtime_relationship_ownership.py:261: in test_malformed_speech_offsets_do_not_authorize_caller_correction
+    assert not await admitted(bridge, "You are our existing customer.")
+E   assert not True
+___ test_malformed_speech_offsets_do_not_authorize_caller_correction[True] ____
+tests\unit\test_realtime_relationship_ownership.py:261: in test_malformed_speech_offsets_do_not_authorize_caller_correction
+    assert not await admitted(bridge, "You are our existing customer.")
+E   assert not True
+___ test_malformed_speech_offsets_do_not_authorize_caller_correction[None] ____
+tests\unit\test_realtime_relationship_ownership.py:261: in test_malformed_speech_offsets_do_not_authorize_caller_correction
+    assert not await admitted(bridge, "You are our existing customer.")
+E   assert not True
+___ test_malformed_speech_offsets_do_not_authorize_caller_correction[1000] ____
+tests\unit\test_realtime_relationship_ownership.py:261: in test_malformed_speech_offsets_do_not_authorize_caller_correction
+    assert not await admitted(bridge, "You are our existing customer.")
+E   assert not True
+____ test_malformed_speech_offsets_do_not_authorize_caller_correction[nan] ____
+tests\unit\test_realtime_relationship_ownership.py:261: in test_malformed_speech_offsets_do_not_authorize_caller_correction
+    assert not await admitted(bridge, "You are our existing customer.")
+E   assert not True
+____ test_malformed_speech_offsets_do_not_authorize_caller_correction[inf] ____
+tests\unit\test_realtime_relationship_ownership.py:261: in test_malformed_speech_offsets_do_not_authorize_caller_correction
+    assert not await admitted(bridge, "You are our existing customer.")
+E   assert not True
+_______ test_unknown_previous_assistant_id_is_not_a_caller_order_error ________
+tests\unit\test_realtime_relationship_ownership.py:269: in test_unknown_previous_assistant_id_is_not_a_caller_order_error
+    assert not await admitted(bridge, "You are our existing customer.")
+E   assert not True
+__________ test_source_revision_replaces_only_owned_contact[openai] ___________
+tests\unit\test_ag05_native_contact_revision.py:28: in test_source_revision_replaces_only_owned_contact
+    assert slots.email == "blair@example.com"
+E   AssertionError: assert None == 'blair@example.com'
+E    +  where None = CallState(email=None, email_confirmed=False, email_readback_attempts=0, phone=None, phone_confirmed=False, phone_readb...declined_count=0, contact_ask_objections=0, contact_capture_paused=False, caller_asked_question=False, line_phone=None).email
+____________ test_source_revision_replaces_only_owned_contact[xai] ____________
+tests\unit\test_ag05_native_contact_revision.py:28: in test_source_revision_replaces_only_owned_contact
+    assert slots.email == "blair@example.com"
+E   AssertionError: assert None == 'blair@example.com'
+E    +  where None = CallState(email=None, email_confirmed=False, email_readback_attempts=0, phone=None, phone_confirmed=False, phone_readb...declined_count=0, contact_ask_objections=0, contact_capture_paused=False, caller_asked_question=False, line_phone=None).email
+_ test_confirmation_revision_cannot_keep_obsolete_yes[No, that is wrong.-openai] _
+tests\unit\test_ag05_native_contact_revision.py:44: in test_confirmation_revision_cannot_keep_obsolete_yes
+    assert r.session.captured_slots.email_confirmed
+E   AssertionError: assert False
+E    +  where False = CallState(email=None, email_confirmed=False, email_readback_attempts=0, phone=None, phone_confirmed=False, phone_readb...declined_count=0, contact_ask_objections=0, contact_capture_paused=False, caller_asked_question=False, line_phone=None).email_confirmed
+E    +    where CallState(email=None, email_confirmed=False, email_readback_attempts=0, phone=None, phone_confirmed=False, phone_readb...declined_count=0, contact_ask_objections=0, contact_capture_paused=False, caller_asked_question=False, line_phone=None) = namespace(_voice_action_capabilities={}, _voice_action_context_loaded=True, _voice_action_pool=<object object at 0x000...3f8f4f2d4acbeaec7166ae1a124920f6dcf0835eae')), _voice_action_delivered_text='Your email is alex@example.com, correct?').captured_slots
+E    +      where namespace(_voice_action_capabilities={}, _voice_action_context_loaded=True, _voice_action_pool=<object object at 0x000...3f8f4f2d4acbeaec7166ae1a124920f6dcf0835eae')), _voice_action_delivered_text='Your email is alex@example.com, correct?') = <tests.qualification.ag04_native.NativeReplay object at 0x0000025C0E6945C0>.session
+_ test_confirmation_revision_cannot_keep_obsolete_yes[No, that is wrong.-xai] _
+tests\unit\test_ag05_native_contact_revision.py:44: in test_confirmation_revision_cannot_keep_obsolete_yes
+    assert r.session.captured_slots.email_confirmed
+E   AssertionError: assert False
+E    +  where False = CallState(email=None, email_confirmed=False, email_readback_attempts=0, phone=None, phone_confirmed=False, phone_readb...declined_count=0, contact_ask_objections=0, contact_capture_paused=False, caller_asked_question=False, line_phone=None).email_confirmed
+E    +    where CallState(email=None, email_confirmed=False, email_readback_attempts=0, phone=None, phone_confirmed=False, phone_readb...declined_count=0, contact_ask_objections=0, contact_capture_paused=False, caller_asked_question=False, line_phone=None) = namespace(_voice_action_capabilities={}, _voice_action_context_loaded=True, _voice_action_pool=<object object at 0x000...3f8f4f2d4acbeaec7166ae1a124920f6dcf0835eae')), _voice_action_delivered_text='Your email is alex@example.com, correct?').captured_slots
+E    +      where namespace(_voice_action_capabilities={}, _voice_action_context_loaded=True, _voice_action_pool=<object object at 0x000...3f8f4f2d4acbeaec7166ae1a124920f6dcf0835eae')), _voice_action_delivered_text='Your email is alex@example.com, correct?') = <tests.qualification.ag04_native.NativeReplay object at 0x0000025C7FD8B200>.session
+________ test_confirmation_revision_cannot_keep_obsolete_yes[-openai] _________
+tests\unit\test_ag05_native_contact_revision.py:44: in test_confirmation_revision_cannot_keep_obsolete_yes
+    assert r.session.captured_slots.email_confirmed
+E   AssertionError: assert False
+E    +  where False = CallState(email=None, email_confirmed=False, email_readback_attempts=0, phone=None, phone_confirmed=False, phone_readb...declined_count=0, contact_ask_objections=0, contact_capture_paused=False, caller_asked_question=False, line_phone=None).email_confirmed
+E    +    where CallState(email=None, email_confirmed=False, email_readback_attempts=0, phone=None, phone_confirmed=False, phone_readb...declined_count=0, contact_ask_objections=0, contact_capture_paused=False, caller_asked_question=False, line_phone=None) = namespace(_voice_action_capabilities={}, _voice_action_context_loaded=True, _voice_action_pool=<object object at 0x000...3f8f4f2d4acbeaec7166ae1a124920f6dcf0835eae')), _voice_action_delivered_text='Your email is alex@example.com, correct?').captured_slots
+E    +      where namespace(_voice_action_capabilities={}, _voice_action_context_loaded=True, _voice_action_pool=<object object at 0x000...3f8f4f2d4acbeaec7166ae1a124920f6dcf0835eae')), _voice_action_delivered_text='Your email is alex@example.com, correct?') = <tests.qualification.ag04_native.NativeReplay object at 0x0000025C0E51B830>.session
+__________ test_confirmation_revision_cannot_keep_obsolete_yes[-xai] __________
+tests\unit\test_ag05_native_contact_revision.py:44: in test_confirmation_revision_cannot_keep_obsolete_yes
+    assert r.session.captured_slots.email_confirmed
+E   AssertionError: assert False
+E    +  where False = CallState(email=None, email_confirmed=False, email_readback_attempts=0, phone=None, phone_confirmed=False, phone_readb...declined_count=0, contact_ask_objections=0, contact_capture_paused=False, caller_asked_question=False, line_phone=None).email_confirmed
+E    +    where CallState(email=None, email_confirmed=False, email_readback_attempts=0, phone=None, phone_confirmed=False, phone_readb...declined_count=0, contact_ask_objections=0, contact_capture_paused=False, caller_asked_question=False, line_phone=None) = namespace(_voice_action_capabilities={}, _voice_action_context_loaded=True, _voice_action_pool=<object object at 0x000...3f8f4f2d4acbeaec7166ae1a124920f6dcf0835eae')), _voice_action_delivered_text='Your email is alex@example.com, correct?').captured_slots
+E    +      where namespace(_voice_action_capabilities={}, _voice_action_context_loaded=True, _voice_action_pool=<object object at 0x000...3f8f4f2d4acbeaec7166ae1a124920f6dcf0835eae')), _voice_action_delivered_text='Your email is alex@example.com, correct?') = <tests.qualification.ag04_native.NativeReplay object at 0x0000025C0E49ED80>.session
+____ test_confirmation_revision_uses_original_readback_not_later_assistant ____
+tests\unit\test_ag05_native_contact_revision.py:105: in test_confirmation_revision_uses_original_readback_not_later_assistant
+    assert r.session.captured_slots.email_confirmed
+E   AssertionError: assert False
+E    +  where False = CallState(email=None, email_confirmed=False, email_readback_attempts=0, phone=None, phone_confirmed=False, phone_readb...declined_count=0, contact_ask_objections=0, contact_capture_paused=False, caller_asked_question=False, line_phone=None).email_confirmed
+E    +    where CallState(email=None, email_confirmed=False, email_readback_attempts=0, phone=None, phone_confirmed=False, phone_readb...declined_count=0, contact_ask_objections=0, contact_capture_paused=False, caller_asked_question=False, line_phone=None) = namespace(_voice_action_capabilities={}, _voice_action_context_loaded=True, _voice_action_pool=<object object at 0x000...c3c2c6283f8f4f2d4acbeaec7166ae1a124920f6dcf0835eae')), _voice_action_delivered_text='What information would you like?').captured_slots
+E    +      where namespace(_voice_action_capabilities={}, _voice_action_context_loaded=True, _voice_action_pool=<object object at 0x000...c3c2c6283f8f4f2d4acbeaec7166ae1a124920f6dcf0835eae')), _voice_action_delivered_text='What information would you like?') = <tests.qualification.ag04_native.NativeReplay object at 0x0000025C0E5182F0>.session
+_ test_caller_unusable_contact_keeps_null_status_with_owned_source[My email is maybe unclear] _
+tests\unit\test_ag05_native_contact_revision.py:115: in test_caller_unusable_contact_keeps_null_status_with_owned_source
+    assert len(rows) == 1
+E   assert 0 == 1
+E    +  where 0 = len({})
+_ test_caller_unusable_contact_keeps_null_status_with_owned_source[My phone number is +123] _
+tests\unit\test_ag05_native_contact_revision.py:115: in test_caller_unusable_contact_keeps_null_status_with_owned_source
+    assert len(rows) == 1
+E   assert 0 == 1
+E    +  where 0 = len({})
+_ test_direct_self_business_and_bare_contact_answers_remain_supported[My email is 'alex@example.com'.] _
+tests\unit\test_ag05_native_contact_revision.py:139: in test_direct_self_business_and_bare_contact_answers_remain_supported
+    row = snapshot_slots(r.session.captured_slots)["email"]
+E   KeyError: 'email'
+_ test_direct_self_business_and_bare_contact_answers_remain_supported[Our business email is alex@example.com.] _
+tests\unit\test_ag05_native_contact_revision.py:139: in test_direct_self_business_and_bare_contact_answers_remain_supported
+    row = snapshot_slots(r.session.captured_slots)["email"]
+E   KeyError: 'email'
+_ test_direct_self_business_and_bare_contact_answers_remain_supported[alex@example.com] _
+tests\unit\test_ag05_native_contact_revision.py:139: in test_direct_self_business_and_bare_contact_answers_remain_supported
+    row = snapshot_slots(r.session.captured_slots)["email"]
+E   KeyError: 'email'
+_ test_direct_self_business_and_bare_contact_answers_remain_supported['alex@example.com'] _
+tests\unit\test_ag05_native_contact_revision.py:139: in test_direct_self_business_and_bare_contact_answers_remain_supported
+    row = snapshot_slots(r.session.captured_slots)["email"]
+E   KeyError: 'email'
+__________ test_empty_owned_final_then_revision_has_real_source_row ___________
+tests\unit\test_ag05_native_contact_revision.py:185: in test_empty_owned_final_then_revision_has_real_source_row
+    assert snapshot_slots(r.session.captured_slots)["email"]["evidence"]["value_source"]["provider_item_id"] == "source"
+E   KeyError: 'email'
+=========================== short test summary info ===========================
+FAILED tests/unit/test_contact_capture_state_machine.py::test_non_e164_phone_valid_in_one_likely_country_is_read_back_with_its_code
+FAILED tests/unit/test_contact_capture_state_machine.py::test_email_clarification_mode_is_injected_into_the_next_turn_prompt
+FAILED tests/unit/test_contact_capture_state_machine.py::test_phone_missing_region_prompt_asks_for_country_instead_of_guessing_us
+FAILED tests/unit/test_contact_capture_state_machine.py::test_both_live_pipelines_consume_agent_contact_mode_signal[transport_played-phone]
+FAILED tests/unit/test_contact_capture_state_machine.py::test_both_live_pipelines_consume_agent_contact_mode_signal[transmitted-None]
+FAILED tests/unit/test_contact_capture_state_machine.py::test_cancelled_capture_is_not_reasked_or_rendered_as_a_fact
+FAILED tests/unit/test_contact_capture_state_machine.py::test_one_turn_can_retain_both_contacts_but_serializes_confirmation
+FAILED tests/unit/test_contact_capture_state_machine.py::test_realtime_bridge_uses_same_machine_and_confirms_only_after_readback
+FAILED tests/unit/test_contact_capture_state_machine.py::test_realtime_resolution_supersedes_pending_contact_directive[yes, that's right-confirmed]
+FAILED tests/unit/test_contact_capture_state_machine.py::test_realtime_resolution_supersedes_pending_contact_directive[never mind, don't save that-cancelled]
+FAILED tests/unit/test_contact_capture_state_machine.py::test_realtime_dual_contact_retires_email_before_advancing_to_phone
+FAILED tests/unit/test_contact_capture_state_machine.py::test_realtime_bridge_none_confidence_is_neutral_but_alternatives_vary
+FAILED tests/unit/test_contact_capture_state_machine.py::test_realtime_ambiguity_interrupts_speculation_with_backend_directive
+FAILED tests/unit/test_contact_capture_state_machine.py::test_realtime_confirmation_persists_canonical_value_and_audit_once
+FAILED tests/unit/test_contact_capture_state_machine.py::test_realtime_pending_correction_revokes_prior_caller_contact_row
+FAILED tests/unit/test_contact_capture_state_machine.py::test_realtime_model_is_told_the_same_confirm_before_commit_contract
+FAILED tests/unit/test_contact_capture_state_machine.py::test_cascaded_contact_evidence_is_bound_to_the_same_detached_turn
+FAILED tests/unit/test_contact_pause_and_punctuation.py::test_explicit_self_email_cue_keeps_spoken_syntax_without_needing_a_colon[Please note my email Anna dot support at example dot com.-anna.support@example.com]
+FAILED tests/unit/test_contact_pause_and_punctuation.py::test_explicit_self_email_cue_keeps_spoken_syntax_without_needing_a_colon[My email Anna dot support at example dot com.-anna.support@example.com]
+FAILED tests/unit/test_contact_pause_and_punctuation.py::test_explicit_self_email_cue_keeps_spoken_syntax_without_needing_a_colon[My email: anna dot support at example dot com.-anna.support@example.com]
+FAILED tests/unit/test_contact_pause_and_punctuation.py::test_explicit_self_email_cue_keeps_spoken_syntax_without_needing_a_colon[My email is anna dot support at example dot com.-anna.support@example.com]
+FAILED tests/unit/test_contact_pause_and_punctuation.py::test_explicit_self_email_cue_keeps_spoken_syntax_without_needing_a_colon[Please note my email me at example dot com.-me@example.com]
+FAILED tests/unit/test_contact_pause_and_punctuation.py::test_explicit_self_email_cue_keeps_spoken_syntax_without_needing_a_colon[My email yes at example dot com.-yes@example.com]
+FAILED tests/unit/test_contact_pause_and_punctuation.py::test_caller_can_resume_paused_capture_by_volunteering_a_new_value
+FAILED tests/unit/test_contact_pause_and_punctuation.py::test_same_turn_literal_capture_uses_exact_address_and_stays_unconfirmed
+FAILED tests/unit/test_contact_pause_and_punctuation.py::test_realtime_pause_replaces_old_readback_directive_then_resumes
+FAILED tests/unit/test_realtime_relationship_ownership.py::test_explicit_denial_survives_thirty_later_ordinary_caller_turns
+FAILED tests/unit/test_realtime_relationship_ownership.py::test_delayed_old_final_cannot_overwrite_newer_denial
+FAILED tests/unit/test_realtime_relationship_ownership.py::test_late_denial_cannot_resume_after_gateway_suppresses_cancellation[send]
+FAILED tests/unit/test_realtime_relationship_ownership.py::test_late_denial_cannot_resume_after_gateway_suppresses_cancellation[finish]
+FAILED tests/unit/test_realtime_relationship_ownership.py::test_pre_send_guard_does_not_cancel_itself_and_repairs_only_once
+FAILED tests/unit/test_realtime_relationship_ownership.py::test_late_prior_denial_survives_current_ordinary_transcript_replacement
+FAILED tests/unit/test_realtime_relationship_ownership.py::test_evicted_speech_anchor_replay_cannot_reverse_newer_correction
+FAILED tests/unit/test_realtime_relationship_ownership.py::test_malformed_speech_offsets_do_not_authorize_caller_correction[-1]
+FAILED tests/unit/test_realtime_relationship_ownership.py::test_malformed_speech_offsets_do_not_authorize_caller_correction[True]
+FAILED tests/unit/test_realtime_relationship_ownership.py::test_malformed_speech_offsets_do_not_authorize_caller_correction[None]
+FAILED tests/unit/test_realtime_relationship_ownership.py::test_malformed_speech_offsets_do_not_authorize_caller_correction[1000]
+FAILED tests/unit/test_realtime_relationship_ownership.py::test_malformed_speech_offsets_do_not_authorize_caller_correction[nan]
+FAILED tests/unit/test_realtime_relationship_ownership.py::test_malformed_speech_offsets_do_not_authorize_caller_correction[inf]
+FAILED tests/unit/test_realtime_relationship_ownership.py::test_unknown_previous_assistant_id_is_not_a_caller_order_error
+FAILED tests/unit/test_ag05_native_contact_revision.py::test_source_revision_replaces_only_owned_contact[openai]
+FAILED tests/unit/test_ag05_native_contact_revision.py::test_source_revision_replaces_only_owned_contact[xai]
+FAILED tests/unit/test_ag05_native_contact_revision.py::test_confirmation_revision_cannot_keep_obsolete_yes[No, that is wrong.-openai]
+FAILED tests/unit/test_ag05_native_contact_revision.py::test_confirmation_revision_cannot_keep_obsolete_yes[No, that is wrong.-xai]
+FAILED tests/unit/test_ag05_native_contact_revision.py::test_confirmation_revision_cannot_keep_obsolete_yes[-openai]
+FAILED tests/unit/test_ag05_native_contact_revision.py::test_confirmation_revision_cannot_keep_obsolete_yes[-xai]
+FAILED tests/unit/test_ag05_native_contact_revision.py::test_confirmation_revision_uses_original_readback_not_later_assistant
+FAILED tests/unit/test_ag05_native_contact_revision.py::test_caller_unusable_contact_keeps_null_status_with_owned_source[My email is maybe unclear]
+FAILED tests/unit/test_ag05_native_contact_revision.py::test_caller_unusable_contact_keeps_null_status_with_owned_source[My phone number is +123]
+FAILED tests/unit/test_ag05_native_contact_revision.py::test_direct_self_business_and_bare_contact_answers_remain_supported[My email is 'alex@example.com'.]
+FAILED tests/unit/test_ag05_native_contact_revision.py::test_direct_self_business_and_bare_contact_answers_remain_supported[Our business email is alex@example.com.]
+FAILED tests/unit/test_ag05_native_contact_revision.py::test_direct_self_business_and_bare_contact_answers_remain_supported[alex@example.com]
+FAILED tests/unit/test_ag05_native_contact_revision.py::test_direct_self_business_and_bare_contact_answers_remain_supported['alex@example.com']
+FAILED tests/unit/test_ag05_native_contact_revision.py::test_empty_owned_final_then_revision_has_real_source_row
+54 failed, 94 passed, 39 warnings in 11.61s
