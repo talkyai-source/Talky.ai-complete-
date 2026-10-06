@@ -1,0 +1,363 @@
+FFFFFFFFFFFFF..FFFF                                                      [100%]
+================================== FAILURES ===================================
+_________ test_knowledge_only_turn_withholds_prose_until_tool_result __________
+tests\unit\test_knowledge_tool_evidence_lifecycle.py:79: in test_knowledge_only_turn_withholds_prose_until_tool_result
+    assert await _speak(service, session) == [PRICE]
+E   assert ["I can't con...n available."] == ['Starter cos...0 per month.']
+E     At index 0 diff: "I can't confirm that figure from the information available." != 'Starter costs $20 per month.'
+E     Use -v to get more diff
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.voice_pipeline.turn_streamer:turn_streamer.py:796 ungrounded_figure_replaced call=synthetic-ev figures=['$999']
+ERROR    app.domain.services.voice_pipeline.turn_streamer:turn_streamer.py:1285 LLM streaming error for call synthetic-evidence-call: 'arguments_raw'
+Traceback (most recent call last):
+  File "C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\ag02-tool-evidence-lifecycle-20261007\backend\app\domain\services\voice_pipeline\turn_streamer.py", line 1044, in stream
+    async for token in _token_iter:
+  File "C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\ag02-tool-evidence-lifecycle-20261007\backend\app\infrastructure\llm\groq.py", line 475, in stream_chat_with_tools
+    async for token in stream:
+  File "C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\ag02-tool-evidence-lifecycle-20261007\backend\app\infrastructure\llm\streaming.py", line 191, in stream_tool_turn
+    extra = [assistant_tool_message(calls, "".join(content) or None)]
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\ag02-tool-evidence-lifecycle-20261007\backend\app\infrastructure\llm\streaming.py", line 100, in assistant_tool_message
+    "name": c["name"], "arguments": c["arguments_raw"],
+                                    ~^^^^^^^^^^^^^^^^^
+KeyError: 'arguments_raw'
+WARNING  app.domain.services.voice_pipeline.turn_streamer:turn_streamer.py:1287 LLM error for synthetic-evidence-call after partial TTS — dropping buffer
+____________ test_prior_turn_price_requires_current_lookup[False] _____________
+tests\unit\test_knowledge_tool_evidence_lifecycle.py:88: in test_prior_turn_price_requires_current_lookup
+    assert await _speak(service, session) == [PRICE]
+E   assert ["I'm sorry, ...ay it again?"] == ['Starter cos...0 per month.']
+E     At index 0 diff: "I'm sorry, I had trouble processing that. Could you say it again?" != 'Starter costs $20 per month.'
+E     Use -v to get more diff
+------------------------------ Captured log call ------------------------------
+ERROR    app.domain.services.voice_pipeline.turn_streamer:turn_streamer.py:1285 LLM streaming error for call synthetic-evidence-call: 'arguments_raw'
+Traceback (most recent call last):
+  File "C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\ag02-tool-evidence-lifecycle-20261007\backend\app\domain\services\voice_pipeline\turn_streamer.py", line 1044, in stream
+    async for token in _token_iter:
+  File "C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\ag02-tool-evidence-lifecycle-20261007\backend\app\infrastructure\llm\groq.py", line 475, in stream_chat_with_tools
+    async for token in stream:
+  File "C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\ag02-tool-evidence-lifecycle-20261007\backend\app\infrastructure\llm\streaming.py", line 191, in stream_tool_turn
+    extra = [assistant_tool_message(calls, "".join(content) or None)]
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\ag02-tool-evidence-lifecycle-20261007\backend\app\infrastructure\llm\streaming.py", line 100, in assistant_tool_message
+    "name": c["name"], "arguments": c["arguments_raw"],
+                                    ~^^^^^^^^^^^^^^^^^
+KeyError: 'arguments_raw'
+_____________ test_prior_turn_price_requires_current_lookup[True] _____________
+tests\unit\test_knowledge_tool_evidence_lifecycle.py:88: in test_prior_turn_price_requires_current_lookup
+    assert await _speak(service, session) == [PRICE]
+E   assert ["I'm sorry, ...ay it again?"] == ['Starter cos...0 per month.']
+E     At index 0 diff: "I'm sorry, I had trouble processing that. Could you say it again?" != 'Starter costs $20 per month.'
+E     Use -v to get more diff
+------------------------------ Captured log call ------------------------------
+ERROR    app.domain.services.voice_pipeline.turn_streamer:turn_streamer.py:1285 LLM streaming error for call synthetic-evidence-call: 'arguments_raw'
+Traceback (most recent call last):
+  File "C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\ag02-tool-evidence-lifecycle-20261007\backend\app\domain\services\voice_pipeline\turn_streamer.py", line 1044, in stream
+    async for token in _token_iter:
+  File "C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\ag02-tool-evidence-lifecycle-20261007\backend\app\infrastructure\llm\groq.py", line 475, in stream_chat_with_tools
+    async for token in stream:
+  File "C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\ag02-tool-evidence-lifecycle-20261007\backend\app\infrastructure\llm\streaming.py", line 191, in stream_tool_turn
+    extra = [assistant_tool_message(calls, "".join(content) or None)]
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\ag02-tool-evidence-lifecycle-20261007\backend\app\infrastructure\llm\streaming.py", line 100, in assistant_tool_message
+    "name": c["name"], "arguments": c["arguments_raw"],
+                                    ~^^^^^^^^^^^^^^^^^
+KeyError: 'arguments_raw'
+_ test_tool_success_comes_from_admitted_evidence[Starter price-nodes0-matched-True] _
+tests\unit\test_knowledge_tool_evidence_lifecycle.py:117: in test_tool_success_comes_from_admitted_evidence
+    assert await _speak(service, session) == [PRICE if success else UNCERTAIN]
+E   assert ["I'm sorry, ...ay it again?"] == ['Starter cos...0 per month.']
+E     At index 0 diff: "I'm sorry, I had trouble processing that. Could you say it again?" != 'Starter costs $20 per month.'
+E     Use -v to get more diff
+------------------------------ Captured log call ------------------------------
+ERROR    app.domain.services.voice_pipeline.turn_streamer:turn_streamer.py:1285 LLM streaming error for call synthetic-evidence-call: 'arguments_raw'
+Traceback (most recent call last):
+  File "C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\ag02-tool-evidence-lifecycle-20261007\backend\app\domain\services\voice_pipeline\turn_streamer.py", line 1044, in stream
+    async for token in _token_iter:
+  File "C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\ag02-tool-evidence-lifecycle-20261007\backend\app\infrastructure\llm\groq.py", line 475, in stream_chat_with_tools
+    async for token in stream:
+  File "C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\ag02-tool-evidence-lifecycle-20261007\backend\app\infrastructure\llm\streaming.py", line 191, in stream_tool_turn
+    extra = [assistant_tool_message(calls, "".join(content) or None)]
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\ag02-tool-evidence-lifecycle-20261007\backend\app\infrastructure\llm\streaming.py", line 100, in assistant_tool_message
+    "name": c["name"], "arguments": c["arguments_raw"],
+                                    ~^^^^^^^^^^^^^^^^^
+KeyError: 'arguments_raw'
+_ test_tool_success_comes_from_admitted_evidence[Starter international installation warranty cancellation-nodes1-weak_match-False] _
+tests\unit\test_knowledge_tool_evidence_lifecycle.py:117: in test_tool_success_comes_from_admitted_evidence
+    assert await _speak(service, session) == [PRICE if success else UNCERTAIN]
+E   assert ["I'm sorry, ...ay it again?"] == ["I can't con...n available."]
+E     At index 0 diff: "I'm sorry, I had trouble processing that. Could you say it again?" != "I can't confirm that figure from the information available."
+E     Use -v to get more diff
+------------------------------ Captured log call ------------------------------
+ERROR    app.domain.services.voice_pipeline.turn_streamer:turn_streamer.py:1285 LLM streaming error for call synthetic-evidence-call: 'arguments_raw'
+Traceback (most recent call last):
+  File "C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\ag02-tool-evidence-lifecycle-20261007\backend\app\domain\services\voice_pipeline\turn_streamer.py", line 1044, in stream
+    async for token in _token_iter:
+  File "C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\ag02-tool-evidence-lifecycle-20261007\backend\app\infrastructure\llm\groq.py", line 475, in stream_chat_with_tools
+    async for token in stream:
+  File "C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\ag02-tool-evidence-lifecycle-20261007\backend\app\infrastructure\llm\streaming.py", line 191, in stream_tool_turn
+    extra = [assistant_tool_message(calls, "".join(content) or None)]
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\ag02-tool-evidence-lifecycle-20261007\backend\app\infrastructure\llm\streaming.py", line 100, in assistant_tool_message
+    "name": c["name"], "arguments": c["arguments_raw"],
+                                    ~^^^^^^^^^^^^^^^^^
+KeyError: 'arguments_raw'
+_ test_tool_success_comes_from_admitted_evidence[quasar nebula-nodes2-no_match-False] _
+tests\unit\test_knowledge_tool_evidence_lifecycle.py:117: in test_tool_success_comes_from_admitted_evidence
+    assert await _speak(service, session) == [PRICE if success else UNCERTAIN]
+E   assert ["I'm sorry, ...ay it again?"] == ["I can't con...n available."]
+E     At index 0 diff: "I'm sorry, I had trouble processing that. Could you say it again?" != "I can't confirm that figure from the information available."
+E     Use -v to get more diff
+------------------------------ Captured log call ------------------------------
+ERROR    app.domain.services.voice_pipeline.turn_streamer:turn_streamer.py:1285 LLM streaming error for call synthetic-evidence-call: 'arguments_raw'
+Traceback (most recent call last):
+  File "C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\ag02-tool-evidence-lifecycle-20261007\backend\app\domain\services\voice_pipeline\turn_streamer.py", line 1044, in stream
+    async for token in _token_iter:
+  File "C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\ag02-tool-evidence-lifecycle-20261007\backend\app\infrastructure\llm\groq.py", line 475, in stream_chat_with_tools
+    async for token in stream:
+  File "C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\ag02-tool-evidence-lifecycle-20261007\backend\app\infrastructure\llm\streaming.py", line 191, in stream_tool_turn
+    extra = [assistant_tool_message(calls, "".join(content) or None)]
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\ag02-tool-evidence-lifecycle-20261007\backend\app\infrastructure\llm\streaming.py", line 100, in assistant_tool_message
+    "name": c["name"], "arguments": c["arguments_raw"],
+                                    ~^^^^^^^^^^^^^^^^^
+KeyError: 'arguments_raw'
+_ test_tool_success_comes_from_admitted_evidence[Starter price-nodes3-no_match-False] _
+tests\unit\test_knowledge_tool_evidence_lifecycle.py:117: in test_tool_success_comes_from_admitted_evidence
+    assert await _speak(service, session) == [PRICE if success else UNCERTAIN]
+E   assert ["I'm sorry, ...ay it again?"] == ["I can't con...n available."]
+E     At index 0 diff: "I'm sorry, I had trouble processing that. Could you say it again?" != "I can't confirm that figure from the information available."
+E     Use -v to get more diff
+------------------------------ Captured log call ------------------------------
+ERROR    app.domain.services.voice_pipeline.turn_streamer:turn_streamer.py:1285 LLM streaming error for call synthetic-evidence-call: 'arguments_raw'
+Traceback (most recent call last):
+  File "C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\ag02-tool-evidence-lifecycle-20261007\backend\app\domain\services\voice_pipeline\turn_streamer.py", line 1044, in stream
+    async for token in _token_iter:
+  File "C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\ag02-tool-evidence-lifecycle-20261007\backend\app\infrastructure\llm\groq.py", line 475, in stream_chat_with_tools
+    async for token in stream:
+  File "C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\ag02-tool-evidence-lifecycle-20261007\backend\app\infrastructure\llm\streaming.py", line 191, in stream_tool_turn
+    extra = [assistant_tool_message(calls, "".join(content) or None)]
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\ag02-tool-evidence-lifecycle-20261007\backend\app\infrastructure\llm\streaming.py", line 100, in assistant_tool_message
+    "name": c["name"], "arguments": c["arguments_raw"],
+                                    ~^^^^^^^^^^^^^^^^^
+KeyError: 'arguments_raw'
+_ test_tool_success_comes_from_admitted_evidence[   -nodes4-unavailable-False] _
+tests\unit\test_knowledge_tool_evidence_lifecycle.py:117: in test_tool_success_comes_from_admitted_evidence
+    assert await _speak(service, session) == [PRICE if success else UNCERTAIN]
+E   assert ["I'm sorry, ...ay it again?"] == ["I can't con...n available."]
+E     At index 0 diff: "I'm sorry, I had trouble processing that. Could you say it again?" != "I can't confirm that figure from the information available."
+E     Use -v to get more diff
+------------------------------ Captured log call ------------------------------
+ERROR    app.domain.services.voice_pipeline.turn_streamer:turn_streamer.py:1285 LLM streaming error for call synthetic-evidence-call: 'arguments_raw'
+Traceback (most recent call last):
+  File "C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\ag02-tool-evidence-lifecycle-20261007\backend\app\domain\services\voice_pipeline\turn_streamer.py", line 1044, in stream
+    async for token in _token_iter:
+  File "C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\ag02-tool-evidence-lifecycle-20261007\backend\app\infrastructure\llm\groq.py", line 475, in stream_chat_with_tools
+    async for token in stream:
+  File "C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\ag02-tool-evidence-lifecycle-20261007\backend\app\infrastructure\llm\streaming.py", line 191, in stream_tool_turn
+    extra = [assistant_tool_message(calls, "".join(content) or None)]
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\ag02-tool-evidence-lifecycle-20261007\backend\app\infrastructure\llm\streaming.py", line 100, in assistant_tool_message
+    "name": c["name"], "arguments": c["arguments_raw"],
+                                    ~^^^^^^^^^^^^^^^^^
+KeyError: 'arguments_raw'
+_ test_tool_success_comes_from_admitted_evidence[Starter price-nodes5-no_match-False] _
+tests\unit\test_knowledge_tool_evidence_lifecycle.py:117: in test_tool_success_comes_from_admitted_evidence
+    assert await _speak(service, session) == [PRICE if success else UNCERTAIN]
+E   assert ["I'm sorry, ...ay it again?"] == ["I can't con...n available."]
+E     At index 0 diff: "I'm sorry, I had trouble processing that. Could you say it again?" != "I can't confirm that figure from the information available."
+E     Use -v to get more diff
+------------------------------ Captured log call ------------------------------
+ERROR    app.domain.services.voice_pipeline.turn_streamer:turn_streamer.py:1285 LLM streaming error for call synthetic-evidence-call: 'arguments_raw'
+Traceback (most recent call last):
+  File "C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\ag02-tool-evidence-lifecycle-20261007\backend\app\domain\services\voice_pipeline\turn_streamer.py", line 1044, in stream
+    async for token in _token_iter:
+  File "C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\ag02-tool-evidence-lifecycle-20261007\backend\app\infrastructure\llm\groq.py", line 475, in stream_chat_with_tools
+    async for token in stream:
+  File "C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\ag02-tool-evidence-lifecycle-20261007\backend\app\infrastructure\llm\streaming.py", line 191, in stream_tool_turn
+    extra = [assistant_tool_message(calls, "".join(content) or None)]
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\ag02-tool-evidence-lifecycle-20261007\backend\app\infrastructure\llm\streaming.py", line 100, in assistant_tool_message
+    "name": c["name"], "arguments": c["arguments_raw"],
+                                    ~^^^^^^^^^^^^^^^^^
+KeyError: 'arguments_raw'
+_________ test_unavailable_lookup_is_not_a_success[missing_container] _________
+tests\unit\test_knowledge_tool_evidence_lifecycle.py:137: in test_unavailable_lookup_is_not_a_success
+    assert await _speak(service, session) == [UNCERTAIN]
+E   assert ["I'm sorry, ...ay it again?"] == ["I can't con...n available."]
+E     At index 0 diff: "I'm sorry, I had trouble processing that. Could you say it again?" != "I can't confirm that figure from the information available."
+E     Use -v to get more diff
+------------------------------ Captured log call ------------------------------
+ERROR    app.domain.services.voice_pipeline.turn_streamer:turn_streamer.py:1285 LLM streaming error for call synthetic-evidence-call: 'arguments_raw'
+Traceback (most recent call last):
+  File "C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\ag02-tool-evidence-lifecycle-20261007\backend\app\domain\services\voice_pipeline\turn_streamer.py", line 1044, in stream
+    async for token in _token_iter:
+  File "C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\ag02-tool-evidence-lifecycle-20261007\backend\app\infrastructure\llm\groq.py", line 475, in stream_chat_with_tools
+    async for token in stream:
+  File "C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\ag02-tool-evidence-lifecycle-20261007\backend\app\infrastructure\llm\streaming.py", line 191, in stream_tool_turn
+    extra = [assistant_tool_message(calls, "".join(content) or None)]
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\ag02-tool-evidence-lifecycle-20261007\backend\app\infrastructure\llm\streaming.py", line 100, in assistant_tool_message
+    "name": c["name"], "arguments": c["arguments_raw"],
+                                    ~^^^^^^^^^^^^^^^^^
+KeyError: 'arguments_raw'
+_______________ test_unavailable_lookup_is_not_a_success[error] _______________
+tests\unit\test_knowledge_tool_evidence_lifecycle.py:137: in test_unavailable_lookup_is_not_a_success
+    assert await _speak(service, session) == [UNCERTAIN]
+E   assert ["I'm sorry, ...ay it again?"] == ["I can't con...n available."]
+E     At index 0 diff: "I'm sorry, I had trouble processing that. Could you say it again?" != "I can't confirm that figure from the information available."
+E     Use -v to get more diff
+------------------------------ Captured log call ------------------------------
+ERROR    app.domain.services.voice_pipeline.turn_streamer:turn_streamer.py:1285 LLM streaming error for call synthetic-evidence-call: 'arguments_raw'
+Traceback (most recent call last):
+  File "C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\ag02-tool-evidence-lifecycle-20261007\backend\app\domain\services\voice_pipeline\turn_streamer.py", line 1044, in stream
+    async for token in _token_iter:
+  File "C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\ag02-tool-evidence-lifecycle-20261007\backend\app\infrastructure\llm\groq.py", line 475, in stream_chat_with_tools
+    async for token in stream:
+  File "C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\ag02-tool-evidence-lifecycle-20261007\backend\app\infrastructure\llm\streaming.py", line 191, in stream_tool_turn
+    extra = [assistant_tool_message(calls, "".join(content) or None)]
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\ag02-tool-evidence-lifecycle-20261007\backend\app\infrastructure\llm\streaming.py", line 100, in assistant_tool_message
+    "name": c["name"], "arguments": c["arguments_raw"],
+                                    ~^^^^^^^^^^^^^^^^^
+KeyError: 'arguments_raw'
+______________ test_unavailable_lookup_is_not_a_success[timeout] ______________
+tests\unit\test_knowledge_tool_evidence_lifecycle.py:137: in test_unavailable_lookup_is_not_a_success
+    assert await _speak(service, session) == [UNCERTAIN]
+E   assert ["I'm sorry, ...ay it again?"] == ["I can't con...n available."]
+E     At index 0 diff: "I'm sorry, I had trouble processing that. Could you say it again?" != "I can't confirm that figure from the information available."
+E     Use -v to get more diff
+------------------------------ Captured log call ------------------------------
+ERROR    app.domain.services.voice_pipeline.turn_streamer:turn_streamer.py:1285 LLM streaming error for call synthetic-evidence-call: 'arguments_raw'
+Traceback (most recent call last):
+  File "C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\ag02-tool-evidence-lifecycle-20261007\backend\app\domain\services\voice_pipeline\turn_streamer.py", line 1044, in stream
+    async for token in _token_iter:
+  File "C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\ag02-tool-evidence-lifecycle-20261007\backend\app\infrastructure\llm\groq.py", line 475, in stream_chat_with_tools
+    async for token in stream:
+  File "C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\ag02-tool-evidence-lifecycle-20261007\backend\app\infrastructure\llm\streaming.py", line 191, in stream_tool_turn
+    extra = [assistant_tool_message(calls, "".join(content) or None)]
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\ag02-tool-evidence-lifecycle-20261007\backend\app\infrastructure\llm\streaming.py", line 100, in assistant_tool_message
+    "name": c["name"], "arguments": c["arguments_raw"],
+                                    ~^^^^^^^^^^^^^^^^^
+KeyError: 'arguments_raw'
+____ test_no_tool_smalltalk_clears_evidence_without_changing_spoken_reply _____
+tests\unit\test_knowledge_tool_evidence_lifecycle.py:153: in test_no_tool_smalltalk_clears_evidence_without_changing_spoken_reply
+    assert await _speak(service, session) == [PRICE]
+E   assert ["I'm sorry, ...ay it again?"] == ['Starter cos...0 per month.']
+E     At index 0 diff: "I'm sorry, I had trouble processing that. Could you say it again?" != 'Starter costs $20 per month.'
+E     Use -v to get more diff
+------------------------------ Captured log call ------------------------------
+ERROR    app.domain.services.voice_pipeline.turn_streamer:turn_streamer.py:1285 LLM streaming error for call synthetic-evidence-call: 'arguments_raw'
+Traceback (most recent call last):
+  File "C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\ag02-tool-evidence-lifecycle-20261007\backend\app\domain\services\voice_pipeline\turn_streamer.py", line 1044, in stream
+    async for token in _token_iter:
+  File "C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\ag02-tool-evidence-lifecycle-20261007\backend\app\infrastructure\llm\groq.py", line 475, in stream_chat_with_tools
+    async for token in stream:
+  File "C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\ag02-tool-evidence-lifecycle-20261007\backend\app\infrastructure\llm\streaming.py", line 191, in stream_tool_turn
+    extra = [assistant_tool_message(calls, "".join(content) or None)]
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\ag02-tool-evidence-lifecycle-20261007\backend\app\infrastructure\llm\streaming.py", line 100, in assistant_tool_message
+    "name": c["name"], "arguments": c["arguments_raw"],
+                                    ~^^^^^^^^^^^^^^^^^
+KeyError: 'arguments_raw'
+__________ test_malformed_tool_evidence_cannot_record_success[None] ___________
+tests\unit\test_knowledge_tool_evidence_lifecycle.py:186: in test_malformed_tool_evidence_cannot_record_success
+    assert await _speak(service, session) == [UNCERTAIN]
+E   assert ["I'm sorry, ...ay it again?"] == ["I can't con...n available."]
+E     At index 0 diff: "I'm sorry, I had trouble processing that. Could you say it again?" != "I can't confirm that figure from the information available."
+E     Use -v to get more diff
+------------------------------ Captured log call ------------------------------
+ERROR    app.domain.services.voice_pipeline.turn_streamer:turn_streamer.py:1285 LLM streaming error for call synthetic-evidence-call: 'arguments_raw'
+Traceback (most recent call last):
+  File "C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\ag02-tool-evidence-lifecycle-20261007\backend\app\domain\services\voice_pipeline\turn_streamer.py", line 1044, in stream
+    async for token in _token_iter:
+  File "C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\ag02-tool-evidence-lifecycle-20261007\backend\app\infrastructure\llm\groq.py", line 475, in stream_chat_with_tools
+    async for token in stream:
+  File "C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\ag02-tool-evidence-lifecycle-20261007\backend\app\infrastructure\llm\streaming.py", line 191, in stream_tool_turn
+    extra = [assistant_tool_message(calls, "".join(content) or None)]
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\ag02-tool-evidence-lifecycle-20261007\backend\app\infrastructure\llm\streaming.py", line 100, in assistant_tool_message
+    "name": c["name"], "arguments": c["arguments_raw"],
+                                    ~^^^^^^^^^^^^^^^^^
+KeyError: 'arguments_raw'
+________ test_malformed_tool_evidence_cannot_record_success[evidence1] ________
+tests\unit\test_knowledge_tool_evidence_lifecycle.py:186: in test_malformed_tool_evidence_cannot_record_success
+    assert await _speak(service, session) == [UNCERTAIN]
+E   assert ["I'm sorry, ...ay it again?"] == ["I can't con...n available."]
+E     At index 0 diff: "I'm sorry, I had trouble processing that. Could you say it again?" != "I can't confirm that figure from the information available."
+E     Use -v to get more diff
+------------------------------ Captured log call ------------------------------
+ERROR    app.domain.services.voice_pipeline.turn_streamer:turn_streamer.py:1285 LLM streaming error for call synthetic-evidence-call: 'arguments_raw'
+Traceback (most recent call last):
+  File "C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\ag02-tool-evidence-lifecycle-20261007\backend\app\domain\services\voice_pipeline\turn_streamer.py", line 1044, in stream
+    async for token in _token_iter:
+  File "C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\ag02-tool-evidence-lifecycle-20261007\backend\app\infrastructure\llm\groq.py", line 475, in stream_chat_with_tools
+    async for token in stream:
+  File "C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\ag02-tool-evidence-lifecycle-20261007\backend\app\infrastructure\llm\streaming.py", line 191, in stream_tool_turn
+    extra = [assistant_tool_message(calls, "".join(content) or None)]
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\ag02-tool-evidence-lifecycle-20261007\backend\app\infrastructure\llm\streaming.py", line 100, in assistant_tool_message
+    "name": c["name"], "arguments": c["arguments_raw"],
+                                    ~^^^^^^^^^^^^^^^^^
+KeyError: 'arguments_raw'
+________ test_malformed_tool_evidence_cannot_record_success[evidence2] ________
+tests\unit\test_knowledge_tool_evidence_lifecycle.py:186: in test_malformed_tool_evidence_cannot_record_success
+    assert await _speak(service, session) == [UNCERTAIN]
+E   assert ["I'm sorry, ...ay it again?"] == ["I can't con...n available."]
+E     At index 0 diff: "I'm sorry, I had trouble processing that. Could you say it again?" != "I can't confirm that figure from the information available."
+E     Use -v to get more diff
+------------------------------ Captured log call ------------------------------
+ERROR    app.domain.services.voice_pipeline.turn_streamer:turn_streamer.py:1285 LLM streaming error for call synthetic-evidence-call: 'arguments_raw'
+Traceback (most recent call last):
+  File "C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\ag02-tool-evidence-lifecycle-20261007\backend\app\domain\services\voice_pipeline\turn_streamer.py", line 1044, in stream
+    async for token in _token_iter:
+  File "C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\ag02-tool-evidence-lifecycle-20261007\backend\app\infrastructure\llm\groq.py", line 475, in stream_chat_with_tools
+    async for token in stream:
+  File "C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\ag02-tool-evidence-lifecycle-20261007\backend\app\infrastructure\llm\streaming.py", line 191, in stream_tool_turn
+    extra = [assistant_tool_message(calls, "".join(content) or None)]
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\ag02-tool-evidence-lifecycle-20261007\backend\app\infrastructure\llm\streaming.py", line 100, in assistant_tool_message
+    "name": c["name"], "arguments": c["arguments_raw"],
+                                    ~^^^^^^^^^^^^^^^^^
+KeyError: 'arguments_raw'
+________ test_malformed_tool_evidence_cannot_record_success[evidence3] ________
+tests\unit\test_knowledge_tool_evidence_lifecycle.py:186: in test_malformed_tool_evidence_cannot_record_success
+    assert await _speak(service, session) == [UNCERTAIN]
+E   assert ["I'm sorry, ...ay it again?"] == ["I can't con...n available."]
+E     At index 0 diff: "I'm sorry, I had trouble processing that. Could you say it again?" != "I can't confirm that figure from the information available."
+E     Use -v to get more diff
+------------------------------ Captured log call ------------------------------
+ERROR    app.domain.services.voice_pipeline.turn_streamer:turn_streamer.py:1285 LLM streaming error for call synthetic-evidence-call: 'arguments_raw'
+Traceback (most recent call last):
+  File "C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\ag02-tool-evidence-lifecycle-20261007\backend\app\domain\services\voice_pipeline\turn_streamer.py", line 1044, in stream
+    async for token in _token_iter:
+  File "C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\ag02-tool-evidence-lifecycle-20261007\backend\app\infrastructure\llm\groq.py", line 475, in stream_chat_with_tools
+    async for token in stream:
+  File "C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\ag02-tool-evidence-lifecycle-20261007\backend\app\infrastructure\llm\streaming.py", line 191, in stream_tool_turn
+    extra = [assistant_tool_message(calls, "".join(content) or None)]
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\ag02-tool-evidence-lifecycle-20261007\backend\app\infrastructure\llm\streaming.py", line 100, in assistant_tool_message
+    "name": c["name"], "arguments": c["arguments_raw"],
+                                    ~^^^^^^^^^^^^^^^^^
+KeyError: 'arguments_raw'
+=========================== short test summary info ===========================
+FAILED tests/unit/test_knowledge_tool_evidence_lifecycle.py::test_knowledge_only_turn_withholds_prose_until_tool_result
+FAILED tests/unit/test_knowledge_tool_evidence_lifecycle.py::test_prior_turn_price_requires_current_lookup[False]
+FAILED tests/unit/test_knowledge_tool_evidence_lifecycle.py::test_prior_turn_price_requires_current_lookup[True]
+FAILED tests/unit/test_knowledge_tool_evidence_lifecycle.py::test_tool_success_comes_from_admitted_evidence[Starter price-nodes0-matched-True]
+FAILED tests/unit/test_knowledge_tool_evidence_lifecycle.py::test_tool_success_comes_from_admitted_evidence[Starter international installation warranty cancellation-nodes1-weak_match-False]
+FAILED tests/unit/test_knowledge_tool_evidence_lifecycle.py::test_tool_success_comes_from_admitted_evidence[quasar nebula-nodes2-no_match-False]
+FAILED tests/unit/test_knowledge_tool_evidence_lifecycle.py::test_tool_success_comes_from_admitted_evidence[Starter price-nodes3-no_match-False]
+FAILED tests/unit/test_knowledge_tool_evidence_lifecycle.py::test_tool_success_comes_from_admitted_evidence[   -nodes4-unavailable-False]
+FAILED tests/unit/test_knowledge_tool_evidence_lifecycle.py::test_tool_success_comes_from_admitted_evidence[Starter price-nodes5-no_match-False]
+FAILED tests/unit/test_knowledge_tool_evidence_lifecycle.py::test_unavailable_lookup_is_not_a_success[missing_container]
+FAILED tests/unit/test_knowledge_tool_evidence_lifecycle.py::test_unavailable_lookup_is_not_a_success[error]
+FAILED tests/unit/test_knowledge_tool_evidence_lifecycle.py::test_unavailable_lookup_is_not_a_success[timeout]
+FAILED tests/unit/test_knowledge_tool_evidence_lifecycle.py::test_no_tool_smalltalk_clears_evidence_without_changing_spoken_reply
+FAILED tests/unit/test_knowledge_tool_evidence_lifecycle.py::test_malformed_tool_evidence_cannot_record_success[None]
+FAILED tests/unit/test_knowledge_tool_evidence_lifecycle.py::test_malformed_tool_evidence_cannot_record_success[evidence1]
+FAILED tests/unit/test_knowledge_tool_evidence_lifecycle.py::test_malformed_tool_evidence_cannot_record_success[evidence2]
+FAILED tests/unit/test_knowledge_tool_evidence_lifecycle.py::test_malformed_tool_evidence_cannot_record_success[evidence3]
+17 failed, 2 passed, 38 warnings in 2.88s

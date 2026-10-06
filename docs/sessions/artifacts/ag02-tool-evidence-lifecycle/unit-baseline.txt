@@ -1,0 +1,118 @@
+FF.FF..F.FFFF..FFFF                                                      [100%]
+================================== FAILURES ===================================
+_________ test_knowledge_only_turn_withholds_prose_until_tool_result __________
+tests\unit\test_knowledge_tool_evidence_lifecycle.py:81: in test_knowledge_only_turn_withholds_prose_until_tool_result
+    assert await _speak(service, session) == [PRICE]
+E   assert ["I can't con...0 per month.'] == ['Starter cos...0 per month.']
+E     At index 0 diff: "I can't confirm that figure from the information available." != 'Starter costs $20 per month.'
+E     Left contains one more item: 'Starter costs $20 per month.'
+E     Use -v to get more diff
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.voice_pipeline.turn_streamer:turn_streamer.py:796 ungrounded_figure_replaced call=synthetic-ev figures=['$999']
+____________ test_prior_turn_price_requires_current_lookup[False] _____________
+tests\unit\test_knowledge_tool_evidence_lifecycle.py:99: in test_prior_turn_price_requires_current_lookup
+    assert await _speak(service, session) == [PRICE if fresh_lookup else UNCERTAIN]
+E   assert ['Starter cos...0 per month.'] == ["I can't con...n available."]
+E     At index 0 diff: 'Starter costs $20 per month.' != "I can't confirm that figure from the information available."
+E     Use -v to get more diff
+_ test_tool_success_comes_from_admitted_evidence[Starter price-nodes0-matched-True] _
+tests\unit\test_knowledge_tool_evidence_lifecycle.py:126: in test_tool_success_comes_from_admitted_evidence
+    assert state.last_tool_code == status
+E   AssertionError: assert 'ok' == 'matched'
+E     - matched
+E     + ok
+_ test_tool_success_comes_from_admitted_evidence[Starter international installation warranty cancellation-nodes1-weak_match-False] _
+tests\unit\test_knowledge_tool_evidence_lifecycle.py:125: in test_tool_success_comes_from_admitted_evidence
+    assert state.last_tool_success is success
+E   AssertionError: assert True is False
+E    +  where True = LiveConversationState(identity_introduced=False, decision_maker=<DecisionMakerStatus.UNKNOWN: 'unknown'>, current_prov...stomer_relationship=<CustomerRelationship.UNKNOWN: 'unknown'>, relationship_turn_id=None, relationship_turn_order=None).last_tool_success
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.voice_pipeline.turn_streamer:turn_streamer.py:796 ungrounded_figure_replaced call=synthetic-ev figures=['$20']
+_ test_tool_success_comes_from_admitted_evidence[   -nodes4-unavailable-False] _
+tests\unit\test_knowledge_tool_evidence_lifecycle.py:126: in test_tool_success_comes_from_admitted_evidence
+    assert state.last_tool_code == status
+E   AssertionError: assert 'no_match' == 'unavailable'
+E     - unavailable
+E     + no_match
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.voice_pipeline.turn_streamer:turn_streamer.py:796 ungrounded_figure_replaced call=synthetic-ev figures=['$20']
+_________ test_unavailable_lookup_is_not_a_success[missing_container] _________
+tests\unit\test_knowledge_tool_evidence_lifecycle.py:143: in test_unavailable_lookup_is_not_a_success
+    assert state.last_tool_success is False
+E   AssertionError: assert True is False
+E    +  where True = LiveConversationState(identity_introduced=False, decision_maker=<DecisionMakerStatus.UNKNOWN: 'unknown'>, current_prov...stomer_relationship=<CustomerRelationship.UNKNOWN: 'unknown'>, relationship_turn_id=None, relationship_turn_order=None).last_tool_success
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.voice_pipeline.turn_streamer:turn_streamer.py:796 ungrounded_figure_replaced call=synthetic-ev figures=['$20']
+_______________ test_unavailable_lookup_is_not_a_success[error] _______________
+tests\unit\test_knowledge_tool_evidence_lifecycle.py:143: in test_unavailable_lookup_is_not_a_success
+    assert state.last_tool_success is False
+E   AssertionError: assert True is False
+E    +  where True = LiveConversationState(identity_introduced=False, decision_maker=<DecisionMakerStatus.UNKNOWN: 'unknown'>, current_prov...stomer_relationship=<CustomerRelationship.UNKNOWN: 'unknown'>, relationship_turn_id=None, relationship_turn_order=None).last_tool_success
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.voice_pipeline.knowledge_tool:knowledge_tool.py:248 KB_TOOL call=syntheti error_type=RuntimeError
+WARNING  app.domain.services.voice_pipeline.turn_streamer:turn_streamer.py:796 ungrounded_figure_replaced call=synthetic-ev figures=['$20']
+______________ test_unavailable_lookup_is_not_a_success[timeout] ______________
+tests\unit\test_knowledge_tool_evidence_lifecycle.py:143: in test_unavailable_lookup_is_not_a_success
+    assert state.last_tool_success is False
+E   AssertionError: assert True is False
+E    +  where True = LiveConversationState(identity_introduced=False, decision_maker=<DecisionMakerStatus.UNKNOWN: 'unknown'>, current_prov...stomer_relationship=<CustomerRelationship.UNKNOWN: 'unknown'>, relationship_turn_id=None, relationship_turn_order=None).last_tool_success
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.voice_pipeline.knowledge_tool:knowledge_tool.py:211 KB_TOOL call=syntheti TIMEOUT >500ms query_chars=13 — answering without facts
+WARNING  app.domain.services.voice_pipeline.turn_streamer:turn_streamer.py:796 ungrounded_figure_replaced call=synthetic-ev figures=['$20']
+____ test_no_tool_smalltalk_clears_evidence_without_changing_spoken_reply _____
+tests\unit\test_knowledge_tool_evidence_lifecycle.py:159: in test_no_tool_smalltalk_clears_evidence_without_changing_spoken_reply
+    assert session._knowledge_evidence == {"status": "unavailable", "passages": []}
+E   AssertionError: assert {'passages': ...0 per month.'} == {'passages': ...'unavailable'}
+E     Differing items:
+E     {'passages': [{'coverage': 1.0, 'node_id': 'starter', 'source_id': None, 'source_version': None, ...}]} != {'passages': []}
+E     {'status': 'matched'} != {'status': 'unavailable'}
+E     Left contains 1 more item:
+E     {'text': '- Starter price: Starter costs $20 per month.'}
+E     Use -v to get more diff
+__________ test_malformed_tool_evidence_cannot_record_success[None] ___________
+tests\unit\test_knowledge_tool_evidence_lifecycle.py:189: in test_malformed_tool_evidence_cannot_record_success
+    assert session._live_structured_state.last_tool_success is False
+E   AssertionError: assert True is False
+E    +  where True = LiveConversationState(identity_introduced=False, decision_maker=<DecisionMakerStatus.UNKNOWN: 'unknown'>, current_prov...stomer_relationship=<CustomerRelationship.UNKNOWN: 'unknown'>, relationship_turn_id=None, relationship_turn_order=None).last_tool_success
+E    +    where LiveConversationState(identity_introduced=False, decision_maker=<DecisionMakerStatus.UNKNOWN: 'unknown'>, current_prov...stomer_relationship=<CustomerRelationship.UNKNOWN: 'unknown'>, relationship_turn_id=None, relationship_turn_order=None) = CallSession(call_id='synthetic-evidence-call', campaign_id='campaign-a', lead_id='synthetic-lead', tenant_id='tenant-a...e, audio_input_buffer=None, audio_output_buffer=None, transcript_buffer=None, barge_in_event=None, captured_slots=None)._live_structured_state
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.voice_pipeline.turn_streamer:turn_streamer.py:796 ungrounded_figure_replaced call=synthetic-ev figures=['$20']
+________ test_malformed_tool_evidence_cannot_record_success[evidence1] ________
+tests\unit\test_knowledge_tool_evidence_lifecycle.py:189: in test_malformed_tool_evidence_cannot_record_success
+    assert session._live_structured_state.last_tool_success is False
+E   AssertionError: assert True is False
+E    +  where True = LiveConversationState(identity_introduced=False, decision_maker=<DecisionMakerStatus.UNKNOWN: 'unknown'>, current_prov...stomer_relationship=<CustomerRelationship.UNKNOWN: 'unknown'>, relationship_turn_id=None, relationship_turn_order=None).last_tool_success
+E    +    where LiveConversationState(identity_introduced=False, decision_maker=<DecisionMakerStatus.UNKNOWN: 'unknown'>, current_prov...stomer_relationship=<CustomerRelationship.UNKNOWN: 'unknown'>, relationship_turn_id=None, relationship_turn_order=None) = CallSession(call_id='synthetic-evidence-call', campaign_id='campaign-a', lead_id='synthetic-lead', tenant_id='tenant-a...e, audio_input_buffer=None, audio_output_buffer=None, transcript_buffer=None, barge_in_event=None, captured_slots=None)._live_structured_state
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.voice_pipeline.turn_streamer:turn_streamer.py:796 ungrounded_figure_replaced call=synthetic-ev figures=['$20']
+________ test_malformed_tool_evidence_cannot_record_success[evidence2] ________
+tests\unit\test_knowledge_tool_evidence_lifecycle.py:189: in test_malformed_tool_evidence_cannot_record_success
+    assert session._live_structured_state.last_tool_success is False
+E   AssertionError: assert True is False
+E    +  where True = LiveConversationState(identity_introduced=False, decision_maker=<DecisionMakerStatus.UNKNOWN: 'unknown'>, current_prov...stomer_relationship=<CustomerRelationship.UNKNOWN: 'unknown'>, relationship_turn_id=None, relationship_turn_order=None).last_tool_success
+E    +    where LiveConversationState(identity_introduced=False, decision_maker=<DecisionMakerStatus.UNKNOWN: 'unknown'>, current_prov...stomer_relationship=<CustomerRelationship.UNKNOWN: 'unknown'>, relationship_turn_id=None, relationship_turn_order=None) = CallSession(call_id='synthetic-evidence-call', campaign_id='campaign-a', lead_id='synthetic-lead', tenant_id='tenant-a...e, audio_input_buffer=None, audio_output_buffer=None, transcript_buffer=None, barge_in_event=None, captured_slots=None)._live_structured_state
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.voice_pipeline.turn_streamer:turn_streamer.py:796 ungrounded_figure_replaced call=synthetic-ev figures=['$20']
+________ test_malformed_tool_evidence_cannot_record_success[evidence3] ________
+tests\unit\test_knowledge_tool_evidence_lifecycle.py:189: in test_malformed_tool_evidence_cannot_record_success
+    assert session._live_structured_state.last_tool_success is False
+E   AssertionError: assert True is False
+E    +  where True = LiveConversationState(identity_introduced=False, decision_maker=<DecisionMakerStatus.UNKNOWN: 'unknown'>, current_prov...stomer_relationship=<CustomerRelationship.UNKNOWN: 'unknown'>, relationship_turn_id=None, relationship_turn_order=None).last_tool_success
+E    +    where LiveConversationState(identity_introduced=False, decision_maker=<DecisionMakerStatus.UNKNOWN: 'unknown'>, current_prov...stomer_relationship=<CustomerRelationship.UNKNOWN: 'unknown'>, relationship_turn_id=None, relationship_turn_order=None) = CallSession(call_id='synthetic-evidence-call', campaign_id='campaign-a', lead_id='synthetic-lead', tenant_id='tenant-a...e, audio_input_buffer=None, audio_output_buffer=None, transcript_buffer=None, barge_in_event=None, captured_slots=None)._live_structured_state
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.voice_pipeline.turn_streamer:turn_streamer.py:796 ungrounded_figure_replaced call=synthetic-ev figures=['$20']
+=========================== short test summary info ===========================
+FAILED tests/unit/test_knowledge_tool_evidence_lifecycle.py::test_knowledge_only_turn_withholds_prose_until_tool_result
+FAILED tests/unit/test_knowledge_tool_evidence_lifecycle.py::test_prior_turn_price_requires_current_lookup[False]
+FAILED tests/unit/test_knowledge_tool_evidence_lifecycle.py::test_tool_success_comes_from_admitted_evidence[Starter price-nodes0-matched-True]
+FAILED tests/unit/test_knowledge_tool_evidence_lifecycle.py::test_tool_success_comes_from_admitted_evidence[Starter international installation warranty cancellation-nodes1-weak_match-False]
+FAILED tests/unit/test_knowledge_tool_evidence_lifecycle.py::test_tool_success_comes_from_admitted_evidence[   -nodes4-unavailable-False]
+FAILED tests/unit/test_knowledge_tool_evidence_lifecycle.py::test_unavailable_lookup_is_not_a_success[missing_container]
+FAILED tests/unit/test_knowledge_tool_evidence_lifecycle.py::test_unavailable_lookup_is_not_a_success[error]
+FAILED tests/unit/test_knowledge_tool_evidence_lifecycle.py::test_unavailable_lookup_is_not_a_success[timeout]
+FAILED tests/unit/test_knowledge_tool_evidence_lifecycle.py::test_no_tool_smalltalk_clears_evidence_without_changing_spoken_reply
+FAILED tests/unit/test_knowledge_tool_evidence_lifecycle.py::test_malformed_tool_evidence_cannot_record_success[None]
+FAILED tests/unit/test_knowledge_tool_evidence_lifecycle.py::test_malformed_tool_evidence_cannot_record_success[evidence1]
+FAILED tests/unit/test_knowledge_tool_evidence_lifecycle.py::test_malformed_tool_evidence_cannot_record_success[evidence2]
+FAILED tests/unit/test_knowledge_tool_evidence_lifecycle.py::test_malformed_tool_evidence_cannot_record_success[evidence3]
+13 failed, 6 passed, 38 warnings in 2.20s

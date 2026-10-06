@@ -1,0 +1,198 @@
+{
+  "tested_base": "76ba91eabfea5cbf1f6b106202e16a5dbf858b1b",
+  "source_commit": "cd6088a66785f6458c3b0764bb3aa59d9c5af755",
+  "source_binding": "Final checks ran base76ba91ea plus the two-file reviewed source. All24 final LF hashes are stable and current; all23 tracked backend inputs equal source_commit. Commit binding is parity, not a rerun.",
+  "python": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\backend\\.venv\\Scripts\\python.exe",
+  "environment": {
+    "PYTHONPATH": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-tool-evidence-lifecycle-20261007\\backend",
+    "PYTHONUTF8": "1",
+    "PYTHONDONTWRITEBYTECODE": "1"
+  },
+  "installed_versions": {
+    "pytest": "7.4.4",
+    "pytest-asyncio": "0.23.3",
+    "pydantic": "2.12.5",
+    "fastapi": "0.139.0",
+    "groq": "0.37.0"
+  },
+  "dependency_locations": {
+    "pytest": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\backend\\.venv\\Lib\\site-packages",
+    "pytest-asyncio": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\backend\\.venv\\Lib\\site-packages",
+    "pydantic": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\backend\\.venv\\Lib\\site-packages",
+    "fastapi": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\backend\\.venv\\Lib\\site-packages",
+    "groq": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\backend\\.venv\\Lib\\site-packages"
+  },
+  "dependency_limit": "Existing selected venv only; no requirements reinstall or exact-requirements parity claim.",
+  "authoritative_final": "unit-review-final-result.json",
+  "new_controls": 22,
+  "final_total": 158,
+  "counts_overlap": true,
+  "scope_limit": "No real model/STT/TTS/provider/DB/browser/server/deploy; model-authored query semantic equivalence and latency unqualified; default inject unchanged.",
+  "commands": [
+    {
+      "cwd": ".",
+      "argv": [
+        "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\backend\\.venv\\Scripts\\python.exe",
+        "docs/sessions/artifacts/ag02-tool-evidence-lifecycle/unit_probe.py",
+        "baseline"
+      ],
+      "log": "unit-fixture-first.txt",
+      "result": "unit-fixture-first-result.json",
+      "failed": 17,
+      "passed": 2,
+      "warnings": 38,
+      "seconds": 2.88,
+      "exit_code": 1,
+      "source_unchanged": true,
+      "prohibited_attempts": 0,
+      "internal_socketpairs": 39,
+      "scope": "Invalid synthetic transport omitted arguments_raw; fixture error, not product failure.",
+      "runner_snapshot": "first-probe.py"
+    },
+    {
+      "cwd": ".",
+      "argv": [
+        "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\backend\\.venv\\Scripts\\python.exe",
+        "docs/sessions/artifacts/ag02-tool-evidence-lifecycle/unit_probe.py",
+        "baseline"
+      ],
+      "log": "unit-baseline.txt",
+      "result": "unit-baseline-result.json",
+      "failed": 13,
+      "passed": 6,
+      "warnings": 38,
+      "seconds": 2.2,
+      "exit_code": 1,
+      "source_unchanged": true,
+      "prohibited_attempts": 0,
+      "internal_socketpairs": 39,
+      "scope": "Corrected fixture; before application edits.",
+      "runner_snapshot": "first-probe.py"
+    },
+    {
+      "cwd": ".",
+      "argv": [
+        "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\backend\\.venv\\Scripts\\python.exe",
+        "docs/sessions/artifacts/ag02-tool-evidence-lifecycle/unit_probe.py",
+        "focused"
+      ],
+      "log": "unit-focused.txt",
+      "result": "unit-focused-result.json",
+      "failed": 0,
+      "passed": 19,
+      "warnings": 38,
+      "seconds": 1.72,
+      "exit_code": 0,
+      "source_unchanged": true,
+      "prohibited_attempts": 0,
+      "internal_socketpairs": 39,
+      "scope": "First scoped fix; before test-only blank-line correction and root same-turn review.",
+      "runner_snapshot": "first-probe.py"
+    },
+    {
+      "cwd": ".",
+      "argv": [
+        "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\backend\\.venv\\Scripts\\python.exe",
+        "docs/sessions/artifacts/ag02-tool-evidence-lifecycle/unit_probe.py",
+        "final"
+      ],
+      "log": "unit-first-green.txt",
+      "result": "unit-first-green-result.json",
+      "failed": 0,
+      "passed": 155,
+      "warnings": 50,
+      "seconds": 3.44,
+      "exit_code": 0,
+      "source_unchanged": true,
+      "prohibited_attempts": 0,
+      "internal_socketpairs": 99,
+      "scope": "First affected green; before test-only blank-line correction and root review.",
+      "runner_snapshot": "first-probe.py"
+    },
+    {
+      "cwd": ".",
+      "argv": [
+        "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\backend\\.venv\\Scripts\\python.exe",
+        "docs/sessions/artifacts/ag02-tool-evidence-lifecycle/unit_probe.py",
+        "final"
+      ],
+      "log": "unit-final.txt",
+      "result": "unit-final-result.json",
+      "failed": 0,
+      "passed": 155,
+      "warnings": 50,
+      "seconds": 22.99,
+      "exit_code": 0,
+      "source_unchanged": true,
+      "prohibited_attempts": 0,
+      "internal_socketpairs": 99,
+      "scope": "After lint-only test blank-line correction; before root same-turn review.",
+      "runner_snapshot": "first-probe.py"
+    },
+    {
+      "cwd": ".",
+      "argv": [
+        "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\backend\\.venv\\Scripts\\python.exe",
+        "docs/sessions/artifacts/ag02-tool-evidence-lifecycle/unit_probe.py",
+        "review-baseline"
+      ],
+      "log": "unit-review-baseline.txt",
+      "result": "unit-review-baseline-result.json",
+      "failed": 3,
+      "passed": 19,
+      "warnings": 44,
+      "seconds": 3.52,
+      "exit_code": 1,
+      "source_unchanged": true,
+      "prohibited_attempts": 0,
+      "internal_socketpairs": 45,
+      "scope": "Root same-turn controls before replacement; matched-to-matched fixture overlaps current sources.",
+      "runner_snapshot": "unit_probe.py"
+    },
+    {
+      "cwd": ".",
+      "argv": [
+        "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\backend\\.venv\\Scripts\\python.exe",
+        "docs/sessions/artifacts/ag02-tool-evidence-lifecycle/unit_probe.py",
+        "review-final"
+      ],
+      "log": "unit-review-fixture.txt",
+      "result": "unit-review-fixture-result.json",
+      "failed": 1,
+      "passed": 157,
+      "warnings": 56,
+      "seconds": 5.82,
+      "exit_code": 1,
+      "source_unchanged": true,
+      "prohibited_attempts": 0,
+      "internal_socketpairs": 105,
+      "scope": "Replacement fixed weak/no_match; matched fixture shared price term and retained current $20.",
+      "runner_snapshot": "unit_probe.py"
+    },
+    {
+      "cwd": ".",
+      "argv": [
+        "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\backend\\.venv\\Scripts\\python.exe",
+        "docs/sessions/artifacts/ag02-tool-evidence-lifecycle/unit_probe.py",
+        "review-final"
+      ],
+      "log": "unit-review-final.txt",
+      "result": "unit-review-final-result.json",
+      "failed": 0,
+      "passed": 158,
+      "warnings": 56,
+      "seconds": 4.17,
+      "exit_code": 0,
+      "source_unchanged": true,
+      "prohibited_attempts": 0,
+      "internal_socketpairs": 105,
+      "scope": "Final disjoint matched fixture, latest frozen source; includes22 new controls.",
+      "runner_snapshot": "unit_probe.py"
+    }
+  ],
+  "lint": "lint.json (newtest0; application24 unchanged baseline/current diagnostic types/counts)",
+  "git_diff_cached_check": {
+    "exit_code": 0,
+    "scope": "exacttwo source/test files before source commit"
+  }
+}

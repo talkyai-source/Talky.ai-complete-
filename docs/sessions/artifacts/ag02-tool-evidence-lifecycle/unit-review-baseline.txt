@@ -1,0 +1,25 @@
+.FFF..................                                                   [100%]
+================================== FAILURES ===================================
+_ test_latest_lookup_supersedes_earlier_facts_in_same_turn[Starter international installation warranty cancellation-weak_match] _
+tests\unit\test_knowledge_tool_evidence_lifecycle.py:98: in test_latest_lookup_supersedes_earlier_facts_in_same_turn
+    assert await _speak(service, session) == [UNCERTAIN]
+E   assert ['Starter cos...0 per month.'] == ["I can't con...n available."]
+E     At index 0 diff: 'Starter costs $20 per month.' != "I can't confirm that figure from the information available."
+E     Use -v to get more diff
+_ test_latest_lookup_supersedes_earlier_facts_in_same_turn[quasar nebula-no_match] _
+tests\unit\test_knowledge_tool_evidence_lifecycle.py:98: in test_latest_lookup_supersedes_earlier_facts_in_same_turn
+    assert await _speak(service, session) == [UNCERTAIN]
+E   assert ['Starter cos...0 per month.'] == ["I can't con...n available."]
+E     At index 0 diff: 'Starter costs $20 per month.' != "I can't confirm that figure from the information available."
+E     Use -v to get more diff
+_ test_latest_lookup_supersedes_earlier_facts_in_same_turn[Enterprise price-matched] _
+tests\unit\test_knowledge_tool_evidence_lifecycle.py:98: in test_latest_lookup_supersedes_earlier_facts_in_same_turn
+    assert await _speak(service, session) == [UNCERTAIN]
+E   assert ['Starter cos...0 per month.'] == ["I can't con...n available."]
+E     At index 0 diff: 'Starter costs $20 per month.' != "I can't confirm that figure from the information available."
+E     Use -v to get more diff
+=========================== short test summary info ===========================
+FAILED tests/unit/test_knowledge_tool_evidence_lifecycle.py::test_latest_lookup_supersedes_earlier_facts_in_same_turn[Starter international installation warranty cancellation-weak_match]
+FAILED tests/unit/test_knowledge_tool_evidence_lifecycle.py::test_latest_lookup_supersedes_earlier_facts_in_same_turn[quasar nebula-no_match]
+FAILED tests/unit/test_knowledge_tool_evidence_lifecycle.py::test_latest_lookup_supersedes_earlier_facts_in_same_turn[Enterprise price-matched]
+3 failed, 19 passed, 44 warnings in 3.52s

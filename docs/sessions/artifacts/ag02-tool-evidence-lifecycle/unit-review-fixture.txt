@@ -1,0 +1,13 @@
+...F.................................................................... [ 45%]
+........................................................................ [ 91%]
+..............                                                           [100%]
+================================== FAILURES ===================================
+_ test_latest_lookup_supersedes_earlier_facts_in_same_turn[Enterprise price-matched] _
+tests\unit\test_knowledge_tool_evidence_lifecycle.py:98: in test_latest_lookup_supersedes_earlier_facts_in_same_turn
+    assert await _speak(service, session) == [UNCERTAIN]
+E   assert ['Starter cos...0 per month.'] == ["I can't con...n available."]
+E     At index 0 diff: 'Starter costs $20 per month.' != "I can't confirm that figure from the information available."
+E     Use -v to get more diff
+=========================== short test summary info ===========================
+FAILED tests/unit/test_knowledge_tool_evidence_lifecycle.py::test_latest_lookup_supersedes_earlier_facts_in_same_turn[Enterprise price-matched]
+1 failed, 157 passed, 56 warnings in 5.82s
