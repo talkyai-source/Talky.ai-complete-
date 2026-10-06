@@ -1,0 +1,28 @@
+{
+  "source_commit": "3d94726e3086c68700a7a55b9140b8c206311184",
+  "tested_base": "0270d44981a4218e16619d7a65b4ffb7dc79a8ef",
+  "final_result": "unit-final-result.json",
+  "report": "docs/sessions/2026-10-07-ag02-model-sections.md",
+  "artifact_lf_sha256": {
+    "docs/sessions/artifacts/ag02-model-sections/commands.json": "b9896fe51a7c0f045867c9ed54fc79ab34e5697fe0972a995f7983720e5cd6a0",
+    "docs/sessions/artifacts/ag02-model-sections/exploratory.json": "34b3d11dff897dfb871d0c5dc062b4ffbaa117a07e1726a4204f987cf42fa43d",
+    "docs/sessions/artifacts/ag02-model-sections/first/prompt_config.py": "63e4763248bd0e03e810f684fa9195b378853d09e2b669933453b616a0ef7260",
+    "docs/sessions/artifacts/ag02-model-sections/first/runtime-pre-contact.py": "4ce986cb22849cc60ad4666b52f75b00ab785357f5f3783216806ae4ed1355df",
+    "docs/sessions/artifacts/ag02-model-sections/first/runtime.py": "677e9b8e1b2f719ca0dbf0bc1b92b887b2ef292dcff7885d0ad5343823dc6abb",
+    "docs/sessions/artifacts/ag02-model-sections/first/test_campaign_test_ws.py": "e7f62cd01b30c29668ae7285a068b2998605d927849d2cb6eb1f916b0fae20af",
+    "docs/sessions/artifacts/ag02-model-sections/first/test_realtime_profile_contract-pre-contact.py": "a3f0721796e6ceba50c36ab2f4aa2aebb32c7da619075a98c5ea7d65c95bd4a5",
+    "docs/sessions/artifacts/ag02-model-sections/lint.txt": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18",
+    "docs/sessions/artifacts/ag02-model-sections/source-hashes.json": "448aaab4607e04a164b79a4bf0f306d05690aee2a32766a9ef79df5054ac3b34",
+    "docs/sessions/artifacts/ag02-model-sections/unit-final-result.json": "944abe1b2ab343e1c827669f3a856820eec7c3a0c4a4351d3e7017095b96d137",
+    "docs/sessions/artifacts/ag02-model-sections/unit-final.txt": "4e9e86c4943d07c966fdae1afe5bbe126b08447a2bd925fb655a509f77cf48c8",
+    "docs/sessions/artifacts/ag02-model-sections/unit-first-result.json": "8ba2efc2c04f00d5a933db7b6876dd6ca26913ed490776db8e5e7c9d5e3d13c5",
+    "docs/sessions/artifacts/ag02-model-sections/unit-first.txt": "1a79a78276706110dcddee5f04eb7818a6b0fa830561dc0278ea2955f35ac9dd",
+    "docs/sessions/artifacts/ag02-model-sections/unit-pre-contact-result.json": "d9f160ae371c123cb7f16ca8379616a624fbaa2b94bc25f8daea6dfcf21ce416",
+    "docs/sessions/artifacts/ag02-model-sections/unit-pre-contact.txt": "ec5ac4ba895ba85344b31b867508e7f4a48114f8722ae1a84273daf63b0f1b4f",
+    "docs/sessions/artifacts/ag02-model-sections/unit_probe.py": "3d89d56d53ed0334a508b479912171523c099f2f9755e84ae5618aa66ef9ed1e",
+    "docs/sessions/2026-10-07-ag02-model-sections.md": "ca91ec7764e66087a299d9ac94a9c8d50c8562683ba9941fc3cfa076abc18da6"
+  },
+  "source_inputs": 38,
+  "tracked_input_parity": 37,
+  "reviewed_source_paths": 16
+}

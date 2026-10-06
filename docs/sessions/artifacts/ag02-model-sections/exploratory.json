@@ -1,0 +1,21 @@
+{
+  "runs": [
+    {
+      "command": "python -m pytest tests/unit/test_knowledge_model_sections.py tests/unit/test_knowledge_session_inject.py tests/unit/test_realtime_profile_contract.py -q",
+      "passed": 99,
+      "failed": 1,
+      "warnings": 24,
+      "elapsed_seconds": 15.51,
+      "failure": "Existing all-voices native fixture had no catalog but expected query knowledge tool always available. Fixture migrated to actual scoped catalog and exact-section schema.",
+      "limits": "Exploratory run, not frozen/hash-bound; wire serializer edit overlapped execution. Tool output retained in conversation."
+    },
+    {
+      "command": "python -m pytest backend/tests/unit/test_knowledge_model_sections.py backend/tests/unit/test_knowledge_session_inject.py backend/tests/unit/test_realtime_profile_contract.py -q",
+      "passed": 105,
+      "failed": 0,
+      "warnings": 51,
+      "elapsed_seconds": 3.5,
+      "limits": "Focused offline synthetic boundaries; overlapping final suite, not additive."
+    }
+  ]
+}
