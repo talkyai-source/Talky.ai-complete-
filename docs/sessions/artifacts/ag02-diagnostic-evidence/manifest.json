@@ -1,0 +1,28 @@
+{
+  "tested_base": "c01175c15679d881f591c7c5d0a5e17d5af4c465",
+  "source_commit": "239a96f2b397cd9cd975f307d819ab8f1532d3c7",
+  "source_hash_file": "source-hashes.json",
+  "source_count": 33,
+  "backend_before_after_source_count": 20,
+  "artifact_count": 16,
+  "artifact_lf_sha256": {
+    "docs/sessions/artifacts/ag02-diagnostic-evidence/backend-focused.txt": "053608b0b558d51a67047bfc9d4b05e74ce3e545e2d88d692b3f12e378b24c53",
+    "docs/sessions/artifacts/ag02-diagnostic-evidence/backend-lint.txt": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18",
+    "docs/sessions/artifacts/ag02-diagnostic-evidence/backend-runtime.json": "d8ae2bd0bdfc3739aa3758b819706a454147cc293c18b4dd6c8732e33064e3ed",
+    "docs/sessions/artifacts/ag02-diagnostic-evidence/baseline.txt": "eea5b4c128791992fa4cce1bdbfe62b94b9abc4fe9c0f3049183f6071cb380d5",
+    "docs/sessions/artifacts/ag02-diagnostic-evidence/build.txt": "6732661b71213c7a188c531c8a81444d21e87702441507c66a7284c1a5b12035",
+    "docs/sessions/artifacts/ag02-diagnostic-evidence/commands.json": "dbb9f0d77a471f2ce97db3e66ab5334822b2c9ea887880aee176ce3c634ee43f",
+    "docs/sessions/artifacts/ag02-diagnostic-evidence/frontend-first.txt": "4a780733c5c27e2c9453266262b1fee65803696f80d26203f552f7e1b87ca9c9",
+    "docs/sessions/artifacts/ag02-diagnostic-evidence/frontend-focused.txt": "368eed623d74e547b5e9d829fcd09374236041f4ac4b10febc92340953e68213",
+    "docs/sessions/artifacts/ag02-diagnostic-evidence/frontend-lint.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "docs/sessions/artifacts/ag02-diagnostic-evidence/frontend-runtime.json": "dbd8b0dbd39499548edd0237d7578d9226e25fd9891331e68185681b5a030b6e",
+    "docs/sessions/artifacts/ag02-diagnostic-evidence/source-hashes.json": "2829cfc2ed793f2abfbe342500373a8feaaf3571e37c2d474c23393b76d937af",
+    "docs/sessions/artifacts/ag02-diagnostic-evidence/typescript.txt": "dcf1157e0d790a342c95ca208182fba8f2b513608bca9d58c6649743d0b6e445",
+    "docs/sessions/artifacts/ag02-diagnostic-evidence/unit-final-result.json": "fa861587d0501fd701d1ab88009bbac3af7bd4dfed4195b74103653f7414659a",
+    "docs/sessions/artifacts/ag02-diagnostic-evidence/unit-final.txt": "f1a5320ec773ec926365a35d52fe73cfd889df696ffa333617868493f661885d",
+    "docs/sessions/artifacts/ag02-diagnostic-evidence/unit_probe.py": "7af8ba0d44fe55d29d5c35ae246141323949b364ef7925be34fbe36871cb3445",
+    "docs/sessions/2026-10-06-ag02-knowledge-diagnostic-evidence.md": "397458e13fbf4ab61cce149a24a197877c895c724f97af6e38e5986d6a109f94"
+  },
+  "review": "Root and account_finalize final source/test review clear; independent reviewer did not execute tests or access services. Final artifact parity reviewed separately.",
+  "scope": "Existing diagnostic source-evidence projection only; not semantic retrieval or paid-product acceptance."
+}

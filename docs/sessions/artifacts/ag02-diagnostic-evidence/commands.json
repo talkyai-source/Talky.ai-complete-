@@ -1,0 +1,178 @@
+{
+  "tested_base": "c01175c15679d881f591c7c5d0a5e17d5af4c465",
+  "source_commit": "239a96f2b397cd9cd975f307d819ab8f1532d3c7",
+  "source_binding": "Checks used c01175c1 plus the reviewed six-file diff. The source commit does not change tested bytes or imply a rerun. Backend has20 before/after hashes; the final33-file map also records frontend/configuration dependencies after frozen checks.",
+  "python": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\backend\\.venv\\Scripts\\python.exe",
+  "backend_environment": {
+    "PYTHONUTF8": "1",
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "PYTHONPATH": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-diagnostic-evidence-20261006\\backend"
+  },
+  "frontend_dependencies": "Existing root Talk-Leee/node_modules via junction; actual versions/locations in frontend-runtime.json, not lockfile parity.",
+  "commands": [
+    {
+      "cwd": "backend",
+      "argv": [
+        "-m",
+        "pytest",
+        "tests/unit/test_campaign_knowledge_staged_http.py",
+        "-q",
+        "--tb=short",
+        "--disable-warnings",
+        "-k",
+        "question_projects"
+      ],
+      "log": "baseline.txt",
+      "exit_code": 1,
+      "failed": 2,
+      "deselected": 4,
+      "seconds": 3.9,
+      "scope": "Before application edits: actual route+actual SQL retrieval, synthetic fetch rows, shared admission comparison. No guarded-network counter was recorded in this focused run."
+    },
+    {
+      "cwd": "backend",
+      "argv": [
+        "-m",
+        "pytest",
+        "tests/unit/test_campaign_knowledge_staged_http.py",
+        "-q",
+        "--tb=short",
+        "--disable-warnings"
+      ],
+      "log": "backend-focused.txt",
+      "exit_code": 0,
+      "passed": 13,
+      "seconds": 4.97
+    },
+    {
+      "cwd": ".",
+      "argv": [
+        "docs/sessions/artifacts/ag02-diagnostic-evidence/unit_probe.py"
+      ],
+      "log": "unit-final.txt",
+      "result": "unit-final-result.json",
+      "exit_code": 0,
+      "passed": 156,
+      "warnings": 11,
+      "seconds": 13.2,
+      "modules": 8,
+      "includes_focused": 13,
+      "new_controls": 9,
+      "network": "Socket/async transport guard,0prohibited,204internal socketpairs; no database/provider IO."
+    },
+    {
+      "cwd": "Talk-Leee",
+      "argv": [
+        "node",
+        "--test",
+        "--import",
+        "tsx",
+        "--import",
+        "./src/test-utils/setup.ts",
+        "src/components/campaigns/knowledge-panel.test.tsx",
+        "src/lib/knowledge-test-api.test.ts"
+      ],
+      "log": "frontend-first.txt",
+      "exit_code": 0,
+      "passed": 25,
+      "scope": "Initial green run had React act diagnostics; retained, not final lifecycle evidence."
+    },
+    {
+      "cwd": "Talk-Leee",
+      "argv": [
+        "node",
+        "--test",
+        "--import",
+        "tsx",
+        "--import",
+        "./src/test-utils/setup.ts",
+        "src/components/campaigns/knowledge-panel.test.tsx",
+        "src/lib/knowledge-test-api.test.ts"
+      ],
+      "log": "frontend-focused.txt",
+      "exit_code": 0,
+      "passed": 25,
+      "failed": 0,
+      "skipped": 0,
+      "new_controls": 22,
+      "milliseconds": 13461.9865,
+      "act_diagnostics": 0
+    },
+    {
+      "cwd": "Talk-Leee",
+      "argv": [
+        "npm",
+        "run",
+        "typecheck",
+        "--",
+        "--incremental",
+        "false"
+      ],
+      "log": "typescript.txt",
+      "exit_code": 0
+    },
+    {
+      "cwd": "Talk-Leee",
+      "argv": [
+        "node",
+        "node_modules/eslint/bin/eslint.js",
+        "src/components/campaigns/knowledge-panel.tsx",
+        "src/components/campaigns/knowledge-panel.test.tsx",
+        "src/lib/api.ts",
+        "src/lib/knowledge-test-api.test.ts"
+      ],
+      "log": "frontend-lint.txt",
+      "exit_code": 0,
+      "errors": 0,
+      "warnings": 0
+    },
+    {
+      "cwd": "Talk-Leee",
+      "argv": [
+        "npm",
+        "run",
+        "build"
+      ],
+      "environment": {
+        "NEXT_TELEMETRY_DISABLED": "1",
+        "SENTRY_AUTH_TOKEN": "empty"
+      },
+      "log": "build.txt",
+      "exit_code": 0,
+      "compile": "3.3min",
+      "typescript": "92s",
+      "static_pages": "70/70 in18.3s",
+      "limit": "Existing Cache-Control warning retained. Build may load existing Google font assets; no AI/connector provider inference or secret/token upload."
+    },
+    {
+      "cwd": ".",
+      "argv": [
+        "-m",
+        "ruff",
+        "check",
+        "--select",
+        "F",
+        "backend/app/api/v1/endpoints/campaign_knowledge.py",
+        "backend/tests/unit/test_campaign_knowledge_staged_http.py",
+        "docs/sessions/artifacts/ag02-diagnostic-evidence/unit_probe.py"
+      ],
+      "log": "backend-lint.txt",
+      "exit_code": 0
+    },
+    {
+      "cwd": ".",
+      "argv": [
+        "git",
+        "diff",
+        "--check"
+      ],
+      "exit_code": 0
+    }
+  ],
+  "notes": [
+    "An initial cwd-relative baseline command failed before pytest or output-log creation; corrected command produced the retained two-failure baseline.",
+    "First/final frontend totals and focused/affected backend totals overlap; do not add them.",
+    "Root-owned authored-source coverage and qualifier fixes are not in this owner baseline.",
+    "No gold evaluation rerun, threshold/synonym change, new provider, live AI/telephony/connector call, DB mutation, deployed server/browser/call acceptance, push or deployment."
+  ]
+}
