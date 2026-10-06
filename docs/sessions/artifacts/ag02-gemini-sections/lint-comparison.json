@@ -1,0 +1,1338 @@
+{
+  "backend/app/infrastructure/llm/gemini.py": {
+    "base": {
+      "exit_code": 1,
+      "counts": {
+        "I001": 1,
+        "UP035": 2,
+        "UP007": 11,
+        "UP006": 3,
+        "F841": 1,
+        "B904": 2
+      },
+      "diagnostics": [
+        {
+          "cell": null,
+          "code": "I001",
+          "end_location": {
+            "column": 1,
+            "row": 30
+          },
+          "filename": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-model-sections-20261007\\backend\\app\\infrastructure\\llm\\gemini.py",
+          "fix": {
+            "applicability": "safe",
+            "edits": [
+              {
+                "content": "import asyncio\nimport logging\nimport os\nfrom contextlib import aclosing\nfrom typing import AsyncIterator, List, Optional\n\nfrom app.domain.interfaces.llm_provider import LLMProvider\nfrom app.domain.models.conversation import Message, MessageRole\nfrom app.infrastructure.llm.request_profile import record_traditional_request\nfrom app.infrastructure.llm.streaming import (\n    LLMStreamStalled,\n    close_stream,\n    execute_tool_call,\n    stream_with_timeout,\n)\nfrom app.utils.resilience import CircuitBreaker, CircuitOpenError\n\n",
+                "end_location": {
+                  "column": 1,
+                  "row": 30
+                },
+                "location": {
+                  "column": 1,
+                  "row": 15
+                }
+              }
+            ],
+            "message": "Organize imports"
+          },
+          "location": {
+            "column": 1,
+            "row": 15
+          },
+          "message": "Import block is un-sorted or un-formatted",
+          "noqa_row": 15,
+          "url": "https://docs.astral.sh/ruff/rules/unsorted-imports"
+        },
+        {
+          "cell": null,
+          "code": "UP035",
+          "end_location": {
+            "column": 49,
+            "row": 19
+          },
+          "filename": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-model-sections-20261007\\backend\\app\\infrastructure\\llm\\gemini.py",
+          "fix": {
+            "applicability": "safe",
+            "edits": [
+              {
+                "content": "from typing import List, Optional\nfrom collections.abc import AsyncIterator",
+                "end_location": {
+                  "column": 49,
+                  "row": 19
+                },
+                "location": {
+                  "column": 1,
+                  "row": 19
+                }
+              }
+            ],
+            "message": "Import from `collections.abc`"
+          },
+          "location": {
+            "column": 1,
+            "row": 19
+          },
+          "message": "Import from `collections.abc` instead: `AsyncIterator`",
+          "noqa_row": 19,
+          "url": "https://docs.astral.sh/ruff/rules/deprecated-import"
+        },
+        {
+          "cell": null,
+          "code": "UP035",
+          "end_location": {
+            "column": 49,
+            "row": 19
+          },
+          "filename": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-model-sections-20261007\\backend\\app\\infrastructure\\llm\\gemini.py",
+          "fix": null,
+          "location": {
+            "column": 1,
+            "row": 19
+          },
+          "message": "`typing.List` is deprecated, use `list` instead",
+          "noqa_row": 19,
+          "url": "https://docs.astral.sh/ruff/rules/deprecated-import"
+        },
+        {
+          "cell": null,
+          "code": "UP007",
+          "end_location": {
+            "column": 45,
+            "row": 114
+          },
+          "filename": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-model-sections-20261007\\backend\\app\\infrastructure\\llm\\gemini.py",
+          "fix": {
+            "applicability": "safe",
+            "edits": [
+              {
+                "content": "int | None",
+                "end_location": {
+                  "column": 45,
+                  "row": 114
+                },
+                "location": {
+                  "column": 32,
+                  "row": 114
+                }
+              }
+            ],
+            "message": "Convert to `X | Y`"
+          },
+          "location": {
+            "column": 32,
+            "row": 114
+          },
+          "message": "Use `X | Y` for type annotations",
+          "noqa_row": 114,
+          "url": "https://docs.astral.sh/ruff/rules/non-pep604-annotation"
+        },
+        {
+          "cell": null,
+          "code": "UP007",
+          "end_location": {
+            "column": 79,
+            "row": 233
+          },
+          "filename": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-model-sections-20261007\\backend\\app\\infrastructure\\llm\\gemini.py",
+          "fix": {
+            "applicability": "safe",
+            "edits": [
+              {
+                "content": "int | None",
+                "end_location": {
+                  "column": 79,
+                  "row": 233
+                },
+                "location": {
+                  "column": 66,
+                  "row": 233
+                }
+              }
+            ],
+            "message": "Convert to `X | Y`"
+          },
+          "location": {
+            "column": 66,
+            "row": 233
+          },
+          "message": "Use `X | Y` for type annotations",
+          "noqa_row": 233,
+          "url": "https://docs.astral.sh/ruff/rules/non-pep604-annotation"
+        },
+        {
+          "cell": null,
+          "code": "UP007",
+          "end_location": {
+            "column": 56,
+            "row": 269
+          },
+          "filename": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-model-sections-20261007\\backend\\app\\infrastructure\\llm\\gemini.py",
+          "fix": {
+            "applicability": "safe",
+            "edits": [
+              {
+                "content": "int | None",
+                "end_location": {
+                  "column": 56,
+                  "row": 269
+                },
+                "location": {
+                  "column": 43,
+                  "row": 269
+                }
+              }
+            ],
+            "message": "Convert to `X | Y`"
+          },
+          "location": {
+            "column": 43,
+            "row": 269
+          },
+          "message": "Use `X | Y` for type annotations",
+          "noqa_row": 269,
+          "url": "https://docs.astral.sh/ruff/rules/non-pep604-annotation"
+        },
+        {
+          "cell": null,
+          "code": "UP006",
+          "end_location": {
+            "column": 23,
+            "row": 315
+          },
+          "filename": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-model-sections-20261007\\backend\\app\\infrastructure\\llm\\gemini.py",
+          "fix": {
+            "applicability": "safe",
+            "edits": [
+              {
+                "content": "list",
+                "end_location": {
+                  "column": 23,
+                  "row": 315
+                },
+                "location": {
+                  "column": 19,
+                  "row": 315
+                }
+              }
+            ],
+            "message": "Replace with `list`"
+          },
+          "location": {
+            "column": 19,
+            "row": 315
+          },
+          "message": "Use `list` instead of `List` for type annotation",
+          "noqa_row": 315,
+          "url": "https://docs.astral.sh/ruff/rules/non-pep585-annotation"
+        },
+        {
+          "cell": null,
+          "code": "UP007",
+          "end_location": {
+            "column": 37,
+            "row": 316
+          },
+          "filename": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-model-sections-20261007\\backend\\app\\infrastructure\\llm\\gemini.py",
+          "fix": {
+            "applicability": "safe",
+            "edits": [
+              {
+                "content": "str | None",
+                "end_location": {
+                  "column": 37,
+                  "row": 316
+                },
+                "location": {
+                  "column": 24,
+                  "row": 316
+                }
+              }
+            ],
+            "message": "Convert to `X | Y`"
+          },
+          "location": {
+            "column": 24,
+            "row": 316
+          },
+          "message": "Use `X | Y` for type annotations",
+          "noqa_row": 316,
+          "url": "https://docs.astral.sh/ruff/rules/non-pep604-annotation"
+        },
+        {
+          "cell": null,
+          "code": "UP007",
+          "end_location": {
+            "column": 37,
+            "row": 317
+          },
+          "filename": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-model-sections-20261007\\backend\\app\\infrastructure\\llm\\gemini.py",
+          "fix": {
+            "applicability": "safe",
+            "edits": [
+              {
+                "content": "float | None",
+                "end_location": {
+                  "column": 37,
+                  "row": 317
+                },
+                "location": {
+                  "column": 22,
+                  "row": 317
+                }
+              }
+            ],
+            "message": "Convert to `X | Y`"
+          },
+          "location": {
+            "column": 22,
+            "row": 317
+          },
+          "message": "Use `X | Y` for type annotations",
+          "noqa_row": 317,
+          "url": "https://docs.astral.sh/ruff/rules/non-pep604-annotation"
+        },
+        {
+          "cell": null,
+          "code": "UP007",
+          "end_location": {
+            "column": 34,
+            "row": 318
+          },
+          "filename": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-model-sections-20261007\\backend\\app\\infrastructure\\llm\\gemini.py",
+          "fix": {
+            "applicability": "safe",
+            "edits": [
+              {
+                "content": "int | None",
+                "end_location": {
+                  "column": 34,
+                  "row": 318
+                },
+                "location": {
+                  "column": 21,
+                  "row": 318
+                }
+              }
+            ],
+            "message": "Convert to `X | Y`"
+          },
+          "location": {
+            "column": 21,
+            "row": 318
+          },
+          "message": "Use `X | Y` for type annotations",
+          "noqa_row": 318,
+          "url": "https://docs.astral.sh/ruff/rules/non-pep604-annotation"
+        },
+        {
+          "cell": null,
+          "code": "F841",
+          "end_location": {
+            "column": 25,
+            "row": 472
+          },
+          "filename": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-model-sections-20261007\\backend\\app\\infrastructure\\llm\\gemini.py",
+          "fix": {
+            "applicability": "unsafe",
+            "edits": [
+              {
+                "content": "",
+                "end_location": {
+                  "column": 1,
+                  "row": 473
+                },
+                "location": {
+                  "column": 1,
+                  "row": 472
+                }
+              }
+            ],
+            "message": "Remove assignment to unused variable `last_err`"
+          },
+          "location": {
+            "column": 17,
+            "row": 472
+          },
+          "message": "Local variable `last_err` is assigned to but never used",
+          "noqa_row": 472,
+          "url": "https://docs.astral.sh/ruff/rules/unused-variable"
+        },
+        {
+          "cell": null,
+          "code": "B904",
+          "end_location": {
+            "column": 76,
+            "row": 480
+          },
+          "filename": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-model-sections-20261007\\backend\\app\\infrastructure\\llm\\gemini.py",
+          "fix": null,
+          "location": {
+            "column": 21,
+            "row": 480
+          },
+          "message": "Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling",
+          "noqa_row": 480,
+          "url": "https://docs.astral.sh/ruff/rules/raise-without-from-inside-except"
+        },
+        {
+          "cell": null,
+          "code": "B904",
+          "end_location": {
+            "column": 76,
+            "row": 494
+          },
+          "filename": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-model-sections-20261007\\backend\\app\\infrastructure\\llm\\gemini.py",
+          "fix": null,
+          "location": {
+            "column": 21,
+            "row": 494
+          },
+          "message": "Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling",
+          "noqa_row": 494,
+          "url": "https://docs.astral.sh/ruff/rules/raise-without-from-inside-except"
+        },
+        {
+          "cell": null,
+          "code": "UP006",
+          "end_location": {
+            "column": 23,
+            "row": 498
+          },
+          "filename": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-model-sections-20261007\\backend\\app\\infrastructure\\llm\\gemini.py",
+          "fix": {
+            "applicability": "safe",
+            "edits": [
+              {
+                "content": "list",
+                "end_location": {
+                  "column": 23,
+                  "row": 498
+                },
+                "location": {
+                  "column": 19,
+                  "row": 498
+                }
+              }
+            ],
+            "message": "Replace with `list`"
+          },
+          "location": {
+            "column": 19,
+            "row": 498
+          },
+          "message": "Use `list` instead of `List` for type annotation",
+          "noqa_row": 498,
+          "url": "https://docs.astral.sh/ruff/rules/non-pep585-annotation"
+        },
+        {
+          "cell": null,
+          "code": "UP007",
+          "end_location": {
+            "column": 37,
+            "row": 499
+          },
+          "filename": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-model-sections-20261007\\backend\\app\\infrastructure\\llm\\gemini.py",
+          "fix": {
+            "applicability": "safe",
+            "edits": [
+              {
+                "content": "str | None",
+                "end_location": {
+                  "column": 37,
+                  "row": 499
+                },
+                "location": {
+                  "column": 24,
+                  "row": 499
+                }
+              }
+            ],
+            "message": "Convert to `X | Y`"
+          },
+          "location": {
+            "column": 24,
+            "row": 499
+          },
+          "message": "Use `X | Y` for type annotations",
+          "noqa_row": 499,
+          "url": "https://docs.astral.sh/ruff/rules/non-pep604-annotation"
+        },
+        {
+          "cell": null,
+          "code": "UP007",
+          "end_location": {
+            "column": 36,
+            "row": 500
+          },
+          "filename": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-model-sections-20261007\\backend\\app\\infrastructure\\llm\\gemini.py",
+          "fix": {
+            "applicability": "safe",
+            "edits": [
+              {
+                "content": "List[dict] | None",
+                "end_location": {
+                  "column": 36,
+                  "row": 500
+                },
+                "location": {
+                  "column": 16,
+                  "row": 500
+                }
+              }
+            ],
+            "message": "Convert to `X | Y`"
+          },
+          "location": {
+            "column": 16,
+            "row": 500
+          },
+          "message": "Use `X | Y` for type annotations",
+          "noqa_row": 500,
+          "url": "https://docs.astral.sh/ruff/rules/non-pep604-annotation"
+        },
+        {
+          "cell": null,
+          "code": "UP006",
+          "end_location": {
+            "column": 29,
+            "row": 500
+          },
+          "filename": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-model-sections-20261007\\backend\\app\\infrastructure\\llm\\gemini.py",
+          "fix": {
+            "applicability": "safe",
+            "edits": [
+              {
+                "content": "list",
+                "end_location": {
+                  "column": 29,
+                  "row": 500
+                },
+                "location": {
+                  "column": 25,
+                  "row": 500
+                }
+              }
+            ],
+            "message": "Replace with `list`"
+          },
+          "location": {
+            "column": 25,
+            "row": 500
+          },
+          "message": "Use `list` instead of `List` for type annotation",
+          "noqa_row": 500,
+          "url": "https://docs.astral.sh/ruff/rules/non-pep585-annotation"
+        },
+        {
+          "cell": null,
+          "code": "UP007",
+          "end_location": {
+            "column": 37,
+            "row": 502
+          },
+          "filename": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-model-sections-20261007\\backend\\app\\infrastructure\\llm\\gemini.py",
+          "fix": {
+            "applicability": "safe",
+            "edits": [
+              {
+                "content": "float | None",
+                "end_location": {
+                  "column": 37,
+                  "row": 502
+                },
+                "location": {
+                  "column": 22,
+                  "row": 502
+                }
+              }
+            ],
+            "message": "Convert to `X | Y`"
+          },
+          "location": {
+            "column": 22,
+            "row": 502
+          },
+          "message": "Use `X | Y` for type annotations",
+          "noqa_row": 502,
+          "url": "https://docs.astral.sh/ruff/rules/non-pep604-annotation"
+        },
+        {
+          "cell": null,
+          "code": "UP007",
+          "end_location": {
+            "column": 34,
+            "row": 503
+          },
+          "filename": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-model-sections-20261007\\backend\\app\\infrastructure\\llm\\gemini.py",
+          "fix": {
+            "applicability": "safe",
+            "edits": [
+              {
+                "content": "int | None",
+                "end_location": {
+                  "column": 34,
+                  "row": 503
+                },
+                "location": {
+                  "column": 21,
+                  "row": 503
+                }
+              }
+            ],
+            "message": "Convert to `X | Y`"
+          },
+          "location": {
+            "column": 21,
+            "row": 503
+          },
+          "message": "Use `X | Y` for type annotations",
+          "noqa_row": 503,
+          "url": "https://docs.astral.sh/ruff/rules/non-pep604-annotation"
+        },
+        {
+          "cell": null,
+          "code": "UP007",
+          "end_location": {
+            "column": 48,
+            "row": 573
+          },
+          "filename": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-model-sections-20261007\\backend\\app\\infrastructure\\llm\\gemini.py",
+          "fix": {
+            "applicability": "safe",
+            "edits": [
+              {
+                "content": "str | None",
+                "end_location": {
+                  "column": 48,
+                  "row": 573
+                },
+                "location": {
+                  "column": 35,
+                  "row": 573
+                }
+              }
+            ],
+            "message": "Convert to `X | Y`"
+          },
+          "location": {
+            "column": 35,
+            "row": 573
+          },
+          "message": "Use `X | Y` for type annotations",
+          "noqa_row": 573,
+          "url": "https://docs.astral.sh/ruff/rules/non-pep604-annotation"
+        }
+      ]
+    },
+    "current": {
+      "exit_code": 1,
+      "counts": {
+        "I001": 1,
+        "UP035": 2,
+        "UP007": 11,
+        "UP006": 3,
+        "F841": 1,
+        "B904": 2
+      },
+      "diagnostics": [
+        {
+          "cell": null,
+          "code": "I001",
+          "end_location": {
+            "column": 1,
+            "row": 30
+          },
+          "filename": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-model-sections-20261007\\backend\\app\\infrastructure\\llm\\gemini.py",
+          "fix": {
+            "applicability": "safe",
+            "edits": [
+              {
+                "content": "import asyncio\nimport logging\nimport os\nfrom contextlib import aclosing\nfrom typing import AsyncIterator, List, Optional\n\nfrom app.domain.interfaces.llm_provider import LLMProvider\nfrom app.domain.models.conversation import Message, MessageRole\nfrom app.infrastructure.llm.request_profile import record_traditional_request\nfrom app.infrastructure.llm.streaming import (\n    LLMStreamStalled,\n    close_stream,\n    execute_tool_call,\n    stream_with_timeout,\n)\nfrom app.utils.resilience import CircuitBreaker, CircuitOpenError\n\n",
+                "end_location": {
+                  "column": 1,
+                  "row": 30
+                },
+                "location": {
+                  "column": 1,
+                  "row": 15
+                }
+              }
+            ],
+            "message": "Organize imports"
+          },
+          "location": {
+            "column": 1,
+            "row": 15
+          },
+          "message": "Import block is un-sorted or un-formatted",
+          "noqa_row": 15,
+          "url": "https://docs.astral.sh/ruff/rules/unsorted-imports"
+        },
+        {
+          "cell": null,
+          "code": "UP035",
+          "end_location": {
+            "column": 49,
+            "row": 19
+          },
+          "filename": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-model-sections-20261007\\backend\\app\\infrastructure\\llm\\gemini.py",
+          "fix": {
+            "applicability": "safe",
+            "edits": [
+              {
+                "content": "from typing import List, Optional\nfrom collections.abc import AsyncIterator",
+                "end_location": {
+                  "column": 49,
+                  "row": 19
+                },
+                "location": {
+                  "column": 1,
+                  "row": 19
+                }
+              }
+            ],
+            "message": "Import from `collections.abc`"
+          },
+          "location": {
+            "column": 1,
+            "row": 19
+          },
+          "message": "Import from `collections.abc` instead: `AsyncIterator`",
+          "noqa_row": 19,
+          "url": "https://docs.astral.sh/ruff/rules/deprecated-import"
+        },
+        {
+          "cell": null,
+          "code": "UP035",
+          "end_location": {
+            "column": 49,
+            "row": 19
+          },
+          "filename": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-model-sections-20261007\\backend\\app\\infrastructure\\llm\\gemini.py",
+          "fix": null,
+          "location": {
+            "column": 1,
+            "row": 19
+          },
+          "message": "`typing.List` is deprecated, use `list` instead",
+          "noqa_row": 19,
+          "url": "https://docs.astral.sh/ruff/rules/deprecated-import"
+        },
+        {
+          "cell": null,
+          "code": "UP007",
+          "end_location": {
+            "column": 45,
+            "row": 114
+          },
+          "filename": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-model-sections-20261007\\backend\\app\\infrastructure\\llm\\gemini.py",
+          "fix": {
+            "applicability": "safe",
+            "edits": [
+              {
+                "content": "int | None",
+                "end_location": {
+                  "column": 45,
+                  "row": 114
+                },
+                "location": {
+                  "column": 32,
+                  "row": 114
+                }
+              }
+            ],
+            "message": "Convert to `X | Y`"
+          },
+          "location": {
+            "column": 32,
+            "row": 114
+          },
+          "message": "Use `X | Y` for type annotations",
+          "noqa_row": 114,
+          "url": "https://docs.astral.sh/ruff/rules/non-pep604-annotation"
+        },
+        {
+          "cell": null,
+          "code": "UP007",
+          "end_location": {
+            "column": 79,
+            "row": 233
+          },
+          "filename": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-model-sections-20261007\\backend\\app\\infrastructure\\llm\\gemini.py",
+          "fix": {
+            "applicability": "safe",
+            "edits": [
+              {
+                "content": "int | None",
+                "end_location": {
+                  "column": 79,
+                  "row": 233
+                },
+                "location": {
+                  "column": 66,
+                  "row": 233
+                }
+              }
+            ],
+            "message": "Convert to `X | Y`"
+          },
+          "location": {
+            "column": 66,
+            "row": 233
+          },
+          "message": "Use `X | Y` for type annotations",
+          "noqa_row": 233,
+          "url": "https://docs.astral.sh/ruff/rules/non-pep604-annotation"
+        },
+        {
+          "cell": null,
+          "code": "UP007",
+          "end_location": {
+            "column": 56,
+            "row": 269
+          },
+          "filename": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-model-sections-20261007\\backend\\app\\infrastructure\\llm\\gemini.py",
+          "fix": {
+            "applicability": "safe",
+            "edits": [
+              {
+                "content": "int | None",
+                "end_location": {
+                  "column": 56,
+                  "row": 269
+                },
+                "location": {
+                  "column": 43,
+                  "row": 269
+                }
+              }
+            ],
+            "message": "Convert to `X | Y`"
+          },
+          "location": {
+            "column": 43,
+            "row": 269
+          },
+          "message": "Use `X | Y` for type annotations",
+          "noqa_row": 269,
+          "url": "https://docs.astral.sh/ruff/rules/non-pep604-annotation"
+        },
+        {
+          "cell": null,
+          "code": "UP006",
+          "end_location": {
+            "column": 23,
+            "row": 315
+          },
+          "filename": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-model-sections-20261007\\backend\\app\\infrastructure\\llm\\gemini.py",
+          "fix": {
+            "applicability": "safe",
+            "edits": [
+              {
+                "content": "list",
+                "end_location": {
+                  "column": 23,
+                  "row": 315
+                },
+                "location": {
+                  "column": 19,
+                  "row": 315
+                }
+              }
+            ],
+            "message": "Replace with `list`"
+          },
+          "location": {
+            "column": 19,
+            "row": 315
+          },
+          "message": "Use `list` instead of `List` for type annotation",
+          "noqa_row": 315,
+          "url": "https://docs.astral.sh/ruff/rules/non-pep585-annotation"
+        },
+        {
+          "cell": null,
+          "code": "UP007",
+          "end_location": {
+            "column": 37,
+            "row": 316
+          },
+          "filename": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-model-sections-20261007\\backend\\app\\infrastructure\\llm\\gemini.py",
+          "fix": {
+            "applicability": "safe",
+            "edits": [
+              {
+                "content": "str | None",
+                "end_location": {
+                  "column": 37,
+                  "row": 316
+                },
+                "location": {
+                  "column": 24,
+                  "row": 316
+                }
+              }
+            ],
+            "message": "Convert to `X | Y`"
+          },
+          "location": {
+            "column": 24,
+            "row": 316
+          },
+          "message": "Use `X | Y` for type annotations",
+          "noqa_row": 316,
+          "url": "https://docs.astral.sh/ruff/rules/non-pep604-annotation"
+        },
+        {
+          "cell": null,
+          "code": "UP007",
+          "end_location": {
+            "column": 37,
+            "row": 317
+          },
+          "filename": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-model-sections-20261007\\backend\\app\\infrastructure\\llm\\gemini.py",
+          "fix": {
+            "applicability": "safe",
+            "edits": [
+              {
+                "content": "float | None",
+                "end_location": {
+                  "column": 37,
+                  "row": 317
+                },
+                "location": {
+                  "column": 22,
+                  "row": 317
+                }
+              }
+            ],
+            "message": "Convert to `X | Y`"
+          },
+          "location": {
+            "column": 22,
+            "row": 317
+          },
+          "message": "Use `X | Y` for type annotations",
+          "noqa_row": 317,
+          "url": "https://docs.astral.sh/ruff/rules/non-pep604-annotation"
+        },
+        {
+          "cell": null,
+          "code": "UP007",
+          "end_location": {
+            "column": 34,
+            "row": 318
+          },
+          "filename": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-model-sections-20261007\\backend\\app\\infrastructure\\llm\\gemini.py",
+          "fix": {
+            "applicability": "safe",
+            "edits": [
+              {
+                "content": "int | None",
+                "end_location": {
+                  "column": 34,
+                  "row": 318
+                },
+                "location": {
+                  "column": 21,
+                  "row": 318
+                }
+              }
+            ],
+            "message": "Convert to `X | Y`"
+          },
+          "location": {
+            "column": 21,
+            "row": 318
+          },
+          "message": "Use `X | Y` for type annotations",
+          "noqa_row": 318,
+          "url": "https://docs.astral.sh/ruff/rules/non-pep604-annotation"
+        },
+        {
+          "cell": null,
+          "code": "F841",
+          "end_location": {
+            "column": 25,
+            "row": 472
+          },
+          "filename": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-model-sections-20261007\\backend\\app\\infrastructure\\llm\\gemini.py",
+          "fix": {
+            "applicability": "unsafe",
+            "edits": [
+              {
+                "content": "",
+                "end_location": {
+                  "column": 1,
+                  "row": 473
+                },
+                "location": {
+                  "column": 1,
+                  "row": 472
+                }
+              }
+            ],
+            "message": "Remove assignment to unused variable `last_err`"
+          },
+          "location": {
+            "column": 17,
+            "row": 472
+          },
+          "message": "Local variable `last_err` is assigned to but never used",
+          "noqa_row": 472,
+          "url": "https://docs.astral.sh/ruff/rules/unused-variable"
+        },
+        {
+          "cell": null,
+          "code": "B904",
+          "end_location": {
+            "column": 76,
+            "row": 480
+          },
+          "filename": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-model-sections-20261007\\backend\\app\\infrastructure\\llm\\gemini.py",
+          "fix": null,
+          "location": {
+            "column": 21,
+            "row": 480
+          },
+          "message": "Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling",
+          "noqa_row": 480,
+          "url": "https://docs.astral.sh/ruff/rules/raise-without-from-inside-except"
+        },
+        {
+          "cell": null,
+          "code": "B904",
+          "end_location": {
+            "column": 76,
+            "row": 494
+          },
+          "filename": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-model-sections-20261007\\backend\\app\\infrastructure\\llm\\gemini.py",
+          "fix": null,
+          "location": {
+            "column": 21,
+            "row": 494
+          },
+          "message": "Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling",
+          "noqa_row": 494,
+          "url": "https://docs.astral.sh/ruff/rules/raise-without-from-inside-except"
+        },
+        {
+          "cell": null,
+          "code": "UP006",
+          "end_location": {
+            "column": 23,
+            "row": 498
+          },
+          "filename": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-model-sections-20261007\\backend\\app\\infrastructure\\llm\\gemini.py",
+          "fix": {
+            "applicability": "safe",
+            "edits": [
+              {
+                "content": "list",
+                "end_location": {
+                  "column": 23,
+                  "row": 498
+                },
+                "location": {
+                  "column": 19,
+                  "row": 498
+                }
+              }
+            ],
+            "message": "Replace with `list`"
+          },
+          "location": {
+            "column": 19,
+            "row": 498
+          },
+          "message": "Use `list` instead of `List` for type annotation",
+          "noqa_row": 498,
+          "url": "https://docs.astral.sh/ruff/rules/non-pep585-annotation"
+        },
+        {
+          "cell": null,
+          "code": "UP007",
+          "end_location": {
+            "column": 37,
+            "row": 499
+          },
+          "filename": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-model-sections-20261007\\backend\\app\\infrastructure\\llm\\gemini.py",
+          "fix": {
+            "applicability": "safe",
+            "edits": [
+              {
+                "content": "str | None",
+                "end_location": {
+                  "column": 37,
+                  "row": 499
+                },
+                "location": {
+                  "column": 24,
+                  "row": 499
+                }
+              }
+            ],
+            "message": "Convert to `X | Y`"
+          },
+          "location": {
+            "column": 24,
+            "row": 499
+          },
+          "message": "Use `X | Y` for type annotations",
+          "noqa_row": 499,
+          "url": "https://docs.astral.sh/ruff/rules/non-pep604-annotation"
+        },
+        {
+          "cell": null,
+          "code": "UP007",
+          "end_location": {
+            "column": 36,
+            "row": 500
+          },
+          "filename": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-model-sections-20261007\\backend\\app\\infrastructure\\llm\\gemini.py",
+          "fix": {
+            "applicability": "safe",
+            "edits": [
+              {
+                "content": "List[dict] | None",
+                "end_location": {
+                  "column": 36,
+                  "row": 500
+                },
+                "location": {
+                  "column": 16,
+                  "row": 500
+                }
+              }
+            ],
+            "message": "Convert to `X | Y`"
+          },
+          "location": {
+            "column": 16,
+            "row": 500
+          },
+          "message": "Use `X | Y` for type annotations",
+          "noqa_row": 500,
+          "url": "https://docs.astral.sh/ruff/rules/non-pep604-annotation"
+        },
+        {
+          "cell": null,
+          "code": "UP006",
+          "end_location": {
+            "column": 29,
+            "row": 500
+          },
+          "filename": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-model-sections-20261007\\backend\\app\\infrastructure\\llm\\gemini.py",
+          "fix": {
+            "applicability": "safe",
+            "edits": [
+              {
+                "content": "list",
+                "end_location": {
+                  "column": 29,
+                  "row": 500
+                },
+                "location": {
+                  "column": 25,
+                  "row": 500
+                }
+              }
+            ],
+            "message": "Replace with `list`"
+          },
+          "location": {
+            "column": 25,
+            "row": 500
+          },
+          "message": "Use `list` instead of `List` for type annotation",
+          "noqa_row": 500,
+          "url": "https://docs.astral.sh/ruff/rules/non-pep585-annotation"
+        },
+        {
+          "cell": null,
+          "code": "UP007",
+          "end_location": {
+            "column": 37,
+            "row": 502
+          },
+          "filename": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-model-sections-20261007\\backend\\app\\infrastructure\\llm\\gemini.py",
+          "fix": {
+            "applicability": "safe",
+            "edits": [
+              {
+                "content": "float | None",
+                "end_location": {
+                  "column": 37,
+                  "row": 502
+                },
+                "location": {
+                  "column": 22,
+                  "row": 502
+                }
+              }
+            ],
+            "message": "Convert to `X | Y`"
+          },
+          "location": {
+            "column": 22,
+            "row": 502
+          },
+          "message": "Use `X | Y` for type annotations",
+          "noqa_row": 502,
+          "url": "https://docs.astral.sh/ruff/rules/non-pep604-annotation"
+        },
+        {
+          "cell": null,
+          "code": "UP007",
+          "end_location": {
+            "column": 34,
+            "row": 503
+          },
+          "filename": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-model-sections-20261007\\backend\\app\\infrastructure\\llm\\gemini.py",
+          "fix": {
+            "applicability": "safe",
+            "edits": [
+              {
+                "content": "int | None",
+                "end_location": {
+                  "column": 34,
+                  "row": 503
+                },
+                "location": {
+                  "column": 21,
+                  "row": 503
+                }
+              }
+            ],
+            "message": "Convert to `X | Y`"
+          },
+          "location": {
+            "column": 21,
+            "row": 503
+          },
+          "message": "Use `X | Y` for type annotations",
+          "noqa_row": 503,
+          "url": "https://docs.astral.sh/ruff/rules/non-pep604-annotation"
+        },
+        {
+          "cell": null,
+          "code": "UP007",
+          "end_location": {
+            "column": 48,
+            "row": 575
+          },
+          "filename": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-model-sections-20261007\\backend\\app\\infrastructure\\llm\\gemini.py",
+          "fix": {
+            "applicability": "safe",
+            "edits": [
+              {
+                "content": "str | None",
+                "end_location": {
+                  "column": 48,
+                  "row": 575
+                },
+                "location": {
+                  "column": 35,
+                  "row": 575
+                }
+              }
+            ],
+            "message": "Convert to `X | Y`"
+          },
+          "location": {
+            "column": 35,
+            "row": 575
+          },
+          "message": "Use `X | Y` for type annotations",
+          "noqa_row": 575,
+          "url": "https://docs.astral.sh/ruff/rules/non-pep604-annotation"
+        }
+      ]
+    }
+  },
+  "backend/tests/unit/test_gemini_tools.py": {
+    "base": {
+      "exit_code": 1,
+      "counts": {
+        "I001": 1
+      },
+      "diagnostics": [
+        {
+          "cell": null,
+          "code": "I001",
+          "end_location": {
+            "column": 1,
+            "row": 22
+          },
+          "filename": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-model-sections-20261007\\backend\\tests\\unit\\test_gemini_tools.py",
+          "fix": {
+            "applicability": "safe",
+            "edits": [
+              {
+                "content": "from __future__ import annotations\n\nimport asyncio\nfrom types import SimpleNamespace\n\nimport pytest\n\nfrom app.domain.models.conversation import Message, MessageRole\nfrom app.domain.services.voice_pipeline.action_tools import ACTION_SEND_EMAIL\nfrom app.domain.services.voice_pipeline.knowledge_tool import KNOWLEDGE_TOOL_SPEC\nfrom app.infrastructure.llm.gemini import GeminiLLMProvider\n\n\n",
+                "end_location": {
+                  "column": 1,
+                  "row": 22
+                },
+                "location": {
+                  "column": 1,
+                  "row": 9
+                }
+              }
+            ],
+            "message": "Organize imports"
+          },
+          "location": {
+            "column": 1,
+            "row": 9
+          },
+          "message": "Import block is un-sorted or un-formatted",
+          "noqa_row": 9,
+          "url": "https://docs.astral.sh/ruff/rules/unsorted-imports"
+        }
+      ]
+    },
+    "current": {
+      "exit_code": 1,
+      "counts": {
+        "I001": 1
+      },
+      "diagnostics": [
+        {
+          "cell": null,
+          "code": "I001",
+          "end_location": {
+            "column": 1,
+            "row": 22
+          },
+          "filename": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-model-sections-20261007\\backend\\tests\\unit\\test_gemini_tools.py",
+          "fix": {
+            "applicability": "safe",
+            "edits": [
+              {
+                "content": "from __future__ import annotations\n\nimport asyncio\nfrom types import SimpleNamespace\n\nimport pytest\n\nfrom app.domain.models.conversation import Message, MessageRole\nfrom app.domain.services.voice_pipeline.action_tools import ACTION_SEND_EMAIL\nfrom app.domain.services.voice_pipeline.knowledge_tool import KNOWLEDGE_TOOL_SPEC\nfrom app.infrastructure.llm.gemini import GeminiLLMProvider\n\n\n",
+                "end_location": {
+                  "column": 1,
+                  "row": 22
+                },
+                "location": {
+                  "column": 1,
+                  "row": 9
+                }
+              }
+            ],
+            "message": "Organize imports"
+          },
+          "location": {
+            "column": 1,
+            "row": 9
+          },
+          "message": "Import block is un-sorted or un-formatted",
+          "noqa_row": 9,
+          "url": "https://docs.astral.sh/ruff/rules/unsorted-imports"
+        }
+      ]
+    }
+  }
+}

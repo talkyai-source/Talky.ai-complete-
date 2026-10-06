@@ -1,0 +1,66 @@
+{
+  "source_head": "f44af7d6fb6e6b10133fb631b21f10f1693e63d3",
+  "source_before": {
+    "backend/tests/unit/test_gemini_tools.py": "091756e67cbb5b9491ab93ce943dbf2ec83f9d0f7884686ab0e724a69394d884",
+    "backend/tests/unit/test_gemini_llm.py": "98f1299794bd89bd85053fbfa06b7fe32bdd811d8a95ee94a206aab641b97a58",
+    "backend/tests/unit/test_llm_tool_continuation.py": "46dd15a6f0491f42d7e474cb93cc786dba5b9e0b4f32445ee8e982d8339857b1",
+    "backend/tests/unit/test_traditional_llm_wire_profile.py": "99a99d88455f3260156dad07808564df20c2c1301634d907ad57b9ca3a32beb4",
+    "backend/app/infrastructure/llm/gemini.py": "7dd132039df02ad1c80e63e6c74e46c0377223ea6e2d12536716eb806bd5856e",
+    "backend/app/infrastructure/llm/streaming.py": "b52aadb57c97bf3bf93376734d5c099e02252d8789c7faa8c6ebd8a76d6c22ab",
+    "backend/app/infrastructure/llm/groq.py": "2d781583518715adbe69445385cb0deee0e3e494b926d283c748120b92fca6ea",
+    "backend/app/infrastructure/llm/openai.py": "37cc14e7248f1a44532ba3c86ef683bbb341bbc6ff8673cb6d951c62f29fb8b3",
+    "backend/app/infrastructure/llm/cerebras.py": "f11eea82043ace50642c75f5aacf2186fcd0d44e3f9a3013cae150872407e68f",
+    "backend/app/domain/services/voice_pipeline/knowledge_tool.py": "3b3de3bd2e1a0d4196c1cccf4f4dcca358c3f9f3e7eeecd5c66a68a14ab50e61",
+    "backend/app/services/scripts/knowledge/sections.py": "4ba281a6de5c8cc70693e065888058932a7ed615485d0d8e04047ab838870a5b",
+    "backend/app/services/scripts/prompts/prompt_safety.py": "b1ab27a650569490b2cf16ba2a7806032f273e4f2f7aab5caf5ab526d10b314d",
+    "backend/app/domain/models/conversation.py": "ab9a751051380ea79890c88fca680f7cc2fe918840c532242687dbd73b97a7d0",
+    "backend/pytest.ini": "1ddb81768fae0fd87c91f5dbf36820f743da709ff6956f37697b9a4db10909d4",
+    "backend/requirements.txt": "2564e9ed1f871f5597bba5830149cfdfab706ac27c5215263b20377bad6f9915",
+    "docs/sessions/artifacts/ag02-gemini-sections/unit_probe.py": "5a7800d9831e3f324958e99643913c3fe88bf82d29d3bf7806ae0a99be3daed6"
+  },
+  "python": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\backend\\.venv\\Scripts\\python.exe",
+  "python_version": "3.12.12 (main, Dec  9 2025, 19:02:55) [MSC v.1944 64 bit (AMD64)]",
+  "environment": {
+    "PYTHONPATH": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-model-sections-20261007\\backend",
+    "PYTHONUTF8": "1",
+    "PYTHONDONTWRITEBYTECODE": "1"
+  },
+  "installed_versions": {
+    "pytest": "7.4.4",
+    "pytest-asyncio": "0.23.3",
+    "pydantic": "2.12.5",
+    "fastapi": "0.139.0",
+    "groq": "0.37.0"
+  },
+  "pytest_argv": [
+    "tests/unit/test_gemini_tools.py",
+    "tests/unit/test_gemini_llm.py",
+    "tests/unit/test_llm_tool_continuation.py",
+    "tests/unit/test_traditional_llm_wire_profile.py",
+    "-q",
+    "--tb=short",
+    "--disable-warnings"
+  ],
+  "exit_code": 0,
+  "source_after": {
+    "backend/tests/unit/test_gemini_tools.py": "091756e67cbb5b9491ab93ce943dbf2ec83f9d0f7884686ab0e724a69394d884",
+    "backend/tests/unit/test_gemini_llm.py": "98f1299794bd89bd85053fbfa06b7fe32bdd811d8a95ee94a206aab641b97a58",
+    "backend/tests/unit/test_llm_tool_continuation.py": "46dd15a6f0491f42d7e474cb93cc786dba5b9e0b4f32445ee8e982d8339857b1",
+    "backend/tests/unit/test_traditional_llm_wire_profile.py": "99a99d88455f3260156dad07808564df20c2c1301634d907ad57b9ca3a32beb4",
+    "backend/app/infrastructure/llm/gemini.py": "7dd132039df02ad1c80e63e6c74e46c0377223ea6e2d12536716eb806bd5856e",
+    "backend/app/infrastructure/llm/streaming.py": "b52aadb57c97bf3bf93376734d5c099e02252d8789c7faa8c6ebd8a76d6c22ab",
+    "backend/app/infrastructure/llm/groq.py": "2d781583518715adbe69445385cb0deee0e3e494b926d283c748120b92fca6ea",
+    "backend/app/infrastructure/llm/openai.py": "37cc14e7248f1a44532ba3c86ef683bbb341bbc6ff8673cb6d951c62f29fb8b3",
+    "backend/app/infrastructure/llm/cerebras.py": "f11eea82043ace50642c75f5aacf2186fcd0d44e3f9a3013cae150872407e68f",
+    "backend/app/domain/services/voice_pipeline/knowledge_tool.py": "3b3de3bd2e1a0d4196c1cccf4f4dcca358c3f9f3e7eeecd5c66a68a14ab50e61",
+    "backend/app/services/scripts/knowledge/sections.py": "4ba281a6de5c8cc70693e065888058932a7ed615485d0d8e04047ab838870a5b",
+    "backend/app/services/scripts/prompts/prompt_safety.py": "b1ab27a650569490b2cf16ba2a7806032f273e4f2f7aab5caf5ab526d10b314d",
+    "backend/app/domain/models/conversation.py": "ab9a751051380ea79890c88fca680f7cc2fe918840c532242687dbd73b97a7d0",
+    "backend/pytest.ini": "1ddb81768fae0fd87c91f5dbf36820f743da709ff6956f37697b9a4db10909d4",
+    "backend/requirements.txt": "2564e9ed1f871f5597bba5830149cfdfab706ac27c5215263b20377bad6f9915",
+    "docs/sessions/artifacts/ag02-gemini-sections/unit_probe.py": "5a7800d9831e3f324958e99643913c3fe88bf82d29d3bf7806ae0a99be3daed6"
+  },
+  "internal_socketpairs": 144,
+  "prohibited_attempts": 0,
+  "source_unchanged": true
+}

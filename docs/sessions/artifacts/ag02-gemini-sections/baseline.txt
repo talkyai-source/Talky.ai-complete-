@@ -1,0 +1,150 @@
+....FFFFFFFF                                                             [100%]
+================================== FAILURES ===================================
+______ test_catalog_then_read_preserves_each_rounds_native_signed_parts _______
+backend\tests\unit\test_gemini_tools.py:218: in test_catalog_then_read_preserves_each_rounds_native_signed_parts
+    assert result == ["Refunds take five working days."]
+E   AssertionError: assert [] == ['Refunds tak...orking days.']
+E     Right contains one more item: 'Refunds take five working days.'
+E     Use -v to get more diff
+_______ test_repeated_write_runs_once_across_rounds_and_stops_at_budget _______
+backend\tests\unit\test_gemini_tools.py:241: in test_repeated_write_runs_once_across_rounds_and_stops_at_budget
+    assert result == ["The request was accepted."] and calls == [(ACTION_SEND_EMAIL, {})]
+E   AssertionError: assert ([] == ['The request was accepted.']
+E     Right contains one more item: 'The request was accepted.'
+E     Use -v to get more diff)
+_____________ test_repeated_read_refreshes_evidence_after_catalog _____________
+backend\tests\unit\test_gemini_tools.py:259: in test_repeated_read_refreshes_evidence_after_catalog
+    assert calls == args
+E   AssertionError: assert [{'section_ids': ['a']}] == [{'section_id..._ids': ['a']}]
+E     Right contains 2 more items, first extra item: {'catalog_offset': 0}
+E     Use -v to get more diff
+__________ test_tool_round_budget_is_strict_even_without_tools[True] __________
+backend\tests\unit\test_gemini_tools.py:266: in test_tool_round_budget_is_strict_even_without_tools
+    _run(provider.stream_chat_with_tools([], max_tool_rounds=budget))
+backend\tests\unit\test_gemini_tools.py:66: in _run
+    return asyncio.run(_collect())
+..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\runners.py:195: in run
+    return runner.run(main)
+..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\runners.py:118: in run
+    return self._loop.run_until_complete(task)
+..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\base_events.py:691: in run_until_complete
+    return future.result()
+backend\tests\unit\test_gemini_tools.py:65: in _collect
+    return [tok async for tok in agen]
+backend\app\infrastructure\llm\gemini.py:525: in stream_chat_with_tools
+    async for tok in stream:
+backend\app\infrastructure\llm\gemini.py:685: in stream_chat_with_timeout
+    async for token in stream:
+backend\app\infrastructure\llm\streaming.py:46: in stream_with_timeout
+    token = await asyncio.wait_for(
+..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\tasks.py:520: in wait_for
+    return await fut
+backend\app\infrastructure\llm\gemini.py:339: in stream_chat
+    raise RuntimeError("Gemini client not initialized. Call initialize() first.")
+E   RuntimeError: Gemini client not initialized. Call initialize() first.
+___________ test_tool_round_budget_is_strict_even_without_tools[0] ____________
+backend\tests\unit\test_gemini_tools.py:266: in test_tool_round_budget_is_strict_even_without_tools
+    _run(provider.stream_chat_with_tools([], max_tool_rounds=budget))
+backend\tests\unit\test_gemini_tools.py:66: in _run
+    return asyncio.run(_collect())
+..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\runners.py:195: in run
+    return runner.run(main)
+..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\runners.py:118: in run
+    return self._loop.run_until_complete(task)
+..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\base_events.py:691: in run_until_complete
+    return future.result()
+backend\tests\unit\test_gemini_tools.py:65: in _collect
+    return [tok async for tok in agen]
+backend\app\infrastructure\llm\gemini.py:525: in stream_chat_with_tools
+    async for tok in stream:
+backend\app\infrastructure\llm\gemini.py:685: in stream_chat_with_timeout
+    async for token in stream:
+backend\app\infrastructure\llm\streaming.py:46: in stream_with_timeout
+    token = await asyncio.wait_for(
+..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\tasks.py:520: in wait_for
+    return await fut
+backend\app\infrastructure\llm\gemini.py:339: in stream_chat
+    raise RuntimeError("Gemini client not initialized. Call initialize() first.")
+E   RuntimeError: Gemini client not initialized. Call initialize() first.
+___________ test_tool_round_budget_is_strict_even_without_tools[4] ____________
+backend\tests\unit\test_gemini_tools.py:266: in test_tool_round_budget_is_strict_even_without_tools
+    _run(provider.stream_chat_with_tools([], max_tool_rounds=budget))
+backend\tests\unit\test_gemini_tools.py:66: in _run
+    return asyncio.run(_collect())
+..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\runners.py:195: in run
+    return runner.run(main)
+..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\runners.py:118: in run
+    return self._loop.run_until_complete(task)
+..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\base_events.py:691: in run_until_complete
+    return future.result()
+backend\tests\unit\test_gemini_tools.py:65: in _collect
+    return [tok async for tok in agen]
+backend\app\infrastructure\llm\gemini.py:525: in stream_chat_with_tools
+    async for tok in stream:
+backend\app\infrastructure\llm\gemini.py:685: in stream_chat_with_timeout
+    async for token in stream:
+backend\app\infrastructure\llm\streaming.py:46: in stream_with_timeout
+    token = await asyncio.wait_for(
+..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\tasks.py:520: in wait_for
+    return await fut
+backend\app\infrastructure\llm\gemini.py:339: in stream_chat
+    raise RuntimeError("Gemini client not initialized. Call initialize() first.")
+E   RuntimeError: Gemini client not initialized. Call initialize() first.
+___________ test_tool_round_budget_is_strict_even_without_tools[-1] ___________
+backend\tests\unit\test_gemini_tools.py:266: in test_tool_round_budget_is_strict_even_without_tools
+    _run(provider.stream_chat_with_tools([], max_tool_rounds=budget))
+backend\tests\unit\test_gemini_tools.py:66: in _run
+    return asyncio.run(_collect())
+..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\runners.py:195: in run
+    return runner.run(main)
+..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\runners.py:118: in run
+    return self._loop.run_until_complete(task)
+..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\base_events.py:691: in run_until_complete
+    return future.result()
+backend\tests\unit\test_gemini_tools.py:65: in _collect
+    return [tok async for tok in agen]
+backend\app\infrastructure\llm\gemini.py:525: in stream_chat_with_tools
+    async for tok in stream:
+backend\app\infrastructure\llm\gemini.py:685: in stream_chat_with_timeout
+    async for token in stream:
+backend\app\infrastructure\llm\streaming.py:46: in stream_with_timeout
+    token = await asyncio.wait_for(
+..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\tasks.py:520: in wait_for
+    return await fut
+backend\app\infrastructure\llm\gemini.py:339: in stream_chat
+    raise RuntimeError("Gemini client not initialized. Call initialize() first.")
+E   RuntimeError: Gemini client not initialized. Call initialize() first.
+__________ test_tool_round_budget_is_strict_even_without_tools[1.5] ___________
+backend\tests\unit\test_gemini_tools.py:266: in test_tool_round_budget_is_strict_even_without_tools
+    _run(provider.stream_chat_with_tools([], max_tool_rounds=budget))
+backend\tests\unit\test_gemini_tools.py:66: in _run
+    return asyncio.run(_collect())
+..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\runners.py:195: in run
+    return runner.run(main)
+..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\runners.py:118: in run
+    return self._loop.run_until_complete(task)
+..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\base_events.py:691: in run_until_complete
+    return future.result()
+backend\tests\unit\test_gemini_tools.py:65: in _collect
+    return [tok async for tok in agen]
+backend\app\infrastructure\llm\gemini.py:525: in stream_chat_with_tools
+    async for tok in stream:
+backend\app\infrastructure\llm\gemini.py:685: in stream_chat_with_timeout
+    async for token in stream:
+backend\app\infrastructure\llm\streaming.py:46: in stream_with_timeout
+    token = await asyncio.wait_for(
+..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\tasks.py:520: in wait_for
+    return await fut
+backend\app\infrastructure\llm\gemini.py:339: in stream_chat
+    raise RuntimeError("Gemini client not initialized. Call initialize() first.")
+E   RuntimeError: Gemini client not initialized. Call initialize() first.
+=========================== short test summary info ===========================
+FAILED backend\tests\unit\test_gemini_tools.py::test_catalog_then_read_preserves_each_rounds_native_signed_parts
+FAILED backend\tests\unit\test_gemini_tools.py::test_repeated_write_runs_once_across_rounds_and_stops_at_budget
+FAILED backend\tests\unit\test_gemini_tools.py::test_repeated_read_refreshes_evidence_after_catalog
+FAILED backend\tests\unit\test_gemini_tools.py::test_tool_round_budget_is_strict_even_without_tools[True]
+FAILED backend\tests\unit\test_gemini_tools.py::test_tool_round_budget_is_strict_even_without_tools[0]
+FAILED backend\tests\unit\test_gemini_tools.py::test_tool_round_budget_is_strict_even_without_tools[4]
+FAILED backend\tests\unit\test_gemini_tools.py::test_tool_round_budget_is_strict_even_without_tools[-1]
+FAILED backend\tests\unit\test_gemini_tools.py::test_tool_round_budget_is_strict_even_without_tools[1.5]
+8 failed, 4 passed in 10.30s
