@@ -81,13 +81,13 @@ def test_real_pinned_builder_separates_direction_and_hashes_final_prompt(mode, a
         # the agent knew nothing about the campaign: 980a2caa, 2026-09-30).
         assert "Preserve fixture-guidance exactly." in text
         assert config.system_prompt == text
-        assert config.prompt_version == "realtime@8"
+        assert config.prompt_version == "realtime@9"
         assert "caller contacted the company" in text
         for phrase in FORBIDDEN:
             assert phrase not in text
     assert config.realtime_greet_on_start == (mode == "agent_first" or action == "voicemail")
     if action == "voicemail":
-        assert ("AFTER-HOURS AI MESSAGE INTAKE" if pipeline == "cascaded" else "INBOUND after-hours AI message-intake") in config.system_prompt
+        assert ("AFTER-HOURS AI MESSAGE INTAKE" if pipeline == "cascaded" else "after-hours message intake") in config.system_prompt
 
 
 def test_legacy_caller_first_shaper_cannot_turn_inbound_into_outbound():

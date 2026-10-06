@@ -237,24 +237,9 @@ class TestResponseCleaning:
     """Test response cleaning of LLM artifacts"""
 
     def test_clean_filler_words(self):
-        """Strip canned/assistant-y openers, but KEEP natural human discourse
-        markers (Well/So/Okay/Actually) — those are the conversational fillers
-        we want spoken, not removed."""
         guardrails = LLMGuardrails()
-
-        # Canned politeness → stripped.
-        stripped = [
-            ("Sure! I'll do that.", "I'll do that."),
-            ("Sure thing! On it.", "On it."),
-            ("Of course! Happy to help.", "Happy to help."),
-        ]
-        for input_text, expected in stripped:
-            assert guardrails.clean_response(input_text) == expected, f"Failed: {input_text}"
-
-        # Natural discourse markers → preserved (reach TTS).
-        for kept in ("Well, I can help with that.", "So, let me check on that.",
-                     "Actually, that works.", "Okay, here we go."):
-            assert guardrails.clean_response(kept) == kept, f"Should keep: {kept}"
+        for text in ("Sure! I'll do that.", "Sure thing! On it.", "Of course, take your time.", "Well, let's see.", "Okay, go ahead."):
+            assert guardrails.clean_response(text) == text
 
     def test_clean_whitespace(self):
         """Test cleanup of excessive whitespace"""
@@ -265,13 +250,11 @@ class TestResponseCleaning:
 
         assert "  " not in cleaned
 
-    def test_clean_strips_parenthetical_stage_direction(self):
-        """A multi-word parenthetical aside the model narrates about itself must
-        never reach TTS (real bug: '(waiting for the number to be provided)')."""
+    def test_clean_preserves_parenthetical_qualifiers(self):
+        # A generic parenthesis matcher cannot distinguish asides from factual qualifiers.
         guardrails = LLMGuardrails()
-        out = guardrails.clean_response("It's... (waiting for the number to be provided)")
-        assert "waiting for the number" not in out
-        assert "(" not in out and ")" not in out
+        for text in ("Starter costs £19 (excluding VAT).", "Open weekdays (except public holidays)."):
+            assert guardrails.clean_response(text) == text
 
     def test_clean_keeps_numeric_parentheses(self):
         """A phone area code in parens has no 3+ letter word, so it survives."""
@@ -361,35 +344,19 @@ def guardrails():
     return LLMGuardrails()
 
 
-def test_sure_thing_is_stripped(guardrails):
-    """'Sure thing!' IS a filler opener and must be stripped; content must survive."""
-    result = guardrails.clean_response("Sure thing! Our Basic plan costs $29/month.")
-    assert not result.startswith("Sure thing"), (
-        f"'Sure thing' filler must be stripped, got: '{result}'"
-    )
-    assert "Our Basic plan costs $29/month" in result, (
-        f"Content after filler must be preserved, got: '{result}'"
-    )
+def test_sure_thing_is_preserved(guardrails):
+    text = "Sure thing! Our Basic plan costs $29/month."
+    assert guardrails.clean_response(text) == text
 
 
-def test_sure_exclamation_filler_is_stripped(guardrails):
-    """'Sure! ' followed by real content IS a filler and should be stripped."""
-    result = guardrails.clean_response("Sure! I can help you with that.")
-    assert result == "I can help you with that."
+def test_sure_exclamation_is_preserved(guardrails):
+    text = "Sure! I can help you with that."
+    assert guardrails.clean_response(text) == text
 
 
-def test_sure_comma_filler_is_stripped(guardrails):
-    """'Sure, ' followed by real content IS a filler and should be stripped.
-
-    2026-08-13: the expected value gained its capital. Stripping the filler
-    also strips the capital it was carrying, so this returned "let me check
-    that for you." — and that lowercase fragment is what every persisted
-    transcript and QA review then showed. Production turns read "take your
-    time.", "go ahead.", "what did you have in mind?". Sentence case is now
-    restored after a strip; the stripping itself is unchanged.
-    """
-    result = guardrails.clean_response("Sure, let me check that for you.")
-    assert result == "Let me check that for you."
+def test_sure_comma_is_preserved(guardrails):
+    text = "Sure, let me check that for you."
+    assert guardrails.clean_response(text) == text
 
 
 # ── Other filler patterns must still work ────────────────────────────────────
@@ -404,9 +371,9 @@ def test_natural_discourse_markers_preserved(guardrails):
     assert guardrails.clean_response("Hmm, good question.") == "Hmm, good question."
 
 
-def test_of_course_filler_stripped(guardrails):
-    result = guardrails.clean_response("Of course! Happy to help.")
-    assert result == "Happy to help."
+def test_of_course_is_preserved(guardrails):
+    text = "Of course! Happy to help."
+    assert guardrails.clean_response(text) == text
 
 
 def test_no_filler_unchanged(guardrails):

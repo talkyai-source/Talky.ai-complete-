@@ -128,6 +128,10 @@ _EXPECTED_HASHES: dict[str, str] = {
     "lead_gen@13": "2d6b540419dab373",
     "customer_support@11": "968fb986d3653107",
     "receptionist@11": "4691260c5a7819c5",
+    # Concise guide, model-owned contact dialogue, no staged scripts.
+    "lead_gen@14": "6727620cfd202e38",
+    "customer_support@12": "99594e61c35a143c",
+    "receptionist@12": "7da2fd3873eaab15",
 }
 
 

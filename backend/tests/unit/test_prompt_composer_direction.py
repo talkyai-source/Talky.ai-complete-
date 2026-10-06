@@ -5,7 +5,7 @@ These tests cover the contract that landed in Sprint A:
 * INBOUND prompts carry the canonical inbound directive at position 0.
 * OUTBOUND prompts have no inbound directive.
 * Each persona × direction produces an opener that matches the direction.
-* Few-shot examples and filler-word permission survive composition.
+* The guide permits natural wording without prescribed dialogue examples.
 * Backward-compat: positional 4-arg compose_prompt still works (existing
   tests in test_prompt_composer.py exercise this path).
 """
@@ -127,18 +127,10 @@ class TestDirectionContract:
 
 class TestPerPersonaDirectionalOpeners:
     def test_lead_gen_outbound_opener(self):
-        """Outbound lead_gen — introduce + the honest reason, not a pitch, and
-        NOT a hang-up invitation."""
-        flat = _flat(compose_prompt(
-            "lead_gen", "Alex", "Acme", LEAD_GEN_SLOTS,
-            direction="outbound",
-        ))
-        assert "Alex from Acme" in flat
-        # The reason is the disarming move; it must be instructed.
-        assert "reason" in flat.lower()
-        # A callback request may be captured, but it is not scheduling.
-        assert "preferred callback time" in flat
-        assert "confirm scheduling only after the runtime succeeds" in flat
+        flat = _flat(compose_prompt("lead_gen", "Alex", "Acme", LEAD_GEN_SLOTS, direction="outbound"))
+        assert "outbound call" in flat and LEAD_GEN_SLOTS["call_reason"] in flat
+        assert "Alex" in flat and "Acme" in flat
+        assert "Introduce" in flat and "naturally" in flat
 
     def test_the_worst_measured_opener_is_absent_from_the_whole_prompt(self):
         """THIS TEST USED TO ASSERT THE OPPOSITE.
@@ -174,49 +166,31 @@ class TestPerPersonaDirectionalOpeners:
                 )
 
     def test_lead_gen_inbound_opener(self):
-        """Carrier inbound serves the caller's enquiry, not a cold-contact opener."""
-        flat = _flat(compose_prompt(
-            "lead_gen", "Alex", "Acme", LEAD_GEN_SLOTS,
-            direction="inbound",
-        ))
-        assert "Alex from Acme" in flat
-        assert "INBOUND ENQUIRY HANDLING" in flat
+        flat = _flat(compose_prompt("lead_gen", "Alex", "Acme", LEAD_GEN_SLOTS, direction="inbound"))
+        assert "TRUE INBOUND CALL" in flat
+        assert "people who contacted Acme" in flat and "Alex" in flat
         assert LEAD_GEN_SLOTS["services_description"] in flat
         assert "You called THEM" not in flat
-        assert "do not play receptionist" not in flat.lower()
 
     def test_customer_support_inbound_opener(self):
-        flat = _flat(compose_prompt(
-            "customer_support", "Sam", "Acme", SUPPORT_SLOTS,
-            direction="inbound",
-        ))
-        assert "Thanks for calling Acme" in flat
-        assert "this is Sam" in flat
+        flat = _flat(compose_prompt("customer_support", "Sam", "Acme", SUPPORT_SLOTS, direction="inbound"))
+        assert "caller contacted Acme" in flat and "Sam" in flat
+        assert "You are calling on behalf" not in flat
 
     def test_customer_support_outbound_opener(self):
-        """Customer support callbacks need a callback-shaped opener,
-        not the inbound 'thanks for calling'."""
-        flat = _flat(compose_prompt(
-            "customer_support", "Sam", "Acme", SUPPORT_SLOTS,
-            direction="outbound",
-        ))
-        assert "calling about your recent inquiry" in flat
+        flat = _flat(compose_prompt("customer_support", "Sam", "Acme", SUPPORT_SLOTS, direction="outbound"))
+        assert "calling on behalf of Acme support" in flat
+        assert "without assuming a previous enquiry" in flat
         assert "Thanks for calling Acme" not in flat
 
     def test_receptionist_inbound_opener(self):
-        flat = _flat(compose_prompt(
-            "receptionist", "Maya", "Acme", RECEPTIONIST_SLOTS,
-            direction="inbound",
-        ))
-        assert "Thank you for calling Acme" in flat
-        assert "this is Maya" in flat
+        flat = _flat(compose_prompt("receptionist", "Maya", "Acme", RECEPTIONIST_SLOTS, direction="inbound"))
+        assert "caller contacted Acme" in flat and "Maya" in flat
+        assert "You are calling for" not in flat
 
     def test_receptionist_outbound_opener(self):
-        flat = _flat(compose_prompt(
-            "receptionist", "Maya", "Acme", RECEPTIONIST_SLOTS,
-            direction="outbound",
-        ))
-        assert "following up on your inquiry" in flat
+        flat = _flat(compose_prompt("receptionist", "Maya", "Acme", RECEPTIONIST_SLOTS, direction="outbound"))
+        assert "calling for Acme" in flat and "approved purpose" in flat
         assert "Thank you for calling Acme" not in flat
 
 
@@ -231,38 +205,20 @@ class TestFewShotAndFillers:
         ("customer_support", SUPPORT_SLOTS),
         ("receptionist", RECEPTIONIST_SLOTS),
     ])
-    def test_filler_permission_present(self, persona, slots):
-        """Models suppress disfluencies by default; the persona prompt
-        must explicitly permit natural fillers ('uh', 'let me see',
-        etc.) so the agent does not sound like a service bot."""
+    def test_natural_wording_does_not_prescribe_fillers(self, persona, slots):
         out = compose_prompt(persona, "Alex", "Acme", slots)
-        # The persona must explicitly permit natural fillers so the agent
-        # doesn't sound like a service bot. Intent-based (not a single brittle
-        # phrase): either the classic permission line OR concrete filler
-        # examples the agent can mimic.
-        assert (
-            "Use occasional fillers" in out
-            or '"got it"' in out
-            or "let me see" in out
-            or '"hmm"' in out
-            or "Sound warm and natural, using contractions" in out
-        )
+        assert "own natural" in out and "warm, clear and concise" in out
+        assert "Use occasional fillers" not in out
 
     @pytest.mark.parametrize("persona,slots", [
         ("lead_gen", LEAD_GEN_SLOTS),
         ("customer_support", SUPPORT_SLOTS),
         ("receptionist", RECEPTIONIST_SLOTS),
     ])
-    def test_few_shot_examples_present(self, persona, slots):
-        """Each persona body carries an EXAMPLES block with USER/AGENT
-        pairs — the OpenAI 2026 Realtime Prompting Guide flagged this
-        as the single biggest miss for voice agents."""
+    def test_platform_does_not_prescribe_dialogue_examples(self, persona, slots):
         out = compose_prompt(persona, "Alex", "Acme", slots)
-        assert "EXAMPLES" in out
-        # At least one USER: / AGENT: pair must be intact after slot
-        # substitution; without them the LLM has nothing to mimic.
-        assert re.search(r"USER:\s+\S", out)
-        assert re.search(r"AGENT:\s+\S", out)
+        assert "no required script or order" in out
+        assert "AGENT:" not in out and "USER:" not in out
 
 
 # ---------------------------------------------------------------------

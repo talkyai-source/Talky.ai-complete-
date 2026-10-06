@@ -35,27 +35,11 @@ def test_no_blocks_no_slots_returns_base_unchanged():
 
 
 def test_empty_state_adds_no_captured_header():
-    """An empty CallState has no CAPTURED facts and no pending contact item --
-    but compose_system_prompt (prompt_builder.py) unconditionally appends the
-    CALLBACK POLICY line whenever it runs at all (issue
-    inbound-callback-promises-no-record / call a5e033c7), so passing
-    ``captured_slots=CallState()`` is no longer a no-op the way an omitted
-    ``captured_slots=None`` still is (see test_no_blocks_no_slots_returns_
-    base_unchanged above, which never calls compose_system_prompt at all).
-
-    A reviewer (2026-09-24) caught this test still asserting the pre-policy
-    byte-for-byte invariant and flagged it as a new, unreported failure
-    against ``out == "BASE"``. The invariant this test actually owns -- no
-    CAPTURED header for an empty state -- still holds under both orders; it
-    is asserted here instead of the now-incorrect full-string equality. The
-    stable/cache-friendly property (BASE leads the cached order; the legacy
-    order still runs everything through one compose_system_prompt call) is
-    unaffected and reasserted explicitly.
-    """
+    """Empty state carries neutral capability data, with no invented contacts."""
     for order in (_LEGACY, _CACHED):
         out = build_turn_prompt("BASE", captured_slots=CallState(), **order)
-        assert "CAPTURED" not in out
-        assert "callback policy" in out.lower()
+        assert "CONTACT CONTEXT" in out
+        assert "callback_scheduling_available" in out.lower()
     legacy_out = build_turn_prompt("BASE", captured_slots=CallState(), **_LEGACY)
     assert legacy_out.rstrip().endswith("BASE")
     cached_out = build_turn_prompt("BASE", captured_slots=CallState(), **_CACHED)
@@ -127,7 +111,7 @@ def test_legacy_puts_live_state_and_captured_on_top():
     )
     assert (
         out.index("LIVESTATE")
-        < out.index("CAPTURED")
+        < out.index("CONTACT CONTEXT")
         < out.index("BASE")
         < out.index("ACCENT")
         < out.index("FLOOR")
@@ -170,7 +154,7 @@ def test_stable_blocks_all_precede_every_per_turn_block():
         **_CACHED,
     )
     stable_end = max(out.index(b) for b in ("BASE", "ENDSESSION", "TAGS", "ACCENT"))
-    volatile_start = min(out.index(b) for b in ("ASKAI", "KB", "CAPTURED", "LIVESTATE"))
+    volatile_start = min(out.index(b) for b in ("ASKAI", "KB", "CONTACT CONTEXT", "LIVESTATE"))
     assert stable_end < volatile_start
 
 
@@ -186,7 +170,7 @@ def test_live_state_is_the_last_per_turn_block():
         **_CACHED,
     )
     assert out.index("KB") < out.index("LIVESTATE") < out.index("FLOOR")
-    assert out.index("CAPTURED") < out.index("LIVESTATE")
+    assert out.index("CONTACT CONTEXT") < out.index("LIVESTATE")
 
 
 def test_captured_facts_survive_the_move():
@@ -196,9 +180,9 @@ def test_captured_facts_survive_the_move():
         captured_slots=CallState(email="bob@acme.com", email_confirmed=True),
         **_CACHED,
     )
-    assert "CAPTURED" in out
+    assert "CONTACT CONTEXT" in out
     assert "bob@acme.com" in out
-    assert out.index("BASE") < out.index("CAPTURED")
+    assert out.index("BASE") < out.index("CONTACT CONTEXT")
 
 
 def test_the_two_orders_contain_exactly_the_same_blocks():
@@ -217,7 +201,7 @@ def test_the_two_orders_contain_exactly_the_same_blocks():
     legacy = build_turn_prompt("BASE", **kwargs, **_LEGACY)
     cached = build_turn_prompt("BASE", **kwargs, **_CACHED)
     for token in ("BASE", "LIVESTATE", "ASKAI", "KB", "ENDSESSION",
-                  "TAGS", "ACCENT", "FLOOR", "CAPTURED", "bob@acme.com"):
+                  "TAGS", "ACCENT", "FLOOR", "CONTACT CONTEXT", "bob@acme.com"):
         assert token in legacy, f"{token} missing from legacy order"
         assert token in cached, f"{token} missing from cache-friendly order"
     assert sorted(legacy.split()) == sorted(cached.split())

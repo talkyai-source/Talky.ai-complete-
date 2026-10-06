@@ -513,7 +513,7 @@ class LLMGuardrails:
         Clean LLM response by removing common artifacts.
 
         Removes:
-        - Thinking patterns ("Well, ", "So, ", "Actually, ")
+        - Explicit reasoning/control artifacts
         - Hidden reasoning blocks / stray tags
         - Markdown formatting markers
         - Excessive whitespace
@@ -550,12 +550,6 @@ class LLMGuardrails:
         # "(sighs)") — wrong format on every engine, and the markdown pass below
         # would otherwise leave the bare word "laughs" to be read aloud.
         cleaned = strip_stage_directions(cleaned)
-        # Also drop parenthetical ASIDES the model narrates about itself — e.g.
-        # "(waiting for the number to be provided)" leaked to TTS in a real call.
-        # Require a 3+ letter word inside, so numeric groups like a phone area
-        # code "(077)" survive; word-containing parens are never meant to be
-        # spoken on a voice call.
-        cleaned = re.sub(r'\([^)]*[A-Za-z]{3,}[^)]*\)', ' ', cleaned)
         # Bracket audio tags ([laughs]) — keep only the ones the LIVE engine
         # performs (per-provider, default-deny). tts_model_id is the precise path;
         # preserve_audio_tags is the legacy binary fallback for callers without it.
@@ -570,83 +564,6 @@ class LLMGuardrails:
         cleaned = re.sub(r'^\s*(?:[-*+•]|\d+[.)])\s+', '', cleaned, flags=re.MULTILINE)
         cleaned = re.sub(r'\*\*\*?|\*\*?|__?|~~', '', cleaned)
         cleaned = re.sub(r'<[^>]+>', ' ', cleaned)
-
-        # Remove common filler starts.
-        # Strip ONLY the corporate / assistant-y canned openers that make an
-        # agent sound like a bot. We deliberately DO NOT strip natural human
-        # discourse markers ("Well,", "So,", "Okay,", "Alright,", "Actually,")
-        # anymore — those are exactly the conversational openers the persona now
-        # asks for. Removing them was deleting the very naturalness we want, so
-        # "So, I'm calling because..." was reaching TTS as "I'm calling
-        # because..." (the filler vanished). Keep the canned-politeness strips.
-        # Multi-word phrases must come before single-word so the longer match wins.
-        # 2026-08-13: every pattern here requires a SEPARATOR after the filler
-        # (`\s+`, or the sentence ending). "Sure thing" alone used `\s*`, which
-        # matches the empty string — so "Sure thing." stripped to a bare "."
-        # and "Sure thing. The weather today is actually quite nice." stripped
-        # to ". The weather today is actually quite nice.". Both were spoken on
-        # production calls that day.
-        #
-        # The bare "." was the worse of the two: turn_streamer drops any
-        # sentence with no speakable content, so the agent said NOTHING that
-        # turn. From the caller's side that is dead air in the middle of a
-        # conversation — the model had answered, and the answer was deleted
-        # between the LLM and the wire by a stray quantifier.
-        # Each filler must be followed by a SEPARATOR or the end of the text.
-        # `(?:\s+|$)` rather than `\s+` matters for the longest-match ordering
-        # below: with `\s+`, "Sure thing." failed the two-word pattern (no
-        # trailing space) and fell through to the one-word `^Sure` pattern,
-        # which ate "Sure " and left "thing." — the bug simply moved.
-        # Anchoring on `$` lets the longer phrase win even when it IS the whole
-        # message, and the "filler was everything" guard below then restores it.
-        filler_starts = [
-            r'^Sure thing(?:\s*[!,.])?(?:\s+|$)',
-            r'^No problem(?:\s*[!,.])?(?:\s+|$)',
-            r'^Happy to help(?:\s*[!,.])?(?:\s+|$)',
-            r'^Sure(?:\s*[!,.])?(?:\s+|$)',
-            r'^Of course(?:\s*[!,.])?(?:\s+|$)',
-            r'^Absolutely(?:\s*[!,.])?(?:\s+|$)',
-            r'^Certainly(?:\s*[!,.])?(?:\s+|$)',
-            r'^Definitely(?:\s*[!,.])?(?:\s+|$)',
-            r'^(Great[!,]\s+)',         # "Great!" or "Great," as opener only
-        ]
-
-        before_fillers = cleaned
-        for pattern in filler_starts:
-            cleaned = re.sub(pattern, '', cleaned, flags=re.IGNORECASE)
-
-        if cleaned != before_fillers:
-            # Strip punctuation orphaned by the filler removal. The em-dash case
-            # below was the known one ("Sure thing! —I'm offering..."); the same
-            # thing happens with ordinary sentence punctuation and went unhandled
-            # until it reached production as a spoken ". The weather today is
-            # actually quite nice."
-            #
-            # Generalised deliberately rather than adding "." to the dash class:
-            # the defect is not which character was left behind, it is that
-            # removing a leading phrase can leave ANY leading punctuation
-            # dangling. Gated on the text having actually changed, so a reply
-            # that legitimately opens with punctuation is untouched.
-            cleaned = re.sub(r'^[\s—–\-.,;:!?]+', '', cleaned)
-
-            # If the filler WAS the whole message, keep the original. Speaking
-            # "Sure thing." is right; speaking "." is not, and — because a
-            # sentence with no speakable content is dropped downstream — saying
-            # nothing at all is worse than either.
-            if not re.search(r'[A-Za-z0-9]', cleaned):
-                cleaned = before_fillers
-            else:
-                # Restore sentence case. The filler carried the capital, so
-                # "Sure, take your time." became "take your time." — which is
-                # what the persisted transcript and every QA review then shows.
-                # Only touches a lowercase ASCII letter, so "iPhone" or a
-                # capitalised name is never rewritten.
-                if cleaned[:1].islower():
-                    cleaned = cleaned[0].upper() + cleaned[1:]
-        else:
-            # Unchanged text: keep the original narrow dash strip so behaviour
-            # is identical for every reply that had no filler to remove.
-            cleaned = re.sub(r'^[—–\-]+\s*', '', cleaned)
 
         # Clean up whitespace
         cleaned = re.sub(r'\s+', ' ', cleaned).strip()

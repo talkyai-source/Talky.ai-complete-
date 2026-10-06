@@ -1,81 +1,14 @@
-"""Shared call-direction primitives for prompt composition.
-
-Two pieces live here so they can be referenced by both the prompt
-composer (low-level) and the telephony bridge runtime (higher-level)
-without creating an import cycle:
-
-* ``INBOUND_DIRECTIVE_SENTINEL`` — the unique header string that marks a
-  prompt as direction-aware. The runtime ``select_inbound_base_prompt``
-  uses this for idempotency: if the sentinel is already in the prompt,
-  the prompt was built inbound-aware at compose time and runtime
-  shaping is a no-op.
-* ``inbound_directive_block(...)`` — the canonical block that frames a
-  CALLER-SPEAKS-FIRST outbound call: the agent dialed the callee but waits
-  for them to speak, then leads with its own introduction + purpose. Used
-  both by ``compose_prompt`` (outbound with ``opening_mode=callee_first``) and by
-  ``select_inbound_base_prompt`` (runtime fallback for legacy / non-
-  composed prompts).
-
-Keeping the sentinel and the block here means there is exactly one
-canonical phrasing across the codebase. Tests assert downstream readers
-match this canonical wording.
-
-Historical note: the ``INBOUND_*`` names predate the realisation that
-"caller speaks first" on an OUTBOUND dialer is a turn-taking choice, NOT a
-genuine inbound call. The names are kept (composer, telemetry labels, and
-tests import them) but the directive text below is outbound-framed: the
-agent owns the call and introduces its purpose — it never plays receptionist.
-"""
+"""Call origin and first-speaker context shared by composition and runtime."""
 from __future__ import annotations
 
-
-# First line of the caller-speaks-first directive AND the idempotency
-# marker. This is the single canonical definition — the legacy
-# TELEPHONY_INBOUND_SYSTEM_PROMPT that once had to mirror it was retired
-# (2026-06-18), so nothing else needs to be kept in sync with it now.
 INBOUND_DIRECTIVE_SENTINEL = "OUTBOUND CALL — CALLEE SPEAKS FIRST"
 
 
 def inbound_directive_block(*, agent_name: str, company_name: str) -> str:
-    """Return the caller-speaks-first directive for the given agent/company.
-
-    This frames an OUTBOUND call where the campaign owner chose to let the
-    callee speak first (a brief courtesy pause before the agent talks). The
-    agent still OWNS the call — it dialed this person and has a reason for
-    calling — so after the callee says "hello" the agent introduces itself
-    and its purpose. It must NOT act as a receptionist ("how can I help
-    you?"), which would wrongly imply the callee dialed in.
-
-    Llama-style and OpenAI Realtime models weight early tokens heavily, so
-    this block is designed to land at position 0 of the system prompt — its
-    framing overrides any outbound-cold-open or receptionist phrasing that
-    might sit in the persona body below it.
-
-    OPENER BUDGET (2026-08-07). This block used to say "keep the opening to 1-2
-    short sentences" while lead_gen's STAGE 1 said "ONE breath — under twenty
-    words". Two sizes for the same turn, and THIS one both sits at position 0
-    and literally claims to override the other — so the looser number won on
-    the single turn where an 11.7s monologue got a callee to hang up. The two
-    now state the same budget in the same words.
-    """
+    """Historical name retained for caller-first outbound calls."""
     return (
-        f"{INBOUND_DIRECTIVE_SENTINEL} (this overrides any timing or "
-        "opening instructions below):\n"
-        f"- You are placing an OUTBOUND call on behalf of {company_name}. "
-        "You dialed this person — they did NOT call you. They will speak "
-        'first (usually a short "hello?"); wait for them before you say '
-        "anything.\n"
-        "- On their first words, give your opening: introduce yourself as "
-        f"{agent_name} from {company_name} and say why you're calling, in "
-        "your own natural words, following the personality and goal "
-        "described below.\n"
-        '- Do NOT answer like a receptionist. Never open with "how can I '
-        'help you?", "thanks for calling", or "you\'ve reached ..." — you '
-        "called THEM, so you lead with your reason for reaching out.\n"
-        "- If they instead open with a direct question, answer it in ONE "
-        "short sentence first, then continue.\n"
-        "- Keep the opening to one breath — under twenty words — and ask at "
-        "most one question, then stop and let them answer. After this opening "
-        "turn, follow the personality, knowledge, and rules below for the "
-        "rest of the call."
+        f"{INBOUND_DIRECTIVE_SENTINEL}\n"
+        f"You are {agent_name} for {company_name}. You dialed this person; they did not call the company. "
+        "Wait for them to speak first. Introduce yourself and the approved reason naturally if needed, "
+        "then follow their response. A direct question takes priority over an opening."
     )

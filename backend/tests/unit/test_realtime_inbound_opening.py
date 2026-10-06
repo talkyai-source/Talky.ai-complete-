@@ -103,7 +103,7 @@ def test_realtime_inbound_instructions_never_use_outbound_framing():
     assert "caller contacted the company" in text
     assert "why you're calling" not in text
     assert "Thanks for calling Acme. How can I help?" in text
-    assert "Never say or imply that you called them" in text
+    assert "You are calling on behalf" not in text
 
 
 def test_realtime_message_intake_is_conversational_not_sales_or_voicemail_claims():
@@ -117,15 +117,15 @@ def test_realtime_message_intake_is_conversational_not_sales_or_voicemail_claims
         )
     )
 
-    assert "INBOUND after-hours AI message-intake" in text
-    assert "do not sell or qualify" in text
-    assert "invite one concise message" in text
+    assert "after-hours message intake" in text
+    assert "do not turn it into sales qualification" in text
+    assert "Help take the caller's message" in text
     assert "why you're calling" not in text
 
 
 def test_realtime_outbound_opening_remains_unchanged():
     text = build_realtime_instructions(RealtimePersona())
-    assert "why you're calling" in text
+    assert "calling on behalf of the company (outbound)" in text
 
 
 def test_ai_message_intake_projects_answered_not_outbound_voicemail():
