@@ -20,6 +20,7 @@ import {
     LeadTypeSelect,
     LeadAccentIcon,
 } from "@/components/calls/call-history-workflow-controls";
+import { Select } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { getRecordingCapabilities } from "@/lib/media-permissions";
 import { useEffectivePermissions } from "@/lib/queries/inbound-queries";
@@ -1062,25 +1063,29 @@ export default function CallsPage() {
                             ))}
                         </div>
                         <label htmlFor="call-history-did-filter" className="sr-only">Filter calls by DID</label>
-                        <select
+                        <Select
                             id="call-history-did-filter"
+                            ariaLabel="Filter calls by DID"
+                            fitLongestOption
                             value={selectedDid ?? ""}
-                            onChange={(e) => { setSelectedDid(e.target.value || undefined); setPage(1); }}
-                            className="rounded-lg border border-border bg-background px-3 py-2 text-xs font-semibold text-foreground focus:outline-none focus:ring-2 focus:ring-ring/40"
+                            onChange={(next) => { setSelectedDid(next || undefined); setPage(1); }}
+                            selectClassName="h-auto rounded-lg px-3 py-2 pr-9 text-xs font-semibold"
                         >
                             <option value="">All DIDs</option>
                             {didOptions.map((did) => <option key={did} value={did}>{did}</option>)}
-                        </select>
+                        </Select>
                         <label htmlFor="call-history-campaign-filter" className="sr-only">Filter calls by inbound campaign</label>
-                        <select
+                        <Select
                             id="call-history-campaign-filter"
+                            ariaLabel="Filter calls by inbound campaign"
+                            fitLongestOption
                             value={inboundCampaignId ?? ""}
-                            onChange={(e) => { setInboundCampaignId(e.target.value || undefined); setPage(1); }}
-                            className="rounded-lg border border-border bg-background px-3 py-2 text-xs font-semibold text-foreground focus:outline-none focus:ring-2 focus:ring-ring/40"
+                            onChange={(next) => { setInboundCampaignId(next || undefined); setPage(1); }}
+                            selectClassName="h-auto rounded-lg px-3 py-2 pr-9 text-xs font-semibold"
                         >
                             <option value="">All campaigns</option>
                             {campaignOptions.map((campaign) => <option key={campaign.id} value={campaign.id}>{campaign.name}</option>)}
-                        </select>
+                        </Select>
                         </div>
                     </div>
 

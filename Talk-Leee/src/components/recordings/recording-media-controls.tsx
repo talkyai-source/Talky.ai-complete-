@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Download, Loader2, Lock, Pause, Play, Trash2 } from "lucide-react";
 
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { Select } from "@/components/ui/select";
 import { extendedApi, type Recording } from "@/lib/extended-api";
 import { isApiClientError } from "@/lib/http-client";
 
@@ -317,14 +318,15 @@ export function RecordingMediaControls({
                             className="h-1 flex-1 cursor-pointer appearance-none rounded-lg bg-foreground/15 accent-foreground"
                         />
                         <span className="w-10 text-xs tabular-nums text-foreground/70">{formatDuration(duration)}</span>
-                        <select
-                            value={rate}
-                            onChange={(event) => setRate(Number(event.target.value))}
-                            aria-label="Playback speed"
-                            className="cursor-pointer rounded-md bg-foreground/5 px-1.5 py-1 text-xs font-medium text-foreground/80 outline-none hover:bg-foreground/10"
+                        <Select
+                            value={String(rate)}
+                            onChange={(next) => setRate(Number(next))}
+                            ariaLabel="Playback speed"
+                            fitLongestOption
+                            selectClassName="h-auto cursor-pointer rounded-md border-0 bg-foreground/5 px-1.5 py-1 pr-7 text-xs font-medium text-foreground/80 shadow-none hover:bg-foreground/10"
                         >
-                            {PLAYBACK_SPEEDS.map((speed) => <option key={speed} value={speed}>{speed}×</option>)}
-                        </select>
+                            {PLAYBACK_SPEEDS.map((speed) => <option key={speed} value={speed}>{`${speed}×`}</option>)}
+                        </Select>
                     </div>
                 ) : playbackAllowed ? (
                     <span className="flex-1 text-xs text-muted-foreground">Audio loads only when you press play.</span>

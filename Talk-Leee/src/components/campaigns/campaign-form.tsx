@@ -21,6 +21,7 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select } from "@/components/ui/select";
 import { dashboardApi, PersonaType } from "@/lib/dashboard-api";
 import { guidanceBudgetStatus } from "@/lib/campaign-guidance";
 import {
@@ -1096,17 +1097,19 @@ export function CampaignForm({ mode, campaignId, initialData, afterCreateHref, d
                                         Campaign type: Outbound
                                     </span>
                                     <Label className="text-xs">Opening:</Label>
-                                    <select
+                                    <Select
+                                        ariaLabel="Preview opening mode"
+                                        fitLongestOption
                                         value={previewOpening}
-                                        onChange={(e) =>
-                                            setPreviewOpening(e.target.value as "agent_first" | "callee_first")
+                                        onChange={(next) =>
+                                            setPreviewOpening(next as "agent_first" | "callee_first")
                                         }
-                                        className="rounded border border-border bg-background px-2 py-1 text-xs"
+                                        selectClassName="h-auto rounded border-border px-2 py-1 pr-8 text-xs"
                                         disabled={previewLoading}
                                     >
                                         <option value="agent_first">Agent opens</option>
                                         <option value="callee_first">Callee says hello first</option>
-                                    </select>
+                                    </Select>
                                     <Button
                                         type="button"
                                         size="sm"

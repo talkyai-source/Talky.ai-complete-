@@ -5,6 +5,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperti
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Modal } from "@/components/ui/modal";
+import { Select } from "@/components/ui/select";
 import type { Campaign } from "@/lib/dashboard-api";
 import {
     applyCampaignFilters,
@@ -935,23 +936,23 @@ export function CampaignPerformanceTable({
                     </div>
                     <div className="flex flex-wrap items-center justify-center gap-2 sm:justify-end">
                         <div className="text-xs font-semibold text-muted-foreground">Rows</div>
-                        <select
-                            aria-label="Rows per page"
-                            value={rowsPerPage}
-                            onChange={(e) => {
-                                const v = e.target.value;
+                        <Select
+                            ariaLabel="Rows per page"
+                            fitLongestOption
+                            value={String(rowsPerPage)}
+                            onChange={(v) => {
                                 const next: RowsPerPage =
                                     v === "All" ? "All" : (Number(v) as RowsPerPage);
                                 setRowsPerPage(next);
                             }}
-                            className="h-9 rounded-md border border-input bg-background px-2 text-sm text-foreground"
+                            selectClassName="h-9 px-2 pr-9"
                         >
                             <option value={10}>10</option>
                             <option value={25}>25</option>
                             <option value={50}>50</option>
                             <option value={100}>100</option>
                             <option value="All">All</option>
-                        </select>
+                        </Select>
                         <div className="flex flex-wrap items-center justify-center gap-1">
                             <Button type="button" variant="outline" size="sm" onClick={() => setPage(1)} disabled={paged.page <= 1}>
                                 First
@@ -1153,18 +1154,18 @@ export function CampaignPerformanceTable({
                     <div className="rounded-xl border border-border bg-muted/30 p-4">
                         <div className="text-sm font-semibold text-foreground">Date range</div>
                         <div className="mt-3 grid grid-cols-1 gap-3">
-                            <select
-                                aria-label="Export date range preset"
+                            <Select
+                                ariaLabel="Export date range preset"
                                 value={exportPreset}
-                                onChange={(e) => setExportPreset(e.target.value as ExportPreset)}
-                                className="h-10 rounded-md border border-border bg-background px-2 text-sm text-foreground"
+                                onChange={(next) => setExportPreset(next as ExportPreset)}
+                                selectClassName="border-border px-2 pr-9"
                             >
                                 <option value="All Time">All Time</option>
                                 <option value="Last 7 Days">Last 7 Days</option>
                                 <option value="Last 30 Days">Last 30 Days</option>
                                 <option value="This Month">This Month</option>
                                 <option value="Custom">Custom</option>
-                            </select>
+                            </Select>
                             {exportPreset === "Custom" ? (
                                 <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                                     <div>
@@ -1410,34 +1411,36 @@ function ReportScheduleEditor({ storageKey }: { storageKey: string }) {
             <div className={cn("grid grid-cols-1 gap-3 md:grid-cols-2", !enabled ? "opacity-50" : "")} aria-disabled={!enabled}>
                 <div>
                     <label className="text-xs font-semibold text-muted-foreground">Recurrence</label>
-                    <select
+                    <Select
+                        ariaLabel="Report recurrence"
                         value={recurrence}
                         disabled={!enabled}
-                        onChange={(e) => {
-                            const v = e.target.value;
+                        onChange={(v) => {
                             if (v === "Daily" || v === "Weekly" || v === "Monthly") setRecurrence(v);
                         }}
-                        className="mt-1 h-10 w-full rounded-md border border-input bg-background px-2 text-sm text-foreground"
+                        className="mt-1"
+                        selectClassName="px-2 pr-9"
                     >
                         <option value="Daily">Daily</option>
                         <option value="Weekly">Weekly</option>
                         <option value="Monthly">Monthly</option>
-                    </select>
+                    </Select>
                 </div>
                 <div>
                     <label className="text-xs font-semibold text-muted-foreground">Delivery</label>
-                    <select
+                    <Select
+                        ariaLabel="Report delivery"
                         value={delivery}
                         disabled={!enabled}
-                        onChange={(e) => {
-                            const v = e.target.value;
+                        onChange={(v) => {
                             if (v === "Email" || v === "Webhook") setDelivery(v);
                         }}
-                        className="mt-1 h-10 w-full rounded-md border border-input bg-background px-2 text-sm text-foreground"
+                        className="mt-1"
+                        selectClassName="px-2 pr-9"
                     >
                         <option value="Email">Email</option>
                         <option value="Webhook">Webhook</option>
-                    </select>
+                    </Select>
                 </div>
                 <div>
                     <label className="text-xs font-semibold text-muted-foreground">Time</label>
