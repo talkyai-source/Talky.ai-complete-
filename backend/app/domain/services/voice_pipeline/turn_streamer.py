@@ -80,7 +80,6 @@ from app.domain.services.voice_pipeline.readback_guard import phone_readback_gua
 from app.services.scripts.prompts.live_state import build_live_state_block
 from app.domain.services.voice_pipeline.knowledge_tool import (
     KB_TOOL_NAME,
-    NO_KB_FACTS,
     knowledge_tools_for,
     run_knowledge_lookup,
     tool_system_addendum,
@@ -393,6 +392,11 @@ class TurnStreamer:
         Returns (full_response_text, llm_latency_ms, tts_latency_ms).
         """
         call_id = session.call_id
+        # Evidence authorizes only this turn. A tool-mode direct answer never
+        # enters either lookup helper, so clear previous facts before choosing
+        # a path; injection and inline prompts rebuild current grounding below.
+        session._knowledge_grounding = []
+        session._knowledge_evidence = {"status": "unavailable", "passages": []}
         barge_in_event = self._p._barge_in_events.get(call_id)
         guardrails = get_guardrails()
 
@@ -970,23 +974,29 @@ class TurnStreamer:
         t_tts_end: Optional[float] = None
 
         # Connected tool turn. Action results and KB facts share one provider
-        # round-trip, but actions use strict buffering so round-0 prose can
-        # never promise success before the tool result exists.
+        # round-trip. Buffer decision-round prose for either tool family so
+        # unverified claims cannot reach speech before the result exists.
         offered_tools = [*(kb_tools or []), *action_tools]
         if offered_tools:
             async def _voice_tool_runner(_name: str, _args: dict) -> str:
                 if _name == KB_TOOL_NAME:
                     q = (_args or {}).get("query") or last_user_text_for_limit
                     result = await run_knowledge_lookup(session, q)
-                    if result and result != NO_KB_FACTS:
-                        turn_grounding.extend(getattr(session, "_knowledge_grounding", []))
+                    evidence = getattr(session, "_knowledge_evidence", None)
+                    status = evidence.get("status") if isinstance(evidence, dict) else None
+                    if status not in ("matched", "weak_match", "no_match", "unavailable"):
+                        status = "unavailable"
+                    matched = status == "matched"
+                    # A later lookup supersedes earlier facts, including when
+                    # distinct calls arrive in the same provider decision round.
+                    turn_grounding[:] = getattr(session, "_knowledge_grounding", []) if matched else []
                     current = getattr(session, "_live_structured_state", _structured)
                     session._live_structured_state = reduce_live_state(
                         current,
                         ToolResultEvidence(
                             tool_name="knowledge_lookup",
-                            success=result != NO_KB_FACTS,
-                            code="ok" if result != NO_KB_FACTS else "no_match",
+                            success=matched,
+                            code=status,
                         ),
                     )
                     return result
@@ -1020,7 +1030,7 @@ class TurnStreamer:
                 system_prompt=system_prompt,
                 tools=offered_tools,
                 tool_runner=_voice_tool_runner,
-                require_tool_result_before_content=bool(action_tools),
+                require_tool_result_before_content=bool(action_tools or kb_tools),
                 temperature=getattr(session, "llm_temperature", None),
                 max_tokens=getattr(session, "llm_max_tokens", None),
                 # Prompt-cache routing hint (Cerebras prompt_cache_key). The
