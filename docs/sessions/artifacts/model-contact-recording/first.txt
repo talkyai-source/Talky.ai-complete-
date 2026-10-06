@@ -1,0 +1,40 @@
+........................F....F.                                          [100%]
+================================== FAILURES ===================================
+_ test_native_actual_wire_waits_for_tool_not_regex_and_returns_pending[openai] _
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\tasks.py:520: in wait_for
+    return await fut
+E   asyncio.exceptions.CancelledError
+
+The above exception was the direct cause of the following exception:
+tests\unit\test_model_contact_recording.py:262: in test_native_actual_wire_waits_for_tool_not_regex_and_returns_pending
+    await replay.step({"kind": "tool", "name": "record_contact", "arguments": args("My email is alex@example.com")})
+tests\qualification\ag04_native.py:278: in step
+    await self.drain(playback=step.get("wait", True))
+tests\qualification\ag04_native.py:208: in drain
+    await asyncio.wait_for(asyncio.gather(*self.bridge._tool_tasks), 2)
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\tasks.py:519: in wait_for
+    async with timeouts.timeout(timeout):
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\timeouts.py:115: in __aexit__
+    raise TimeoutError from exc_val
+E   TimeoutError
+------------------------------ Captured log call ------------------------------
+WARNING  app.realtime.openai:openai.py:588 realtime live-state update rejected call=ag04-synthetic-ef483f54350c488a84ea69fae3afabc3 err=invalid live structured state block
+_ test_actual_turn_runner_binds_evidence_but_does_not_parse_or_classify_contact _
+tests\unit\test_model_contact_recording.py:322: in test_actual_turn_runner_binds_evidence_but_does_not_parse_or_classify_contact
+    assert s.captured_slots.email == "alex@example.com" and not s.captured_slots.email_confirmed
+E   AssertionError: assert (None == 'alex@example.com')
+E    +  where None = CallState(email=None, email_confirmed=False, email_readback_attempts=0, phone=None, phone_confirmed=False, phone_readb...declined_count=0, contact_ask_objections=0, contact_capture_paused=False, caller_asked_question=False, line_phone=None).email
+E    +    where CallState(email=None, email_confirmed=False, email_readback_attempts=0, phone=None, phone_confirmed=False, phone_readb...declined_count=0, contact_ask_objections=0, contact_capture_paused=False, caller_asked_question=False, line_phone=None) = namespace(captured_slots=CallState(email=None, email_confirmed=False, email_readback_attempts=0, phone=None, phone_con...call_id=None, conversation_history=[], _line_phone_checked=True, _end_session_action_handled=False, _contact_turn=None).captured_slots
+------------------------------ Captured log call ------------------------------
+ERROR    app.domain.services.voice_pipeline.turn_runner:turn_runner.py:478 Turn error for call 1448dd44-949f-4514-bd8e-33f0c141b29c: 'NoneType' object has no attribute 'source'
+Traceback (most recent call last):
+  File "C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\model-contact-recording-20261007\backend\app\domain\services\voice_pipeline\turn_runner.py", line 315, in run
+    response_text, llm_latency_ms, tts_latency_ms = await self._p._stream_llm_and_tts(
+                                                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\model-contact-recording-20261007\backend\tests\unit\test_model_contact_recording.py", line 312, in stream
+    assert current._contact_turn.source.provider_item_id == "source"
+AttributeError: 'NoneType' object has no attribute 'source'
+=========================== short test summary info ===========================
+FAILED tests/unit/test_model_contact_recording.py::test_native_actual_wire_waits_for_tool_not_regex_and_returns_pending[openai]
+FAILED tests/unit/test_model_contact_recording.py::test_actual_turn_runner_binds_evidence_but_does_not_parse_or_classify_contact
+2 failed, 29 passed, 17 warnings in 5.98s

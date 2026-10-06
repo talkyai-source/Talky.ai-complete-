@@ -1,0 +1,41 @@
+{
+  "cwd": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\model-contact-recording-20261007",
+  "setup_each_run": "$env:PYTHONUTF8='1'\n$env:PYTHONDONTWRITEBYTECODE='1'\n$env:ENVIRONMENT='test'\n$env:DATABASE_URL='postgresql://test:test@127.0.0.1:1/unavailable_test'\n$env:PYTHONPATH='C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/tmp/model-contact-recording-20261007/backend'",
+  "executed": [
+    {
+      "phase": "first",
+      "shell": "& 'C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/backend/.venv/Scripts/python.exe' -B 'docs/sessions/artifacts/model-contact-recording/offline_runner.py' first *> 'docs/sessions/artifacts/model-contact-recording/first.txt'"
+    },
+    {
+      "phase": "second",
+      "shell": "& 'C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/backend/.venv/Scripts/python.exe' -B 'docs/sessions/artifacts/model-contact-recording/offline_runner.py' second *> 'docs/sessions/artifacts/model-contact-recording/second.txt'"
+    },
+    {
+      "phase": "final",
+      "shell": "& 'C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/backend/.venv/Scripts/python.exe' -B 'docs/sessions/artifacts/model-contact-recording/offline_runner.py' final *> 'docs/sessions/artifacts/model-contact-recording/final.txt'"
+    },
+    {
+      "phase": "followup",
+      "shell": "& 'C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/backend/.venv/Scripts/python.exe' -B 'docs/sessions/artifacts/model-contact-recording/followup_runner.py' followup *> 'docs/sessions/artifacts/model-contact-recording/followup.txt'"
+    }
+  ],
+  "notes": [
+    "Local Windows PowerShell; login=false. Existing venv, not an exact dependency installation.",
+    "No provider/DB command was executed. All regression invocations are offline and guarded.",
+    "Do not overwrite historical logs by rerunning these exact output paths."
+  ],
+  "verification": [
+    {
+      "shell": "& 'C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/backend/.venv/Scripts/python.exe' -m ruff check --select F --extend-ignore F401,F841 backend/app/domain/services/voice_pipeline/contact_recording.py backend/app/domain/services/voice_pipeline/lead_slot_capture.py backend/app/domain/services/voice_pipeline/turn_runner.py backend/app/domain/services/voice_pipeline/turn_ender.py backend/app/realtime/bridge.py backend/app/realtime/tools.py backend/tests/unit/test_model_contact_recording.py",
+      "observed": "All checks passed; final contact source state."
+    },
+    {
+      "shell": "& 'C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/backend/.venv/Scripts/python.exe' -m ruff check --select F --extend-ignore F401,F841 backend/app/realtime/bridge.py backend/tests/unit/test_model_contact_recording.py",
+      "observed": "All checks passed; native follow-up source state."
+    },
+    {
+      "shell": "git diff --check",
+      "observed": "Exit 0; normal CRLF normalization notices only; both final source states."
+    }
+  ]
+}
