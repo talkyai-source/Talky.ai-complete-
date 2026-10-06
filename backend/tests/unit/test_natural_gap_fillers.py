@@ -18,7 +18,6 @@ import pytest
 from app.domain.models.conversation import Message, MessageRole
 from app.domain.models.session import CallSession
 from app.domain.services.voice_pipeline_service import VoicePipelineService
-from app.services.scripts.prompts import accent_fillers as af
 from app.services.scripts.spoken_email_normalizer import natural_phone_readback
 
 # ── the filler in the real pipeline ───────────────────────────────────────

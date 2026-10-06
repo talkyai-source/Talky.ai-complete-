@@ -10,28 +10,13 @@ from datetime import datetime
 from fastapi.encoders import jsonable_encoder
 from langgraph.graph import StateGraph, END
 from langgraph.graph.message import add_messages
-from langgraph.prebuilt import ToolNode
 
 # LangChain message classes for proper LangGraph compatibility
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain_core.messages import AIMessage, ToolMessage
 
 from app.infrastructure.assistant.llm_client import get_assistant_client
 
-import asyncpg  # migrated from db_client
 
-from app.infrastructure.assistant.tools import (
-    get_dashboard_stats,
-    get_usage_info,
-    get_leads,
-    get_campaigns,
-    get_recent_calls,
-    get_actions_today,
-    send_email,
-    send_sms,
-    initiate_call,
-    start_campaign,
-    ALL_TOOLS
-)
 from app.infrastructure.assistant.tools.llm_schemas import GROQ_TOOL_SCHEMAS
 from app.infrastructure.assistant.tools.dispatch import dispatch_tool
 from app.infrastructure.assistant.model_config import normalize_model
@@ -134,7 +119,6 @@ async def agent_node(state: AgentState) -> Dict[str, Any]:
     Main agent node that processes messages and decides on tool calls.
     Uses Groq for fast inference.
     """
-    import os
     
     # Resolve the model first — it selects the vendor. `adapt` rewrites the
     # request for that vendor (token-limit param name, reasoning controls).

@@ -28,7 +28,6 @@ from app.domain.services.voice_tuning import (
 from app.services.scripts.prompts import (
     PromptCompositionError,
     compose_prompt,
-    pick_agent_name,
     pick_agent_name_for_voice,
 )
 from app.services.scripts.prompts.bodies import resolve_body_sync as resolve_pinned_body
