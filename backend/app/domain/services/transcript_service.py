@@ -412,6 +412,11 @@ class TranscriptService:
 
     def caller_source(self, call_id: str, caller_turn_order: int) -> Optional[dict]:
         """Resolve a traditional accepted order to one actual saved caller row."""
+        evidence = self.caller_evidence(call_id, caller_turn_order)
+        return evidence["source"] if evidence is not None else None
+
+    def caller_evidence(self, call_id: str, caller_turn_order: int) -> Optional[dict]:
+        """Resolve text and source together before any conversational cleanup."""
         identity = f"traditional:{caller_turn_order}"
         matches = [turn for turn in self.get_transcript_json(call_id)
                    if turn.get("role") == "user" and turn.get("is_final") is not False
@@ -422,8 +427,10 @@ class TranscriptService:
         projected = matches[0]
         if not projected.get("content") or projected.get("effective_content_status") == "unavailable":
             return None
-        return {"provider_item_id": identity, "caller_turn_order": caller_turn_order,
-                "revision_sha256": hashlib.sha256(projected["content"].encode("utf-8")).hexdigest()}
+        return {"text": projected["content"], "source": {
+            "provider_item_id": identity, "caller_turn_order": caller_turn_order,
+            "revision_sha256": hashlib.sha256(projected["content"].encode("utf-8")).hexdigest(),
+        }}
 
     def annotate_turn_revision(
         self, call_id: str, *, turn_index: int, provider_item_id: str,

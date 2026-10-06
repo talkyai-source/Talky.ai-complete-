@@ -291,16 +291,19 @@ class TurnRunner:
             session.captured_slots = CapturedSlotsState()
         from app.domain.services.voice_pipeline.contact_capture import ContactSource
         order = getattr(asyncio.current_task(), "_caller_turn_order", None)
-        source = None
+        source, source_text = None, ""
         if isinstance(order, int) and not isinstance(order, bool):
-            resolver = getattr(self._p.transcript_service, "caller_source", None)
+            resolver = getattr(self._p.transcript_service, "caller_evidence", None)
             evidence = resolver(call_id, order) if callable(resolver) else None
             if isinstance(evidence, dict):
                 try:
-                    source = ContactSource(**evidence)
-                except (TypeError, ValueError):
+                    source = ContactSource(**evidence["source"])
+                    source_text = evidence["text"]
+                except (KeyError, TypeError, ValueError):
                     pass
-        bind_contact_turn(session, full_transcript, source)
+        # Echo cleanup changes the model's message, not the saved caller row.
+        # Bind the canonical bundle so its source hash still verifies exactly.
+        bind_contact_turn(session, source_text, source)
         if not session.captured_slots.line_phone and not getattr(session, "_line_phone_checked", False):
             session._line_phone_checked = True
             line = await known_line_number(session)

@@ -375,6 +375,90 @@ async def test_actual_turn_runner_binds_evidence_but_does_not_parse_or_classify_
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("suffix", ["", " My password is Qwerty!."])
+async def test_actual_transcript_dispatch_echo_cleanup_keeps_canonical_contact_evidence(suffix):
+    from unittest.mock import AsyncMock
+    from app.domain.models.conversation import Message, MessageRole, TranscriptChunk
+    from app.domain.services.explicit_secrets import sanitize_explicit_secrets
+    from app.domain.services.transcript_service import TranscriptService
+    from app.domain.services.voice_pipeline.transcript_handler import TranscriptHandler
+    from app.domain.services.voice_pipeline.turn_ender import TurnEnder
+    from tests.unit.test_instant_opener_continues_to_llm import _session, _pipeline_stub
+    s, pipeline, pool = _session(), _pipeline_stub(), SQLPort()
+    s.call_id = str(uuid4())
+    s.turn_id, s._line_phone_checked = 2, True
+    s._dialer_call_id, s._dialer_tenant_id = str(uuid4()), str(uuid4())
+    s._dialer_campaign_id, s._dialer_lead_id = str(uuid4()), str(uuid4())
+    disclosure = "This call may be recorded for quality and training purposes."
+    quote = "My email is alex@example.com"
+    raw = disclosure + " " + quote + suffix
+    canonical = sanitize_explicit_secrets(raw)
+    s.conversation_history = [Message(role=MessageRole.ASSISTANT, content=disclosure)]
+    service = pipeline.transcript_service = TranscriptService()
+    pipeline.stt_provider.detect_turn_end = lambda chunk: chunk.is_final and not chunk.text
+    pipeline.handle_turn_end = TurnEnder(pipeline).handle
+    observations = []
+    async def stream(current, websocket):
+        result = await record_contact(current, args(quote), pool=pool)
+        observations.append((current.conversation_history[-1].content, current._contact_turn, result))
+        return "Is that the address you want to use?", 1, 1
+    pipeline._stream_llm_and_tts = AsyncMock(side_effect=stream)
+    handler = TranscriptHandler(pipeline)
+    try:
+        await handler.handle(s, TranscriptChunk(text=raw, is_final=True, confidence=1.0))
+        original = service.get_turns(s.call_id)[0]
+        await handler.handle(s, TranscriptChunk(text="", is_final=True))
+        task = pipeline._pending_llm_tasks[s.call_id]
+        await asyncio.wait_for(task, 2)
+        assert len(observations) == 1
+        shown, bound, result = observations[0]
+        assert shown == sanitize_explicit_secrets(quote + suffix)
+        assert result["saved"] and result["validation_status"] == "awaiting_confirmation"
+        assert bound.text == canonical and bound.source.provider_item_id == "traditional:1"
+        assert bound.source.revision_sha256 == hashlib.sha256(canonical.encode()).hexdigest()
+        assert len(pool.writes) == 1
+        row = next(row for row in service.get_transcript_json(s.call_id) if row["role"] == "user")
+        assert row["content"] == original.content == canonical
+        assert "original_content" not in row and "asr_latest_revision" not in row["metadata"]
+        assert row["metadata"]["provider_item_id"] == "traditional:1"
+        evidence = snapshot_slots(s.captured_slots)["email"]["evidence"]
+        assert evidence["value_source"]["revision_sha256"] == bound.source.revision_sha256
+        assert snapshot_slots(s.captured_slots)["email"]["raw_value"] == quote
+    finally:
+        service.clear_buffer(s.call_id)
+
+
+@pytest.mark.parametrize("state", ["revised", "retracted", "malformed_revision", "duplicate_owner"])
+def test_canonical_contact_bundle_resolves_only_one_current_owned_row(state):
+    from app.domain.services.transcript_service import TranscriptService
+    service, call_id = TranscriptService(), str(uuid4())
+    original = "My email is old@example.com"
+    revised = "My email is alex@example.com"
+    row = service.accumulate_turn(call_id, "user", original, is_final=True, turn_index=0)
+    assert service.bind_caller_turn(call_id, row, caller_turn_order=1)
+    try:
+        if state == "duplicate_owner":
+            other = service.accumulate_turn(call_id, "user", revised, is_final=True, turn_index=1)
+            assert service.bind_caller_turn(call_id, other, caller_turn_order=1)
+        else:
+            assert service.annotate_turn_revision(call_id, turn_index=0,
+                provider_item_id="traditional:1", caller_turn_order=1,
+                content="" if state == "retracted" else revised)
+            if state == "malformed_revision":
+                row.metadata["asr_latest_revision"]["content_sha256"] = "invalid"
+        bundle = service.caller_evidence(call_id, 1)
+        if state == "revised":
+            assert bundle["text"] == revised
+            assert bundle["source"] == service.caller_source(call_id, 1)
+            assert bundle["source"]["revision_sha256"] == hashlib.sha256(revised.encode()).hexdigest()
+            assert row.content == original
+        else:
+            assert bundle is None and service.caller_source(call_id, 1) is None
+    finally:
+        service.clear_buffer(call_id)
+
+
+@pytest.mark.asyncio
 async def test_caller_first_hello_reaches_model_once_without_presynth_script(monkeypatch):
     from unittest.mock import AsyncMock
     from app.domain.models.conversation import MessageRole

@@ -239,16 +239,29 @@ async def test_cancelled_final_save_retains_bounded_frozen_evidence(transcript, 
 
 async def test_actual_traditional_runner_contact_sources_resolve_to_saved_caller_rows(transcript):
     import hashlib
+    from uuid import uuid4
+    from app.domain.services.voice_pipeline.contact_recording import record_contact
     from tests.unit.test_ag03_caller_dispatch_order import pipeline, final
+    from tests.unit.test_model_contact_recording import SQLPort
 
     service, session = pipeline()
     service.transcript_service = transcript
     session._line_phone_checked = True
     session._has_introduced = True
-    service._stream_llm_and_tts = AsyncMock(side_effect=[
-        ("Your email is alex@example.com, is that correct?", 1.0, 1.0),
-        ("Thank you for confirming.", 1.0, 1.0),
-    ])
+    session._dialer_call_id, session._dialer_tenant_id = str(uuid4()), str(uuid4())
+    session._dialer_campaign_id, session._dialer_lead_id = str(uuid4()), str(uuid4())
+    pool = SQLPort()
+    async def model_response(current, websocket):
+        expected = current.captured_slots.email
+        result = await record_contact(current, {
+            "kind": "email", "operation": "confirm" if expected else "set",
+            "value": "alex@example.com", "expected_value": expected,
+            "source_quote": current._contact_turn.text,
+        }, pool=pool)
+        assert result["saved"]
+        return ("Thank you for confirming." if expected else
+                "Your email is alex@example.com, is that correct?"), 1.0, 1.0
+    service._stream_llm_and_tts = AsyncMock(side_effect=model_response)
     for utterance in ("My email is alex at example dot com.", "Yes, that's correct."):
         await final(service, session, utterance)
         task = service._pending_llm_tasks.get(session.call_id)
@@ -259,6 +272,7 @@ async def test_actual_traditional_runner_contact_sources_resolve_to_saved_caller
     assert capture.status.value == "confirmed"
     assert capture.value_source.provider_item_id == "traditional:1"
     assert capture.confirmation_source.provider_item_id == "traditional:2"
+    assert len(pool.writes) == 2
     rows = {r["metadata"].get("provider_item_id"): r for r in transcript.get_transcript_json(session.call_id)}
     for source in (capture.value_source, capture.confirmation_source):
         row = rows[source.provider_item_id]
