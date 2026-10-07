@@ -33,6 +33,7 @@ from app.domain.services.end_session_action import (
     build_end_session_tool_instructions,
     parse_end_session_action,
 )
+from app.domain.services.voice_pipeline.speech_guard import guard_spoken_sentence
 from app.domain.services.voice_pipeline.end_call import strip_and_flag
 from app.domain.services.llm_guardrails import get_guardrails
 from app.domain.services.voice_pipeline import expressive_caps
@@ -554,6 +555,9 @@ class TurnStreamer:
                     # many characters it takes to say it.
                     if not sentence or not any(c.isalnum() for c in sentence):
                         continue
+                    # Unbacked "done" claims and denied-relationship claims
+                    # never reach the caller (speech_guard.py).
+                    sentence = guard_spoken_sentence(session, sentence)
 
                     if _barged():
                         tts_was_interrupted = True
@@ -663,6 +667,7 @@ class TurnStreamer:
                     raw_tail, tts_model_id=_tts_model_id,
                     protected_values=_protected_readback,
                 )
+                sentence = guard_spoken_sentence(session, sentence)
                 if sentence:
                     if t_tts_first is None:
                         t_tts_first = time.monotonic()

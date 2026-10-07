@@ -1,4 +1,9 @@
-"""Bounded runtime facts for the voice prompt, without transcript classification."""
+"""Bounded runtime facts for the voice prompt.
+
+No transcript classification, with one narrow exception: an explicit caller
+denial of being a customer (speech_guard.py), so the model never treats a
+caller who said "I am not your customer" as an existing one.
+"""
 from __future__ import annotations
 
 import re
@@ -26,6 +31,7 @@ class LiveConversationState:
     last_tool_name: Optional[str] = None
     last_tool_success: Optional[bool] = None
     last_tool_code: Optional[str] = None
+    customer_relationship: Optional[str] = None  # "denied" or unknown
 
 
 @dataclass(frozen=True)
@@ -143,6 +149,10 @@ def reduce_cascaded_session_live_state(
                 phone_confirmed=bool(getattr(slots, "phone_confirmed", False)),
             ),
         )
+    from app.domain.services.voice_pipeline.speech_guard import caller_denied_relationship
+
+    if caller_denied_relationship(getattr(session, "conversation_history", ()) or ()):
+        state = replace(state, customer_relationship="denied")
     setattr(session, "_live_structured_state", state)
     return state
 
@@ -178,6 +188,7 @@ def render_live_state_block(state: LiveConversationState, *, opening_interrupted
             f"identity_introduced={identity}",
             f"confirmed_contacts={contact_text}",
             f"last_tool_result={tool_text}",
+            *(("customer_relationship=denied",) if state.customer_relationship == "denied" else ()),
             *(("opening=interrupted",) if opening_interrupted else ()),
             LIVE_STATE_BLOCK_END,
         )

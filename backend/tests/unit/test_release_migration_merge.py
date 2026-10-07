@@ -12,7 +12,9 @@ MERGE = "0063_release_history_merge"
 
 
 def test_release_exposes_one_head_containing_both_existing_histories():
-    assert SCRIPTS.get_heads() == [MERGE]
+    # 0064 (DNC phone_number compatibility trigger) sits on top of the merge.
+    assert SCRIPTS.get_heads() == ["0064_dnc_phone_number_default"]
+    assert SCRIPTS.get_revision("0064_dnc_phone_number_default").down_revision == MERGE
     merge = SCRIPTS.get_revision(MERGE)
     assert set(merge.down_revision) == {HEARTBEAT, RECEIPTS}
     assert SCRIPTS.get_revision(HEARTBEAT).down_revision == "0047_protect_ai_config_backup"
