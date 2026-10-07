@@ -1,0 +1,31 @@
+{
+  "python": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\backend\\.venv\\Scripts\\python.exe",
+  "version": "3.12.12 (main, Dec  9 2025, 19:02:55) [MSC v.1944 64 bit (AMD64)]",
+  "cwd": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\agent-capture-recovery-20261007",
+  "pytest_argv": [
+    "backend/tests/unit/test_capture_restart_recovery.py",
+    "-q",
+    "--tb=short",
+    "--disable-warnings",
+    "-o",
+    "addopts="
+  ],
+  "source_before": {
+    "backend/app/domain/services/call_summary/store.py": "77f408b34d8ebec1b81820b2dba6cd6f63fc38bab43983e397dba5c95e359a27",
+    "backend/app/api/v1/endpoints/calls.py": "26f311725429c057b69bdfc0e3243d016dc057ceae19d3555b5f95c111f17c08",
+    "backend/app/domain/services/call_summary/business_details.py": "cdffc0ef9db10f3374e6ebfef4b7e3aa61499fe7464adc426547a7bf3ac1fde6",
+    "backend/tests/unit/test_capture_restart_recovery.py": "3a63d3597269cf7d5074dfb5dd3fe285f443e0c390b9c5d086bb57e7dbdba1a2"
+  },
+  "source_after": {
+    "backend/app/domain/services/call_summary/store.py": "77f408b34d8ebec1b81820b2dba6cd6f63fc38bab43983e397dba5c95e359a27",
+    "backend/app/api/v1/endpoints/calls.py": "26f311725429c057b69bdfc0e3243d016dc057ceae19d3555b5f95c111f17c08",
+    "backend/app/domain/services/call_summary/business_details.py": "cdffc0ef9db10f3374e6ebfef4b7e3aa61499fe7464adc426547a7bf3ac1fde6",
+    "backend/tests/unit/test_capture_restart_recovery.py": "3a63d3597269cf7d5074dfb5dd3fe285f443e0c390b9c5d086bb57e7dbdba1a2"
+  },
+  "source_unchanged": true,
+  "network": {
+    "internal_socketpairs": 19,
+    "prohibited_attempts": 0
+  },
+  "pytest_exit_code": 1
+}

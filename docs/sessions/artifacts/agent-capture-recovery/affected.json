@@ -1,0 +1,49 @@
+{
+  "python": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\backend\\.venv\\Scripts\\python.exe",
+  "version": "3.12.12 (main, Dec  9 2025, 19:02:55) [MSC v.1944 64 bit (AMD64)]",
+  "cwd": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\agent-capture-recovery-20261007",
+  "pytest_argv": [
+    "backend/tests/unit/test_capture_restart_recovery.py",
+    "backend/tests/unit/test_summary_revision_repairs.py",
+    "backend/tests/unit/test_business_detail_capture.py",
+    "backend/tests/unit/call_summary/test_store.py",
+    "backend/tests/unit/test_model_contact_recording.py",
+    "backend/tests/unit/test_transcript_flush_pooled.py",
+    "backend/tests/unit/test_transcript_sealed_after_hangup.py",
+    "-q",
+    "--tb=short",
+    "--disable-warnings",
+    "-o",
+    "addopts="
+  ],
+  "source_before": {
+    "backend/app/domain/services/call_summary/store.py": "5209950d01b670dec5533f52b12bae6707a44a6ac2eb8eda47132f4da5250037",
+    "backend/app/api/v1/endpoints/calls.py": "b91f6c39900826e3f2e4e2a7100a9f225838662b8d53521314615b6ccfe16fdd",
+    "backend/app/domain/services/call_summary/business_details.py": "cdffc0ef9db10f3374e6ebfef4b7e3aa61499fe7464adc426547a7bf3ac1fde6",
+    "backend/tests/unit/test_capture_restart_recovery.py": "3a63d3597269cf7d5074dfb5dd3fe285f443e0c390b9c5d086bb57e7dbdba1a2",
+    "backend/tests/unit/test_summary_revision_repairs.py": "a46d6168664f2978c0ebc4e720d9053f41ba138e281bd4c6d0ce4ec14ad7646e",
+    "backend/tests/unit/test_business_detail_capture.py": "a9852e58ff584f4118564d4528a8482fd716ecc4908f7930bc3cf0276b1411ed",
+    "backend/tests/unit/call_summary/test_store.py": "9f0746f1e6e8003ae53729fb21238892a97f1d768b3d3c367b8db8f5020d5a75",
+    "backend/tests/unit/test_model_contact_recording.py": "b51c7593d65c1f707f2146112a228b384a21f8d83f3f6b4abb42b6f9cd3c5224",
+    "backend/tests/unit/test_transcript_flush_pooled.py": "c6179f58befc8ed4148caa2967355ce2906b8eff873a499426ae0d3cc0745ce5",
+    "backend/tests/unit/test_transcript_sealed_after_hangup.py": "36cdb2f40c5f5623ec422d5655c8b297c3a29719cd2fd605c85f9f963a988c73"
+  },
+  "source_after": {
+    "backend/app/domain/services/call_summary/store.py": "5209950d01b670dec5533f52b12bae6707a44a6ac2eb8eda47132f4da5250037",
+    "backend/app/api/v1/endpoints/calls.py": "b91f6c39900826e3f2e4e2a7100a9f225838662b8d53521314615b6ccfe16fdd",
+    "backend/app/domain/services/call_summary/business_details.py": "cdffc0ef9db10f3374e6ebfef4b7e3aa61499fe7464adc426547a7bf3ac1fde6",
+    "backend/tests/unit/test_capture_restart_recovery.py": "3a63d3597269cf7d5074dfb5dd3fe285f443e0c390b9c5d086bb57e7dbdba1a2",
+    "backend/tests/unit/test_summary_revision_repairs.py": "a46d6168664f2978c0ebc4e720d9053f41ba138e281bd4c6d0ce4ec14ad7646e",
+    "backend/tests/unit/test_business_detail_capture.py": "a9852e58ff584f4118564d4528a8482fd716ecc4908f7930bc3cf0276b1411ed",
+    "backend/tests/unit/call_summary/test_store.py": "9f0746f1e6e8003ae53729fb21238892a97f1d768b3d3c367b8db8f5020d5a75",
+    "backend/tests/unit/test_model_contact_recording.py": "b51c7593d65c1f707f2146112a228b384a21f8d83f3f6b4abb42b6f9cd3c5224",
+    "backend/tests/unit/test_transcript_flush_pooled.py": "c6179f58befc8ed4148caa2967355ce2906b8eff873a499426ae0d3cc0745ce5",
+    "backend/tests/unit/test_transcript_sealed_after_hangup.py": "36cdb2f40c5f5623ec422d5655c8b297c3a29719cd2fd605c85f9f963a988c73"
+  },
+  "source_unchanged": true,
+  "network": {
+    "internal_socketpairs": 153,
+    "prohibited_attempts": 0
+  },
+  "pytest_exit_code": 0
+}

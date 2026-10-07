@@ -1,0 +1,39 @@
+.FFFF.FFF                                                                [100%]
+================================== FAILURES ===================================
+__ test_summary_reports_completeness_of_its_current_durable_source[partial] ___
+backend\tests\unit\test_capture_restart_recovery.py:93: in test_summary_reports_completeness_of_its_current_durable_source
+    assert result["source_evidence"] == {
+E   KeyError: 'source_evidence'
+___ test_summary_reports_completeness_of_its_current_durable_source[failed] ___
+backend\tests\unit\test_capture_restart_recovery.py:93: in test_summary_reports_completeness_of_its_current_durable_source
+    assert result["source_evidence"] == {
+E   KeyError: 'source_evidence'
+__ test_summary_reports_completeness_of_its_current_durable_source[unknown] ___
+backend\tests\unit\test_capture_restart_recovery.py:93: in test_summary_reports_completeness_of_its_current_durable_source
+    assert result["source_evidence"] == {
+E   KeyError: 'source_evidence'
+__ test_summary_reports_completeness_of_its_current_durable_source[complete] __
+backend\tests\unit\test_capture_restart_recovery.py:93: in test_summary_reports_completeness_of_its_current_durable_source
+    assert result["source_evidence"] == {
+E   KeyError: 'source_evidence'
+_ test_late_source_or_summary_change_never_exposes_a_stale_summary[transcript] _
+backend\tests\unit\test_capture_restart_recovery.py:127: in test_late_source_or_summary_change_never_exposes_a_stale_summary
+    assert result["available"] is False and result["summary"] is None
+E   assert (True is False)
+__ test_late_source_or_summary_change_never_exposes_a_stale_summary[summary] __
+backend\tests\unit\test_capture_restart_recovery.py:127: in test_late_source_or_summary_change_never_exposes_a_stale_summary
+    assert result["available"] is False and result["summary"] is None
+E   assert (True is False)
+__ test_late_source_or_summary_change_never_exposes_a_stale_summary[missing] __
+backend\tests\unit\test_capture_restart_recovery.py:127: in test_late_source_or_summary_change_never_exposes_a_stale_summary
+    assert result["available"] is False and result["summary"] is None
+E   assert (True is False)
+=========================== short test summary info ===========================
+FAILED backend\tests\unit\test_capture_restart_recovery.py::test_summary_reports_completeness_of_its_current_durable_source[partial]
+FAILED backend\tests\unit\test_capture_restart_recovery.py::test_summary_reports_completeness_of_its_current_durable_source[failed]
+FAILED backend\tests\unit\test_capture_restart_recovery.py::test_summary_reports_completeness_of_its_current_durable_source[unknown]
+FAILED backend\tests\unit\test_capture_restart_recovery.py::test_summary_reports_completeness_of_its_current_durable_source[complete]
+FAILED backend\tests\unit\test_capture_restart_recovery.py::test_late_source_or_summary_change_never_exposes_a_stale_summary[transcript]
+FAILED backend\tests\unit\test_capture_restart_recovery.py::test_late_source_or_summary_change_never_exposes_a_stale_summary[summary]
+FAILED backend\tests\unit\test_capture_restart_recovery.py::test_late_source_or_summary_change_never_exposes_a_stale_summary[missing]
+7 failed, 2 passed in 1.69s
