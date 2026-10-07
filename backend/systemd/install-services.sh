@@ -47,6 +47,7 @@ systemctl daemon-reload
 #     15-second timer was retired), enabled directly.
 echo "  Enabling services..."
 systemctl enable talky-api.service
+systemctl enable talky-api-web.service   # dashboard API, telephony off (2026-10-07)
 systemctl enable talky-voice-worker.service
 systemctl enable talky-dialer-worker.service
 systemctl enable talky-reminder-worker.service

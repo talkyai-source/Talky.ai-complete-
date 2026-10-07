@@ -1,0 +1,39 @@
+# Talky.ai dashboard API (core-infra review 2026-10-07).
+#
+# The same FastAPI app as talky-api, with telephony switched OFF: it never
+# claims the ARI owner lock, never connects Asterisk and never runs orphan
+# recovery (app/core/process_role.py). nginx sends it everything except the
+# live-call routes (backend/deploy/infra/nginx/api.talkleeai.com.conf), so
+# dashboard load or a dashboard restart can never stall a live call, and
+# while this process restarts nginx falls back to talky-api.
+#
+# Stays at --workers 1 until the slowapi auth limiter gets Redis storage
+# (its counters are per process today).
+[Unit]
+Description=Talky.ai Dashboard API (no telephony)
+After=network.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=exec
+WorkingDirectory=/opt/talky/backend
+EnvironmentFile=/opt/talky/backend/.env
+Environment=TELEPHONY_ENABLED=false
+ExecStart=/opt/talky/backend/venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8001 --workers 1 --ws websockets --ws-ping-interval 30 --ws-ping-timeout 5
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=talky-api-web
+
+# Resources (core-infra review 2026-10-07). Memory limits only catch a
+# runaway leak before it pushes the whole host, and live calls, into swap.
+# Postgres pool: an explicit share of max_connections=100. Budget:
+# call API 15 + dashboard API 12 + dialer 10 + voice 10 + reminder 3 = 50.
+MemoryHigh=1G
+MemoryMax=1536M
+Environment=PG_POOL_MIN_SIZE=2
+Environment=PG_POOL_MAX_SIZE=12
+
+[Install]
+WantedBy=multi-user.target

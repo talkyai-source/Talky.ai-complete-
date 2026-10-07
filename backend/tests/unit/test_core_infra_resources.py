@@ -15,6 +15,7 @@ BACKEND = Path(__file__).resolve().parents[2]
 SYSTEMD = BACKEND / "systemd"
 POOLED_UNITS = (
     "talky-api.service",
+    "talky-api-web.service",
     "talky-dialer-worker.service",
     "talky-voice-worker.service",
     "talky-reminder-worker.service",
@@ -46,9 +47,9 @@ def test_the_connection_budget_leaves_headroom_for_jobs_and_admin():
         int(re.search(r"^Environment=PG_POOL_MAX_SIZE=(\d+)$", _unit(n), re.M).group(1))
         for n in POOLED_UNITS
     )
-    # Was 4 x 20 = 80 by default. Leave room for migrations, pg_dump, the trunk
-    # updater, cleanup and an operator's psql.
-    assert total == 43
+    # Was 20 per process by default. Leave room for migrations, pg_dump, the
+    # trunk updater, cleanup and an operator's psql.
+    assert total == 50
     assert total <= MAX_CONNECTIONS // 2
 
 
