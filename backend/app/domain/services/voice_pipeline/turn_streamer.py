@@ -558,6 +558,8 @@ class TurnStreamer:
                     # Unbacked "done" claims and denied-relationship claims
                     # never reach the caller (speech_guard.py).
                     sentence = guard_spoken_sentence(session, sentence)
+                    if not sentence:
+                        continue
 
                     if _barged():
                         tts_was_interrupted = True

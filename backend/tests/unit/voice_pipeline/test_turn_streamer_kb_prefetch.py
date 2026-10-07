@@ -16,7 +16,9 @@ async def test_model_starts_from_prepared_catalog_without_turn_fetch(monkeypatch
     assert response == steps[-1] and len(rounds) == 3
     assert "knowledge_catalog" in rounds[0][1]["system_prompt"]
     assert "Canada" in rounds[0][1]["system_prompt"]
-    assert "Refunds" not in rounds[0][1]["system_prompt"]
+    # Since 2026-10-08 a catalog that fits is outlined whole (test call
+    # c8df9107): every heading is visible up front, never any source text.
+    assert f"{child}: Refunds" in rounds[0][1]["system_prompt"]
     assert "five working days" not in rounds[0][1]["system_prompt"]
     assert "Refunds" in rounds[1][1]["extra_messages"][1]["content"]
     assert "five working days" not in rounds[1][1]["extra_messages"][1]["content"]

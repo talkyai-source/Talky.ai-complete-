@@ -65,6 +65,11 @@ _RELATIONSHIP_CLAIM = re.compile(
     re.IGNORECASE,
 )
 
+# Internal knowledge section ids (sections.py: f"k{digest[:8]}_{n}"). Test call
+# c8df9107 (2026-10-08) spoke "k11a0797713" aloud when the agent ran out of
+# lookup rounds mid-navigation.
+_SECTION_ID = re.compile(r"\s*\bk[0-9a-f]{8}_\d+\b")
+
 UNBACKED_ACTION_LINE = "I'm not able to do that from this call."
 RELATIONSHIP_ACK_LINE = "Thanks for clarifying."
 
@@ -101,6 +106,10 @@ def guard_spoken_sentence(session: Any, sentence: str) -> str:
     """Return what to actually speak for ``sentence``."""
     if not sentence:
         return sentence
+    if _SECTION_ID.search(sentence):
+        sentence = _SECTION_ID.sub("", sentence).strip()
+        if not any(c.isalnum() for c in sentence):
+            return ""
     if claims_completed_action(sentence) and not _confirmation_allowed(session):
         return UNBACKED_ACTION_LINE
     if _RELATIONSHIP_CLAIM.search(sentence) and caller_denied_relationship(
