@@ -22,3 +22,15 @@ From this worktree's `backend`, with `PYTHONDONTWRITEBYTECODE=1` and `PYTHONPATH
 ```
 
 Logs: [artifacts/knowledge-context-limits](artifacts/knowledge-context-limits/). Network was not instrumented; no measured-zero-network claim is made. Reviewer reads are separate from owner execution. Live/profile/audio and customer acceptance remain open, with no package/gate/freeze closure.
+
+## 8 October combined-run follow-up
+
+Source/tests: `4e100d3c84695694959bfad69bb450554291b9f5`; independent narrow source review clear.
+
+The root combined run exposed three affected knowledge failures, reproduced locally as **3 failed, 12 passed**. The actual guide exceeded its existing 9,500-character fixture budget by 71; its wording is now 245 characters shorter (9,326 in that fixture), with the budget unchanged. Two retired expectations now verify the real contract: oversized fragments remain incomplete and clear prior grounding; the actual streamer starts with roots, browses a branch, reads its authored child and never reloads the catalog during the turn. Only the guide and two existing test files changed. Final **119 passed**, 88 deprecation warnings, 16.79s; totals overlap earlier checks. Scoped Ruff F and diff check passed. The final command used the same environment above with:
+
+```text
+-m pytest tests/unit/test_kb_injection_budget.py tests/unit/test_knowledge_tool_evidence_lifecycle.py tests/unit/voice_pipeline/test_turn_streamer_kb_prefetch.py tests/unit/test_knowledge_tool.py tests/unit/test_knowledge_limits.py tests/unit/test_realtime_profile_contract.py -q
+```
+
+The three-module baseline omitted the last three modules. Raw logs are preserved as `knowledge-contract-followup-baseline.txt` and `knowledge-contract-followup-final.txt`; root's combined result remains separately scoped.

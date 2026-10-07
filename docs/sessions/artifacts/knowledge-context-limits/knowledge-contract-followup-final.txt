@@ -1,0 +1,22 @@
+........................................................................ [ 60%]
+...............................................                          [100%]
+============================== warnings summary ===============================
+tests/unit/test_knowledge_tool_evidence_lifecycle.py: 24 warnings
+tests/unit/voice_pipeline/test_turn_streamer_kb_prefetch.py: 2 warnings
+tests/unit/test_knowledge_limits.py: 8 warnings
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\backend\.venv\Lib\site-packages\pydantic\main.py:250: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+
+tests/unit/test_realtime_profile_contract.py: 18 warnings
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\agent-knowledge-limits-20261007\backend\app\realtime\runtime.py:188: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    started_at=datetime.utcnow(),
+
+tests/unit/test_realtime_profile_contract.py: 18 warnings
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\agent-knowledge-limits-20261007\backend\app\realtime\runtime.py:189: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    last_activity_at=datetime.utcnow(),
+
+tests/unit/test_realtime_profile_contract.py: 18 warnings
+  <string>:17: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+119 passed, 88 warnings in 16.79s

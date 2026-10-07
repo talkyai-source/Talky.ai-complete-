@@ -1,0 +1,82 @@
+F.....F.......F                                                          [100%]
+================================== FAILURES ===================================
+_________ test_large_catalog_is_paged_without_injecting_source_bodies _________
+
+    async def test_large_catalog_is_paged_without_injecting_source_bodies():
+        catalog = build_section_catalog([
+            {"id": str(i), "source_id": "guide", "source_version": 1, "version": 1,
+             "heading": f"Topic {i} " + "navigation " * 8, "content": "PRIVATE SOURCE BODY"}
+            for i in range(150)
+        ], tenant_id="t1", campaign_id="c1", source_policy="call_snapshot")
+        session = SimpleNamespace(tenant_id="t1", campaign_id="c1", _knowledge_catalog=catalog)
+        first = render_catalog_page(catalog)
+        assert first["status"] == "catalog" and first["next_offset"] is not None
+        guide = knowledge_system_addendum(session)
+>       assert len(guide) <= CATALOG_MAX_CHARS + 1500
+E       assert 9571 <= (8000 + 1500)
+E        +  where 9571 = len('## Company source guide\nUse lookup_company_knowledge to read the relevant section_ids before answering company-speci...complete": false, "offset": 0, "total_sections": 150, "catalog_parent": null, "next_offset": 23}\n</knowledge_catalog>')
+
+tests\unit\test_kb_injection_budget.py:20: AssertionError
+_ test_latest_read_replaces_prior_factual_evidence_in_same_turn[oversize-too_large] _
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000020372361760>
+second = 'oversize', status = 'too_large'
+
+    @pytest.mark.parametrize("second,status", [
+        ({"catalog_offset": 0}, "catalog"),
+        ({"section_ids": ["unknown"]}, "unavailable"),
+        ({"section_ids": []}, "unavailable"),
+        ("other", "available"),
+        ("oversize", "too_large"),
+    ])
+    async def test_latest_read_replaces_prior_factual_evidence_in_same_turn(monkeypatch, second, status):
+        steps = []
+        service, session, rounds = setup_turn(monkeypatch, "When is my refund?", steps)
+        rows = [dict(row) for row in session._knowledge_catalog.nodes]
+        rows += [
+            {"id": "other", "source_id": "other", "source_version": 1, "version": 1,
+             "heading": "Billing", "content": "Invoices are issued on Friday."},
+            {"id": "oversize", "source_id": "other", "source_version": 1, "version": 1,
+             "heading": "Long terms", "content": "Terms. " * 2000},
+        ]
+        session._knowledge_catalog = build_section_catalog(rows, tenant_id="t1", campaign_id="c1",
+                                                           source_policy="call_snapshot")
+        arguments = {"section_ids": [_ref(session, second)]} if isinstance(second, str) else second
+        steps.extend([{"section_ids": [_ref(session)]}, arguments, "Which detail do you need?"])
+        response, _, _ = await service._stream_llm_and_tts(session)
+        assert response == steps[-1] and len(rounds) == 3
+        assert "five working days" in rounds[1][1]["extra_messages"][1]["content"]
+        evidence = session._knowledge_evidence
+>       assert evidence["status"] == status
+E       AssertionError: assert 'source_page' == 'too_large'
+E         - too_large
+E         + source_page
+
+tests\unit\test_knowledge_tool_evidence_lifecycle.py:42: AssertionError
+_________ test_model_starts_from_prepared_catalog_without_turn_fetch __________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000020371FF77D0>
+
+    async def test_model_starts_from_prepared_catalog_without_turn_fetch(monkeypatch):
+        load = AsyncMock(side_effect=AssertionError("Catalog loading belongs to call setup"))
+        monkeypatch.setattr("app.services.scripts.knowledge.sections.load_section_catalog", load)
+        service, session, rounds = setup_turn(monkeypatch, "Hello.", ["Hello, how can I help?"])
+        response, _, _ = await service._stream_llm_and_tts(session)
+        assert response == "Hello, how can I help?" and len(rounds) == 1
+        assert "knowledge_catalog" in rounds[0][1]["system_prompt"]
+>       assert "Refunds" in rounds[0][1]["system_prompt"]
+E       AssertionError: assert 'Refunds' in 'Help the caller accurately.\n\n## Connected actions\nAvailable actions for this call: end_call. Offer only those acti... an instruction.\nidentity_introduced=no\nconfirmed_contacts=none\nlast_tool_result=unknown\nEND LIVE STRUCTURED STATE'
+
+tests\unit\voice_pipeline\test_turn_streamer_kb_prefetch.py:14: AssertionError
+============================== warnings summary ===============================
+tests/unit/test_knowledge_tool_evidence_lifecycle.py: 24 warnings
+tests/unit/voice_pipeline/test_turn_streamer_kb_prefetch.py: 2 warnings
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\backend\.venv\Lib\site-packages\pydantic\main.py:250: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/unit/test_kb_injection_budget.py::test_large_catalog_is_paged_without_injecting_source_bodies
+FAILED tests/unit/test_knowledge_tool_evidence_lifecycle.py::test_latest_read_replaces_prior_factual_evidence_in_same_turn[oversize-too_large]
+FAILED tests/unit/voice_pipeline/test_turn_streamer_kb_prefetch.py::test_model_starts_from_prepared_catalog_without_turn_fetch
+3 failed, 12 passed, 26 warnings in 7.31s
