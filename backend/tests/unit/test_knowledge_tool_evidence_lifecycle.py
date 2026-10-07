@@ -19,7 +19,7 @@ def _ref(session, node_id="refund"):
     ({"section_ids": ["unknown"]}, "unavailable"),
     ({"section_ids": []}, "unavailable"),
     ("other", "available"),
-    ("oversize", "too_large"),
+    ("oversize", "source_page"),
 ])
 async def test_latest_read_replaces_prior_factual_evidence_in_same_turn(monkeypatch, second, status):
     steps = []
@@ -46,6 +46,11 @@ async def test_latest_read_replaces_prior_factual_evidence_in_same_turn(monkeypa
         assert session._knowledge_grounding
     else:
         assert evidence["passages"] == [] and session._knowledge_grounding == []
+        if status == "source_page":
+            assert evidence["context_complete"] is False
+            assert evidence["source_offset"] == 0 and evidence["next_source_offset"] > 0
+            assert "Terms." in evidence["source_text"]
+            assert "five working days" not in evidence["source_text"]
     state = session._live_structured_state
     assert state.last_tool_code == status
     assert state.last_tool_success is (status in {"available", "catalog"})
