@@ -113,7 +113,7 @@ export default function InvoicesPage() {
                     {invoices.map((inv) => (
                       <tr key={inv.id} className="border-b border-border last:border-b-0 hover:bg-muted/20 transition-colors">
                         <td className="px-4 py-3">
-                          <Link href={`/billing/invoices/${inv.id}`} className="font-semibold text-foreground hover:underline">
+                          <Link href={`/billing/invoices/${inv.id}`} className="inline-block py-1 -my-1 font-semibold text-foreground hover:underline">
                             {inv.stripe_invoice_id || inv.id.slice(0, 8)}
                           </Link>
                         </td>

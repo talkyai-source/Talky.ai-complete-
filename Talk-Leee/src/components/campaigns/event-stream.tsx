@@ -204,7 +204,9 @@ export function EventStream({
                     <div className="text-sm font-semibold text-foreground">Event Stream</div>
                     <div className="mt-1 text-sm text-muted-foreground">Realtime operational activity and system signals.</div>
                 </div>
-                <div className="flex flex-wrap items-center gap-2">
+                {/* pr-12: keeps the Hide toggle clear of the fixed chat
+                    launcher's lane while scrolling (Group C, 2026-10). */}
+                <div className="flex flex-wrap items-center gap-2 pr-12">
                     {(["All", "Campaigns", "System", "Alerts", "User Actions"] as EventQuickFilter[]).map((k) => (
                         <Button
                             key={k}
@@ -233,7 +235,7 @@ export function EventStream({
             {!hidden ? (
                 <div id="event-stream-body">
                     <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
-                        <label className="flex items-center justify-between rounded-lg border border-border bg-background px-3 py-2 transition-shadow duration-150 ease-out hover:shadow-sm">
+                        <label className="flex items-center justify-between rounded-lg border border-border bg-background py-2 pl-3 pr-16 transition-shadow duration-150 ease-out hover:shadow-sm">
                             <div className="text-sm font-semibold text-foreground">Sound notifications</div>
                             <input
                                 type="checkbox"
@@ -242,7 +244,7 @@ export function EventStream({
                                 className="h-4 w-4 rounded border-input bg-background accent-primary"
                             />
                         </label>
-                        <label className="flex items-center justify-between rounded-lg border border-border bg-background px-3 py-2 transition-shadow duration-150 ease-out hover:shadow-sm">
+                        <label className="flex items-center justify-between rounded-lg border border-border bg-background py-2 pl-3 pr-16 transition-shadow duration-150 ease-out hover:shadow-sm">
                             <div className="text-sm font-semibold text-foreground">Desktop notifications</div>
                             <input
                                 type="checkbox"

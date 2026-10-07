@@ -24,27 +24,46 @@ export function callTimestampLabel(iso: string): string {
  */
 export function CallTimestamp({ iso, durationSeconds }: { iso: string; durationSeconds?: number | null }) {
     const label = callTimestampLabel(iso);
+    const d = new Date(iso);
+    // Short visible form (2026-10): the hover card is unreachable on touch, so
+    // the date and time must exist as text. Two tiny lines fit the grid's
+    // 2.5rem icon-width Time track without changing the column template.
+    const dateShort = d.toLocaleDateString(undefined, { month: "numeric", day: "numeric" });
+    const timeShort = d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
     return (
-        <TooltipProvider delayDuration={150}>
-            <Tooltip>
-                <TooltipTrigger asChild>
-                    <button
-                        type="button"
-                        aria-label={`Call time ${label}`}
-                        data-testid="call-timestamp"
-                        className="inline-flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                    >
-                        <Clock className="h-4 w-4" aria-hidden />
-                        <time dateTime={iso} className="sr-only">{label}</time>
-                    </button>
-                </TooltipTrigger>
-                <TooltipContent side="top" align="center" sideOffset={8} className="p-3 text-xs shadow-xl">
-                    <div className="font-semibold">{label}</div>
-                    <div className="mt-1 text-muted-foreground">
-                        Duration {formatCallDuration(durationSeconds)} · {Intl.DateTimeFormat().resolvedOptions().timeZone}
-                    </div>
-                </TooltipContent>
-            </Tooltip>
-        </TooltipProvider>
+        <div className="inline-flex max-w-full flex-col items-center">
+            <TooltipProvider delayDuration={150}>
+                <Tooltip>
+                    <TooltipTrigger asChild>
+                        <button
+                            type="button"
+                            aria-label={`Call time ${label}`}
+                            data-testid="call-timestamp"
+                            className="inline-flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        >
+                            <Clock className="h-4 w-4" aria-hidden />
+                            <time dateTime={iso} className="sr-only">{label}</time>
+                        </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="top" align="center" sideOffset={8} className="p-3 text-xs shadow-xl">
+                        <div className="font-semibold">{label}</div>
+                        <div className="mt-1 text-muted-foreground">
+                            Duration {formatCallDuration(durationSeconds)} · {Intl.DateTimeFormat().resolvedOptions().timeZone}
+                        </div>
+                    </TooltipContent>
+                </Tooltip>
+            </TooltipProvider>
+            {/* aria-hidden: the button above already announces the full timestamp. */}
+            <time
+                dateTime={iso}
+                aria-hidden
+                data-testid="call-timestamp-text"
+                className="whitespace-nowrap text-center text-[9px] leading-[11px] tracking-tight text-muted-foreground tabular-nums"
+            >
+                {dateShort}
+                <br />
+                {timeShort}
+            </time>
+        </div>
     );
 }

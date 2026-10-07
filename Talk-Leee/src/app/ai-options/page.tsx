@@ -863,7 +863,7 @@ export default function AIOptionsPage() {
                             const eagerExplicit = "stt_eager_eot_threshold" in tuning;
                             const minConf = tuning.turn_0_min_confidence;
                             const minChars = tuning.turn_0_min_alpha_chars;
-                            const resetLink = "text-[11px] text-muted-foreground underline hover:text-foreground";
+                            const resetLink = "inline-block px-1 py-1 -mx-1 -my-1 text-[11px] text-muted-foreground underline hover:text-foreground";
                             const rangeCls = "mt-1 w-full accent-emerald-500";
                             const numCls = "mt-1 w-full rounded border border-border bg-background px-3 py-2 text-sm text-foreground";
                             return (
@@ -882,7 +882,7 @@ export default function AIOptionsPage() {
                                         <div className="flex items-center justify-between text-xs"><span className="font-medium text-foreground">Eager-mode threshold <span className="ml-1 text-muted-foreground">default 0.7</span></span><span className="font-mono text-emerald-500">{!eagerExplicit ? "—" : eager === null ? "disabled" : (eager as number).toFixed(2)}</span></div>
                                         <input type="range" min={0.3} max={0.9} step={0.05} value={(eager ?? 0.7) as number} onChange={(e) => updateVoiceTuningField("stt_eager_eot_threshold", parseFloat(e.target.value))} disabled={eager === null} className={`${rangeCls} disabled:opacity-40`} />
                                         <div className="mt-1 flex flex-wrap items-center gap-3">
-                                            <label className="flex items-center gap-1 text-[11px] text-muted-foreground"><input type="checkbox" checked={eager === null} onChange={(e) => updateVoiceTuningField("stt_eager_eot_threshold", e.target.checked ? null : 0.7)} className="accent-emerald-500" />Disable eager mode</label>
+                                            <label className="flex cursor-pointer items-center gap-1 px-1 py-1 -mx-1 -my-1 text-[11px] text-muted-foreground"><input type="checkbox" checked={eager === null} onChange={(e) => updateVoiceTuningField("stt_eager_eot_threshold", e.target.checked ? null : 0.7)} className="accent-emerald-500" />Disable eager mode</label>
                                             {eagerExplicit && <button type="button" onClick={() => resetVoiceTuningField("stt_eager_eot_threshold")} className={resetLink}>Reset to default</button>}
                                         </div>
                                     </div>

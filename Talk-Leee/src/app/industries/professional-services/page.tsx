@@ -29,7 +29,7 @@ export default function ProfessionalServicesIndustryPage() {
   const cardBodyClassName = "mt-3 text-sm sm:text-base text-gray-700 dark:text-muted-foreground leading-relaxed";
   const listClassName = "mt-4 space-y-2 text-sm sm:text-base text-gray-700 dark:text-muted-foreground";
   const priceClassName = "text-2xl md:text-3xl font-bold tracking-tight text-primary dark:text-foreground";
-  const buttonSizeClassName = "rounded-full h-12 sm:h-14 px-8 sm:px-10 text-sm sm:text-base font-semibold";
+  const buttonSizeClassName = "rounded-full min-h-12 sm:min-h-14 h-auto whitespace-normal text-center max-w-full px-8 sm:px-10 text-sm sm:text-base font-semibold";
   const primaryButtonClassName = `${buttonSizeClassName} bg-blue-600 hover:bg-blue-700 text-white`;
   const outlineButtonClassName = `${buttonSizeClassName} bg-blue-950 hover:bg-blue-950 text-white hover:text-white border-blue-950 hover:border-blue-950 dark:bg-blue-900 dark:hover:bg-blue-900 dark:text-white dark:hover:text-white dark:border-blue-900 dark:hover:border-blue-900`;
   const centeredCtaClassName = "mt-10 flex justify-center";
@@ -326,7 +326,7 @@ export default function ProfessionalServicesIndustryPage() {
         "High-volume call handling",
         "Dedicated success manager",
       ],
-      ctaLabel: "Request Enterprise Access",
+      ctaLabel: "Contact Sales",
       ctaHref: "/#contact",
       ctaVariant: "outline" as const,
     },

@@ -1225,7 +1225,9 @@ export default function ContactsPage() {
                                                     </span>
                                                 )}
                                             </div>
-                                            <div className="mt-3 flex justify-end gap-2 border-t border-border/60 pt-3">
+                                            {/* pr-12: keeps Edit/Delete clear of the fixed chat
+                                                launcher's lane while scrolling (Group C, 2026-10). */}
+                                            <div className="mt-3 flex justify-end gap-2 border-t border-border/60 pt-3 pr-12">
                                                 <button
                                                     type="button"
                                                     onClick={() => startEditContact(contact)}

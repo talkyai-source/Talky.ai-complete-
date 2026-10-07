@@ -242,7 +242,7 @@ export function RecordingFeedbackBar({
                                 type="button"
                                 onClick={() => { recorder.cancel(); setMode("none"); }}
                                 aria-label="Cancel recording"
-                                className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+                                className="inline-flex items-center gap-1 px-1 py-1 -mx-1 -my-1 text-xs text-muted-foreground hover:text-foreground"
                             >
                                 <X className="h-3.5 w-3.5" /> Cancel
                             </button>
@@ -279,7 +279,7 @@ export function RecordingFeedbackBar({
                                 type="button"
                                 onClick={() => recorder.discard()}
                                 aria-label="Discard recording"
-                                className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+                                className="inline-flex items-center gap-1 px-1 py-1 -mx-1 -my-1 text-xs text-muted-foreground hover:text-foreground"
                             >
                                 <Trash2 className="h-3.5 w-3.5" /> Discard
                             </button>
@@ -330,7 +330,7 @@ export function RecordingFeedbackBar({
                         <button
                             type="button"
                             onClick={() => setMode("none")}
-                            className="text-xs text-muted-foreground hover:text-foreground"
+                            className="px-1 py-1 -mx-1 -my-1 text-xs text-muted-foreground hover:text-foreground"
                         >
                             Cancel
                         </button>

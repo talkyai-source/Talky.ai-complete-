@@ -21,6 +21,16 @@ export default function WhiteLabelDashboardPage() {
     );
 }
 
+// One grid at every size (campaigns-table pattern, see
+// campaign-performance-table.tsx): fixed tracks plus a 10rem floor on the
+// flexible Display Name column so it can never collapse to zero. Tracks
+// 160px + 10rem (160px) + 180px + 90px + 180px = 770px, + 4 gap-2 gutters
+// (32px) + the row's px-4 inset (32px) = 834px = 52.125rem. Narrower
+// viewports scroll the grid sideways inside the card instead of clipping
+// the Transfer/Actions columns.
+const PARTNERS_GRID_COLS = "grid-cols-[160px_minmax(10rem,1fr)_180px_90px_180px]";
+const PARTNERS_GRID_MIN_WIDTH = "min-w-[52.125rem]";
+
 type PartnerRecord = {
     partner_id: string;
     display_name: string;
@@ -186,36 +196,38 @@ function PartnersAdmin() {
                 </div>
 
                 <div className="overflow-hidden rounded-2xl border border-border bg-background/60">
-                    <div className="hidden grid-cols-[160px_minmax(0,1fr)_220px_120px_180px] gap-2 border-b border-border bg-background/70 px-4 py-3 text-xs font-semibold text-muted-foreground md:grid">
-                        <div>Partner ID</div>
-                        <div>Display Name</div>
-                        <div>Admin Token</div>
-                        <div>Transfer</div>
-                        <div className="text-right">Actions</div>
-                    </div>
-                    <div className="divide-y divide-border">
-                        {items.map((p) => (
-                            <div
-                                key={p.partner_id}
-                                className="grid grid-cols-1 gap-3 px-4 py-4 text-sm text-foreground md:grid-cols-[160px_minmax(0,1fr)_220px_120px_180px]"
-                            >
-                                <div className="font-semibold tabular-nums">{p.partner_id}</div>
-                                <div className="min-w-0 truncate">{p.display_name}</div>
-                                <div className="font-mono text-xs break-all">{p.admin_token}</div>
-                                <div className="text-xs font-semibold">{p.allow_transfer ? "On" : "Off"}</div>
-                                <div className="flex flex-wrap items-center justify-start gap-2 md:justify-end">
-                                    <Button type="button" size="sm" variant="secondary" asChild>
-                                        <Link href={`/white-label/${encodeURIComponent(p.partner_id)}/preview`}>Preview</Link>
-                                    </Button>
-                                    <Button type="button" size="sm" variant="outline" asChild>
-                                        <Link href={`/white-label/${encodeURIComponent(p.partner_id)}/tenants`}>Tenants</Link>
-                                    </Button>
+                    <div className="relative overflow-x-auto">
+                        <div className={`grid ${PARTNERS_GRID_COLS} ${PARTNERS_GRID_MIN_WIDTH} gap-2 border-b border-border bg-background/70 px-4 py-3 text-xs font-semibold text-muted-foreground`}>
+                            <div>Partner ID</div>
+                            <div>Display Name</div>
+                            <div>Admin Token</div>
+                            <div>Transfer</div>
+                            <div className="text-right">Actions</div>
+                        </div>
+                        <div className="divide-y divide-border">
+                            {items.map((p) => (
+                                <div
+                                    key={p.partner_id}
+                                    className={`grid ${PARTNERS_GRID_COLS} ${PARTNERS_GRID_MIN_WIDTH} gap-2 px-4 py-4 text-sm text-foreground`}
+                                >
+                                    <div className="font-semibold tabular-nums">{p.partner_id}</div>
+                                    <div className="min-w-0 truncate">{p.display_name}</div>
+                                    <div className="font-mono text-xs break-all">{p.admin_token}</div>
+                                    <div className="text-xs font-semibold">{p.allow_transfer ? "On" : "Off"}</div>
+                                    <div className="flex flex-wrap items-center justify-end gap-2">
+                                        <Button type="button" size="sm" variant="secondary" asChild>
+                                            <Link href={`/white-label/${encodeURIComponent(p.partner_id)}/preview`}>Preview</Link>
+                                        </Button>
+                                        <Button type="button" size="sm" variant="outline" asChild>
+                                            <Link href={`/white-label/${encodeURIComponent(p.partner_id)}/tenants`}>Tenants</Link>
+                                        </Button>
+                                    </div>
                                 </div>
-                            </div>
-                        ))}
-                        {!loading && items.length === 0 ? (
-                            <div className="px-6 py-10 text-center text-sm text-muted-foreground">No partners found.</div>
-                        ) : null}
+                            ))}
+                            {!loading && items.length === 0 ? (
+                                <div className="px-6 py-10 text-center text-sm text-muted-foreground">No partners found.</div>
+                            ) : null}
+                        </div>
                     </div>
                 </div>
             </div>

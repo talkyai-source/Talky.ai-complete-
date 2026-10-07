@@ -164,7 +164,7 @@ export default function ReviewsPage() {
                                                             );
                                                             setPage(1);
                                                         }}
-                                                        className="break-all text-left font-mono text-xs underline-offset-2 hover:underline"
+                                                        className="break-all p-1 -m-1 text-left font-mono text-xs underline-offset-2 hover:underline"
                                                     >
                                                         {r.prompt_version}
                                                     </button>
@@ -271,7 +271,9 @@ export default function ReviewsPage() {
                             <>
                                 <ul className="divide-y divide-border">
                                     {list.data!.items.map((r) => (
-                                        <li key={r.id} className="flex items-start gap-4 py-3">
+                                        /* pr-12: keeps the Listen link clear of the fixed chat
+                                           launcher's lane while scrolling (Group C, 2026-10). */
+                                        <li key={r.id} className="flex items-start gap-4 py-3 pr-12">
                                             <span className="flex w-14 shrink-0 items-center gap-1 pt-0.5">
                                                 <Star
                                                     className={`h-4 w-4 ${

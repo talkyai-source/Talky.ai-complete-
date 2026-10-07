@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
@@ -520,6 +520,12 @@ function UsageSummarySection({
   onRetry: () => void;
 }) {
   const max = Math.max(...daily.map((d) => d.minutesUsed), 1);
+  // Per-day readout (2026-10): the values used to live only in hover `title`s,
+  // which touch, keyboard and screen-reader users can never reach. Each bar is
+  // now a real button (aria-label carries the value) and the tapped/focused
+  // day is printed inside the chart's existing headroom, so nothing moves.
+  const [selectedDay, setSelectedDay] = useState<DailyUsageDay | null>(null);
+  const readoutDay = selectedDay ?? (daily.length > 0 ? daily[daily.length - 1] : null);
 
   return (
     <Card>
@@ -541,20 +547,34 @@ function UsageSummarySection({
             <div className="relative h-32 overflow-hidden rounded-2xl border border-border/70 bg-muted/20 px-3 pb-3 pt-5">
               <div className="pointer-events-none absolute inset-x-3 top-1/3 border-t border-dashed border-border/70" />
               <div className="pointer-events-none absolute inset-x-3 top-2/3 border-t border-dashed border-border/70" />
+              {readoutDay ? (
+                <p
+                  aria-live="polite"
+                  data-usage-readout
+                  className="pointer-events-none absolute right-3 top-0.5 z-10 text-[11px] tabular-nums text-muted-foreground"
+                >
+                  {formatDate(readoutDay.date)} · {readoutDay.minutesUsed} min
+                </p>
+              ) : null}
               <div className="relative flex h-full items-end gap-2">
                 {daily.map((d) => {
                   const h = (d.minutesUsed / max) * 100;
                   return (
-                    <div
+                    <button
                       key={d.date}
-                      className="group flex h-full flex-1 items-end"
+                      type="button"
+                      data-usage-bar
+                      onClick={() => setSelectedDay(d)}
+                      onFocus={() => setSelectedDay(d)}
+                      aria-label={`${formatDate(d.date)}: ${d.minutesUsed} minutes used`}
                       title={`${d.date}: ${d.minutesUsed} min`}
+                      className="group flex h-full flex-1 items-end focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     >
                       <div
                         className="w-full min-w-1 rounded-t-md bg-gradient-to-t from-primary to-primary/55 transition-[height,filter] duration-500 group-hover:brightness-110"
                         style={{ height: `${Math.max(h, 4)}%` }}
                       />
-                    </div>
+                    </button>
                   );
                 })}
               </div>
@@ -767,7 +787,7 @@ function RecentInvoices({
                 {invoices.slice(0, 3).map((inv) => (
                   <tr key={inv.id} className="border-b border-border last:border-b-0 hover:bg-muted/20 transition-colors">
                     <td className="px-4 py-3">
-                      <Link href={`/billing/invoices/${inv.id}`} className="font-semibold text-foreground hover:underline">
+                      <Link href={`/billing/invoices/${inv.id}`} className="inline-block py-1 -my-1 font-semibold text-foreground hover:underline">
                         {inv.stripe_invoice_id || inv.id.slice(0, 8)}
                       </Link>
                     </td>
