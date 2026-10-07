@@ -1,0 +1,1224 @@
+{
+  "source_before": {
+    "Talk-Leee/src/app/calls/page.tsx": "fe20656d91541fae6e9dc4f5a0e1a6e25fbb9dba2eccd7c1f1ab5d2100d51bf4",
+    "Talk-Leee/src/components/calls/CallSummaryCard.test.tsx": "a59594193ae8e30e5f824578624d01fd3f328c96265aab9175471bb8f3c9cc9b",
+    "Talk-Leee/src/components/calls/CallSummaryCard.tsx": "d40f95e4b2a083d1ac377cc93a38ffc047df899c61deeb51e9d97c901b484604",
+    "Talk-Leee/src/components/calls/lead-details-panel.test.tsx": "1067569544867e00b6f3b178a30f25af9cead5c229130614045c9a7dc98731b4",
+    "Talk-Leee/src/components/calls/lead-details-panel.tsx": "eaac25f2776c098eec19a45eed03f149b1f57c03608fa50f40fa90df28485932",
+    "Talk-Leee/src/lib/dashboard-api.ts": "455153812201b52cad99151be9877735afc9068c66f207adb7f8fcb152d2628d",
+    "backend/app/api/v1/endpoints/calls.py": "b91f6c39900826e3f2e4e2a7100a9f225838662b8d53521314615b6ccfe16fdd",
+    "backend/app/api/v1/endpoints/lead_details.py": "b004c2413587af9ca4f26b0d827a2b2183d1d2fd08cf0bf7a2225a4075e089bc",
+    "backend/app/domain/services/call_summary/store.py": "5209950d01b670dec5533f52b12bae6707a44a6ac2eb8eda47132f4da5250037",
+    "backend/app/domain/services/lead_capture_service.py": "062977f8c95a4454d24f341d8d890a5f46807da6d05c91f7da551d58945d4488",
+    "backend/app/domain/services/voice_pipeline/contact_capture.py": "62b18f9c27cb3219a92323ffa1aea2cea186b579bae36f7714677a01d28c2bfa",
+    "backend/app/domain/services/voice_pipeline/contact_recording.py": "6e4f6044ddfbc1c735d44a2715a243b6e185d1c978428305b3698c8a50d091c6",
+    "backend/app/domain/services/voice_pipeline/knowledge_tool.py": "73047b59e05fe1f63aa377859a0e67ca8499c80db4ea9525ba48c152f5a2c100",
+    "backend/app/domain/services/voice_pipeline/lead_slot_capture.py": "180368ca0164f430df56aa375f60e9ff0d8bccc79d44fab938de0a2f902567d4",
+    "backend/app/domain/services/voice_pipeline/turn_streamer.py": "73e877e0eee9ea018464a2d6bedc35748d2535a29fd988f846cc0bd6884d5c17",
+    "backend/app/infrastructure/assistant/agent.py": "32e565a5eb60ecf0c175d4de2eb0af40c465cd92afabeee6f65b4003a1bfad83",
+    "backend/app/infrastructure/assistant/tools/campaign_admin.py": "575afc2a2cd107da8d90286e280862df40e4ae5a05a40a2b011c68cd12adfb84",
+    "backend/app/infrastructure/assistant/tools/llm_schemas.py": "d83f7bdce3bd0522729b4d9d39cfa4ea95f211bfa41a56e90c2d983198227d93",
+    "backend/app/infrastructure/llm/streaming.py": "54d4ccb869cf667ed376a5e74ef69181f63fe951efe804dc2613c21386954180",
+    "backend/app/realtime/README.md": "500e445e564d3746b4194268058fe15afabad741f16ce20a7049579c02f384f2",
+    "backend/app/realtime/prompts.py": "2c0ec549a872f5b863e945f74b1c9ece1e2629d0753b677b552889a4339b2263",
+    "backend/app/services/scripts/call_state_tracker.py": "9473e4df8502733b54241ad380d3336d699ec5cf950e64c123da64cb9dfe336e",
+    "backend/app/services/scripts/knowledge/sections.py": "a25c9c7d4db9dba8813eaf121e47a5f0978677584a28dc7ee6049f2a9d767ff7",
+    "backend/app/services/scripts/prompt_builder.py": "60fad740007f3ee8de1d8678a9c7e42ade175be5d9fa82cacdfc0cf4d9e0d994",
+    "backend/app/services/scripts/prompts/guardrails.py": "4f69f1bf054504353a134b233787a0dc7e1ac6b1f9b1128f79e92c72dd5dfc1c",
+    "backend/app/services/scripts/prompts/versions.py": "93072e067dc8168598739c6ccda809c8b7ec46a17eb19cda36ced759b851f474",
+    "backend/scripts/qualify_agent_sections.py": "3d200564dd109ab94a2f8aaeb0507f5d753eef01cc9dfad4f595d28e1e8d6578",
+    "backend/tests/integration/test_ag05_lead_evidence.py": "0c7a0a73b072f6046cb05470a6ad54a8bbe053937cc58ca2564cd27850146952",
+    "backend/tests/integration/test_capture_restart_recovery.py": "da212d40d6fe0b186010dc0bdddccd318f2daefb68afc339b7e8201c83dffd00",
+    "backend/tests/integration/test_model_identity_lead_evidence.py": "afc7a026a357e6d3a00fc14990c724a37e282dccb72b4b9398577ede47fd45f9",
+    "backend/tests/unit/test_agent_section_qualification.py": "4b882c7f7cc60977736ba8ed4cd70327c0e433179c45a4588387df884bc0cd8e",
+    "backend/tests/unit/test_assistant_knowledge_authorization.py": "3403cc9522d4e53cfc1506e0450d0b738dcd3045cdda97d1ae48286d4aec55b0",
+    "backend/tests/unit/test_capture_restart_recovery.py": "3a63d3597269cf7d5074dfb5dd3fe285f443e0c390b9c5d086bb57e7dbdba1a2",
+    "backend/tests/unit/test_knowledge_limits.py": "f398f8121998a0e53774241bbb7cc116ed6cd163f5e2ea23cf76473d3cdbe6cb",
+    "backend/tests/unit/test_model_identity_recording.py": "dc8662e3f40951ce42fabf8ce3d2c1f95012b11432303e75685e8c32afc82f6a",
+    "backend/tests/unit/test_prompt_versions.py": "5d1473e55d63668fd9d15ee53a75e7a099fb2bcfaef6168b6bc7a84858dddbf2",
+    "backend/tests/unit/test_true_inbound_prompt_separation.py": "9ec5b3f4e4085c475d3170000ccf6ca53f5e438b806864817162bd142a13cb27",
+    "docs/sessions/2026-10-07-agent-capture-recovery.md": "c240571a227a07fc4b53ddf56b5bee67fa87e6c7e18bdebdb4611a00b0cb6ae8",
+    "docs/sessions/2026-10-07-knowledge-context-limits.md": "c7897f9199a63d284f360f03d37c8eddd0f8736c1ffa0b31ca6cb511d928c79c",
+    "docs/sessions/2026-10-07-model-identity-capture.md": "a7203c4984161b5ef7022cbc295ca535c5a31020f2544e5b39fe0cc722a47372",
+    "docs/sessions/artifacts/agent-capture-recovery/affected.json": "096bdd66ee53c4dff5eac9a56b87e45800d1e17a6e7d46b06468988a81db6269",
+    "docs/sessions/artifacts/agent-capture-recovery/affected.txt": "04099ad700c7ccc796736f774d617fceae0c2c1246cf4dd93d9224ea1ddaab11",
+    "docs/sessions/artifacts/agent-capture-recovery/baseline.json": "8cdb5b5d8cc5afeb6e0ba1e820724036fdabbfd7c3eed314aaf7d6fd4f7443df",
+    "docs/sessions/artifacts/agent-capture-recovery/baseline.txt": "58aa873688f1bcfa7aa39e76a0c1c226bba1aca20d7288e2963b4267a023ee92",
+    "docs/sessions/artifacts/agent-capture-recovery/focused.json": "573e61f26390a197a3f110b9753424ab24151a75924e73a57b110280cf224278",
+    "docs/sessions/artifacts/agent-capture-recovery/focused.txt": "7d11cf415414c639cbd80321ec4f49cdb5900fe72320a0d3d9d4d8c19acc5883",
+    "docs/sessions/artifacts/agent-capture-recovery/runner.py": "e228e1e608c703e90f1bfa7db0c2d41a2f8a739f753f35b80015f4ea8655db20",
+    "docs/sessions/artifacts/knowledge-context-limits/benchmark.py": "75a3fc2eb9b11d345e715de00a4360a3e05262cae9147dd6cbaf123482797718",
+    "docs/sessions/artifacts/knowledge-context-limits/catalog-perf-after.txt": "cc99c21b4f3c94d46f43a54496c15bb844f2b383a339ab8da8a4d4f17fa1d446",
+    "docs/sessions/artifacts/knowledge-context-limits/catalog-perf-before.txt": "6ca1a0fde8fb873548b0c3a22fe7c58cfec846dfbf4318836b789f7767ad75b8",
+    "docs/sessions/artifacts/knowledge-context-limits/context-limits-baseline.txt": "a289cce916a8bc8db6c03dcc2aa4b9d38665b85a81265e3d86be72fa12d144a8",
+    "docs/sessions/artifacts/knowledge-context-limits/knowledge-limits-affected-first.txt": "7ce0ab8cd8087345593bcd9a10c087411615a91e4dd11e1f114449c41cd6f0f9",
+    "docs/sessions/artifacts/knowledge-context-limits/knowledge-limits-affected-second.txt": "de8fb374db8e8412829995154562ef699636ce8c7ffbefd90dd0834dbcc0c036",
+    "docs/sessions/artifacts/knowledge-context-limits/knowledge-limits-baseline.txt": "f71f87777fa8ed4ca67b32740e2e5f222a1ae60c4d8a531a2e50b14537242374",
+    "docs/sessions/artifacts/knowledge-context-limits/knowledge-limits-final.txt": "03ba0ca57a9f67b7320f1b1e20e2656c571362a1b293bc4ee7adcfc8be291af3",
+    "docs/sessions/artifacts/model-identity-capture/baseline-test.py": "f7537f8fbf76c3b3f3b21e407288d7bdfddadcaa2de71c5906e7bfd9a8885ebe",
+    "docs/sessions/artifacts/model-identity-capture/baseline.txt": "cf53b486c8153d11de26496ff0ace6b24253b8bcf22a9a4218372a3492fecc15",
+    "docs/sessions/artifacts/model-identity-capture/checks.json": "0e59af7648735846271b5701c24ddfb99c76ea2573661281d99f6010070c0fa8",
+    "docs/sessions/artifacts/model-identity-capture/commands.txt": "6401136b0674affbe025570f7bcadb8b5e64af502a9dff4a3eb0e57b00289843",
+    "docs/sessions/artifacts/model-identity-capture/diff-check.txt": "58730e9c8fa711968ba5902db13d51e699fdf1706681a660245480c80a1595f9",
+    "docs/sessions/artifacts/model-identity-capture/eslint.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "docs/sessions/artifacts/model-identity-capture/final-source.json": "09383b3d1128a8367f3cbb8553980cddf8949f1be1415ef48c96458eb2586e29",
+    "docs/sessions/artifacts/model-identity-capture/first.txt": "efcf985bd42a82604c8746587117bd06921ee6f1b46245941548b81820c1cf4e",
+    "docs/sessions/artifacts/model-identity-capture/frontend.txt": "27801c9876aa6d7664b7d3ee8911eef89b05f5dbefeacd08a8830b19bd4cf05b",
+    "docs/sessions/artifacts/model-identity-capture/legacy-pg-baseline.txt": "1cad26736fd400557c89871fe4dc3f1c67d6825d2b8e15424b287e056d3d1e0f",
+    "docs/sessions/artifacts/model-identity-capture/manifest.json": "a103a55553be75d468df7ab5e1a7bc796d3e0d24f677b0dd5ea5f6261a6cd699",
+    "docs/sessions/artifacts/model-identity-capture/pg-final.json": "94118deeb48d085cf833db1cfdb13373d62a2136b36711b1a5393c45b9ac3ee0",
+    "docs/sessions/artifacts/model-identity-capture/pg-final.txt": "047c4661bcc6ddc85003d88b96cf3c427961bc6190d204755ac9b9d2305621ea",
+    "docs/sessions/artifacts/model-identity-capture/pg_check.py": "21672f3d66fa50d9753cafd591042361db4318b6f50657a975b79b0cd7088556",
+    "docs/sessions/artifacts/model-identity-capture/ruff.txt": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18",
+    "docs/sessions/artifacts/model-identity-capture/typecheck.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "docs/sessions/artifacts/model-identity-capture/unit-final.txt": "4f375a3ddc68ec453eebd0f1f2847ed85f03b34d959cc68718fc74948d44aa5d",
+    "docs/sessions/artifacts/model-identity-capture/unit-initial-fixture.txt": "b89892dcc209f974293d7f0178874e1c5498ca5e3227ad791f809674409c185c",
+    "docs/sessions/artifacts/agent-limitations/pg_check.py": "c23664a133739500804bbe2457167e14853d55003911a989bf7c9298f98df7d4",
+    "docs/sessions/artifacts/ag06-canonical-recovery/probe.py": "225141c89e9b5eb8635609e1a96a48b1d8b26ff166a5b4da54120c3949a692d1"
+  },
+  "before": {
+    "public": {
+      "head": "0061_dnc_runtime_contract",
+      "tables": {
+        "abuse_detection_rules": {
+          "count": 8,
+          "data_hash": "1b62df9126631773c371932e839cbc80"
+        },
+        "abuse_events": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "action_plans": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "admin_media_deletion_intents": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "admin_media_deletion_request_keys": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "ai_config_migrations": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "alembic_version": {
+          "count": 1,
+          "data_hash": "9135024a1f9169b8e151d689545ffbfa"
+        },
+        "assistant_actions": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "assistant_conversations": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "audit_logs": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "billing_checkout_attempts": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "billing_ledger": {
+          "count": 761,
+          "data_hash": "c6e769e88e78d84cfba6effe8c17f321"
+        },
+        "billing_refund_snapshots": {
+          "count": 18,
+          "data_hash": "e16b2f47da9cc8cf8dab4aa5c1f0a15c"
+        },
+        "billing_webhook_notifications": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "billing_webhook_review_log": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "call_events": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "call_feedback": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "call_guard_decisions": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "call_lead_details": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "call_legs": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "call_velocity_snapshots": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "calls": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "campaign_knowledge_nodes": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "campaign_knowledge_sources": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "campaign_lead_fields": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "campaigns": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "clients": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "cloned_voices": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "connector_accounts": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "connectors": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "contact_lists": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "conversation_reviews": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "conversations": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "crm_deliveries": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "dialer_jobs": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "dnc_entries": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "inbound_audit_events": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "inbound_billing_hold_finalize_approvals": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "inbound_campaign_configs": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "inbound_did_assignments": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "inbound_operation_idempotency": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "inbound_reassignment_requests": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "inbound_rejections": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "inbound_usage_transactions": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "invoice_snapshots": {
+          "count": 120,
+          "data_hash": "88fad5f926f8df9217dded1fb0a29840"
+        },
+        "invoices": {
+          "count": 65,
+          "data_hash": "efa55e1daffcb043d83e20f18a745acb"
+        },
+        "leads": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "login_attempts": {
+          "count": 72,
+          "data_hash": "25840bb8f000f073e13544f8799f13aa"
+        },
+        "meetings": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "mfa_challenges": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "partner_limits": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "permissions": {
+          "count": 42,
+          "data_hash": "637bc15dc82a0d44728a69f9193166e3"
+        },
+        "plan_price_options": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "plans": {
+          "count": 170,
+          "data_hash": "c1123fcdec0739c1fb2ffc87040f1082"
+        },
+        "platform_runtime_controls": {
+          "count": 1,
+          "data_hash": "7b7bab55f025160a20409aa4e507e5b1"
+        },
+        "processed_webhook_events": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "prompt_template_versions": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "public_contact_enquiries": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "recordings": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "recordings_s3": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "recovery_codes": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "refresh_tokens": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "reminders": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "review_reward_ledger": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "role_permissions": {
+          "count": 150,
+          "data_hash": "9c023bb140e49d652c5d5c88f078b20c"
+        },
+        "roles": {
+          "count": 5,
+          "data_hash": "7745847c5b5bea8b97c752a7cc96fad3"
+        },
+        "secret_access_log": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "security_events": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "security_sessions": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "subscriptions": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "suspension_events": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "talky_0041_contact_lists_adoption": {
+          "count": 1,
+          "data_hash": "9e43cdf99b84df9a2ca9feb300b72404"
+        },
+        "tenant_ai_configs": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "tenant_call_limits": {
+          "count": 105,
+          "data_hash": "624be810a07f227fc7dac0dbe18dee9e"
+        },
+        "tenant_codec_policies": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "tenant_inbound_controls": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "tenant_phone_numbers": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "tenant_policy_audit_log": {
+          "count": 142,
+          "data_hash": "dbd92fe761753b9734a5e12b602c72a9"
+        },
+        "tenant_quota_usage": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "tenant_quotas": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "tenant_route_policies": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "tenant_runtime_policy_events": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "tenant_runtime_policy_versions": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "tenant_secrets": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "tenant_settings": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "tenant_sip_trunks": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "tenant_sip_trust_policies": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "tenant_telephony_concurrency_events": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "tenant_telephony_concurrency_leases": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "tenant_telephony_concurrency_policies": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "tenant_telephony_idempotency": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "tenant_telephony_quota_events": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "tenant_telephony_threshold_policies": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "tenant_users": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "tenants": {
+          "count": 301,
+          "data_hash": "da26d5b003644b449032690a9ee7b204"
+        },
+        "topup_orders": {
+          "count": 108,
+          "data_hash": "b6b0ec443c5dd51d1e5da3b4d6015bc9"
+        },
+        "topup_packages": {
+          "count": 3,
+          "data_hash": "8755a0548dc296564feae99a24ce185b"
+        },
+        "transcripts": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "usage_records": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "user_mfa": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "user_passkeys": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "user_permissions": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "user_profiles": {
+          "count": 4,
+          "data_hash": "109d28109f7d54d3c6925bfc9e01b2db"
+        },
+        "webauthn_challenges": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "webhook_configs": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "webhook_deliveries": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "webhook_endpoints": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "white_label_partners": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        }
+      },
+      "schema": {
+        "relations": {
+          "count": 520,
+          "sha256": "62de6290330b76a7c2e9551dc991a0879b8086ad6f6236370fb06a6baa329754"
+        },
+        "columns": {
+          "count": 1624,
+          "sha256": "fd2b967d072422ae50405eaa52be723d9e5b7bc76274d8ea0fe2619c5d7c0306"
+        },
+        "constraints": {
+          "count": 601,
+          "sha256": "c4607d796433350d68d8edf78d9d2ec66c45f74a32aac9eb79c79fe8130dbc53"
+        },
+        "policies": {
+          "count": 106,
+          "sha256": "3f4df52fdab6ea8ce6a4995a2f3f39a6063b02218cf3f25a427a29eaa1b18c65"
+        },
+        "functions": {
+          "count": 98,
+          "sha256": "88e35a20a4496bf75eb7bf84f172392b709563a0c95e8d0902874bbce80c7640"
+        },
+        "triggers": {
+          "count": 1024,
+          "sha256": "366566c94172a534dbf5261efc4fbf8fbc206af865df1adf24e84b0ac32cfd4e"
+        }
+      }
+    },
+    "roles": [
+      "authenticated",
+      "cp02_0d6bef16eb164033b15b1e4aacec4ec8",
+      "cp02_10826191917f4d77b3eb23d3353b3d66",
+      "cp02_576c95a973d247c0ab22a394d6b0d307",
+      "cp02_5fe88db686e543f2910d50ff36b2ed80",
+      "cp02_875f3238f69e4a2d80340d720f65cccd",
+      "cp02_93b7807967be4d9084d25fa16656119f",
+      "cp02_a5e43ad9b99247039c24a3da99361d49",
+      "cp02_b3ffd2fc670442f5874d183f7ccd2dd2",
+      "cp02_bd64cc082b2946bd8c84faae5c363565",
+      "cp02_e12874a156714960b108e6985aa9b190",
+      "cp02_fe5237e5af944cf0bd73ea3b9d922942",
+      "cp03_451ccd1dfbeb418289ce37fd362d2757",
+      "cp03_baf8096c29e94862811eab34695712b4",
+      "pg_checkpoint",
+      "pg_create_subscription",
+      "pg_database_owner",
+      "pg_execute_server_program",
+      "pg_monitor",
+      "pg_read_all_data",
+      "pg_read_all_settings",
+      "pg_read_all_stats",
+      "pg_read_server_files",
+      "pg_signal_backend",
+      "pg_stat_scan_tables",
+      "pg_use_reserved_connections",
+      "pg_write_all_data",
+      "pg_write_server_files",
+      "talky"
+    ],
+    "schemas": [
+      "information_schema",
+      "pg_catalog",
+      "pg_toast",
+      "public"
+    ]
+  },
+  "network": {
+    "database_socket_attempts": 0,
+    "database_transport_attempts": 89,
+    "database_address_resolutions": 0,
+    "internal_socketpairs": 84,
+    "prohibited_attempts": 0
+  },
+  "runtime": {
+    "executable": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\backend\\.venv\\Scripts\\python.exe",
+    "version": "3.12.12 (main, Dec  9 2025, 19:02:55) [MSC v.1944 64 bit (AMD64)]",
+    "prefix": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\backend\\.venv",
+    "pythonpath": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\production-ready-20261004\\backend",
+    "dont_write_bytecode": true,
+    "dependencies": {
+      "asyncpg": {
+        "version": "0.29.0",
+        "location": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\backend\\.venv\\Lib\\site-packages\\asyncpg\\__init__.py"
+      },
+      "alembic": {
+        "version": "1.13.1",
+        "location": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\backend\\.venv\\Lib\\site-packages\\alembic\\__init__.py"
+      },
+      "sqlalchemy": {
+        "version": "2.0.25",
+        "location": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\backend\\.venv\\Lib\\site-packages\\sqlalchemy\\__init__.py"
+      },
+      "pytest": {
+        "version": "7.4.4",
+        "location": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\backend\\.venv\\Lib\\site-packages\\pytest\\__init__.py"
+      },
+      "pytest_asyncio": {
+        "version": "0.23.3",
+        "location": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\backend\\.venv\\Lib\\site-packages\\pytest_asyncio\\__init__.py"
+      },
+      "httpx": {
+        "version": "0.28.1",
+        "location": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\backend\\.venv\\Lib\\site-packages\\httpx\\__init__.py"
+      },
+      "fastapi": {
+        "version": "0.139.0",
+        "location": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\backend\\.venv\\Lib\\site-packages\\fastapi\\__init__.py"
+      },
+      "jwt": {
+        "version": "2.13.0",
+        "location": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\backend\\.venv\\Lib\\site-packages\\jwt\\__init__.py"
+      },
+      "pydantic": {
+        "version": "2.12.5",
+        "location": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\backend\\.venv\\Lib\\site-packages\\pydantic\\__init__.py"
+      }
+    }
+  },
+  "pytest_argv": [
+    "tests/integration/test_ag05_lead_evidence.py",
+    "tests/integration/test_model_identity_lead_evidence.py",
+    "tests/integration/test_capture_restart_recovery.py",
+    "-q",
+    "--tb=short",
+    "-o",
+    "addopts="
+  ],
+  "pytest_exit_code": 0,
+  "after": {
+    "public": {
+      "head": "0061_dnc_runtime_contract",
+      "tables": {
+        "abuse_detection_rules": {
+          "count": 8,
+          "data_hash": "1b62df9126631773c371932e839cbc80"
+        },
+        "abuse_events": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "action_plans": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "admin_media_deletion_intents": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "admin_media_deletion_request_keys": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "ai_config_migrations": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "alembic_version": {
+          "count": 1,
+          "data_hash": "9135024a1f9169b8e151d689545ffbfa"
+        },
+        "assistant_actions": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "assistant_conversations": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "audit_logs": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "billing_checkout_attempts": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "billing_ledger": {
+          "count": 761,
+          "data_hash": "c6e769e88e78d84cfba6effe8c17f321"
+        },
+        "billing_refund_snapshots": {
+          "count": 18,
+          "data_hash": "e16b2f47da9cc8cf8dab4aa5c1f0a15c"
+        },
+        "billing_webhook_notifications": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "billing_webhook_review_log": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "call_events": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "call_feedback": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "call_guard_decisions": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "call_lead_details": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "call_legs": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "call_velocity_snapshots": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "calls": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "campaign_knowledge_nodes": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "campaign_knowledge_sources": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "campaign_lead_fields": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "campaigns": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "clients": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "cloned_voices": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "connector_accounts": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "connectors": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "contact_lists": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "conversation_reviews": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "conversations": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "crm_deliveries": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "dialer_jobs": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "dnc_entries": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "inbound_audit_events": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "inbound_billing_hold_finalize_approvals": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "inbound_campaign_configs": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "inbound_did_assignments": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "inbound_operation_idempotency": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "inbound_reassignment_requests": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "inbound_rejections": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "inbound_usage_transactions": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "invoice_snapshots": {
+          "count": 120,
+          "data_hash": "88fad5f926f8df9217dded1fb0a29840"
+        },
+        "invoices": {
+          "count": 65,
+          "data_hash": "efa55e1daffcb043d83e20f18a745acb"
+        },
+        "leads": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "login_attempts": {
+          "count": 72,
+          "data_hash": "25840bb8f000f073e13544f8799f13aa"
+        },
+        "meetings": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "mfa_challenges": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "partner_limits": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "permissions": {
+          "count": 42,
+          "data_hash": "637bc15dc82a0d44728a69f9193166e3"
+        },
+        "plan_price_options": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "plans": {
+          "count": 170,
+          "data_hash": "c1123fcdec0739c1fb2ffc87040f1082"
+        },
+        "platform_runtime_controls": {
+          "count": 1,
+          "data_hash": "7b7bab55f025160a20409aa4e507e5b1"
+        },
+        "processed_webhook_events": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "prompt_template_versions": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "public_contact_enquiries": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "recordings": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "recordings_s3": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "recovery_codes": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "refresh_tokens": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "reminders": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "review_reward_ledger": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "role_permissions": {
+          "count": 150,
+          "data_hash": "9c023bb140e49d652c5d5c88f078b20c"
+        },
+        "roles": {
+          "count": 5,
+          "data_hash": "7745847c5b5bea8b97c752a7cc96fad3"
+        },
+        "secret_access_log": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "security_events": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "security_sessions": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "subscriptions": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "suspension_events": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "talky_0041_contact_lists_adoption": {
+          "count": 1,
+          "data_hash": "9e43cdf99b84df9a2ca9feb300b72404"
+        },
+        "tenant_ai_configs": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "tenant_call_limits": {
+          "count": 105,
+          "data_hash": "624be810a07f227fc7dac0dbe18dee9e"
+        },
+        "tenant_codec_policies": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "tenant_inbound_controls": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "tenant_phone_numbers": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "tenant_policy_audit_log": {
+          "count": 142,
+          "data_hash": "dbd92fe761753b9734a5e12b602c72a9"
+        },
+        "tenant_quota_usage": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "tenant_quotas": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "tenant_route_policies": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "tenant_runtime_policy_events": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "tenant_runtime_policy_versions": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "tenant_secrets": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "tenant_settings": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "tenant_sip_trunks": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "tenant_sip_trust_policies": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "tenant_telephony_concurrency_events": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "tenant_telephony_concurrency_leases": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "tenant_telephony_concurrency_policies": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "tenant_telephony_idempotency": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "tenant_telephony_quota_events": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "tenant_telephony_threshold_policies": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "tenant_users": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "tenants": {
+          "count": 301,
+          "data_hash": "da26d5b003644b449032690a9ee7b204"
+        },
+        "topup_orders": {
+          "count": 108,
+          "data_hash": "b6b0ec443c5dd51d1e5da3b4d6015bc9"
+        },
+        "topup_packages": {
+          "count": 3,
+          "data_hash": "8755a0548dc296564feae99a24ce185b"
+        },
+        "transcripts": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "usage_records": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "user_mfa": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "user_passkeys": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "user_permissions": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "user_profiles": {
+          "count": 4,
+          "data_hash": "109d28109f7d54d3c6925bfc9e01b2db"
+        },
+        "webauthn_challenges": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "webhook_configs": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "webhook_deliveries": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "webhook_endpoints": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "white_label_partners": {
+          "count": 0,
+          "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+        }
+      },
+      "schema": {
+        "relations": {
+          "count": 520,
+          "sha256": "62de6290330b76a7c2e9551dc991a0879b8086ad6f6236370fb06a6baa329754"
+        },
+        "columns": {
+          "count": 1624,
+          "sha256": "fd2b967d072422ae50405eaa52be723d9e5b7bc76274d8ea0fe2619c5d7c0306"
+        },
+        "constraints": {
+          "count": 601,
+          "sha256": "c4607d796433350d68d8edf78d9d2ec66c45f74a32aac9eb79c79fe8130dbc53"
+        },
+        "policies": {
+          "count": 106,
+          "sha256": "3f4df52fdab6ea8ce6a4995a2f3f39a6063b02218cf3f25a427a29eaa1b18c65"
+        },
+        "functions": {
+          "count": 98,
+          "sha256": "88e35a20a4496bf75eb7bf84f172392b709563a0c95e8d0902874bbce80c7640"
+        },
+        "triggers": {
+          "count": 1024,
+          "sha256": "366566c94172a534dbf5261efc4fbf8fbc206af865df1adf24e84b0ac32cfd4e"
+        }
+      }
+    },
+    "roles": [
+      "authenticated",
+      "cp02_0d6bef16eb164033b15b1e4aacec4ec8",
+      "cp02_10826191917f4d77b3eb23d3353b3d66",
+      "cp02_576c95a973d247c0ab22a394d6b0d307",
+      "cp02_5fe88db686e543f2910d50ff36b2ed80",
+      "cp02_875f3238f69e4a2d80340d720f65cccd",
+      "cp02_93b7807967be4d9084d25fa16656119f",
+      "cp02_a5e43ad9b99247039c24a3da99361d49",
+      "cp02_b3ffd2fc670442f5874d183f7ccd2dd2",
+      "cp02_bd64cc082b2946bd8c84faae5c363565",
+      "cp02_e12874a156714960b108e6985aa9b190",
+      "cp02_fe5237e5af944cf0bd73ea3b9d922942",
+      "cp03_451ccd1dfbeb418289ce37fd362d2757",
+      "cp03_baf8096c29e94862811eab34695712b4",
+      "pg_checkpoint",
+      "pg_create_subscription",
+      "pg_database_owner",
+      "pg_execute_server_program",
+      "pg_monitor",
+      "pg_read_all_data",
+      "pg_read_all_settings",
+      "pg_read_all_stats",
+      "pg_read_server_files",
+      "pg_signal_backend",
+      "pg_stat_scan_tables",
+      "pg_use_reserved_connections",
+      "pg_write_all_data",
+      "pg_write_server_files",
+      "talky"
+    ],
+    "schemas": [
+      "information_schema",
+      "pg_catalog",
+      "pg_toast",
+      "public"
+    ]
+  },
+  "source_after": {
+    "Talk-Leee/src/app/calls/page.tsx": "fe20656d91541fae6e9dc4f5a0e1a6e25fbb9dba2eccd7c1f1ab5d2100d51bf4",
+    "Talk-Leee/src/components/calls/CallSummaryCard.test.tsx": "a59594193ae8e30e5f824578624d01fd3f328c96265aab9175471bb8f3c9cc9b",
+    "Talk-Leee/src/components/calls/CallSummaryCard.tsx": "d40f95e4b2a083d1ac377cc93a38ffc047df899c61deeb51e9d97c901b484604",
+    "Talk-Leee/src/components/calls/lead-details-panel.test.tsx": "1067569544867e00b6f3b178a30f25af9cead5c229130614045c9a7dc98731b4",
+    "Talk-Leee/src/components/calls/lead-details-panel.tsx": "eaac25f2776c098eec19a45eed03f149b1f57c03608fa50f40fa90df28485932",
+    "Talk-Leee/src/lib/dashboard-api.ts": "455153812201b52cad99151be9877735afc9068c66f207adb7f8fcb152d2628d",
+    "backend/app/api/v1/endpoints/calls.py": "b91f6c39900826e3f2e4e2a7100a9f225838662b8d53521314615b6ccfe16fdd",
+    "backend/app/api/v1/endpoints/lead_details.py": "b004c2413587af9ca4f26b0d827a2b2183d1d2fd08cf0bf7a2225a4075e089bc",
+    "backend/app/domain/services/call_summary/store.py": "5209950d01b670dec5533f52b12bae6707a44a6ac2eb8eda47132f4da5250037",
+    "backend/app/domain/services/lead_capture_service.py": "062977f8c95a4454d24f341d8d890a5f46807da6d05c91f7da551d58945d4488",
+    "backend/app/domain/services/voice_pipeline/contact_capture.py": "62b18f9c27cb3219a92323ffa1aea2cea186b579bae36f7714677a01d28c2bfa",
+    "backend/app/domain/services/voice_pipeline/contact_recording.py": "6e4f6044ddfbc1c735d44a2715a243b6e185d1c978428305b3698c8a50d091c6",
+    "backend/app/domain/services/voice_pipeline/knowledge_tool.py": "73047b59e05fe1f63aa377859a0e67ca8499c80db4ea9525ba48c152f5a2c100",
+    "backend/app/domain/services/voice_pipeline/lead_slot_capture.py": "180368ca0164f430df56aa375f60e9ff0d8bccc79d44fab938de0a2f902567d4",
+    "backend/app/domain/services/voice_pipeline/turn_streamer.py": "73e877e0eee9ea018464a2d6bedc35748d2535a29fd988f846cc0bd6884d5c17",
+    "backend/app/infrastructure/assistant/agent.py": "32e565a5eb60ecf0c175d4de2eb0af40c465cd92afabeee6f65b4003a1bfad83",
+    "backend/app/infrastructure/assistant/tools/campaign_admin.py": "575afc2a2cd107da8d90286e280862df40e4ae5a05a40a2b011c68cd12adfb84",
+    "backend/app/infrastructure/assistant/tools/llm_schemas.py": "d83f7bdce3bd0522729b4d9d39cfa4ea95f211bfa41a56e90c2d983198227d93",
+    "backend/app/infrastructure/llm/streaming.py": "54d4ccb869cf667ed376a5e74ef69181f63fe951efe804dc2613c21386954180",
+    "backend/app/realtime/README.md": "500e445e564d3746b4194268058fe15afabad741f16ce20a7049579c02f384f2",
+    "backend/app/realtime/prompts.py": "2c0ec549a872f5b863e945f74b1c9ece1e2629d0753b677b552889a4339b2263",
+    "backend/app/services/scripts/call_state_tracker.py": "9473e4df8502733b54241ad380d3336d699ec5cf950e64c123da64cb9dfe336e",
+    "backend/app/services/scripts/knowledge/sections.py": "a25c9c7d4db9dba8813eaf121e47a5f0978677584a28dc7ee6049f2a9d767ff7",
+    "backend/app/services/scripts/prompt_builder.py": "60fad740007f3ee8de1d8678a9c7e42ade175be5d9fa82cacdfc0cf4d9e0d994",
+    "backend/app/services/scripts/prompts/guardrails.py": "4f69f1bf054504353a134b233787a0dc7e1ac6b1f9b1128f79e92c72dd5dfc1c",
+    "backend/app/services/scripts/prompts/versions.py": "93072e067dc8168598739c6ccda809c8b7ec46a17eb19cda36ced759b851f474",
+    "backend/scripts/qualify_agent_sections.py": "3d200564dd109ab94a2f8aaeb0507f5d753eef01cc9dfad4f595d28e1e8d6578",
+    "backend/tests/integration/test_ag05_lead_evidence.py": "0c7a0a73b072f6046cb05470a6ad54a8bbe053937cc58ca2564cd27850146952",
+    "backend/tests/integration/test_capture_restart_recovery.py": "da212d40d6fe0b186010dc0bdddccd318f2daefb68afc339b7e8201c83dffd00",
+    "backend/tests/integration/test_model_identity_lead_evidence.py": "afc7a026a357e6d3a00fc14990c724a37e282dccb72b4b9398577ede47fd45f9",
+    "backend/tests/unit/test_agent_section_qualification.py": "4b882c7f7cc60977736ba8ed4cd70327c0e433179c45a4588387df884bc0cd8e",
+    "backend/tests/unit/test_assistant_knowledge_authorization.py": "3403cc9522d4e53cfc1506e0450d0b738dcd3045cdda97d1ae48286d4aec55b0",
+    "backend/tests/unit/test_capture_restart_recovery.py": "3a63d3597269cf7d5074dfb5dd3fe285f443e0c390b9c5d086bb57e7dbdba1a2",
+    "backend/tests/unit/test_knowledge_limits.py": "f398f8121998a0e53774241bbb7cc116ed6cd163f5e2ea23cf76473d3cdbe6cb",
+    "backend/tests/unit/test_model_identity_recording.py": "dc8662e3f40951ce42fabf8ce3d2c1f95012b11432303e75685e8c32afc82f6a",
+    "backend/tests/unit/test_prompt_versions.py": "5d1473e55d63668fd9d15ee53a75e7a099fb2bcfaef6168b6bc7a84858dddbf2",
+    "backend/tests/unit/test_true_inbound_prompt_separation.py": "9ec5b3f4e4085c475d3170000ccf6ca53f5e438b806864817162bd142a13cb27",
+    "docs/sessions/2026-10-07-agent-capture-recovery.md": "c240571a227a07fc4b53ddf56b5bee67fa87e6c7e18bdebdb4611a00b0cb6ae8",
+    "docs/sessions/2026-10-07-knowledge-context-limits.md": "c7897f9199a63d284f360f03d37c8eddd0f8736c1ffa0b31ca6cb511d928c79c",
+    "docs/sessions/2026-10-07-model-identity-capture.md": "a7203c4984161b5ef7022cbc295ca535c5a31020f2544e5b39fe0cc722a47372",
+    "docs/sessions/artifacts/agent-capture-recovery/affected.json": "096bdd66ee53c4dff5eac9a56b87e45800d1e17a6e7d46b06468988a81db6269",
+    "docs/sessions/artifacts/agent-capture-recovery/affected.txt": "04099ad700c7ccc796736f774d617fceae0c2c1246cf4dd93d9224ea1ddaab11",
+    "docs/sessions/artifacts/agent-capture-recovery/baseline.json": "8cdb5b5d8cc5afeb6e0ba1e820724036fdabbfd7c3eed314aaf7d6fd4f7443df",
+    "docs/sessions/artifacts/agent-capture-recovery/baseline.txt": "58aa873688f1bcfa7aa39e76a0c1c226bba1aca20d7288e2963b4267a023ee92",
+    "docs/sessions/artifacts/agent-capture-recovery/focused.json": "573e61f26390a197a3f110b9753424ab24151a75924e73a57b110280cf224278",
+    "docs/sessions/artifacts/agent-capture-recovery/focused.txt": "7d11cf415414c639cbd80321ec4f49cdb5900fe72320a0d3d9d4d8c19acc5883",
+    "docs/sessions/artifacts/agent-capture-recovery/runner.py": "e228e1e608c703e90f1bfa7db0c2d41a2f8a739f753f35b80015f4ea8655db20",
+    "docs/sessions/artifacts/knowledge-context-limits/benchmark.py": "75a3fc2eb9b11d345e715de00a4360a3e05262cae9147dd6cbaf123482797718",
+    "docs/sessions/artifacts/knowledge-context-limits/catalog-perf-after.txt": "cc99c21b4f3c94d46f43a54496c15bb844f2b383a339ab8da8a4d4f17fa1d446",
+    "docs/sessions/artifacts/knowledge-context-limits/catalog-perf-before.txt": "6ca1a0fde8fb873548b0c3a22fe7c58cfec846dfbf4318836b789f7767ad75b8",
+    "docs/sessions/artifacts/knowledge-context-limits/context-limits-baseline.txt": "a289cce916a8bc8db6c03dcc2aa4b9d38665b85a81265e3d86be72fa12d144a8",
+    "docs/sessions/artifacts/knowledge-context-limits/knowledge-limits-affected-first.txt": "7ce0ab8cd8087345593bcd9a10c087411615a91e4dd11e1f114449c41cd6f0f9",
+    "docs/sessions/artifacts/knowledge-context-limits/knowledge-limits-affected-second.txt": "de8fb374db8e8412829995154562ef699636ce8c7ffbefd90dd0834dbcc0c036",
+    "docs/sessions/artifacts/knowledge-context-limits/knowledge-limits-baseline.txt": "f71f87777fa8ed4ca67b32740e2e5f222a1ae60c4d8a531a2e50b14537242374",
+    "docs/sessions/artifacts/knowledge-context-limits/knowledge-limits-final.txt": "03ba0ca57a9f67b7320f1b1e20e2656c571362a1b293bc4ee7adcfc8be291af3",
+    "docs/sessions/artifacts/model-identity-capture/baseline-test.py": "f7537f8fbf76c3b3f3b21e407288d7bdfddadcaa2de71c5906e7bfd9a8885ebe",
+    "docs/sessions/artifacts/model-identity-capture/baseline.txt": "cf53b486c8153d11de26496ff0ace6b24253b8bcf22a9a4218372a3492fecc15",
+    "docs/sessions/artifacts/model-identity-capture/checks.json": "0e59af7648735846271b5701c24ddfb99c76ea2573661281d99f6010070c0fa8",
+    "docs/sessions/artifacts/model-identity-capture/commands.txt": "6401136b0674affbe025570f7bcadb8b5e64af502a9dff4a3eb0e57b00289843",
+    "docs/sessions/artifacts/model-identity-capture/diff-check.txt": "58730e9c8fa711968ba5902db13d51e699fdf1706681a660245480c80a1595f9",
+    "docs/sessions/artifacts/model-identity-capture/eslint.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "docs/sessions/artifacts/model-identity-capture/final-source.json": "09383b3d1128a8367f3cbb8553980cddf8949f1be1415ef48c96458eb2586e29",
+    "docs/sessions/artifacts/model-identity-capture/first.txt": "efcf985bd42a82604c8746587117bd06921ee6f1b46245941548b81820c1cf4e",
+    "docs/sessions/artifacts/model-identity-capture/frontend.txt": "27801c9876aa6d7664b7d3ee8911eef89b05f5dbefeacd08a8830b19bd4cf05b",
+    "docs/sessions/artifacts/model-identity-capture/legacy-pg-baseline.txt": "1cad26736fd400557c89871fe4dc3f1c67d6825d2b8e15424b287e056d3d1e0f",
+    "docs/sessions/artifacts/model-identity-capture/manifest.json": "a103a55553be75d468df7ab5e1a7bc796d3e0d24f677b0dd5ea5f6261a6cd699",
+    "docs/sessions/artifacts/model-identity-capture/pg-final.json": "94118deeb48d085cf833db1cfdb13373d62a2136b36711b1a5393c45b9ac3ee0",
+    "docs/sessions/artifacts/model-identity-capture/pg-final.txt": "047c4661bcc6ddc85003d88b96cf3c427961bc6190d204755ac9b9d2305621ea",
+    "docs/sessions/artifacts/model-identity-capture/pg_check.py": "21672f3d66fa50d9753cafd591042361db4318b6f50657a975b79b0cd7088556",
+    "docs/sessions/artifacts/model-identity-capture/ruff.txt": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18",
+    "docs/sessions/artifacts/model-identity-capture/typecheck.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "docs/sessions/artifacts/model-identity-capture/unit-final.txt": "4f375a3ddc68ec453eebd0f1f2847ed85f03b34d959cc68718fc74948d44aa5d",
+    "docs/sessions/artifacts/model-identity-capture/unit-initial-fixture.txt": "b89892dcc209f974293d7f0178874e1c5498ca5e3227ad791f809674409c185c",
+    "docs/sessions/artifacts/agent-limitations/pg_check.py": "c23664a133739500804bbe2457167e14853d55003911a989bf7c9298f98df7d4",
+    "docs/sessions/artifacts/ag06-canonical-recovery/probe.py": "225141c89e9b5eb8635609e1a96a48b1d8b26ff166a5b4da54120c3949a692d1"
+  },
+  "source_unchanged": true,
+  "protected_unchanged": true
+}

@@ -83,6 +83,17 @@
       "verification": "docs/sessions/artifacts/agent-residual-repairs/verification.json",
       "provider_run": "not_run",
       "deployment": "not_run"
+    },
+    "agent_limitations_20261008": {
+      "source_candidate": "408481f1041a26ea53a55dea8d2ad63f313147cd",
+      "report": "docs/sessions/2026-10-08-agent-limitations.md",
+      "verification": "docs/sessions/artifacts/agent-limitations/verification.json",
+      "postgres_verification": "docs/sessions/artifacts/agent-limitations/postgres-first.json",
+      "source_boundaries": "docs/sessions/artifacts/agent-limitations/checks.json",
+      "model_section_dry_plan": "docs/sessions/artifacts/agent-limitations/section-dry-plan.json",
+      "provider_run": "not_run",
+      "deployment": "not_run",
+      "designation": "Existing profile/account and owned test destinations requested; unanswered."
     }
   },
   "status_rules": {
@@ -568,10 +579,15 @@
           "path": "docs/sessions/2026-10-07-agent-residual-repairs.md",
           "kind": "six_reproduced_residual_agent_repairs_with_1812_offline_checks",
           "candidate": "0e0d249227c4efc2353af3b38e36bd75d95b4361"
+        },
+        {
+          "path": "docs/sessions/2026-10-08-agent-limitations.md",
+          "kind": "bounded_agent_limit_repairs_and_local_storage_ui_verification_not_live_acceptance",
+          "candidate": "408481f1041a26ea53a55dea8d2ad63f313147cd"
         }
       ],
-      "blocker": "Live keyword ranking/query-recovery is superseded by model-selected scoped authored sections. Local source/tool/session integration is tested, but original-question actual-model accuracy, full campaign profile, voice timing and human/customer acceptance remain unqualified. Historical raw scores remain unchanged and do not qualify the new architecture. The old query-based qualification CLI is explicitly retired; no provider credential has been used for this revision.",
-      "next_action": "Review a bounded actual-model section-selection profile using unchanged gold questions/thresholds, then use a designated existing account under its reviewed execution limits. Verify original-question answers and contact interpretation. Qualify current approved campaign versions, native/traditional runtime, saved leads, audio and deployed timing before acceptance.",
+      "blocker": "Current authored-section selection supports bounded branch browsing and complete-context-validated source pages. Local routing/source tests and an 80-question dry plan pass, but actual-model answers, campaign profile, voice timing and human/customer acceptance remain unqualified. The retired query runner and historical raw scores do not qualify this architecture. Existing model/account designation remains unanswered; no provider credential was used.",
+      "next_action": "Use the prepared current-agent evaluator on a designated existing account/profile within its explicit limits, review unchanged original-question answers and applicable conditions, then qualify native/traditional audio, saved leads and deployed timing. Do not treat incomplete source pages or a dry plan as factual acceptance.",
       "target_date": null,
       "execution_note": "Local candidate 69d09fe575831c42a14b28c0a7417ca1b388c492: 791 combined backend and 9 PostgreSQL tests passed. Synthetic 60-question quality gate failed (pinned 93.33/71.11%, SQL 88.89/68.89%, targets 90/85%). No provider calls, push or deployment; no package closure."
     },
@@ -614,6 +630,11 @@
           "path": "docs/sessions/2026-10-07-agent-residual-repairs.md",
           "kind": "six_reproduced_residual_agent_repairs_with_1812_offline_checks",
           "candidate": "0e0d249227c4efc2353af3b38e36bd75d95b4361"
+        },
+        {
+          "path": "docs/sessions/2026-10-08-agent-limitations.md",
+          "kind": "bounded_agent_limit_repairs_and_local_storage_ui_verification_not_live_acceptance",
+          "candidate": "408481f1041a26ea53a55dea8d2ad63f313147cd"
         }
       ],
       "blocker": "The user-requested model-owned revision removes deterministic relationship interpretation and speech rewrites. Prior candidate_verified evidence is historical; current relationship comprehension/retention needs actual-model and call evaluation.",
@@ -718,6 +739,11 @@
           "path": "docs/sessions/2026-10-07-agent-residual-repairs.md",
           "kind": "six_reproduced_residual_agent_repairs_with_1812_offline_checks",
           "candidate": "0e0d249227c4efc2353af3b38e36bd75d95b4361"
+        },
+        {
+          "path": "docs/sessions/2026-10-08-agent-limitations.md",
+          "kind": "bounded_agent_limit_repairs_and_local_storage_ui_verification_not_live_acceptance",
+          "candidate": "408481f1041a26ea53a55dea8d2ad63f313147cd"
         }
       ],
       "blocker": "Concise guides and model-owned speech replace the old output semantic judge; deterministic privacy/effect/transport controls remain. Historical replay mappings and preserved Groq semantic failure are retained, but do not qualify this revised prompt/runtime. Actual model, acoustic, interruption, unsupported-fact and premature-success behavior needs new profile acceptance.",
@@ -774,10 +800,15 @@
           "path": "docs/sessions/2026-10-07-agent-residual-repairs.md",
           "kind": "six_reproduced_residual_agent_repairs_with_1812_offline_checks",
           "candidate": "0e0d249227c4efc2353af3b38e36bd75d95b4361"
+        },
+        {
+          "path": "docs/sessions/2026-10-08-agent-limitations.md",
+          "kind": "bounded_agent_limit_repairs_and_local_storage_ui_verification_not_live_acceptance",
+          "candidate": "408481f1041a26ea53a55dea8d2ad63f313147cd"
         }
       ],
-      "blocker": "Model record_contact now interprets email/phone and uses existing validated persistence/source revisions. Local saving and invalidation controls pass; real interpretation accuracy, correction burden, Sales Hub browser and connector acceptance remain unverified. New spoken name/company lead fields were not added. Same-process retry cannot recover evidence never committed before process death.",
-      "next_action": "Qualify actual caller spellings/corrections/confirmations and saved pending/confirmed display on the approved cohort/profile, then real connector outcomes. Confirmation evidence is model interpretation, not guaranteed transcription correctness.",
+      "blocker": "The model recording tool now accepts email, phone, full_name and company_name with source/revision and per-field save acknowledgement. Existing durable-summary note recovery, stale-summary withholding, local PostgreSQL/API evidence and rendered source-status UI are verified. Actual model interpretation/correction burden, deployed Leads/Sales Hub and owned connector outcomes remain unverified. Captured name/company do not overwrite scalar imported/generated lead display names. Words or model commands never committed before process loss cannot be reconstructed as confirmed facts; incomplete transcripts remain explicit.",
+      "next_action": "On the designated existing profile and owned destinations, verify real caller names, companies, spellings, corrections, confirmations and withdrawals against saved evidence and rendered pending/confirmed states, then actual connector receipts. Confirmation is model interpretation, not guaranteed transcription correctness.",
       "target_date": null
     },
     {
@@ -996,6 +1027,11 @@
           "path": "docs/sessions/2026-10-07-agent-residual-repairs.md",
           "kind": "six_reproduced_residual_agent_repairs_with_1812_offline_checks",
           "candidate": "0e0d249227c4efc2353af3b38e36bd75d95b4361"
+        },
+        {
+          "path": "docs/sessions/2026-10-08-agent-limitations.md",
+          "kind": "bounded_agent_limit_repairs_and_local_storage_ui_verification_not_live_acceptance",
+          "candidate": "408481f1041a26ea53a55dea8d2ad63f313147cd"
         }
       ],
       "blocker": "A05 cleanup and documented crash contract are locally verified; remaining architecture dispositions follow lifecycle/provider/configuration owning repairs. No full architecture or live/release claim.",

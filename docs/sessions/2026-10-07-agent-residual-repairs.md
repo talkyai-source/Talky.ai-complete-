@@ -1,5 +1,7 @@
 # Remaining agent repairs — 7 October 2026
 
+Follow-up: [8 October's limitations checkpoint](2026-10-08-agent-limitations.md) extends knowledge/context handling and name/company capture, verifies durable summary recovery and actual local database/UI behavior, and prepares current-model evaluation. The bounds below describe this earlier candidate; current limits and remaining live acceptance are in that checkpoint.
+
 The user authorized fixing the six concrete defects and small cleanup items found after the [agent remnants cleanup](2026-10-07-agent-cleanup.md). This record covers those local repairs, not a new feature or production acceptance. Baseline: `1750341b9425a994da2f43e27b2ecfb2fa7e5f04`. Final tested source: **`0e0d249227c4efc2353af3b38e36bd75d95b4361`**, branch `codex/production-ready-20261004`, isolated worktree `tmp/production-ready-20261004`. Unrelated original-checkout changes are preserved.
 
 ## Defects and resulting behavior

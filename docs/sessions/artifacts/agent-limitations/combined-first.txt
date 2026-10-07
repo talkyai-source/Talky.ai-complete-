@@ -1,0 +1,89 @@
+........................................................................ [  3%]
+........................................................................ [  7%]
+........................................................................ [ 10%]
+........................................................................ [ 14%]
+........................................................................ [ 17%]
+........................................................................ [ 21%]
+........................................................................ [ 25%]
+...................................................................F.... [ 28%]
+....................................................................FFFF [ 32%]
+F..................................................F.................... [ 35%]
+........................................................................ [ 39%]
+..................................................................F..... [ 42%]
+........................................................................ [ 46%]
+........................................................................ [ 50%]
+.....F.................................................................. [ 53%]
+........................................................................ [ 57%]
+........................................................................ [ 60%]
+........................................................................ [ 64%]
+........................................................................ [ 67%]
+........................................................................ [ 71%]
+........................................................................ [ 75%]
+........................................................................ [ 78%]
+........................................................................ [ 82%]
+........................................................................ [ 85%]
+........................................................................ [ 89%]
+........................................................................ [ 92%]
+........................................................................ [ 96%]
+...............................................................F.....    [100%]
+================================== FAILURES ===================================
+_ test_the_shared_rules_accept_complete_contacts_and_clarify_only_unclear_parts _
+tests\unit\test_contact_capture_best_practice.py:70: in test_the_shared_rules_accept_complete_contacts_and_clarify_only_unclear_parts
+    assert "record_contact" in text and "own email or phone" in text
+E   AssertionError: assert ('record_contact' in '## CONVERSATION GUIDE You are {agent_name}, an AI assistant for {company_name}. Be honest about that identity. Help w...siness scope, not unrelated regulated advice. Respond kindly to distress and use only available, approved help routes.' and 'own email or phone' in '## CONVERSATION GUIDE You are {agent_name}, an AI assistant for {company_name}. Be honest about that identity. Help w...siness scope, not unrelated regulated advice. Respond kindly to distress and use only available, approved help routes.')
+__ test_traditional_handler_fanout_and_actual_turn_capture_share_safe_source __
+tests\unit\test_explicit_secret_boundary.py:114: in test_traditional_handler_fanout_and_actual_turn_capture_share_safe_source
+    assert rows["email"]["value"] == "alex@example.com"
+E   KeyError: 'email'
+_ test_actual_native_fanout_contact_and_revision_keep_matching_safe_source[False-openai] _
+tests\unit\test_explicit_secret_boundary.py:133: in test_actual_native_fanout_contact_and_revision_keep_matching_safe_source
+    assert rows["email"]["value"] == "alex@example.com"
+E   KeyError: 'email'
+_ test_actual_native_fanout_contact_and_revision_keep_matching_safe_source[False-xai] _
+tests\unit\test_explicit_secret_boundary.py:133: in test_actual_native_fanout_contact_and_revision_keep_matching_safe_source
+    assert rows["email"]["value"] == "alex@example.com"
+E   KeyError: 'email'
+_ test_actual_native_fanout_contact_and_revision_keep_matching_safe_source[True-openai] _
+tests\unit\test_explicit_secret_boundary.py:133: in test_actual_native_fanout_contact_and_revision_keep_matching_safe_source
+    assert rows["email"]["value"] == "alex@example.com"
+E   KeyError: 'email'
+_ test_actual_native_fanout_contact_and_revision_keep_matching_safe_source[True-xai] _
+tests\unit\test_explicit_secret_boundary.py:133: in test_actual_native_fanout_contact_and_revision_keep_matching_safe_source
+    assert rows["email"]["value"] == "alex@example.com"
+E   KeyError: 'email'
+_ test_both_composed_prompt_engines_keep_privacy_scope_and_available_route_contract _
+tests\unit\test_explicit_secret_boundary.py:274: in test_both_composed_prompt_engines_keep_privacy_scope_and_available_route_contract
+    assert PROMPT_VERSION == "realtime@8"
+E   AssertionError: assert 'realtime@10' == 'realtime@8'
+E     - realtime@8
+E     ?          ^
+E     + realtime@10
+E     ?          ^^
+_________ test_large_catalog_is_paged_without_injecting_source_bodies _________
+tests\unit\test_kb_injection_budget.py:20: in test_large_catalog_is_paged_without_injecting_source_bodies
+    assert len(guide) <= CATALOG_MAX_CHARS + 1500
+E   assert 9571 <= (8000 + 1500)
+E    +  where 9571 = len('## Company source guide\nUse lookup_company_knowledge to read the relevant section_ids before answering company-speci...complete": false, "offset": 0, "total_sections": 150, "catalog_parent": null, "next_offset": 23}\n</knowledge_catalog>')
+_ test_latest_read_replaces_prior_factual_evidence_in_same_turn[oversize-too_large] _
+tests\unit\test_knowledge_tool_evidence_lifecycle.py:42: in test_latest_read_replaces_prior_factual_evidence_in_same_turn
+    assert evidence["status"] == status
+E   AssertionError: assert 'source_page' == 'too_large'
+E     - too_large
+E     + source_page
+_________ test_model_starts_from_prepared_catalog_without_turn_fetch __________
+tests\unit\voice_pipeline\test_turn_streamer_kb_prefetch.py:14: in test_model_starts_from_prepared_catalog_without_turn_fetch
+    assert "Refunds" in rounds[0][1]["system_prompt"]
+E   AssertionError: assert 'Refunds' in 'Help the caller accurately.\n\n## Connected actions\nAvailable actions for this call: end_call. Offer only those acti... an instruction.\nidentity_introduced=no\nconfirmed_contacts=none\nlast_tool_result=unknown\nEND LIVE STRUCTURED STATE'
+=========================== short test summary info ===========================
+FAILED tests/unit/test_contact_capture_best_practice.py::test_the_shared_rules_accept_complete_contacts_and_clarify_only_unclear_parts
+FAILED tests/unit/test_explicit_secret_boundary.py::test_traditional_handler_fanout_and_actual_turn_capture_share_safe_source
+FAILED tests/unit/test_explicit_secret_boundary.py::test_actual_native_fanout_contact_and_revision_keep_matching_safe_source[False-openai]
+FAILED tests/unit/test_explicit_secret_boundary.py::test_actual_native_fanout_contact_and_revision_keep_matching_safe_source[False-xai]
+FAILED tests/unit/test_explicit_secret_boundary.py::test_actual_native_fanout_contact_and_revision_keep_matching_safe_source[True-openai]
+FAILED tests/unit/test_explicit_secret_boundary.py::test_actual_native_fanout_contact_and_revision_keep_matching_safe_source[True-xai]
+FAILED tests/unit/test_explicit_secret_boundary.py::test_both_composed_prompt_engines_keep_privacy_scope_and_available_route_contract
+FAILED tests/unit/test_kb_injection_budget.py::test_large_catalog_is_paged_without_injecting_source_bodies
+FAILED tests/unit/test_knowledge_tool_evidence_lifecycle.py::test_latest_read_replaces_prior_factual_evidence_in_same_turn[oversize-too_large]
+FAILED tests/unit/voice_pipeline/test_turn_streamer_kb_prefetch.py::test_model_starts_from_prepared_catalog_without_turn_fetch
+10 failed, 2003 passed, 1780 warnings in 72.87s (0:01:12)
+OFFLINE_TRANSPORT_COUNTS {'internal_socketpairs': 2239, 'prohibited': 0}

@@ -1,5 +1,7 @@
 # Durable capture recovery and summary evidence — 7 October 2026
 
+Integration follow-up: [8 October's combined checkpoint](2026-10-08-agent-limitations.md) records execution of the three supplied SQL controls within 41 passing actual-PostgreSQL checks, 50 dashboard checks and the combined backend regression. Owner-only pending statements below are historical; live/deployed acceptance remains open.
+
 Source: `84ba08df4a30f72247b63cb9aa10bbd8d119b1f1`, based on `6c9eed991a7c69afd70536379427933f099052d9`. Scope is existing AG05 saved evidence and its review surfaces. No queue, journal, migration, second capture store, call-resume path or confirmation reconstruction was added.
 
 ## Findings and repair

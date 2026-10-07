@@ -1,0 +1,15 @@
+F.....F.......                                                           [100%]
+================================== FAILURES ===================================
+_____ test_dry_plan_uses_actual_current_streamer_and_hides_grading_labels _____
+tests\unit\test_agent_section_qualification.py:21: in test_dry_plan_uses_actual_current_streamer_and_hides_grading_labels
+    assert report["error"] is None and report["production_approved"] is False
+E   AssertionError: assert ('ValueError' is None)
+_ test_transport_binds_endpoint_model_and_actual_retry_budget_without_headers _
+tests\unit\test_agent_section_qualification.py:76: in test_transport_binds_endpoint_model_and_actual_retry_budget_without_headers
+    assert "completion_tokens" in guard.records[0]["response_stream"]
+E   AssertionError: assert 'completion_tokens' in ''
+=========================== short test summary info ===========================
+FAILED tests/unit/test_agent_section_qualification.py::test_dry_plan_uses_actual_current_streamer_and_hides_grading_labels
+FAILED tests/unit/test_agent_section_qualification.py::test_transport_binds_endpoint_model_and_actual_retry_budget_without_headers
+2 failed, 12 passed, 2 warnings in 6.47s
+OFFLINE_TRANSPORT_COUNTS {'internal_socketpairs': 29, 'prohibited': 0}
