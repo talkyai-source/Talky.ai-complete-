@@ -1,0 +1,27 @@
+{
+  "application_preexisting_diagnostics": [
+    [
+      "F401",
+      "`app.domain.services.telephony.config._RINGING_MAX_AGE_S` imported but unused"
+    ],
+    [
+      "F401",
+      "`datetime.datetime` imported but unused"
+    ],
+    [
+      "F401",
+      "`datetime.timezone` imported but unused"
+    ],
+    [
+      "F841",
+      "Local variable `container` is assigned to but never used"
+    ],
+    [
+      "F841",
+      "Local variable `detector` is assigned to but never used"
+    ]
+  ],
+  "unchanged_from_HEAD": true,
+  "new_test_lint_exit": 0,
+  "new_test_lint_output": "All checks passed!\n"
+}

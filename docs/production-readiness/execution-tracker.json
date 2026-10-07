@@ -94,6 +94,16 @@
       "provider_run": "not_run",
       "deployment": "not_run",
       "designation": "Existing profile/account and owned test destinations requested; unanswered."
+    },
+    "release_preparation_20261008": {
+      "branch": "codex/production-release-20261008",
+      "pr": "https://github.com/talkyai-source/Talky.ai-complete-/pull/19",
+      "integrated_origin_main": "ea2b83a61435d170147b941453f1b112b0d597eb",
+      "report": "docs/sessions/2026-10-08-release-preparation.md",
+      "production_observed_sha": "ea2b83a61435d170147b941453f1b112b0d597eb",
+      "production_observed_at": "2026-10-07T20:26:07.726382+00:00",
+      "production_activated_by_this_release": false,
+      "release_gate_closed": false
     }
   },
   "status_rules": {

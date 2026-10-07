@@ -1,0 +1,32 @@
+{
+  "observed_at": "2026-10-07T20:26:07.726382+00:00",
+  "server_sha": "ea2b83a61435d170147b941453f1b112b0d597eb",
+  "git_status": [],
+  "services": {
+    "talky-api": "active",
+    "talky-dialer-worker": "active",
+    "talky-reminder-worker": "active",
+    "talky-voice-worker": "active",
+    "talky-voice-gateway": "active",
+    "talky-trunk-status": "active",
+    "talky-trunk-status.timer": "failed"
+  },
+  "health": {
+    "/health": 200,
+    "/api/v1/healthz/ready": 200,
+    "/api/v1/healthz/deep": 200
+  },
+  "sudo_noninteractive_exit": 1,
+  "sudo_requires_password": true,
+  "backup_state": {
+    "Result": "exit-code",
+    "ExecMainStatus": "1",
+    "InactiveEnterTimestamp": "Wed 2026-10-07 02:38:15 UTC"
+  },
+  "backup_size_rejections": [
+    {
+      "candidate_bytes": 24156814,
+      "previous_bytes": 690149225
+    }
+  ]
+}

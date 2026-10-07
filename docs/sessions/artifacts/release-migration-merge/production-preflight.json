@@ -1,0 +1,346 @@
+{
+  "database_state": [
+    {
+      "version_num": "0048_audit_skip_heartbeat"
+    }
+  ],
+  "transaction": [
+    {
+      "read_only": "on",
+      "isolation": "repeatable read"
+    }
+  ],
+  "current_role": [
+    {
+      "rolname": "talkyai",
+      "rolsuper": false,
+      "rolbypassrls": false,
+      "rolinherit": true,
+      "database_connect": true,
+      "schema_usage": true,
+      "schema_create": true
+    }
+  ],
+  "existing_table_ownership": [
+    {
+      "relname": "assistant_actions",
+      "owner": "talkyai",
+      "inherits_owner": true,
+      "can_select": true,
+      "can_insert": true,
+      "can_update": true,
+      "relrowsecurity": true,
+      "relforcerowsecurity": true
+    },
+    {
+      "relname": "calls",
+      "owner": "talkyai",
+      "inherits_owner": true,
+      "can_select": true,
+      "can_insert": true,
+      "can_update": true,
+      "relrowsecurity": true,
+      "relforcerowsecurity": true
+    },
+    {
+      "relname": "dialer_jobs",
+      "owner": "talkyai",
+      "inherits_owner": true,
+      "can_select": true,
+      "can_insert": true,
+      "can_update": true,
+      "relrowsecurity": true,
+      "relforcerowsecurity": true
+    },
+    {
+      "relname": "dnc_entries",
+      "owner": "talkyai",
+      "inherits_owner": true,
+      "can_select": true,
+      "can_insert": true,
+      "can_update": true,
+      "relrowsecurity": true,
+      "relforcerowsecurity": true
+    },
+    {
+      "relname": "invoices",
+      "owner": "talkyai",
+      "inherits_owner": true,
+      "can_select": true,
+      "can_insert": true,
+      "can_update": true,
+      "relrowsecurity": true,
+      "relforcerowsecurity": true
+    },
+    {
+      "relname": "leads",
+      "owner": "talkyai",
+      "inherits_owner": true,
+      "can_select": true,
+      "can_insert": true,
+      "can_update": true,
+      "relrowsecurity": true,
+      "relforcerowsecurity": true
+    },
+    {
+      "relname": "mfa_challenges",
+      "owner": "talkyai",
+      "inherits_owner": true,
+      "can_select": true,
+      "can_insert": true,
+      "can_update": true,
+      "relrowsecurity": false,
+      "relforcerowsecurity": false
+    },
+    {
+      "relname": "permissions",
+      "owner": "talkyai",
+      "inherits_owner": true,
+      "can_select": true,
+      "can_insert": true,
+      "can_update": true,
+      "relrowsecurity": false,
+      "relforcerowsecurity": false
+    },
+    {
+      "relname": "plans",
+      "owner": "talkyai",
+      "inherits_owner": true,
+      "can_select": true,
+      "can_insert": true,
+      "can_update": true,
+      "relrowsecurity": false,
+      "relforcerowsecurity": false
+    },
+    {
+      "relname": "processed_webhook_events",
+      "owner": "talkyai",
+      "inherits_owner": true,
+      "can_select": true,
+      "can_insert": true,
+      "can_update": true,
+      "relrowsecurity": false,
+      "relforcerowsecurity": false
+    },
+    {
+      "relname": "role_permissions",
+      "owner": "talkyai",
+      "inherits_owner": true,
+      "can_select": true,
+      "can_insert": true,
+      "can_update": true,
+      "relrowsecurity": false,
+      "relforcerowsecurity": false
+    },
+    {
+      "relname": "topup_orders",
+      "owner": "talkyai",
+      "inherits_owner": true,
+      "can_select": true,
+      "can_insert": true,
+      "can_update": true,
+      "relrowsecurity": true,
+      "relforcerowsecurity": true
+    },
+    {
+      "relname": "user_profiles",
+      "owner": "talkyai",
+      "inherits_owner": true,
+      "can_select": true,
+      "can_insert": true,
+      "can_update": true,
+      "relrowsecurity": true,
+      "relforcerowsecurity": true
+    }
+  ],
+  "default_grants": [],
+  "new_table_name_collisions": [
+    {
+      "name": "assistant_action_resolutions",
+      "already_exists": false
+    },
+    {
+      "name": "billing_checkout_attempts",
+      "already_exists": false
+    },
+    {
+      "name": "billing_refund_snapshots",
+      "already_exists": false
+    },
+    {
+      "name": "billing_webhook_notifications",
+      "already_exists": false
+    },
+    {
+      "name": "billing_webhook_review_log",
+      "already_exists": false
+    },
+    {
+      "name": "crm_deliveries",
+      "already_exists": false
+    },
+    {
+      "name": "invoice_snapshots",
+      "already_exists": false
+    },
+    {
+      "name": "plan_price_options",
+      "already_exists": false
+    },
+    {
+      "name": "public_contact_enquiries",
+      "already_exists": false
+    }
+  ],
+  "identity_columns": [
+    {
+      "relname": "mfa_challenges",
+      "attname": "attempts",
+      "type": "integer",
+      "attnotnull": true
+    },
+    {
+      "relname": "user_profiles",
+      "attname": "email_verified_at",
+      "type": "timestamp with time zone",
+      "attnotnull": false
+    },
+    {
+      "relname": "user_profiles",
+      "attname": "is_verified",
+      "type": "boolean",
+      "attnotnull": true
+    },
+    {
+      "relname": "user_profiles",
+      "attname": "verification_token",
+      "type": "text",
+      "attnotnull": false
+    }
+  ],
+  "verification_counts": [
+    {
+      "total_profiles": 23,
+      "verified_profiles": 23,
+      "verified_missing_timestamp": 0,
+      "verified_with_token": 0,
+      "constraint_violations": 0
+    }
+  ],
+  "mfa_attempt_counts": [
+    {
+      "invalid_bounds": 0,
+      "null_attempts": 0
+    }
+  ],
+  "identity_named_constraints": [
+    {
+      "conname": "chk_email_verification_consistency",
+      "convalidated": true,
+      "definition": "CHECK (((is_verified = false) OR ((is_verified = true) AND (verification_token IS NULL) AND (email_verified_at IS NOT NULL))))"
+    },
+    {
+      "conname": "mfa_challenges_attempts_bounds",
+      "convalidated": true,
+      "definition": "CHECK (((attempts >= 0) AND (attempts <= 100)))"
+    }
+  ],
+  "active_job_counts": [
+    {
+      "active_jobs": 0
+    }
+  ],
+  "active_job_duplicates": [
+    {
+      "duplicate_lead_groups": 0,
+      "excess_jobs": 0
+    }
+  ],
+  "active_job_named_index": [
+    {
+      "relname": "uq_dialer_jobs_one_active_per_lead",
+      "relkind": "i",
+      "indisunique": true,
+      "indisvalid": true,
+      "indisready": true,
+      "indislive": true,
+      "indimmediate": true,
+      "indnkeyatts": 1,
+      "indnatts": 1,
+      "amname": "btree",
+      "correct_table": true,
+      "first_key": "lead_id",
+      "predicate": "((status)::text = ANY ((ARRAY['pending'::character varying, 'queued'::character varying, 'retry_scheduled'::character varying, 'processing'::character varying, 'calling'::character varying])::text[]))"
+    }
+  ],
+  "dnc_columns": [
+    {
+      "attname": "added_by",
+      "type": "uuid",
+      "attnotnull": false
+    },
+    {
+      "attname": "normalized_number",
+      "type": "character varying(20)",
+      "attnotnull": true
+    },
+    {
+      "attname": "source",
+      "type": "character varying(50)",
+      "attnotnull": true
+    },
+    {
+      "attname": "tenant_id",
+      "type": "uuid",
+      "attnotnull": false
+    },
+    {
+      "attname": "updated_at",
+      "type": "timestamp with time zone",
+      "attnotnull": true
+    }
+  ],
+  "dnc_source_checks": [],
+  "dnc_unique_indexes": [
+    {
+      "relname": "dnc_entries_pkey",
+      "conname": null,
+      "condeferrable": null,
+      "indisprimary": true,
+      "indisunique": true,
+      "indisvalid": true,
+      "indisready": true,
+      "indislive": true,
+      "indimmediate": true,
+      "indnkeyatts": 1,
+      "indnatts": 1,
+      "amname": "btree",
+      "keys": [
+        "id"
+      ],
+      "predicate": null,
+      "has_expressions": false
+    }
+  ],
+  "dnc_named_index_collisions": [],
+  "dnc_duplicate_counts": [
+    {
+      "duplicate_source_groups": 0,
+      "excess_rows": 0
+    }
+  ],
+  "dnc_data_shape_counts": [
+    {
+      "total_rows": 2,
+      "missing_required_values": 0,
+      "normalized_over_50_chars": 0
+    }
+  ],
+  "existing_additive_column_collisions": [],
+  "paid_plan_counts": [
+    {
+      "existing_paid_plans": 3,
+      "free_options_seeded": 1
+    }
+  ]
+}

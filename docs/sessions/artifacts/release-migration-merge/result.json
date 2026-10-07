@@ -1,0 +1,1214 @@
+{
+  "runtime": {
+    "executable": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\backend\\.venv\\Scripts\\python.exe",
+    "version": "3.12.12 (main, Dec  9 2025, 19:02:55) [MSC v.1944 64 bit (AMD64)]",
+    "prefix": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\backend\\.venv",
+    "pythonpath": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\production-release-20261008\\backend",
+    "dont_write_bytecode": true,
+    "dependencies": {
+      "asyncpg": {
+        "version": "0.29.0",
+        "location": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\backend\\.venv\\Lib\\site-packages\\asyncpg\\__init__.py"
+      },
+      "alembic": {
+        "version": "1.13.1",
+        "location": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\backend\\.venv\\Lib\\site-packages\\alembic\\__init__.py"
+      },
+      "sqlalchemy": {
+        "version": "2.0.25",
+        "location": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\backend\\.venv\\Lib\\site-packages\\sqlalchemy\\__init__.py"
+      },
+      "pytest": {
+        "version": "7.4.4",
+        "location": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\backend\\.venv\\Lib\\site-packages\\pytest\\__init__.py"
+      },
+      "pytest_asyncio": {
+        "version": "0.23.3",
+        "location": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\backend\\.venv\\Lib\\site-packages\\pytest_asyncio\\__init__.py"
+      },
+      "httpx": {
+        "version": "0.28.1",
+        "location": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\backend\\.venv\\Lib\\site-packages\\httpx\\__init__.py"
+      },
+      "fastapi": {
+        "version": "0.139.0",
+        "location": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\backend\\.venv\\Lib\\site-packages\\fastapi\\__init__.py"
+      },
+      "jwt": {
+        "version": "2.13.0",
+        "location": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\backend\\.venv\\Lib\\site-packages\\jwt\\__init__.py"
+      },
+      "pydantic": {
+        "version": "2.12.5",
+        "location": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\backend\\.venv\\Lib\\site-packages\\pydantic\\__init__.py"
+      }
+    }
+  },
+  "source_before": {
+    "backend/Alembic/versions/0001_baseline.py": "fa6695c3375052205523c69c6223611512ee1b5bce00c2cab3bd92419c87058f",
+    "backend/Alembic/versions/0002_add_refresh_tokens.py": "923ba08abd09d9e47043fa395af2774706d25b67eaedabf9f62e8ada429efee6",
+    "backend/Alembic/versions/0003_add_stream_events.py": "9ef29b49a310a9a3277cf194c005a0b61a26858fd275b28be025114ed0c52365",
+    "backend/Alembic/versions/0004_security_events_alert_type.py": "d6f9f455f060ad2e4b1fb60fbe9643c9e2a825426fb6426b22c74012c0926402",
+    "backend/Alembic/versions/0005_tenant_telephony_credentials.py": "cddf35ab8dff240abe2f3ab5947e94f3bea63ffe5c3f495dc95d7f59ccaf3cde",
+    "backend/Alembic/versions/0006_sip_trunk_test_result.py": "58cac4f664d6dda15eaa7debb43748787b411e36a522913c9bbee7a8ecdc698b",
+    "backend/Alembic/versions/0007_mfa_challenge_attempts.py": "8b62c319f0f790a5e62c078c472474742f6598ac5cf215f96e807eb883bec9e5",
+    "backend/Alembic/versions/0008_tenant_ai_configs_voice_tuning.py": "1e2f2d19892823ddadf2a2c68489208d1c63828c3da7ad22b9d8004dd6bcbf3e",
+    "backend/Alembic/versions/0009_dialer_jobs_failure_classification.py": "4b5f81815b79996b3121ea491be5e608a7a04e566890491321c9dc3799ff914e",
+    "backend/Alembic/versions/0010_campaign_knowledge.py": "c30f6235beeb9b690150c1d0ffc4524220abdd8a6266d55c5ba507d2584cfe52",
+    "backend/Alembic/versions/0011_campaign_tts_provider.py": "637eb1314bf68c057d2ad717d7935dadb664d3016a77233dbf89f259fdeea01a",
+    "backend/Alembic/versions/0012_call_feedback.py": "251ad8b1b748e18103d8540100ce12a20f24c0709d327ba8b8f3f0024ba7642a",
+    "backend/Alembic/versions/0013_canonical_rls_policies.py": "da80a139982261e96749845726ea5e099185e3aa1646032ea846401c90a1fd4b",
+    "backend/Alembic/versions/0014_admin_media_controls.py": "67d3788df9bf0db67a172ce988e3edfa5a4e4d057c63dc0fec2186afd9a6ed47",
+    "backend/Alembic/versions/0015_conversation_reviews.py": "08cf1691d1a1818430ac409f98206f4803705888438dbd2820f7eea9519aa5c7",
+    "backend/Alembic/versions/0016_prompt_version_rollback.py": "550adb85e87554a6ee8e00994a4bb11d9f8e4c49d54e557f54a540f412e7fe7b",
+    "backend/Alembic/versions/0017_test_calls.py": "f522dbe095ca895f42257c8a112525b054cfc38b849cccba0df06bda87d3c391",
+    "backend/Alembic/versions/0018_calls_lead_id_nullable.py": "a69c609c15cb613258ef17f19aa9a8bffad226aba68041608e2f503cd2528013",
+    "backend/Alembic/versions/0019_ai_config_migration_records.py": "0efac8c3a9020b3bd6b0e860354bcd4b55b00f67c736a62a5925ca1c44777a1d",
+    "backend/Alembic/versions/0020_contact_and_lead_capture.py": "9320a654a03373b581204ce70c284b2fe91ac74d9c9b6d7c308daa4fc6f41176",
+    "backend/Alembic/versions/0021_billing_topup.py": "3ac153937cd85e4b5b0d9f4ccc3a732f2e40b38bcdff21977c78b946e6a52c0c",
+    "backend/Alembic/versions/0022_inbound_calling_foundation.py": "bdf89e422196ef0a2a597ce8bc07e6ef16ddca9b373c30049c93eb8bd16ac30d",
+    "backend/Alembic/versions/0023_admin_media_deletion_safety.py": "63795dc91d5602a132662c956b051b65dfa9435c3472d5768fe13e6c98987ca9",
+    "backend/Alembic/versions/0024_recording_permissions.py": "c393811cbf69cea7fe7a0a7efa037b7a1b0a957c8e3604cc93ef41bac3422095",
+    "backend/Alembic/versions/0025_media_hold_serialization.py": "4eb0042bf5603ed1e15b66867cca33b8bc9b54eb17ef82c53ba9a2f1ebbcf6f3",
+    "backend/Alembic/versions/0026_media_delete_recovery.py": "4e87cf7bcb508ade6499fb4c1e7e5526dd4d6a5e47dd8371c38b859c7a6616e1",
+    "backend/Alembic/versions/0027_media_delete_request_keys.py": "eae06acafc122b675d858b50a3aca85e7b959662b1ee7dba9c01ef130d57e674",
+    "backend/Alembic/versions/0028_call_terminal_settlement_cas.py": "8aeb625198a29f692aa966254f889b7b0bf07632f2edf2567776bde35bcd219a",
+    "backend/Alembic/versions/0029_trunk_runtime_status.py": "0930d8288de9bd5961a5abf0cb655313bd8de6d587787338d5eddbda80b8d840",
+    "backend/Alembic/versions/0030_inbound_transfer_leg_usage.py": "29e7fdb75499b7c4bfc4c6f130a17a15dcd108856b269743901154f083e5f43e",
+    "backend/Alembic/versions/0031_inbound_lease_safety.py": "dc042e54583c8003a53c637281c312c58f7578132ec14895d74bf679f3992311",
+    "backend/Alembic/versions/0032_inbound_billing_hold.py": "86df9404e59b3cb8ec0480870262501a4ae950d1bb06c9663cf26d9b0fe11f22",
+    "backend/Alembic/versions/0033_bootstrap_contract_repair.py": "0098372135838286989581c074a79c696a92162e126541f42f64f3f3fdc32814",
+    "backend/Alembic/versions/0034_inbound_billing_four_eye.py": "ac5d3755b1f3bdcf717ae663662e44fb8747a194d5d36b0eef94620dc2c18271",
+    "backend/Alembic/versions/0035_user_profiles_role_widen.py": "59141af2c5b157d7eeda6d9e7ae0d968aff7918d25a9bc827783e60666bb8d08",
+    "backend/Alembic/versions/0036_inbound_rejection_log.py": "ab17b133efa56b4eb18d0ec67cf0cf921aa3c122fe57df8a9aaddd6c36fa627c",
+    "backend/Alembic/versions/0037_inbound_duration_quarantine.py": "c57ebb6b5ee41d3e9c92f1608b4b76a6888ce728a2a0cd9045a58824fd894859",
+    "backend/Alembic/versions/0038_tenant_table_rls_backfill.py": "d0bdb6793204d4ba294322cd3ae4e3e5ac4ad1cf23fb78672c3b7a68f482fa85",
+    "backend/Alembic/versions/0039_contact_capture_audit.py": "dccc24d0227599df5f382e3f2ad48d451e7351e2d4216de29ceae418e3c9e80c",
+    "backend/Alembic/versions/0040_calls_campaign_nullable.py": "756f7ca9fbf8c135ca10115abd5e289e46dd261fe76626338774a88be4b66e88",
+    "backend/Alembic/versions/0041_tenant_campaign_fk.py": "d018050ce6199dc3ff07bd4b650d081deed4d15ee8cd97bcaad3ab936285b6ee",
+    "backend/Alembic/versions/0042_dialer_origination_guard.py": "7bc8673d3ac5791f5e789f9c935099577cac95c6c2088e62cef3decec77cbe90",
+    "backend/Alembic/versions/0043_campaign_direction_lock.py": "91a41f70106b79595b76fbfdf7df0190d174e004135195df467ec5173168e25b",
+    "backend/Alembic/versions/0044_webhook_null_tenant_rls.py": "474be28d8a58389994f08f27a7e97a31f6010914273d1d80938d4a6d251ee80e",
+    "backend/Alembic/versions/0045_refresh_session_binding.py": "11e5387acbba9a84d47028f99c05e0052a91a2098b5e4e6a93409e9c49a4b21c",
+    "backend/Alembic/versions/0046_inbound_extension_bindings.py": "1fa072adffba24bbcdd782140bb69703068a61a91a88fba531f4ecc669276d13",
+    "backend/Alembic/versions/0047_protect_ai_config_backup.py": "0b4d0e4b210e4e8ac5044170e0e860957a67160df114cbeb4db206947b5db69f",
+    "backend/Alembic/versions/0048_audit_skip_heartbeat.py": "469b13cdb0604854569487c12305620ffc84132116e925ab375e2a3e76d8ef5a",
+    "backend/Alembic/versions/0048_crm_deliveries.py": "ccccde24eb1ed7917cab42511e8a703a6cfb65d97fd7ae2c25f49b77377078ef",
+    "backend/Alembic/versions/0049_lead_detail_evidence.py": "11d0793604f0b1ffdeff8c7485e57e395eaae1979613d48accd6083884fc0142",
+    "backend/Alembic/versions/0050_assistant_execution_permissions.py": "cbf441bd70ce212859ed5bdbf7ad9e1c6413a9f0f7fd7aa039eeec2481ea4bc4",
+    "backend/Alembic/versions/0051_crm_destination_identity.py": "53dd3439ffa5f46a731f8e82ceebdc1ab5cc9820513700ecb415f0276bfff47f",
+    "backend/Alembic/versions/0052_public_contact_enquiries.py": "0654f5827b4cfffb5b0a7160fb5d953789bd1fda766ce418fb4194bbf1458b88",
+    "backend/Alembic/versions/0053_billing_price_options.py": "6b33ac2ccf4e0900cc6c445a5557add3efff5d5048fd97231c7100c477da5ccb",
+    "backend/Alembic/versions/0054_billing_webhook_receipts.py": "d31f7c91c6444873d4172d7794bc5c9c8f1d0c90bd3196d541840374b5a8be6e",
+    "backend/Alembic/versions/0055_invoice_snapshots.py": "6e37bfdb15952ed9a8322109dc6f25b8a0b512c129a50b493289871c81cb592b",
+    "backend/Alembic/versions/0056_billing_refund_snapshots.py": "7dd0b61a2cb33dac6592e64119fdd90032032cbc979a6a3561ed13a3f285131f",
+    "backend/Alembic/versions/0057_transcript_save_state.py": "d6dd37cd0125693194c74dbc5527dfdcb1b044344b0fae3eb62ba43312532ea4",
+    "backend/Alembic/versions/0058_crm_contact_effect.py": "9d6a068aff6bb43bad1ee605eee16fb86f134d0793a15fcaa7c7b6db93e8be87",
+    "backend/Alembic/versions/0059_auth_identity_contract.py": "c51610e4014c5c2daa79cf016297e37af87157d5b313e61aaa23eac83ef4a4df",
+    "backend/Alembic/versions/0060_dialer_active_job_owner.py": "7fb6d4061c24a0f94a536481aa0128bc607b99c6e28afd685ca6a59a9050a8e8",
+    "backend/Alembic/versions/0061_dnc_runtime_contract.py": "75828d434ac0332beb89e7e58e992043f32b9e76ae9a437fa476ab9fb58db0f9",
+    "backend/Alembic/versions/0062_saved_acknowledgement.py": "e28f287ebf38a192f912cd648aa6bca78e72d6aeaac5eaf54c31aa0c94b15337",
+    "backend/Alembic/versions/0063_release_history_merge.py": "b5503392e2e444b1f20c86ee04062875b5d7b8c4ac56b149d8f4ba080ade3620",
+    "backend/Alembic/env.py": "c2af1024a58704b31538bfa0c0c6e19f160c605897a38e4ceda4776867ca8afa",
+    "backend/alembic.ini": "99ffb09a090a646c2adbf8891fa276bdda137b0fddd9a1a198d83b8f6508dceb",
+    "backend/database/complete_schema.sql": "c109eca88c24897dff8e1c3b62edc77fb375930da29d1921ce96e22655b67830",
+    "backend/tests/integration/test_release_migration_merge.py": "414c898a5925b422cd78c10bbb76808ca357f71656e1ce056eba9b50e660406d",
+    "docs/sessions/artifacts/release-migration-merge/probe.py": "59ce8c755e1c05f3e3c4a2ff8b4bbeaf56f999460d9edf67be1178274ec9ea32"
+  },
+  "network": {
+    "database_socket_attempts": 0,
+    "database_transport_attempts": 28,
+    "database_address_resolutions": 0,
+    "internal_socketpairs": 28,
+    "prohibited_attempts": 0
+  },
+  "protected_before": {
+    "head": "0061_dnc_runtime_contract",
+    "tables": {
+      "abuse_detection_rules": {
+        "count": 8,
+        "data_hash": "1b62df9126631773c371932e839cbc80"
+      },
+      "abuse_events": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "action_plans": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "admin_media_deletion_intents": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "admin_media_deletion_request_keys": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "ai_config_migrations": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "alembic_version": {
+        "count": 1,
+        "data_hash": "9135024a1f9169b8e151d689545ffbfa"
+      },
+      "assistant_actions": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "assistant_conversations": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "audit_logs": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "billing_checkout_attempts": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "billing_ledger": {
+        "count": 761,
+        "data_hash": "c6e769e88e78d84cfba6effe8c17f321"
+      },
+      "billing_refund_snapshots": {
+        "count": 18,
+        "data_hash": "e16b2f47da9cc8cf8dab4aa5c1f0a15c"
+      },
+      "billing_webhook_notifications": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "billing_webhook_review_log": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "call_events": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "call_feedback": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "call_guard_decisions": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "call_lead_details": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "call_legs": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "call_velocity_snapshots": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "calls": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "campaign_knowledge_nodes": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "campaign_knowledge_sources": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "campaign_lead_fields": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "campaigns": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "clients": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "cloned_voices": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "connector_accounts": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "connectors": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "contact_lists": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "conversation_reviews": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "conversations": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "crm_deliveries": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "dialer_jobs": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "dnc_entries": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "inbound_audit_events": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "inbound_billing_hold_finalize_approvals": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "inbound_campaign_configs": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "inbound_did_assignments": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "inbound_operation_idempotency": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "inbound_reassignment_requests": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "inbound_rejections": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "inbound_usage_transactions": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "invoice_snapshots": {
+        "count": 120,
+        "data_hash": "88fad5f926f8df9217dded1fb0a29840"
+      },
+      "invoices": {
+        "count": 65,
+        "data_hash": "efa55e1daffcb043d83e20f18a745acb"
+      },
+      "leads": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "login_attempts": {
+        "count": 72,
+        "data_hash": "25840bb8f000f073e13544f8799f13aa"
+      },
+      "meetings": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "mfa_challenges": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "partner_limits": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "permissions": {
+        "count": 42,
+        "data_hash": "637bc15dc82a0d44728a69f9193166e3"
+      },
+      "plan_price_options": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "plans": {
+        "count": 170,
+        "data_hash": "c1123fcdec0739c1fb2ffc87040f1082"
+      },
+      "platform_runtime_controls": {
+        "count": 1,
+        "data_hash": "7b7bab55f025160a20409aa4e507e5b1"
+      },
+      "processed_webhook_events": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "prompt_template_versions": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "public_contact_enquiries": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "recordings": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "recordings_s3": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "recovery_codes": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "refresh_tokens": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "reminders": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "review_reward_ledger": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "role_permissions": {
+        "count": 150,
+        "data_hash": "9c023bb140e49d652c5d5c88f078b20c"
+      },
+      "roles": {
+        "count": 5,
+        "data_hash": "7745847c5b5bea8b97c752a7cc96fad3"
+      },
+      "secret_access_log": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "security_events": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "security_sessions": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "subscriptions": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "suspension_events": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "talky_0041_contact_lists_adoption": {
+        "count": 1,
+        "data_hash": "9e43cdf99b84df9a2ca9feb300b72404"
+      },
+      "tenant_ai_configs": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "tenant_call_limits": {
+        "count": 105,
+        "data_hash": "624be810a07f227fc7dac0dbe18dee9e"
+      },
+      "tenant_codec_policies": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "tenant_inbound_controls": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "tenant_phone_numbers": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "tenant_policy_audit_log": {
+        "count": 142,
+        "data_hash": "dbd92fe761753b9734a5e12b602c72a9"
+      },
+      "tenant_quota_usage": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "tenant_quotas": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "tenant_route_policies": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "tenant_runtime_policy_events": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "tenant_runtime_policy_versions": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "tenant_secrets": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "tenant_settings": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "tenant_sip_trunks": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "tenant_sip_trust_policies": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "tenant_telephony_concurrency_events": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "tenant_telephony_concurrency_leases": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "tenant_telephony_concurrency_policies": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "tenant_telephony_idempotency": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "tenant_telephony_quota_events": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "tenant_telephony_threshold_policies": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "tenant_users": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "tenants": {
+        "count": 301,
+        "data_hash": "da26d5b003644b449032690a9ee7b204"
+      },
+      "topup_orders": {
+        "count": 108,
+        "data_hash": "b6b0ec443c5dd51d1e5da3b4d6015bc9"
+      },
+      "topup_packages": {
+        "count": 3,
+        "data_hash": "8755a0548dc296564feae99a24ce185b"
+      },
+      "transcripts": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "usage_records": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "user_mfa": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "user_passkeys": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "user_permissions": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "user_profiles": {
+        "count": 4,
+        "data_hash": "109d28109f7d54d3c6925bfc9e01b2db"
+      },
+      "webauthn_challenges": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "webhook_configs": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "webhook_deliveries": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "webhook_endpoints": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "white_label_partners": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      }
+    },
+    "schema": {
+      "relations": {
+        "count": 520,
+        "sha256": "62de6290330b76a7c2e9551dc991a0879b8086ad6f6236370fb06a6baa329754"
+      },
+      "columns": {
+        "count": 1624,
+        "sha256": "fd2b967d072422ae50405eaa52be723d9e5b7bc76274d8ea0fe2619c5d7c0306"
+      },
+      "constraints": {
+        "count": 601,
+        "sha256": "c4607d796433350d68d8edf78d9d2ec66c45f74a32aac9eb79c79fe8130dbc53"
+      },
+      "policies": {
+        "count": 106,
+        "sha256": "3f4df52fdab6ea8ce6a4995a2f3f39a6063b02218cf3f25a427a29eaa1b18c65"
+      },
+      "functions": {
+        "count": 98,
+        "sha256": "88e35a20a4496bf75eb7bf84f172392b709563a0c95e8d0902874bbce80c7640"
+      },
+      "triggers": {
+        "count": 1024,
+        "sha256": "366566c94172a534dbf5261efc4fbf8fbc206af865df1adf24e84b0ac32cfd4e"
+      }
+    }
+  },
+  "pytest_argv": [
+    "tests/integration/test_release_migration_merge.py",
+    "-q",
+    "--tb=short",
+    "-o",
+    "addopts="
+  ],
+  "pytest_exit_code": 0,
+  "cases": [
+    {
+      "start": "0048_audit_skip_heartbeat",
+      "database": "release_merge_138c9794528a46dda6cf3fe8317db1ad_test",
+      "steps": [
+        "canonical bootstrap + supported stamp0008",
+        "actual upgrade to 0048_audit_skip_heartbeat",
+        "actual upgrade head",
+        "repeat upgrade head"
+      ],
+      "created": true,
+      "starting_heartbeat_skip": true,
+      "original_audit": [
+        "{\"id\": \"3bb3b0e4-814c-41ad-aa56-ebd2c9f1906d\", \"action\": \"INSERT\", \"source\": \"db_trigger\", \"record_id\": \"05c34669-7d46-4f71-a50c-a644c1ea4e98\", \"tenant_id\": \"5b4ec55b-4d30-4672-8dd4-fc7cd7a613bb\", \"actor_type\": \"system\", \"created_at\": \"2026-10-08T00:56:53.864549+05:00\", \"request_id\": null, \"table_name\": \"tenant_sip_trunks\", \"actor_user_id\": null, \"after_payload\": {\"id\": \"05c34669-7d46-4f71-a50c-a644c1ea4e98\", \"port\": 5060, \"metadata\": {}, \"direction\": \"both\", \"is_active\": false, \"tenant_id\": \"5b4ec55b-4d30-4672-8dd4-fc7cd7a613bb\", \"transport\": \"udp\", \"created_at\": \"2026-10-08T00:56:53.864549+05:00\", \"created_by\": null, \"sip_domain\": \"example.invalid\", \"trunk_name\": \"Synthetic migration trunk\", \"updated_at\": \"2026-10-08T00:56:53.864549+05:00\", \"updated_by\": null, \"auth_username\": null, \"live_status_detail\": null, \"live_status_checked_at\": null, \"auth_password_encrypted\": null, \"live_registration_status\": null}, \"before_payload\": null, \"changed_fields\": [\"created_at\", \"direction\", \"id\", \"is_active\", \"metadata\", \"port\", \"sip_domain\", \"tenant_id\", \"transport\", \"trunk_name\", \"updated_at\"], \"correlation_id\": null, \"retention_until\": \"2027-11-12T00:56:53.864549+05:00\"}"
+      ],
+      "heads": [
+        "0063_release_history_merge"
+      ],
+      "original_audit_retained": true,
+      "audit_actions": [
+        "INSERT",
+        "UPDATE",
+        "DELETE"
+      ],
+      "both_branch_contracts": true,
+      "connections_before_drop": 0,
+      "removed": true
+    },
+    {
+      "start": "0062_saved_acknowledgement",
+      "database": "release_merge_9bf22510893845f6b86f23bb296fe7bc_test",
+      "steps": [
+        "canonical bootstrap + supported stamp0008",
+        "actual upgrade to 0062_saved_acknowledgement",
+        "actual upgrade head",
+        "repeat upgrade head"
+      ],
+      "created": true,
+      "starting_heartbeat_skip": false,
+      "original_audit": [
+        "{\"id\": \"073fb642-1288-41e1-b6c8-57f1dcc67546\", \"action\": \"INSERT\", \"source\": \"db_trigger\", \"record_id\": \"b540ff7e-3922-49b7-b50a-7cb518755aa0\", \"tenant_id\": \"eac0a770-3ac1-4869-9920-36b4b15b4cd9\", \"actor_type\": \"system\", \"created_at\": \"2026-10-08T00:57:09.788743+05:00\", \"request_id\": null, \"table_name\": \"tenant_sip_trunks\", \"actor_user_id\": null, \"after_payload\": {\"id\": \"b540ff7e-3922-49b7-b50a-7cb518755aa0\", \"port\": 5060, \"metadata\": {}, \"direction\": \"both\", \"is_active\": false, \"tenant_id\": \"eac0a770-3ac1-4869-9920-36b4b15b4cd9\", \"transport\": \"udp\", \"created_at\": \"2026-10-08T00:57:09.788743+05:00\", \"created_by\": null, \"sip_domain\": \"example.invalid\", \"trunk_name\": \"Synthetic migration trunk\", \"updated_at\": \"2026-10-08T00:57:09.788743+05:00\", \"updated_by\": null, \"auth_username\": null, \"live_status_detail\": null, \"live_status_checked_at\": null, \"auth_password_encrypted\": null, \"live_registration_status\": null}, \"before_payload\": null, \"changed_fields\": [\"created_at\", \"direction\", \"id\", \"is_active\", \"metadata\", \"port\", \"sip_domain\", \"tenant_id\", \"transport\", \"trunk_name\", \"updated_at\"], \"correlation_id\": null, \"retention_until\": \"2027-11-12T00:57:09.788743+05:00\"}"
+      ],
+      "heads": [
+        "0063_release_history_merge"
+      ],
+      "original_audit_retained": true,
+      "audit_actions": [
+        "INSERT",
+        "UPDATE",
+        "DELETE"
+      ],
+      "both_branch_contracts": true,
+      "connections_before_drop": 0,
+      "removed": true
+    },
+    {
+      "start": "0008_tenant_voice_tuning",
+      "database": "release_merge_7e4cf4652f834d4a877eb6447d596900_test",
+      "steps": [
+        "canonical bootstrap + supported stamp0008",
+        "actual upgrade head",
+        "repeat upgrade head"
+      ],
+      "created": true,
+      "starting_heartbeat_skip": false,
+      "original_audit": [
+        "{\"id\": \"ed896eac-a01c-48c9-89ec-c56e68f3aa81\", \"action\": \"INSERT\", \"source\": \"db_trigger\", \"record_id\": \"a7eb4df9-523a-4853-ac8a-a930d7800329\", \"tenant_id\": \"7807afde-9198-4d4c-be22-b90afb9cb595\", \"actor_type\": \"system\", \"created_at\": \"2026-10-08T00:57:17.979019+05:00\", \"request_id\": null, \"table_name\": \"tenant_sip_trunks\", \"actor_user_id\": null, \"after_payload\": {\"id\": \"a7eb4df9-523a-4853-ac8a-a930d7800329\", \"port\": 5060, \"metadata\": {}, \"direction\": \"both\", \"is_active\": false, \"tenant_id\": \"7807afde-9198-4d4c-be22-b90afb9cb595\", \"transport\": \"udp\", \"created_at\": \"2026-10-08T00:57:17.979019+05:00\", \"created_by\": null, \"sip_domain\": \"example.invalid\", \"trunk_name\": \"Synthetic migration trunk\", \"updated_at\": \"2026-10-08T00:57:17.979019+05:00\", \"updated_by\": null, \"auth_username\": null, \"auth_password_encrypted\": null}, \"before_payload\": null, \"changed_fields\": [\"created_at\", \"direction\", \"id\", \"is_active\", \"metadata\", \"port\", \"sip_domain\", \"tenant_id\", \"transport\", \"trunk_name\", \"updated_at\"], \"correlation_id\": null, \"retention_until\": \"2027-11-12T00:57:17.979019+05:00\"}"
+      ],
+      "heads": [
+        "0063_release_history_merge"
+      ],
+      "original_audit_retained": true,
+      "audit_actions": [
+        "INSERT",
+        "UPDATE",
+        "DELETE"
+      ],
+      "both_branch_contracts": true,
+      "connections_before_drop": 0,
+      "removed": true
+    }
+  ],
+  "protected_after": {
+    "head": "0061_dnc_runtime_contract",
+    "tables": {
+      "abuse_detection_rules": {
+        "count": 8,
+        "data_hash": "1b62df9126631773c371932e839cbc80"
+      },
+      "abuse_events": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "action_plans": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "admin_media_deletion_intents": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "admin_media_deletion_request_keys": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "ai_config_migrations": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "alembic_version": {
+        "count": 1,
+        "data_hash": "9135024a1f9169b8e151d689545ffbfa"
+      },
+      "assistant_actions": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "assistant_conversations": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "audit_logs": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "billing_checkout_attempts": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "billing_ledger": {
+        "count": 761,
+        "data_hash": "c6e769e88e78d84cfba6effe8c17f321"
+      },
+      "billing_refund_snapshots": {
+        "count": 18,
+        "data_hash": "e16b2f47da9cc8cf8dab4aa5c1f0a15c"
+      },
+      "billing_webhook_notifications": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "billing_webhook_review_log": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "call_events": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "call_feedback": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "call_guard_decisions": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "call_lead_details": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "call_legs": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "call_velocity_snapshots": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "calls": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "campaign_knowledge_nodes": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "campaign_knowledge_sources": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "campaign_lead_fields": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "campaigns": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "clients": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "cloned_voices": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "connector_accounts": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "connectors": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "contact_lists": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "conversation_reviews": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "conversations": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "crm_deliveries": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "dialer_jobs": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "dnc_entries": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "inbound_audit_events": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "inbound_billing_hold_finalize_approvals": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "inbound_campaign_configs": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "inbound_did_assignments": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "inbound_operation_idempotency": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "inbound_reassignment_requests": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "inbound_rejections": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "inbound_usage_transactions": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "invoice_snapshots": {
+        "count": 120,
+        "data_hash": "88fad5f926f8df9217dded1fb0a29840"
+      },
+      "invoices": {
+        "count": 65,
+        "data_hash": "efa55e1daffcb043d83e20f18a745acb"
+      },
+      "leads": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "login_attempts": {
+        "count": 72,
+        "data_hash": "25840bb8f000f073e13544f8799f13aa"
+      },
+      "meetings": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "mfa_challenges": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "partner_limits": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "permissions": {
+        "count": 42,
+        "data_hash": "637bc15dc82a0d44728a69f9193166e3"
+      },
+      "plan_price_options": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "plans": {
+        "count": 170,
+        "data_hash": "c1123fcdec0739c1fb2ffc87040f1082"
+      },
+      "platform_runtime_controls": {
+        "count": 1,
+        "data_hash": "7b7bab55f025160a20409aa4e507e5b1"
+      },
+      "processed_webhook_events": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "prompt_template_versions": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "public_contact_enquiries": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "recordings": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "recordings_s3": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "recovery_codes": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "refresh_tokens": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "reminders": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "review_reward_ledger": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "role_permissions": {
+        "count": 150,
+        "data_hash": "9c023bb140e49d652c5d5c88f078b20c"
+      },
+      "roles": {
+        "count": 5,
+        "data_hash": "7745847c5b5bea8b97c752a7cc96fad3"
+      },
+      "secret_access_log": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "security_events": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "security_sessions": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "subscriptions": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "suspension_events": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "talky_0041_contact_lists_adoption": {
+        "count": 1,
+        "data_hash": "9e43cdf99b84df9a2ca9feb300b72404"
+      },
+      "tenant_ai_configs": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "tenant_call_limits": {
+        "count": 105,
+        "data_hash": "624be810a07f227fc7dac0dbe18dee9e"
+      },
+      "tenant_codec_policies": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "tenant_inbound_controls": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "tenant_phone_numbers": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "tenant_policy_audit_log": {
+        "count": 142,
+        "data_hash": "dbd92fe761753b9734a5e12b602c72a9"
+      },
+      "tenant_quota_usage": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "tenant_quotas": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "tenant_route_policies": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "tenant_runtime_policy_events": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "tenant_runtime_policy_versions": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "tenant_secrets": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "tenant_settings": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "tenant_sip_trunks": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "tenant_sip_trust_policies": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "tenant_telephony_concurrency_events": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "tenant_telephony_concurrency_leases": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "tenant_telephony_concurrency_policies": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "tenant_telephony_idempotency": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "tenant_telephony_quota_events": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "tenant_telephony_threshold_policies": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "tenant_users": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "tenants": {
+        "count": 301,
+        "data_hash": "da26d5b003644b449032690a9ee7b204"
+      },
+      "topup_orders": {
+        "count": 108,
+        "data_hash": "b6b0ec443c5dd51d1e5da3b4d6015bc9"
+      },
+      "topup_packages": {
+        "count": 3,
+        "data_hash": "8755a0548dc296564feae99a24ce185b"
+      },
+      "transcripts": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "usage_records": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "user_mfa": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "user_passkeys": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "user_permissions": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "user_profiles": {
+        "count": 4,
+        "data_hash": "109d28109f7d54d3c6925bfc9e01b2db"
+      },
+      "webauthn_challenges": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "webhook_configs": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "webhook_deliveries": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "webhook_endpoints": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "white_label_partners": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      }
+    },
+    "schema": {
+      "relations": {
+        "count": 520,
+        "sha256": "62de6290330b76a7c2e9551dc991a0879b8086ad6f6236370fb06a6baa329754"
+      },
+      "columns": {
+        "count": 1624,
+        "sha256": "fd2b967d072422ae50405eaa52be723d9e5b7bc76274d8ea0fe2619c5d7c0306"
+      },
+      "constraints": {
+        "count": 601,
+        "sha256": "c4607d796433350d68d8edf78d9d2ec66c45f74a32aac9eb79c79fe8130dbc53"
+      },
+      "policies": {
+        "count": 106,
+        "sha256": "3f4df52fdab6ea8ce6a4995a2f3f39a6063b02218cf3f25a427a29eaa1b18c65"
+      },
+      "functions": {
+        "count": 98,
+        "sha256": "88e35a20a4496bf75eb7bf84f172392b709563a0c95e8d0902874bbce80c7640"
+      },
+      "triggers": {
+        "count": 1024,
+        "sha256": "366566c94172a534dbf5261efc4fbf8fbc206af865df1adf24e84b0ac32cfd4e"
+      }
+    }
+  },
+  "protected_unchanged": true,
+  "source_after": {
+    "backend/Alembic/versions/0001_baseline.py": "fa6695c3375052205523c69c6223611512ee1b5bce00c2cab3bd92419c87058f",
+    "backend/Alembic/versions/0002_add_refresh_tokens.py": "923ba08abd09d9e47043fa395af2774706d25b67eaedabf9f62e8ada429efee6",
+    "backend/Alembic/versions/0003_add_stream_events.py": "9ef29b49a310a9a3277cf194c005a0b61a26858fd275b28be025114ed0c52365",
+    "backend/Alembic/versions/0004_security_events_alert_type.py": "d6f9f455f060ad2e4b1fb60fbe9643c9e2a825426fb6426b22c74012c0926402",
+    "backend/Alembic/versions/0005_tenant_telephony_credentials.py": "cddf35ab8dff240abe2f3ab5947e94f3bea63ffe5c3f495dc95d7f59ccaf3cde",
+    "backend/Alembic/versions/0006_sip_trunk_test_result.py": "58cac4f664d6dda15eaa7debb43748787b411e36a522913c9bbee7a8ecdc698b",
+    "backend/Alembic/versions/0007_mfa_challenge_attempts.py": "8b62c319f0f790a5e62c078c472474742f6598ac5cf215f96e807eb883bec9e5",
+    "backend/Alembic/versions/0008_tenant_ai_configs_voice_tuning.py": "1e2f2d19892823ddadf2a2c68489208d1c63828c3da7ad22b9d8004dd6bcbf3e",
+    "backend/Alembic/versions/0009_dialer_jobs_failure_classification.py": "4b5f81815b79996b3121ea491be5e608a7a04e566890491321c9dc3799ff914e",
+    "backend/Alembic/versions/0010_campaign_knowledge.py": "c30f6235beeb9b690150c1d0ffc4524220abdd8a6266d55c5ba507d2584cfe52",
+    "backend/Alembic/versions/0011_campaign_tts_provider.py": "637eb1314bf68c057d2ad717d7935dadb664d3016a77233dbf89f259fdeea01a",
+    "backend/Alembic/versions/0012_call_feedback.py": "251ad8b1b748e18103d8540100ce12a20f24c0709d327ba8b8f3f0024ba7642a",
+    "backend/Alembic/versions/0013_canonical_rls_policies.py": "da80a139982261e96749845726ea5e099185e3aa1646032ea846401c90a1fd4b",
+    "backend/Alembic/versions/0014_admin_media_controls.py": "67d3788df9bf0db67a172ce988e3edfa5a4e4d057c63dc0fec2186afd9a6ed47",
+    "backend/Alembic/versions/0015_conversation_reviews.py": "08cf1691d1a1818430ac409f98206f4803705888438dbd2820f7eea9519aa5c7",
+    "backend/Alembic/versions/0016_prompt_version_rollback.py": "550adb85e87554a6ee8e00994a4bb11d9f8e4c49d54e557f54a540f412e7fe7b",
+    "backend/Alembic/versions/0017_test_calls.py": "f522dbe095ca895f42257c8a112525b054cfc38b849cccba0df06bda87d3c391",
+    "backend/Alembic/versions/0018_calls_lead_id_nullable.py": "a69c609c15cb613258ef17f19aa9a8bffad226aba68041608e2f503cd2528013",
+    "backend/Alembic/versions/0019_ai_config_migration_records.py": "0efac8c3a9020b3bd6b0e860354bcd4b55b00f67c736a62a5925ca1c44777a1d",
+    "backend/Alembic/versions/0020_contact_and_lead_capture.py": "9320a654a03373b581204ce70c284b2fe91ac74d9c9b6d7c308daa4fc6f41176",
+    "backend/Alembic/versions/0021_billing_topup.py": "3ac153937cd85e4b5b0d9f4ccc3a732f2e40b38bcdff21977c78b946e6a52c0c",
+    "backend/Alembic/versions/0022_inbound_calling_foundation.py": "bdf89e422196ef0a2a597ce8bc07e6ef16ddca9b373c30049c93eb8bd16ac30d",
+    "backend/Alembic/versions/0023_admin_media_deletion_safety.py": "63795dc91d5602a132662c956b051b65dfa9435c3472d5768fe13e6c98987ca9",
+    "backend/Alembic/versions/0024_recording_permissions.py": "c393811cbf69cea7fe7a0a7efa037b7a1b0a957c8e3604cc93ef41bac3422095",
+    "backend/Alembic/versions/0025_media_hold_serialization.py": "4eb0042bf5603ed1e15b66867cca33b8bc9b54eb17ef82c53ba9a2f1ebbcf6f3",
+    "backend/Alembic/versions/0026_media_delete_recovery.py": "4e87cf7bcb508ade6499fb4c1e7e5526dd4d6a5e47dd8371c38b859c7a6616e1",
+    "backend/Alembic/versions/0027_media_delete_request_keys.py": "eae06acafc122b675d858b50a3aca85e7b959662b1ee7dba9c01ef130d57e674",
+    "backend/Alembic/versions/0028_call_terminal_settlement_cas.py": "8aeb625198a29f692aa966254f889b7b0bf07632f2edf2567776bde35bcd219a",
+    "backend/Alembic/versions/0029_trunk_runtime_status.py": "0930d8288de9bd5961a5abf0cb655313bd8de6d587787338d5eddbda80b8d840",
+    "backend/Alembic/versions/0030_inbound_transfer_leg_usage.py": "29e7fdb75499b7c4bfc4c6f130a17a15dcd108856b269743901154f083e5f43e",
+    "backend/Alembic/versions/0031_inbound_lease_safety.py": "dc042e54583c8003a53c637281c312c58f7578132ec14895d74bf679f3992311",
+    "backend/Alembic/versions/0032_inbound_billing_hold.py": "86df9404e59b3cb8ec0480870262501a4ae950d1bb06c9663cf26d9b0fe11f22",
+    "backend/Alembic/versions/0033_bootstrap_contract_repair.py": "0098372135838286989581c074a79c696a92162e126541f42f64f3f3fdc32814",
+    "backend/Alembic/versions/0034_inbound_billing_four_eye.py": "ac5d3755b1f3bdcf717ae663662e44fb8747a194d5d36b0eef94620dc2c18271",
+    "backend/Alembic/versions/0035_user_profiles_role_widen.py": "59141af2c5b157d7eeda6d9e7ae0d968aff7918d25a9bc827783e60666bb8d08",
+    "backend/Alembic/versions/0036_inbound_rejection_log.py": "ab17b133efa56b4eb18d0ec67cf0cf921aa3c122fe57df8a9aaddd6c36fa627c",
+    "backend/Alembic/versions/0037_inbound_duration_quarantine.py": "c57ebb6b5ee41d3e9c92f1608b4b76a6888ce728a2a0cd9045a58824fd894859",
+    "backend/Alembic/versions/0038_tenant_table_rls_backfill.py": "d0bdb6793204d4ba294322cd3ae4e3e5ac4ad1cf23fb78672c3b7a68f482fa85",
+    "backend/Alembic/versions/0039_contact_capture_audit.py": "dccc24d0227599df5f382e3f2ad48d451e7351e2d4216de29ceae418e3c9e80c",
+    "backend/Alembic/versions/0040_calls_campaign_nullable.py": "756f7ca9fbf8c135ca10115abd5e289e46dd261fe76626338774a88be4b66e88",
+    "backend/Alembic/versions/0041_tenant_campaign_fk.py": "d018050ce6199dc3ff07bd4b650d081deed4d15ee8cd97bcaad3ab936285b6ee",
+    "backend/Alembic/versions/0042_dialer_origination_guard.py": "7bc8673d3ac5791f5e789f9c935099577cac95c6c2088e62cef3decec77cbe90",
+    "backend/Alembic/versions/0043_campaign_direction_lock.py": "91a41f70106b79595b76fbfdf7df0190d174e004135195df467ec5173168e25b",
+    "backend/Alembic/versions/0044_webhook_null_tenant_rls.py": "474be28d8a58389994f08f27a7e97a31f6010914273d1d80938d4a6d251ee80e",
+    "backend/Alembic/versions/0045_refresh_session_binding.py": "11e5387acbba9a84d47028f99c05e0052a91a2098b5e4e6a93409e9c49a4b21c",
+    "backend/Alembic/versions/0046_inbound_extension_bindings.py": "1fa072adffba24bbcdd782140bb69703068a61a91a88fba531f4ecc669276d13",
+    "backend/Alembic/versions/0047_protect_ai_config_backup.py": "0b4d0e4b210e4e8ac5044170e0e860957a67160df114cbeb4db206947b5db69f",
+    "backend/Alembic/versions/0048_audit_skip_heartbeat.py": "469b13cdb0604854569487c12305620ffc84132116e925ab375e2a3e76d8ef5a",
+    "backend/Alembic/versions/0048_crm_deliveries.py": "ccccde24eb1ed7917cab42511e8a703a6cfb65d97fd7ae2c25f49b77377078ef",
+    "backend/Alembic/versions/0049_lead_detail_evidence.py": "11d0793604f0b1ffdeff8c7485e57e395eaae1979613d48accd6083884fc0142",
+    "backend/Alembic/versions/0050_assistant_execution_permissions.py": "cbf441bd70ce212859ed5bdbf7ad9e1c6413a9f0f7fd7aa039eeec2481ea4bc4",
+    "backend/Alembic/versions/0051_crm_destination_identity.py": "53dd3439ffa5f46a731f8e82ceebdc1ab5cc9820513700ecb415f0276bfff47f",
+    "backend/Alembic/versions/0052_public_contact_enquiries.py": "0654f5827b4cfffb5b0a7160fb5d953789bd1fda766ce418fb4194bbf1458b88",
+    "backend/Alembic/versions/0053_billing_price_options.py": "6b33ac2ccf4e0900cc6c445a5557add3efff5d5048fd97231c7100c477da5ccb",
+    "backend/Alembic/versions/0054_billing_webhook_receipts.py": "d31f7c91c6444873d4172d7794bc5c9c8f1d0c90bd3196d541840374b5a8be6e",
+    "backend/Alembic/versions/0055_invoice_snapshots.py": "6e37bfdb15952ed9a8322109dc6f25b8a0b512c129a50b493289871c81cb592b",
+    "backend/Alembic/versions/0056_billing_refund_snapshots.py": "7dd0b61a2cb33dac6592e64119fdd90032032cbc979a6a3561ed13a3f285131f",
+    "backend/Alembic/versions/0057_transcript_save_state.py": "d6dd37cd0125693194c74dbc5527dfdcb1b044344b0fae3eb62ba43312532ea4",
+    "backend/Alembic/versions/0058_crm_contact_effect.py": "9d6a068aff6bb43bad1ee605eee16fb86f134d0793a15fcaa7c7b6db93e8be87",
+    "backend/Alembic/versions/0059_auth_identity_contract.py": "c51610e4014c5c2daa79cf016297e37af87157d5b313e61aaa23eac83ef4a4df",
+    "backend/Alembic/versions/0060_dialer_active_job_owner.py": "7fb6d4061c24a0f94a536481aa0128bc607b99c6e28afd685ca6a59a9050a8e8",
+    "backend/Alembic/versions/0061_dnc_runtime_contract.py": "75828d434ac0332beb89e7e58e992043f32b9e76ae9a437fa476ab9fb58db0f9",
+    "backend/Alembic/versions/0062_saved_acknowledgement.py": "e28f287ebf38a192f912cd648aa6bca78e72d6aeaac5eaf54c31aa0c94b15337",
+    "backend/Alembic/versions/0063_release_history_merge.py": "b5503392e2e444b1f20c86ee04062875b5d7b8c4ac56b149d8f4ba080ade3620",
+    "backend/Alembic/env.py": "c2af1024a58704b31538bfa0c0c6e19f160c605897a38e4ceda4776867ca8afa",
+    "backend/alembic.ini": "99ffb09a090a646c2adbf8891fa276bdda137b0fddd9a1a198d83b8f6508dceb",
+    "backend/database/complete_schema.sql": "c109eca88c24897dff8e1c3b62edc77fb375930da29d1921ce96e22655b67830",
+    "backend/tests/integration/test_release_migration_merge.py": "414c898a5925b422cd78c10bbb76808ca357f71656e1ce056eba9b50e660406d",
+    "docs/sessions/artifacts/release-migration-merge/probe.py": "59ce8c755e1c05f3e3c4a2ff8b4bbeaf56f999460d9edf67be1178274ec9ea32"
+  },
+  "source_unchanged": true
+}

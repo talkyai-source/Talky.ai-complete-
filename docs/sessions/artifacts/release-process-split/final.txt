@@ -1,0 +1,23 @@
+........................................................................ [ 41%]
+........................................................................ [ 82%]
+...............................                                          [100%]
+============================== warnings summary ===============================
+tests/unit/test_telephony_bridge_auth.py::test_telephony_stop_remains_running_when_any_call_is_unconfirmed
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-release-20261008\backend\app\api\v1\endpoints\admin\health\_shared.py:16: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    _server_start_time = datetime.utcnow()
+
+tests/unit/test_telephony_bridge_auth.py::test_telephony_stop_remains_running_when_any_call_is_unconfirmed
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-release-20261008\backend\app\api\v1\endpoints\abuse_monitoring.py:147: FastAPIDeprecationWarning: `regex` has been deprecated, please use `pattern` instead
+    severity: Optional[str] = Query(None, regex="^(low|medium|high|critical)$"),
+
+tests/unit/test_telephony_bridge_auth.py::test_telephony_stop_remains_running_when_any_call_is_unconfirmed
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-release-20261008\backend\app\api\v1\endpoints\abuse_monitoring.py:684: FastAPIDeprecationWarning: `regex` has been deprecated, please use `pattern` instead
+    min_severity: str = Query("high", regex="^(medium|high|critical)$"),
+
+tests/unit/test_dialer_origination_durability.py: 48 warnings
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-release-20261008\backend\tmp\langgraph-security-exact-packages\pydantic\main.py:250: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+175 passed, 51 warnings in 11.18s
+blocked_network_attempts=0
